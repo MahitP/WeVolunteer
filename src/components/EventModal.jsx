@@ -45,6 +45,10 @@ export default function EventModal({
   const [editSlots, setEditSlots] = useState(event?.slots || []);
   const [editErrors, setEditErrors] = useState({});
   const [attendanceMap, setAttendanceMap] = useState({});
+  // Only volunteers the organizer has explicitly marked are submitted. Without
+  // this an unticked box would be indistinguishable from "recorded as absent".
+  const [touchedIds, setTouchedIds] = useState(new Set());
+  const [attendanceReason, setAttendanceReason] = useState('');
   const [selectionRuns, setSelectionRuns] = useState([]);
   const [runsLoading, setRunsLoading] = useState(false);
 
@@ -104,23 +108,113 @@ export default function EventModal({
 
   /* ── Actions ─────────────────────────────────────────────── */
 
-  const startAttendance = () => {
+  /**
+   * Opening the attendance screen no longer pre-ticks everyone.
+   *
+   * It used to default every accepted volunteer to present, which on a
+   * multi-date event meant saving after the first day credited hours to
+   * everyone signed up for every later date too. Marks now start from what has
+   * actually been recorded — an existing attendance record, or a check-in mark
+   * taken on the day — and anything else needs an explicit tick.
+   */
+  const startAttendance = async () => {
     const initial = {};
-    acceptedApps.forEach(a => { initial[a.id] = a.attendance ? a.attendance.present : true; });
+    const touched = new Set();
+
+    for (const a of acceptedApps) {
+      if (a.attendance) {
+        initial[a.id] = a.attendance.present;
+        touched.add(a.id);
+      }
+    }
+
+    try {
+      const checkins = await api.fetchCheckins(event.id);
+      const byPair = new Map(checkins.map(c => [`${c.slotId}:${c.userId}`, c.present]));
+      for (const a of acceptedApps) {
+        if (a.attendance) continue;
+        const mark = byPair.get(`${a.slotId}:${a.userId}`);
+        if (mark !== undefined) {
+          initial[a.id] = mark;   // carrying forward a deliberate mark, not a default
+          touched.add(a.id);
+        }
+      }
+    } catch {
+      // Check-in marks are a convenience; the screen still works without them.
+    }
+
     setAttendanceMap(initial);
+    setTouchedIds(touched);
+    setAttendanceReason('');
     setMode('attendance');
+  };
+
+  const startCheckin = async () => {
+    const initial = {};
+    try {
+      const checkins = await api.fetchCheckins(event.id);
+      const byPair = new Map(checkins.map(c => [`${c.slotId}:${c.userId}`, c.present]));
+      for (const a of acceptedApps) {
+        const mark = byPair.get(`${a.slotId}:${a.userId}`);
+        if (mark !== undefined) initial[a.id] = mark;
+      }
+    } catch { /* start from a blank sheet */ }
+    setAttendanceMap(initial);
+    setTouchedIds(new Set(Object.keys(initial)));
+    setMode('checkin');
+  };
+
+  const setMark = (appId, value) => {
+    setAttendanceMap(m => ({ ...m, [appId]: value }));
+    setTouchedIds(prev => new Set(prev).add(appId));
+  };
+
+  const markAll = (apps, value) => {
+    setAttendanceMap(m => ({ ...m, ...Object.fromEntries(apps.map(a => [a.id, value])) }));
+    setTouchedIds(prev => new Set([...prev, ...apps.map(a => a.id)]));
+  };
+
+  const submitCheckin = async () => {
+    setSubmitting(true);
+    try {
+      const payload = Object.fromEntries(
+        [...touchedIds].filter(id => id in attendanceMap).map(id => [id, !!attendanceMap[id]])
+      );
+      const res = await api.submitCheckins(event.id, payload);
+      addToast(`Check-in saved for ${res.marked} volunteer${res.marked !== 1 ? 's' : ''}. No hours credited yet.`, 'success');
+      setMode('view');
+    } catch (err) {
+      addToast(`Could not save check-in: ${err.message}`, 'error');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const submitAttendance = async () => {
     setSubmitting(true);
     try {
-      await api.submitAttendance(event.id, attendanceMap);
-      const present = Object.values(attendanceMap).filter(Boolean).length;
-      addToast(`Attendance saved. Hours credited to ${present} volunteer${present !== 1 ? 's' : ''}.`, 'success');
+      // Only explicitly-marked volunteers are sent. Anything untouched is left
+      // exactly as it is on the server rather than being recorded as absent.
+      const payload = Object.fromEntries(
+        [...touchedIds].filter(id => id in attendanceMap).map(id => [id, !!attendanceMap[id]])
+      );
+      const res = await api.submitAttendance(event.id, payload, attendanceReason);
+      const credited = res.credited?.length || 0;
+      const revoked = res.revoked?.length || 0;
+      addToast(
+        [
+          credited ? `${credited} volunteer${credited !== 1 ? 's' : ''} credited` : '',
+          revoked ? `${revoked} record${revoked !== 1 ? 's' : ''} corrected` : '',
+          !credited && !revoked ? 'No changes to save' : ''
+        ].filter(Boolean).join(' · '),
+        credited || revoked ? 'success' : 'info'
+      );
+      if (res.eventCompleted) addToast('Every shift is accounted for — this event is now complete.', 'info');
       setMode('view');
+      setAttendanceReason('');
       onStateChange();
     } catch (err) {
-      addToast(`Could not save attendance: ${err.message}`, 'error');
+      addToast(err.message, 'error');
     } finally {
       setSubmitting(false);
     }
@@ -322,7 +416,21 @@ export default function EventModal({
     { id: 'questions', label: 'Questions', icon: MessageSquare }
   ];
 
-  const presentCount = Object.values(attendanceMap).filter(Boolean).length;
+  /* ── Attendance / check-in derived state ─────────────────── */
+
+  // Hours can only be finalised for shifts that are over; check-in is for the
+  // ones that are not. Splitting the list here is what stops an organizer
+  // crediting a shift that has not happened.
+  const now = new Date();
+  const endedApps = acceptedApps.filter(a => a.slot?.endDatetime && new Date(a.slot.endDatetime) <= now);
+  const unendedApps = acceptedApps.filter(a => !a.slot?.endDatetime || new Date(a.slot.endDatetime) > now);
+  const markableApps = mode === 'checkin' ? unendedApps : endedApps;
+
+  const markedCount = markableApps.filter(a => touchedIds.has(a.id)).length;
+  const presentCount = markableApps.filter(a => touchedIds.has(a.id) && attendanceMap[a.id]).length;
+  const correctionCount = markableApps.filter(
+    a => touchedIds.has(a.id) && a.attendance && a.attendance.present !== !!attendanceMap[a.id]
+  ).length;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -338,7 +446,10 @@ export default function EventModal({
             </div>
             <div className="row" style={{ gap: 'var(--s2)', alignItems: 'center' }}>
               <h2>
-                {mode === 'edit' ? 'Edit event' : mode === 'attendance' ? 'Take attendance' : event.title}
+                {mode === 'edit' ? 'Edit event'
+                  : mode === 'attendance' ? 'Finalise hours'
+                  : mode === 'checkin' ? 'Check-in'
+                  : event.title}
               </h2>
               {mode === 'view' && currentUser?.role === 'student' && onToggleFavorite && (
                 <button
@@ -363,7 +474,10 @@ export default function EventModal({
               </p>
             )}
             {mode === 'attendance' && (
-              <p className="lead">Check off everyone who showed up. Hours are credited when you save.</p>
+              <p className="lead">Mark who actually attended. Only the volunteers you tick are credited.</p>
+            )}
+            {mode === 'checkin' && (
+              <p className="lead">Tick people off as they arrive. This credits no hours — you finalise those after the shift ends.</p>
             )}
           </div>
           <button className="modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
@@ -524,67 +638,121 @@ export default function EventModal({
               </button>
             </div>
           </>
-        ) : mode === 'attendance' ? (
+        ) : mode === 'attendance' || mode === 'checkin' ? (
           <>
             <div className="modal-body">
-              <div className="alert alert-info" style={{ marginBottom: 'var(--s4)' }}>
+              <div className={`alert ${mode === 'checkin' ? 'alert-info' : 'alert-brand'}`} style={{ marginBottom: 'var(--s4)' }}>
                 <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
                 <span>
-                  Hours are credited from this screen and nowhere else. Only volunteers you mark present
-                  receive credit, and you can come back and correct it later.
+                  {mode === 'checkin' ? (
+                    <>
+                      <span className="alert-title">Check-in doesn't award hours</span>
+                      <span style={{ display: 'block', marginTop: 2 }}>
+                        Use this while the event is running. Once a shift has ended, finalise it to credit hours.
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="alert-title">Only ticked volunteers are credited</span>
+                      <span style={{ display: 'block', marginTop: 2 }}>
+                        Anyone you leave untouched keeps whatever is already recorded — nothing is set to absent
+                        on your behalf. Changing a record that already exists needs a reason.
+                      </span>
+                    </>
+                  )}
                 </span>
               </div>
 
-              {acceptedApps.length === 0 ? (
+              {markableApps.length === 0 ? (
                 <div className="empty">
                   <span className="empty-icon"><Users size={18} /></span>
-                  <h3>No confirmed volunteers</h3>
-                  <p>Accept applicants first, then come back to record who attended.</p>
+                  <h3>
+                    {acceptedApps.length === 0
+                      ? 'No confirmed volunteers'
+                      : mode === 'attendance' ? 'No shifts have ended yet' : 'Nothing to check in'}
+                  </h3>
+                  <p>
+                    {acceptedApps.length === 0
+                      ? 'Accept applicants first, then come back to record who attended.'
+                      : mode === 'attendance'
+                        ? 'Hours can only be finalised once a shift is over. Use check-in during the event.'
+                        : 'Every shift on this event has already finished.'}
+                  </p>
                 </div>
               ) : (
                 <>
-                  <div className="row-between" style={{ marginBottom: 'var(--s4)' }}>
+                  <div className="row-between row-wrap" style={{ marginBottom: 'var(--s4)', gap: 'var(--s2)' }}>
                     <span className="small muted tnum">
-                      <span className="strong">{presentCount}</span> of {acceptedApps.length} marked present
+                      <span className="strong">{markedCount}</span> of {markableApps.length} marked
+                      {presentCount > 0 && <> · <span className="strong">{presentCount}</span> present</>}
                     </span>
                     <div className="row" style={{ gap: 'var(--s2)' }}>
-                      <button className="btn btn-secondary btn-sm"
-                        onClick={() => setAttendanceMap(Object.fromEntries(acceptedApps.map(a => [a.id, true])))}>
+                      <button className="btn btn-secondary btn-sm" onClick={() => markAll(markableApps, true)}>
                         All present
                       </button>
-                      <button className="btn btn-secondary btn-sm"
-                        onClick={() => setAttendanceMap(Object.fromEntries(acceptedApps.map(a => [a.id, false])))}>
+                      <button className="btn btn-secondary btn-sm" onClick={() => markAll(markableApps, false)}>
                         All absent
                       </button>
                     </div>
                   </div>
 
                   <div className="stack-sm">
-                    {acceptedApps.map(app => (
-                      <label key={app.id} className="check" data-checked={attendanceMap[app.id] ? 'true' : 'false'}>
-                        <input type="checkbox" checked={!!attendanceMap[app.id]}
-                          onChange={e => setAttendanceMap(m => ({ ...m, [app.id]: e.target.checked }))} />
-                        <span className="avatar sm">{app.volunteer?.avatar || '👤'}</span>
-                        <span style={{ flex: 1, minWidth: 0 }}>
-                          <span className="check-title">{app.volunteer?.name}</span>
-                          <span className="check-desc tnum">
-                            {app.slot?.name} · {formatTimeRange(app.slot?.startDatetime, app.slot?.endDatetime)}
+                    {markableApps.map(app => {
+                      const isTouched = touchedIds.has(app.id);
+                      const isPresent = !!attendanceMap[app.id];
+                      const changesExisting = app.attendance && app.attendance.present !== isPresent;
+                      return (
+                        <label key={app.id} className="check"
+                          data-checked={isTouched && isPresent ? 'true' : 'false'}>
+                          <input type="checkbox" checked={isPresent}
+                            onChange={e => setMark(app.id, e.target.checked)} />
+                          <span className="avatar sm">{app.volunteer?.avatar || '👤'}</span>
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <span className="check-title">{app.volunteer?.name}</span>
+                            <span className="check-desc tnum">
+                              {app.slot?.name} · {formatTimeRange(app.slot?.startDatetime, app.slot?.endDatetime)}
+                            </span>
                           </span>
-                        </span>
-                        <span className="hourspill">{formatHours(app.slot?.hours)}</span>
-                      </label>
-                    ))}
+                          {!isTouched && <span className="status status-muted">Not marked</span>}
+                          {changesExisting && <span className="status status-pending">Changes record</span>}
+                          {mode === 'attendance' && (
+                            <span className="hourspill">{formatHours(app.attendance?.hoursAwarded ?? app.slot?.hours)}</span>
+                          )}
+                        </label>
+                      );
+                    })}
                   </div>
+
+                  {mode === 'attendance' && correctionCount > 0 && (
+                    <div className="field" style={{ marginTop: 'var(--s5)' }}>
+                      <label htmlFor="att-reason">
+                        Why are you changing {correctionCount} existing record{correctionCount !== 1 ? 's' : ''}?
+                      </label>
+                      <input id="att-reason" className="input" value={attendanceReason}
+                        placeholder="e.g. Signed in but left before the shift finished"
+                        onChange={e => setAttendanceReason(e.target.value)} />
+                      <span className="field-hint">
+                        Saved against the volunteer's hours record along with your name.
+                      </span>
+                    </div>
+                  )}
                 </>
               )}
             </div>
 
             <div className="modal-foot">
               <button className="btn btn-ghost" onClick={() => setMode('view')}>Back</button>
-              <button className="btn btn-primary" onClick={submitAttendance}
-                disabled={submitting || acceptedApps.length === 0}>
-                {submitting ? 'Saving…' : `Credit hours to ${presentCount} volunteer${presentCount !== 1 ? 's' : ''}`}
-              </button>
+              {mode === 'checkin' ? (
+                <button className="btn btn-primary" onClick={submitCheckin}
+                  disabled={submitting || markedCount === 0}>
+                  {submitting ? 'Saving…' : `Save check-in for ${markedCount}`}
+                </button>
+              ) : (
+                <button className="btn btn-primary" onClick={submitAttendance}
+                  disabled={submitting || markedCount === 0 || (correctionCount > 0 && !attendanceReason.trim())}>
+                  {submitting ? 'Saving…' : `Credit hours to ${presentCount} volunteer${presentCount !== 1 ? 's' : ''}`}
+                </button>
+              )}
             </div>
           </>
         ) : (
@@ -655,10 +823,19 @@ export default function EventModal({
                         <Zap size={13} /> Fill fairly
                       </button>
                     )}
+                    {unendedApps.length > 0 && (
+                      <button className="btn btn-secondary btn-sm" onClick={startCheckin}
+                        title="Mark people off as they arrive. Credits no hours.">
+                        <ListChecks size={13} /> Check-in
+                      </button>
+                    )}
                     <button className="btn btn-primary btn-sm" onClick={startAttendance}
-                      disabled={acceptedApps.length === 0}>
+                      disabled={endedApps.length === 0}
+                      title={endedApps.length === 0
+                        ? 'Hours can be finalised once a shift has ended'
+                        : undefined}>
                       <ClipboardCheck size={13} />
-                      {event.status === 'completed' ? 'Edit attendance' : 'Take attendance'}
+                      {event.status === 'completed' ? 'Correct hours' : 'Finalise hours'}
                     </button>
                   </div>
                 </div>

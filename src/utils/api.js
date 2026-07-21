@@ -151,9 +151,19 @@ export const api = {
   }),
 
   // ── Attendance ──────────────────────────────────
-  submitAttendance: async (eventId, attendanceMap) => apiFetch(`/api/events/${eventId}/attendance`, {
+  // Finalising credits hours and is only possible once a shift has ended.
+  // `reason` is required when it changes a record that already exists.
+  submitAttendance: async (eventId, attendanceMap, reason) => apiFetch(`/api/events/${eventId}/attendance`, {
     method: 'POST',
-    body: JSON.stringify({ attendanceMap })
+    body: JSON.stringify({ attendanceMap, reason })
+  }),
+
+  // ── Check-in ────────────────────────────────────
+  // Marking people off during an event. Credits nothing.
+  fetchCheckins: async (eventId) => apiFetch(`/api/events/${eventId}/checkin`),
+  submitCheckins: async (eventId, checkinMap) => apiFetch(`/api/events/${eventId}/checkin`, {
+    method: 'POST',
+    body: JSON.stringify({ checkinMap })
   }),
 
   // ── Admin ───────────────────────────────────────

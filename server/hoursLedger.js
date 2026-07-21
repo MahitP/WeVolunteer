@@ -247,9 +247,16 @@ export function verifyLedgerParity(db) {
   return { ok: mismatches.length === 0, mismatches, usersChecked: ledger.size };
 }
 
-/** Every hours change recorded for one volunteer, newest first. */
+/**
+ * Every hours change recorded for one volunteer, newest first.
+ *
+ * Ties on `created_at` are broken by `rowid`, which SQLite assigns in insertion
+ * order. Several rows share a timestamp whenever one save changes more than one
+ * record, and the id's random suffix would otherwise order them arbitrarily —
+ * an audit log has to read back in the order things actually happened.
+ */
 export function getLedgerForUser(db, userId) {
   return db.prepare(
-    'SELECT * FROM hours_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC'
+    'SELECT rowid AS seq, * FROM hours_ledger WHERE user_id = ? ORDER BY created_at DESC, rowid DESC'
   ).all(userId);
 }

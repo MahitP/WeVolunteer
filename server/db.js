@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import { createHoursLedgerTable, backfillHoursLedger, verifyLedgerParity } from './hoursLedger.js';
+import { createCheckinTable } from './attendance.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -195,6 +196,10 @@ export function initDatabase() {
   } else {
     console.log('Database already initialized.');
   }
+
+  // Check-in marks taken during an event. Separate from `attendance` so that
+  // marking someone off on the day never credits hours by itself.
+  createCheckinTable(db);
 
   initHoursLedger();
 }
