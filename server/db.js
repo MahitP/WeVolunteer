@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
+import { createHoursLedgerTable, backfillHoursLedger, verifyLedgerParity } from './hoursLedger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -193,6 +194,42 @@ export function initDatabase() {
     console.log('Seeding complete.');
   } else {
     console.log('Database already initialized.');
+  }
+
+  initHoursLedger();
+}
+
+/**
+ * Creates the hours ledger and backfills it from existing attendance.
+ *
+ * Safe to run on every boot: creation is IF NOT EXISTS and the backfill is
+ * idempotent on a deterministic id. It is additive only — it never writes to
+ * `attendance`, so a failure here cannot alter a single volunteer's hours.
+ *
+ * Parity is checked and reported but does not halt startup. The ledger is not
+ * yet read by any hours calculation, so a mismatch is a signal to investigate,
+ * not a reason to take the platform down for every user. `npm run verify:hours`
+ * is the blocking gate for operators and CI.
+ */
+function initHoursLedger() {
+  createHoursLedgerTable(db);
+
+  const { inserted, skipped, total } = backfillHoursLedger(db);
+  if (inserted > 0) {
+    console.log(`[Hours ledger] Backfilled ${inserted} entr${inserted === 1 ? 'y' : 'ies'} from ${total} attendance record(s).`);
+  }
+
+  const parity = verifyLedgerParity(db);
+  if (parity.ok) {
+    if (inserted > 0 || skipped > 0) {
+      console.log(`[Hours ledger] Parity verified against attendance for ${parity.usersChecked} volunteer(s).`);
+    }
+  } else {
+    console.error('[Hours ledger] PARITY MISMATCH — ledger disagrees with attendance:');
+    for (const m of parity.mismatches) {
+      console.error(`  ${m.userId}: ledger ${m.ledgerTotal} vs attendance ${m.attendanceTotal}`);
+    }
+    console.error('[Hours ledger] Credited hours are unaffected (attendance is still the source of truth). Investigate before wiring ledger writes.');
   }
 }
 

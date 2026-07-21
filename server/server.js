@@ -1488,6 +1488,7 @@ if (DEMO_MODE) {
       // is in the list because its rows reference those fixed event ids — left
       // behind, a stale confirmed run attaches itself to a freshly seeded event
       // and blocks Auto Select from running on it.
+      db.exec('DROP TABLE IF EXISTS hours_ledger');
       db.exec('DROP TABLE IF EXISTS auto_select_runs');
       db.exec('DROP TABLE IF EXISTS event_announcements');
       db.exec('DROP TABLE IF EXISTS user_favorites');
