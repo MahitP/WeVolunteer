@@ -7,7 +7,7 @@ import {
 import { api } from '../utils/api';
 import {
   formatHours, formatDay, formatTime, formatTimeRange, isoToLocalInput, countdown, gradeLabel,
-  usesAutoSelect, selectionMethodLabel
+  usesAutoSelect, selectionMethodLabel, eventPermissions
 } from '../utils/helpers';
 import { Seats } from './Seats';
 import EventComments from './EventComments';
@@ -73,6 +73,7 @@ export default function EventModal({
       }));
   }, [event?.slots]);
 
+  const permissions = eventPermissions(event);
   const isOwner = currentUser?.role === 'organizer' && currentUser.id === event?.organizerId;
   const isAdmin = currentUser?.role === 'admin';
   const canSeeRuns = isOwner || isAdmin;
@@ -814,9 +815,16 @@ export default function EventModal({
                     </div>
                   </div>
                   <div className="row row-wrap" style={{ gap: 'var(--s2)' }}>
-                    <button className="btn btn-secondary btn-sm" onClick={startEdit}>
-                      <Pencil size={13} /> Edit event
-                    </button>
+                    {permissions.canEditDetails ? (
+                      <button className="btn btn-secondary btn-sm" onClick={startEdit}>
+                        <Pencil size={13} /> Edit event
+                      </button>
+                    ) : (
+                      <span className="small dim" title={permissions.blockedReason}
+                        style={{ alignSelf: 'center' }}>
+                        Details locked
+                      </span>
+                    )}
                     {pendingApps.length > 0 && !signupsClosed && (
                       <button className="btn btn-secondary btn-sm" onClick={runEqualizer} disabled={submitting}
                         title="Fill open spots automatically, giving priority to volunteers with the fewest hours">

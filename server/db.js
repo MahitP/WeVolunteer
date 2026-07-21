@@ -187,6 +187,20 @@ export function initDatabase() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_applications_event ON applications(event_id, status)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_user ON attendance(user_id, present)`);
 
+  // Added after a query-plan audit found these filters running full table scans.
+  // Each one is on a path the app hits constantly, so at district scale they
+  // would degrade together rather than one at a time.
+  //   slots(event_id)              — every event render, edit, and completion check
+  //   applications(slot_id, status)— per-slot capacity counting, in loops
+  //   events(organizer_id)         — every organizer dashboard and stats call
+  //   attendance(event_id)         — deletion guard and per-event hours rollups
+  // applications(user_id) is already covered by the UNIQUE(user_id, slot_id)
+  // index as a leftmost prefix, so it is deliberately not repeated here.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_slots_event ON slots(event_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_applications_slot ON applications(slot_id, status)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_events_organizer ON events(organizer_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_event ON attendance(event_id)`);
+
   // Only seed if the database is empty
   const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get();
   if (userCount.count === 0) {

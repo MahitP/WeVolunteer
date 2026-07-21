@@ -1,9 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  Calendar, Eye, Pencil, Trash2, Search, Copy, Download, X,
-  ShieldAlert, ArrowRight, Inbox, CalendarPlus, Lock, Unlock
+  Calendar, Eye, Pencil, Trash2, Search, Copy, Download,
+  ShieldAlert, ShieldCheck, ArrowRight, Inbox, CalendarPlus, Lock, Unlock
 } from 'lucide-react';
-import { formatHours, formatDay, formatTimeRange, isoToLocalInput, countdown, gradeLabel } from '../utils/helpers';
+import {
+  formatHours, formatDay, formatTimeRange, isoToLocalInput, countdown, gradeLabel, eventPermissions
+} from '../utils/helpers';
 import { api } from '../utils/api';
 import Modal, { ModalHead } from '../components/Modal';
 import { Seats, DateChip } from '../components/Seats';
@@ -332,6 +334,7 @@ export default function OrganizerDashboard({
                     const accepted = evApps.filter(a => a.status === 'accepted').length;
                     const closed = event.status === 'closed' ||
                       new Date() > new Date(event.applicationDeadline);
+                    const perms = eventPermissions(event);
 
                     return (
                       <tr key={event.id}>
@@ -374,20 +377,20 @@ export default function OrganizerDashboard({
                               onClick={() => onViewDetails(event)}>
                               <Eye size={14} />
                             </button>
-                            {event.status !== 'completed' && (
-                              <>
-                                <button className="btn btn-ghost btn-sm btn-icon" title="Edit details"
-                                  onClick={() => startEdit(event)}>
-                                  <Pencil size={14} />
-                                </button>
-                                <button
-                                  className="btn btn-ghost btn-sm btn-icon"
-                                  title={event.status === 'open' ? 'Close sign-ups' : 'Reopen sign-ups'}
-                                  onClick={() => handleToggleStatus(event)}
-                                >
-                                  {event.status === 'open' ? <Lock size={14} /> : <Unlock size={14} />}
-                                </button>
-                              </>
+                            {perms.canEditDetails && (
+                              <button className="btn btn-ghost btn-sm btn-icon" title="Edit details"
+                                onClick={() => startEdit(event)}>
+                                <Pencil size={14} />
+                              </button>
+                            )}
+                            {perms.canChangeStatus && (
+                              <button
+                                className="btn btn-ghost btn-sm btn-icon"
+                                title={event.status === 'open' ? 'Close sign-ups' : 'Reopen sign-ups'}
+                                onClick={() => handleToggleStatus(event)}
+                              >
+                                {event.status === 'open' ? <Lock size={14} /> : <Unlock size={14} />}
+                              </button>
                             )}
                             <button className="btn btn-ghost btn-sm btn-icon" title="Duplicate, one week later"
                               onClick={() => handleDuplicate(event)}>
@@ -397,11 +400,19 @@ export default function OrganizerDashboard({
                               onClick={() => handleExport(event)}>
                               <Download size={14} />
                             </button>
-                            <button className="btn btn-ghost btn-sm btn-icon" title="Delete event"
-                              style={{ color: 'var(--danger)' }}
-                              onClick={() => handleDelete(event)}>
-                              <Trash2 size={14} />
-                            </button>
+                            {perms.canDelete && (
+                              <button className="btn btn-ghost btn-sm btn-icon" title="Delete event"
+                                style={{ color: 'var(--danger)' }}
+                                onClick={() => handleDelete(event)}>
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                            {!perms.canDelete && (
+                              <span className="btn btn-ghost btn-sm btn-icon" title={perms.blockedReason}
+                                style={{ color: 'var(--ink-3)', cursor: 'default' }} aria-label={perms.blockedReason}>
+                                <ShieldCheck size={14} />
+                              </span>
+                            )}
                           </div>
                         </td>
                       </tr>
