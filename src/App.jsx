@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from './utils/api';
+import { DEMO_MODE } from './config';
 import DemoBar from './components/DemoBar';
 import Login from './views/Login';
 import Signup from './views/Signup';
@@ -403,7 +404,9 @@ export default function App() {
 
       {/* ── Content column ── */}
       <div className="content">
-        <DemoBar currentUser={currentUser} onStateChange={handleStateChange} addToast={addToast} />
+        {DEMO_MODE && (
+          <DemoBar currentUser={currentUser} onStateChange={handleStateChange} addToast={addToast} />
+        )}
 
         <header className="topbar">
           <div className="truncate">

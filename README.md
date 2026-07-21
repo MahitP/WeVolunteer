@@ -28,7 +28,7 @@ The Vite dev server proxies `/api/*` to the Express server. On first boot the AP
 | Organizer | rmiller@sbpl.info            | pending admin approval       |
 | Admin     | admin@sbvolunteers.gov       |                              |
 
-The "Reset DB" button in the demo bar (or `POST /api/auth/reset`) restores the seed data at any time.
+The "Reset DB" button in the demo bar (or `POST /api/auth/reset`) restores the seed data at any time. Both the demo bar and that endpoint exist **only** when demo mode is enabled — see Configuration below.
 
 ## Features
 
@@ -38,10 +38,36 @@ The "Reset DB" button in the demo bar (or `POST /api/auth/reset`) restores the s
 
 ## Configuration
 
-| Env var      | Default                       | Purpose                 |
-|--------------|-------------------------------|-------------------------|
-| `API_PORT`   | `5050`                        | Express server port     |
-| `JWT_SECRET` | dev fallback (change in prod) | Token signing secret    |
+### Server (`server/`)
+
+| Env var        | Default                                        | Purpose |
+|----------------|------------------------------------------------|---------|
+| `API_PORT`     | `5050`                                         | Express server port |
+| `NODE_ENV`     | unset                                          | Set to `production` for a real deployment; enables the startup guards below |
+| `JWT_SECRET`   | dev fallback                                   | Token signing secret. **Required when `NODE_ENV=production` — the server refuses to start without it.** |
+| `DEMO_MODE`    | `false`                                        | Registers the database reset endpoint. Opt-in only, and refused outright when `NODE_ENV=production`. `npm run dev` sets it. |
+| `CORS_ORIGINS` | `http://localhost:5173,http://localhost:4173`  | Comma-separated allowlist of browser origins. Requests with no `Origin` header (curl, same-origin) always pass. |
+| `TRUST_PROXY`  | unset                                          | Set to the number of reverse proxies in front of the app (e.g. `1`) so rate limiting sees the real client IP. Leave unset when not behind a proxy — trusting `X-Forwarded-For` blindly lets clients bypass the limiter. |
+
+A minimal production start:
+
+```bash
+NODE_ENV=production \
+JWT_SECRET="$(openssl rand -hex 32)" \
+CORS_ORIGINS="https://sbvolunteers.example.org" \
+npm start --prefix server
+```
+
+### Client
+
+| Env var           | Default | Purpose |
+|-------------------|---------|---------|
+| `VITE_DEMO_MODE`  | unset   | Shows the demo account switcher and the seeded sign-in buttons. Set in `.env.development`, which `vite build` does not read — so a production bundle never contains them. |
+
+### Security posture
+
+- `helmet` sets baseline response headers. Content-Security-Policy is deliberately **not** set here: this server returns JSON only. A policy belongs wherever the HTML is served, which is still Vite (see roadmap item 1.18).
+- Rate limiting is in-memory and per-process: 10 attempts / 15 min on `/api/auth/login` and `/api/auth/signup` (failures only), 600 / 15 min across `/api`. Limits are relaxed in `DEMO_MODE`. Running more than one instance would need a shared store.
 
 ## Scripts
 
