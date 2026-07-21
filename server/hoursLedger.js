@@ -177,13 +177,19 @@ export function backfillHoursLedger(db, { now = new Date().toISOString() } = {})
     LEFT JOIN slots s ON s.id = a.slot_id
   `).all();
 
+  // One query for everything already migrated, rather than one per attendance
+  // row. This runs on every boot, so an N+1 here would mean tens of thousands
+  // of round-trips at startup once the platform has a year of records.
+  const alreadyMigrated = new Set(
+    db.prepare("SELECT id FROM hours_ledger WHERE source = 'migration'").all().map(r => r.id)
+  );
+
   let inserted = 0;
   let skipped = 0;
 
   for (const r of rows) {
     const id = `migrate:${r.slot_id}:${r.user_id}`;
-    const exists = db.prepare('SELECT 1 FROM hours_ledger WHERE id = ?').get(id);
-    if (exists) { skipped++; continue; }
+    if (alreadyMigrated.has(id)) { skipped++; continue; }
 
     recordHoursChange(db, {
       id,

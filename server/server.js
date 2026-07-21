@@ -501,6 +501,12 @@ app.get('/api/events', (req, res) => {
       acceptedBySlot.set(r.slot_id, r.count);
     }
 
+    // Whether any hours have been recorded against this event. The client needs
+    // it to stop offering a delete button the server will refuse — an action
+    // that is always going to fail should not be presented as available.
+    const withAttendance = new Set(
+      db.prepare('SELECT DISTINCT event_id FROM attendance').all().map(r => r.event_id)
+    );
 
     const formattedEvents = events.map(event => {
       const slots = slotsByEvent.get(event.id) || [];
@@ -558,6 +564,7 @@ app.get('/api/events', (req, res) => {
         organizerVerified: event.organizer_verified === 1,
         organizerSchool: event.organizer_school || '',
         status: event.status,
+        hasAttendance: withAttendance.has(event.id),
         autoApprove: event.auto_approve === 1,
         attendeeVisibility: event.attendee_visibility || 'accepted',
         selectionSummary: event.selection_summary ? JSON.parse(event.selection_summary) : null,
@@ -1460,7 +1467,10 @@ app.delete('/api/events/:id', authenticateToken, (req, res) => {
     }
 
     inTransaction(() => {
-      db.prepare('DELETE FROM attendance WHERE event_id = ?').run(eventId);
+      // No `DELETE FROM attendance` here on purpose: the guard above means this
+      // point is only reachable when the event has none, so the statement could
+      // only ever be a no-op — and leaving a destructive statement in the file
+      // invites someone to move the guard later.
       db.prepare('DELETE FROM attendance_checkin WHERE event_id = ?').run(eventId);
       db.prepare('DELETE FROM applications WHERE event_id = ?').run(eventId);
       db.prepare('DELETE FROM event_comments WHERE event_id = ?').run(eventId);

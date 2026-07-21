@@ -3,7 +3,7 @@ import {
   UserCheck, UserX, Trash2, Search, ShieldCheck, Calendar
 } from 'lucide-react';
 import { api } from '../utils/api';
-import { formatHours, formatDay } from '../utils/helpers';
+import { formatHours, formatDay, eventPermissions } from '../utils/helpers';
 import { BarChart } from '../components/BarChart';
 
 export default function AdminDashboard({ addToast }) {
@@ -302,14 +302,22 @@ export default function AdminDashboard({ addToast }) {
                         </span>
                       </td>
                       <td className="cell-actions">
-                        <button
-                          className="btn btn-ghost btn-sm btn-icon"
-                          style={{ color: 'var(--danger)' }}
-                          title="Remove this event"
-                          onClick={() => removeEvent(event)}
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        {eventPermissions(event).canDelete ? (
+                          <button
+                            className="btn btn-ghost btn-sm btn-icon"
+                            style={{ color: 'var(--danger)' }}
+                            title="Remove this event"
+                            onClick={() => removeEvent(event)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        ) : (
+                          // Admins are not exempt: an event that produced service
+                          // hours is part of a student's record either way.
+                          <span className="small dim" title={eventPermissions(event).blockedReason}>
+                            Protected
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))}

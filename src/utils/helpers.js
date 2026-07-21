@@ -56,6 +56,43 @@ export function selectionMethodLabel(event) {
 }
 
 /**
+ * What may still be done to an event, mirroring the server's rules exactly.
+ *
+ * The server refuses to change a completed event, and refuses to delete one
+ * that has attendance recorded — a volunteer's credited hours depend on it.
+ * Offering buttons for either is worse than not having them: the organizer
+ * takes an action, waits, and gets an error for something that was never going
+ * to work. Both sides read from this one description so they cannot drift.
+ *
+ * Keep in step with the `event_completed` and `attendance_exists` guards in
+ * server.js.
+ *
+ * @param {object} event
+ * @returns {{canEditDetails: boolean, canChangeStatus: boolean, canChangeSettings: boolean,
+ *            canDelete: boolean, canDuplicate: boolean, blockedReason: string|null}}
+ */
+export function eventPermissions(event) {
+  const completed = event?.status === 'completed';
+  const hasAttendance = !!event?.hasAttendance;
+
+  return {
+    canEditDetails: !completed,
+    canChangeStatus: !completed,
+    canChangeSettings: !completed,
+    // Attendance blocks deletion even on an event that never completed: the
+    // hours are real either way.
+    canDelete: !completed && !hasAttendance,
+    // Duplicating reads the original and writes a new event, so it stays open.
+    canDuplicate: true,
+    blockedReason: completed
+      ? 'This event is complete. Its details can no longer be changed.'
+      : hasAttendance
+        ? 'Volunteers have credited hours from this event, so it cannot be deleted. Cancel it instead.'
+        : null
+  };
+}
+
+/**
  * Grade as people say it: "Grade 11", but just "Adult" for non-students.
  * @param {string} grade
  * @returns {string}
