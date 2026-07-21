@@ -6,7 +6,10 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { db, initDatabase } from './db.js';
 import { createRandom, performWeightedSelection } from './weighting.js';
-import { scheduleEventSelection, cancelEventSelection, setSelectionTrigger, initScheduler } from './scheduler.js';
+import {
+  recordCheckins, getCheckins, finalizeAttendance,
+  computeEventCompletion, attendanceOnSlots, eventAttendanceCount
+} from './attendance.js';
 
 const app = express();
 // Namespaced env var: tooling often injects a generic PORT for the frontend
@@ -498,6 +501,7 @@ app.get('/api/events', (req, res) => {
       acceptedBySlot.set(r.slot_id, r.count);
     }
 
+
     const formattedEvents = events.map(event => {
       const slots = slotsByEvent.get(event.id) || [];
 
@@ -634,10 +638,6 @@ app.post('/api/events', authenticateToken, (req, res) => {
       }
     });
 
-    const createdEvent = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-    if (createdEvent) {
-      scheduleEventSelection(createdEvent);
-    }
 
     res.status(201).json({
       success: true,
@@ -988,14 +988,72 @@ app.patch('/api/applications/:id', authenticateToken, (req, res) => {
   }
 });
 
-// 9. Confirm Attendance (Organizer only)
+// 9a. Check-in (Organizer only)
+//
+// Marking people off as they arrive. Deliberately not the same act as awarding
+// hours: check-in marks are freely editable, credit nothing, and are available
+// while a shift is still running. Hours are finalised separately, afterwards.
+app.post('/api/events/:id/checkin', authenticateToken, (req, res) => {
+  if (req.user.role !== 'organizer' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  try {
+    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (req.user.role === 'organizer' && event.organizer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied: You do not host this event' });
+    }
+
+    const result = recordCheckins(db, {
+      event,
+      checkinMap: req.body.checkinMap,
+      actor: req.user,
+      now: new Date().toISOString()
+    });
+
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Check-in error:', error);
+    res.status(500).json({ error: 'Internal server error saving check-in' });
+  }
+});
+
+app.get('/api/events/:id/checkin', authenticateToken, (req, res) => {
+  try {
+    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (req.user.role === 'organizer' && event.organizer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied: You do not host this event' });
+    }
+    if (req.user.role === 'student') return res.status(403).json({ error: 'Access denied' });
+
+    res.json(getCheckins(db, req.params.id).map(c => ({
+      slotId: c.slot_id, userId: c.user_id, present: c.present === 1, markedAt: c.marked_at
+    })));
+  } catch (error) {
+    console.error('Check-in fetch error:', error);
+    res.status(500).json({ error: 'Internal server error loading check-in' });
+  }
+});
+
+// 9b. Finalise attendance and credit hours (Organizer only)
+//
+// The only path that changes a volunteer's credited hours. It touches only the
+// records named in the request — never the rest — so a partial or stale submission
+// can no longer mark anyone absent, and a credit can only be removed by an
+// explicit instruction that carries a reason.
 app.post('/api/events/:id/attendance', authenticateToken, (req, res) => {
   if (req.user.role !== 'organizer') {
     return res.status(403).json({ error: 'Access denied: Only organizers can confirm attendance' });
   }
 
   const eventId = req.params.id;
-  const { attendanceMap } = req.body; // { applicationId: boolean }
+  const { attendanceMap, reason } = req.body;
+
+  if (!attendanceMap || typeof attendanceMap !== 'object' || Array.isArray(attendanceMap)) {
+    return res.status(400).json({ error: 'attendanceMap is required' });
+  }
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
@@ -1003,53 +1061,66 @@ app.post('/api/events/:id/attendance', authenticateToken, (req, res) => {
     if (event.organizer_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
-
-    // Load accepted applicants for this event
-    const apps = db.prepare("SELECT * FROM applications WHERE event_id = ? AND status = 'accepted'").all(eventId);
-
-    // Delete existing attendance records for this event
-    db.prepare('DELETE FROM attendance WHERE event_id = ?').run(eventId);
-
-    const insertAttendance = db.prepare(`
-      INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-
-    for (const app of apps) {
-      const isPresent = !!attendanceMap[app.id]; // check by application row id!
-
-      // Calculate hours from slot time duration
-      const slot = db.prepare('SELECT start_datetime, end_datetime FROM slots WHERE id = ?').get(app.slot_id);
-      let hours = 0.0;
-      if (slot) {
-        const start = new Date(slot.start_datetime);
-        const end = new Date(slot.end_datetime);
-        hours = Math.max(0.1, Number(((end - start) / (1000 * 60 * 60)).toFixed(2)));
-      }
-
-      insertAttendance.run(eventId, app.slot_id, app.user_id, isPresent ? 1 : 0, hours);
-
-      // Notify the volunteer about their attendance outcome
-      if (isPresent) {
-        createNotification({
-          userId: app.user_id,
-          kind: 'hours',
-          title: `${hours.toFixed(1)} hours credited!`,
-          body: `Your attendance was confirmed for "${event.title}".`,
-          link: `event:${event.id}`
-        });
-      }
+    if (event.status === 'cancelled') {
+      return res.status(409).json({ error: 'This event was cancelled, so hours cannot be credited for it.' });
     }
 
-    // Complete the event status
-    db.prepare("UPDATE events SET status = 'completed' WHERE id = ?").run(eventId);
+    const now = new Date().toISOString();
+    let outcome;
 
-    res.json({ success: true });
+    inTransaction(() => {
+      outcome = finalizeAttendance(db, { event, attendanceMap, reason, actor: req.user, now });
+      if (!outcome.ok) throw new AttendanceRefused(outcome);
+
+      // Completion is what makes an event immutable, so it is only reached when
+      // every shift has ended and every accepted volunteer has been accounted
+      // for. A multi-day event is no longer frozen after its first morning.
+      const completion = computeEventCompletion(db, eventId, now);
+      outcome.completion = completion;
+      if (completion.complete && event.status !== 'completed') {
+        db.prepare("UPDATE events SET status = 'completed' WHERE id = ?").run(eventId);
+        outcome.eventCompleted = true;
+      }
+    });
+
+    for (const c of outcome.credited) {
+      createNotification({
+        userId: c.userId,
+        kind: 'hours',
+        title: `${Number(c.hours).toFixed(1)} hours credited`,
+        body: `Your attendance was confirmed for "${event.title}" — ${c.slotName}.`,
+        link: `event:${event.id}`
+      });
+    }
+    for (const r of outcome.revoked) {
+      if (!r.wasCredited) continue; // never credited, so nothing was taken away
+      createNotification({
+        userId: r.userId,
+        kind: 'hours',
+        title: 'Attendance record corrected',
+        body: `Your attendance for "${event.title}" — ${r.slotName} was updated to absent. Speak to the organizer if that looks wrong.`,
+        link: `event:${event.id}`
+      });
+    }
+
+    res.json({ success: true, ...outcome });
   } catch (error) {
+    if (error instanceof AttendanceRefused) {
+      const { error: code, message, ...rest } = error.outcome;
+      return res.status(code === 'reason_required' ? 400 : 409).json({ error: message, code, ...rest });
+    }
     console.error('Confirm attendance error:', error);
     res.status(500).json({ error: 'Internal server error confirming attendance records' });
   }
 });
+
+/** Thrown to roll the transaction back when finalisation is refused. */
+class AttendanceRefused extends Error {
+  constructor(outcome) {
+    super(outcome.message);
+    this.outcome = outcome;
+  }
+}
 
 // 10. Edit Event Details and Slots (Organizer only)
 app.put('/api/events/:id', authenticateToken, (req, res) => {
@@ -1077,9 +1148,35 @@ app.put('/api/events/:id', authenticateToken, (req, res) => {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
 
+    if (event.status === 'completed') {
+      return res.status(409).json({
+        error: 'This event is complete and its details can no longer be changed. Attendance can still be corrected.',
+        code: 'event_completed'
+      });
+    }
+
     // A moved meeting place is the change most likely to make someone turn up
     // at the wrong address, so confirmed volunteers are told about it.
     const locationChanged = event.location !== location;
+
+    // Removing a shift used to take its attendance rows with it, silently
+    // destroying hours volunteers had already earned. Credited service is not
+    // something an event edit gets to delete as a side effect.
+    const payloadIds = slots.filter(s => s.id && !s.id.startsWith('new-')).map(s => s.id);
+    const existingIds = db.prepare('SELECT id FROM slots WHERE event_id = ?').all(eventId).map(s => s.id);
+    const removedIds = existingIds.filter(id => !payloadIds.includes(id));
+    const protectedRows = attendanceOnSlots(db, removedIds);
+
+    if (protectedRows.length > 0) {
+      const names = [...new Set(protectedRows.map(r => r.user_name).filter(Boolean))];
+      return res.status(409).json({
+        error: `Those shifts have attendance recorded against them, so they cannot be removed. `
+             + `${names.length} volunteer${names.length === 1 ? '' : 's'} would lose credited hours: ${names.join(', ')}.`,
+        code: 'attendance_exists',
+        volunteers: names,
+        slots: [...new Set(protectedRows.map(r => r.slot_name).filter(Boolean))]
+      });
+    }
 
     inTransaction(() => {
       // 1. Update event details
@@ -1100,25 +1197,17 @@ app.put('/api/events/:id', authenticateToken, (req, res) => {
           .run(attendeeVisibility === 'private' ? 'private' : 'accepted', eventId);
       }
 
-      // 2. Differential sync slots
-      const payloadSlotIds = slots.filter(s => s.id && !s.id.startsWith('new-')).map(s => s.id);
-      if (payloadSlotIds.length > 0) {
-        // Find slots to delete (those that are currently in DB but not in request payload)
-        const placeholders = payloadSlotIds.map(() => '?').join(',');
-        const slotsToDelete = db.prepare(`
-          SELECT id FROM slots WHERE event_id = ? AND id NOT IN (${placeholders})
-        `).all(eventId, ...payloadSlotIds);
-
-        for (const s of slotsToDelete) {
-          db.prepare('DELETE FROM attendance WHERE slot_id = ?').run(s.id);
-          db.prepare('DELETE FROM applications WHERE slot_id = ?').run(s.id);
-          db.prepare('DELETE FROM slots WHERE id = ?').run(s.id);
-        }
-      } else {
-        // Delete all slots
-        db.prepare('DELETE FROM attendance WHERE event_id = ?').run(eventId);
-        db.prepare('DELETE FROM applications WHERE event_id = ?').run(eventId);
-        db.prepare('DELETE FROM slots WHERE event_id = ?').run(eventId);
+      // 2. Differential sync slots.
+      //
+      // `removedIds` was computed above and has already been checked for
+      // attendance, so nothing credited can be reached from here. There is
+      // deliberately no "payload named no existing slots, so delete them all"
+      // branch: an edit that names no slots is a malformed request, not an
+      // instruction to erase every sign-up on the event.
+      for (const slotId of removedIds) {
+        db.prepare('DELETE FROM attendance_checkin WHERE slot_id = ?').run(slotId);
+        db.prepare('DELETE FROM applications WHERE slot_id = ?').run(slotId);
+        db.prepare('DELETE FROM slots WHERE id = ?').run(slotId);
       }
 
       // 3. Insert new or update existing slots
@@ -1148,10 +1237,6 @@ app.put('/api/events/:id', authenticateToken, (req, res) => {
       });
     }
 
-    const updatedEvent = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-    if (updatedEvent) {
-      scheduleEventSelection(updatedEvent);
-    }
 
     res.json({ success: true, notified });
   } catch (error) {
@@ -1241,6 +1326,12 @@ app.patch('/api/events/:id', authenticateToken, (req, res) => {
     if (event.organizer_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
+    if (event.status === 'completed') {
+      return res.status(409).json({
+        error: 'This event is complete and its settings can no longer be changed.',
+        code: 'event_completed'
+      });
+    }
 
     if (autoApprove !== undefined) {
       db.prepare('UPDATE events SET auto_approve = ? WHERE id = ?').run(autoApprove ? 1 : 0, eventId);
@@ -1250,10 +1341,6 @@ app.patch('/api/events/:id', authenticateToken, (req, res) => {
         .run(attendeeVisibility === 'private' ? 'private' : 'accepted', eventId);
     }
 
-    const updatedEvent = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-    if (updatedEvent) {
-      scheduleEventSelection(updatedEvent);
-    }
 
     const updated = db.prepare('SELECT auto_approve, attendee_visibility FROM events WHERE id = ?').get(eventId);
     res.json({
@@ -1353,8 +1440,28 @@ app.delete('/api/events/:id', authenticateToken, (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
+    // An event that produced service hours is part of a student's record, and a
+    // record is not something a delete button gets to remove. Cancellation is
+    // the way to call an event off; corrections go through attendance.
+    const attendanceRows = eventAttendanceCount(db, eventId);
+    if (attendanceRows > 0) {
+      return res.status(409).json({
+        error: 'This event has attendance recorded against it and can no longer be deleted, '
+             + 'because volunteers\' service hours depend on it. Cancel it instead.',
+        code: 'attendance_exists',
+        attendanceRecords: attendanceRows
+      });
+    }
+    if (event.status === 'completed') {
+      return res.status(409).json({
+        error: 'This event is complete and can no longer be deleted.',
+        code: 'event_completed'
+      });
+    }
+
     inTransaction(() => {
       db.prepare('DELETE FROM attendance WHERE event_id = ?').run(eventId);
+      db.prepare('DELETE FROM attendance_checkin WHERE event_id = ?').run(eventId);
       db.prepare('DELETE FROM applications WHERE event_id = ?').run(eventId);
       db.prepare('DELETE FROM event_comments WHERE event_id = ?').run(eventId);
       db.prepare('DELETE FROM user_favorites WHERE event_id = ?').run(eventId);
@@ -1362,8 +1469,6 @@ app.delete('/api/events/:id', authenticateToken, (req, res) => {
       db.prepare('DELETE FROM slots WHERE event_id = ?').run(eventId);
       db.prepare('DELETE FROM events WHERE id = ?').run(eventId);
     });
-
-    cancelEventSelection(eventId);
 
     res.json({ success: true });
   } catch (error) {
@@ -1391,6 +1496,12 @@ app.patch('/api/events/:id/status', authenticateToken, (req, res) => {
     if (req.user.role === 'organizer' && event.organizer_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
+    if (event.status === 'completed') {
+      return res.status(409).json({
+        error: 'This event is complete. Its status can no longer be changed.',
+        code: 'event_completed'
+      });
+    }
 
     db.prepare('UPDATE events SET status = ? WHERE id = ?').run(status, eventId);
 
@@ -1406,10 +1517,6 @@ app.patch('/api/events/:id/status', authenticateToken, (req, res) => {
       });
     }
 
-    const updatedEvent = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-    if (updatedEvent) {
-      scheduleEventSelection(updatedEvent);
-    }
     res.json({ success: true, status, notified });
   } catch (error) {
     console.error('Toggle status error:', error);
@@ -1489,6 +1596,7 @@ if (DEMO_MODE) {
       // behind, a stale confirmed run attaches itself to a freshly seeded event
       // and blocks Auto Select from running on it.
       db.exec('DROP TABLE IF EXISTS hours_ledger');
+      db.exec('DROP TABLE IF EXISTS attendance_checkin');
       db.exec('DROP TABLE IF EXISTS auto_select_runs');
       db.exec('DROP TABLE IF EXISTS event_announcements');
       db.exec('DROP TABLE IF EXISTS user_favorites');
@@ -2658,6 +2766,12 @@ app.post('/api/events/:id/auto-select/confirm', authenticateToken, (req, res) =>
     if (req.user.role !== 'admin' && event.organizer_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
+    if (event.status === 'completed') {
+      return res.status(409).json({
+        error: 'This event is complete. Selection can no longer be confirmed for it.',
+        code: 'event_completed'
+      });
+    }
 
     // Fetch the latest run
     const latestRun = db.prepare(`
@@ -2807,144 +2921,6 @@ app.use((err, req, res, next) => {
   const status = err.type === 'entity.parse.failed' ? 400 : 500;
   res.status(status).json({ error: status === 400 ? 'Invalid JSON in request body' : 'Internal server error' });
 });
-
-// Executes Auto Select selection algorithm for a specific event
-function processEventSelection(eventId) {
-  try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-    if (!event || event.auto_approve !== 1) return;
-
-    const slots = db.prepare('SELECT * FROM slots WHERE event_id = ?').all(event.id);
-    let totalApplicants = 0;
-    let acceptedCount = 0;
-    let waitlistedCount = 0;
-    let acceptedHoursSum = 0;
-    let waitlistedHoursSum = 0;
-    let eventNeedsStatusUpdate = false;
-
-    for (const slot of slots) {
-      // Query pending applications for this slot, along with the applicant's hours
-      const pendingApps = db.prepare(`
-        SELECT a.id, a.user_id,
-               COALESCE(SUM(att.hours_awarded), 0) as total_hours
-        FROM applications a
-        LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
-        WHERE a.slot_id = ? AND a.status = 'pending'
-        GROUP BY a.id
-      `).all(slot.id);
-
-      if (pendingApps.length === 0) continue;
-
-      eventNeedsStatusUpdate = true;
-      totalApplicants += pendingApps.length;
-
-      // Retrieve existing accepted count
-      const acceptedSlotCount = db.prepare(`
-        SELECT COUNT(*) as count FROM applications WHERE slot_id = ? AND status = 'accepted'
-      `).get(slot.id).count;
-
-      const remainingSpots = Math.max(0, slot.max_spots - acceptedSlotCount);
-
-      if (remainingSpots <= 0) {
-        // No spots left, move everyone to waitlist
-        const waitlistStmt = db.prepare("UPDATE applications SET status = 'waitlisted', waitlist_order = ? WHERE id = ?");
-        pendingApps.forEach((app, i) => {
-          waitlistStmt.run(i + 1, app.id);
-          waitlistedCount++;
-          waitlistedHoursSum += app.total_hours;
-
-          // Notify student
-          createNotification({
-            userId: app.user_id,
-            kind: 'waitlisted',
-            title: 'Waitlisted',
-            body: `You were placed on the waitlist for "${event.title}" — ${slot.name}.`,
-            link: `event:${event.id}`
-          });
-        });
-      } else {
-        // Perform weighted random selection
-        const seed = `${event.id}:${slot.id}`;
-        const randomFn = createRandom(seed);
-        const { selectedIds, waitlistIds } = performWeightedSelection(pendingApps, remainingSpots, randomFn);
-
-        // Update accepted applicants
-        const acceptStmt = db.prepare("UPDATE applications SET status = 'accepted', waitlist_order = NULL WHERE id = ?");
-        for (const id of selectedIds) {
-          acceptStmt.run(id);
-          acceptedCount++;
-
-          const appRow = pendingApps.find(a => a.id === id);
-          if (appRow) {
-            acceptedHoursSum += appRow.total_hours;
-            createNotification({
-              userId: appRow.user_id,
-              kind: 'accepted',
-              title: 'Application accepted',
-              body: `You were auto-selected and accepted for "${event.title}" — ${slot.name}!`,
-              link: `event:${event.id}`
-            });
-          }
-        }
-
-        // Update waitlisted applicants
-        const waitlistStmt = db.prepare("UPDATE applications SET status = 'waitlisted', waitlist_order = ? WHERE id = ?");
-        waitlistIds.forEach((id, index) => {
-          waitlistStmt.run(index + 1, id);
-          waitlistedCount++;
-
-          const appRow = pendingApps.find(a => a.id === id);
-          if (appRow) {
-            waitlistedHoursSum += appRow.total_hours;
-            createNotification({
-              userId: appRow.user_id,
-              kind: 'waitlisted',
-              title: 'Waitlisted',
-              body: `You were placed on the waitlist (Rank #${index + 1}) for "${event.title}" — ${slot.name}.`,
-              link: `event:${event.id}`
-            });
-          }
-        });
-      }
-    }
-
-    if (eventNeedsStatusUpdate) {
-      // Compute averages
-      const avgAcceptedHours = acceptedCount > 0 ? Number((acceptedHoursSum / acceptedCount).toFixed(1)) : 0;
-      const avgWaitlistedHours = waitlistedCount > 0 ? Number((waitlistedHoursSum / waitlistedCount).toFixed(1)) : 0;
-
-      const summary = {
-        totalApplicants,
-        acceptedVolunteers: acceptedCount,
-        waitlistedVolunteers: waitlistedCount,
-        avgAcceptedHours,
-        avgWaitlistedHours,
-        timestamp: new Date().toISOString()
-      };
-
-      // Save summary and update status
-      db.prepare(`
-        UPDATE events
-        SET selection_summary = ?, status = 'closed'
-        WHERE id = ?
-      `).run(JSON.stringify(summary), event.id);
-
-      console.log(`[Scheduler] Auto Select completed for event ${event.id}:`, summary);
-    } else if (event.status === 'open') {
-      db.prepare("UPDATE events SET status = 'closed' WHERE id = ?").run(event.id);
-    }
-  } catch (err) {
-    console.error(`[Scheduler] Error running Auto Select for event ${eventId}:`, err);
-  }
-}
-
-// Bind selection execution to the scheduler trigger
-setSelectionTrigger((eventId) => {
-  processEventSelection(eventId);
-});
-
-// Initialize timers for existing events on startup
-initScheduler();
 
 // Start Express Server
 // Time-based notifications: once at boot so a fresh database is current,
