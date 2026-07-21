@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { db, initDatabase } from './db.js';
@@ -9,7 +11,33 @@ import { scheduleEventSelection, cancelEventSelection, setSelectionTrigger, init
 const app = express();
 // Namespaced env var: tooling often injects a generic PORT for the frontend
 const PORT = Number(process.env.API_PORT) || 5050;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+/**
+ * Demo scaffolding — the account switcher and the database reset — is opt-in,
+ * never opt-out.
+ *
+ * Keying this to `NODE_ENV !== 'production'` would fail open: NODE_ENV is unset
+ * on a plain `node server.js`, so a real deployment that forgot to set it would
+ * silently expose a route that drops every table. An explicit flag fails closed
+ * instead — absent it, the route is never registered at all.
+ */
+const DEMO_MODE = process.env.DEMO_MODE === 'true';
+
+/**
+ * In production the signing secret must come from the environment. A committed
+ * fallback means every deployment shares a key that is readable on GitHub, and
+ * anyone holding it can mint a token for any user — including an admin.
+ */
 const JWT_SECRET = process.env.JWT_SECRET || 'sbvolunteers_secret_key_12345';
+if (IS_PRODUCTION && !process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET must be set in production. Refusing to start.');
+  process.exit(1);
+}
+if (IS_PRODUCTION && DEMO_MODE) {
+  console.error('FATAL: DEMO_MODE cannot be enabled in production. Refusing to start.');
+  process.exit(1);
+}
 
 const VALID_GRADES = ['9', '10', '11', '12', 'Adult', 'N/A'];
 const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
@@ -17,8 +45,77 @@ const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 // Initialize SQLite database schema and seed data
 initDatabase();
 
-app.use(cors());
-app.use(express.json());
+/**
+ * Rate limiters key on client IP, which behind a reverse proxy is the proxy's.
+ * Trusting `X-Forwarded-For` unconditionally is worse than not trusting it at
+ * all: any client could then spoof the header and get a fresh bucket per
+ * request. So this is opt-in and must match the actual hop count.
+ */
+if (process.env.TRUST_PROXY) {
+  const value = Number(process.env.TRUST_PROXY);
+  app.set('trust proxy', Number.isNaN(value) ? process.env.TRUST_PROXY : value);
+}
+
+// Baseline security headers. CSP is deliberately omitted: this server returns
+// JSON only, and the client's stylesheet pulls fonts from Google. A policy
+// belongs wherever the HTML is served — see roadmap item 1.18.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  // Default is same-origin, which breaks any deployment serving the client
+  // from a different origin than the API.
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
+
+/**
+ * CORS allowlist. Requests with no Origin header — curl, server-to-server, and
+ * same-origin browser requests — are always allowed; only cross-origin browser
+ * traffic is checked against the list.
+ */
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:4173')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    callback(new Error(`Origin not allowed by CORS: ${origin}`));
+  },
+  credentials: true
+}));
+
+app.use(express.json({ limit: '100kb' }));
+
+/**
+ * Two tiers. The strict one guards credential endpoints, where an attacker
+ * gets unlimited guesses against six-character passwords on accounts holding
+ * minors' service records. The loose one is a blunt ceiling on everything else.
+ *
+ * In-memory storage is correct for a single-process SQLite deployment. Running
+ * more than one instance would need a shared store.
+ */
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: DEMO_MODE ? 1000 : 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  // Failed sign-ins are what we are counting; a correct password shouldn't
+  // burn the budget of someone sharing a school's NAT address.
+  skipSuccessfulRequests: true,
+  message: { error: 'Too many attempts. Please wait a few minutes and try again.' }
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: DEMO_MODE ? 10000 : 600,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down.' }
+});
+
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/signup', authLimiter);
+app.use('/api', apiLimiter);
 
 // --- AUTHENTICATION MIDDLEWARE ---
 function authenticateToken(req, res, next) {
@@ -1220,7 +1317,22 @@ app.post('/api/admin/organizers/:id/deny', authenticateToken, (req, res) => {
   const orgId = req.params.id;
 
   try {
-    db.prepare('DELETE FROM users WHERE id = ?').run(orgId);
+    // Scoped deliberately. An unscoped delete by id lets a mistyped or guessed
+    // id remove a student — and ON DELETE CASCADE takes their attendance rows
+    // with them, silently destroying credited service hours. Denial only ever
+    // applies to an organizer who has not been approved yet, and who therefore
+    // has no events and no volunteers attached.
+    const target = db.prepare(
+      "SELECT id FROM users WHERE id = ? AND role = 'organizer' AND verified = 0"
+    ).get(orgId);
+
+    if (!target) {
+      return res.status(404).json({
+        error: 'No pending organizer request matches that id. Approved organizers cannot be deleted here.'
+      });
+    }
+
+    db.prepare("DELETE FROM users WHERE id = ? AND role = 'organizer' AND verified = 0").run(orgId);
     res.json({ success: true });
   } catch (error) {
     console.error('Deny organizer error:', error);
@@ -1360,29 +1472,43 @@ app.get('/api/events/:id/roster.csv', authenticateToken, (req, res) => {
 });
 
 
-// 14. Reset Database (Demo facility)
-app.post('/api/auth/reset', (req, res) => {
-  try {
-    console.log('Resetting database tables to seeds...');
-    // Drop children before parents; includes V2 tables so re-seeding never
-    // collides with stale rows (seed ids are fixed strings)
-    db.exec('DROP TABLE IF EXISTS event_announcements');
-    db.exec('DROP TABLE IF EXISTS user_favorites');
-    db.exec('DROP TABLE IF EXISTS event_comments');
-    db.exec('DROP TABLE IF EXISTS notifications');
-    db.exec('DROP TABLE IF EXISTS attendance');
-    db.exec('DROP TABLE IF EXISTS applications');
-    db.exec('DROP TABLE IF EXISTS slots');
-    db.exec('DROP TABLE IF EXISTS events');
-    db.exec('DROP TABLE IF EXISTS users');
+// 14. Reset Database (demo facility — registered only when DEMO_MODE is on)
+//
+// This drops every table in the database. It exists so the demo can be
+// restored to its seed state, and it must never reach a real deployment: one
+// unauthenticated request would destroy every student's service record.
+// Registering it conditionally means production returns the standard /api 404
+// rather than advertising that the route exists at all.
+if (DEMO_MODE) {
+  app.post('/api/auth/reset', (req, res) => {
+    try {
+      console.log('Resetting database tables to seeds...');
+      // Drop children before parents; includes V2 tables so re-seeding never
+      // collides with stale rows (seed ids are fixed strings). auto_select_runs
+      // is in the list because its rows reference those fixed event ids — left
+      // behind, a stale confirmed run attaches itself to a freshly seeded event
+      // and blocks Auto Select from running on it.
+      db.exec('DROP TABLE IF EXISTS auto_select_runs');
+      db.exec('DROP TABLE IF EXISTS event_announcements');
+      db.exec('DROP TABLE IF EXISTS user_favorites');
+      db.exec('DROP TABLE IF EXISTS event_comments');
+      db.exec('DROP TABLE IF EXISTS notifications');
+      db.exec('DROP TABLE IF EXISTS attendance');
+      db.exec('DROP TABLE IF EXISTS applications');
+      db.exec('DROP TABLE IF EXISTS slots');
+      db.exec('DROP TABLE IF EXISTS events');
+      db.exec('DROP TABLE IF EXISTS users');
 
-    initDatabase();
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Reset database error:', error);
-    res.status(500).json({ error: 'Internal server error resetting database' });
-  }
-});
+      initDatabase();
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Reset database error:', error);
+      res.status(500).json({ error: 'Internal server error resetting database' });
+    }
+  });
+} else {
+  console.log('[Security] DEMO_MODE is off — the database reset endpoint is not registered.');
+}
 
 // ────────────────────────────────────────────────────────────────────
 // V2 ENHANCED FEATURES — Notifications, Comments, Favorites, etc.
@@ -2670,6 +2796,12 @@ app.use('/api', (req, res) => {
 // Last-resort error handler (e.g. malformed JSON bodies)
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
+  // A blocked cross-origin request is a configuration answer, not a crash —
+  // reporting it as a 500 sends whoever deploys this hunting in the wrong place.
+  if (String(err.message).startsWith('Origin not allowed by CORS')) {
+    console.warn(err.message);
+    return res.status(403).json({ error: 'Origin not allowed. Check the CORS_ORIGINS setting.' });
+  }
   console.error('Unhandled error:', err);
   const status = err.type === 'entity.parse.failed' ? 400 : 500;
   res.status(status).json({ error: status === 400 ? 'Invalid JSON in request body' : 'Internal server error' });

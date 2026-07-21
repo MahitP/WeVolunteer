@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { api } from '../utils/api';
+import { DEMO_MODE } from '../config';
 import { Mail, Lock, AlertCircle, CalendarCheck, Award, ClipboardList } from 'lucide-react';
 
 const DEMO_ACCOUNTS = [
@@ -120,25 +121,30 @@ export default function Login({ onLoginSuccess, addToast }) {
           </button>
         </p>
 
-        <div className="auth-demo">
-          <div className="eyebrow">Demo accounts — password “password123”</div>
-          <div className="auth-demo-grid">
-            {DEMO_ACCOUNTS.map(acc => (
-              <button
-                key={acc.email}
-                className="auth-demo-btn"
-                disabled={loading}
-                onClick={() => { setEmail(acc.email); setPassword('password123'); signIn(acc.email, 'password123'); }}
-              >
-                <span className="avatar sm">{acc.avatar}</span>
-                <span className="truncate">
-                  <span className="auth-demo-name truncate">{acc.name}</span>
-                  <span className="auth-demo-role">{acc.role}</span>
-                </span>
-              </button>
-            ))}
+        {/* Seeded sign-ins publish a working password for five accounts, one of
+            them an administrator. Demo scaffolding only — never in a build that
+            faces real users. */}
+        {DEMO_MODE && (
+          <div className="auth-demo">
+            <div className="eyebrow">Demo accounts — password “password123”</div>
+            <div className="auth-demo-grid">
+              {DEMO_ACCOUNTS.map(acc => (
+                <button
+                  key={acc.email}
+                  className="auth-demo-btn"
+                  disabled={loading}
+                  onClick={() => { setEmail(acc.email); setPassword('password123'); signIn(acc.email, 'password123'); }}
+                >
+                  <span className="avatar sm">{acc.avatar}</span>
+                  <span className="truncate">
+                    <span className="auth-demo-name truncate">{acc.name}</span>
+                    <span className="auth-demo-role">{acc.role}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </main>
     </div>
   );
