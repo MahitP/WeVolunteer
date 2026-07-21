@@ -1,0 +1,495 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Calendar, Plus, AlertCircle, Trash2, MapPin, Info, X } from 'lucide-react';
+import { formatHours } from '../utils/helpers';
+
+const CATEGORIES = [
+  { value: 'School', label: 'School project' },
+  { value: '5K', label: '5K run / athletics' },
+  { value: 'Food Pantry', label: 'Food pantry' },
+  { value: 'Fundraiser', label: 'Fundraiser' },
+  { value: 'Other', label: 'Other community service' }
+];
+
+export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
+  const [form, setForm] = useState({
+    title: '', category: 'School', description: '', instructions: '', location: '',
+    applicationDeadline: '', autoApprove: false, attendeeVisibility: 'accepted'
+  });
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const slotCounter = useRef(0);
+
+  const [dateInput, setDateInput] = useState('');
+  const [dates, setDates] = useState([]);
+
+  const [shift, setShift] = useState({
+    name: '', description: '', startTime: '09:00', endTime: '11:00', maxSpots: '2', onDate: ''
+  });
+  const [slots, setSlots] = useState([]);
+
+  const shiftHours = useMemo(() => {
+    const [sh, sm] = shift.startTime.split(':').map(Number);
+    const [eh, em] = shift.endTime.split(':').map(Number);
+    const mins = (eh * 60 + em) - (sh * 60 + sm);
+    return mins > 0 ? Number((mins / 60).toFixed(2)) : 0;
+  }, [shift.startTime, shift.endTime]);
+
+  useEffect(() => {
+    if (dates.length && !dates.includes(shift.onDate)) setShift(s => ({ ...s, onDate: dates[0] }));
+  }, [dates, shift.onDate]);
+
+  const set = (name, value) => {
+    setForm(prev => ({ ...prev, [name]: value }));
+    if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
+  };
+
+  const addDate = () => {
+    if (!dateInput) return addToast('Pick a date first.', 'error');
+    if (dates.includes(dateInput)) return addToast('That date is already on the list.', 'info');
+    setDates(prev => [...prev, dateInput].sort());
+    setDateInput('');
+    setErrors(prev => ({ ...prev, dates: '' }));
+  };
+
+  const removeDate = (date) => {
+    setDates(prev => prev.filter(d => d !== date));
+    setSlots(prev => prev.filter(s => s.date !== date));
+  };
+
+  const validShift = () => {
+    if (!shift.name.trim()) { addToast('Name the shift, e.g. “Grill helper”.', 'error'); return false; }
+    if (shiftHours <= 0) { addToast('The end time must be after the start time.', 'error'); return false; }
+    if (Number(shift.maxSpots) < 1) { addToast('A shift needs at least one spot.', 'error'); return false; }
+    return true;
+  };
+
+  const buildSlot = (date) => {
+    slotCounter.current += 1;
+    return {
+      id: `temp-${slotCounter.current}-${date}`,
+      date,
+      name: shift.name,
+      description: shift.description,
+      startDatetime: `${date}T${shift.startTime}:00`,
+      endDatetime: `${date}T${shift.endTime}:00`,
+      maxSpots: Number(shift.maxSpots) || 1,
+      hours: shiftHours,
+      startTime: shift.startTime,
+      endTime: shift.endTime
+    };
+  };
+
+  const addShift = (scope) => {
+    if (dates.length === 0) return addToast('Add at least one date first.', 'error');
+    if (!validShift()) return;
+    const targets = scope === 'all' ? dates : [shift.onDate].filter(Boolean);
+    if (targets.length === 0) return addToast('Choose which date this shift is on.', 'error');
+    setSlots(prev => [...prev, ...targets.map(buildSlot)]);
+    addToast(
+      scope === 'all'
+        ? `Added “${shift.name}” to all ${dates.length} dates.`
+        : `Added “${shift.name}”.`,
+      'success'
+    );
+    setShift(s => ({ ...s, name: '', description: '' }));
+    setErrors(prev => ({ ...prev, slots: '' }));
+  };
+
+  const validate = () => {
+    const next = {};
+    if (!form.title.trim()) next.title = 'Give the event a name';
+    if (!form.description.trim()) next.description = 'Tell volunteers what they\'ll be doing';
+    if (!form.location.trim()) next.location = 'Add a location';
+    if (!form.applicationDeadline) next.applicationDeadline = 'Set an application deadline';
+    if (slots.length === 0) next.slots = 'Add at least one shift before publishing';
+
+    if (form.applicationDeadline && slots.length > 0) {
+      const first = new Date([...slots].sort((a, b) => a.startDatetime.localeCompare(b.startDatetime))[0].startDatetime);
+      if (new Date(form.applicationDeadline) >= first) {
+        next.applicationDeadline = 'The deadline has to be before the first shift starts';
+      }
+    }
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!validate()) {
+      addToast('Check the highlighted fields before publishing.', 'error');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onSubmitEvent({
+        title: form.title,
+        description: form.description,
+        instructions: form.instructions,
+        category: form.category,
+        location: form.location,
+        applicationDeadline: new Date(form.applicationDeadline).toISOString(),
+        autoApprove: form.autoApprove,
+        attendeeVisibility: form.attendeeVisibility,
+        slots: slots.map(s => ({
+          name: s.name,
+          description: s.description,
+          startDatetime: new Date(s.startDatetime).toISOString(),
+          endDatetime: new Date(s.endDatetime).toISOString(),
+          maxSpots: Number(s.maxSpots)
+        }))
+      });
+      addToast(`“${form.title}” is live. Volunteers can apply now.`, 'success');
+      setActiveTab('dashboard');
+    } catch (err) {
+      addToast(`Could not publish: ${err.message}`, 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const byDate = slots.reduce((acc, slot) => {
+    (acc[slot.date] ||= []).push(slot);
+    return acc;
+  }, {});
+  const totalSpots = slots.reduce((sum, s) => sum + s.maxSpots, 0);
+  const totalHours = slots.reduce((sum, s) => sum + s.hours, 0);
+
+  return (
+    <form onSubmit={handleSubmit} style={{ maxWidth: 760 }}>
+      <div className="stack-lg">
+
+        {/* ── 1. What and where ── */}
+        <section className="card">
+          <div className="card-head"><h2>About the event</h2></div>
+          <div className="card-body">
+            <div className="field" style={{ marginTop: 0 }}>
+              <label htmlFor="ce-title">Event name</label>
+              <input
+                id="ce-title" className="input" value={form.title}
+                placeholder="Softball tournament snack shack"
+                aria-invalid={!!errors.title} onChange={e => set('title', e.target.value)}
+              />
+              {errors.title && <span className="field-error"><AlertCircle size={12} />{errors.title}</span>}
+            </div>
+
+            <div className="field-row">
+              <div className="field" style={{ marginTop: 0 }}>
+                <label htmlFor="ce-cat">Category</label>
+                <select id="ce-cat" className="select" value={form.category} onChange={e => set('category', e.target.value)}>
+                  {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+              </div>
+              <div className="field" style={{ marginTop: 0 }}>
+                <label htmlFor="ce-loc">Location</label>
+                <div className="input-affix">
+                  <MapPin size={15} />
+                  <input
+                    id="ce-loc" className="input" value={form.location} placeholder="Reichler Park"
+                    aria-invalid={!!errors.location} onChange={e => set('location', e.target.value)}
+                  />
+                </div>
+                {errors.location && <span className="field-error"><AlertCircle size={12} />{errors.location}</span>}
+              </div>
+            </div>
+
+            <div className="field">
+              <label htmlFor="ce-desc">What volunteers need to know</label>
+              <textarea
+                id="ce-desc" className="textarea" value={form.description}
+                placeholder="Every shift needs one adult because of the grill. Wear closed-toe shoes."
+                aria-invalid={!!errors.description} onChange={e => set('description', e.target.value)}
+              />
+              {errors.description && <span className="field-error"><AlertCircle size={12} />{errors.description}</span>}
+            </div>
+
+            <div className="field">
+              <label htmlFor="ce-deadline">Applications close</label>
+              <input
+                id="ce-deadline" type="datetime-local" className="input"
+                value={form.applicationDeadline} aria-invalid={!!errors.applicationDeadline}
+                onChange={e => set('applicationDeadline', e.target.value)}
+              />
+              {errors.applicationDeadline
+                ? <span className="field-error"><AlertCircle size={12} />{errors.applicationDeadline}</span>
+                : <span className="field-hint">Must be before your first shift starts.</span>}
+            </div>
+
+            <div className="field">
+              <label htmlFor="ce-instr">
+                Arrival instructions <span className="dim" style={{ fontWeight: 400 }}>(optional)</span>
+              </label>
+              <textarea
+                id="ce-instr" className="textarea" style={{ minHeight: 64 }} value={form.instructions}
+                placeholder="Park in the south lot and check in at the snack shack window."
+                onChange={e => set('instructions', e.target.value)}
+              />
+              <span className="field-hint">
+                Shown to volunteers once they're confirmed. You can post changes later as an update.
+              </span>
+            </div>
+
+            <div className="field">
+              <span className="label">Selection Method</span>
+              <div className="stack-sm">
+                <label className="check" data-checked={!form.autoApprove ? 'true' : 'false'}>
+                  <input type="radio" name="approval" checked={!form.autoApprove}
+                    onChange={() => set('autoApprove', false)} />
+                  <span>
+                    <span className="check-title">Manual Review</span>
+                    <span className="check-desc">
+                      You review applicants after the deadline and choose who is accepted, waitlisted, or rejected.
+                    </span>
+                  </span>
+                </label>
+                <label className="check" data-checked={form.autoApprove ? 'true' : 'false'}>
+                  <input type="radio" name="approval" checked={form.autoApprove}
+                    onChange={() => set('autoApprove', true)} />
+                  <span>
+                    <span className="check-title">Auto Select</span>
+                    <span className="check-desc">
+                      Students apply normally. After the deadline, the system automatically selects volunteers using weighted random selection based on hours.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div className="field">
+              <span className="label">Who can see the volunteer list</span>
+              <div className="stack-sm">
+                <label className="check" data-checked={form.attendeeVisibility === 'accepted' ? 'true' : 'false'}>
+                  <input type="radio" name="visibility" checked={form.attendeeVisibility === 'accepted'}
+                    onChange={() => set('attendeeVisibility', 'accepted')} />
+                  <span>
+                    <span className="check-title">Confirmed volunteers</span>
+                    <span className="check-desc">
+                      People accepted for this event can see who else is coming. Helps students coordinate and makes events feel less intimidating to join.
+                    </span>
+                  </span>
+                </label>
+                <label className="check" data-checked={form.attendeeVisibility === 'private' ? 'true' : 'false'}>
+                  <input type="radio" name="visibility" checked={form.attendeeVisibility === 'private'}
+                    onChange={() => set('attendeeVisibility', 'private')} />
+                  <span>
+                    <span className="check-title">Only me</span>
+                    <span className="check-desc">Volunteers see how many spots are taken, but not who has them.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── 2. Dates ── */}
+        <section className="card">
+          <div className="card-head">
+            <h2>Dates</h2>
+            <span className="small dim">{dates.length} added</span>
+          </div>
+          <div className="card-body">
+            <p className="small muted" style={{ marginBottom: 'var(--s4)' }}>
+              Add every day this event runs. You'll attach shifts to them next.
+            </p>
+
+            <div className="row" style={{ alignItems: 'flex-end', gap: 'var(--s2)' }}>
+              <div className="field" style={{ flex: 1, marginTop: 0 }}>
+                <label htmlFor="ce-date">Date</label>
+                <input
+                  id="ce-date" type="date" className="input" value={dateInput}
+                  onChange={e => setDateInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addDate(); } }}
+                />
+              </div>
+              <button type="button" className="btn btn-secondary" onClick={addDate}>
+                <Plus size={14} /> Add date
+              </button>
+            </div>
+
+            {dates.length > 0 && (
+              <div className="row row-wrap" style={{ gap: 'var(--s2)', marginTop: 'var(--s4)' }}>
+                {dates.map(date => (
+                  <span key={date} className="tag tag-brand" style={{ padding: '0.25rem 0.25rem 0.25rem 0.5rem', fontSize: '0.75rem' }}>
+                    {longDate(date)}
+                    <button type="button" onClick={() => removeDate(date)} aria-label={`Remove ${longDate(date)}`}
+                      style={{ display: 'flex', color: 'inherit', opacity: 0.7 }}>
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* ── 3. Shifts ── */}
+        <section className="card">
+          <div className="card-head">
+            <h2>Shifts</h2>
+            <span className="small dim">{slots.length} added</span>
+          </div>
+          <div className="card-body">
+            {dates.length === 0 && (
+              <div className="alert alert-warn" style={{ marginBottom: 'var(--s4)' }}>
+                <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>Add a date above before creating shifts.</span>
+              </div>
+            )}
+
+            <div className="field-row" style={{ marginTop: 0 }}>
+              <div className="field" style={{ marginTop: 0 }}>
+                <label htmlFor="ce-role">Role</label>
+                <input
+                  id="ce-role" className="input" value={shift.name} placeholder="Grill helper"
+                  onChange={e => setShift(s => ({ ...s, name: e.target.value }))}
+                />
+              </div>
+              <div className="field" style={{ marginTop: 0 }}>
+                <label htmlFor="ce-spots">Spots</label>
+                <input
+                  id="ce-spots" type="number" min="1" className="input" value={shift.maxSpots}
+                  onChange={e => setShift(s => ({ ...s, maxSpots: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="field-row">
+              <div className="field" style={{ marginTop: 0 }}>
+                <label htmlFor="ce-start">Starts</label>
+                <input id="ce-start" type="time" className="input" value={shift.startTime}
+                  onChange={e => setShift(s => ({ ...s, startTime: e.target.value }))} />
+              </div>
+              <div className="field" style={{ marginTop: 0 }}>
+                <label htmlFor="ce-end">Ends</label>
+                <input id="ce-end" type="time" className="input" value={shift.endTime}
+                  onChange={e => setShift(s => ({ ...s, endTime: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="field">
+              <label htmlFor="ce-sdesc">Details <span className="dim" style={{ fontWeight: 400 }}>(optional)</span></label>
+              <input
+                id="ce-sdesc" className="input" value={shift.description}
+                placeholder="Walk the field and pick up litter"
+                onChange={e => setShift(s => ({ ...s, description: e.target.value }))}
+              />
+            </div>
+
+            <div className="inset row-between row-wrap" style={{ marginTop: 'var(--s4)', gap: 'var(--s3)' }}>
+              <span className="small">
+                Credits{' '}
+                <span className={shiftHours > 0 ? 'strong' : ''} style={{ color: shiftHours > 0 ? 'var(--accent)' : 'var(--danger)' }}>
+                  {shiftHours > 0 ? formatHours(shiftHours) : 'invalid times'}
+                </span>{' '}
+                <span className="dim">per volunteer</span>
+              </span>
+
+              <div className="row row-wrap" style={{ gap: 'var(--s2)' }}>
+                {dates.length > 1 && (
+                  <>
+                    <select
+                      className="select" value={shift.onDate} aria-label="Date for this shift"
+                      onChange={e => setShift(s => ({ ...s, onDate: e.target.value }))}
+                      style={{ minWidth: 150 }}
+                    >
+                      {dates.map(d => <option key={d} value={d}>{longDate(d)}</option>)}
+                    </select>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => addShift('one')}>
+                      Add to this date
+                    </button>
+                  </>
+                )}
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => addShift(dates.length > 1 ? 'all' : 'one')}>
+                  <Plus size={13} /> {dates.length > 1 ? `Add to all ${dates.length} dates` : 'Add shift'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── 4. Preview: the sheet volunteers will see ── */}
+        <section className="card">
+          <div className="card-head">
+            <h2>Preview</h2>
+            {slots.length > 0 && (
+              <span className="small dim tnum">
+                {slots.length} shift{slots.length !== 1 ? 's' : ''} · {totalSpots} spots · up to {formatHours(totalHours)}
+              </span>
+            )}
+          </div>
+
+          {errors.slots && (
+            <div style={{ padding: 'var(--s4) var(--s5) 0' }}>
+              <div className="alert alert-danger">
+                <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>{errors.slots}</span>
+              </div>
+            </div>
+          )}
+
+          {slots.length === 0 ? (
+            <div className="empty">
+              <span className="empty-icon"><Calendar size={18} /></span>
+              <h3>Nothing to preview yet</h3>
+              <p>Add dates and shifts above and your sign-up sheet builds itself here.</p>
+            </div>
+          ) : (
+            <div className="card-body">
+              <div className="sheet">
+                {Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).map(([date, daySlots]) => (
+                  <div key={date} className="sheet-daygroup">
+                    <div className="sheet-dayhead">
+                      <Calendar size={12} /> {longDate(date)}
+                    </div>
+                    {daySlots.map(slot => (
+                      <div key={slot.id} className="sheet-row">
+                        <div>
+                          <div className="sheet-time">{time12(slot.startTime)}</div>
+                          <div className="sheet-dur">to {time12(slot.endTime)} · {formatHours(slot.hours)}</div>
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="sheet-role">{slot.name}</div>
+                          {slot.description && <div className="sheet-desc">{slot.description}</div>}
+                        </div>
+                        <div className="sheet-action">
+                          <span className="seats-label">{slot.maxSpots} spot{slot.maxSpots !== 1 ? 's' : ''}</span>
+                          <button
+                            type="button" className="btn btn-ghost btn-sm btn-icon"
+                            style={{ color: 'var(--danger)' }}
+                            onClick={() => setSlots(prev => prev.filter(s => s.id !== slot.id))}
+                            aria-label={`Remove ${slot.name}`}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        <div className="row" style={{ justifyContent: 'flex-end', gap: 'var(--s2)' }}>
+          <button type="button" className="btn btn-ghost" onClick={() => setActiveTab('dashboard')}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary btn-lg" disabled={submitting}>
+            {submitting ? 'Publishing…' : 'Publish sign-up sheet'}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+function longDate(date) {
+  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric'
+  });
+}
+
+function time12(time) {
+  const [h, m] = time.split(':').map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+}
