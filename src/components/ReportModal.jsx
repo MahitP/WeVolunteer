@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { X, AlertTriangle } from 'react-feather';
-import api from '../api';
+import { X, AlertTriangle } from 'lucide-react';
+import { api } from '../utils/api';
 
 export default function ReportModal({ targetType, targetId, onClose, addToast }) {
   const [reason, setReason] = useState('');

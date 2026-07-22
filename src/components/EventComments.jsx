@@ -112,6 +112,10 @@ export default function EventComments({ eventId, currentUser, addToast }) {
       )}
 
       <form onSubmit={handlePost} className="row" style={{ alignItems: 'flex-start', gap: 'var(--s3)' }}>
+        <div style={{ flex: 1 }}>
+          <textarea
+            className="textarea"
+            value={body}
             onChange={e => setBody(e.target.value)}
             placeholder="Ask a question or share an update…"
             maxLength={1000}
