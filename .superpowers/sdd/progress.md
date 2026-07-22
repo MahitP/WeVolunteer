@@ -25,6 +25,13 @@ Task 5: complete (commits 7e28587..ff0559b, review clean)
     router (circular); mounted by path in app.js instead. Plan updated for Task 6.
   - NOTE: commit 49f1710 is mislabelled docs: it swept in WIP code; net state reviewed OK.
 
+Task 6: complete (commits b00afa8..7d153b3, review clean)
+  - Email verification live behind REQUIRE_EMAIL_VERIFICATION (default off).
+  - Interrupted mid-flight by session limit; finished in a second pass.
+
 ## Carry-forward findings (not in this plan — for the P1 plan / final review)
+- Test isolation relies on Vitest default isolate:true (no vitest.config.* exists).
+  routes.verification.test.js runs flag-ON, routes.auth.test.js flag-OFF. Consider
+  pinning isolate:true explicitly so a future config cannot silently break both.
 - ReportModal.jsx:15 calls api.post('/reports', ...) which does not exist on the
   api object. Report/moderation submission is dead at runtime. Found by Task 1 reviewer.
