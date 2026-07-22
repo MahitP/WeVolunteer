@@ -373,16 +373,21 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
         hours: Number(totals.hours) || 0,
         eventsCompleted: totals.events || 0,
         shiftsCompleted: totals.shifts || 0,
-        upcomingCount: upcoming.length,
+        // The count alone carries no whereabouts, so staff may see it too — the
+        // array itself (event location, exact times) is self-only, below.
+        upcomingCount: isSelf || isStaff ? upcoming.length : 0,
         pendingCount
       },
       milestones: buildMilestones(Number(totals.hours) || 0, totals.events || 0),
       byCategory: byCategory.map(c => ({ category: c.category, hours: Number(c.hours) })),
       completed: completed.map(formatServiceRow),
-      upcoming: upcoming.map(u => ({
+      // A confirmed future shift discloses a minor's physical whereabouts at a
+      // known time — visible to the student themselves only, never to other
+      // students, organizers, or admins.
+      upcoming: isSelf ? upcoming.map(u => ({
         eventId: u.event_id, title: u.title, category: u.category, location: u.location,
         slotName: u.slot_name, startDatetime: u.start_datetime, endDatetime: u.end_datetime
-      }))
+      })) : []
     });
   } catch (err) {
     console.error('Volunteer profile error:', err);
