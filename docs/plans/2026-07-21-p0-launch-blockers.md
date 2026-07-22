@@ -2184,3 +2184,130 @@ git tag -a p0-complete -m "All P0 launch blockers closed; app is usable end to e
 **Deliberately out of scope.** The `/health` shadowing and error-handler ordering are visible in Task 2's `app.js` and are left as-is on purpose — they are P1, they need their own tests, and changing them while moving the file would conflate a refactor with a fix. Password minimum length stays at 6 for consistency with the existing client; raising it is P1 work that touches both sides.
 
 **Type consistency.** `formatUserResponse` gains `emailVerified` (Task 4) and `username` (Task 8) — both are additive and no task renames an existing field. `call(method, path, body, token)` from `testServer.js` keeps one signature across all five test files. `issueVerificationToken(userId)` is defined in Task 6 and used only there. `fetchEventDetails(eventId)` is defined in Task 9 Step 4 and consumed in the same task, returning `{event, applications}` — matching what `CheckInView.jsx:35-36` already destructures.
+
+---
+
+## Task 11: Repair event navigation and the password-reset landing
+
+Found by Task 10's browser verification — both defects predate this plan and were invisible to the original audit, which tested the API directly because the client would not compile.
+
+**Files:**
+- Modify: `src/App.jsx:250-254` (`openEventById`) and `src/App.jsx:131-135` (reset redirect)
+- Test: manual browser verification (these are client-side wiring defects; the repo has no client component-test harness and this plan does not add one)
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces: `openEventById(eventOrId)` accepts either an event object or an id string.
+
+### Defect A — no event can be opened from the main screens
+
+Every call site passes the whole event object:
+
+```
+src/components/EventCard.jsx:118          onViewDetails(event)
+src/views/BrowseEvents.jsx:132            onViewDetails(event)
+src/views/VolunteerDashboard.jsx:102,153,261   onViewDetails(event) / onViewDetails(nextShift.event)
+src/views/OrganizerDashboard.jsx:224,233,359,377  onViewDetails(event) / onViewDetails(needsReview[0].event)
+```
+
+but `openEventById` does `events.find(e => e.id === eventId)` against that object, never matches, and shows "That event is no longer available." The Opportunities page and both dashboards are the primary way into an event, so this is the most-used interaction in the product.
+
+- [ ] **Step 1: Reproduce it**
+
+`npm run dev`, sign in as `leo.chen28@gmail.com` / `password123`, go to Opportunities, click any event card. Expect the toast "That event is no longer available." and no modal.
+
+- [ ] **Step 2: Make the handler accept either shape**
+
+Nine call sites pass an object and the profile/notification/calendar paths pass an id. Normalising in the one handler is a smaller, safer change than editing nine call sites, and it matches how `viewVolunteer` in this same file already handles both (`typeof person === 'string' ? person : person?.id`).
+
+Replace `src/App.jsx:250-254`:
+
+```jsx
+  const openEventById = (eventId) => {
+    const match = events.find(e => e.id === eventId);
+    if (match) setSelectedEventState(eventId);
+    else addToast('That event is no longer available.', 'info');
+  };
+```
+
+with:
+
+```jsx
+  // Callers pass either an event object (cards, dashboards) or an id string
+  // (notifications, calendar, profiles). Normalise here rather than at nine
+  // call sites — `viewVolunteer` below already takes the same approach.
+  const openEventById = (eventOrId) => {
+    const id = typeof eventOrId === 'string' ? eventOrId : eventOrId?.id;
+    const match = id && events.find(e => e.id === id);
+    if (match) setSelectedEventState(id);
+    else addToast('That event is no longer available.', 'info');
+  };
+```
+
+- [ ] **Step 3: Verify Defect A is fixed**
+
+Reload, click an event card on Opportunities — the event modal must open. Repeat from the volunteer dashboard ("View"), the organizer dashboard, and the next-shift banner. Then confirm the id-passing paths still work: open an event from a notification and from the calendar.
+
+### Defect B — the password-reset link lands on an infinite spinner
+
+`src/App.jsx:131-135` navigates to `/reset-password` and `return`s out of `validateSession()` before `setIsCheckingSession(false)` runs. The effect's dependency array is `[refreshKey]`, which did not change, so the effect never re-fires and `isCheckingSession` stays `true` forever — the app renders its loading state permanently. The endpoint and the `ResetPassword` page are both fine; only this glue is broken.
+
+- [ ] **Step 4: Reproduce it**
+
+With the dev server running, request a reset for `leo.chen28@gmail.com`, copy the `/?reset=<token>` URL printed to the server console, and open it. Expect a spinner that never resolves.
+
+- [ ] **Step 5: Clear the checking flag before redirecting**
+
+Replace `src/App.jsx:131-135`:
+
+```jsx
+        if (searchParams.has('reset') && currentPath !== '/reset-password') {
+          const token = searchParams.get('reset');
+          navigate(`/reset-password?token=${token}`, { replace: true });
+          return;
+        }
+```
+
+with:
+
+```jsx
+        if (searchParams.has('reset') && currentPath !== '/reset-password') {
+          const token = searchParams.get('reset');
+          // Clear the checking flag before returning: this effect only re-runs
+          // when refreshKey changes, so leaving it set strands the app on its
+          // loading state for ever.
+          setIsCheckingSession(false);
+          navigate(`/reset-password?token=${token}`, { replace: true });
+          return;
+        }
+```
+
+- [ ] **Step 6: Verify Defect B is fixed**
+
+Open the `/?reset=<token>` link again. The "Choose a new password" form must render. Set a new password and sign in with it.
+
+- [ ] **Step 7: Full suite and build**
+
+```bash
+npm test
+npm run build
+```
+
+Expected: 119 passing, build succeeds. Neither defect has server-side coverage, so the counts are unchanged — the verification for this task is the browser walkthrough in Steps 3 and 6.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/App.jsx
+git commit -m "fix: open events from cards and land the password-reset link
+
+openEventById compared an event object against event ids, so every View/Apply
+button on Opportunities and both dashboards showed 'That event is no longer
+available' — the primary way into an event was dead.
+
+The reset-link redirect returned before clearing isCheckingSession, and the
+effect only re-runs on refreshKey, so /?reset=<token> stranded the app on its
+loading spinner for ever.
+
+Both predate this branch; both were invisible until the build was repaired."
+```
