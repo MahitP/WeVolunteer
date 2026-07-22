@@ -24,6 +24,7 @@ dist-ssr
 *.sw?
 
 # Generated at runtime — initDatabase() rebuilds and reseeds it on boot
+*.db
 server/*.db
 
 # Generated knowledge-graph output

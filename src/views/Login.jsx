@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { api } from '../utils/api';
 import { DEMO_MODE } from '../config';
 import { Mail, Lock, AlertCircle, CalendarCheck, Award, ClipboardList } from 'lucide-react';
+import { APP_NAME } from '../config';
 
 const DEMO_ACCOUNTS = [
   { name: 'Leo Chen', email: 'leo.chen28@gmail.com', avatar: '🧑‍💻', role: 'Student' },
@@ -22,6 +23,7 @@ export default function Login({ onLoginSuccess, addToast }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState('login'); // 'login', 'forgot', 'forgot-success'
 
   const signIn = async (emailValue, passwordValue) => {
     setError('');
@@ -37,6 +39,89 @@ export default function Login({ onLoginSuccess, addToast }) {
     }
   };
 
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    if (!email) return setError('Please enter your email address');
+    
+    setError('');
+    setLoading(true);
+    try {
+      await api.forgotPassword(email);
+      setMode('forgot-success');
+    } catch (err) {
+      setError(err.message || 'Something went wrong.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (mode === 'forgot-success') {
+    return (
+      <div className="auth" style={{ justifyContent: 'center' }}>
+        <main className="auth-form" style={{ maxWidth: 400, width: '100%' }}>
+          <div style={{ textAlign: 'center', marginBottom: 'var(--s5)' }}>
+            <Mail size={40} style={{ color: 'var(--brand)', margin: '0 auto 16px' }} />
+            <h1>Check your email</h1>
+            <p className="lead" style={{ marginTop: 8 }}>
+              If an account exists for <strong>{email}</strong>, we have sent a password reset link.
+            </p>
+          </div>
+          <button 
+            className="btn btn-primary btn-block" 
+            onClick={() => setMode('login')}
+          >
+            Back to sign in
+          </button>
+        </main>
+      </div>
+    );
+  }
+
+  if (mode === 'forgot') {
+    return (
+      <div className="auth" style={{ justifyContent: 'center' }}>
+        <main className="auth-form" style={{ maxWidth: 400, width: '100%' }}>
+          <h1>Reset password</h1>
+          <p className="lead" style={{ marginTop: 4, marginBottom: 'var(--s5)' }}>
+            Enter your email address and we'll send you a link to reset your password.
+          </p>
+
+          {error && (
+            <div className="alert alert-danger" style={{ marginBottom: 'var(--s4)' }} role="alert">
+              <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleForgotPassword}>
+            <div className="field">
+              <label htmlFor="reset-email">Email address</label>
+              <div className="input-affix">
+                <Mail size={15} />
+                <input
+                  id="reset-email" type="email" className="input" autoComplete="email"
+                  placeholder="you@example.com" value={email}
+                  onChange={e => setEmail(e.target.value)} required disabled={loading}
+                />
+              </div>
+            </div>
+
+            <button type="submit" className="btn btn-primary btn-block" style={{ marginTop: 'var(--s5)' }} disabled={loading}>
+              {loading ? 'Sending...' : 'Send reset link'}
+            </button>
+          </form>
+
+          <p className="small muted" style={{ textAlign: 'center', marginTop: 'var(--s4)' }}>
+            Remembered your password?{' '}
+            <button className="strong" style={{ color: 'var(--brand)', textDecoration: 'underline' }} onClick={() => setMode('login')}>
+              Sign in
+            </button>
+          </p>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="auth">
       {/* Left: what this is, stated plainly. Not a marketing page. */}
@@ -44,7 +129,7 @@ export default function Login({ onLoginSuccess, addToast }) {
         <div className="brand">
           <span className="brand-mark">SB</span>
           <span className="brand-text">
-            <span className="brand-name">SBVolunteers</span>
+            <span className="brand-name">{APP_NAME}</span>
             <span className="brand-sub">South Brunswick, NJ</span>
           </span>
         </div>
@@ -94,7 +179,17 @@ export default function Login({ onLoginSuccess, addToast }) {
           </div>
 
           <div className="field">
-            <label htmlFor="password">Password</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <label htmlFor="password">Password</label>
+              <button 
+                type="button" 
+                className="small strong" 
+                style={{ color: 'var(--brand)' }}
+                onClick={() => setMode('forgot')}
+              >
+                Forgot?
+              </button>
+            </div>
             <div className="input-affix">
               <Lock size={15} />
               <input

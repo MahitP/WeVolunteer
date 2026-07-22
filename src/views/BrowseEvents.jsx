@@ -133,7 +133,7 @@ export default function BrowseEvents({
                 <div className="eyebrow">{event.category}</div>
                 <div className="strong" style={{ marginTop: 4 }}>{event.title}</div>
                 <div className="small muted" style={{ marginTop: 2 }}>
-                  {event.spotsRemaining} spot{event.spotsRemaining !== 1 ? 's' : ''} left ·{' '}
+                  {event.spotsRemaining} of {event.maxSpots} spots open · {event.applicantCount} applied ·{' '}
                   up to {formatHours(event.hoursAwarded)}
                 </div>
               </button>

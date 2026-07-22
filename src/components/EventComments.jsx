@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { MessageSquare, Send, Trash2, Loader2 } from 'lucide-react';
+import { MessageSquare, Send, Trash2, Loader2, Flag } from 'lucide-react';
 import { api } from '../utils/api';
 import { timeAgo } from '../utils/helpers';
+import ReportModal from './ReportModal';
 
 export default function EventComments({ eventId, currentUser, addToast }) {
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [body, setBody] = useState('');
   const [posting, setPosting] = useState(false);
+  const [reportTarget, setReportTarget] = useState(null);
 
   const load = async () => {
     try {
@@ -29,9 +31,10 @@ export default function EventComments({ eventId, currentUser, addToast }) {
     try {
       await api.postComment(eventId, text);
       setBody('');
-      load();
-    } catch (err) {
-      addToast(`Could not post: ${err.message}`, 'error');
+      await load();
+    } catch (e) {
+      console.error(e);
+      addToast('Failed to post comment', 'error');
     } finally {
       setPosting(false);
     }
@@ -41,20 +44,19 @@ export default function EventComments({ eventId, currentUser, addToast }) {
     if (!window.confirm('Delete this comment?')) return;
     try {
       await api.deleteComment(id);
-      load();
-    } catch (err) {
-      addToast(`Could not delete: ${err.message}`, 'error');
+      setComments(c => c.filter(x => x.id !== id));
+    } catch (e) {
+      console.error(e);
+      addToast('Failed to delete comment', 'error');
     }
   };
 
   return (
-    <div>
-      <div className="section-head">
-        <h3 className="row" style={{ gap: 6 }}>
-          <MessageSquare size={14} /> Questions and updates
-          {comments.length > 0 && <span className="dim">({comments.length})</span>}
-        </h3>
-      </div>
+    <div className="inset">
+      <h3 className="row" style={{ alignItems: 'center', gap: 'var(--s2)', fontSize: '1rem', marginBottom: 'var(--s4)' }}>
+        <MessageSquare size={18} />
+        Questions &amp; Discussion
+      </h3>
 
       {loading ? (
         <div className="stack-sm">
@@ -69,6 +71,7 @@ export default function EventComments({ eventId, currentUser, addToast }) {
         <div style={{ marginBottom: 'var(--s4)' }}>
           {comments.map(c => {
             const canDelete = c.userId === currentUser?.id || currentUser?.role === 'admin';
+            const canReport = currentUser && c.userId !== currentUser.id;
             return (
               <div key={c.id} className="comment">
                 <span className="avatar sm">{c.author.avatar || '👤'}</span>
@@ -78,16 +81,27 @@ export default function EventComments({ eventId, currentUser, addToast }) {
                     {c.author.role === 'organizer' && <span className="tag tag-brand">Host</span>}
                     {c.author.role === 'admin' && <span className="tag tag-warn">Staff</span>}
                     <span className="comment-time">{timeAgo(c.createdAt)}</span>
-                    {canDelete && (
-                      <button
-                        className="btn btn-ghost btn-sm btn-icon"
-                        style={{ marginLeft: 'auto' }}
-                        onClick={() => handleDelete(c.id)}
-                        aria-label="Delete comment"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    )}
+                    <div className="row" style={{ marginLeft: 'auto', gap: 4 }}>
+                      {canReport && (
+                        <button
+                          className="btn btn-ghost btn-sm btn-icon"
+                          onClick={() => setReportTarget(c.id)}
+                          aria-label="Report comment"
+                          style={{ color: 'var(--error)' }}
+                        >
+                          <Flag size={12} />
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button
+                          className="btn btn-ghost btn-sm btn-icon"
+                          onClick={() => handleDelete(c.id)}
+                          aria-label="Delete comment"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <p className="comment-body">{c.body}</p>
                 </div>
@@ -98,12 +112,6 @@ export default function EventComments({ eventId, currentUser, addToast }) {
       )}
 
       <form onSubmit={handlePost} className="row" style={{ alignItems: 'flex-start', gap: 'var(--s3)' }}>
-        <span className="avatar sm">{currentUser?.avatar || '👤'}</span>
-        <div style={{ flex: 1 }}>
-          <textarea
-            className="textarea"
-            style={{ minHeight: 62 }}
-            value={body}
             onChange={e => setBody(e.target.value)}
             placeholder="Ask a question or share an update…"
             maxLength={1000}
@@ -121,6 +129,15 @@ export default function EventComments({ eventId, currentUser, addToast }) {
           </div>
         </div>
       </form>
+
+      {reportTarget && (
+        <ReportModal
+          targetType="comment"
+          targetId={reportTarget}
+          onClose={() => setReportTarget(null)}
+          addToast={addToast}
+        />
+      )}
     </div>
   );
 }

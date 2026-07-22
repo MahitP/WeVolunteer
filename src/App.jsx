@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Routes, Route, useNavigate, useLocation, useSearchParams, Navigate } from 'react-router-dom';
 import { api } from './utils/api';
-import { DEMO_MODE } from './config';
+import { DEMO_MODE, APP_NAME } from './config';
 import DemoBar from './components/DemoBar';
 import Login from './views/Login';
 import Signup from './views/Signup';
@@ -16,21 +17,25 @@ import OrganizerProfile from './views/OrganizerProfile';
 import EventModal from './components/EventModal';
 import NotificationsBell from './components/NotificationsBell';
 import ProfileEditModal from './components/ProfileEditModal';
+import ResetPassword from './views/ResetPassword';
+import CertificateVerification from './views/CertificateVerification';
+import VolunteerPortfolio from './views/VolunteerPortfolio';
+import CheckInView from './views/CheckInView';
 import {
   LayoutDashboard, Compass, CalendarPlus, ShieldCheck, LogOut, CalendarDays,
-  UserCog, CheckCircle2, AlertTriangle, Info, X, ChevronsUpDown, Loader2, Bell, UserRound
+  UserCog, CheckCircle2, AlertTriangle, Info, X, ChevronsUpDown, Loader2, Bell, UserRound, Mail
 } from 'lucide-react';
 
 /* Navigation is defined once and filtered by role, so every role gets the
    same shell instead of a different one. */
 const NAV = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['student', 'organizer'] },
-  { id: 'dashboard', label: 'Review queue', icon: ShieldCheck, roles: ['admin'] },
-  { id: 'browse', label: 'Opportunities', icon: Compass, roles: ['student', 'organizer', 'admin'] },
-  { id: 'calendar', label: 'Calendar', icon: CalendarDays, roles: ['student', 'organizer'] },
-  { id: 'create', label: 'New event', icon: CalendarPlus, roles: ['organizer'], requiresVerified: true },
-  { id: 'notifications', label: 'Notifications', icon: Bell, roles: ['student', 'organizer', 'admin'] },
-  { id: 'profile', label: 'My profile', icon: UserRound, roles: ['student'] }
+  { id: 'dashboard', path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['student', 'organizer'] },
+  { id: 'dashboard', path: '/', label: 'Review queue', icon: ShieldCheck, roles: ['admin'] },
+  { id: 'browse', path: '/events', label: 'Opportunities', icon: Compass, roles: ['student', 'organizer', 'admin'] },
+  { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, roles: ['student', 'organizer'] },
+  { id: 'create', path: '/events/new', label: 'New event', icon: CalendarPlus, roles: ['organizer'], requiresVerified: true },
+  { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, roles: ['student', 'organizer', 'admin'] },
+  { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, roles: ['student'] }
 ];
 
 const PAGE_META = {
@@ -58,33 +63,84 @@ const PAGE_META = {
 const ROLE_LABEL = { admin: 'Administrator', organizer: 'Organizer', student: 'Volunteer' };
 
 export default function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [currentUser, setCurrentUser] = useState(null);
   const [events, setEvents] = useState([]);
   const [applications, setApplications] = useState([]);
   const [favorites, setFavorites] = useState([]);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [selectedEvent, setSelectedEvent] = useState(null);
-  const [viewingProfile, setViewingProfile] = useState(null); // { type, id }
+  
+  const setActiveTab = (tab) => {
+    const map = {
+      dashboard: '/',
+      browse: '/events',
+      create: '/events/new',
+      calendar: '/calendar',
+      notifications: '/notifications',
+      profile: '/profile'
+    };
+    if (map[tab]) navigate(map[tab]);
+  };
+
   const [notifKey, setNotifKey] = useState(0);
   const [editingProfile, setEditingProfile] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
-  const [authScreen, setAuthScreen] = useState('loading');
   const userMenuRef = useRef(null);
+
+  // Derived state from URL
+  const selectedEventId = searchParams.get('event');
+  const selectedEvent = selectedEventId ? events.find(e => e.id === selectedEventId) || null : null;
+  const profileId = searchParams.get('profile');
+  const profileType = searchParams.get('type');
+  const viewingProfile = profileId && profileType ? { type: profileType, id: profileId } : null;
+
+  // Determine active tab for UI selection
+  const currentPath = location.pathname;
+  let activeTab = 'dashboard';
+  if (currentPath.startsWith('/events/new')) activeTab = 'create';
+  else if (currentPath.startsWith('/events')) activeTab = 'browse';
+  else if (currentPath.startsWith('/calendar')) activeTab = 'calendar';
+  else if (currentPath.startsWith('/notifications')) activeTab = 'notifications';
+  else if (currentPath.startsWith('/profile')) activeTab = 'profile';
 
   // Verify JWT session on mount and reload data whenever state changes
   useEffect(() => {
     const validateSession = async () => {
       try {
+        if (searchParams.has('verify')) {
+          const token = searchParams.get('verify');
+          
+          // Clear it from URL immediately
+          const newParams = new URLSearchParams(searchParams);
+          newParams.delete('verify');
+          setSearchParams(newParams, { replace: true });
+          
+          try {
+            await api.verifyEmail(token);
+            addToast('Email verified successfully!', 'success');
+          } catch (err) {
+            addToast(err.message || 'Failed to verify email', 'error');
+          }
+        }
+
+        if (searchParams.has('reset') && currentPath !== '/reset-password') {
+          const token = searchParams.get('reset');
+          navigate(`/reset-password?token=${token}`, { replace: true });
+          return;
+        }
+
         const user = await api.getMe();
         if (!user) {
           setCurrentUser(null);
-          setAuthScreen('login');
+          setIsCheckingSession(false);
           return;
         }
         setCurrentUser(user);
-        setAuthScreen('app');
         
         const promises = [api.fetchEvents(), api.fetchApplications()];
         if (user.role === 'student') {
@@ -97,11 +153,11 @@ export default function App() {
         if (user.role === 'student' && favs) {
           setFavorites(favs.map(f => f.event_id || f.eventId));
         }
-        setSelectedEvent(prev => (prev ? evs.find(e => e.id === prev.id) || null : null));
+        setIsCheckingSession(false);
       } catch (err) {
         console.error('Session check failed:', err);
         setCurrentUser(null);
-        setAuthScreen('login');
+        setIsCheckingSession(false);
       }
     };
     validateSession();
@@ -121,15 +177,6 @@ export default function App() {
       addToast('Could not toggle favorite.', 'error');
     }
   };
-
-  // Keep the active tab valid for the current role
-  useEffect(() => {
-    if (!currentUser) return;
-    const allowed = NAV.filter(n => n.roles.includes(currentUser.role))
-      .filter(n => !n.requiresVerified || currentUser.verified)
-      .map(n => n.id);
-    if (!allowed.includes(activeTab)) setActiveTab('dashboard');
-  }, [currentUser, activeTab]);
 
   useEffect(() => {
     if (!userMenuOpen) return;
@@ -157,184 +204,172 @@ export default function App() {
   const handleCreateEvent = async (eventData) => {
     await api.createEvent(eventData);
     handleStateChange();
+    navigate('/');
   };
 
   const handleLogout = () => {
     api.logout();
     setCurrentUser(null);
-    setAuthScreen('login');
-    setActiveTab('dashboard');
     setEvents([]);
     setApplications([]);
     setUserMenuOpen(false);
+    navigate('/login');
   };
 
   const handleLoginSuccess = () => {
-    setAuthScreen('app');
     handleStateChange();
+    navigate('/');
   };
 
+  const setViewingProfileState = (profile) => {
+    if (profile === null) {
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete('profile');
+      newParams.delete('type');
+      setSearchParams(newParams);
+    } else {
+      const newParams = new URLSearchParams(searchParams);
+      newParams.set('profile', profile.id);
+      newParams.set('type', profile.type);
+      setSearchParams(newParams);
+    }
+  };
+
+  const setSelectedEventState = (eventId) => {
+    if (eventId === null) {
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete('event');
+      setSearchParams(newParams);
+    } else {
+      const newParams = new URLSearchParams(searchParams);
+      newParams.set('event', eventId);
+      setSearchParams(newParams);
+    }
+  };
+
+  const openEventById = (eventId) => {
+    const match = events.find(e => e.id === eventId);
+    if (match) setSelectedEventState(eventId);
+    else addToast('That event is no longer available.', 'info');
+  };
+
+  const viewVolunteer = (person) => {
+    const id = typeof person === 'string' ? person : person?.id;
+    if (id) setViewingProfileState({ type: 'volunteer', id });
+  };
+  const viewOrganizer = (id) => id && setViewingProfileState({ type: 'organizer', id });
+
   /* ── Session check ─────────────────────────────────────────── */
-  if (authScreen === 'loading') {
+  if (isCheckingSession) {
     return (
       <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
         <div className="stack-sm" style={{ alignItems: 'center' }}>
           <div className="brand-mark" style={{ width: 40, height: 40 }}>SB</div>
           <p className="small dim row" style={{ marginTop: 8 }}>
-            <Loader2 size={13} className="spin" /> Signing you in…
+            <Loader2 size={13} className="spin" /> Loading…
           </p>
         </div>
       </div>
     );
   }
 
-  if (authScreen === 'login') {
+  // Public Routes (like certificate verification) bypass auth checks
+  if (currentPath.startsWith('/verify/')) {
+    return (
+      <Routes>
+        <Route path="/verify/:code" element={<CertificateVerification />} />
+      </Routes>
+    );
+  }
+
+  if (!currentUser) {
     return (
       <>
-        <Login
-          onLoginSuccess={(mode) => (mode === 'signup' ? setAuthScreen('signup') : handleLoginSuccess())}
-          addToast={addToast}
-        />
+        <Routes>
+          <Route path="/login" element={
+            <Login
+              onLoginSuccess={(mode) => (mode === 'signup' ? navigate('/signup') : handleLoginSuccess())}
+              addToast={addToast}
+            />
+          } />
+          <Route path="/signup" element={
+            <Signup
+              onSignupSuccess={handleLoginSuccess}
+              onBackToLogin={() => navigate('/login')}
+              addToast={addToast}
+            />
+          } />
+          <Route path="/reset-password" element={
+            <ResetPassword
+              token={searchParams.get('token')}
+              onSuccess={() => {
+                addToast('Password updated successfully. Please sign in.', 'success');
+                navigate('/login');
+              }}
+              onCancel={() => navigate('/login')}
+            />
+          } />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
         <Toasts toasts={toasts} onRemove={removeToast} />
       </>
     );
   }
 
-  if (authScreen === 'signup') {
+  if (!currentUser.emailVerified) {
     return (
-      <>
-        <Signup
-          onSignupSuccess={handleLoginSuccess}
-          onBackToLogin={() => setAuthScreen('login')}
-          addToast={addToast}
-        />
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 'var(--s4)' }}>
+        <div className="card" style={{ maxWidth: 440, width: '100%', textAlign: 'center', padding: 'var(--s6)' }}>
+          <div className="brand-mark" style={{ width: 48, height: 48, margin: '0 auto var(--s5)' }}>SB</div>
+          <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--s3)' }}>Verify your email</h1>
+          <p className="lead" style={{ marginBottom: 'var(--s5)' }}>
+            We've sent a verification link to <strong>{currentUser.email}</strong>.
+            Please click the link to verify your account and continue.
+          </p>
+          <button 
+            className="btn btn-primary btn-block"
+            onClick={async (e) => {
+              const btn = e.target;
+              btn.disabled = true;
+              btn.textContent = 'Sending...';
+              try {
+                await api.resendVerification();
+                addToast('Verification email resent', 'success');
+              } catch (err) {
+                addToast(err.message || 'Failed to resend email', 'error');
+              } finally {
+                btn.disabled = false;
+                btn.textContent = 'Resend verification email';
+              }
+            }}
+          >
+            Resend verification email
+          </button>
+          
+          <button 
+            className="btn btn-text btn-block" 
+            style={{ marginTop: 'var(--s3)' }}
+            onClick={handleLogout}
+          >
+            Sign out
+          </button>
+        </div>
         <Toasts toasts={toasts} onRemove={removeToast} />
-      </>
+      </div>
     );
   }
-
-  if (!currentUser) return null;
 
   /* ── Application shell ─────────────────────────────────────── */
   const navItems = NAV
     .filter(n => n.roles.includes(currentUser.role))
     .filter(n => !n.requiresVerified || currentUser.verified);
 
-  const meta = PAGE_META[currentUser.role]?.[activeTab] || { title: 'SBVolunteers', sub: '' };
+  const meta = PAGE_META[currentUser.role]?.[activeTab] || { title: APP_NAME, sub: '' };
 
   const pendingForMe = currentUser.role === 'organizer'
     ? applications.filter(a => a.status === 'pending' &&
         events.some(e => e.id === a.eventId && e.organizerId === currentUser.id)).length
     : 0;
-
-  const openEventById = (eventId) => {
-    const match = events.find(e => e.id === eventId);
-    if (match) setSelectedEvent(match);
-    else addToast('That event is no longer available.', 'info');
-  };
-
-  const viewVolunteer = (person) => {
-    const id = typeof person === 'string' ? person : person?.id;
-    if (id) setViewingProfile({ type: 'volunteer', id });
-  };
-  const viewOrganizer = (id) => id && setViewingProfile({ type: 'organizer', id });
-
-  const renderPage = () => {
-    // A profile takes over the content area until dismissed
-    if (viewingProfile) {
-      const back = () => setViewingProfile(null);
-      return viewingProfile.type === 'organizer' ? (
-        <OrganizerProfile
-          userId={viewingProfile.id}
-          onBack={back}
-          onViewEvent={(id) => { back(); openEventById(id); }}
-        />
-      ) : (
-        <VolunteerProfile
-          userId={viewingProfile.id}
-          currentUser={currentUser}
-          onBack={back}
-          onEditProfile={() => setEditingProfile(true)}
-          onViewEvent={(id) => { back(); openEventById(id); }}
-          addToast={addToast}
-        />
-      );
-    }
-
-    if (activeTab === 'notifications') {
-      return (
-        <Notifications
-          onViewEvent={openEventById}
-          onCountChange={() => setNotifKey(k => k + 1)}
-        />
-      );
-    }
-
-    if (activeTab === 'calendar') {
-      return (
-        <CalendarView
-          currentUser={currentUser}
-          events={events}
-          applications={applications}
-          onViewEvent={openEventById}
-        />
-      );
-    }
-
-    if (activeTab === 'profile' && currentUser.role === 'student') {
-      return (
-        <VolunteerProfile
-          userId={currentUser.id}
-          currentUser={currentUser}
-          onEditProfile={() => setEditingProfile(true)}
-          onViewEvent={openEventById}
-          addToast={addToast}
-        />
-      );
-    }
-
-    if (activeTab === 'browse') {
-      return (
-        <BrowseEvents
-          currentUser={currentUser}
-          events={events}
-          applications={applications}
-          onViewDetails={setSelectedEvent}
-          favorites={favorites}
-          onToggleFavorite={handleToggleFavorite}
-        />
-      );
-    }
-    if (activeTab === 'create' && currentUser.role === 'organizer' && currentUser.verified) {
-      return <CreateEvent onSubmitEvent={handleCreateEvent} addToast={addToast} setActiveTab={setActiveTab} />;
-    }
-    if (currentUser.role === 'admin') return <AdminDashboard addToast={addToast} />;
-    if (currentUser.role === 'student') {
-      return (
-        <VolunteerDashboard
-          currentUser={currentUser}
-          events={events}
-          applications={applications}
-          addToast={addToast}
-          setActiveTab={setActiveTab}
-          onStateChange={handleStateChange}
-          onViewDetails={setSelectedEvent}
-        />
-      );
-    }
-    return (
-      <OrganizerDashboard
-        currentUser={currentUser}
-        events={events}
-        applications={applications}
-        onStateChange={handleStateChange}
-        addToast={addToast}
-        onViewDetails={setSelectedEvent}
-        onViewVolunteerProfile={viewVolunteer}
-        setActiveTab={setActiveTab}
-      />
-    );
-  };
 
   return (
     <div className="app">
@@ -342,21 +377,21 @@ export default function App() {
 
       {/* ── Sidebar (desktop / rail on tablet) ── */}
       <aside className="sidebar">
-        <a className="brand" href="#" onClick={(e) => { e.preventDefault(); setActiveTab('dashboard'); }}>
+        <a className="brand" href="/" onClick={(e) => { e.preventDefault(); navigate('/'); }}>
           <span className="brand-mark">SB</span>
           <span className="brand-text">
-            <span className="brand-name">SBVolunteers</span>
+            <span className="brand-name">{APP_NAME}</span>
             <span className="brand-sub">South Brunswick, NJ</span>
           </span>
         </a>
 
         <nav className="nav" aria-label="Main">
-          {navItems.map(({ id, label, icon: Icon }) => (
+          {navItems.map(({ id, path, label, icon: Icon }) => (
             <button
               key={id + label}
               className="nav-item"
               aria-current={activeTab === id ? 'page' : undefined}
-              onClick={() => { setViewingProfile(null); setActiveTab(id); }}
+              onClick={() => { setViewingProfileState(null); navigate(path); }}
             >
               <Icon size={17} strokeWidth={2} />
               <span>{label}</span>
@@ -418,22 +453,134 @@ export default function App() {
               key={currentUser.id}
               refreshKey={notifKey}
               onViewEvent={openEventById}
-              onSeeAll={() => { setViewingProfile(null); setActiveTab('notifications'); }}
+              onSeeAll={() => { setViewingProfileState(null); navigate('/notifications'); }}
             />
           </div>
         </header>
 
-        <main className="page" id="main-content" tabIndex={-1}>{renderPage()}</main>
+        <main className="page" id="main-content" tabIndex={-1}>
+          {viewingProfile ? (
+            viewingProfile.type === 'organizer' ? (
+              <OrganizerProfile
+                userId={viewingProfile.id}
+                onBack={() => setViewingProfileState(null)}
+                onViewEvent={(id) => { setViewingProfileState(null); openEventById(id); }}
+              />
+            ) : (
+              <VolunteerProfile
+                userId={viewingProfile.id}
+                currentUser={currentUser}
+                onBack={() => setViewingProfileState(null)}
+                onEditProfile={() => setEditingProfile(true)}
+                onViewEvent={(id) => { setViewingProfileState(null); openEventById(id); }}
+                addToast={addToast}
+              />
+            )
+          ) : (
+            <Routes>
+              <Route path="/" element={
+                currentUser.role === 'admin' ? <AdminDashboard addToast={addToast} /> :
+                currentUser.role === 'student' ? (
+                  <VolunteerDashboard
+                    currentUser={currentUser}
+                    events={events}
+                    applications={applications}
+                    addToast={addToast}
+                    setActiveTab={setActiveTab}
+                    onStateChange={handleStateChange}
+                    onViewDetails={openEventById}
+                  />
+                ) : (
+                  <OrganizerDashboard
+                    currentUser={currentUser}
+                    events={events}
+                    applications={applications}
+                    onStateChange={handleStateChange}
+                    addToast={addToast}
+                    setActiveTab={setActiveTab}
+                    onViewDetails={openEventById}
+                    onViewVolunteerProfile={viewVolunteer}
+                  />
+                )
+              } />
+              
+              <Route path="/events" element={
+                <BrowseEvents
+                  currentUser={currentUser}
+                  events={events}
+                  applications={applications}
+                  onViewDetails={openEventById}
+                  favorites={favorites}
+                  onToggleFavorite={handleToggleFavorite}
+                />
+              } />
+              
+              <Route path="/events/new" element={
+                currentUser.role === 'organizer' && currentUser.verified ? (
+                  <CreateEvent onSubmitEvent={handleCreateEvent} addToast={addToast} setActiveTab={setActiveTab} />
+                ) : <Navigate to="/" replace />
+              } />
+              
+              <Route path="/events/:id/edit" element={
+                currentUser.role === 'organizer' && currentUser.verified ? (
+                  <CreateEvent onSubmitEvent={handleCreateEvent} addToast={addToast} setActiveTab={setActiveTab} />
+                ) : <Navigate to="/" replace />
+              } />
+
+              <Route path="/checkin/:eventId" element={
+                currentUser.role === 'organizer' ? (
+                  <CheckInView currentUser={currentUser} />
+                ) : <Navigate to="/" replace />
+              } />
+              
+              <Route path="/calendar" element={
+                <CalendarView
+                  currentUser={currentUser}
+                  events={events}
+                  applications={applications}
+                  onViewEvent={openEventById}
+                />
+              } />
+              
+              <Route path="/notifications" element={
+                <Notifications
+                  onViewEvent={openEventById}
+                  onCountChange={() => setNotifKey(k => k + 1)}
+                />
+              } />
+              
+              <Route path="/profile" element={
+                currentUser.role === 'student' ? (
+                  <VolunteerProfile
+                    userId={currentUser.id}
+                    currentUser={currentUser}
+                    onEditProfile={() => setEditingProfile(true)}
+                    onViewEvent={openEventById}
+                    addToast={addToast}
+                  />
+                ) : <Navigate to="/" replace />
+              } />
+              
+              <Route path="/portfolio" element={
+                currentUser.role === 'student' ? (
+                  <VolunteerPortfolio currentUser={currentUser} />
+                ) : <Navigate to="/" replace />
+              } />
+              
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          )}
+        </main>
       </div>
 
       {/* ── Mobile navigation ── */}
       <nav className="mobilenav" aria-label="Main">
-        {navItems.map(({ id, label, icon: Icon }) => (
+        {navItems.map(({ id, path, label, icon: Icon }) => (
           <button
             key={id + label}
             className="mobilenav-item"
             aria-current={activeTab === id ? 'page' : undefined}
-            onClick={() => { setViewingProfile(null); setActiveTab(id); }}
+            onClick={() => { setViewingProfileState(null); navigate(path); }}
           >
             <Icon size={19} strokeWidth={2} />
             {label}
@@ -453,11 +600,11 @@ export default function App() {
           event={selectedEvent}
           currentUser={currentUser}
           applications={applications}
-          onClose={() => setSelectedEvent(null)}
+          onClose={() => setSelectedEventState(null)}
           onStateChange={handleStateChange}
           addToast={addToast}
-          onViewVolunteerProfile={(p) => { setSelectedEvent(null); viewVolunteer(p); }}
-          onViewOrganizer={(id) => { setSelectedEvent(null); viewOrganizer(id); }}
+          onViewVolunteerProfile={(p) => { setSelectedEventState(null); viewVolunteer(p); }}
+          onViewOrganizer={(id) => { setSelectedEventState(null); viewOrganizer(id); }}
           isFavorited={favorites.includes(selectedEvent.id)}
           onToggleFavorite={handleToggleFavorite}
         />

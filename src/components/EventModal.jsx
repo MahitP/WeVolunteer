@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useModal } from '../utils/useModal';
 import {
   X, CalendarClock, Users, Check, Clock4, Plus, Trash2, Zap, ShieldCheck,
-  Pencil, ClipboardCheck, AlertCircle, Megaphone, MessageSquare, ListChecks, Info, Star
+  Pencil, ClipboardCheck, AlertCircle, Megaphone, MessageSquare, ListChecks, Info, Star, Flag
 } from 'lucide-react';
 import { api } from '../utils/api';
 import {
@@ -14,6 +15,7 @@ import EventComments from './EventComments';
 import EventAnnouncements from './EventAnnouncements';
 import AttendeeList from './AttendeeList';
 import ApplicantReview from './ApplicantReview';
+import ReportModal from './ReportModal';
 
 const CATEGORIES = [
   { value: 'School', label: 'School project' },
@@ -28,9 +30,11 @@ export default function EventModal({
   isFavorited, onToggleFavorite
 }) {
   const dialogRef = useModal(onClose);
+  const navigate = useNavigate();
   const [mode, setMode] = useState('view'); // 'view' | 'edit' | 'attendance'
   const [tab, setTab] = useState('shifts');
   const [submitting, setSubmitting] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [selectedSlots, setSelectedSlots] = useState([]);
 
   const [editForm, setEditForm] = useState({
@@ -146,23 +150,36 @@ export default function EventModal({
 
     setAttendanceMap(initial);
     setTouchedIds(touched);
+
+    // Merge with any unsaved localStorage state
+    try {
+      const draft = localStorage.getItem(`sbv_draft_attendance_${event.id}`);
+      if (draft) {
+        const { draftMap, draftTouched } = JSON.parse(draft);
+        setAttendanceMap(prev => ({ ...prev, ...draftMap }));
+        setTouchedIds(prev => new Set([...prev, ...draftTouched]));
+      }
+    } catch (e) {
+      console.warn('Failed to load draft attendance', e);
+    }
+
     setAttendanceReason('');
     setMode('attendance');
   };
 
+  useEffect(() => {
+    if (mode === 'attendance' && touchedIds.size > 0) {
+      localStorage.setItem(`sbv_draft_attendance_${event?.id}`, JSON.stringify({
+        draftMap: attendanceMap,
+        draftTouched: Array.from(touchedIds)
+      }));
+    }
+  }, [attendanceMap, touchedIds, mode, event?.id]);
+
   const startCheckin = async () => {
-    const initial = {};
-    try {
-      const checkins = await api.fetchCheckins(event.id);
-      const byPair = new Map(checkins.map(c => [`${c.slotId}:${c.userId}`, c.present]));
-      for (const a of acceptedApps) {
-        const mark = byPair.get(`${a.slotId}:${a.userId}`);
-        if (mark !== undefined) initial[a.id] = mark;
-      }
-    } catch { /* start from a blank sheet */ }
-    setAttendanceMap(initial);
-    setTouchedIds(new Set(Object.keys(initial)));
-    setMode('checkin');
+    // Navigate to the mobile-first check-in view
+    navigate(`/checkin/${event.id}`);
+    onClose();
   };
 
   const setMark = (appId, value) => {
@@ -182,6 +199,10 @@ export default function EventModal({
         [...touchedIds].filter(id => id in attendanceMap).map(id => [id, !!attendanceMap[id]])
       );
       const res = await api.submitCheckins(event.id, payload);
+      
+      // Clear localStorage draft on successful submission
+      localStorage.removeItem(`sbv_draft_attendance_${event.id}`);
+      
       addToast(`Check-in saved for ${res.marked} volunteer${res.marked !== 1 ? 's' : ''}. No hours credited yet.`, 'success');
       setMode('view');
     } catch (err) {
@@ -202,6 +223,10 @@ export default function EventModal({
       const res = await api.submitAttendance(event.id, payload, attendanceReason);
       const credited = res.credited?.length || 0;
       const revoked = res.revoked?.length || 0;
+      
+      // Clear localStorage draft on successful submission
+      localStorage.removeItem(`sbv_draft_attendance_${event.id}`);
+
       addToast(
         [
           credited ? `${credited} volunteer${credited !== 1 ? 's' : ''} credited` : '',
@@ -222,9 +247,20 @@ export default function EventModal({
   };
 
   const handleRunAutoSelect = async () => {
+    if (autoSelectRuns.length >= 3) {
+      addToast('Maximum Auto Select reruns (3) reached.', 'error');
+      return;
+    }
+    
+    let reason = '';
+    if (autoSelectRuns.length > 0) {
+      reason = window.prompt('You are rerunning Auto Select. Please provide a brief reason for the audit log (e.g., "Student withdrew, needed new draw"):');
+      if (!reason) return; // User cancelled
+    }
+    
     setSubmitting(true);
     try {
-      const newRun = await api.runAutoSelect(event.id);
+      const newRun = await api.runAutoSelect(event.id, reason);
       addToast(`Draft selection ${newRun.runNumber} ready to review.`, 'success');
       await loadSelectionRuns();
       onStateChange();
@@ -302,6 +338,20 @@ export default function EventModal({
       onStateChange();
     } catch (err) {
       addToast(`Could not update ${name}: ${err.message}`, 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const bulkDecide = async (appIds, status) => {
+    setSubmitting(true);
+    try {
+      await api.updateApplicationsBulk(appIds, status);
+      const verb = { accepted: 'accepted', waitlisted: 'moved to the waitlist', rejected: 'rejected' }[status];
+      addToast(`${appIds.length} volunteer(s) ${verb}.`, 'success');
+      onStateChange();
+    } catch (err) {
+      addToast(`Bulk update failed: ${err.message}`, 'error');
     } finally {
       setSubmitting(false);
     }
@@ -461,6 +511,17 @@ export default function EventModal({
                   title={isFavorited ? 'Remove from favorites' : 'Add to favorites'}
                 >
                   <Star size={18} fill={isFavorited ? 'var(--accent)' : 'none'} />
+                </button>
+              )}
+              {mode === 'view' && currentUser && currentUser.id !== event.organizerId && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-icon btn-sm"
+                  onClick={() => setShowReportModal(true)}
+                  style={{ color: 'var(--error)', display: 'inline-flex' }}
+                  title="Report this event"
+                >
+                  <Flag size={18} />
                 </button>
               )}
             </div>
@@ -888,6 +949,23 @@ export default function EventModal({
                     </div>
                   )}
 
+                  {isStudent && signupsClosed && eventApps.some(a => a.status === 'waitlisted' && a.userId === currentUser?.id) && (
+                    <div className="alert alert-info" style={{ marginBottom: 'var(--s4)' }}>
+                      <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                      <span>
+                        <div>
+                          <strong>You are on the waitlist</strong>
+                          <div style={{ marginTop: '0.25rem' }}>
+                            {usesAutoSelect(event) 
+                              ? `Due to high demand (${event.applicantCount} applicants for ${event.maxSpots} spots), selection was handled by the Auto Select system to ensure fairness. `
+                              : `Demand exceeded available spots for this event. `}
+                            Students are promoted automatically if accepted volunteers withdraw and spots become available. There is no numbered queue.
+                          </div>
+                        </div>
+                      </span>
+                    </div>
+                  )}
+
                   <div className="section-head">
                     <h3>Shifts</h3>
                     <span className="section-action small dim tnum">
@@ -944,12 +1022,19 @@ export default function EventModal({
                                 </div>
 
                                 <div className="sheet-action">
-                                  <Seats
-                                    filled={slot.maxSpots - slot.spotsRemaining}
-                                    total={slot.maxSpots}
-                                    mine={mine && mine.status === 'accepted' ? 1 : 0}
-                                    showLabel={false}
-                                  />
+                                  <div className="stack-sm" style={{ alignItems: 'flex-end', gap: 4 }}>
+                                    <Seats
+                                      filled={slot.maxSpots - slot.spotsRemaining}
+                                      total={slot.maxSpots}
+                                      mine={mine && mine.status === 'accepted' ? 1 : 0}
+                                      showLabel={false}
+                                    />
+                                    {slot.applicantCount > 0 && (
+                                      <span className="small dim tnum">
+                                        {slot.applicantCount} applied
+                                      </span>
+                                    )}
+                                  </div>
                                   {isStudent ? (
                                     mine ? (
                                       <div className="row" style={{ gap: 6 }}>
@@ -1150,6 +1235,7 @@ export default function EventModal({
                                 applications={pendingApps}
                                 onViewVolunteer={onViewVolunteerProfile}
                                 busy={submitting}
+                                onBulkDecide={bulkDecide}
                               />
                             </section>
                           ) : (
@@ -1320,11 +1406,18 @@ export default function EventModal({
                             <h4 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 600, color: 'var(--ink-2)' }}>Audit Log History</h4>
                             <div className="stack-xs" style={{ marginTop: 8 }}>
                               {selectionRuns.map(run => (
-                                <div key={run.id} className="small dim row" style={{ gap: 8, justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid var(--ink-4)' }}>
-                                  <span style={{ color: run.isConfirmed ? 'var(--ok)' : 'inherit', fontWeight: run.isConfirmed ? 600 : 'normal' }}>
-                                    {run.isConfirmed ? 'Confirmed Run ' : 'Run '}#{run.runNumber}
-                                  </span>
-                                  <span>{new Date(run.createdAt).toLocaleString()}</span>
+                                <div key={run.id} className="small dim stack-xs" style={{ padding: '8px 0', borderBottom: '1px solid var(--ink-4)' }}>
+                                  <div className="row" style={{ gap: 8, justifyContent: 'space-between' }}>
+                                    <span style={{ color: run.isConfirmed ? 'var(--ok)' : 'inherit', fontWeight: run.isConfirmed ? 600 : 'normal' }}>
+                                      {run.isConfirmed ? 'Confirmed Run ' : 'Run '}#{run.runNumber}
+                                    </span>
+                                    <span>{new Date(run.createdAt).toLocaleString()}</span>
+                                  </div>
+                                  {run.reason && (
+                                    <div style={{ color: 'var(--ink-2)', fontStyle: 'italic', paddingLeft: 8, borderLeft: '2px solid var(--ink-4)' }}>
+                                      Reason: {run.reason}
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -1342,6 +1435,7 @@ export default function EventModal({
                         <ApplicantReview
                           applications={pendingApps}
                           onDecide={decide}
+                          onBulkDecide={bulkDecide}
                           onViewVolunteer={onViewVolunteerProfile}
                           busy={submitting}
                         />
@@ -1410,6 +1504,15 @@ export default function EventModal({
           </div>
         )}
       </div>
+
+      {showReportModal && (
+        <ReportModal
+          targetType="event"
+          targetId={event.id}
+          onClose={() => setShowReportModal(false)}
+          addToast={addToast}
+        />
+      )}
     </div>
   );
 }
