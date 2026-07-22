@@ -24,3 +24,12 @@ export const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:51
   .split(',')
   .map(o => o.trim())
   .filter(Boolean);
+
+/**
+ * Whether a new account must confirm its email address before using the app.
+ *
+ * Off by default: turning it on without a working SMTP transport locks every
+ * user out with no way through. Turn it on once SMTP_* is configured (see
+ * Task 6 / README).
+ */
+export const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION === 'true';

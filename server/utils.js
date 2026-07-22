@@ -36,6 +36,7 @@ export function formatUserResponse(row) {
     grade: row.grade,
     role: row.role,
     verified: row.verified === 1,
+    emailVerified: row.email_verified === 1,
     avatar: row.avatar,
     volunteeredHours: totalHours,
     bio: row.bio,
