@@ -1871,9 +1871,46 @@ Run: `npx vitest run server/routes.checkin.test.js`
 
 Expected: FAIL — the first three fail with 404 (no such route). The check-in tests pass already, which is the point: the server side is correct and the client was calling it wrongly.
 
-- [ ] **Step 3: Add `GET /api/events/:id`**
+- [ ] **Step 3a: Extract the slot-shaping helper**
 
-In `server/routes/eventRoutes.js`, add this route immediately after the `GET /api/events` handler (after line 111). It reuses the same per-slot shaping so the client sees one consistent event shape:
+Both `GET /api/events` and the new `GET /api/events/:id` must present a slot identically — two copies would drift. Add this helper near the top of `server/routes/eventRoutes.js`, just below the `const router = express.Router();` line:
+
+```js
+/**
+ * One slot as the client consumes it. Shared by the list and single-event
+ * routes so the two can never disagree about what a slot looks like.
+ *
+ * `acceptedCount` is passed in rather than queried here: callers already
+ * batch-load it, and doing it per slot would reintroduce an N+1.
+ */
+export function formatSlot(s, acceptedCount = 0) {
+  const hours = Math.max(0.1, Number(
+    ((new Date(s.end_datetime) - new Date(s.start_datetime)) / (1000 * 60 * 60)).toFixed(2)
+  ));
+  return {
+    id: s.id,
+    name: s.name,
+    description: s.description,
+    startDatetime: s.start_datetime,
+    endDatetime: s.end_datetime,
+    maxSpots: Number(s.max_spots),
+    spotsRemaining: Math.max(0, s.max_spots - acceptedCount),
+    hours
+  };
+}
+```
+
+Then replace the inline shaping inside `GET /api/events` (lines 46–63) — the block beginning `const formattedSlots = slots.map(s => {` and ending at its closing `});` — with:
+
+```js
+      const formattedSlots = slots.map(s => formatSlot(s, acceptedBySlot.get(s.id) || 0));
+```
+
+This is a pure extraction: the arithmetic and field names are unchanged, so `GET /api/events` must return byte-identical output. The smoke test from Task 2 covers that it still responds; verify the shape by eye in Step 6.
+
+- [ ] **Step 3b: Add `GET /api/events/:id`**
+
+Add this route immediately after the `GET /api/events` handler. It uses `formatSlot` so the client sees one consistent event shape:
 
 ```js
 /**
@@ -1906,21 +1943,7 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
       acceptedBySlot.set(r.slot_id, r.count);
     }
 
-    const formattedSlots = slots.map(s => {
-      const hours = Math.max(0.1, Number(
-        ((new Date(s.end_datetime) - new Date(s.start_datetime)) / 3600000).toFixed(2)
-      ));
-      return {
-        id: s.id,
-        name: s.name,
-        description: s.description,
-        startDatetime: s.start_datetime,
-        endDatetime: s.end_datetime,
-        maxSpots: Number(s.max_spots),
-        spotsRemaining: Math.max(0, s.max_spots - (acceptedBySlot.get(s.id) || 0)),
-        hours
-      };
-    });
+    const formattedSlots = slots.map(s => formatSlot(s, acceptedBySlot.get(s.id) || 0));
 
     const applications = db.prepare(`
       SELECT a.id, a.user_id, a.event_id, a.slot_id, a.status, a.applied_at,
