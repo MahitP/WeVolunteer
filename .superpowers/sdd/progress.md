@@ -33,6 +33,10 @@ Task 7: complete (commits c2fc0e3..eebf6a0, review clean)
   - Withdraw stores withdrawn; re-application revives the row. Status audit also
     fixed CalendarView.jsx and EventModal.jsx mine-lookup (UI still blocked re-apply).
 
+Task 8: complete (commits 2887966..a5846ea, review clean)
+  - Username persisted + case-insensitive uniqueness. Breaking signup change; both
+    callers verified. migrate_usernames.js backfilled 31 users.
+
 ## Carry-forward findings (not in this plan — for the P1 plan / final review)
 - Test isolation relies on Vitest default isolate:true (no vitest.config.* exists).
   routes.verification.test.js runs flag-ON, routes.auth.test.js flag-OFF. Consider
