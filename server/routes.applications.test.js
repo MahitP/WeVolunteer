@@ -175,3 +175,72 @@ describe('applications: bulk organizer actions', () => {
     expect(res.body.skipped.length).toBe(2);
   });
 });
+
+describe('applications: an organizer cannot reactivate a withdrawn application (P1-D)', () => {
+  let orgToken, studentToken, evId, appId;
+
+  // A student applies, is accepted, then withdraws — the setup an organizer
+  // must not be able to silently reverse.
+  const seedWithdrawn = async () => {
+    orgToken = await srv.login('jkatzenback@vikings.org');
+    studentToken = await srv.login('leo.chen28@gmail.com');
+    const future = new Date(Date.now() + 40 * 864e5).toISOString();
+    const mk = await srv.call('POST', '/api/events', {
+      title: 'Withdraw Test', description: 'd', category: 'Other', location: 'Hall',
+      applicationDeadline: new Date(Date.now() + 30 * 864e5).toISOString(),
+      slots: [{ name: 'Shift', description: 'd', startDatetime: future, endDatetime: new Date(Date.now() + 40 * 864e5 + 108e5).toISOString(), maxSpots: 3 }]
+    }, orgToken);
+    evId = mk.body.id;
+    const slot = (await srv.call('GET', '/api/events')).body.find(e => e.id === evId).slots[0];
+    await srv.call('POST', `/api/events/${evId}/apply`, { slotId: slot.id }, studentToken);
+    appId = (await srv.call('GET', '/api/applications', undefined, orgToken)).body.find(a => a.eventId === evId).id;
+    await srv.call('PATCH', `/api/applications/${appId}`, { status: 'accepted' }, orgToken);
+    await srv.call('PATCH', `/api/applications/${appId}`, { status: 'withdrawn' }, studentToken);
+  };
+
+  const currentStatus = async () =>
+    (await srv.call('GET', '/api/applications', undefined, orgToken)).body.find(a => a.id === appId)?.status;
+
+  it('refuses a single accept of a withdrawn application', async () => {
+    await seedWithdrawn();
+    expect(await currentStatus()).toBe('withdrawn');
+    const res = await srv.call('PATCH', `/api/applications/${appId}`, { status: 'accepted' }, orgToken);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('withdrawn');
+    expect(await currentStatus()).toBe('withdrawn');
+  });
+
+  it('refuses a single waitlist of a withdrawn application', async () => {
+    await seedWithdrawn();
+    const res = await srv.call('PATCH', `/api/applications/${appId}`, { status: 'waitlisted' }, orgToken);
+    expect(res.status).toBe(409);
+    expect(await currentStatus()).toBe('withdrawn');
+  });
+
+  it('refuses a bulk action that includes a withdrawn application, and touches nothing', async () => {
+    await seedWithdrawn();
+    // Add a second, live application to the same batch to prove atomicity.
+    const other = await srv.login('priya.patel.nhs@outlook.com');
+    const slot = (await srv.call('GET', '/api/events')).body.find(e => e.id === evId).slots[0];
+    await srv.call('POST', `/api/events/${evId}/apply`, { slotId: slot.id }, other);
+    const liveApp = (await srv.call('GET', '/api/applications', undefined, orgToken)).body
+      .find(a => a.eventId === evId && a.status === 'pending');
+
+    const res = await srv.call('PATCH', '/api/applications/bulk',
+      { applicationIds: [appId, liveApp.id], status: 'accepted' }, orgToken);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('withdrawn');
+    // Neither the withdrawn one nor the live one changed.
+    expect(await currentStatus()).toBe('withdrawn');
+    const liveAfter = (await srv.call('GET', '/api/applications', undefined, orgToken)).body.find(a => a.id === liveApp.id);
+    expect(liveAfter.status).toBe('pending');
+  });
+
+  it('still lets the student re-apply themselves', async () => {
+    await seedWithdrawn();
+    const slot = (await srv.call('GET', '/api/events')).body.find(e => e.id === evId).slots[0];
+    const res = await srv.call('POST', `/api/events/${evId}/apply`, { slotId: slot.id }, studentToken);
+    expect(res.status).toBe(201);
+    expect(await currentStatus()).toBe('pending');
+  });
+});

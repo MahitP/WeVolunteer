@@ -225,6 +225,15 @@ router.patch('/api/applications/bulk', authenticateToken, (req, res) => {
       if (app.organizer_id !== req.user.id) {
         return res.status(403).json({ error: 'Access denied: You do not host this event' });
       }
+      // A withdrawn application is the volunteer's own choice to leave; an
+      // organizer cannot pull them back in. Refuse the whole batch rather than
+      // silently reactivating them as a side effect of a bulk action.
+      if (app.status === 'withdrawn') {
+        return res.status(409).json({
+          error: 'One or more of these volunteers withdrew their application. Only they can re-apply.',
+          code: 'withdrawn'
+        });
+      }
       apps.push(app);
     }
 
@@ -392,6 +401,17 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
     if (!app) return res.status(404).json({ error: 'Application not found' });
     if (app.organizer_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
+    }
+
+    // A withdrawal is the volunteer's own decision to leave. The organizer must
+    // not be able to silently pull them back in — re-committing someone who
+    // stepped down, without their knowledge, to a shift they may no longer be
+    // able to attend. Re-entry only happens if the student re-applies.
+    if (app.status === 'withdrawn') {
+      return res.status(409).json({
+        error: 'This volunteer withdrew their own application. Only they can re-apply.',
+        code: 'withdrawn'
+      });
     }
 
     // Check spots capacity at the slot level if accepting
