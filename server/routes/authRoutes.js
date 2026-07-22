@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
-import { VALID_GRADES, JWT_SECRET } from '../server.js';
+import { VALID_GRADES, JWT_SECRET, DEMO_MODE } from '../config.js';
 import { createRandom, performWeightedSelection } from '../weighting.js';
 import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion, certificateCode } from '../utils.js';
@@ -102,8 +102,6 @@ router.get('/api/auth/me', authenticateToken, (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-const DEMO_MODE = process.env.DEMO_MODE === 'true';
 
 if (DEMO_MODE) {
   router.post('/api/auth/reset', (req, res) => {
