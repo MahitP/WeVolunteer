@@ -24,7 +24,8 @@ describe('auth: email verification (flag on)', () => {
   };
 
   const signup = (email) => srv.call('POST', '/api/auth/signup', {
-    email, password: 'password123', name: 'Test Person', role: 'student', grade: '10'
+    email, password: 'password123', name: 'Test Person', role: 'student', grade: '10',
+    username: `u${Math.random().toString(36).slice(2, 9)}`
   });
 
   it('creates a new account unverified and issues a token', async () => {

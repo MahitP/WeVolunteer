@@ -24,7 +24,7 @@ describe('auth: email verification state', () => {
   it('marks a new signup verified when verification is not required', async () => {
     const res = await srv.call('POST', '/api/auth/signup', {
       email: 'verify.check@example.org', password: 'password123',
-      name: 'Verify Check', role: 'student', grade: '10'
+      name: 'Verify Check', role: 'student', grade: '10', username: 'verify_check'
     });
     expect(res.status).toBe(201);
     expect(res.body.user.emailVerified).toBe(true);
@@ -95,6 +95,49 @@ describe('auth: password reset', () => {
     await srv.call('POST', '/api/auth/forgot-password', { email: 'advait.g@yahoo.com' });
     const token = tokenFor('user-advait');
     const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'abc' });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('auth: username', () => {
+  const signup = (over = {}) => srv.call('POST', '/api/auth/signup', {
+    email: `u${Math.random().toString(36).slice(2, 9)}@example.org`,
+    password: 'password123', name: 'Some Person', role: 'student', grade: '10',
+    username: `u${Math.random().toString(36).slice(2, 9)}`,
+    ...over
+  });
+
+  it('stores the username the signup form sends', async () => {
+    const res = await signup({ username: 'alex_r' });
+    expect(res.status).toBe(201);
+    expect(res.body.user.username).toBe('alex_r');
+  });
+
+  it('rejects a duplicate username', async () => {
+    await signup({ username: 'taken_name' });
+    const res = await signup({ username: 'taken_name' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/username/i);
+  });
+
+  it('rejects a duplicate regardless of case', async () => {
+    await signup({ username: 'casecheck' });
+    const res = await signup({ username: 'CaseCheck' });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects characters the signup form does not allow', async () => {
+    const res = await signup({ username: 'bad name!' });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a username that is too short or too long', async () => {
+    expect((await signup({ username: 'ab' })).status).toBe(400);
+    expect((await signup({ username: 'a'.repeat(21) })).status).toBe(400);
+  });
+
+  it('requires a username', async () => {
+    const res = await signup({ username: undefined });
     expect(res.status).toBe(400);
   });
 });
