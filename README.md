@@ -48,6 +48,7 @@ The "Reset DB" button in the demo bar (or `POST /api/auth/reset`) restores the s
 | `DEMO_MODE`    | `false`                                        | Registers the database reset endpoint. Opt-in only, and refused outright when `NODE_ENV=production`. `npm run dev` sets it. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://localhost:4173`  | Comma-separated allowlist of browser origins. Requests with no `Origin` header (curl, same-origin) always pass. |
 | `TRUST_PROXY`  | unset                                          | Set to the number of reverse proxies in front of the app (e.g. `1`) so rate limiting sees the real client IP. Leave unset when not behind a proxy — trusting `X-Forwarded-For` blindly lets clients bypass the limiter. |
+| `SBV_DB_PATH`  | `server/sbvolunteers.db`                       | Absolute path to the SQLite file. Used by tests; override in production to place the database on a backed-up volume. |
 
 A minimal production start:
 
@@ -56,6 +57,18 @@ NODE_ENV=production \
 JWT_SECRET="$(openssl rand -hex 32)" \
 CORS_ORIGINS="https://sbvolunteers.example.org" \
 npm start --prefix server
+```
+
+#### First admin on a fresh deployment
+
+A production database starts **empty** — demo accounts are only seeded when
+`DEMO_MODE=true`. To create the first administrator:
+
+1. Have that person sign up through the normal form (they will be a `student`).
+2. Promote them:
+
+```bash
+node bin/make-admin.mjs person@district.example.org
 ```
 
 ### Client

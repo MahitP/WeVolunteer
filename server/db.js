@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import { createHoursLedgerTable, backfillHoursLedger, verifyLedgerParity } from './hoursLedger.js';
 import { createCheckinTable } from './attendance.js';
+import { DEMO_MODE } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -278,14 +279,19 @@ export function initDatabase() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_events_organizer ON events(organizer_id)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_event ON attendance(event_id)`);
 
-  // Only seed if the database is empty
+  // Seed data is a demo affordance, never a production one: the seed accounts
+  // share a password that is printed in the README. A real deployment comes up
+  // empty, and its first admin is made with `node bin/make-admin.mjs <email>`
+  // after that person has signed up normally.
   const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get();
-  if (userCount.count === 0) {
+  if (userCount.count > 0) {
+    console.log('Database already initialized.');
+  } else if (DEMO_MODE) {
     console.log('Seeding database...');
     seedDatabase();
     console.log('Seeding complete.');
   } else {
-    console.log('Database already initialized.');
+    console.log('Empty database initialized. DEMO_MODE is off, so no demo accounts were created.');
   }
 
   // Check-in marks taken during an event. Separate from `attendance` so that
