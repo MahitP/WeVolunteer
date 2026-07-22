@@ -128,12 +128,6 @@ export default function App() {
           }
         }
 
-        if (searchParams.has('reset') && currentPath !== '/reset-password') {
-          const token = searchParams.get('reset');
-          navigate(`/reset-password?token=${token}`, { replace: true });
-          return;
-        }
-
         const user = await api.getMe();
         if (!user) {
           setCurrentUser(null);
@@ -247,9 +241,13 @@ export default function App() {
     }
   };
 
-  const openEventById = (eventId) => {
-    const match = events.find(e => e.id === eventId);
-    if (match) setSelectedEventState(eventId);
+  // Callers pass either an event object (cards, dashboards) or an id string
+  // (notifications, calendar, profiles). Normalise here rather than at nine
+  // call sites — `viewVolunteer` below already takes the same approach.
+  const openEventById = (eventOrId) => {
+    const id = typeof eventOrId === 'string' ? eventOrId : eventOrId?.id;
+    const match = id && events.find(e => e.id === id);
+    if (match) setSelectedEventState(id);
     else addToast('That event is no longer available.', 'info');
   };
 
@@ -309,7 +307,14 @@ export default function App() {
               onCancel={() => navigate('/login')}
             />
           } />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route
+            path="*"
+            element={
+              searchParams.has('reset')
+                ? <Navigate to={`/reset-password?token=${encodeURIComponent(searchParams.get('reset'))}`} replace />
+                : <Navigate to="/login" replace />
+            }
+          />
         </Routes>
         <Toasts toasts={toasts} onRemove={removeToast} />
       </>
