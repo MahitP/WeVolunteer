@@ -32,6 +32,7 @@ export function formatUserResponse(row) {
   return {
     id: row.id,
     name: row.name,
+    username: row.username || null,
     email: row.email,
     grade: row.grade,
     role: row.role,

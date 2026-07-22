@@ -22,7 +22,7 @@ function issueVerificationToken(userId) {
 }
 
 router.post('/api/auth/signup', (req, res) => {
-  const { email, password, name, role, grade, avatar, bio, school, skills } = req.body;
+  const { email, password, name, username, role, grade, avatar, bio, school, skills } = req.body;
 
   if (!email || !password || !name || !role || !grade) {
     return res.status(400).json({ error: 'Required fields missing: email, password, name, role, grade' });
@@ -37,6 +37,24 @@ router.post('/api/auth/signup', (req, res) => {
   }
   if (String(password).length < 6) {
     return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+  }
+
+  const cleanUsername = String(username || '').trim();
+  if (!cleanUsername) {
+    return res.status(400).json({ error: 'Choose a username' });
+  }
+  if (cleanUsername.length < 3 || cleanUsername.length > 20) {
+    return res.status(400).json({ error: 'Username must be between 3 and 20 characters' });
+  }
+  if (!/^[a-zA-Z0-9_]+$/.test(cleanUsername)) {
+    return res.status(400).json({ error: 'Username may use letters, numbers, and underscores only' });
+  }
+
+  // The unique index is case-sensitive, but two people cannot meaningfully be
+  // told apart by capitalisation alone — check the way a person would read it.
+  const usernameTaken = db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE').get(cleanUsername);
+  if (usernameTaken) {
+    return res.status(400).json({ error: 'That username is already taken' });
   }
 
   try {
@@ -54,11 +72,11 @@ router.post('/api/auth/signup', (req, res) => {
     const emailVerifiedVal = REQUIRE_EMAIL_VERIFICATION ? 0 : 1;
 
     const stmt = db.prepare(`
-      INSERT INTO users (id, name, email, password_hash, grade, role, verified, email_verified, avatar, bio, school, skills, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, email_verified, avatar, bio, school, skills, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(userId, name, email, passwordHash, grade, role, verifiedVal, emailVerifiedVal, avatar || '👤', bio || '', school || '', skillsJSON, new Date().toISOString());
+    stmt.run(userId, name, email, cleanUsername, passwordHash, grade, role, verifiedVal, emailVerifiedVal, avatar || '👤', bio || '', school || '', skillsJSON, new Date().toISOString());
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
     const user = formatUserResponse(userRow);
@@ -74,7 +92,8 @@ router.post('/api/auth/signup', (req, res) => {
   } catch (error) {
     console.error('Signup error:', error);
     if (error.message.includes('UNIQUE')) {
-      return res.status(400).json({ error: 'Email address already registered' });
+      const field = error.message.includes('username') ? 'Username' : 'Email address';
+      return res.status(400).json({ error: `${field} already registered` });
     }
     res.status(500).json({ error: 'Internal server error during registration' });
   }
