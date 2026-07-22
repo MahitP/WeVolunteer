@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import { createHoursLedgerTable, backfillHoursLedger, verifyLedgerParity } from './hoursLedger.js';
 import { createCheckinTable } from './attendance.js';
-import { DEMO_MODE } from './config.js';
+import { DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -220,11 +220,7 @@ export function initDatabase() {
   addColumnIfMissing('auto_select_runs', 'reason', 'TEXT');
   addColumnIfMissing('users', 'leaderboard_opt_in', 'INTEGER DEFAULT 0');
   
-  const addedEmailVerified = addColumnIfMissing('users', 'email_verified', 'INTEGER DEFAULT 0');
-  if (addedEmailVerified) {
-    // Migrate existing users to be verified so they aren't locked out
-    db.exec('UPDATE users SET email_verified = 1');
-  }
+  addColumnIfMissing('users', 'email_verified', 'INTEGER DEFAULT 0');
 
   // Migrate applications table to allow 'withdrawn' status
   // SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we check if the schema has 'withdrawn'
@@ -292,6 +288,15 @@ export function initDatabase() {
     console.log('Seeding complete.');
   } else {
     console.log('Empty database initialized. DEMO_MODE is off, so no demo accounts were created.');
+  }
+
+  if (!REQUIRE_EMAIL_VERIFICATION) {
+    // Runs after seeding: freshly seeded/inserted rows default to
+    // email_verified = 0, and nothing to confirm while the feature is off, so
+    // a stale 0 would put an otherwise-fine account behind a wall it cannot
+    // get past. Idempotent, and it stops applying the moment verification is
+    // switched on.
+    db.exec('UPDATE users SET email_verified = 1 WHERE email_verified = 0');
   }
 
   // Check-in marks taken during an event. Separate from `attendance` so that

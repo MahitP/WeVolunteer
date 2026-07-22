@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
-import { VALID_GRADES, JWT_SECRET, DEMO_MODE } from '../config.js';
+import { VALID_GRADES, JWT_SECRET, DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from '../config.js';
 import { createRandom, performWeightedSelection } from '../weighting.js';
 import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion, certificateCode } from '../utils.js';
@@ -39,12 +39,16 @@ router.post('/api/auth/signup', (req, res) => {
     // Students and admins start verified (1).
     const verifiedVal = role === 'organizer' ? 0 : 1;
 
+    // When verification is not required there is nothing to confirm, so the
+    // address counts as settled. Task 6 sends the confirmation mail when it is.
+    const emailVerifiedVal = REQUIRE_EMAIL_VERIFICATION ? 0 : 1;
+
     const stmt = db.prepare(`
-      INSERT INTO users (id, name, email, password_hash, grade, role, verified, avatar, bio, school, skills, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO users (id, name, email, password_hash, grade, role, verified, email_verified, avatar, bio, school, skills, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(userId, name, email, passwordHash, grade, role, verifiedVal, avatar || '👤', bio || '', school || '', skillsJSON, new Date().toISOString());
+    stmt.run(userId, name, email, passwordHash, grade, role, verifiedVal, emailVerifiedVal, avatar || '👤', bio || '', school || '', skillsJSON, new Date().toISOString());
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
     const user = formatUserResponse(userRow);
