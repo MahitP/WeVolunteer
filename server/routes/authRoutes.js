@@ -8,6 +8,7 @@ import { createRandom, performWeightedSelection } from '../weighting.js';
 import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion, certificateCode } from '../utils.js';
 import { db, initDatabase } from '../db.js';
+import { authLimiter } from '../app.js';
 
 const router = express.Router();
 
@@ -104,6 +105,82 @@ router.get('/api/auth/me', authenticateToken, (req, res) => {
   } catch (error) {
     console.error('Auth check error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Step 1 of password reset: issue a single-use, expiring token and mail it.
+ *
+ * The response is identical whether or not the address is registered — a
+ * differing response here is an account-enumeration oracle, and this endpoint
+ * is unauthenticated.
+ */
+router.post('/api/auth/forgot-password', authLimiter, async (req, res) => {
+  const { email } = req.body;
+  const SAME_ANSWER = {
+    success: true,
+    message: 'If that address has an account, a reset link is on its way.'
+  };
+
+  if (!email) return res.status(400).json({ error: 'Email is required' });
+
+  try {
+    // COLLATE NOCASE: someone typing Leo.Chen@… who registered leo.chen@…
+    // should still get their mail, not silence.
+    const user = db.prepare('SELECT id, email FROM users WHERE email = ? COLLATE NOCASE').get(String(email).trim());
+
+    if (user) {
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+      // One live token per user: issuing a new link invalidates the old one.
+      db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(user.id);
+      db.prepare('INSERT INTO password_reset_tokens (token, user_id, expires_at) VALUES (?, ?, ?)')
+        .run(token, user.id, expiresAt);
+
+      await sendPasswordResetEmail(user.email, token);
+    }
+
+    res.json(SAME_ANSWER);
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.json(SAME_ANSWER);
+  }
+});
+
+/** Step 2: exchange the token for a new password. Single use. */
+router.post('/api/auth/reset-password', authLimiter, (req, res) => {
+  const { token, password } = req.body;
+
+  if (!token || !password) {
+    return res.status(400).json({ error: 'Token and password are required' });
+  }
+  if (String(password).length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+  }
+
+  try {
+    const row = db.prepare('SELECT * FROM password_reset_tokens WHERE token = ?').get(token);
+    if (!row) {
+      return res.status(400).json({ error: 'That reset link is not valid. Request a new one.' });
+    }
+
+    if (new Date(row.expires_at) < new Date()) {
+      db.prepare('DELETE FROM password_reset_tokens WHERE token = ?').run(token);
+      return res.status(400).json({ error: 'That reset link has expired. Request a new one.' });
+    }
+
+    const passwordHash = bcrypt.hashSync(password, bcrypt.genSaltSync(10));
+
+    inTransaction(() => {
+      db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, row.user_id);
+      db.prepare('DELETE FROM password_reset_tokens WHERE token = ?').run(token);
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ error: 'Could not reset the password' });
   }
 });
 
