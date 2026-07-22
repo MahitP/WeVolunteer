@@ -1,10 +1,10 @@
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dbPath = path.join(__dirname, '..', 'server', 'sbvolunteers.db');
+const dbPath = process.env.SBV_DB_PATH || path.join(__dirname, '..', 'server', 'sbvolunteers.db');
 
 const email = process.argv[2];
 
@@ -14,10 +14,10 @@ if (!email) {
 }
 
 try {
-  const db = new Database(dbPath);
-  
+  const db = new DatabaseSync(dbPath);
+
   const user = db.prepare('SELECT id, role FROM users WHERE email = ?').get(email);
-  
+
   if (!user) {
     console.error(`Error: User with email ${email} not found.`);
     console.error('Please have the user sign up first before promoting them.');
@@ -31,7 +31,6 @@ try {
 
   db.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run(email);
   console.log(`Successfully promoted ${email} to admin.`);
-  
 } catch (error) {
   console.error('Database error:', error.message);
   process.exit(1);
