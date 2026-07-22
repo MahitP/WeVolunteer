@@ -220,7 +220,15 @@ export function initDatabase() {
   addColumnIfMissing('auto_select_runs', 'reason', 'TEXT');
   addColumnIfMissing('users', 'leaderboard_opt_in', 'INTEGER DEFAULT 0');
   
-  addColumnIfMissing('users', 'email_verified', 'INTEGER DEFAULT 0');
+  const addedEmailVerified = addColumnIfMissing('users', 'email_verified', 'INTEGER DEFAULT 0');
+  if (addedEmailVerified) {
+    // The first time this column exists, every current account predates email
+    // verification — none of their 0s is a real pending confirmation. Backfill
+    // them verified regardless of REQUIRE_EMAIL_VERIFICATION, or enabling
+    // verification on an existing database would lock out every current user.
+    // This runs before seeding, so on a fresh database it touches no rows.
+    db.exec('UPDATE users SET email_verified = 1');
+  }
 
   // Migrate applications table to allow 'withdrawn' status
   // SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we check if the schema has 'withdrawn'
