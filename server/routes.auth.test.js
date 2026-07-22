@@ -141,3 +141,88 @@ describe('auth: username', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('auth: volunteer profile does not leak whereabouts to other students', () => {
+  let organizerToken, leoToken, priyaToken, adminToken, eventId, slotId;
+
+  beforeAll(async () => {
+    organizerToken = await srv.login('jkatzenback@vikings.org');
+    // Earlier in this file, "auth: password reset" actually resets these two
+    // seeded students' passwords while exercising the reset flow — their live
+    // passwords are no longer the seeded 'password123'.
+    leoToken = await srv.login('leo.chen28@gmail.com', 'brand-new-pass');
+    priyaToken = await srv.login('priya.patel.nhs@outlook.com', 'first-change');
+    adminToken = await srv.login('admin@sbvolunteers.gov');
+
+    // Build a real confirmed future shift for Priya via the actual API, so the
+    // assertions below are not vacuous.
+    const future = new Date(Date.now() + 30 * 24 * 3600 * 1000);
+    const futureEnd = new Date(future.getTime() + 3 * 3600 * 1000);
+    const createRes = await srv.call('POST', '/api/events', {
+      title: 'Whereabouts Test Event',
+      description: 'Created to prove upcoming shift data is gated correctly.',
+      category: 'Other',
+      location: '12 Maple Ave, South Brunswick',
+      applicationDeadline: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      slots: [{
+        name: 'Morning', description: 'Morning shift',
+        startDatetime: future.toISOString(), endDatetime: futureEnd.toISOString(),
+        maxSpots: 5
+      }]
+    }, organizerToken);
+    expect(createRes.status).toBe(201);
+    eventId = createRes.body.id;
+
+    const eventDetail = await srv.call('GET', `/api/events/${eventId}`, undefined, organizerToken);
+    slotId = eventDetail.body.event.slots[0].id;
+
+    const applyRes = await srv.call('POST', `/api/events/${eventId}/apply`, { slotId }, priyaToken);
+    expect(applyRes.status).toBe(201);
+
+    const apps = (await srv.call('GET', '/api/applications', undefined, organizerToken)).body;
+    const priyaApp = apps.find(a => a.slotId === slotId && a.userId === 'user-student-2');
+    expect(priyaApp).toBeTruthy();
+
+    const acceptRes = await srv.call('PATCH', `/api/applications/${priyaApp.id}`, { status: 'accepted' }, organizerToken);
+    expect(acceptRes.status).toBe(200);
+  });
+
+  it('hides another student\'s upcoming shifts from a fellow student, even though a confirmed future shift exists', async () => {
+    const res = await srv.call('GET', '/api/users/user-student-2/profile', undefined, leoToken);
+    expect(res.status).toBe(200);
+    expect(res.body.upcoming).toEqual([]);
+    expect(res.body.stats.upcomingCount).toBe(0);
+  });
+
+  it('gives the student their own populated upcoming array, including location', async () => {
+    const res = await srv.call('GET', '/api/users/user-student-2/profile', undefined, priyaToken);
+    expect(res.status).toBe(200);
+    expect(res.body.upcoming.length).toBeGreaterThan(0);
+    const shift = res.body.upcoming.find(u => u.eventId === eventId);
+    expect(shift).toBeTruthy();
+    expect(shift.location).toBe('12 Maple Ave, South Brunswick');
+    expect(res.body.stats.upcomingCount).toBeGreaterThan(0);
+  });
+
+  it('gives an organizer an empty upcoming array but a correct non-zero upcomingCount', async () => {
+    const res = await srv.call('GET', '/api/users/user-student-2/profile', undefined, organizerToken);
+    expect(res.status).toBe(200);
+    expect(res.body.upcoming).toEqual([]);
+    expect(res.body.stats.upcomingCount).toBeGreaterThan(0);
+  });
+
+  it('does not regress the organizer applicant-review workflow: email and completed history still show', async () => {
+    const res = await srv.call('GET', '/api/users/user-student-2/profile', undefined, organizerToken);
+    expect(res.status).toBe(200);
+    expect(res.body.volunteer.email).toBe('priya.patel.nhs@outlook.com');
+    expect(Array.isArray(res.body.completed)).toBe(true);
+    expect(res.body.completed.length).toBeGreaterThan(0);
+  });
+
+  it('also hides the upcoming array from an admin, staying self-only', async () => {
+    const res = await srv.call('GET', '/api/users/user-student-2/profile', undefined, adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.upcoming).toEqual([]);
+    expect(res.body.stats.upcomingCount).toBeGreaterThan(0);
+  });
+});
