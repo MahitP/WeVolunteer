@@ -8,7 +8,6 @@ import { createRandom, performWeightedSelection } from '../weighting.js';
 import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion, certificateCode } from '../utils.js';
 import { db, initDatabase } from '../db.js';
-import { authLimiter } from '../app.js';
 
 const router = express.Router();
 
@@ -115,7 +114,7 @@ router.get('/api/auth/me', authenticateToken, (req, res) => {
  * differing response here is an account-enumeration oracle, and this endpoint
  * is unauthenticated.
  */
-router.post('/api/auth/forgot-password', authLimiter, async (req, res) => {
+router.post('/api/auth/forgot-password', async (req, res) => {
   const { email } = req.body;
   const SAME_ANSWER = {
     success: true,
@@ -149,7 +148,7 @@ router.post('/api/auth/forgot-password', authLimiter, async (req, res) => {
 });
 
 /** Step 2: exchange the token for a new password. Single use. */
-router.post('/api/auth/reset-password', authLimiter, (req, res) => {
+router.post('/api/auth/reset-password', (req, res) => {
   const { token, password } = req.body;
 
   if (!token || !password) {
