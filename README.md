@@ -74,6 +74,27 @@ A production database starts **empty** — demo accounts are only seeded when
 node bin/make-admin.mjs person@district.example.org
 ```
 
+#### Upgrading an existing database
+
+`initDatabase()` runs on every boot and applies additive column and table
+migrations automatically (`addColumnIfMissing`, plus the `applications` and
+hours-ledger rebuilds), so simply deploying the new code and restarting picks
+them up. Existing volunteer records, applications, and credited hours are
+preserved, and users added before email verification existed are backfilled as
+verified so nobody is locked out.
+
+One migration is **not** automatic. Usernames were added after the first
+release, so accounts created before that have no username. Backfill them once,
+after upgrading:
+
+```bash
+node server/migrate_usernames.js
+```
+
+It derives a unique username per user from their name/email and skips anyone
+who already has one, so it is safe to re-run. New sign-ups collect a username
+at registration and do not need it.
+
 ### Client
 
 | Env var           | Default | Purpose |
