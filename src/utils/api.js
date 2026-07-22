@@ -250,6 +250,12 @@ export const api = {
   // ── Certificate Verification ─────────────────────
   verifyCertificate: async (code) => apiFetch(`/api/certificates/verify/${encodeURIComponent(code)}`),
 
+  // ── Moderation ─────────────────────────────────
+  submitReport: async ({ targetType, targetId, reason }) => apiFetch('/api/reports', {
+    method: 'POST',
+    body: JSON.stringify({ targetType, targetId, reason })
+  }),
+
   // ── V2: Profile ────────────────────────────────
   updateProfile: async (patch) => apiFetch('/api/auth/profile', {
     method: 'PATCH',
