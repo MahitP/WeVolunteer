@@ -54,9 +54,22 @@ export const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Endpoints that send an email must count EVERY request, not just failures:
+// forgot-password always returns 200 (so it cannot leak whether an address
+// exists), which means authLimiter's skipSuccessfulRequests would never count
+// it and it would have no effective limit at all. This limiter guards against
+// using either endpoint to flood someone's inbox.
+export const mailLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.MAIL_RATE_LIMIT) || (DEMO_MODE ? 1000 : 5),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
+
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/signup', authLimiter);
-app.use('/api/auth/forgot-password', authLimiter);
+app.use('/api/auth/forgot-password', mailLimiter);
+app.use('/api/auth/resend-verification', mailLimiter);
 app.use('/api/auth/reset-password', authLimiter);
 app.use('/api/auth/verify-email', authLimiter);
 app.use('/api', apiLimiter);
