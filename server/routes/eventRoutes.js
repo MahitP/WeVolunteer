@@ -10,6 +10,29 @@ import { db } from '../db.js';
 
 const router = express.Router();
 
+/**
+ * One slot as the client consumes it. Shared by the list and single-event
+ * routes so the two can never disagree about what a slot looks like.
+ *
+ * `acceptedCount` is passed in rather than queried here: callers already
+ * batch-load it, and doing it per slot would reintroduce an N+1.
+ */
+export function formatSlot(s, acceptedCount = 0) {
+  const hours = Math.max(0.1, Number(
+    ((new Date(s.end_datetime) - new Date(s.start_datetime)) / (1000 * 60 * 60)).toFixed(2)
+  ));
+  return {
+    id: s.id,
+    name: s.name,
+    description: s.description,
+    startDatetime: s.start_datetime,
+    endDatetime: s.end_datetime,
+    maxSpots: Number(s.max_spots),
+    spotsRemaining: Math.max(0, s.max_spots - acceptedCount),
+    hours
+  };
+}
+
 router.get('/api/events', (req, res) => {
   try {
     const events = db.prepare(`
@@ -43,24 +66,7 @@ router.get('/api/events', (req, res) => {
     const formattedEvents = events.map(event => {
       const slots = slotsByEvent.get(event.id) || [];
 
-      const formattedSlots = slots.map(s => {
-        const acceptedCount = acceptedBySlot.get(s.id) || 0;
-
-        const start = new Date(s.start_datetime);
-        const end = new Date(s.end_datetime);
-        const hours = Math.max(0.1, Number(((end - start) / (1000 * 60 * 60)).toFixed(2)));
-
-        return {
-          id: s.id,
-          name: s.name,
-          description: s.description,
-          startDatetime: s.start_datetime,
-          endDatetime: s.end_datetime,
-          maxSpots: Number(s.max_spots),
-          spotsRemaining: Math.max(0, s.max_spots - acceptedCount),
-          hours: hours
-        };
-      });
+      const formattedSlots = slots.map(s => formatSlot(s, acceptedBySlot.get(s.id) || 0));
 
       // Bounding datetimes based on slots
       const startDatetime = formattedSlots.length > 0
@@ -107,6 +113,77 @@ router.get('/api/events', (req, res) => {
   } catch (error) {
     console.error('Fetch events error:', error);
     res.status(500).json({ error: 'Internal server error fetching events' });
+  }
+});
+
+/**
+ * One event with its applications, for the organizer's own screens.
+ *
+ * Staff-only: it carries the applicant roster, which is not something a
+ * student may enumerate for an event they are not running.
+ */
+router.get('/api/events/:id', authenticateToken, (req, res) => {
+  try {
+    const event = db.prepare(`
+      SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
+             u.school as organizer_school
+      FROM events e JOIN users u ON e.organizer_id = u.id
+      WHERE e.id = ?
+    `).get(req.params.id);
+
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const isStaff = req.user.role === 'admin' ||
+      (req.user.role === 'organizer' && event.organizer_id === req.user.id);
+    if (!isStaff) return res.status(403).json({ error: 'Access denied: You do not host this event' });
+
+    const slots = db.prepare('SELECT * FROM slots WHERE event_id = ?').all(event.id);
+    const acceptedBySlot = new Map();
+    for (const r of db.prepare(`
+      SELECT slot_id, COUNT(*) as count FROM applications
+      WHERE event_id = ? AND status = 'accepted' GROUP BY slot_id
+    `).all(event.id)) {
+      acceptedBySlot.set(r.slot_id, r.count);
+    }
+
+    const formattedSlots = slots.map(s => formatSlot(s, acceptedBySlot.get(s.id) || 0));
+
+    const applications = db.prepare(`
+      SELECT a.id, a.user_id, a.event_id, a.slot_id, a.status, a.applied_at,
+             u.name, u.avatar, u.grade, u.school
+      FROM applications a JOIN users u ON a.user_id = u.id
+      WHERE a.event_id = ?
+      ORDER BY u.name
+    `).all(event.id).map(a => ({
+      id: a.id,
+      userId: a.user_id,
+      eventId: a.event_id,
+      slotId: a.slot_id,
+      status: a.status,
+      appliedAt: a.applied_at,
+      volunteer: { id: a.user_id, name: a.name, avatar: a.avatar, grade: a.grade, school: a.school }
+    }));
+
+    res.json({
+      event: {
+        id: event.id,
+        title: event.title,
+        description: event.description,
+        category: event.category,
+        location: event.location,
+        instructions: event.instructions || '',
+        applicationDeadline: event.application_deadline,
+        organizerId: event.organizer_id,
+        organizerName: event.organizer_name,
+        status: event.status,
+        autoApprove: event.auto_approve === 1,
+        slots: formattedSlots
+      },
+      applications
+    });
+  } catch (err) {
+    console.error('Fetch event error:', err);
+    res.status(500).json({ error: 'Failed to load event' });
   }
 });
 

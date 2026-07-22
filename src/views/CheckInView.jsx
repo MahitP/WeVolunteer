@@ -56,16 +56,17 @@ export default function CheckInView({ currentUser }) {
     const key = `${app.slotId}:${app.userId}`;
     const currentlyPresent = !!checkins.get(key);
     const newPresent = !currentlyPresent;
-    
+
     // Optimistic update
     setCheckins(prev => new Map(prev).set(key, newPresent));
 
     try {
-      await api.submitCheckins(eventId, {
-        [`${app.slotId}:${app.userId}`]: newPresent
-      });
+      // The server keys check-in marks by application id, not slot:user.
+      const res = await api.submitCheckins(eventId, { [app.id]: newPresent });
+      if (res.marked !== 1) {
+        throw new Error('The server did not record that mark.');
+      }
     } catch (err) {
-      // Revert on failure
       setCheckins(prev => new Map(prev).set(key, currentlyPresent));
       alert(`Could not save check-in: ${err.message}`);
     }
@@ -75,20 +76,22 @@ export default function CheckInView({ currentUser }) {
     const appsInSlot = applications.filter(a => a.slotId === slotId);
     const updates = {};
     const optimisticMap = new Map(checkins);
-    
+
     appsInSlot.forEach(app => {
-      const key = `${app.slotId}:${app.userId}`;
-      updates[key] = present;
-      optimisticMap.set(key, present);
+      updates[app.id] = present;
+      optimisticMap.set(`${app.slotId}:${app.userId}`, present);
     });
 
+    const previous = new Map(checkins);
     setCheckins(optimisticMap);
     try {
-      await api.submitCheckins(eventId, updates);
+      const res = await api.submitCheckins(eventId, updates);
+      if (res.marked !== appsInSlot.length) {
+        throw new Error(`Only ${res.marked} of ${appsInSlot.length} marks were recorded.`);
+      }
     } catch (err) {
+      setCheckins(previous);
       alert(`Could not save check-ins: ${err.message}`);
-      // Simple refresh to fix state
-      window.location.reload(); 
     }
   };
 

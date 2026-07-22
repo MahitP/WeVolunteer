@@ -129,6 +129,8 @@ export const api = {
   // ── Events ──────────────────────────────────────
   fetchEvents: async () => apiFetch('/api/events'),
 
+  fetchEventDetails: async (eventId) => apiFetch(`/api/events/${eventId}`),
+
   createEvent: async (eventData) => apiFetch('/api/events', {
     method: 'POST',
     body: JSON.stringify(eventData)
