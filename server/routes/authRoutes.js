@@ -11,6 +11,16 @@ import { db, initDatabase } from '../db.js';
 
 const router = express.Router();
 
+/** Issues a fresh email-confirmation token, replacing any previous one. */
+function issueVerificationToken(userId) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  db.prepare('DELETE FROM email_verification_tokens WHERE user_id = ?').run(userId);
+  db.prepare('INSERT INTO email_verification_tokens (token, user_id, expires_at) VALUES (?, ?, ?)')
+    .run(token, userId, expiresAt);
+  return token;
+}
+
 router.post('/api/auth/signup', (req, res) => {
   const { email, password, name, role, grade, avatar, bio, school, skills } = req.body;
 
@@ -52,6 +62,12 @@ router.post('/api/auth/signup', (req, res) => {
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
     const user = formatUserResponse(userRow);
+    if (REQUIRE_EMAIL_VERIFICATION) {
+      const verifyToken = issueVerificationToken(userId);
+      sendVerificationEmail(email, verifyToken).catch(err =>
+        console.error('Verification email failed to send:', err)
+      );
+    }
     const token = jwt.sign({ id: user.id, role: user.role, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
 
     res.status(201).json({ user, token });
@@ -180,6 +196,52 @@ router.post('/api/auth/reset-password', (req, res) => {
   } catch (err) {
     console.error('Reset password error:', err);
     res.status(500).json({ error: 'Could not reset the password' });
+  }
+});
+
+/** Confirms an address from the link in the welcome email. Single use. */
+router.post('/api/auth/verify-email', (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: 'Token is required' });
+
+  try {
+    const row = db.prepare('SELECT * FROM email_verification_tokens WHERE token = ?').get(token);
+    if (!row) {
+      return res.status(400).json({ error: 'That confirmation link is not valid. Request a new one.' });
+    }
+    if (new Date(row.expires_at) < new Date()) {
+      db.prepare('DELETE FROM email_verification_tokens WHERE token = ?').run(token);
+      return res.status(400).json({ error: 'That confirmation link has expired. Request a new one.' });
+    }
+
+    inTransaction(() => {
+      db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(row.user_id);
+      db.prepare('DELETE FROM email_verification_tokens WHERE token = ?').run(token);
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Verify email error:', err);
+    res.status(500).json({ error: 'Could not confirm that address' });
+  }
+});
+
+/** Sends a fresh confirmation link to the signed-in user's own address. */
+router.post('/api/auth/resend-verification', authenticateToken, async (req, res) => {
+  try {
+    const user = db.prepare('SELECT id, email, email_verified FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.email_verified === 1) {
+      return res.json({ success: true, message: 'That address is already confirmed.' });
+    }
+
+    const token = issueVerificationToken(user.id);
+    await sendVerificationEmail(user.email, token);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Resend verification error:', err);
+    res.status(500).json({ error: 'Could not resend the confirmation email' });
   }
 });
 
