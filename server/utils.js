@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { db } from './db.js';
-import { JWT_SECRET } from './server.js';
+import { JWT_SECRET } from './config.js';
 
 // --- AUTHENTICATION MIDDLEWARE ---
 export function authenticateToken(req, res, next) {
