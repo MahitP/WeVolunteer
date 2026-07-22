@@ -20,6 +20,11 @@ Task 4: complete (commits dace29d..7e28587, review clean)
   - emailVerified surfaced; app reachable. PLAN BUG FIXED: backfill moved to run
     after seedDatabase() (brief placed it before, so seeded users stayed 0).
 
+Task 5: complete (commits 7e28587..ff0559b, review clean)
+  - Password reset live. PLAN BUG FIXED: authLimiter cannot be imported into a
+    router (circular); mounted by path in app.js instead. Plan updated for Task 6.
+  - NOTE: commit 49f1710 is mislabelled docs: it swept in WIP code; net state reviewed OK.
+
 ## Carry-forward findings (not in this plan — for the P1 plan / final review)
 - ReportModal.jsx:15 calls api.post('/reports', ...) which does not exist on the
   api object. Report/moderation submission is dead at runtime. Found by Task 1 reviewer.
