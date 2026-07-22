@@ -142,19 +142,31 @@ router.post('/api/events/:id/apply', authenticateToken, (req, res) => {
       return res.status(400).json({ error: 'Application deadline has passed. Sign-ups are closed.' });
     }
 
-    // Check if already signed up for this specific slot
-    const exists = db.prepare('SELECT COUNT(*) as count FROM applications WHERE slot_id = ? AND user_id = ?').get(slotId, req.user.id);
-    if (exists.count > 0) {
+    // A withdrawn application is not a live one. Withdrawing by mistake should
+    // cost the student nothing while applications are still open, so the old
+    // row is revived rather than blocking — UNIQUE(user_id, slot_id) means a
+    // second INSERT is not an option.
+    const existing = db.prepare(
+      'SELECT id, status FROM applications WHERE slot_id = ? AND user_id = ?'
+    ).get(slotId, req.user.id);
+
+    const status = 'pending';
+    const appliedAt = new Date().toISOString();
+    let appId;
+
+    if (existing && existing.status !== 'withdrawn') {
       return res.status(400).json({ error: 'You have already applied for this time slot' });
+    } else if (existing) {
+      appId = existing.id;
+      db.prepare('UPDATE applications SET status = ?, applied_at = ?, waitlist_order = NULL WHERE id = ?')
+        .run(status, appliedAt, appId);
+    } else {
+      appId = `app-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      db.prepare(`
+        INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(appId, req.user.id, eventId, slotId, status, appliedAt);
     }
-
-    let status = 'pending';
-
-    const appId = `app-${Date.now()}`;
-    db.prepare(`
-      INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(appId, req.user.id, eventId, slotId, status, new Date().toISOString());
 
     // Notify organizer
     createNotification({
@@ -167,14 +179,7 @@ router.post('/api/events/:id/apply', authenticateToken, (req, res) => {
 
     res.status(201).json({
       success: true,
-      application: {
-        id: appId,
-        eventId,
-        slotId,
-        userId: req.user.id,
-        status,
-        appliedAt: new Date().toISOString()
-      }
+      application: { id: appId, eventId, slotId, userId: req.user.id, status, appliedAt }
     });
   } catch (error) {
     console.error('Apply error:', error);
@@ -187,10 +192,13 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
   const appId = req.params.id;
   const { status } = req.body; // 'accepted', 'waitlisted', 'rejected'
 
-  // Students can only withdraw (set to rejected) their own pending applications
+  // Students can only withdraw their own applications
   if (req.user.role === 'student') {
-    if (status !== 'rejected') {
-      return res.status(403).json({ error: 'Students may only withdraw (reject) their own applications.' });
+    // 'rejected' is still accepted so an older client build keeps working.
+    // Both mean the same act; only 'withdrawn' is stored, because a student
+    // leaving is not the same event as an organizer turning them down.
+    if (status !== 'withdrawn' && status !== 'rejected') {
+      return res.status(403).json({ error: 'Students may only withdraw their own applications.' });
     }
     try {
       const app = db.prepare(`
@@ -215,7 +223,8 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
         });
       }
 
-      db.prepare('UPDATE applications SET status = ? WHERE id = ?').run('rejected', appId);
+      db.prepare('UPDATE applications SET status = ?, waitlist_order = NULL WHERE id = ?')
+        .run('withdrawn', appId);
 
       if (wasConfirmed) {
         // Notify student releasing spot
@@ -246,7 +255,7 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
       return res.json({
         success: true,
         released: wasConfirmed,
-        application: { id: appId, status: 'rejected' }
+        application: { id: appId, status: 'withdrawn' }
       });
     } catch (err) {
       console.error('Withdraw error:', err);
