@@ -29,6 +29,10 @@ Task 6: complete (commits b00afa8..7d153b3, review clean)
   - Email verification live behind REQUIRE_EMAIL_VERIFICATION (default off).
   - Interrupted mid-flight by session limit; finished in a second pass.
 
+Task 7: complete (commits c2fc0e3..eebf6a0, review clean)
+  - Withdraw stores withdrawn; re-application revives the row. Status audit also
+    fixed CalendarView.jsx and EventModal.jsx mine-lookup (UI still blocked re-apply).
+
 ## Carry-forward findings (not in this plan — for the P1 plan / final review)
 - Test isolation relies on Vitest default isolate:true (no vitest.config.* exists).
   routes.verification.test.js runs flag-ON, routes.auth.test.js flag-OFF. Consider
