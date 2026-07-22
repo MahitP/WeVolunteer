@@ -17,9 +17,10 @@ const db = new DatabaseSync(dbPath);
  */
 function addColumnIfMissing(table, column, definition) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
-  if (columns.some(c => c.name === column)) return;
+  if (columns.some(c => c.name === column)) return false;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   console.log(`Migration: added ${table}.${column}`);
+  return true;
 }
 
 export function initDatabase() {
@@ -37,6 +38,9 @@ export function initDatabase() {
       bio TEXT,
       school TEXT,
       skills TEXT,
+      leaderboard_opt_in INTEGER DEFAULT 0,
+      username TEXT UNIQUE,
+      profile_visibility TEXT CHECK(profile_visibility IN ('private', 'friends', 'public')) DEFAULT 'private',
       created_at TEXT NOT NULL
     )
   `);
@@ -77,7 +81,7 @@ export function initDatabase() {
       user_id TEXT NOT NULL,
       event_id TEXT NOT NULL,
       slot_id TEXT NOT NULL,
-      status TEXT CHECK(status IN ('pending', 'accepted', 'waitlisted', 'rejected')) DEFAULT 'pending',
+      status TEXT CHECK(status IN ('pending', 'accepted', 'waitlisted', 'rejected', 'withdrawn')) DEFAULT 'pending',
       applied_at TEXT NOT NULL,
       waitlist_order INTEGER,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -139,6 +143,19 @@ export function initDatabase() {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS reports (
+      id TEXT PRIMARY KEY,
+      reporter_id TEXT NOT NULL,
+      target_type TEXT NOT NULL CHECK(target_type IN ('event', 'comment')),
+      target_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT DEFAULT 'open' CHECK(status IN ('open', 'resolved', 'dismissed')),
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(reporter_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
   // Announcements: one-way updates from the organizer to everyone signed up —
   // location changes, what to bring, weather calls. Deliberately not a
   // messaging system: no replies, no direct messages between users.
@@ -164,7 +181,26 @@ export function initDatabase() {
       selected_ids TEXT NOT NULL,
       waitlist_ids TEXT NOT NULL,
       is_confirmed INTEGER DEFAULT 0,
+      reason TEXT,
       FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
 
@@ -179,6 +215,46 @@ export function initDatabase() {
   addColumnIfMissing('events', 'attendee_visibility', "TEXT NOT NULL DEFAULT 'accepted'");
   addColumnIfMissing('applications', 'waitlist_order', 'INTEGER');
   addColumnIfMissing('events', 'selection_summary', 'TEXT');
+  addColumnIfMissing('auto_select_runs', 'reason', 'TEXT');
+  addColumnIfMissing('users', 'leaderboard_opt_in', 'INTEGER DEFAULT 0');
+  
+  const addedEmailVerified = addColumnIfMissing('users', 'email_verified', 'INTEGER DEFAULT 0');
+  if (addedEmailVerified) {
+    // Migrate existing users to be verified so they aren't locked out
+    db.exec('UPDATE users SET email_verified = 1');
+  }
+
+  // Migrate applications table to allow 'withdrawn' status
+  // SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we check if the schema has 'withdrawn'
+  const appSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='applications'").get();
+  if (appSchema && !appSchema.sql.includes("'withdrawn'")) {
+    console.log("Migrating 'applications' table to support 'withdrawn' status...");
+    db.exec(`
+      BEGIN TRANSACTION;
+      CREATE TABLE applications_new (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        slot_id TEXT NOT NULL,
+        status TEXT CHECK(status IN ('pending', 'accepted', 'waitlisted', 'rejected', 'withdrawn')) DEFAULT 'pending',
+        applied_at TEXT NOT NULL,
+        waitlist_order INTEGER,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+        FOREIGN KEY(slot_id) REFERENCES slots(id) ON DELETE CASCADE,
+        UNIQUE(user_id, slot_id)
+      );
+      INSERT INTO applications_new SELECT * FROM applications;
+      DROP TABLE applications;
+      ALTER TABLE applications_new RENAME TO applications;
+      COMMIT;
+    `);
+  }
+
+  // Pre-pilot social/profile prep
+  addColumnIfMissing('users', 'username', 'TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL');
+  addColumnIfMissing('users', 'profile_visibility', "TEXT CHECK(profile_visibility IN ('private', 'friends', 'public')) DEFAULT 'private'");
 
   // Indexes for performance
   db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read)`);

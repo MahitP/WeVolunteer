@@ -7,6 +7,7 @@ import { api } from '../utils/api';
 import { formatHours, formatDay, formatTimeRange, gradeLabel, countdown } from '../utils/helpers';
 import { DateChip } from '../components/Seats';
 import CertificateModal from '../components/CertificateModal';
+import { Link } from 'react-router-dom';
 
 const HOUR_GOAL = 25;
 
@@ -108,10 +109,17 @@ export default function VolunteerProfile({
             )}
           </div>
 
-          {isSelf && onEditProfile && (
-            <button className="btn btn-secondary btn-sm" onClick={onEditProfile}>
-              <Pencil size={13} /> Edit profile
-            </button>
+          {isSelf && (
+            <div className="row" style={{ gap: 8 }}>
+              <Link to="/portfolio" className="btn btn-secondary btn-sm">
+                <FileText size={13} /> Transcript
+              </Link>
+              {onEditProfile && (
+                <button className="btn btn-secondary btn-sm" onClick={onEditProfile}>
+                  <Pencil size={13} /> Edit profile
+                </button>
+              )}
+            </div>
           )}
         </div>
       </section>

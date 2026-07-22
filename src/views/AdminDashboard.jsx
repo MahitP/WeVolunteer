@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  UserCheck, UserX, Trash2, Search, ShieldCheck, Calendar
+  UserCheck, UserX, Trash2, Search, ShieldCheck, Calendar, Flag, CheckCircle
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { formatHours, formatDay, eventPermissions } from '../utils/helpers';
@@ -10,20 +10,23 @@ export default function AdminDashboard({ addToast }) {
   const [pendingOrganizers, setPendingOrganizers] = useState([]);
   const [events, setEvents] = useState([]);
   const [totals, setTotals] = useState(null);
+  const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [busyId, setBusyId] = useState(null);
 
   const loadData = async () => {
     try {
-      const [orgs, evts, stats] = await Promise.all([
+      const [orgs, evts, stats, rpts] = await Promise.all([
         api.apiFetch('/api/admin/organizers/pending'),
         api.fetchEvents(),
-        api.fetchAdminStats().catch(() => null)
+        api.fetchAdminStats().catch(() => null),
+        api.apiFetch('/api/admin/reports').catch(() => [])
       ]);
       setPendingOrganizers(orgs);
       setEvents(evts);
       setTotals(stats);
+      setReports(rpts);
     } catch (err) {
       addToast(`Could not load the review queue: ${err.message}`, 'error');
     } finally {
@@ -32,6 +35,22 @@ export default function AdminDashboard({ addToast }) {
   };
 
   useEffect(() => { loadData(); }, []);
+
+  const resolveReport = async (reportId, status) => {
+    setBusyId(reportId);
+    try {
+      await api.apiFetch(`/api/admin/reports/${reportId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status })
+      });
+      addToast(`Report marked as ${status}.`, 'success');
+      loadData();
+    } catch (err) {
+      addToast(`Failed to update report: ${err.message}`, 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const approve = async (org) => {
     setBusyId(org.id);
@@ -243,7 +262,77 @@ export default function AdminDashboard({ addToast }) {
         )}
       </section>
 
-      {/* ── Moderation ── */}
+      {/* ── Moderation Queue ── */}
+      <section>
+        <div className="section-head">
+          <h2>Moderation queue</h2>
+          {reports.filter(r => r.status === 'open').length > 0 && (
+            <span className="section-action tag tag-error">{reports.filter(r => r.status === 'open').length} waiting</span>
+          )}
+        </div>
+
+        {reports.length === 0 ? (
+          <div className="card empty">
+            <span className="empty-icon" style={{ background: 'var(--ok-tint)', color: 'var(--ok)' }}>
+              <Flag size={18} />
+            </span>
+            <h3>No reports</h3>
+            <p>Community reports will appear here for review.</p>
+          </div>
+        ) : (
+          <div className="stack">
+            {reports.map(report => (
+              <div key={report.id} className="card card-pad" style={{ opacity: report.status === 'resolved' || report.status === 'dismissed' ? 0.6 : 1 }}>
+                <div className="row-between row-wrap" style={{ gap: 'var(--s4)', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="row" style={{ gap: 'var(--s2)', marginBottom: 'var(--s1)' }}>
+                      <span className={`tag ${report.status === 'open' ? 'tag-error' : 'tag-ok'}`}>
+                        {report.status.toUpperCase()}
+                      </span>
+                      <span className="small strong capitalize">Reported {report.target_type}</span>
+                      <span className="small dim">{formatDay(report.created_at)}</span>
+                    </div>
+                    
+                    <div className="small" style={{ marginBottom: 'var(--s2)' }}>
+                      <span className="dim">Reported by: </span>
+                      <span className="strong">{report.reporter_name}</span> <span className="muted">({report.reporter_email})</span>
+                    </div>
+
+                    <div className="inset" style={{ marginBottom: 'var(--s3)', background: 'var(--surface-2)' }}>
+                      <div className="small strong" style={{ marginBottom: 4 }}>Target Content:</div>
+                      <p className="small muted">"{report.target_title}"</p>
+                    </div>
+
+                    <div className="small strong" style={{ marginBottom: 4 }}>Reason for report:</div>
+                    <p className="small">{report.reason}</p>
+                  </div>
+
+                  {report.status === 'open' && (
+                    <div className="row" style={{ gap: 'var(--s2)' }}>
+                      <button 
+                        className="btn btn-ghost btn-sm" 
+                        onClick={() => resolveReport(report.id, 'dismissed')}
+                        disabled={busyId === report.id}
+                      >
+                        Dismiss
+                      </button>
+                      <button 
+                        className="btn btn-primary btn-sm"
+                        onClick={() => resolveReport(report.id, 'resolved')}
+                        disabled={busyId === report.id}
+                      >
+                        <CheckCircle size={14} /> Resolve
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ── All events ── */}
       <section>
         <div className="section-head"><h2>All events</h2></div>
 

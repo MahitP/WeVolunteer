@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
+import { APP_NAME } from '../config';
   FileText, ArrowRight, Printer, X, Ban, Trophy, MapPin, CalendarCheck, History, ShieldCheck
 } from 'lucide-react';
 import { formatHours, formatDay, formatTimeRange, countdown } from '../utils/helpers';
@@ -42,7 +43,7 @@ export default function VolunteerDashboard({
   }, [myApps, events]);
 
   const upcoming = useMemo(() => mine
-    .filter(({ app }) => app.status === 'accepted' && new Date(app.slot?.endDatetime || 0) > new Date())
+    .filter(({ app, event }) => event.status !== 'cancelled' && app.status === 'accepted' && new Date(app.slot?.endDatetime || 0) > new Date())
     .sort((a, b) => new Date(a.slot?.startDatetime || 0) - new Date(b.slot?.startDatetime || 0)),
     [mine]);
 
@@ -101,6 +102,18 @@ export default function VolunteerDashboard({
           <button className="btn btn-secondary" onClick={() => onViewDetails(nextShift.event)}>
             View details
           </button>
+        </section>
+      ) : mine.length === 0 && totalHours === 0 ? (
+        <section className="card card-pad" style={{ background: 'var(--brand)', color: '#fff', border: 'none' }}>
+          <h2>Welcome to {APP_NAME}! 🎉</h2>
+          <p className="lead" style={{ marginTop: 8, color: 'rgba(255,255,255,0.9)', maxWidth: '60ch' }}>
+            This is your dashboard. Once you start signing up for events, your upcoming shifts and completed hours will appear here.
+          </p>
+          <div style={{ marginTop: 'var(--s4)' }}>
+            <button className="btn btn-primary" style={{ background: '#fff', color: 'var(--brand)' }} onClick={() => setActiveTab('browse')}>
+              Find your first opportunity <ArrowRight size={15} />
+            </button>
+          </div>
         </section>
       ) : (
         <section className="card card-pad row-between row-wrap" style={{ gap: 'var(--s4)' }}>

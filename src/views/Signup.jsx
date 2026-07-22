@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { api } from '../utils/api';
+import { APP_NAME } from '../config';
 import { AlertCircle, ArrowLeft } from 'lucide-react';
 
 const AVATARS = ['👤', '🧑‍💻', '👩‍⚕️', '🧑‍🎨', '👩‍🎓', '👩‍💼', '🦁', '🦉', '🦊', '🎨'];
 
 export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
   const [form, setForm] = useState({
-    name: '', email: '', password: '', role: 'student',
+    name: '', username: '', email: '', password: '', role: 'student',
     grade: '10', avatar: '👤', bio: '', school: '', skillsInput: ''
   });
   const [errors, setErrors] = useState({});
@@ -24,10 +25,17 @@ export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
   const validate = () => {
     const next = {};
     if (!form.name.trim()) next.name = 'Enter your full name';
+    
+    if (!form.username.trim()) next.username = 'Choose a username';
+    else if (form.username.length < 3 || form.username.length > 20) next.username = 'Must be between 3 and 20 characters';
+    else if (!/^[a-zA-Z0-9_]+$/.test(form.username)) next.username = 'Letters, numbers, and underscores only';
+    
     if (!form.email.trim()) next.email = 'Enter your email address';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) next.email = 'That doesn\'t look like an email address';
+    
     if (!form.password) next.password = 'Choose a password';
     else if (form.password.length < 6) next.password = 'Use at least 6 characters';
+    
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -39,6 +47,7 @@ export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
     try {
       const user = await api.signup({
         name: form.name,
+        username: form.username,
         email: form.email,
         password: form.password,
         role: form.role,
@@ -70,7 +79,7 @@ export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
         <div className="brand">
           <span className="brand-mark">SB</span>
           <span className="brand-text">
-            <span className="brand-name">SBVolunteers</span>
+            <span className="brand-name">{APP_NAME}</span>
             <span className="brand-sub">South Brunswick, NJ</span>
           </span>
         </div>
@@ -128,6 +137,17 @@ export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
               aria-invalid={!!errors.name} onChange={e => set('name', e.target.value)} required
             />
             {errors.name && <span className="field-error"><AlertCircle size={12} />{errors.name}</span>}
+          </div>
+
+          <div className="field">
+            <label htmlFor="su-username">Username</label>
+            <input
+              id="su-username" className="input" value={form.username} placeholder="alex_r"
+              aria-invalid={!!errors.username} onChange={e => set('username', e.target.value)} required
+            />
+            {errors.username
+              ? <span className="field-error"><AlertCircle size={12} />{errors.username}</span>
+              : <span className="field-hint">This will be your public alias. Avoid using your real name if you prefer privacy.</span>}
           </div>
 
           <div className="field">

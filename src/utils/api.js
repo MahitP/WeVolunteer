@@ -77,6 +77,33 @@ export const api = {
     return data.user;
   },
 
+  verifyEmail: async (token) => {
+    return apiFetch('/api/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ token })
+    });
+  },
+
+  resendVerification: async () => {
+    return apiFetch('/api/auth/resend-verification', {
+      method: 'POST'
+    });
+  },
+
+  forgotPassword: async (email) => {
+    return apiFetch('/api/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    });
+  },
+
+  resetPassword: async (token, password) => {
+    return apiFetch('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, password })
+    });
+  },
+
   logout: () => {
     localStorage.removeItem(STORAGE_KEYS.TOKEN);
     localStorage.removeItem(STORAGE_KEYS.USER);
@@ -145,9 +172,14 @@ export const api = {
     body: JSON.stringify({ status })
   }),
 
+  updateApplicationsBulk: async (applicationIds, status) => apiFetch(`/api/applications/bulk`, {
+    method: 'PATCH',
+    body: JSON.stringify({ applicationIds, status })
+  }),
+
   withdrawApplication: async (applicationId) => apiFetch(`/api/applications/${applicationId}`, {
     method: 'PATCH',
-    body: JSON.stringify({ status: 'rejected' })
+    body: JSON.stringify({ status: 'withdrawn' })
   }),
 
   // ── Attendance ──────────────────────────────────
@@ -213,6 +245,9 @@ export const api = {
   fetchFavorites: async () => apiFetch('/api/favorites'),
   toggleFavorite: async (eventId) => apiFetch(`/api/favorites/${eventId}`, { method: 'POST' }),
 
+  // ── Certificate Verification ─────────────────────
+  verifyCertificate: async (code) => apiFetch(`/api/certificates/verify/${encodeURIComponent(code)}`),
+
   // ── V2: Profile ────────────────────────────────
   updateProfile: async (patch) => apiFetch('/api/auth/profile', {
     method: 'PATCH',
@@ -229,6 +264,9 @@ export const api = {
   fetchAdminStats: async () => apiFetch('/api/admin/stats'),
   duplicateEvent: async (eventId) => apiFetch(`/api/events/${eventId}/duplicate`, { method: 'POST' }),
   fetchAutoSelectRuns: async (eventId) => apiFetch(`/api/events/${eventId}/auto-select/runs`),
-  runAutoSelect: async (eventId) => apiFetch(`/api/events/${eventId}/auto-select/run`, { method: 'POST' }),
+  runAutoSelect: async (eventId, reason = '') => apiFetch(`/api/events/${eventId}/auto-select/run`, { 
+    method: 'POST',
+    body: JSON.stringify({ reason }) 
+  }),
   confirmAutoSelect: async (eventId) => apiFetch(`/api/events/${eventId}/auto-select/confirm`, { method: 'POST' })
 };
