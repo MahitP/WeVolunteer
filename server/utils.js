@@ -139,7 +139,7 @@ export function runNotificationSweep() {
         AND e.application_deadline <= ?
         AND NOT EXISTS (
           SELECT 1 FROM applications a
-          WHERE a.event_id = e.id AND a.user_id = f.user_id AND a.status != 'rejected'
+          WHERE a.event_id = e.id AND a.user_id = f.user_id AND a.status NOT IN ('rejected', 'withdrawn')
         )
     `).all(now.toISOString(), in48h);
 
