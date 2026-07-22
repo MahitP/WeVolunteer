@@ -187,6 +187,116 @@ router.post('/api/events/:id/apply', authenticateToken, (req, res) => {
   }
 });
 
+// 8a. Bulk update application status (Organizer only).
+//
+// Registered BEFORE /api/applications/:id, because that route's :id parameter
+// would otherwise capture the literal "bulk". Mirrors the single-application
+// organizer branch below exactly — same allowed statuses, same ownership and
+// capacity rules — so the two cannot diverge. All writes happen in one
+// transaction; notifications and waitlist promotion run only after it commits,
+// because createNotification performs its own writes.
+router.patch('/api/applications/bulk', authenticateToken, (req, res) => {
+  if (req.user.role !== 'organizer') {
+    return res.status(403).json({ error: 'Access denied: Only organizers can manage application status' });
+  }
+
+  const { applicationIds, status } = req.body;
+
+  if (!Array.isArray(applicationIds) || applicationIds.length === 0) {
+    return res.status(400).json({ error: 'applicationIds must be a non-empty array' });
+  }
+  if (!['accepted', 'waitlisted', 'rejected'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status update. Must be accepted, waitlisted, or rejected.' });
+  }
+
+  try {
+    // Load every named application with its event owner. A missing id, or one on
+    // an event this organizer does not host, fails the whole request rather than
+    // applying part of it — a half-done bulk action is worse than a refused one.
+    const apps = [];
+    for (const id of applicationIds) {
+      const app = db.prepare(`
+        SELECT a.*, e.organizer_id, e.title as event_title, e.auto_approve
+        FROM applications a
+        JOIN events e ON a.event_id = e.id
+        WHERE a.id = ?
+      `).get(id);
+      if (!app) return res.status(404).json({ error: `Application not found: ${id}` });
+      if (app.organizer_id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied: You do not host this event' });
+      }
+      apps.push(app);
+    }
+
+    // When accepting, capacity is counted per slot across the whole batch so the
+    // combined effect can never overfill a slot — the single route only guards
+    // one at a time. Applications beyond a slot's remaining spots are skipped and
+    // reported, never accepted over capacity.
+    const applied = [];
+    const skipped = [];
+    const remainingBySlot = {};
+    if (status === 'accepted') {
+      for (const app of apps) {
+        if (remainingBySlot[app.slot_id] === undefined) {
+          const slot = db.prepare('SELECT max_spots FROM slots WHERE id = ?').get(app.slot_id);
+          const slotMaxSpots = slot ? slot.max_spots : 0;
+          const slotAccepted = db.prepare(`
+            SELECT COUNT(*) as count FROM applications
+            WHERE slot_id = ? AND status = 'accepted'
+          `).get(app.slot_id).count;
+          remainingBySlot[app.slot_id] = Math.max(0, slotMaxSpots - slotAccepted);
+        }
+      }
+    }
+
+    const promotions = [];
+    inTransaction(() => {
+      const update = db.prepare('UPDATE applications SET status = ? WHERE id = ?');
+      for (const app of apps) {
+        if (app.status === 'accepted' && status === 'accepted') {
+          // Already accepted — a no-op that must not consume a fresh spot.
+          skipped.push({ id: app.id, reason: 'already_accepted' });
+          continue;
+        }
+        if (status === 'accepted') {
+          if (remainingBySlot[app.slot_id] <= 0) {
+            skipped.push({ id: app.id, reason: 'slot_full' });
+            continue;
+          }
+          remainingBySlot[app.slot_id] -= 1;
+        }
+
+        const wasAccepted = app.status === 'accepted';
+        update.run(status, app.id);
+        applied.push({ id: app.id, status, userId: app.user_id, eventId: app.event_id, eventTitle: app.event_title });
+
+        if (wasAccepted && status !== 'accepted' && app.auto_approve === 1) {
+          promotions.push({ slotId: app.slot_id, eventId: app.event_id, eventTitle: app.event_title, organizerId: app.organizer_id });
+        }
+      }
+    });
+
+    // After the commit: fill any spots freed by a demotion, then notify.
+    for (const p of promotions) {
+      handleWaitlistPromotion(p.slotId, p.eventId, p.eventTitle, p.organizerId);
+    }
+    for (const a of applied) {
+      createNotification({
+        userId: a.userId,
+        kind: status === 'accepted' ? 'accepted' : status === 'waitlisted' ? 'waitlisted' : 'declined',
+        title: `Application ${status}`,
+        body: `Your application for "${a.eventTitle}" was ${status}.`,
+        link: `event:${a.eventId}`
+      });
+    }
+
+    res.json({ success: true, updated: applied.length, applied, skipped });
+  } catch (error) {
+    console.error('Bulk update app status error:', error);
+    res.status(500).json({ error: 'Internal server error updating applications' });
+  }
+});
+
 // 8. Update Application Status (Organizer: accept/waitlist/reject · Student: withdraw own)
 router.patch('/api/applications/:id', authenticateToken, (req, res) => {
   const appId = req.params.id;
