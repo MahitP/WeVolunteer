@@ -1030,13 +1030,20 @@ Expected: FAIL — the reset tests fail with 404 responses (`expected 404 to be 
 
 - [ ] **Step 3: Implement both routes**
 
-In `server/routes/authRoutes.js`, add `authLimiter` to the imports:
+**Do not import `authLimiter` into this router.** `app.js` imports the routers before it defines `authLimiter`, so `import { authLimiter } from '../app.js'` reads an uninitialised binding and the server dies at boot with `ReferenceError: Cannot access 'authLimiter' before initialization`.
+
+Rate limits are mounted by path in `app.js`, which already does exactly this for login and signup. Add two lines there, beside the existing pair:
 
 ```js
-import { authLimiter } from '../app.js';
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/signup', authLimiter);
+app.use('/api/auth/forgot-password', authLimiter);
+app.use('/api/auth/reset-password', authLimiter);
 ```
 
-Then add these two routes immediately after the `GET /api/auth/me` handler (after line 104):
+This keeps rate-limiting policy in one place and leaves the routers free of any dependency on `app.js`.
+
+Then add these two routes to `server/routes/authRoutes.js`, immediately after the `GET /api/auth/me` handler (after line 104) — note there is no `authLimiter` argument in the route signatures:
 
 ```js
 /**
@@ -1046,7 +1053,7 @@ Then add these two routes immediately after the `GET /api/auth/me` handler (afte
  * differing response here is an account-enumeration oracle, and this endpoint
  * is unauthenticated.
  */
-router.post('/api/auth/forgot-password', authLimiter, async (req, res) => {
+router.post('/api/auth/forgot-password', async (req, res) => {
   const { email } = req.body;
   const SAME_ANSWER = {
     success: true,
@@ -1080,7 +1087,7 @@ router.post('/api/auth/forgot-password', authLimiter, async (req, res) => {
 });
 
 /** Step 2: exchange the token for a new password. Single use. */
-router.post('/api/auth/reset-password', authLimiter, (req, res) => {
+router.post('/api/auth/reset-password', (req, res) => {
   const { token, password } = req.body;
 
   if (!token || !password) {
@@ -1289,11 +1296,17 @@ Then in the signup handler, immediately after the `const user = formatUserRespon
 
 - [ ] **Step 4: Implement both routes**
 
-Add after the reset-password route from Task 5:
+Rate-limit the new endpoint by path in `app.js`, beside the ones added in Task 5 — do **not** import `authLimiter` into the router (it creates a boot-time circular import):
+
+```js
+app.use('/api/auth/verify-email', authLimiter);
+```
+
+Then add these routes to `server/routes/authRoutes.js`, after the reset-password route from Task 5:
 
 ```js
 /** Confirms an address from the link in the welcome email. Single use. */
-router.post('/api/auth/verify-email', authLimiter, (req, res) => {
+router.post('/api/auth/verify-email', (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'Token is required' });
 
