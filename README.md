@@ -49,6 +49,9 @@ The "Reset DB" button in the demo bar (or `POST /api/auth/reset`) restores the s
 | `CORS_ORIGINS` | `http://localhost:5173,http://localhost:4173`  | Comma-separated allowlist of browser origins. Requests with no `Origin` header (curl, same-origin) always pass. |
 | `TRUST_PROXY`  | unset                                          | Set to the number of reverse proxies in front of the app (e.g. `1`) so rate limiting sees the real client IP. Leave unset when not behind a proxy — trusting `X-Forwarded-For` blindly lets clients bypass the limiter. |
 | `SBV_DB_PATH`  | `server/sbvolunteers.db`                       | Absolute path to the SQLite file. Used by tests; override in production to place the database on a backed-up volume. |
+| `REQUIRE_EMAIL_VERIFICATION` | `false`                          | When `true`, a new account must click a confirmation link before using the app. **Only turn this on once `SMTP_*` is configured** — without a working transport it locks every new user out. |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | unset | Transactional mail transport. With any of these unset, mail is printed to the server console instead of being sent. |
+| `APP_URL`      | `https://sbvolunteers.org` in production | Base URL used to build confirmation and password-reset links. |
 
 A minimal production start:
 
