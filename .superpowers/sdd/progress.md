@@ -37,9 +37,15 @@ Task 8: complete (commits 2887966..a5846ea, review clean)
   - Username persisted + case-insensitive uniqueness. Breaking signup change; both
     callers verified. migrate_usernames.js backfilled 31 users.
 
+Task 9: complete (commits cef83c0..b2556ca, review clean)
+  - Day-of check-in repaired; GET /api/events/:id added (staff-only); formatSlot shared.
+
 ## Carry-forward findings (not in this plan — for the P1 plan / final review)
 - Test isolation relies on Vitest default isolate:true (no vitest.config.* exists).
   routes.verification.test.js runs flag-ON, routes.auth.test.js flag-OFF. Consider
   pinning isolate:true explicitly so a future config cannot silently break both.
+- var(--brand-shade) referenced in CheckInView.jsx:202 and ApplicantReview.jsx:84 but
+  never defined in src/index.css (only --brand, --brand-tint, --brand-tint-2, --brand-ink).
+  Pre-existing. Found by Task 9 reviewer.
 - ReportModal.jsx:15 calls api.post('/reports', ...) which does not exist on the
   api object. Report/moderation submission is dead at runtime. Found by Task 1 reviewer.
