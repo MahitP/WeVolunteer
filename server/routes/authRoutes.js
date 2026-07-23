@@ -309,7 +309,16 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
     if (!row) return res.status(404).json({ error: 'Volunteer not found' });
 
     const isSelf = req.params.id === req.user.id;
-    const isStaff = req.user.role === 'admin' || req.user.role === 'organizer';
+
+    // Organizers only see contact/PII fields for students who have applied
+    // to an event they host — not for every student on the platform.
+    const hostsApplicant = req.user.role === 'organizer' && !!db.prepare(`
+      SELECT 1 FROM applications a
+      JOIN events e ON a.event_id = e.id
+      WHERE a.user_id = ? AND e.organizer_id = ?
+      LIMIT 1
+    `).get(req.params.id, req.user.id);
+    const canSeeContact = isSelf || req.user.role === 'admin' || hostsApplicant;
 
     const totals = db.prepare(`
       SELECT COALESCE(SUM(hours_awarded), 0) as hours,
@@ -361,21 +370,22 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
         id: row.id,
         name: row.name,
         avatar: row.avatar,
-        grade: row.grade,
-        bio: row.bio,
-        school: row.school,
+        grade: canSeeContact ? row.grade : null,
+        bio: canSeeContact ? row.bio : null,
+        school: canSeeContact ? row.school : null,
         skills: row.skills ? JSON.parse(row.skills) : [],
         joinedAt: row.created_at,
         // Contact details stay with the person and the adults coordinating them
-        email: isSelf || isStaff ? row.email : null
+        email: canSeeContact ? row.email : null
       },
       stats: {
         hours: Number(totals.hours) || 0,
         eventsCompleted: totals.events || 0,
         shiftsCompleted: totals.shifts || 0,
-        // The count alone carries no whereabouts, so staff may see it too — the
-        // array itself (event location, exact times) is self-only, below.
-        upcomingCount: isSelf || isStaff ? upcoming.length : 0,
+        // The count alone carries no whereabouts, so staff who legitimately
+        // see contact info may see it too — the array itself (event location,
+        // exact times) is self-only, below.
+        upcomingCount: isSelf || canSeeContact ? upcoming.length : 0,
         pendingCount
       },
       milestones: buildMilestones(Number(totals.hours) || 0, totals.events || 0),
