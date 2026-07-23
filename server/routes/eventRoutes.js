@@ -33,7 +33,7 @@ export function formatSlot(s, acceptedCount = 0) {
   };
 }
 
-router.get('/api/events', (req, res) => {
+router.get('/api/events', authenticateToken, (req, res) => {
   try {
     const events = db.prepare(`
       SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
@@ -41,7 +41,16 @@ router.get('/api/events', (req, res) => {
       FROM events e
       JOIN users u ON e.organizer_id = u.id
     `).all();
-    
+
+    // Arrival details (instructions) are only for people who are actually
+    // going, or who run the event — not the open internet, and not every
+    // other signed-in student. Batch-loaded once so the per-event mapping
+    // below stays free of an N+1.
+    const acceptedEventIds = new Set(
+      db.prepare("SELECT DISTINCT event_id FROM applications WHERE user_id = ? AND status = 'accepted'")
+        .all(req.user.id).map(r => r.event_id)
+    );
+
     // Batch-load slots and accepted counts once instead of per-event queries
     const slotsByEvent = new Map();
     for (const s of db.prepare('SELECT * FROM slots').all()) {
@@ -84,6 +93,10 @@ router.get('/api/events', (req, res) => {
         ? Number(formattedSlots.reduce((sum, s) => sum + s.hours, 0).toFixed(2))
         : 0;
 
+      const canSeeInstructions = req.user.role === 'admin' ||
+        event.organizer_id === req.user.id ||
+        acceptedEventIds.has(event.id);
+
       return {
         id: event.id,
         title: event.title,
@@ -96,7 +109,7 @@ router.get('/api/events', (req, res) => {
         maxSpots: maxSpots,
         spotsRemaining: spotsRemaining,
         applicationDeadline: event.application_deadline,
-        instructions: event.instructions || '',
+        instructions: canSeeInstructions ? (event.instructions || '') : '',
         organizerId: event.organizer_id,
         organizerName: event.organizer_name,
         organizerVerified: event.organizer_verified === 1,

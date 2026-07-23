@@ -13,7 +13,7 @@ describe('applications: withdrawal and re-application', () => {
 
   beforeAll(async () => {
     studentToken = await srv.login('leo.chen28@gmail.com');
-    const events = (await srv.call('GET', '/api/events')).body;
+    const events = (await srv.call('GET', '/api/events', undefined, studentToken)).body;
     const ev = events.find(e => e.status === 'open' && e.slots.length > 0);
     eventId = ev.id;
     slotId = ev.slots.find(s => s.spotsRemaining > 0).id;
@@ -77,7 +77,7 @@ describe('applications: bulk organizer actions', () => {
       slots: [{ name: 'Shift', description: 'd', startDatetime: future, endDatetime: futureEnd, maxSpots }]
     }, orgToken);
     const evId = mk.body.id;
-    const slot = (await srv.call('GET', '/api/events')).body.find(e => e.id === evId).slots[0];
+    const slot = (await srv.call('GET', '/api/events', undefined, orgToken)).body.find(e => e.id === evId).slots[0];
     const ids = [];
     for (const email of applicants) {
       const tok = await srv.login(email);
@@ -146,7 +146,7 @@ describe('applications: bulk organizer actions', () => {
       slots: [{ name: 'S', description: 'd', startDatetime: future, endDatetime: new Date(Date.now() + 30 * 864e5 + 108e5).toISOString(), maxSpots: 3 }]
     }, otherOrg);
     const foreignEv = mk.body.id;
-    const foreignSlot = (await srv.call('GET', '/api/events')).body.find(e => e.id === foreignEv).slots[0].id;
+    const foreignSlot = (await srv.call('GET', '/api/events', undefined, otherOrg)).body.find(e => e.id === foreignEv).slots[0].id;
     const stu = await srv.login('colin.carbin29@outlook.com');
     await srv.call('POST', `/api/events/${foreignEv}/apply`, { slotId: foreignSlot }, stu);
     const foreignApp = (await srv.call('GET', '/api/applications', undefined, otherOrg)).body
@@ -191,7 +191,7 @@ describe('applications: an organizer cannot reactivate a withdrawn application (
       slots: [{ name: 'Shift', description: 'd', startDatetime: future, endDatetime: new Date(Date.now() + 40 * 864e5 + 108e5).toISOString(), maxSpots: 3 }]
     }, orgToken);
     evId = mk.body.id;
-    const slot = (await srv.call('GET', '/api/events')).body.find(e => e.id === evId).slots[0];
+    const slot = (await srv.call('GET', '/api/events', undefined, orgToken)).body.find(e => e.id === evId).slots[0];
     await srv.call('POST', `/api/events/${evId}/apply`, { slotId: slot.id }, studentToken);
     appId = (await srv.call('GET', '/api/applications', undefined, orgToken)).body.find(a => a.eventId === evId).id;
     await srv.call('PATCH', `/api/applications/${appId}`, { status: 'accepted' }, orgToken);
@@ -221,7 +221,7 @@ describe('applications: an organizer cannot reactivate a withdrawn application (
     await seedWithdrawn();
     // Add a second, live application to the same batch to prove atomicity.
     const other = await srv.login('priya.patel.nhs@outlook.com');
-    const slot = (await srv.call('GET', '/api/events')).body.find(e => e.id === evId).slots[0];
+    const slot = (await srv.call('GET', '/api/events', undefined, orgToken)).body.find(e => e.id === evId).slots[0];
     await srv.call('POST', `/api/events/${evId}/apply`, { slotId: slot.id }, other);
     const liveApp = (await srv.call('GET', '/api/applications', undefined, orgToken)).body
       .find(a => a.eventId === evId && a.status === 'pending');
@@ -238,7 +238,7 @@ describe('applications: an organizer cannot reactivate a withdrawn application (
 
   it('still lets the student re-apply themselves', async () => {
     await seedWithdrawn();
-    const slot = (await srv.call('GET', '/api/events')).body.find(e => e.id === evId).slots[0];
+    const slot = (await srv.call('GET', '/api/events', undefined, orgToken)).body.find(e => e.id === evId).slots[0];
     const res = await srv.call('POST', `/api/events/${evId}/apply`, { slotId: slot.id }, studentToken);
     expect(res.status).toBe(201);
     expect(await currentStatus()).toBe('pending');

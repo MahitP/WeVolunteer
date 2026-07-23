@@ -227,3 +227,100 @@ describe('leaderboard privacy', () => {
     expect(boardAfterOptOut.body.map(r => r.id)).not.toContain('user-student-2');
   });
 });
+
+// Task 6: GET /api/events requires auth and scopes `instructions` to accepted
+// volunteers/staff; announcements are gated the same way `attendees` already is.
+describe('privacy: event listing requires auth and scopes instructions', () => {
+  let leoToken, priyaToken, hostingOrgToken, adminToken;
+
+  // Seeded event-softball has app-sb-6 (Leo, accepted) and app-sb-10 (Priya,
+  // pending — not accepted). The seed script leaves `instructions` null, so
+  // we set real text directly in the DB (the same pattern the leaderboard
+  // tests above use) rather than re-litigating the seed data itself.
+  const SOFTBALL_INSTRUCTIONS = 'Enter through the west gate and check in at the snack shack table.';
+
+  beforeAll(async () => {
+    leoToken = await srv.login('leo.chen28@gmail.com');
+    priyaToken = await srv.login('priya.patel.nhs@outlook.com');
+    hostingOrgToken = await srv.login('jkatzenback@vikings.org');
+    adminToken = await srv.login('admin@sbvolunteers.gov');
+
+    const rawDb = new DatabaseSync(process.env.SBV_DB_PATH);
+    try {
+      rawDb.prepare("UPDATE events SET instructions = ? WHERE id = 'event-softball'").run(SOFTBALL_INSTRUCTIONS);
+    } finally {
+      rawDb.close();
+    }
+  });
+
+  it('requires a token for GET /api/events', async () => {
+    const res = await srv.call('GET', '/api/events');
+    expect(res.status).toBe(401);
+  });
+
+  it('blanks instructions for a signed-in student who is not accepted (Priya, pending)', async () => {
+    const res = await srv.call('GET', '/api/events', undefined, priyaToken);
+    expect(res.status).toBe(200);
+    const softball = res.body.find(e => e.id === 'event-softball');
+    expect(softball).toBeTruthy();
+    expect(softball.instructions).toBe('');
+  });
+
+  it('reveals real instructions to an accepted student (Leo)', async () => {
+    const res = await srv.call('GET', '/api/events', undefined, leoToken);
+    expect(res.status).toBe(200);
+    const softball = res.body.find(e => e.id === 'event-softball');
+    expect(softball.instructions).toBe(SOFTBALL_INSTRUCTIONS);
+  });
+
+  it('reveals real instructions to the hosting organizer', async () => {
+    const res = await srv.call('GET', '/api/events', undefined, hostingOrgToken);
+    expect(res.status).toBe(200);
+    const softball = res.body.find(e => e.id === 'event-softball');
+    expect(softball.instructions).toBe(SOFTBALL_INSTRUCTIONS);
+  });
+
+  it('reveals real instructions to an admin', async () => {
+    const res = await srv.call('GET', '/api/events', undefined, adminToken);
+    expect(res.status).toBe(200);
+    const softball = res.body.find(e => e.id === 'event-softball');
+    expect(softball.instructions).toBe(SOFTBALL_INSTRUCTIONS);
+  });
+});
+
+describe('privacy: event announcements gated to accepted volunteers and staff', () => {
+  let leoToken, priyaToken, hostingOrgToken, adminToken;
+
+  beforeAll(async () => {
+    leoToken = await srv.login('leo.chen28@gmail.com');
+    priyaToken = await srv.login('priya.patel.nhs@outlook.com');
+    hostingOrgToken = await srv.login('jkatzenback@vikings.org');
+    adminToken = await srv.login('admin@sbvolunteers.gov');
+  });
+
+  it('returns an empty array to a not-accepted (pending) student', async () => {
+    const res = await srv.call('GET', '/api/events/event-softball/announcements', undefined, priyaToken);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('returns the real announcements to an accepted student (Leo)', async () => {
+    const res = await srv.call('GET', '/api/events/event-softball/announcements', undefined, leoToken);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.length).toBeGreaterThan(0);
+    expect(res.body.map(a => a.id)).toContain('ann-1');
+  });
+
+  it('returns the real announcements to the hosting organizer', async () => {
+    const res = await srv.call('GET', '/api/events/event-softball/announcements', undefined, hostingOrgToken);
+    expect(res.status).toBe(200);
+    expect(res.body.map(a => a.id)).toContain('ann-1');
+  });
+
+  it('returns the real announcements to an admin', async () => {
+    const res = await srv.call('GET', '/api/events/event-softball/announcements', undefined, adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.map(a => a.id)).toContain('ann-1');
+  });
+});

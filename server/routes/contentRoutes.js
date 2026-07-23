@@ -205,6 +205,21 @@ router.get('/api/events/:id/attendees', authenticateToken, (req, res) => {
 
 router.get('/api/events/:id/announcements', authenticateToken, (req, res) => {
   try {
+    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const isStaff = req.user.role === 'admin' ||
+      (req.user.role === 'organizer' && event.organizer_id === req.user.id);
+
+    if (!isStaff) {
+      const mine = db.prepare(`
+        SELECT 1 FROM applications
+        WHERE event_id = ? AND user_id = ? AND status = 'accepted'
+      `).get(req.params.id, req.user.id);
+
+      if (!mine) return res.json([]);
+    }
+
     const rows = db.prepare(`
       SELECT n.*, u.name as author_name, u.avatar as author_avatar, u.role as author_role
       FROM event_announcements n
