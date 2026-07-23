@@ -16,10 +16,14 @@ export function authenticateToken(req, res, next) {
     // trusting the (up to 7-day-old) token payload, so a deleted user's
     // token stops working and a role/email change takes effect immediately.
     const userRow = db.prepare(
-      'SELECT id, role, email, name, email_verified FROM users WHERE id = ?'
+      'SELECT id, role, email, name, email_verified, token_version FROM users WHERE id = ?'
     ).get(decodedUser.id);
 
     if (!userRow) return res.status(401).json({ error: 'Account no longer exists' });
+
+    if ((decodedUser.tokenVersion ?? 0) !== userRow.token_version) {
+      return res.status(401).json({ error: 'Session expired, please sign in again' });
+    }
 
     req.user = {
       id: userRow.id,

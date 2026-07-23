@@ -86,7 +86,7 @@ router.post('/api/auth/signup', (req, res) => {
         console.error('Verification email failed to send:', err)
       );
     }
-    const token = jwt.sign({ id: user.id, role: user.role, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.id, role: user.role, email: user.email, name: user.name, tokenVersion: userRow.token_version ?? 0 }, JWT_SECRET, { expiresIn: '7d' });
 
     res.status(201).json({ user, token });
   } catch (error) {
@@ -120,7 +120,7 @@ router.post('/api/auth/login', (req, res) => {
     }
 
     const user = formatUserResponse(userRow);
-    const token = jwt.sign({ id: user.id, role: user.role, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.id, role: user.role, email: user.email, name: user.name, tokenVersion: userRow.token_version ?? 0 }, JWT_SECRET, { expiresIn: '7d' });
 
     res.json({ user, token });
   } catch (error) {
@@ -207,7 +207,7 @@ router.post('/api/auth/reset-password', (req, res) => {
     const passwordHash = bcrypt.hashSync(password, bcrypt.genSaltSync(10));
 
     inTransaction(() => {
-      db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, row.user_id);
+      db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?').run(passwordHash, row.user_id);
       db.prepare('DELETE FROM password_reset_tokens WHERE token = ?').run(token);
     });
 
