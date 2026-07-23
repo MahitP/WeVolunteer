@@ -11,7 +11,23 @@ export function authenticateToken(req, res, next) {
 
   jwt.verify(token, JWT_SECRET, (err, decodedUser) => {
     if (err) return res.status(403).json({ error: 'Invalid or expired token' });
-    req.user = decodedUser;
+
+    // Re-derive identity from the database on every request rather than
+    // trusting the (up to 7-day-old) token payload, so a deleted user's
+    // token stops working and a role/email change takes effect immediately.
+    const userRow = db.prepare(
+      'SELECT id, role, email, name, email_verified FROM users WHERE id = ?'
+    ).get(decodedUser.id);
+
+    if (!userRow) return res.status(401).json({ error: 'Account no longer exists' });
+
+    req.user = {
+      id: userRow.id,
+      role: userRow.role,
+      email: userRow.email,
+      name: userRow.name,
+      email_verified: userRow.email_verified
+    };
     next();
   });
 }
