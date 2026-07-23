@@ -128,6 +128,30 @@ describe('auto-select: deadline guard, re-draw reasons, and draw cap', () => {
     expect(ev.selectionSummary.runCount).toBe(2);
     expect(ev.selectionSummary.redrawReasons).toEqual([secondReason]);
   });
+
+  it('exposes the re-draw reason on the runs audit endpoint before confirmation', async () => {
+    const seeded = await seedDrawEvent(1, applicants);
+    const evId2 = seeded.evId;
+    const orgToken2 = seeded.orgToken;
+    pushDeadlineToPast(evId2);
+
+    const first = await srv.call('POST', `/api/events/${evId2}/auto-select/run`, {}, orgToken2);
+    expect(first.status).toBe(200);
+
+    const redrawReason = 'wrong shift assigned';
+    const second = await srv.call('POST', `/api/events/${evId2}/auto-select/run`, { reason: redrawReason }, orgToken2);
+    expect(second.status).toBe(200);
+
+    const runs = await srv.call('GET', `/api/events/${evId2}/auto-select/runs`, undefined, orgToken2);
+    expect(runs.status).toBe(200);
+    expect(Array.isArray(runs.body)).toBe(true);
+    expect(runs.body.length).toBe(2);
+
+    const run1 = runs.body.find(r => r.runNumber === 1);
+    const run2 = runs.body.find(r => r.runNumber === 2);
+    expect(run1.reason).toBeNull();
+    expect(run2.reason).toBe(redrawReason);
+  });
 });
 
 describe('auto-select: deterministic seeded draw', () => {

@@ -708,7 +708,8 @@ router.get('/api/events/:id/auto-select/runs', authenticateToken, (req, res) => 
       createdAt: run.created_at,
       isConfirmed: run.is_confirmed === 1,
       selectedIds: JSON.parse(run.selected_ids),
-      waitlistIds: JSON.parse(run.waitlist_ids)
+      waitlistIds: JSON.parse(run.waitlist_ids),
+      reason: run.reason ?? null
     }));
 
     res.json(formattedRuns);
