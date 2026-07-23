@@ -7,7 +7,8 @@ describe('route test harness', () => {
   afterAll(async () => { await srv.close(); });
 
   it('serves the seeded events list', async () => {
-    const res = await srv.call('GET', '/api/events');
+    const token = await srv.login('leo.chen28@gmail.com');
+    const res = await srv.call('GET', '/api/events', undefined, token);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeGreaterThan(0);
