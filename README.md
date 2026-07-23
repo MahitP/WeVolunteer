@@ -95,6 +95,20 @@ It derives a unique username per user from their name/email and skips anyone
 who already has one, so it is safe to re-run. New sign-ups collect a username
 at registration and do not need it.
 
+**Back up the database before the first boot on new code.** Boot applies the
+migrations above automatically, and the case-insensitive email dedupe
+(introduced with the `idx_users_email_nocase` index) may rewrite the email of a
+duplicate account on a database that predates case-insensitive uniqueness. It is
+non-destructive — it never deletes a user or touches attendance/hours, only
+renames the lower-hours account of a duplicate pair to `local+dup-<rowid>@domain`
+and logs every change — and it is a no-op on data with no case-collisions. Still,
+take a copy of the SQLite file (and its `-wal`/`-shm` sidecars if present) before
+deploying, so any dedupe rename can be reviewed and reversed by hand:
+
+```bash
+cp server/sbvolunteers.db "sbvolunteers.$(date +%F).bak.db"
+```
+
 ### Client
 
 | Env var           | Default | Purpose |
