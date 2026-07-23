@@ -29,6 +29,23 @@ describe('auth: email verification state', () => {
     expect(res.status).toBe(201);
     expect(res.body.user.emailVerified).toBe(true);
   });
+
+  it('does not block an unverified user when the flag is off (anti-lockout)', async () => {
+    const res = await srv.call('POST', '/api/auth/signup', {
+      email: 'unverified.flagoff@example.org', password: 'password123',
+      name: 'Unverified Flag Off', role: 'student', grade: '10', username: 'unverified_flagoff'
+    });
+    expect(res.status).toBe(201);
+
+    // Flag-off signup marks the account verified by design, so force it back
+    // to unverified directly in the DB to simulate a historical/edge-case row.
+    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    db.prepare('UPDATE users SET email_verified = 0 WHERE id = ?').run(res.body.user.id);
+    db.close();
+
+    const apps = await srv.call('GET', '/api/applications', undefined, res.body.token);
+    expect(apps.status).toBe(200);
+  });
 });
 
 describe('auth: password reset', () => {

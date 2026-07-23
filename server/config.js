@@ -33,3 +33,13 @@ export const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:51
  * Task 6 / README).
  */
 export const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION === 'true';
+
+// Paths an authenticated-but-unverified user may still reach when
+// REQUIRE_EMAIL_VERIFICATION is on: enough to see their own account and finish
+// verifying. Deliberately minimal — no action routes, no other users' data.
+export const EMAIL_GATE_ALLOWLIST = [
+  '/api/auth/me',
+  '/api/auth/verify-email',
+  '/api/auth/resend-verification',
+  '/api/notifications'
+];
