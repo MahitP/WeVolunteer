@@ -468,19 +468,18 @@ router.get('/api/stats/organizer', authenticateToken, (req, res) => {
 router.get('/api/leaderboard', authenticateToken, (req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT u.id, u.name, u.avatar, u.school, u.grade,
+      SELECT u.id, u.name, u.avatar,
              COALESCE(SUM(a.hours_awarded), 0) as hours,
              COUNT(DISTINCT a.slot_id) as shifts
       FROM users u
       LEFT JOIN attendance a ON a.user_id = u.id AND a.present = 1
-      WHERE u.role = 'student'
+      WHERE u.role = 'student' AND u.leaderboard_opt_in = 1
       GROUP BY u.id
       ORDER BY hours DESC, shifts DESC
       LIMIT 25
     `).all();
     res.json(rows.map((r, i) => ({
       rank: i + 1, id: r.id, name: r.name, avatar: r.avatar,
-      school: r.school, grade: r.grade,
       hours: Number(r.hours), shifts: r.shifts
     })));
   } catch (err) {

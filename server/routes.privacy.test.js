@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
 import { startTestServer } from './testServer.js';
 
 // One server for the whole file (Tasks 5 and 6 append more describes below).
@@ -138,5 +139,91 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
     expect(res.body.volunteer.name).toBe('Priya Patel');
     expect(typeof res.body.stats.hours).toBe('number');
     expect(Array.isArray(res.body.completed)).toBe(true);
+  });
+});
+
+describe('leaderboard privacy', () => {
+  let leoToken;
+  const SEEDED_STUDENT_IDS = ['user-student-1', 'user-student-2', 'user-student-3'];
+
+  beforeAll(async () => {
+    leoToken = await srv.login('leo.chen28@gmail.com');
+  });
+
+  it('is empty of seeded students while everyone defaults to leaderboard_opt_in = 0', async () => {
+    const res = await srv.call('GET', '/api/leaderboard', undefined, leoToken);
+    expect(res.status).toBe(200);
+    const ids = res.body.map(r => r.id);
+    for (const seededId of SEEDED_STUDENT_IDS) {
+      expect(ids).not.toContain(seededId);
+    }
+  });
+
+  it('shows a student once leaderboard_opt_in is set to 1 directly in the DB', async () => {
+    const rawDb = new DatabaseSync(process.env.SBV_DB_PATH);
+    try {
+      rawDb.prepare("UPDATE users SET leaderboard_opt_in = 1 WHERE id = 'user-student-3'").run();
+    } finally {
+      rawDb.close();
+    }
+
+    const res = await srv.call('GET', '/api/leaderboard', undefined, leoToken);
+    expect(res.status).toBe(200);
+    const ids = res.body.map(r => r.id);
+    expect(ids).toContain('user-student-3');
+
+    // Reset so this test doesn't leak state into the others below.
+    const rawDb2 = new DatabaseSync(process.env.SBV_DB_PATH);
+    try {
+      rawDb2.prepare("UPDATE users SET leaderboard_opt_in = 0 WHERE id = 'user-student-3'").run();
+    } finally {
+      rawDb2.close();
+    }
+  });
+
+  it('never returns school or grade on leaderboard rows', async () => {
+    const rawDb = new DatabaseSync(process.env.SBV_DB_PATH);
+    try {
+      rawDb.prepare("UPDATE users SET leaderboard_opt_in = 1 WHERE id = 'user-student-3'").run();
+    } finally {
+      rawDb.close();
+    }
+
+    const res = await srv.call('GET', '/api/leaderboard', undefined, leoToken);
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBeGreaterThan(0);
+    for (const row of res.body) {
+      expect(row).not.toHaveProperty('school');
+      expect(row).not.toHaveProperty('grade');
+    }
+
+    const rawDb2 = new DatabaseSync(process.env.SBV_DB_PATH);
+    try {
+      rawDb2.prepare("UPDATE users SET leaderboard_opt_in = 0 WHERE id = 'user-student-3'").run();
+    } finally {
+      rawDb2.close();
+    }
+  });
+
+  it('round-trips the opt-in through PATCH /api/auth/profile (the write-path guard)', async () => {
+    const priyaToken = await srv.login('priya.patel.nhs@outlook.com');
+
+    // Opt in.
+    const optInRes = await srv.call('PATCH', '/api/auth/profile', { leaderboardOptIn: true }, priyaToken);
+    expect(optInRes.status).toBe(200);
+    expect(optInRes.body.user.leaderboardOptIn).toBe(true);
+
+    const boardAfterOptIn = await srv.call('GET', '/api/leaderboard', undefined, leoToken);
+    expect(boardAfterOptIn.status).toBe(200);
+    expect(boardAfterOptIn.body.map(r => r.id)).toContain('user-student-2');
+
+    // Opt back out.
+    const optOutRes = await srv.call('PATCH', '/api/auth/profile', { leaderboardOptIn: false }, priyaToken);
+    expect(optOutRes.status).toBe(200);
+    expect(optOutRes.body.user.leaderboardOptIn).toBe(false);
+
+    const boardAfterOptOut = await srv.call('GET', '/api/leaderboard', undefined, leoToken);
+    expect(boardAfterOptOut.status).toBe(200);
+    expect(boardAfterOptOut.body.map(r => r.id)).not.toContain('user-student-2');
   });
 });
