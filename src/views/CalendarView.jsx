@@ -81,7 +81,7 @@ export default function CalendarView({ currentUser, events = [], applications = 
     }
 
     // Deadlines for open events the student has not yet applied to
-    const appliedIds = new Set(mine.filter(a => a.status !== 'rejected').map(a => a.eventId));
+    const appliedIds = new Set(mine.filter(a => a.status !== 'rejected' && a.status !== 'withdrawn').map(a => a.eventId));
     for (const event of events) {
       if (event.status !== 'open' || appliedIds.has(event.id)) continue;
       if (new Date(event.applicationDeadline) < new Date()) continue;

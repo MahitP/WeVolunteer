@@ -4,10 +4,12 @@ import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import { createHoursLedgerTable, backfillHoursLedger, verifyLedgerParity } from './hoursLedger.js';
 import { createCheckinTable } from './attendance.js';
+import { DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dbPath = path.join(__dirname, 'sbvolunteers.db');
+// SBV_DB_PATH lets tests point at a throwaway file. Unset in normal operation.
+const dbPath = process.env.SBV_DB_PATH || path.join(__dirname, 'sbvolunteers.db');
 
 const db = new DatabaseSync(dbPath);
 
@@ -21,6 +23,77 @@ function addColumnIfMissing(table, column, definition) {
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   console.log(`Migration: added ${table}.${column}`);
   return true;
+}
+
+/**
+ * Reconciles pre-existing case-variant email duplicates (F-11) before the
+ * case-insensitive unique index is created.
+ *
+ * A fresh seeded database has zero case-insensitive collisions, so this is a
+ * no-op there — it only does work defensively, against a production database
+ * that already has duplicates from the case-sensitive era.
+ *
+ * For each colliding group, the account with the most CREDITED hours
+ * (attendance.present = 1) survives unchanged; ties broken by oldest
+ * created_at, then lowest rowid. Every other account in the group is
+ * RENAMED (never merged, never deleted) to a reserved `local+dup-<rowid>@domain`
+ * form and has its token_version bumped so its existing sessions drop. No
+ * user_id ever changes, no application/attendance row is ever moved, and no
+ * user is ever deleted — merging risks colliding with attendance's
+ * PRIMARY KEY(slot_id, user_id) / applications' UNIQUE(user_id, slot_id), and
+ * deleting would cascade away the account's credited hours. The renamed
+ * account's records stay intact-but-parked for an admin to reconcile by hand.
+ */
+function dedupeCaseInsensitiveEmails(db) {
+  const groups = db.prepare(
+    'SELECT LOWER(email) AS key FROM users GROUP BY key HAVING COUNT(*) > 1'
+  ).all();
+  if (groups.length === 0) return;
+
+  db.exec('BEGIN TRANSACTION');
+  try {
+    const hoursForUser = db.prepare(
+      'SELECT COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ? AND present = 1'
+    );
+    const renameStmt = db.prepare(
+      'UPDATE users SET email = ?, token_version = token_version + 1 WHERE rowid = ?'
+    );
+
+    for (const { key } of groups) {
+      const members = db.prepare(
+        'SELECT rowid, id, email, created_at FROM users WHERE LOWER(email) = ?'
+      ).all(key);
+
+      const withHours = members.map(m => ({
+        ...m,
+        hours: hoursForUser.get(m.id).hours
+      }));
+
+      // Survivor: most credited hours, then oldest created_at, then lowest rowid.
+      withHours.sort((a, b) => {
+        if (b.hours !== a.hours) return b.hours - a.hours;
+        if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+        return a.rowid - b.rowid;
+      });
+      const survivor = withHours[0];
+
+      for (const member of withHours) {
+        if (member.rowid === survivor.rowid) continue;
+
+        const at = member.email.lastIndexOf('@');
+        const newEmail = at === -1
+          ? `${member.email}+dup-${member.rowid}`
+          : `${member.email.slice(0, at)}+dup-${member.rowid}${member.email.slice(at)}`;
+
+        renameStmt.run(newEmail, member.rowid);
+        console.log(`[Email dedupe] ${member.email} -> ${newEmail} (id ${member.id})`);
+      }
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
+    throw err;
+  }
 }
 
 export function initDatabase() {
@@ -217,10 +290,15 @@ export function initDatabase() {
   addColumnIfMissing('events', 'selection_summary', 'TEXT');
   addColumnIfMissing('auto_select_runs', 'reason', 'TEXT');
   addColumnIfMissing('users', 'leaderboard_opt_in', 'INTEGER DEFAULT 0');
-  
+  addColumnIfMissing('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');
+
   const addedEmailVerified = addColumnIfMissing('users', 'email_verified', 'INTEGER DEFAULT 0');
   if (addedEmailVerified) {
-    // Migrate existing users to be verified so they aren't locked out
+    // The first time this column exists, every current account predates email
+    // verification — none of their 0s is a real pending confirmation. Backfill
+    // them verified regardless of REQUIRE_EMAIL_VERIFICATION, or enabling
+    // verification on an existing database would lock out every current user.
+    // This runs before seeding, so on a fresh database it touches no rows.
     db.exec('UPDATE users SET email_verified = 1');
   }
 
@@ -256,6 +334,15 @@ export function initDatabase() {
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL');
   addColumnIfMissing('users', 'profile_visibility', "TEXT CHECK(profile_visibility IN ('private', 'friends', 'public')) DEFAULT 'private'");
 
+  // F-11: email uniqueness was case-sensitive while forgot-password already
+  // matched COLLATE NOCASE, so one person could hold leo@x and Leo@x with
+  // service hours split across them. Reconcile any pre-existing case-variant
+  // duplicates BEFORE the unique index is created below — CREATE UNIQUE INDEX
+  // would otherwise fail (or silently forbid) on a database that already has
+  // colliding rows.
+  dedupeCaseInsensitiveEmails(db);
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_nocase ON users(email COLLATE NOCASE)');
+
   // Indexes for performance
   db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_comments_event ON event_comments(event_id, created_at)`);
@@ -277,14 +364,28 @@ export function initDatabase() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_events_organizer ON events(organizer_id)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_event ON attendance(event_id)`);
 
-  // Only seed if the database is empty
+  // Seed data is a demo affordance, never a production one: the seed accounts
+  // share a password that is printed in the README. A real deployment comes up
+  // empty, and its first admin is made with `node bin/make-admin.mjs <email>`
+  // after that person has signed up normally.
   const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get();
-  if (userCount.count === 0) {
+  if (userCount.count > 0) {
+    console.log('Database already initialized.');
+  } else if (DEMO_MODE) {
     console.log('Seeding database...');
     seedDatabase();
     console.log('Seeding complete.');
   } else {
-    console.log('Database already initialized.');
+    console.log('Empty database initialized. DEMO_MODE is off, so no demo accounts were created.');
+  }
+
+  if (!REQUIRE_EMAIL_VERIFICATION) {
+    // Runs after seeding: freshly seeded/inserted rows default to
+    // email_verified = 0, and nothing to confirm while the feature is off, so
+    // a stale 0 would put an otherwise-fine account behind a wall it cannot
+    // get past. Idempotent, and it stops applying the moment verification is
+    // switched on.
+    db.exec('UPDATE users SET email_verified = 1 WHERE email_verified = 0');
   }
 
   // Check-in marks taken during an event. Separate from `attendance` so that

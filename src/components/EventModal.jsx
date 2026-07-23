@@ -989,7 +989,10 @@ export default function EventModal({
                           </div>
 
                           {slots.map(slot => {
-                            const mine = eventApps.find(a => a.slotId === slot.id && a.userId === currentUser?.id);
+                            // A withdrawn application is not a live one — treat it like no
+                            // application so the slot goes back to offering "Request",
+                            // matching the server allowing re-application over it.
+                            const mine = eventApps.find(a => a.slotId === slot.id && a.userId === currentUser?.id && a.status !== 'withdrawn');
                             const isFull = slot.spotsRemaining <= 0;
                             const isSelected = selectedSlots.includes(slot.id);
                             const acceptedHere = eventApps.filter(a => a.slotId === slot.id && a.status === 'accepted');

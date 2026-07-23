@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
-import { VALID_GRADES } from '../server.js';
+import { VALID_GRADES } from '../config.js';
 import { createRandom, performWeightedSelection } from '../weighting.js';
 import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion, certificateCode } from '../utils.js';
@@ -205,6 +205,21 @@ router.get('/api/events/:id/attendees', authenticateToken, (req, res) => {
 
 router.get('/api/events/:id/announcements', authenticateToken, (req, res) => {
   try {
+    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const isStaff = req.user.role === 'admin' ||
+      (req.user.role === 'organizer' && event.organizer_id === req.user.id);
+
+    if (!isStaff) {
+      const mine = db.prepare(`
+        SELECT 1 FROM applications
+        WHERE event_id = ? AND user_id = ? AND status = 'accepted'
+      `).get(req.params.id, req.user.id);
+
+      if (!mine) return res.json([]);
+    }
+
     const rows = db.prepare(`
       SELECT n.*, u.name as author_name, u.avatar as author_avatar, u.role as author_role
       FROM event_announcements n
@@ -468,19 +483,18 @@ router.get('/api/stats/organizer', authenticateToken, (req, res) => {
 router.get('/api/leaderboard', authenticateToken, (req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT u.id, u.name, u.avatar, u.school, u.grade,
+      SELECT u.id, u.name, u.avatar,
              COALESCE(SUM(a.hours_awarded), 0) as hours,
              COUNT(DISTINCT a.slot_id) as shifts
       FROM users u
       LEFT JOIN attendance a ON a.user_id = u.id AND a.present = 1
-      WHERE u.role = 'student'
+      WHERE u.role = 'student' AND u.leaderboard_opt_in = 1
       GROUP BY u.id
       ORDER BY hours DESC, shifts DESC
       LIMIT 25
     `).all();
     res.json(rows.map((r, i) => ({
       rank: i + 1, id: r.id, name: r.name, avatar: r.avatar,
-      school: r.school, grade: r.grade,
       hours: Number(r.hours), shifts: r.shifts
     })));
   } catch (err) {
