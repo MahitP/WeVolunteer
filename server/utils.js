@@ -70,6 +70,7 @@ export function formatUserResponse(row) {
     role: row.role,
     verified: row.verified === 1,
     emailVerified: row.email_verified === 1,
+    leaderboardOptIn: row.leaderboard_opt_in === 1,
     avatar: row.avatar,
     volunteeredHours: totalHours,
     bio: row.bio,
