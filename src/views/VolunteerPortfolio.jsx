@@ -134,10 +134,7 @@ export default function VolunteerPortfolio({ currentUser }) {
             </table>
           )}
         </section>
-        
-        {/* Footer */}
-        <footer style={{ marginTop: 'var(--s8)', paddingTop: 'var(--s4)', borderTop: '1px solid #ccc', color: '#666', fontSize: '0.85rem', textAlign: 'center' }}>
-          <div className="row" style={{ justifyContent: 'center', gap: 6, marginBottom: 4 }}>
+
         {/* Official Note & Signature */}
         <div style={{ marginTop: 'var(--s8)', paddingTop: 'var(--s6)', borderTop: '1px solid #ccc', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           <div style={{ color: '#666', fontSize: '0.9rem', maxWidth: '60%' }}>

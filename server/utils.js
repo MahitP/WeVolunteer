@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { db } from './db.js';
-import { JWT_SECRET } from './server.js';
+import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST } from './config.js';
 
 // --- AUTHENTICATION MIDDLEWARE ---
 export function authenticateToken(req, res, next) {
@@ -11,7 +11,39 @@ export function authenticateToken(req, res, next) {
 
   jwt.verify(token, JWT_SECRET, (err, decodedUser) => {
     if (err) return res.status(403).json({ error: 'Invalid or expired token' });
-    req.user = decodedUser;
+
+    // Re-derive identity from the database on every request rather than
+    // trusting the (up to 7-day-old) token payload, so a deleted user's
+    // token stops working and a role/email change takes effect immediately.
+    const userRow = db.prepare(
+      'SELECT id, role, email, name, email_verified, token_version FROM users WHERE id = ?'
+    ).get(decodedUser.id);
+
+    if (!userRow) return res.status(401).json({ error: 'Account no longer exists' });
+
+    if ((decodedUser.tokenVersion ?? 0) !== userRow.token_version) {
+      return res.status(401).json({ error: 'Session expired, please sign in again' });
+    }
+
+    req.user = {
+      id: userRow.id,
+      role: userRow.role,
+      email: userRow.email,
+      name: userRow.name,
+      email_verified: userRow.email_verified
+    };
+
+    if (
+      REQUIRE_EMAIL_VERIFICATION &&
+      userRow.email_verified !== 1 &&
+      !EMAIL_GATE_ALLOWLIST.includes(req.path)
+    ) {
+      return res.status(403).json({
+        error: 'Please verify your email address to continue.',
+        code: 'email_unverified'
+      });
+    }
+
     next();
   });
 }
@@ -32,10 +64,13 @@ export function formatUserResponse(row) {
   return {
     id: row.id,
     name: row.name,
+    username: row.username || null,
     email: row.email,
     grade: row.grade,
     role: row.role,
     verified: row.verified === 1,
+    emailVerified: row.email_verified === 1,
+    leaderboardOptIn: row.leaderboard_opt_in === 1,
     avatar: row.avatar,
     volunteeredHours: totalHours,
     bio: row.bio,
@@ -138,7 +173,7 @@ export function runNotificationSweep() {
         AND e.application_deadline <= ?
         AND NOT EXISTS (
           SELECT 1 FROM applications a
-          WHERE a.event_id = e.id AND a.user_id = f.user_id AND a.status != 'rejected'
+          WHERE a.event_id = e.id AND a.user_id = f.user_id AND a.status NOT IN ('rejected', 'withdrawn')
         )
     `).all(now.toISOString(), in48h);
 

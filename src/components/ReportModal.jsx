@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { X, AlertTriangle } from 'react-feather';
-import api from '../api';
+import { X, AlertTriangle } from 'lucide-react';
+import { api } from '../utils/api';
 
 export default function ReportModal({ targetType, targetId, onClose, addToast }) {
   const [reason, setReason] = useState('');
@@ -12,16 +12,13 @@ export default function ReportModal({ targetType, targetId, onClose, addToast })
 
     setIsSubmitting(true);
     try {
-      await api.post('/reports', {
-        targetType,
-        targetId,
-        reason: reason.trim()
-      });
+      await api.submitReport({ targetType, targetId, reason: reason.trim() });
       addToast('Report submitted successfully. Thank you.', 'success');
       onClose();
     } catch (err) {
       console.error(err);
-      addToast(err.response?.data?.error || 'Failed to submit report', 'error');
+      // apiFetch throws a plain Error whose message is the server's error text.
+      addToast(err.message || 'Failed to submit report', 'error');
       setIsSubmitting(false);
     }
   };

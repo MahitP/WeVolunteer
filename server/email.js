@@ -23,6 +23,12 @@ if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
     },
   });
   console.log(`[Email] Configured to send via ${SMTP_HOST}`);
+} else if (IS_PRODUCTION) {
+  // The console mock is a development convenience. In production it would print
+  // password-reset and verification tokens to the server log and deliver
+  // nothing — a silent failure that also leaks credentials. Refuse to boot.
+  console.error('FATAL: SMTP is not configured (SMTP_HOST, SMTP_USER, SMTP_PASS are required in production).');
+  process.exit(1);
 } else {
   // Fallback to console logger for development
   transporter = {

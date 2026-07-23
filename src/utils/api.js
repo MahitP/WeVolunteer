@@ -129,6 +129,8 @@ export const api = {
   // ── Events ──────────────────────────────────────
   fetchEvents: async () => apiFetch('/api/events'),
 
+  fetchEventDetails: async (eventId) => apiFetch(`/api/events/${eventId}`),
+
   createEvent: async (eventData) => apiFetch('/api/events', {
     method: 'POST',
     body: JSON.stringify(eventData)
@@ -247,6 +249,12 @@ export const api = {
 
   // ── Certificate Verification ─────────────────────
   verifyCertificate: async (code) => apiFetch(`/api/certificates/verify/${encodeURIComponent(code)}`),
+
+  // ── Moderation ─────────────────────────────────
+  submitReport: async ({ targetType, targetId, reason }) => apiFetch('/api/reports', {
+    method: 'POST',
+    body: JSON.stringify({ targetType, targetId, reason })
+  }),
 
   // ── V2: Profile ────────────────────────────────
   updateProfile: async (patch) => apiFetch('/api/auth/profile', {

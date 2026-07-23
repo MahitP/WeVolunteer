@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
-import { VALID_GRADES } from '../server.js';
+import { VALID_GRADES } from '../config.js';
 import { createRandom, performWeightedSelection } from '../weighting.js';
 import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion, certificateCode } from '../utils.js';
@@ -142,19 +142,31 @@ router.post('/api/events/:id/apply', authenticateToken, (req, res) => {
       return res.status(400).json({ error: 'Application deadline has passed. Sign-ups are closed.' });
     }
 
-    // Check if already signed up for this specific slot
-    const exists = db.prepare('SELECT COUNT(*) as count FROM applications WHERE slot_id = ? AND user_id = ?').get(slotId, req.user.id);
-    if (exists.count > 0) {
+    // A withdrawn application is not a live one. Withdrawing by mistake should
+    // cost the student nothing while applications are still open, so the old
+    // row is revived rather than blocking — UNIQUE(user_id, slot_id) means a
+    // second INSERT is not an option.
+    const existing = db.prepare(
+      'SELECT id, status FROM applications WHERE slot_id = ? AND user_id = ?'
+    ).get(slotId, req.user.id);
+
+    const status = 'pending';
+    const appliedAt = new Date().toISOString();
+    let appId;
+
+    if (existing && existing.status !== 'withdrawn') {
       return res.status(400).json({ error: 'You have already applied for this time slot' });
+    } else if (existing) {
+      appId = existing.id;
+      db.prepare('UPDATE applications SET status = ?, applied_at = ?, waitlist_order = NULL WHERE id = ?')
+        .run(status, appliedAt, appId);
+    } else {
+      appId = `app-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      db.prepare(`
+        INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(appId, req.user.id, eventId, slotId, status, appliedAt);
     }
-
-    let status = 'pending';
-
-    const appId = `app-${Date.now()}`;
-    db.prepare(`
-      INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(appId, req.user.id, eventId, slotId, status, new Date().toISOString());
 
     // Notify organizer
     createNotification({
@@ -167,18 +179,130 @@ router.post('/api/events/:id/apply', authenticateToken, (req, res) => {
 
     res.status(201).json({
       success: true,
-      application: {
-        id: appId,
-        eventId,
-        slotId,
-        userId: req.user.id,
-        status,
-        appliedAt: new Date().toISOString()
-      }
+      application: { id: appId, eventId, slotId, userId: req.user.id, status, appliedAt }
     });
   } catch (error) {
     console.error('Apply error:', error);
     res.status(500).json({ error: 'Internal server error applying to event' });
+  }
+});
+
+// 8a. Bulk update application status (Organizer only).
+//
+// Registered BEFORE /api/applications/:id, because that route's :id parameter
+// would otherwise capture the literal "bulk". Mirrors the single-application
+// organizer branch below exactly — same allowed statuses, same ownership and
+// capacity rules — so the two cannot diverge. All writes happen in one
+// transaction; notifications and waitlist promotion run only after it commits,
+// because createNotification performs its own writes.
+router.patch('/api/applications/bulk', authenticateToken, (req, res) => {
+  if (req.user.role !== 'organizer') {
+    return res.status(403).json({ error: 'Access denied: Only organizers can manage application status' });
+  }
+
+  const { applicationIds, status } = req.body;
+
+  if (!Array.isArray(applicationIds) || applicationIds.length === 0) {
+    return res.status(400).json({ error: 'applicationIds must be a non-empty array' });
+  }
+  if (!['accepted', 'waitlisted', 'rejected'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status update. Must be accepted, waitlisted, or rejected.' });
+  }
+
+  try {
+    // Load every named application with its event owner. A missing id, or one on
+    // an event this organizer does not host, fails the whole request rather than
+    // applying part of it — a half-done bulk action is worse than a refused one.
+    const apps = [];
+    for (const id of applicationIds) {
+      const app = db.prepare(`
+        SELECT a.*, e.organizer_id, e.title as event_title, e.auto_approve
+        FROM applications a
+        JOIN events e ON a.event_id = e.id
+        WHERE a.id = ?
+      `).get(id);
+      if (!app) return res.status(404).json({ error: `Application not found: ${id}` });
+      if (app.organizer_id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied: You do not host this event' });
+      }
+      // A withdrawn application is the volunteer's own choice to leave; an
+      // organizer cannot pull them back in. Refuse the whole batch rather than
+      // silently reactivating them as a side effect of a bulk action.
+      if (app.status === 'withdrawn') {
+        return res.status(409).json({
+          error: 'One or more of these volunteers withdrew their application. Only they can re-apply.',
+          code: 'withdrawn'
+        });
+      }
+      apps.push(app);
+    }
+
+    // When accepting, capacity is counted per slot across the whole batch so the
+    // combined effect can never overfill a slot — the single route only guards
+    // one at a time. Applications beyond a slot's remaining spots are skipped and
+    // reported, never accepted over capacity.
+    const applied = [];
+    const skipped = [];
+    const remainingBySlot = {};
+    if (status === 'accepted') {
+      for (const app of apps) {
+        if (remainingBySlot[app.slot_id] === undefined) {
+          const slot = db.prepare('SELECT max_spots FROM slots WHERE id = ?').get(app.slot_id);
+          const slotMaxSpots = slot ? slot.max_spots : 0;
+          const slotAccepted = db.prepare(`
+            SELECT COUNT(*) as count FROM applications
+            WHERE slot_id = ? AND status = 'accepted'
+          `).get(app.slot_id).count;
+          remainingBySlot[app.slot_id] = Math.max(0, slotMaxSpots - slotAccepted);
+        }
+      }
+    }
+
+    const promotions = [];
+    inTransaction(() => {
+      const update = db.prepare('UPDATE applications SET status = ? WHERE id = ?');
+      for (const app of apps) {
+        if (app.status === 'accepted' && status === 'accepted') {
+          // Already accepted — a no-op that must not consume a fresh spot.
+          skipped.push({ id: app.id, reason: 'already_accepted' });
+          continue;
+        }
+        if (status === 'accepted') {
+          if (remainingBySlot[app.slot_id] <= 0) {
+            skipped.push({ id: app.id, reason: 'slot_full' });
+            continue;
+          }
+          remainingBySlot[app.slot_id] -= 1;
+        }
+
+        const wasAccepted = app.status === 'accepted';
+        update.run(status, app.id);
+        applied.push({ id: app.id, status, userId: app.user_id, eventId: app.event_id, eventTitle: app.event_title });
+
+        if (wasAccepted && status !== 'accepted' && app.auto_approve === 1) {
+          promotions.push({ slotId: app.slot_id, eventId: app.event_id, eventTitle: app.event_title, organizerId: app.organizer_id });
+        }
+      }
+    });
+
+    // After the commit: fill any spots freed by a demotion, then notify.
+    for (const p of promotions) {
+      handleWaitlistPromotion(p.slotId, p.eventId, p.eventTitle, p.organizerId);
+    }
+    for (const a of applied) {
+      createNotification({
+        userId: a.userId,
+        kind: status === 'accepted' ? 'accepted' : status === 'waitlisted' ? 'waitlisted' : 'declined',
+        title: `Application ${status}`,
+        body: `Your application for "${a.eventTitle}" was ${status}.`,
+        link: `event:${a.eventId}`
+      });
+    }
+
+    res.json({ success: true, updated: applied.length, applied, skipped });
+  } catch (error) {
+    console.error('Bulk update app status error:', error);
+    res.status(500).json({ error: 'Internal server error updating applications' });
   }
 });
 
@@ -187,10 +311,13 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
   const appId = req.params.id;
   const { status } = req.body; // 'accepted', 'waitlisted', 'rejected'
 
-  // Students can only withdraw (set to rejected) their own pending applications
+  // Students can only withdraw their own applications
   if (req.user.role === 'student') {
-    if (status !== 'rejected') {
-      return res.status(403).json({ error: 'Students may only withdraw (reject) their own applications.' });
+    // 'rejected' is still accepted so an older client build keeps working.
+    // Both mean the same act; only 'withdrawn' is stored, because a student
+    // leaving is not the same event as an organizer turning them down.
+    if (status !== 'withdrawn' && status !== 'rejected') {
+      return res.status(403).json({ error: 'Students may only withdraw their own applications.' });
     }
     try {
       const app = db.prepare(`
@@ -215,7 +342,8 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
         });
       }
 
-      db.prepare('UPDATE applications SET status = ? WHERE id = ?').run('rejected', appId);
+      db.prepare('UPDATE applications SET status = ?, waitlist_order = NULL WHERE id = ?')
+        .run('withdrawn', appId);
 
       if (wasConfirmed) {
         // Notify student releasing spot
@@ -246,7 +374,7 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
       return res.json({
         success: true,
         released: wasConfirmed,
-        application: { id: appId, status: 'rejected' }
+        application: { id: appId, status: 'withdrawn' }
       });
     } catch (err) {
       console.error('Withdraw error:', err);
@@ -273,6 +401,17 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
     if (!app) return res.status(404).json({ error: 'Application not found' });
     if (app.organizer_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
+    }
+
+    // A withdrawal is the volunteer's own decision to leave. The organizer must
+    // not be able to silently pull them back in — re-committing someone who
+    // stepped down, without their knowledge, to a shift they may no longer be
+    // able to attend. Re-entry only happens if the student re-applies.
+    if (app.status === 'withdrawn') {
+      return res.status(409).json({
+        error: 'This volunteer withdrew their own application. Only they can re-apply.',
+        code: 'withdrawn'
+      });
     }
 
     // Check spots capacity at the slot level if accepting
