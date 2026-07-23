@@ -183,19 +183,25 @@ Seeded accounts (password `password123`): students `leo.chen28@gmail.com`, `priy
 
 **Files expected to change.**
 - Modify: `server/routes/contentRoutes.js` — `GET /api/leaderboard`.
+- Modify: `server/routes/authRoutes.js` — `PATCH /api/auth/profile` must persist the opt-in (currently a no-op).
+- Modify: `server/utils.js` — `formatUserResponse` must return the opt-in so the client toggle reflects saved state.
 - Test: extend `server/routes.privacy.test.js`.
 
 **Dependencies.** None.
 
+**CRITICAL — the write path is missing.** The client already has a "Leaderboard Participation" toggle (`ProfileEditModal.jsx`) that sends `leaderboardOptIn`, but the server's `PATCH /api/auth/profile` **does not persist it** and `formatUserResponse` **does not return it** (both verified). Filtering the leaderboard on `leaderboard_opt_in = 1` WITHOUT wiring the write path would make the leaderboard **permanently empty** — nobody could ever opt in. This task must do both, or it is a regression.
+
 **Implementation approach.**
-- Add `WHERE u.role = 'student' AND u.leaderboard_opt_in = 1` to the query.
-- Remove `school` and `grade` from both the `SELECT` and the mapped response. Keep `rank, id, name, avatar, hours, shifts`.
-- The client `Leaderboard` view must tolerate the smaller shape — confirm it does not hard-read `.school`/`.grade` (grep the client); if it renders them, remove those cells. Keep this client edit minimal and in the same commit.
+- **Leaderboard query (`contentRoutes.js`):** add `AND u.leaderboard_opt_in = 1` to the existing `WHERE u.role = 'student'`. Remove `school` and `grade` from both the `SELECT` and the mapped response. Keep `rank, id, name, avatar, hours, shifts`.
+- **Persist opt-in (`authRoutes.js` `PATCH /api/auth/profile`):** the handler builds an `updates`/`values` array from allowed fields (name, avatar, bio, school, skills, grade). Add handling for `leaderboardOptIn`: `if (leaderboardOptIn !== undefined) { updates.push('leaderboard_opt_in = ?'); values.push(leaderboardOptIn ? 1 : 0); }`. Destructure `leaderboardOptIn` from `req.body`. Keep it minimal and consistent with the surrounding fields.
+- **Return opt-in (`utils.js` `formatUserResponse`):** add `leaderboardOptIn: row.leaderboard_opt_in === 1` to the returned object, so `ProfileEditModal`'s `user?.leaderboardOptIn` reflects the saved state (it currently always reads `undefined` → false).
+- **Client render:** the dashboard leaderboard (`VolunteerDashboard.jsx` `buildBoard`) renders only `entry.name`, `entry.id`, `entry.hours` — it does **not** read `.school`/`.grade` (verified). So dropping those fields needs **no client change**. Do not touch the client.
 
 **Tests required.**
 1. A seeded student with `leaderboard_opt_in = 0` (the default) does **not** appear in the leaderboard.
 2. After setting a student's `leaderboard_opt_in = 1` directly, they appear.
 3. No leaderboard row contains a `school` or `grade` field.
+4. **Opt-in round-trip through the API (proves the write path):** a student calls `PATCH /api/auth/profile { leaderboardOptIn: true }`; the response user object has `leaderboardOptIn: true`; and the student then appears in `GET /api/leaderboard`. Then `PATCH { leaderboardOptIn: false }` removes them again. This is the test that guards against shipping a dead leaderboard.
 
 **Security considerations.** Default-off is the safe default and matches the column default. No new exposure.
 
