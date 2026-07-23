@@ -219,7 +219,8 @@ export function initDatabase() {
   addColumnIfMissing('events', 'selection_summary', 'TEXT');
   addColumnIfMissing('auto_select_runs', 'reason', 'TEXT');
   addColumnIfMissing('users', 'leaderboard_opt_in', 'INTEGER DEFAULT 0');
-  
+  addColumnIfMissing('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');
+
   const addedEmailVerified = addColumnIfMissing('users', 'email_verified', 'INTEGER DEFAULT 0');
   if (addedEmailVerified) {
     // The first time this column exists, every current account predates email

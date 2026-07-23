@@ -97,3 +97,77 @@ describe('authenticateToken: reads identity from the database', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('authenticateToken: token_version invalidates sessions on password reset', () => {
+  const tokenFor = (userId) => {
+    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    const row = db.prepare(
+      'SELECT token FROM password_reset_tokens WHERE user_id = ? ORDER BY expires_at DESC LIMIT 1'
+    ).get(userId);
+    db.close();
+    return row?.token;
+  };
+
+  it('rejects a token minted before a password reset, but a fresh login after the reset works', async () => {
+    const signupRes = await signup({ password: 'orig-password1' });
+    expect(signupRes.status).toBe(201);
+    const userId = signupRes.body.user.id;
+    const email = signupRes.body.user.email;
+    const oldToken = signupRes.body.token;
+
+    // The pre-reset token works right now.
+    const before = await srv.call('GET', '/api/auth/me', undefined, oldToken);
+    expect(before.status).toBe(200);
+
+    // Request and apply a password reset.
+    const forgot = await srv.call('POST', '/api/auth/forgot-password', { email });
+    expect(forgot.status).toBe(200);
+    const resetToken = tokenFor(userId);
+    expect(resetToken).toBeTruthy();
+
+    const reset = await srv.call('POST', '/api/auth/reset-password', { token: resetToken, password: 'new-password1' });
+    expect(reset.status).toBe(200);
+
+    // The old token is now invalid.
+    const after = await srv.call('GET', '/api/auth/me', undefined, oldToken);
+    expect(after.status).toBe(401);
+    expect(after.body.error).toBe('Session expired, please sign in again');
+
+    // A fresh login with the new password works and yields a usable token.
+    const relogin = await srv.call('POST', '/api/auth/login', { email, password: 'new-password1' });
+    expect(relogin.status).toBe(200);
+    const newToken = relogin.body.token;
+    const me = await srv.call('GET', '/api/auth/me', undefined, newToken);
+    expect(me.status).toBe(200);
+    expect(me.body.email).toBe(email);
+  });
+
+  it('a current-version token keeps working across an unrelated request', async () => {
+    const signupRes = await signup();
+    expect(signupRes.status).toBe(201);
+    const token = signupRes.body.token;
+
+    const first = await srv.call('GET', '/api/auth/me', undefined, token);
+    expect(first.status).toBe(200);
+
+    const second = await srv.call('GET', '/api/auth/me', undefined, token);
+    expect(second.status).toBe(200);
+    expect(second.body.email).toBe(signupRes.body.user.email);
+  });
+
+  it('a legacy token with no tokenVersion claim still authenticates against a version-0 row', async () => {
+    const signupRes = await signup();
+    expect(signupRes.status).toBe(201);
+    const userId = signupRes.body.user.id;
+
+    // Sign a token the old way, before tokenVersion existed.
+    const legacyToken = jwt.sign(
+      { id: userId, role: 'student', email: signupRes.body.user.email, name: signupRes.body.user.name },
+      'test-secret-not-for-production',
+      { expiresIn: '7d' }
+    );
+
+    const res = await srv.call('GET', '/api/auth/me', undefined, legacyToken);
+    expect(res.status).toBe(200);
+  });
+});
