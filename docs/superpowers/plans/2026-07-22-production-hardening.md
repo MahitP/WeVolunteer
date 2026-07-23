@@ -226,14 +226,14 @@ Seeded accounts (password `password123`): students `leo.chen28@gmail.com`, `priy
 
 **Implementation approach.**
 - `GET /api/events`: add `authenticateToken`. Batch-load the caller's accepted event ids once (`SELECT DISTINCT event_id FROM applications WHERE user_id = ? AND status = 'accepted'`). For each event, include `instructions` only if the caller is an accepted volunteer OR the hosting organizer OR an admin; otherwise emit `instructions: ''`. Everything else in the payload is unchanged.
-- **Client check:** the client currently fetches `/api/events` on load. It already sends the token (`apiFetch` attaches it). Confirm no unauthenticated pre-login call to `/api/events` exists (grep the client); the public certificate-verification route is separate and stays unauthenticated. If any pre-login fetch exists, note it — but the app gates all event views behind login, so this should be a no-op for the UI.
-- Announcements gate: copy the visibility check from `GET /api/events/:id/attendees` (`contentRoutes.js`) — staff always; a student only if accepted on the event. Return `{ visible: false, announcements: [] }` shape consistent with attendees for the non-visible case, and have the client treat that as "no announcements".
+- **Client check (verified):** `App.jsx` calls `api.fetchEvents()` only AFTER `getMe()` succeeds (line ~139), and `AdminDashboard` fetches with a token too — there is no pre-login/unauthenticated call to `/api/events`. `apiFetch` attaches the token. So adding `authenticateToken` needs **no client change**. Do not touch the client.
+- **Announcements gate — return a bare array, NOT a wrapper object.** The announcements client does `setItems(await fetchAnnouncements(id))` and maps over the result, so the GET response must stay an **array** (verified in `EventAnnouncements.jsx`). Copy the visibility logic from `GET /api/events/:id/attendees` — staff (admin or hosting organizer) always; a student only if `status = 'accepted'` on the event — but for the non-visible case **return `[]`** (an empty array), not `{ visible: false, ... }`. This keeps the client untouched: a non-participant simply sees no announcements. Do NOT change the announcements response shape for the visible case.
 
 **Tests required.**
 1. `GET /api/events` with no token → 401.
 2. A signed-in student who is not accepted on an event gets that event with `instructions === ''`.
 3. An accepted student gets the real `instructions`; the hosting organizer and an admin do too.
-4. A student not accepted on an event gets `visible: false` / empty from that event's announcements; an accepted student and staff get the real list.
+4. A student not accepted on an event gets `[]` from that event's announcements; an accepted student, the hosting organizer, and an admin get the real (non-empty) list. (Seed: the softball event `event-softball` has a seeded announcement `ann-1` and Priya has a pending — not accepted — application; set up an accepted student to see the populated list.)
 
 **Security considerations.** This is the reason attendee visibility was built server-side; announcements must match it. Ensure the instructions-blanking happens server-side (never rely on the client to hide it).
 
