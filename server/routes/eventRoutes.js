@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
-import { VALID_GRADES, VALID_CATEGORIES } from '../config.js';
+import { VALID_GRADES, VALID_CATEGORIES, MAX_AUTO_SELECT_DRAWS } from '../config.js';
 import { createRandom, performWeightedSelection } from '../weighting.js';
 import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion, certificateCode } from '../utils.js';
@@ -738,6 +738,15 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, (req, res) => 
       return res.status(400).json({ error: 'This event is not configured for Auto Select' });
     }
 
+    // A draw before the deadline would exclude students who have every right
+    // to apply until then — refuse rather than let a fairness mechanism run early.
+    if (new Date() < new Date(event.application_deadline)) {
+      return res.status(400).json({
+        error: 'Applications are still open; selection can run after the deadline.',
+        code: 'deadline_not_passed'
+      });
+    }
+
     // Check if there is already a confirmed selection
     const confirmedExists = db.prepare('SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ? AND is_confirmed = 1').get(eventId).count;
     if (confirmedExists > 0) {
@@ -746,6 +755,22 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, (req, res) => 
 
     // Determine the next run number
     const runCount = db.prepare('SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ?').get(eventId).count;
+
+    // A re-drawable "fairness" mechanism with no audit trail can be shopped
+    // until the organizer likes the outcome. Cap total draws and require a
+    // typed reason on every re-draw (the first draw needs none).
+    const { reason } = req.body;
+    if (runCount >= MAX_AUTO_SELECT_DRAWS) {
+      return res.status(409).json({
+        error: 'The maximum number of re-draws has been reached for this event.',
+        code: 'draw_cap_reached'
+      });
+    }
+    if (runCount >= 1 && !String(reason || '').trim()) {
+      return res.status(400).json({ error: 'A re-draw requires a reason.', code: 'reason_required' });
+    }
+    const cleanReason = String(reason || '').trim().slice(0, 500);
+
     const nextRunNumber = runCount + 1;
 
     // Gather pending applicants for each slot
@@ -760,7 +785,7 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, (req, res) => 
         FROM applications a
         LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
         WHERE a.slot_id = ? AND a.status = 'pending'
-        GROUP BY a.id
+        GROUP BY a.id ORDER BY a.id
       `).all(slot.id);
 
       if (pendingApps.length === 0) continue;
@@ -790,9 +815,9 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, (req, res) => 
     const nowStr = new Date().toISOString();
 
     db.prepare(`
-      INSERT INTO auto_select_runs (id, event_id, run_number, created_at, selected_ids, waitlist_ids, is_confirmed)
-      VALUES (?, ?, ?, ?, ?, ?, 0)
-    `).run(runId, eventId, nextRunNumber, nowStr, JSON.stringify(selectedIds), JSON.stringify(waitlistIds));
+      INSERT INTO auto_select_runs (id, event_id, run_number, created_at, selected_ids, waitlist_ids, is_confirmed, reason)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+    `).run(runId, eventId, nextRunNumber, nowStr, JSON.stringify(selectedIds), JSON.stringify(waitlistIds), runCount >= 1 ? cleanReason : null);
 
     res.json({
       id: runId,
@@ -935,12 +960,23 @@ router.post('/api/events/:id/auto-select/confirm', authenticateToken, (req, res)
       const avgAcceptedHours = selectedIds.length > 0 ? Number((acceptedHoursSum / selectedIds.length).toFixed(1)) : 0;
       const avgWaitlistedHours = waitlistIds.length > 0 ? Number((waitlistedHoursSum / waitlistIds.length).toFixed(1)) : 0;
 
+      // Surface the draw history so the published summary reflects that
+      // re-draws happened, and why — not just the final, cleaned-up outcome.
+      const runCount = db.prepare('SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ?').get(eventId).count;
+      const redrawReasons = db.prepare(`
+        SELECT reason FROM auto_select_runs
+        WHERE event_id = ? AND reason IS NOT NULL
+        ORDER BY run_number ASC
+      `).all(eventId).map(r => r.reason);
+
       const summary = {
         totalApplicants,
         acceptedVolunteers: selectedIds.length,
         waitlistedVolunteers: waitlistIds.length,
         avgAcceptedHours,
         avgWaitlistedHours,
+        runCount,
+        redrawReasons,
         timestamp: new Date().toISOString()
       };
 
