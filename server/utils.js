@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { db } from './db.js';
-import { JWT_SECRET } from './config.js';
+import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST } from './config.js';
 
 // --- AUTHENTICATION MIDDLEWARE ---
 export function authenticateToken(req, res, next) {
@@ -32,6 +32,18 @@ export function authenticateToken(req, res, next) {
       name: userRow.name,
       email_verified: userRow.email_verified
     };
+
+    if (
+      REQUIRE_EMAIL_VERIFICATION &&
+      userRow.email_verified !== 1 &&
+      !EMAIL_GATE_ALLOWLIST.includes(req.path)
+    ) {
+      return res.status(403).json({
+        error: 'Please verify your email address to continue.',
+        code: 'email_unverified'
+      });
+    }
+
     next();
   });
 }

@@ -71,4 +71,40 @@ describe('auth: email verification (flag on)', () => {
     const res = await srv.call('POST', '/api/auth/resend-verification');
     expect(res.status).toBe(401);
   });
+
+  it('blocks an unverified user from a normal action route', async () => {
+    const res = await signup('gated@example.org');
+    const apps = await srv.call('GET', '/api/applications', undefined, res.body.token);
+    expect(apps.status).toBe(403);
+    expect(apps.body.code).toBe('email_unverified');
+  });
+
+  it('still allows the allowlisted routes for an unverified user', async () => {
+    const res = await signup('allowlisted@example.org');
+    const token = res.body.token;
+
+    const me = await srv.call('GET', '/api/auth/me', undefined, token);
+    expect(me.status).toBe(200);
+
+    const resend = await srv.call('POST', '/api/auth/resend-verification', undefined, token);
+    expect(resend.status).toBe(200);
+
+    const notifications = await srv.call('GET', '/api/notifications', undefined, token);
+    expect(notifications.status).toBe(200);
+  });
+
+  it('unblocks the same token once the account is verified', async () => {
+    const res = await signup('unblock@example.org');
+    const token = res.body.token;
+
+    const blocked = await srv.call('GET', '/api/applications', undefined, token);
+    expect(blocked.status).toBe(403);
+
+    const verifyToken = tokenFor(res.body.user.id);
+    const verify = await srv.call('POST', '/api/auth/verify-email', { token: verifyToken });
+    expect(verify.status).toBe(200);
+
+    const allowed = await srv.call('GET', '/api/applications', undefined, token);
+    expect(allowed.status).toBe(200);
+  });
 });
