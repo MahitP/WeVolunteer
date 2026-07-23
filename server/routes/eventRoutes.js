@@ -7,6 +7,7 @@ import { createRandom, performWeightedSelection } from '../weighting.js';
 import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion, certificateCode } from '../utils.js';
 import { db } from '../db.js';
+import { validateEventPayload } from '../validation.js';
 
 const router = express.Router();
 
@@ -225,6 +226,9 @@ router.post('/api/events', authenticateToken, (req, res) => {
     return res.status(400).json({ error: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}` });
   }
 
+  const validation = validateEventPayload({ title, description, location, instructions, applicationDeadline, slots });
+  if (!validation.ok) return res.status(400).json({ error: validation.error });
+
   try {
     const eventId = `event-${Date.now()}`;
     const nowStr = new Date().toISOString();
@@ -305,6 +309,9 @@ router.put('/api/events/:id', authenticateToken, (req, res) => {
   if (!VALID_CATEGORIES.includes(category)) {
     return res.status(400).json({ error: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}` });
   }
+
+  const validation = validateEventPayload({ title, description, location, instructions, applicationDeadline, slots });
+  if (!validation.ok) return res.status(400).json({ error: validation.error });
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
