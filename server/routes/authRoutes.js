@@ -39,6 +39,10 @@ router.post('/api/auth/signup', (req, res) => {
     return res.status(400).json({ error: 'Password must be at least 6 characters long' });
   }
 
+  // Normalise on write: case and surrounding whitespace are not meaningful
+  // parts of an email address, so the stored form is always lowercase/trimmed.
+  const normEmail = String(email).trim().toLowerCase();
+
   const cleanUsername = String(username || '').trim();
   if (!cleanUsername) {
     return res.status(400).json({ error: 'Choose a username' });
@@ -55,6 +59,13 @@ router.post('/api/auth/signup', (req, res) => {
   const usernameTaken = db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE').get(cleanUsername);
   if (usernameTaken) {
     return res.status(400).json({ error: 'That username is already taken' });
+  }
+
+  // The unique index is case-insensitive too, but check explicitly for a
+  // clean 400 message — the UNIQUE-violation catch below is only the race backstop.
+  const emailTaken = db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE').get(normEmail);
+  if (emailTaken) {
+    return res.status(400).json({ error: 'Email address already registered' });
   }
 
   try {
@@ -76,13 +87,13 @@ router.post('/api/auth/signup', (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(userId, name, email, cleanUsername, passwordHash, grade, role, verifiedVal, emailVerifiedVal, avatar || '👤', bio || '', school || '', skillsJSON, new Date().toISOString());
+    stmt.run(userId, name, normEmail, cleanUsername, passwordHash, grade, role, verifiedVal, emailVerifiedVal, avatar || '👤', bio || '', school || '', skillsJSON, new Date().toISOString());
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
     const user = formatUserResponse(userRow);
     if (REQUIRE_EMAIL_VERIFICATION) {
       const verifyToken = issueVerificationToken(userId);
-      sendVerificationEmail(email, verifyToken).catch(err =>
+      sendVerificationEmail(normEmail, verifyToken).catch(err =>
         console.error('Verification email failed to send:', err)
       );
     }
@@ -108,8 +119,10 @@ router.post('/api/auth/login', (req, res) => {
   }
 
   try {
-    const userRow = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-    
+    // COLLATE NOCASE: existing mixed-case rows (pre-normalisation, or
+    // dedupe survivors) still authenticate during the transition.
+    const userRow = db.prepare('SELECT * FROM users WHERE email = ? COLLATE NOCASE').get(String(email).trim());
+
     if (!userRow) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
