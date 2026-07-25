@@ -94,18 +94,19 @@ app.use(attendanceRoutes);
 app.use(adminRoutes);
 app.use(contentRoutes);
 
-app.use('/api', (req, res) => {
-  res.status(404).json({ error: `Not found: ${req.method} ${req.originalUrl}` });
+// Health check is registered BEFORE the production SPA catch-all below, so it
+// always returns its JSON — a load balancer must never receive index.html here.
+app.get('/health', (req, res) => {
+  try {
+    db.prepare('SELECT 1').get();
+    res.json({ status: 'ok', database: 'connected', version: '2.0.0' });
+  } catch (err) {
+    res.status(500).json({ status: 'error', database: 'disconnected' });
+  }
 });
 
-app.use((err, req, res, next) => {
-  if (String(err.message).startsWith('Origin not allowed by CORS')) {
-    console.warn(err.message);
-    return res.status(403).json({ error: 'Origin not allowed.' });
-  }
-  console.error('Unhandled error:', err);
-  const status = err.type === 'entity.parse.failed' ? 400 : 500;
-  res.status(status).json({ error: status === 400 ? 'Invalid JSON' : 'Internal server error' });
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `Not found: ${req.method} ${req.originalUrl}` });
 });
 
 if (IS_PRODUCTION) {
@@ -120,11 +121,14 @@ if (IS_PRODUCTION) {
   });
 }
 
-app.get('/health', (req, res) => {
-  try {
-    db.prepare('SELECT 1').get();
-    res.json({ status: 'ok', database: 'connected', version: '2.0.0' });
-  } catch (err) {
-    res.status(500).json({ status: 'error', database: 'disconnected' });
+// Error handler registered LAST, so it catches errors from every layer above,
+// including the static/SPA block.
+app.use((err, req, res, next) => {
+  if (String(err.message).startsWith('Origin not allowed by CORS')) {
+    console.warn(err.message);
+    return res.status(403).json({ error: 'Origin not allowed.' });
   }
+  console.error('Unhandled error:', err);
+  const status = err.type === 'entity.parse.failed' ? 400 : 500;
+  res.status(status).json({ error: status === 400 ? 'Invalid JSON' : 'Internal server error' });
 });
