@@ -87,7 +87,7 @@ export default function EventComments({ eventId, currentUser, addToast }) {
                           className="btn btn-ghost btn-sm btn-icon"
                           onClick={() => setReportTarget(c.id)}
                           aria-label="Report comment"
-                          style={{ color: 'var(--error)' }}
+                          style={{ color: 'var(--danger)' }}
                         >
                           <Flag size={12} />
                         </button>
