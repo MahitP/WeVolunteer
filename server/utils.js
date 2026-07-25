@@ -318,17 +318,3 @@ export function buildMilestones(hours, events) {
   }));
 }
 
-export function certificateCode(userId, eventId) {
-  const source = `sbv::${userId}::${eventId}`;
-  let h1 = 0x811c9dc5;
-  let h2 = 0x01000193;
-  for (let i = 0; i < source.length; i++) {
-    h1 = Math.imul(h1 ^ source.charCodeAt(i), 0x01000193) >>> 0;
-    h2 = Math.imul(h2 + source.charCodeAt(i) * (i + 1), 0x85ebca6b) >>> 0;
-  }
-  const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; // no 0/O/1/I
-  const block = (n) => Array.from({ length: 4 }, (_, i) =>
-    alphabet[(n >>> (i * 5)) % alphabet.length]).join('');
-  return `SBV-${block(h1)}-${block(h2)}`;
-}
-

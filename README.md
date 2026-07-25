@@ -109,6 +109,16 @@ deploying, so any dedupe rename can be reviewed and reversed by hand:
 cp server/sbvolunteers.db "sbvolunteers.$(date +%F).bak.db"
 ```
 
+**Certificate codes were re-keyed to random stored values (hard cutover).**
+Certificate codes used to be derivable from a user id and event id, which made
+the public verify endpoint forgeable offline. Codes are now generated with
+`crypto.randomBytes` and stored in a new `certificates` table, backfilled at
+boot for every volunteer's existing completed attendance. This is a hard
+cutover: any certificate **printed or downloaded before this deploy** has the
+old, no-longer-valid code and will stop verifying — it must be re-downloaded
+from the certificates page to get the new code. Back up the database first
+(same copy step above covers this migration too).
+
 ### Client
 
 | Env var           | Default | Purpose |

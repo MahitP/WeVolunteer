@@ -5,7 +5,7 @@ import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
 import { VALID_GRADES, VALID_CATEGORIES, MAX_AUTO_SELECT_DRAWS } from '../config.js';
 import { createRandom, performWeightedSelection } from '../weighting.js';
 import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
-import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion, certificateCode } from '../utils.js';
+import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion } from '../utils.js';
 import { db } from '../db.js';
 import { validateEventPayload } from '../validation.js';
 

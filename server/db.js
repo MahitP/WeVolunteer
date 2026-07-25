@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import { createHoursLedgerTable, backfillHoursLedger, verifyLedgerParity } from './hoursLedger.js';
+import { createCertificatesTable, backfillCertificates } from './certificates.js';
 import { createCheckinTable } from './attendance.js';
 import { DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from './config.js';
 
@@ -393,6 +394,7 @@ export function initDatabase() {
   createCheckinTable(db);
 
   initHoursLedger();
+  initCertificates();
 }
 
 /**
@@ -426,6 +428,23 @@ function initHoursLedger() {
       console.error(`  ${m.userId}: ledger ${m.ledgerTotal} vs attendance ${m.attendanceTotal}`);
     }
     console.error('[Hours ledger] Credited hours are unaffected (attendance is still the source of truth). Investigate before wiring ledger writes.');
+  }
+}
+
+/**
+ * Creates the certificates table and issues codes for any credited
+ * attendance that doesn't have one yet.
+ *
+ * Safe to run on every boot: creation is IF NOT EXISTS and the backfill is
+ * idempotent (skips any (user, event) pair that already has a stored code).
+ * Never writes to `attendance`.
+ */
+function initCertificates() {
+  createCertificatesTable(db);
+
+  const { inserted } = backfillCertificates(db);
+  if (inserted > 0) {
+    console.log(`[Certificates] Issued ${inserted} code(s).`);
   }
 }
 
