@@ -158,7 +158,7 @@ export default function CheckInView({ currentUser }) {
           </h2>
           {appsForCurrentSlot.length > 0 && (
             <span className="small muted">
-              <span className="strong tnum" style={{ color: 'var(--fg)' }}>{presentCount}</span> / {appsForCurrentSlot.length} here
+              <span className="strong tnum" style={{ color: 'var(--ink)' }}>{presentCount}</span> / {appsForCurrentSlot.length} here
             </span>
           )}
         </div>
@@ -199,7 +199,7 @@ export default function CheckInView({ currentUser }) {
                       <div className="row" style={{ gap: 'var(--s3)' }}>
                         <span className="avatar sm">{app.volunteer?.avatar || '👤'}</span>
                         <div className="truncate">
-                          <div style={{ fontWeight: 500, fontSize: '1.05rem', color: isPresent ? 'var(--brand-ink)' : 'var(--fg)' }} className="truncate">
+                          <div style={{ fontWeight: 500, fontSize: '1.05rem', color: isPresent ? 'var(--brand-ink)' : 'var(--ink)' }} className="truncate">
                             {app.volunteer?.name}
                           </div>
                           {app.volunteer?.grade && (
