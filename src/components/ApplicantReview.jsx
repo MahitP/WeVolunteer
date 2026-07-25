@@ -81,7 +81,7 @@ export default function ApplicantReview({ applications, onDecide, onBulkDecide, 
 
       {selectedIds.size > 0 && onBulkDecide && (
         <div className="card row-between" style={{ backgroundColor: 'var(--brand-tint)', padding: 'var(--s2) var(--s4)', marginBottom: 'var(--s3)', borderRadius: 8 }}>
-          <span className="small strong" style={{ color: 'var(--brand-shade)' }}>
+          <span className="small strong" style={{ color: 'var(--brand-ink)' }}>
             {selectedIds.size} volunteer{selectedIds.size !== 1 ? 's' : ''} selected
           </span>
           <div className="row" style={{ gap: 'var(--s2)' }}>
