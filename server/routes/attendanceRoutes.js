@@ -5,7 +5,8 @@ import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
 import { VALID_GRADES } from '../config.js';
 import { createRandom, performWeightedSelection } from '../weighting.js';
 import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
-import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion, certificateCode } from '../utils.js';
+import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion } from '../utils.js';
+import { getOrCreateCertificateCode } from '../certificates.js';
 import { db } from '../db.js';
 
 const router = express.Router();
@@ -223,7 +224,7 @@ router.get('/api/certificates', authenticateToken, (req, res) => {
       shifts: r.shifts,
       startDatetime: r.first_start,
       endDatetime: r.last_end,
-      code: certificateCode(req.user.id, r.event_id)
+      code: getOrCreateCertificateCode(db, req.user.id, r.event_id)
     })));
   } catch (err) {
     console.error('Certificates error:', err);
@@ -232,34 +233,38 @@ router.get('/api/certificates', authenticateToken, (req, res) => {
 });
 
 
-// Public check of a certificate code — how a school office verifies a printout
+// Public check of a certificate code — how a school office verifies a
+// printout. A single indexed lookup by the stored code — never a scan over
+// every certificate — and deliberately omits grade from the response: the
+// code is a bearer credential handed to whoever is verifying, not proof of
+// who they are, so it should disclose only what a printed certificate
+// itself would (name, event, organizer, hours, date).
 router.get('/api/certificates/verify/:code', (req, res) => {
   try {
-    const rows = db.prepare(`
-      SELECT at.user_id, u.name as volunteer_name, u.grade,
-             e.id as event_id, e.title, org.name as organizer_name,
-             COALESCE(SUM(at.hours_awarded), 0) as hours,
-             MAX(s.end_datetime) as last_end
+    const code = String(req.params.code || '').toUpperCase();
+    const cert = db.prepare('SELECT user_id, event_id FROM certificates WHERE code = ?').get(code);
+    if (!cert) return res.status(404).json({ valid: false, error: 'No certificate matches that code' });
+
+    const row = db.prepare(`
+      SELECT u.name AS volunteer_name, e.title, org.name AS organizer_name,
+             COALESCE(SUM(at.hours_awarded),0) AS hours, MAX(s.end_datetime) AS last_end
       FROM attendance at
       JOIN slots s ON at.slot_id = s.id
       JOIN events e ON at.event_id = e.id
       JOIN users u ON at.user_id = u.id
       JOIN users org ON e.organizer_id = org.id
-      WHERE at.present = 1
+      WHERE at.user_id = ? AND at.event_id = ? AND at.present = 1
       GROUP BY at.user_id, e.id
-    `).all();
-
-    const match = rows.find(r => certificateCode(r.user_id, r.event_id) === req.params.code.toUpperCase());
-    if (!match) return res.status(404).json({ valid: false, error: 'No certificate matches that code' });
+    `).get(cert.user_id, cert.event_id);
+    if (!row) return res.status(404).json({ valid: false, error: 'No certificate matches that code' });
 
     res.json({
       valid: true,
-      volunteerName: match.volunteer_name,
-      grade: match.grade,
-      eventTitle: match.title,
-      organizerName: match.organizer_name,
-      hours: Number(match.hours),
-      completedAt: match.last_end
+      volunteerName: row.volunteer_name,
+      eventTitle: row.title,
+      organizerName: row.organizer_name,
+      hours: Number(row.hours),
+      completedAt: row.last_end
     });
   } catch (err) {
     res.status(500).json({ error: 'Verification failed' });
