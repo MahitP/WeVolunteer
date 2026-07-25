@@ -13,10 +13,21 @@ describe('applications: withdrawal and re-application', () => {
 
   beforeAll(async () => {
     studentToken = await srv.login('leo.chen28@gmail.com');
-    const events = (await srv.call('GET', '/api/events', undefined, studentToken)).body;
-    const ev = events.find(e => e.status === 'open' && e.slots.length > 0);
-    eventId = ev.id;
-    slotId = ev.slots.find(s => s.spotsRemaining > 0).id;
+    // Create a fresh open event with a future deadline rather than depending on
+    // a seeded fixture — the seeded softball event has a fixed 2026-07-24
+    // deadline that expires with the wall clock, which used to make this suite
+    // fail once that date passed.
+    const orgToken = await srv.login('jkatzenback@vikings.org');
+    const start = new Date(Date.now() + 30 * 864e5).toISOString();
+    const end = new Date(Date.now() + 30 * 864e5 + 108e5).toISOString();
+    const mk = await srv.call('POST', '/api/events', {
+      title: 'Withdrawal Test', description: 'd', category: 'Other', location: 'Hall',
+      applicationDeadline: new Date(Date.now() + 20 * 864e5).toISOString(),
+      slots: [{ name: 'Shift', description: 'd', startDatetime: start, endDatetime: end, maxSpots: 3 }]
+    }, orgToken);
+    eventId = mk.body.id;
+    slotId = (await srv.call('GET', '/api/events', undefined, studentToken)).body
+      .find(e => e.id === eventId).slots[0].id;
   });
 
   const apply = () => srv.call('POST', `/api/events/${eventId}/apply`, { slotId }, studentToken);
