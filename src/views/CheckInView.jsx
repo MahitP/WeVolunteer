@@ -120,9 +120,9 @@ export default function CheckInView({ currentUser }) {
   const presentCount = appsForCurrentSlot.filter(a => checkins.get(`${a.slotId}:${a.userId}`)).length;
 
   return (
-    <div style={{ backgroundColor: 'var(--surface-1)', minHeight: '100vh', paddingBottom: 'var(--s8)' }}>
+    <div style={{ backgroundColor: 'var(--paper)', minHeight: '100vh', paddingBottom: 'var(--s8)' }}>
       {/* ── Top Bar ── */}
-      <div style={{ backgroundColor: 'var(--surface-2)', borderBottom: '1px solid var(--border)', padding: 'var(--s3) var(--s4)', position: 'sticky', top: 0, zIndex: 10 }}>
+      <div style={{ backgroundColor: 'var(--surface-2)', borderBottom: '1px solid var(--rule)', padding: 'var(--s3) var(--s4)', position: 'sticky', top: 0, zIndex: 10 }}>
         <div className="row-between mx-auto" style={{ maxWidth: 600 }}>
           <button className="btn btn-ghost btn-sm" style={{ paddingLeft: 0 }} onClick={() => navigate(-1)}>
             <ArrowLeft size={20} /> <span style={{ marginLeft: 4 }}>Back</span>
@@ -189,7 +189,7 @@ export default function CheckInView({ currentUser }) {
                     className="row"
                     style={{ 
                       padding: 'var(--s3) var(--s4)',
-                      borderBottom: i < appsForCurrentSlot.length - 1 ? '1px solid var(--border)' : 'none',
+                      borderBottom: i < appsForCurrentSlot.length - 1 ? '1px solid var(--rule)' : 'none',
                       backgroundColor: isPresent ? 'var(--brand-tint)' : 'transparent',
                       cursor: 'pointer',
                       transition: 'background-color 0.15s ease'

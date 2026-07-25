@@ -32,7 +32,7 @@ export default function ReportModal({ targetType, targetId, onClose, addToast })
 
         <div className="stack-lg">
           <div className="stack-sm">
-            <h2 style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)', color: 'var(--error)' }}>
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)', color: 'var(--danger)' }}>
               <AlertTriangle size={24} />
               Report {targetType === 'event' ? 'Event' : 'Comment'}
             </h2>

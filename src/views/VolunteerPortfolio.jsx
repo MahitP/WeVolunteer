@@ -52,9 +52,9 @@ export default function VolunteerPortfolio({ currentUser }) {
   const { volunteer, stats, completed } = data;
 
   return (
-    <div style={{ backgroundColor: 'var(--surface-1)', minHeight: '100vh', paddingBottom: 'var(--s8)' }}>
+    <div style={{ backgroundColor: 'var(--paper)', minHeight: '100vh', paddingBottom: 'var(--s8)' }}>
       {/* ── Screen-only controls ── */}
-      <div className="no-print" style={{ backgroundColor: 'var(--surface-2)', borderBottom: '1px solid var(--border)', padding: 'var(--s4) var(--s6)' }}>
+      <div className="no-print" style={{ backgroundColor: 'var(--surface-2)', borderBottom: '1px solid var(--rule)', padding: 'var(--s4) var(--s6)' }}>
         <div className="row-between mx-auto" style={{ maxWidth: 800 }}>
           <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>
             <ArrowLeft size={16} /> Back to profile
