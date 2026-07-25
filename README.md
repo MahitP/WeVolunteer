@@ -95,6 +95,30 @@ It derives a unique username per user from their name/email and skips anyone
 who already has one, so it is safe to re-run. New sign-ups collect a username
 at registration and do not need it.
 
+**Back up the database before the first boot on new code.** Boot applies the
+migrations above automatically, and the case-insensitive email dedupe
+(introduced with the `idx_users_email_nocase` index) may rewrite the email of a
+duplicate account on a database that predates case-insensitive uniqueness. It is
+non-destructive — it never deletes a user or touches attendance/hours, only
+renames the lower-hours account of a duplicate pair to `local+dup-<rowid>@domain`
+and logs every change — and it is a no-op on data with no case-collisions. Still,
+take a copy of the SQLite file (and its `-wal`/`-shm` sidecars if present) before
+deploying, so any dedupe rename can be reviewed and reversed by hand:
+
+```bash
+cp server/sbvolunteers.db "sbvolunteers.$(date +%F).bak.db"
+```
+
+**Certificate codes were re-keyed to random stored values (hard cutover).**
+Certificate codes used to be derivable from a user id and event id, which made
+the public verify endpoint forgeable offline. Codes are now generated with
+`crypto.randomBytes` and stored in a new `certificates` table, backfilled at
+boot for every volunteer's existing completed attendance. This is a hard
+cutover: any certificate **printed or downloaded before this deploy** has the
+old, no-longer-valid code and will stop verifying — it must be re-downloaded
+from the certificates page to get the new code. Back up the database first
+(same copy step above covers this migration too).
+
 ### Client
 
 | Env var           | Default | Purpose |

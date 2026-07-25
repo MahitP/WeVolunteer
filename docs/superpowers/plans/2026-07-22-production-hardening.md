@@ -339,21 +339,28 @@ Seeded accounts (password `password123`): students `leo.chen28@gmail.com`, `priy
 
 **Why it matters.** F-10: `certificateCode(userId, eventId)` is a non-secret hash of two guessable ids — the reviewer computed a valid code offline and pulled a minor's name, grade, and hours unauthenticated. The verify endpoint also full-table-scans on every call.
 
+**DECISION (approved): hard cutover (option A).** Old printed certificates stop verifying; no old-code fallback is kept. Pre-public, so acceptable; a grace period would re-open the vulnerability.
+
 **Files expected to change.**
-- Modify: `server/db.js` — new table `certificates(user_id, event_id, code UNIQUE, created_at, PRIMARY KEY(user_id,event_id))`, plus a backfill that assigns a random code to every existing `(user_id, event_id)` that has present attendance.
-- Modify: `server/utils.js` — remove `certificateCode`; add `getOrCreateCertificateCode(userId, eventId)` that reads/creates from the table with a cryptographically random code (`crypto.randomBytes` → base32, formatted `SBV-XXXX-XXXX`).
-- Modify: `server/routes/attendanceRoutes.js` — `GET /api/certificates` uses the stored code; `GET /api/certificates/verify/:code` looks the code up by indexed column (no scan) and returns volunteer name, event, organizer, hours, date — **not grade**.
-- Modify: `server/app.js` — mount a rate limiter on `/api/certificates/verify` (reuse the `mailLimiter` shape or a new `verifyLimiter`, by path, no circular import).
+- Create: `server/certificates.js` — a dedicated module (mirroring `hoursLedger.js`): `createCertificatesTable(db)`, `backfillCertificates(db)`, `getOrCreateCertificateCode(db, userId, eventId)`. Random code via `crypto.randomBytes`, base32 Crockford, `SBV-XXXX-XXXX`.
+- Modify: `server/db.js` — call `createCertificatesTable(db)` and `backfillCertificates(db)` in `initDatabase()` (near the hours-ledger init), with a boot log line `[Certificates] Issued N code(s)`.
+- Modify: `server/utils.js` — **remove** the `certificateCode` function entirely.
+- Modify: all six `server/routes/*.js` — **remove `certificateCode` from the shared `import { … } from '../utils.js'` line** (it is imported in all six but used only in `attendanceRoutes.js`; removing the export breaks the ESM named import in every file, so all six import lines must drop it). This is mechanical (an unused-import removal in five of them) and required by the security fix.
+- Modify: `server/routes/attendanceRoutes.js` — `GET /api/certificates` uses `getOrCreateCertificateCode(db, req.user.id, r.event_id)`; `GET /api/certificates/verify/:code` looks the code up by the indexed `code` column (no scan) and returns volunteer name, event, organizer, hours, date — **not grade**.
+- Modify: `server/app.js` — add a `verifyLimiter` next to `mailLimiter` and mount it by path: `app.use('/api/certificates/verify', verifyLimiter)`. No `../app.js` import into routers.
+- Modify: `README.md` — runbook note: hard cutover, re-issue any pre-deploy printed certificate; back up DB before deploy (the Task 7 note already covers backup).
 - Test: `server/routes.certificates.test.js` (new).
 
-**Dependencies.** Task 11 (Phase 3) touches `app.js` ordering; keep this task's limiter mount consistent with the existing by-path mounts. No hard code dependency.
+**Client check (verified):** `CertificateModal.jsx` displays `certificate.code` and builds `/verify/${certificate.code}` — it uses whatever the API returns, so no change. The student's OWN certificate modal shows their own grade (fine). Grade is dropped only from the PUBLIC verify endpoint response. Confirm `src/views/CertificateVerification.jsx` (the public verify page) does not hard-require `grade` — if it renders grade, remove that line (minimal client edit in the same commit); if it already omits/guards it, no client change.
+
+**Dependencies.** Task 11 (Phase 3) touches `app.js` ordering; keep this limiter mount consistent with the existing by-path mounts. No hard code dependency.
 
 **Implementation approach.**
-- Code generation: `crypto.randomBytes(5)` → 8 base32 chars (Crockford alphabet, no 0/O/1/I) → `SBV-XXXX-XXXX`. Insert with `INSERT OR IGNORE` keyed on `(user_id, event_id)`; on conflict read the existing code (stable per certificate).
-- Backfill migration: for every distinct `(user_id, event_id)` in `attendance WHERE present = 1` with no `certificates` row, create one. Idempotent (keyed insert). Runs at boot like the hours-ledger backfill.
-- Verify endpoint: `SELECT ... FROM certificates c JOIN ... WHERE c.code = ?` (indexed, single row) — O(1) instead of scanning all attendance. Uppercase-normalise input. Return `{ valid, volunteerName, eventTitle, organizerName, hours, completedAt }` — grade removed.
-- Rate limit: `verifyLimiter` (e.g. 20/15 min, no `skipSuccessfulRequests`) mounted `app.use('/api/certificates/verify', verifyLimiter)`.
-- The printed certificate copy already says "Verify at …/verify/CODE"; the code format is unchanged in shape (`SBV-XXXX-XXXX`), so existing printed certificates that were generated from the old deterministic code will **no longer verify**. Because this is pre-public and the pilot's certificates were demo data, that is acceptable — but call it out explicitly in the report and README: any certificate printed before this deploy must be re-issued.
+- Code generation: `crypto.randomBytes(5)` → 8 base32 chars (Crockford alphabet `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`, no 0/O/1/I) → `SBV-XXXX-XXXX`. Insert with `INSERT OR IGNORE` keyed on `(user_id, event_id)`; on the (astronomically rare) `code`-uniqueness conflict, regenerate; then read back the row so the returned code is always the stored one (stable per certificate).
+- Backfill: for every distinct `(user_id, event_id)` in `attendance WHERE present = 1` with no `certificates` row, create one. Idempotent (keyed insert). Runs at boot like the hours-ledger backfill; log the count.
+- Verify endpoint: `SELECT c.user_id, c.event_id, u.name, e.title, org.name, hours, last_end FROM certificates c JOIN attendance/... WHERE c.code = ?` — single indexed lookup, O(1). Uppercase-normalise input. Return `{ valid, volunteerName, eventTitle, organizerName, hours, completedAt }` — **no grade**. Recompute hours as `SUM(hours_awarded) WHERE present = 1` for that `(user, event)` so the figure stays the derived source-of-truth value.
+- Rate limit: `verifyLimiter` — `limit: DEMO_MODE ? 1000 : 20`, `windowMs: 15*60*1000`, **no** `skipSuccessfulRequests` (every check counts), mounted `app.use('/api/certificates/verify', verifyLimiter)`.
+- The printed certificate shape (`SBV-XXXX-XXXX`) is unchanged, so layout and client are unaffected — only the code VALUE is now random+stored, and old printed codes no longer verify (hard cutover, approved).
 
 **Tests required.**
 1. Two calls to `GET /api/certificates` for the same completed event return the **same** code (stable), and it verifies.

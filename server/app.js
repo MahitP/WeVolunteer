@@ -66,12 +66,25 @@ export const mailLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// The public certificate-verify endpoint is unauthenticated by design (a
+// school office checking a printout has no account), so it has no other
+// guard against being hammered to enumerate codes. Every request counts —
+// deliberately no skipSuccessfulRequests — because a successful lookup is
+// exactly the thing an enumeration attempt looks like from the outside.
+export const verifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: DEMO_MODE ? 1000 : 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
+
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/signup', authLimiter);
 app.use('/api/auth/forgot-password', mailLimiter);
 app.use('/api/auth/resend-verification', mailLimiter);
 app.use('/api/auth/reset-password', authLimiter);
 app.use('/api/auth/verify-email', authLimiter);
+app.use('/api/certificates/verify', verifyLimiter);
 app.use('/api', apiLimiter);
 
 app.use(authRoutes);

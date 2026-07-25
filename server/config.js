@@ -18,6 +18,7 @@ export const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'O
 export const APP_NAME = process.env.APP_NAME || 'SBVolunteers';
 export const SCHOOL_NAME = process.env.SCHOOL_NAME || 'South Brunswick, NJ';
 export const MAX_AUTO_SELECT_APPLICANTS = Number(process.env.MAX_AUTO_SELECT_APPLICANTS) || 100;
+export const MAX_AUTO_SELECT_DRAWS = Number(process.env.MAX_AUTO_SELECT_DRAWS) || 5;
 export const DEFAULT_EMAIL_FROM = `"${APP_NAME}" <noreply@sbvolunteers.org>`;
 
 export const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:4173')
