@@ -10,13 +10,15 @@ import { defineConfig } from 'vitest/config';
  * both be right if each gets a fresh module registry — db.js and config.js read
  * their environment once, at import time.
  *
- * Note the suite currently passes with `isolate: false` too, because the
- * default worker pool already runs each file in its own process, which supplies
- * a fresh registry by itself. So this pin is defence in depth, not a fix for a
- * present failure: it states the requirement explicitly so that a future change
- * to the pool, or a major-version flip of the default, cannot quietly let these
- * suites contaminate each other — a failure that would surface as confusing
- * order-dependent flakiness rather than an obvious error.
+ * This is NOT merely defensive. Setting `isolate: false` and running the suite
+ * repeatedly fails every time, with a failure count that varies by test-file
+ * scheduling order (observed 2, then 4, then 2 failures across three runs) —
+ * module-level state such as the rate limiters' counters survives across files
+ * that share a worker. `isolate: true` produces 241/241 on every run.
+ *
+ * So do not remove this pin to "simplify" the config: it is load-bearing today,
+ * and without it CI becomes order-dependently flaky rather than obviously
+ * broken, which is far harder to diagnose.
  */
 export default defineConfig({
   test: {
