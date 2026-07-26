@@ -14,6 +14,22 @@ const dbPath = process.env.SBV_DB_PATH || path.join(__dirname, 'sbvolunteers.db'
 
 const db = new DatabaseSync(dbPath);
 
+// Connection durability/concurrency settings, applied before any statement runs.
+//
+// WAL lets readers continue while a write is in progress, instead of the
+// default rollback journal where a writer locks the whole file. busy_timeout
+// gives a blocked writer a retry window rather than failing instantly with
+// SQLITE_BUSY — the default is 0. The app is single-process, but the boot
+// backfills, the 15-minute notification sweep, and the standalone scripts
+// (verify:hours, bin/make-admin.mjs) can all open this file, so a zero-length
+// window is an avoidable failure mode.
+//
+// WAL is written into the database header and persists; it also creates -wal
+// and -shm sidecar files, which any backup must copy alongside the .db (see
+// the runbook in README.md).
+db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA busy_timeout = 5000');
+
 /**
  * Adds a column only if it isn't already present. `ALTER TABLE ... ADD COLUMN`
  * throws on a duplicate, so existing databases would fail to boot otherwise.

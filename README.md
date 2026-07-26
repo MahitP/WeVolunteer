@@ -102,11 +102,18 @@ duplicate account on a database that predates case-insensitive uniqueness. It is
 non-destructive — it never deletes a user or touches attendance/hours, only
 renames the lower-hours account of a duplicate pair to `local+dup-<rowid>@domain`
 and logs every change — and it is a no-op on data with no case-collisions. Still,
-take a copy of the SQLite file (and its `-wal`/`-shm` sidecars if present) before
-deploying, so any dedupe rename can be reviewed and reversed by hand:
+take a copy of the SQLite file before deploying, so any dedupe rename can be
+reviewed and reversed by hand.
+
+The database runs in WAL mode, so recent commits may still live in the
+`-wal` sidecar rather than the main file. Stop the server first (a clean
+shutdown checkpoints the WAL), then copy all three paths — a `.db` copied
+without its `-wal` can be missing the newest writes:
 
 ```bash
-cp server/sbvolunteers.db "sbvolunteers.$(date +%F).bak.db"
+cp server/sbvolunteers.db     "sbvolunteers.$(date +%F).bak.db"
+cp server/sbvolunteers.db-wal "sbvolunteers.$(date +%F).bak.db-wal" 2>/dev/null || true
+cp server/sbvolunteers.db-shm "sbvolunteers.$(date +%F).bak.db-shm" 2>/dev/null || true
 ```
 
 **Certificate codes were re-keyed to random stored values (hard cutover).**
