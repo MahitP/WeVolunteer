@@ -33,6 +33,12 @@ export function validateEventPayload({ title, description, location, instruction
 
   let earliestStartMs = Infinity;
   for (const slot of slots) {
+    // A null or non-object entry would throw on the property reads below,
+    // surfacing a client mistake as a 500.
+    if (typeof slot !== 'object' || slot === null || Array.isArray(slot)) {
+      return { ok: false, error: 'Each shift must be an object.' };
+    }
+
     const startMs = Date.parse(slot.startDatetime);
     const endMs = Date.parse(slot.endDatetime);
     if (isNaN(startMs) || isNaN(endMs)) {
@@ -47,11 +53,14 @@ export function validateEventPayload({ title, description, location, instruction
       return { ok: false, error: `Each shift must allow between ${MIN_MAX_SPOTS} and ${MAX_MAX_SPOTS} volunteers.` };
     }
 
-    if (typeof slot.name === 'string' && slot.name.length > MAX_SLOT_NAME_LENGTH) {
-      return { ok: false, error: `Each shift name must be ${MAX_SLOT_NAME_LENGTH} characters or fewer.` };
+    // Text fields must BE strings, not merely be length-checked when they
+    // happen to be one: a non-string here reaches the SQLite bind and fails
+    // there as a 500 instead of being reported as bad input.
+    if (typeof slot.name !== 'string' || slot.name.length > MAX_SLOT_NAME_LENGTH) {
+      return { ok: false, error: `Each shift name must be text of ${MAX_SLOT_NAME_LENGTH} characters or fewer.` };
     }
-    if (typeof slot.description === 'string' && slot.description.length > MAX_SLOT_DESCRIPTION_LENGTH) {
-      return { ok: false, error: `Each shift description must be ${MAX_SLOT_DESCRIPTION_LENGTH} characters or fewer.` };
+    if (typeof slot.description !== 'string' || slot.description.length > MAX_SLOT_DESCRIPTION_LENGTH) {
+      return { ok: false, error: `Each shift description must be text of ${MAX_SLOT_DESCRIPTION_LENGTH} characters or fewer.` };
     }
 
     if (startMs < earliestStartMs) earliestStartMs = startMs;
@@ -61,17 +70,23 @@ export function validateEventPayload({ title, description, location, instruction
     return { ok: false, error: 'The application deadline must be on or before the first shift starts.' };
   }
 
-  if (typeof title === 'string' && title.length > MAX_TITLE_LENGTH) {
-    return { ok: false, error: `Title must be ${MAX_TITLE_LENGTH} characters or fewer.` };
+  // As above: these must BE strings. The routes already reject missing values,
+  // so a non-string here is a wrong-type payload, not an absent one.
+  if (typeof title !== 'string' || title.length > MAX_TITLE_LENGTH) {
+    return { ok: false, error: `Title must be text of ${MAX_TITLE_LENGTH} characters or fewer.` };
   }
-  if (typeof description === 'string' && description.length > MAX_DESCRIPTION_LENGTH) {
-    return { ok: false, error: `Description must be ${MAX_DESCRIPTION_LENGTH} characters or fewer.` };
+  if (typeof description !== 'string' || description.length > MAX_DESCRIPTION_LENGTH) {
+    return { ok: false, error: `Description must be text of ${MAX_DESCRIPTION_LENGTH} characters or fewer.` };
   }
-  if (typeof location === 'string' && location.length > MAX_LOCATION_LENGTH) {
-    return { ok: false, error: `Location must be ${MAX_LOCATION_LENGTH} characters or fewer.` };
+  if (typeof location !== 'string' || location.length > MAX_LOCATION_LENGTH) {
+    return { ok: false, error: `Location must be text of ${MAX_LOCATION_LENGTH} characters or fewer.` };
   }
-  if (instructions && typeof instructions === 'string' && instructions.length > MAX_INSTRUCTIONS_LENGTH) {
-    return { ok: false, error: `Instructions must be ${MAX_INSTRUCTIONS_LENGTH} characters or fewer.` };
+  // Instructions are optional: absent/empty is fine, but a supplied value must
+  // be text.
+  if (instructions !== undefined && instructions !== null && instructions !== '') {
+    if (typeof instructions !== 'string' || instructions.length > MAX_INSTRUCTIONS_LENGTH) {
+      return { ok: false, error: `Instructions must be text of ${MAX_INSTRUCTIONS_LENGTH} characters or fewer.` };
+    }
   }
 
   return { ok: true };
