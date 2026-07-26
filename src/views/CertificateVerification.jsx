@@ -57,7 +57,7 @@ export default function CertificateVerification() {
 
           {status === 'invalid' && (
             <div style={{ textAlign: 'center' }}>
-              <div style={{ color: 'var(--critical)', marginBottom: 'var(--s4)' }}>
+              <div style={{ color: 'var(--danger)', marginBottom: 'var(--s4)' }}>
                 <ShieldAlert size={48} />
               </div>
               <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--s2)' }}>Invalid Certificate</h1>
@@ -76,7 +76,7 @@ export default function CertificateVerification() {
 
           {status === 'error' && (
             <div style={{ textAlign: 'center' }}>
-              <div style={{ color: 'var(--warning)', marginBottom: 'var(--s4)' }}>
+              <div style={{ color: 'var(--warn)', marginBottom: 'var(--s4)' }}>
                 <ShieldAlert size={48} />
               </div>
               <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--s2)' }}>System Error</h1>
@@ -89,7 +89,7 @@ export default function CertificateVerification() {
 
           {status === 'valid' && certData && (
             <div>
-              <div style={{ textAlign: 'center', color: 'var(--success)', marginBottom: 'var(--s4)' }}>
+              <div style={{ textAlign: 'center', color: 'var(--ok)', marginBottom: 'var(--s4)' }}>
                 <ShieldCheck size={48} />
               </div>
               <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--s2)', textAlign: 'center' }}>

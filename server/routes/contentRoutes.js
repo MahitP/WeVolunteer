@@ -585,6 +585,16 @@ router.post('/api/reports', authenticateToken, (req, res) => {
     return res.status(400).json({ error: 'Invalid target type' });
   }
 
+  // A non-string targetId/reason passes the presence check above (an object is
+  // truthy) but cannot be bound by node:sqlite, which would surface a client
+  // mistake as a 500.
+  if (typeof targetId !== 'string' || typeof reason !== 'string') {
+    return res.status(400).json({ error: 'targetId and reason must be text' });
+  }
+  if (reason.length > 1000) {
+    return res.status(400).json({ error: 'Reason is too long (max 1000 characters)' });
+  }
+
   try {
     const id = 'rep_' + crypto.randomBytes(8).toString('hex');
     const now = new Date().toISOString();

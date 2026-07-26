@@ -518,7 +518,7 @@ export default function EventModal({
                   type="button"
                   className="btn btn-ghost btn-icon btn-sm"
                   onClick={() => setShowReportModal(true)}
-                  style={{ color: 'var(--error)', display: 'inline-flex' }}
+                  style={{ color: 'var(--danger)', display: 'inline-flex' }}
                   title="Report this event"
                 >
                   <Flag size={18} />
@@ -1126,8 +1126,8 @@ export default function EventModal({
                       {/* Case 1: Selection is confirmed (Selection summary exists) */}
                       {event.selectionSummary ? (
                         <>
-                          <div className="card" style={{ padding: 'var(--s4)', background: 'var(--ink-5)', border: '1px solid var(--ink-4)', borderRadius: 8, marginBottom: 'var(--s4)' }}>
-                            <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600, color: 'var(--ink-1)' }}>Selection Run Summary</h4>
+                          <div className="card" style={{ padding: 'var(--s4)', background: 'var(--surface-3)', border: '1px solid var(--rule)', borderRadius: 8, marginBottom: 'var(--s4)' }}>
+                            <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600, color: 'var(--ink)' }}>Selection Run Summary</h4>
                             <p className="small dim" style={{ margin: '4px 0 12px 0' }}>
                               Completed on {new Date(event.selectionSummary.timestamp).toLocaleString()}
                             </p>
@@ -1201,7 +1201,7 @@ export default function EventModal({
                                   .sort((a, b) => (a.waitlistOrder || 999) - (b.waitlistOrder || 999))
                                   .map((app, index) => (
                                     <div key={app.id} className="list-row">
-                                      <span className="small badge" style={{ marginRight: 8, background: 'var(--ink-4)', color: 'var(--ink-2)', padding: '2px 6px', borderRadius: 4 }}>
+                                      <span className="small badge" style={{ marginRight: 8, background: 'var(--rule)', color: 'var(--ink-2)', padding: '2px 6px', borderRadius: 4 }}>
                                         #{app.waitlistOrder || (index + 1)}
                                       </span>
                                       <button className="person" onClick={() => onViewVolunteerProfile(app.volunteer)}>
@@ -1250,7 +1250,7 @@ export default function EventModal({
                                   <div className="skeleton skeleton-line" style={{ width: '60%' }} />
                                 </div>
                               ) : selectionRuns.length === 0 ? (
-                                <div className="card" style={{ padding: 'var(--s4)', textAlign: 'center', background: 'var(--ink-5)', border: '1px solid var(--ink-4)', borderRadius: 8, marginBottom: 'var(--s4)' }}>
+                                <div className="card" style={{ padding: 'var(--s4)', textAlign: 'center', background: 'var(--surface-3)', border: '1px solid var(--rule)', borderRadius: 8, marginBottom: 'var(--s4)' }}>
                                   <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600 }}>Applications Closed – Auto Select Ready</h3>
                                   <p className="small dim" style={{ margin: 'var(--s2) 0 var(--s4) 0' }}>
                                     The application deadline has passed. You can now run the weighted selection.
@@ -1275,8 +1275,8 @@ export default function EventModal({
 
                                     return (
                                       <>
-                                        <div className="card" style={{ padding: 'var(--s4)', background: 'var(--ink-5)', border: '1px solid var(--ink-4)', borderRadius: 8, marginBottom: 'var(--s4)' }}>
-                                          <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600, color: 'var(--ink-1)' }}>Auto Select Results (Preview)</h4>
+                                        <div className="card" style={{ padding: 'var(--s4)', background: 'var(--surface-3)', border: '1px solid var(--rule)', borderRadius: 8, marginBottom: 'var(--s4)' }}>
+                                          <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600, color: 'var(--ink)' }}>Auto Select Results (Preview)</h4>
                                           <p className="small dim" style={{ margin: '4px 0 12px 0' }}>
                                             Generated draft Run #{latestDraft.runNumber} on {new Date(latestDraft.createdAt).toLocaleTimeString()}
                                           </p>
@@ -1356,7 +1356,7 @@ export default function EventModal({
                                                 if (!app) return null;
                                                 return (
                                                   <div key={app.id} className="list-row">
-                                                    <span className="small badge" style={{ marginRight: 8, background: 'var(--ink-4)', color: 'var(--ink-2)', padding: '2px 6px', borderRadius: 4 }}>
+                                                    <span className="small badge" style={{ marginRight: 8, background: 'var(--rule)', color: 'var(--ink-2)', padding: '2px 6px', borderRadius: 4 }}>
                                                       #{idx + 1}
                                                     </span>
                                                     <button className="person" onClick={() => onViewVolunteerProfile(app.volunteer)}>
@@ -1405,11 +1405,11 @@ export default function EventModal({
                       {/* Persistent Audit Log History for Organizers/Admins */}
                       {selectionRuns.length > 0 && (
                         <section style={{ marginTop: 'var(--s4)' }}>
-                          <div className="card" style={{ padding: 'var(--s3) var(--s4)', background: 'var(--ink-5)', border: '1px solid var(--ink-4)', borderRadius: 8 }}>
+                          <div className="card" style={{ padding: 'var(--s3) var(--s4)', background: 'var(--surface-3)', border: '1px solid var(--rule)', borderRadius: 8 }}>
                             <h4 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 600, color: 'var(--ink-2)' }}>Audit Log History</h4>
                             <div className="stack-xs" style={{ marginTop: 8 }}>
                               {selectionRuns.map(run => (
-                                <div key={run.id} className="small dim stack-xs" style={{ padding: '8px 0', borderBottom: '1px solid var(--ink-4)' }}>
+                                <div key={run.id} className="small dim stack-xs" style={{ padding: '8px 0', borderBottom: '1px solid var(--rule)' }}>
                                   <div className="row" style={{ gap: 8, justifyContent: 'space-between' }}>
                                     <span style={{ color: run.isConfirmed ? 'var(--ok)' : 'inherit', fontWeight: run.isConfirmed ? 600 : 'normal' }}>
                                       {run.isConfirmed ? 'Confirmed Run ' : 'Run '}#{run.runNumber}
@@ -1417,7 +1417,7 @@ export default function EventModal({
                                     <span>{new Date(run.createdAt).toLocaleString()}</span>
                                   </div>
                                   {run.reason && (
-                                    <div style={{ color: 'var(--ink-2)', fontStyle: 'italic', paddingLeft: 8, borderLeft: '2px solid var(--ink-4)' }}>
+                                    <div style={{ color: 'var(--ink-2)', fontStyle: 'italic', paddingLeft: 8, borderLeft: '2px solid var(--rule)' }}>
                                       Reason: {run.reason}
                                     </div>
                                   )}
