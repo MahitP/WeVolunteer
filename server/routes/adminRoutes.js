@@ -1,11 +1,6 @@
 import express from 'express';
-import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
-import { VALID_GRADES } from '../config.js';
-import { createRandom, performWeightedSelection } from '../weighting.js';
-import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
-import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion } from '../utils.js';
+
+import { authenticateToken, formatUserResponse, createNotification } from '../utils.js';
 import { db } from '../db.js';
 
 const router = express.Router();
