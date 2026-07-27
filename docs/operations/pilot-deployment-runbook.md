@@ -47,10 +47,9 @@ The `v1.0.0-pilot` release (`7fc79cd`), plus one documentation-only commit
 `main` — the only change is the roadmap document. **Deploy `main`.**
 
 Be aware of one cosmetic inconsistency you will trip over immediately:
-`GET /health` returns `"version": "2.0.0"`, a hardcoded string in
-[server/app.js:102](../../server/app.js#L102) that does not match the release tag.
-It is not a deployment blocker, but do not use it to identify which build is
-running — use `git rev-parse HEAD` on the server instead.
+`GET /health` reports the version from `server/package.json`, so it tracks the
+released version automatically. For the exact build, `git rev-parse HEAD` on the
+server remains the authoritative answer.
 
 ### What the system consists of
 
@@ -303,7 +302,7 @@ working.
 catch-all specifically so a load balancer can never receive `index.html` from
 it. It runs `SELECT 1` against the database.
 
-- `200 {"status":"ok","database":"connected","version":"2.0.0"}`
+- `200 {"status":"ok","database":"connected","version":"1.0.0"}`
 - `500 {"status":"error","database":"disconnected"}`
 
 It is unauthenticated and not rate-limited (it sits outside the `/api` limiter).
@@ -735,10 +734,12 @@ difference from `main` is the roadmap document.
 
 ### Step 3 — Install dependencies
 
-There are **two** `package.json` files. Both must be installed.
+This is an npm workspace: the `server` package is a workspace member, so a
+single install at the root covers both the client and the server. There is no
+separate install step for `server/`.
 
 ```bash
-sudo -u wev npm ci                 # root: Installs React, Vite, Express, sqlite, etc.
+sudo -u wev npm ci --include=dev
 ```
 
 Use `npm ci`, not `npm install` — it installs exactly the locked versions and
@@ -990,7 +991,7 @@ production boot except where noted as environment-specific.
 ```bash
 # 1 — health, through the proxy, over TLS
 curl -sS https://volunteers.sbschools.example.org/health
-# → {"status":"ok","database":"connected","version":"2.0.0"}
+# → {"status":"ok","database":"connected","version":"1.0.0"}
 ```
 
 ```bash
@@ -1432,8 +1433,8 @@ Rolling back *code* and rolling back *data* are different operations with
 different risks.
 
 **Code rollback is straightforward** — `git checkout <previous-sha>`,
-`npm ci`, `npm run build`, `npm prune --omit=dev`, restart. There is no
-build-time coupling to the database.
+`npm ci --include=dev`, `npm run build`, `npm prune --omit=dev`, restart. There
+is no build-time coupling to the database.
 
 **Schema rollback is not supported.** Migrations are forward-only:
 `addColumnIfMissing` has no `removeColumn`, the `applications` rebuild has no
@@ -1810,7 +1811,7 @@ BASE=https://volunteers.sbschools.example.org
 
 | # | Action | Expected outcome |
 |---|---|---|
-| A1 | `curl -sS $BASE/health` | `{"status":"ok","database":"connected","version":"2.0.0"}` |
+| A1 | `curl -sS $BASE/health` | `{"status":"ok","database":"connected","version":"1.0.0"}` |
 | A2 | `curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' $BASE/` | `200 text/html; charset=UTF-8` |
 | A3 | `curl -sS -o /dev/null -w '%{http_code}\n' $BASE/events` | `200` — SPA fallback works for deep links |
 | A4 | `curl -sS $BASE/api/nope` | `{"error":"Not found: GET /api/nope"}` — JSON, not HTML |
@@ -1988,7 +1989,7 @@ registered before the SPA catch-all so it can never return HTML.
 curl -sf https://volunteers.sbschools.example.org/health
 ```
 
-- `200 {"status":"ok","database":"connected","version":"2.0.0"}` — the process
+- `200 {"status":"ok","database":"connected","version":"1.0.0"}` — the process
   is up **and** SQLite answered `SELECT 1`.
 - `500 {"status":"error","database":"disconnected"}` — the process is up but the
   database is not answering. This is the serious one: it means the file is
@@ -2386,7 +2387,9 @@ sudo -u wev git log --oneline -10
 sudo -u wev git checkout <previous-sha>
 
 # 4. Reinstall and rebuild — dependency versions may differ.
-sudo -u wev npm ci
+#    --include=dev is required: the build needs Vite, which is a devDependency,
+#    and npm omits devDependencies when NODE_ENV=production is set.
+sudo -u wev npm ci --include=dev
 sudo -u wev npm run build
 sudo -u wev npm prune --omit=dev
 
@@ -2710,11 +2713,12 @@ addressed.
 found" even though the account exists.
 *Mitigation:* always pass the address in lowercase. Documented in §5 step 7.
 
-**M7 — `/health` reports a version that matches nothing.**
-Hardcoded `"2.0.0"` against release tag `v1.0.0-pilot`. During an incident this
-actively misleads.
-*Mitigation:* identify the running build with `git rev-parse HEAD` on the
-server, never with `/health`.
+**M7 — `/health` version. Resolved in v1.0.0.**
+It previously reported a hardcoded `"2.0.0"` against a `v1.0.0` release, which
+actively misled during incident triage. It now reads the version from
+`server/package.json` and cannot drift.
+*Still true:* for the exact build, `git rev-parse HEAD` on the server is
+authoritative — the version alone does not identify a commit.
 
 **M8 — No password change for a signed-in user, and no admin password reset.**
 The reset-by-email flow is the only path. If SMTP is down, the only recovery is
