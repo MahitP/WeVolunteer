@@ -49,7 +49,7 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
           <div className="certificate" id="printable-certificate">
             <div style={{ textAlign: 'center' }}>
               <div className="certificate-org">
-                South Brunswick Volunteer Network · New Jersey
+                WeVolunteer Network
               </div>
               <div className="certificate-rule" />
               <h1>Certificate of Community Service</h1>

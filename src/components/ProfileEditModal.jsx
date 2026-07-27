@@ -90,7 +90,7 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
             <div className="field" style={{ marginTop: 0 }}>
               <label htmlFor="pf-school">School or organization</label>
               <input id="pf-school" className="input" value={form.school}
-                placeholder="South Brunswick High School"
+                placeholder="e.g. Your High School"
                 onChange={e => set('school', e.target.value)} />
             </div>
             <div className="field" style={{ marginTop: 0 }}>

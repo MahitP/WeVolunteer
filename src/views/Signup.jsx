@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { api } from '../utils/api';
-import { APP_NAME, PRIVACY_URL } from '../config';
+import { APP_NAME, PRIVACY_URL, SCHOOL_NAME } from '../config';
 import { AlertCircle, ArrowLeft } from 'lucide-react';
 
 const AVATARS = ['👤', '🧑‍💻', '👩‍⚕️', '🧑‍🎨', '👩‍🎓', '👩‍💼', '🦁', '🦉', '🦊', '🎨'];
@@ -82,10 +82,10 @@ export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
     <div className="auth">
       <aside className="auth-pitch">
         <div className="brand">
-          <span className="brand-mark">SB</span>
+          <span className="brand-mark">WV</span>
           <span className="brand-text">
             <span className="brand-name">{APP_NAME}</span>
-            <span className="brand-sub">South Brunswick, NJ</span>
+            <span className="brand-sub">{SCHOOL_NAME}</span>
           </span>
         </div>
         <div>
@@ -193,7 +193,7 @@ export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
               <label htmlFor="su-school">{isStudent ? 'School' : 'Organization'}</label>
               <input
                 id="su-school" className="input" value={form.school}
-                placeholder={isStudent ? 'South Brunswick High School' : 'e.g. SB Public Library'}
+                placeholder={isStudent ? 'e.g. Your High School' : 'e.g. Local Public Library'}
                 onChange={e => set('school', e.target.value)}
               />
             </div>
