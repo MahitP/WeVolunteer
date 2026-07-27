@@ -283,6 +283,27 @@ Enabling demo mode with `NODE_ENV=production` is also refused.
 
 **Transport.** The process binds `127.0.0.1` and is unreachable except through the reverse proxy. Helmet sets baseline security headers; CORS is scoped to `/api` with a same-origin fallback.
 
+### Dependency advisories
+
+`npm audit` currently reports one high-severity advisory against `react-router`
+([GHSA-qwww-vcr4-c8h2](https://github.com/advisories/GHSA-qwww-vcr4-c8h2) — CSRF
+bypass in RSC mode). It has been assessed and **does not apply to this
+application**:
+
+- The advisory is scoped to React Router's **RSC (React Server Components)
+  mode**. This is a client-rendered SPA with no server components.
+- The only router API used is `BrowserRouter`. There are no route `loader` or
+  `action` handlers, no `createBrowserRouter`, and no `RouterProvider` — the
+  attack surface the advisory describes is not instantiated.
+
+`npm audit fix --force` resolves it by **downgrading** to `react-router-dom@7.11.0`.
+That is a step backwards: 7.18.1 is the current release, and the downgrade is
+flagged by npm as a breaking change. The dependency is deliberately left at the
+latest version rather than moved to an older one to silence a finding that does
+not apply.
+
+This will be revisited when a patched release above 7.18.1 is published.
+
 ---
 
 ## Testing
