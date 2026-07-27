@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
+import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS } from './config.js';
 import { db } from './db.js';
@@ -189,12 +190,20 @@ app.use(attendanceRoutes);
 app.use(adminRoutes);
 app.use(contentRoutes);
 
+// Read once at import rather than per request. Derived from package.json so it
+// cannot drift from the released version the way a hardcoded literal did — this
+// previously reported 2.0.0 against a 1.0.0 release, which is actively
+// misleading when you are trying to identify a running build during an incident.
+const VERSION = JSON.parse(
+  readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf8')
+).version;
+
 // Health check is registered BEFORE the production SPA catch-all below, so it
 // always returns its JSON — a load balancer must never receive index.html here.
 app.get('/health', (req, res) => {
   try {
     db.prepare('SELECT 1').get();
-    res.json({ status: 'ok', database: 'connected', version: '2.0.0' });
+    res.json({ status: 'ok', database: 'connected', version: VERSION });
   } catch (err) {
     res.status(500).json({ status: 'error', database: 'disconnected' });
   }

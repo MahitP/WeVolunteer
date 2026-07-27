@@ -9,8 +9,8 @@ be updated when behavior changes.
 
 | Document | Purpose |
 |---|---|
-| [`pilot-deployment-runbook.md`](operations/pilot-deployment-runbook.md) | Provisioning through incident response. Written for an engineer who has not seen this project before. |
-| [`pilot-readiness-review.md`](operations/pilot-readiness-review.md) | Pre-launch review: findings, severity, and what was done about each. |
+| [`pilot-deployment-runbook.md`](operations/pilot-deployment-runbook.md) | Provisioning through incident response. The living operational reference — written for an engineer who has not seen this project before, and kept current. |
+| [`pilot-readiness-review.md`](operations/pilot-readiness-review.md) | The pre-launch engineering gate, dated 2026-07-26. A point-in-time audit rather than a maintained document: every finding in it was addressed before 1.0.0, and it is kept because the reasoning behind each severity call is still useful. |
 
 Deployment artifacts referenced by the runbook live in [`../deploy/`](../deploy/).
 

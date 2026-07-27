@@ -646,7 +646,9 @@ Organizers are community members — a librarian, a coach, a parent volunteer. S
 
 ### P1-16 · `/health` reports a version that matches nothing
 
-**Location:** `app.js:102` — `version: '2.0.0'` hardcoded, against release tag `v1.0.0-pilot`.
+**Location:** `app.js` — `version: '2.0.0'` hardcoded, against release tag `v1.0.0-pilot`.
+
+**Resolved in v1.0.0:** the value is now read from `server/package.json` and cannot drift.
 
 **Why it matters.** During an incident, the first question is "what is running?" This endpoint answers it wrongly and confidently.
 
