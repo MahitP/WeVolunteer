@@ -1,0 +1,21 @@
+[Unit]
+Description=Run the WeVolunteer database backup nightly
+Documentation=file:///srv/wevolunteer/docs/operations/pilot-deployment-runbook.md
+
+[Timer]
+# 03:00 local time, outside any plausible event or sign-up window.
+OnCalendar=*-*-* 03:00:00
+
+# Spread the start by up to 5 minutes so a host running several timers does not
+# fire them all at once.
+RandomizedDelaySec=5m
+
+# If the machine was off at 03:00, run the backup once it comes back rather than
+# skipping the night entirely. This is the setting that stops a rebooted or
+# suspended host from quietly accumulating gaps in the backup history.
+Persistent=true
+
+Unit=wevolunteer-backup.service
+
+[Install]
+WantedBy=timers.target
