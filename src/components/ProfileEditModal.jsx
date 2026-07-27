@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { useModal } from '../utils/useModal';
-import { X } from 'lucide-react';
+import { X, LogOut } from 'lucide-react';
 import { api } from '../utils/api';
 
 const AVATARS = ['👤', '🧑‍💻', '👩‍⚕️', '🧑‍🎨', '👩‍🎓', '👩‍💼', '🦁', '🦉', '🦊', '🎨', '🧑‍🔬', '🧑‍🍳', '👨‍🚒', '👩‍🏫', '🧑‍🎓', '🌟'];
 
-export default function ProfileEditModal({ user, onClose, onSave, addToast }) {
+export default function ProfileEditModal({ user, onClose, onSave, addToast, onSignOut }) {
   const dialogRef = useModal(onClose);
   // Initialised once from the user prop. The modal unmounts when closed, so
   // there is no stale state to sync back.
@@ -139,6 +139,31 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast }) {
               <span className="field-hint">Allow your name, avatar, and total hours to appear on the public leaderboard. If unchecked, your profile is only visible to you and event organizers.</span>
             </div>
           </div>
+          {/* Sign out lives here because this is the only account surface every
+              role can reach on a phone: below 700px the sidebar (and the user
+              menu that used to hold the only sign-out control) is display:none,
+              which left mobile users with no way to end their session at all.
+              Shared Chromebooks and family phones make that a real exposure —
+              sessions last seven days.
+
+              Kept inside this form's .modal-body on purpose: a second
+              .modal-body would create a second independent scroll region, which
+              stranded the fields above it. type="button" so it never submits. */}
+          {onSignOut && (
+            <div className="field" style={{ borderTop: '1px solid var(--rule)', paddingTop: 'var(--s4)', marginTop: 'var(--s5)' }}>
+              <button
+                type="button"
+                className="btn btn-danger btn-block"
+                onClick={onSignOut}
+                disabled={saving}
+              >
+                <LogOut size={15} /> Sign out
+              </button>
+              <span className="field-hint">
+                Ends your session on this device. Always sign out on a shared or borrowed device.
+              </span>
+            </div>
+          )}
         </form>
 
         <div className="modal-foot">

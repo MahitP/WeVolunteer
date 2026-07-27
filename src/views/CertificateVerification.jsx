@@ -5,23 +5,44 @@ import { ShieldCheck, ShieldAlert, Loader2, Calendar } from 'lucide-react';
 import { formatDay, formatHours } from '../utils/helpers';
 import { APP_NAME } from '../config';
 
+/**
+ * Shape of a certificate code, for rejecting obvious nonsense without a round
+ * trip: `WEV-XXXX-XXXX`.
+ *
+ * Deliberately checks shape only, not the exact alphabet the server draws
+ * from. A code containing a character the generator never emits still goes to
+ * the server, which answers authoritatively — being lenient here means a
+ * change to the generator can never cause this page to reject a genuine
+ * certificate offline. The strict alphabet lives in server/certificates.js and
+ * is the only place that decides what a real code looks like.
+ */
+const CODE_SHAPE = /^WEV-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+
 export default function CertificateVerification() {
   const { code } = useParams();
-  const [status, setStatus] = useState('loading'); // loading, valid, invalid, error
+  // loading · valid · invalid · ratelimited · error
+  const [status, setStatus] = useState('loading');
   const [certData, setCertData] = useState(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (!code) {
+    let cancelled = false;
+    const cleanCode = String(code || '').toUpperCase().trim();
+
+    // A missing or malformed code cannot match anything. Answer immediately
+    // rather than spending one of the verify endpoint's 20 requests per 15
+    // minutes on input we already know is not a code.
+    if (!cleanCode || !CODE_SHAPE.test(cleanCode)) {
       setStatus('invalid');
       return;
     }
-    
-    // Auto format lowercase to uppercase for the user
-    const cleanCode = code.toUpperCase().trim();
+
+    setStatus('loading');
 
     api.verifyCertificate(cleanCode)
       .then(res => {
-        if (res.valid) {
+        if (cancelled) return;
+        if (res?.valid) {
           setCertData(res);
           setStatus('valid');
         } else {
@@ -29,10 +50,29 @@ export default function CertificateVerification() {
         }
       })
       .catch(err => {
-        if (err.status === 404) setStatus('invalid');
-        else setStatus('error');
+        if (cancelled) return;
+        // 404 is the server saying, authoritatively, that no certificate has
+        // this code — that is an invalid certificate, not a failure of ours.
+        if (err.status === 404) {
+          setStatus('invalid');
+          return;
+        }
+        // Being rate limited says nothing about the certificate. Reporting it
+        // as invalid would accuse a genuine record of being forged simply
+        // because the office checked several in a row.
+        if (err.status === 429) {
+          setStatus('ratelimited');
+          return;
+        }
+        // Anything else — unreachable server, 5xx, unexpected shape — is our
+        // problem, and must never be presented as a verdict on the certificate.
+        setStatus('error');
       });
-  }, [code]);
+
+    return () => { cancelled = true; };
+  }, [code, attempt]);
+
+  const retry = () => setAttempt(a => a + 1);
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--surface-2)' }}>
@@ -68,9 +108,30 @@ export default function CertificateVerification() {
                 <p className="small dim">
                   <strong>Why am I seeing this?</strong><br />
                   This certificate may be forged, or the code was mistyped. {APP_NAME} certificates are cryptographically tied to the student's attendance records.
+                  {' '}Codes look like <strong>WEV-XXXX-XXXX</strong> and never contain the letters I or O, or the digits 0 or 1.
                 </p>
               </div>
               <Link to="/" className="btn btn-secondary">Return to home</Link>
+            </div>
+          )}
+
+          {status === 'ratelimited' && (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ color: 'var(--warn)', marginBottom: 'var(--s4)' }}>
+                <ShieldAlert size={48} />
+              </div>
+              <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--s2)' }}>Too many checks</h1>
+              <p className="lead" style={{ marginBottom: 'var(--s5)' }}>
+                This service limits how many certificates can be checked in a short period.
+                Please wait a few minutes and try again.
+              </p>
+              <div className="surface inset" style={{ padding: 'var(--s4)', borderRadius: 8, textAlign: 'left', marginBottom: 'var(--s5)' }}>
+                <p className="small dim">
+                  <strong>This is not a verdict on the certificate.</strong><br />
+                  The code <strong>{code}</strong> has not been checked yet — the limit was reached before we could look it up.
+                </p>
+              </div>
+              <button className="btn btn-secondary" onClick={retry}>Try again</button>
             </div>
           )}
 
@@ -79,11 +140,17 @@ export default function CertificateVerification() {
               <div style={{ color: 'var(--warn)', marginBottom: 'var(--s4)' }}>
                 <ShieldAlert size={48} />
               </div>
-              <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--s2)' }}>System Error</h1>
+              <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--s2)' }}>Verification unavailable</h1>
               <p className="lead" style={{ marginBottom: 'var(--s5)' }}>
-                We couldn't reach the verification server. Please try again later.
+                We couldn't reach the verification service. Please try again in a moment.
               </p>
-              <button className="btn btn-secondary" onClick={() => window.location.reload()}>Try again</button>
+              <div className="surface inset" style={{ padding: 'var(--s4)', borderRadius: 8, textAlign: 'left', marginBottom: 'var(--s5)' }}>
+                <p className="small dim">
+                  <strong>This is not a verdict on the certificate.</strong><br />
+                  The code <strong>{code}</strong> could not be checked. It has been neither confirmed nor rejected.
+                </p>
+              </div>
+              <button className="btn btn-secondary" onClick={retry}>Try again</button>
             </div>
           )}
 

@@ -44,4 +44,32 @@ describe('mail endpoints are rate limited', () => {
     const res = await srv.call('POST', '/api/auth/resend-verification');
     expect(res.status).toBe(429);
   });
+
+  /**
+   * A limited response must be JSON in the same shape as every other API error.
+   *
+   * express-rate-limit's default is `text/plain`, which the client could not
+   * parse — so it fell back to printing the bare status and a locked-out
+   * student was told "Request failed (429)". Asserting the content type here is
+   * the point of the test: a future upgrade that restores the text default
+   * would silently reintroduce that message.
+   */
+  it('answers a limited request with JSON the client can display', async () => {
+    const res = await fetch(`${srv.base}/api/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'leo.chen28@gmail.com' })
+    });
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('content-type')).toMatch(/application\/json/);
+
+    const body = await res.json();
+    expect(body.code).toBe('rate_limited');
+    expect(typeof body.error).toBe('string');
+    // A human sentence, not a status code echoed back at the user.
+    expect(body.error).toMatch(/try again/i);
+    expect(body.error).not.toMatch(/429/);
+    expect(body.retryAfterMinutes).toBeGreaterThan(0);
+  });
 });

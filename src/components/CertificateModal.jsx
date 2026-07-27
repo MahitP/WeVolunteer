@@ -2,19 +2,30 @@ import React from 'react';
 import { useModal } from '../utils/useModal';
 import { X, Printer, ShieldCheck } from 'lucide-react';
 import { formatHours, formatDay, gradeLabel } from '../utils/helpers';
+import { publicOrigin } from '../config';
 
 /**
  * A single event's certificate, printable to paper or PDF.
  *
- * The verification code is deterministic on the server, so a school office can
- * check a printed copy against the platform. It is an identifier, not a
- * secret — the same role a receipt number plays.
+ * The verification code is a random value stored server-side and handed out
+ * with the printout, so a school office can check a printed copy against the
+ * platform. It is a bearer credential for "whoever holds this piece of
+ * paper" — possession of the code is what it proves, nothing more.
  */
 export default function CertificateModal({ certificate, volunteer, onClose }) {
-  const dialogRef = useModal(onClose);
+  // Bail out BEFORE useModal runs. useModal locks body scrolling for as long as
+  // it is mounted; calling it and then returning null left the page unscrollable
+  // with no dialog on screen and no visible way out — which read to users as the
+  // app freezing. A component that renders nothing must have no side effects.
   if (!certificate) return null;
+  return <CertificateDialog certificate={certificate} volunteer={volunteer} onClose={onClose} />;
+}
+
+function CertificateDialog({ certificate, volunteer, onClose }) {
+  const dialogRef = useModal(onClose);
 
   const verifyPath = `/verify/${certificate.code}`;
+  const verifyHost = publicOrigin();
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -75,7 +86,7 @@ export default function CertificateModal({ certificate, volunteer, onClose }) {
               <div style={{ textAlign: 'right' }}>
                 <div className="certificate-code">{certificate.code}</div>
                 <div className="certificate-sign-label">
-                  Verify at sbvolunteers.org{verifyPath}
+                  Verify at {verifyHost}{verifyPath}
                 </div>
               </div>
             </div>

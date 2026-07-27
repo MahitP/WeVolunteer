@@ -15,7 +15,7 @@ describe('auth: email verification (flag on)', () => {
   });
 
   const tokenFor = (userId) => {
-    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
     const row = db.prepare(
       'SELECT token FROM email_verification_tokens WHERE user_id = ? ORDER BY expires_at DESC LIMIT 1'
     ).get(userId);

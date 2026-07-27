@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useModal } from '../utils/useModal';
 import {
@@ -16,6 +16,7 @@ import EventAnnouncements from './EventAnnouncements';
 import AttendeeList from './AttendeeList';
 import ApplicantReview from './ApplicantReview';
 import ReportModal from './ReportModal';
+import Modal from './Modal';
 
 const CATEGORIES = [
   { value: 'School', label: 'School project' },
@@ -35,6 +36,9 @@ export default function EventModal({
   const [tab, setTab] = useState('shifts');
   const [submitting, setSubmitting] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showRedrawModal, setShowRedrawModal] = useState(false);
+  const [redrawReason, setRedrawReason] = useState('');
+  const tabRefs = useRef({});
   const [selectedSlots, setSelectedSlots] = useState([]);
 
   const [editForm, setEditForm] = useState({
@@ -153,7 +157,7 @@ export default function EventModal({
 
     // Merge with any unsaved localStorage state
     try {
-      const draft = localStorage.getItem(`sbv_draft_attendance_${event.id}`);
+      const draft = localStorage.getItem(`wev_draft_attendance_${event.id}`);
       if (draft) {
         const { draftMap, draftTouched } = JSON.parse(draft);
         setAttendanceMap(prev => ({ ...prev, ...draftMap }));
@@ -169,7 +173,7 @@ export default function EventModal({
 
   useEffect(() => {
     if (mode === 'attendance' && touchedIds.size > 0) {
-      localStorage.setItem(`sbv_draft_attendance_${event?.id}`, JSON.stringify({
+      localStorage.setItem(`wev_draft_attendance_${event?.id}`, JSON.stringify({
         draftMap: attendanceMap,
         draftTouched: Array.from(touchedIds)
       }));
@@ -201,7 +205,7 @@ export default function EventModal({
       const res = await api.submitCheckins(event.id, payload);
       
       // Clear localStorage draft on successful submission
-      localStorage.removeItem(`sbv_draft_attendance_${event.id}`);
+      localStorage.removeItem(`wev_draft_attendance_${event.id}`);
       
       addToast(`Check-in saved for ${res.marked} volunteer${res.marked !== 1 ? 's' : ''}. No hours credited yet.`, 'success');
       setMode('view');
@@ -225,7 +229,7 @@ export default function EventModal({
       const revoked = res.revoked?.length || 0;
       
       // Clear localStorage draft on successful submission
-      localStorage.removeItem(`sbv_draft_attendance_${event.id}`);
+      localStorage.removeItem(`wev_draft_attendance_${event.id}`);
 
       addToast(
         [
@@ -246,26 +250,40 @@ export default function EventModal({
     }
   };
 
+  /**
+   * Starts a draw. The first one needs no reason; every re-draw does.
+   *
+   * The cap is NOT enforced here any more. This used to block at 3 while the
+   * server's MAX_AUTO_SELECT_DRAWS allowed 5 — so the error message was wrong,
+   * and the documented operator setting silently did nothing below 3. The
+   * server owns the limit and reports `draw_cap_reached`; this just relays it.
+   */
   const handleRunAutoSelect = async () => {
-    if (autoSelectRuns.length >= 3) {
-      addToast('Maximum Auto Select reruns (3) reached.', 'error');
+    // A re-draw is the fairness-sensitive case: the reason is the permanent
+    // audit record of why a selection was run again. It was collected with
+    // window.prompt — unstyled, unexplained, unvalidated, and suppressed
+    // outright by some mobile browsers. "n/a" is what that produces, and "n/a"
+    // is what the district would have to show a parent who questioned a draw.
+    if (autoSelectRuns.length > 0) {
+      setRedrawReason('');
+      setShowRedrawModal(true);
       return;
     }
-    
-    let reason = '';
-    if (autoSelectRuns.length > 0) {
-      reason = window.prompt('You are rerunning Auto Select. Please provide a brief reason for the audit log (e.g., "Student withdrew, needed new draw"):');
-      if (!reason) return; // User cancelled
-    }
-    
+    await executeAutoSelect('');
+  };
+
+  const executeAutoSelect = async (reason) => {
     setSubmitting(true);
     try {
       const newRun = await api.runAutoSelect(event.id, reason);
       addToast(`Draft selection ${newRun.runNumber} ready to review.`, 'success');
+      setShowRedrawModal(false);
       await loadSelectionRuns();
       onStateChange();
     } catch (err) {
+      // draw_cap_reached comes back from the server with its own message.
       addToast(`Could not run selection: ${err.message}`, 'error');
+      if (err.data?.code === 'draw_cap_reached') setShowRedrawModal(false);
     } finally {
       setSubmitting(false);
     }
@@ -346,9 +364,24 @@ export default function EventModal({
   const bulkDecide = async (appIds, status) => {
     setSubmitting(true);
     try {
-      await api.updateApplicationsBulk(appIds, status);
+      const res = await api.updateApplicationsBulk(appIds, status);
       const verb = { accepted: 'accepted', waitlisted: 'moved to the waitlist', rejected: 'rejected' }[status];
-      addToast(`${appIds.length} volunteer(s) ${verb}.`, 'success');
+
+      // Report what the SERVER did, never what was selected. It legitimately
+      // skips applicants when a shift is already full or they are already
+      // accepted, so echoing appIds.length told an organizer that 40 volunteers
+      // were confirmed when only 30 rows changed — and the other 10 were left
+      // pending, unnotified, and invisible until nobody turned up.
+      const updated = res?.updated ?? 0;
+      const skipped = res?.skipped ?? [];
+      const full = skipped.filter(s => s.reason === 'slot_full').length;
+      const already = skipped.filter(s => s.reason === 'already_accepted').length;
+
+      const parts = [`${updated} volunteer${updated === 1 ? '' : 's'} ${verb}`];
+      if (full > 0) parts.push(`${full} skipped — shift full`);
+      if (already > 0) parts.push(`${already} already accepted`);
+
+      addToast(parts.join(' · '), full > 0 ? 'info' : 'success');
       onStateChange();
     } catch (err) {
       addToast(`Bulk update failed: ${err.message}`, 'error');
@@ -456,6 +489,32 @@ export default function EventModal({
   };
 
   /* ── Tabs ────────────────────────────────────────────────── */
+
+  /**
+   * Arrow-key navigation for the tablist, per the WAI-ARIA tabs pattern.
+   *
+   * Left/Right move between tabs and wrap; Home/End jump to the ends. Focus is
+   * moved explicitly because the tabs use a roving tabindex — only the selected
+   * one is reachable by Tab, so without this the other tabs are unreachable by
+   * keyboard entirely.
+   */
+  const handleTabKeyDown = (e) => {
+    const ids = tabs.map(t => t.id);
+    const current = ids.indexOf(tab);
+    if (current === -1) return;
+
+    let next = null;
+    if (e.key === 'ArrowRight') next = (current + 1) % ids.length;
+    else if (e.key === 'ArrowLeft') next = (current - 1 + ids.length) % ids.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = ids.length - 1;
+    if (next === null) return;
+
+    e.preventDefault();
+    const nextId = ids[next];
+    setTab(nextId);
+    tabRefs.current[nextId]?.focus();
+  };
 
   const tabs = [
     { id: 'shifts', label: 'Shifts', icon: CalendarClock },
@@ -911,24 +970,55 @@ export default function EventModal({
               </div>
             )}
 
-            {/* ── Tabs ── */}
-            <div className="tabs" role="tablist">
+            {/* ── Tabs ──
+                Declaring role="tablist" is a promise about behaviour. Before
+                this, the roles were here but nothing honoured the contract:
+                no aria-controls, no panel association, no roving tabindex, no
+                arrow keys. A screen reader announced "tab, 1 of 5" and then
+                arrow keys did nothing — which is worse than plain buttons,
+                because it tells the user to expect something that isn't there.
+
+                Now: each tab owns an id, points at its panel, and only the
+                selected tab is in the tab order (roving tabindex). Arrow keys
+                move between tabs, Home/End jump to the ends. */}
+            <div
+              className="tabs"
+              role="tablist"
+              aria-label="Event sections"
+              onKeyDown={handleTabKeyDown}
+            >
               {tabs.map(({ id, label, icon: Icon, count }) => (
                 <button
                   key={id}
+                  id={`tab-${id}`}
                   role="tab"
                   aria-selected={tab === id}
+                  aria-controls={`tabpanel-${id}`}
+                  tabIndex={tab === id ? 0 : -1}
+                  ref={el => { tabRefs.current[id] = el; }}
                   className="tab"
                   onClick={() => setTab(id)}
                 >
                   <Icon size={14} />
                   {label}
-                  {count > 0 && <span className="tab-count">{count}</span>}
+                  {count > 0 && (
+                    <>
+                      <span className="tab-count" aria-hidden="true">{count}</span>
+                      {/* The bare number reads as noise otherwise. */}
+                      <span className="sr-only">({count} awaiting your decision)</span>
+                    </>
+                  )}
                 </button>
               ))}
             </div>
 
-            <div className="tabpanel" role="tabpanel">
+            <div
+              className="tabpanel"
+              role="tabpanel"
+              id={`tabpanel-${tab}`}
+              aria-labelledby={`tab-${tab}`}
+              tabIndex={0}
+            >
               {tab === 'shifts' && (
                 <>
                   {isStudent && !signupsClosed && (
@@ -1516,6 +1606,83 @@ export default function EventModal({
           addToast={addToast}
         />
       )}
+
+      {showRedrawModal && (
+        <RedrawReasonModal
+          runNumber={autoSelectRuns.length + 1}
+          reason={redrawReason}
+          onChange={setRedrawReason}
+          submitting={submitting}
+          onCancel={() => setShowRedrawModal(false)}
+          onConfirm={() => executeAutoSelect(redrawReason.trim())}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Collects the reason for re-running Auto Select.
+ *
+ * This exists as a real dialog rather than a window.prompt because of what the
+ * field is for: a fairness mechanism that can be re-rolled needs a record of
+ * why, and that record is shown to administrators. A bare system prompt with
+ * no explanation and no validation reliably produces "n/a" — which is worse
+ * than no audit trail, because it looks like one.
+ *
+ * The minimum length is deliberate but modest: enough to stop a single
+ * character, not so much that it becomes an obstacle to a legitimate re-draw.
+ */
+const MIN_REDRAW_REASON = 10;
+
+function RedrawReasonModal({ runNumber, reason, onChange, submitting, onCancel, onConfirm }) {
+  const trimmed = reason.trim();
+  const tooShort = trimmed.length > 0 && trimmed.length < MIN_REDRAW_REASON;
+  const canSubmit = trimmed.length >= MIN_REDRAW_REASON && !submitting;
+
+  return (
+    <Modal onClose={onCancel} label="Reason for re-running Auto Select">
+      <div className="modal-head">
+        <div>
+          <h2>Re-run Auto Select?</h2>
+          <p className="lead">This will be draw {runNumber} for this event.</p>
+        </div>
+        <button className="modal-close" onClick={onCancel} aria-label="Close"><X size={18} /></button>
+      </div>
+
+      <div className="modal-body">
+        <div className="alert alert-warn" style={{ marginBottom: 'var(--s4)' }}>
+          <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>
+            Every draw is kept, and your reason is <strong>permanently recorded</strong> and visible to
+            administrators. This is what makes the draw auditable if a volunteer or parent asks why the
+            selection was run again.
+          </span>
+        </div>
+
+        <div className="field" style={{ marginTop: 0 }}>
+          <label htmlFor="redraw-reason">Why are you re-running the draw?</label>
+          <textarea
+            id="redraw-reason"
+            className="textarea"
+            value={reason}
+            autoFocus
+            aria-invalid={tooShort}
+            placeholder="e.g. Two selected students withdrew after the draw, so the shift was left short."
+            onChange={e => onChange(e.target.value)}
+          />
+          {tooShort
+            ? <span className="field-error"><AlertCircle size={12} />Please give a little more detail ({MIN_REDRAW_REASON} characters minimum)</span>
+            : <span className="field-hint">A specific sentence. "n/a" or "retry" will not mean anything to whoever reads this later.</span>}
+        </div>
+      </div>
+
+      <div className="modal-foot">
+        <button className="btn btn-ghost" onClick={onCancel} disabled={submitting}>Cancel</button>
+        <button className="btn btn-primary" onClick={onConfirm} disabled={!canSubmit}>
+          {submitting ? 'Running…' : `Run draw ${runNumber}`}
+        </button>
+      </div>
+    </Modal>
   );
 }

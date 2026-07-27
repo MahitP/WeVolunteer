@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { api } from '../utils/api';
-import { APP_NAME } from '../config';
+import { APP_NAME, PRIVACY_URL } from '../config';
 import { AlertCircle, ArrowLeft } from 'lucide-react';
 
 const AVATARS = ['👤', '🧑‍💻', '👩‍⚕️', '🧑‍🎨', '👩‍🎓', '👩‍💼', '🦁', '🦉', '🦊', '🎨'];
@@ -8,7 +8,7 @@ const AVATARS = ['👤', '🧑‍💻', '👩‍⚕️', '🧑‍🎨', '👩‍
 export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
   const [form, setForm] = useState({
     name: '', username: '', email: '', password: '', role: 'student',
-    grade: '10', avatar: '👤', bio: '', school: '', skillsInput: ''
+    grade: '10', avatar: '👤', bio: '', school: '', skillsInput: '', privacyAccepted: false
   });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
@@ -35,6 +35,11 @@ export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
     
     if (!form.password) next.password = 'Choose a password';
     else if (form.password.length < 6) next.password = 'Use at least 6 characters';
+
+    // Only enforced when a notice actually exists to read.
+    if (PRIVACY_URL && !form.privacyAccepted) {
+      next.privacyAccepted = 'Please confirm you have read the privacy notice';
+    }
     
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -236,6 +241,38 @@ export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
                 <span className="alert-title">Organizer accounts are reviewed.</span>{' '}
                 You can sign in right away, but you'll be able to post events once a school administrator approves you.
               </span>
+            </div>
+          )}
+
+          {/* Renders only when the district has published a privacy notice and
+              its URL is configured (VITE_PRIVACY_URL). Deliberately no fallback
+              text: a consent checkbox pointing at nothing would manufacture the
+              appearance of a reviewed policy where none exists, which is worse
+              than asking for no consent at all. */}
+          {PRIVACY_URL && (
+            <div className="field row" style={{ alignItems: 'flex-start', gap: 12, marginTop: 'var(--s5)' }}>
+              <input
+                id="su-privacy"
+                type="checkbox"
+                checked={form.privacyAccepted}
+                onChange={e => set('privacyAccepted', e.target.checked)}
+                aria-invalid={!!errors.privacyAccepted}
+                style={{ marginTop: 4 }}
+              />
+              <div className="stack-xs">
+                <label htmlFor="su-privacy" style={{ margin: 0 }}>
+                  I have read the{' '}
+                  <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--brand)', textDecoration: 'underline' }}>
+                    privacy notice
+                  </a>
+                </label>
+                <span className="field-hint">
+                  It explains what {APP_NAME} collects, who can see it, and how to have it removed.
+                </span>
+                {errors.privacyAccepted && (
+                  <span className="field-error"><AlertCircle size={12} />{errors.privacyAccepted}</span>
+                )}
+              </div>
             </div>
           )}
 

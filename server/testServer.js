@@ -11,8 +11,8 @@ import path from 'path';
  * are dynamic.
  */
 export async function startTestServer() {
-  const dir = mkdtempSync(path.join(tmpdir(), 'sbv-test-'));
-  process.env.SBV_DB_PATH = path.join(dir, 'test.db');
+  const dir = mkdtempSync(path.join(tmpdir(), 'wev-test-'));
+  process.env.WEV_DB_PATH = path.join(dir, 'test.db');
   process.env.DEMO_MODE = 'true';
   process.env.JWT_SECRET = 'test-secret-not-for-production';
 
@@ -21,7 +21,7 @@ export async function startTestServer() {
 
   initDatabase();
 
-  const server = app.listen(0);
+  const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
 

@@ -10,7 +10,7 @@ import {
 
 /**
  * Every test runs against a throwaway in-memory database with the minimum
- * schema the ledger touches. Nothing here can reach server/sbvolunteers.db —
+ * schema the ledger touches. Nothing here can reach server/wevolunteer.db —
  * the module takes `db` as a parameter precisely so tests never open the real
  * file.
  */

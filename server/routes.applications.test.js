@@ -147,7 +147,7 @@ describe('applications: bulk organizer actions', () => {
   it('refuses a batch containing an application on an event the caller does not host', async () => {
     // Build a real event under a DIFFERENT organizer. rmiller starts unverified
     // and cannot create events, so approve them first as the admin.
-    const adminTok = await srv.login('admin@sbvolunteers.gov');
+    const adminTok = await srv.login('admin@example.gov');
     await srv.call('POST', '/api/admin/organizers/user-org-pending/approve', undefined, adminTok);
     const otherOrg = await srv.login('rmiller@sbpl.info');
     const future = new Date(Date.now() + 30 * 864e5).toISOString();

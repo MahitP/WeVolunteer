@@ -5,9 +5,9 @@ import { initDatabase } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-// Honour SBV_DB_PATH like db.js does, so this operates on the same database the
+// Honour WEV_DB_PATH like db.js does, so this operates on the same database the
 // server uses when the file has been relocated (e.g. onto a backed-up volume).
-const dbPath = process.env.SBV_DB_PATH || path.join(__dirname, 'sbvolunteers.db');
+const dbPath = process.env.WEV_DB_PATH || path.join(__dirname, 'wevolunteer.db');
 const db = new DatabaseSync(dbPath);
 
 console.log('Initializing database to run schema migrations...');

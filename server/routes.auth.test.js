@@ -39,7 +39,7 @@ describe('auth: email verification state', () => {
 
     // Flag-off signup marks the account verified by design, so force it back
     // to unverified directly in the DB to simulate a historical/edge-case row.
-    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
     db.prepare('UPDATE users SET email_verified = 0 WHERE id = ?').run(res.body.user.id);
     db.close();
 
@@ -50,7 +50,7 @@ describe('auth: email verification state', () => {
 
 describe('auth: password reset', () => {
   const tokenFor = (userId) => {
-    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
     const row = db.prepare(
       'SELECT token FROM password_reset_tokens WHERE user_id = ? ORDER BY expires_at DESC LIMIT 1'
     ).get(userId);
@@ -99,7 +99,7 @@ describe('auth: password reset', () => {
     await srv.call('POST', '/api/auth/forgot-password', { email: 'emiller2027@gmail.com' });
     const token = tokenFor('user-student-3');
 
-    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
     db.prepare('UPDATE password_reset_tokens SET expires_at = ? WHERE token = ?')
       .run('2020-01-01T00:00:00.000Z', token);
     db.close();
@@ -169,7 +169,7 @@ describe('auth: volunteer profile does not leak whereabouts to other students', 
     // passwords are no longer the seeded 'password123'.
     leoToken = await srv.login('leo.chen28@gmail.com', 'brand-new-pass');
     priyaToken = await srv.login('priya.patel.nhs@outlook.com', 'first-change');
-    adminToken = await srv.login('admin@sbvolunteers.gov');
+    adminToken = await srv.login('admin@example.gov');
 
     // Build a real confirmed future shift for Priya via the actual API, so the
     // assertions below are not vacuous.

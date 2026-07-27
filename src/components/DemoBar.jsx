@@ -8,7 +8,7 @@ const SEED_USERS = [
   { id: 'user-student-3', name: 'Ethan Miller', email: 'emiller2027@gmail.com', avatar: '🧑‍🎨', role: 'Volunteer' },
   { id: 'user-org-1', name: 'Jacquelyn Katzenback', email: 'jkatzenback@vikings.org', avatar: '👩‍💼', role: 'Organizer' },
   { id: 'user-org-pending', name: 'Robert Miller', email: 'rmiller@sbpl.info', avatar: '👨‍🏫', role: 'Organizer, pending' },
-  { id: 'user-admin', name: 'System Admin', email: 'admin@sbvolunteers.gov', avatar: '🛠️', role: 'Administrator' }
+  { id: 'user-admin', name: 'System Admin', email: 'admin@example.gov', avatar: '🛠️', role: 'Administrator' }
 ];
 
 /**

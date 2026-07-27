@@ -16,7 +16,7 @@ import { fileURLToPath } from 'url';
 import { verifyLedgerParity } from './hoursLedger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = process.argv[2] || path.join(__dirname, 'sbvolunteers.db');
+const dbPath = process.argv[2] || path.join(__dirname, 'wevolunteer.db');
 
 const db = new DatabaseSync(dbPath);
 

@@ -153,7 +153,14 @@ export default function VolunteerProfile({
             <span className="small strong">Progress to the {HOUR_GOAL}-hour Silver Award</span>
             <span className="small muted tnum">{formatHours(stats.hours)} / {HOUR_GOAL} hrs</span>
           </div>
-          <div className="meter">
+          <div
+            className="meter"
+            role="progressbar"
+            aria-valuenow={Number(Number(stats.hours).toFixed(2))}
+            aria-valuemin={0}
+            aria-valuemax={HOUR_GOAL}
+            aria-label={`Progress to the ${HOUR_GOAL}-hour Silver Award: ${formatHours(stats.hours)} of ${HOUR_GOAL} hours`}
+          >
             <div
               className={`meter-fill ${stats.hours >= HOUR_GOAL ? 'full' : 'accent'}`}
               style={{ width: `${goalPct}%` }}

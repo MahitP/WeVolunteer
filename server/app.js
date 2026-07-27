@@ -29,15 +29,102 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
-    callback(new Error(`Origin not allowed by CORS: ${origin}`));
-  },
-  credentials: true
+// Scoped to /api deliberately.
+//
+// Mounted globally, this also guarded the static bundle — and browsers send an
+// `Origin` header when fetching `<script type="module">` even same-origin. So a
+// production deployment whose CORS_ORIGINS did not exactly match its public
+// origin answered its own JavaScript with 403 and served a blank white page,
+// with nothing in the UI to explain it. That is the wrong failure for a
+// misconfigured allowlist, and it made CORS_ORIGINS a silent, total outage
+// rather than the API access control it is meant to be.
+//
+// The allowlist exists to say who may call the API from another origin. The
+// SPA's own assets are public files and are served regardless — they already
+// were to any client that omitted the header.
+app.use('/api', cors((req, callback) => {
+  const origin = req.headers.origin;
+  const allow = { origin: true, credentials: true };
+
+  // No Origin at all: curl, a health checker, a same-origin GET. Never a
+  // cross-site browser request, so nothing to guard against.
+  if (!origin) return callback(null, allow);
+
+  if (ALLOWED_ORIGINS.includes(origin)) return callback(null, allow);
+
+  // Development only: any loopback origin.
+  //
+  // In dev the client is served by Vite on its own port and proxies /api here,
+  // so the browser's Origin is the Vite origin while the Host has been rewritten
+  // to this server — the same-origin check below cannot match. Pinning
+  // CORS_ORIGINS to a fixed port breaks the moment Vite picks a different one
+  // (which it does whenever 5173 is taken), and the failure is invisible:
+  // every GET works and only writes fail, so the app loads and login 403s.
+  //
+  // Strictly gated on NOT production, so this can never widen a real
+  // deployment. A production build never reaches this branch.
+  if (!IS_PRODUCTION) {
+    try {
+      const { hostname } = new URL(origin);
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
+        return callback(null, allow);
+      }
+    } catch { /* malformed Origin — fall through to the checks below */ }
+  }
+
+  // Same-origin requests must always pass.
+  //
+  // Browsers attach `Origin` to POST/PATCH/DELETE even when the page and the
+  // API share an origin — which they do in the production topology, where this
+  // same Express process serves both. Without this check, a deployment whose
+  // CORS_ORIGINS did not exactly match its public origin still loaded the app
+  // and still served every GET, but refused every login and every write with a
+  // 403 the UI could not explain. A partial failure like that is far harder to
+  // diagnose than a total one.
+  //
+  // Comparing the Origin's host to the request's own Host is not a weakening:
+  // a cross-site request carries the attacker's origin and the victim's host,
+  // so it still fails. (The reverse proxy must pass the real Host through —
+  // `proxy_set_header Host $host` — which the deployment runbook specifies.)
+  let sameOrigin = false;
+  try {
+    sameOrigin = new URL(origin).host === req.headers.host;
+  } catch {
+    sameOrigin = false; // malformed Origin header
+  }
+  if (sameOrigin) return callback(null, allow);
+
+  callback(new Error(`Origin not allowed by CORS: ${origin}`));
 }));
 
 app.use(express.json({ limit: '100kb' }));
+
+/**
+ * Builds the 429 response for a limiter.
+ *
+ * express-rate-limit's default is `text/plain` "Too many requests, please try
+ * again later." The client parses every error body as JSON, so that default
+ * left it with nothing to show and it fell back to printing the raw status —
+ * students hitting the login limiter were told "Request failed (429)", which
+ * explains neither what happened nor what to do.
+ *
+ * Every limited response is now JSON in the same `{ error }` shape as the rest
+ * of the API, carries `code: 'rate_limited'` so a caller can branch on it, and
+ * states the wait in minutes derived from the limiter's own window.
+ */
+function limitHandler(message) {
+  return (req, res) => {
+    const resetAt = req.rateLimit?.resetTime;
+    const minutes = resetAt
+      ? Math.max(1, Math.ceil((new Date(resetAt) - Date.now()) / 60000))
+      : 15;
+    res.status(429).json({
+      error: `${message} Please try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+      code: 'rate_limited',
+      retryAfterMinutes: minutes
+    });
+  };
+}
 
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -45,6 +132,7 @@ export const authLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   skipSuccessfulRequests: true,
+  handler: limitHandler('Too many sign-in attempts from this device.'),
 });
 
 export const apiLimiter = rateLimit({
@@ -52,6 +140,7 @@ export const apiLimiter = rateLimit({
   limit: DEMO_MODE ? 10000 : 600,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  handler: limitHandler('Too many requests from this device.'),
 });
 
 // Endpoints that send an email must count EVERY request, not just failures:
@@ -64,6 +153,7 @@ export const mailLimiter = rateLimit({
   limit: Number(process.env.MAIL_RATE_LIMIT) || (DEMO_MODE ? 1000 : 5),
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  handler: limitHandler('Too many email requests from this device.'),
 });
 
 // The public certificate-verify endpoint is unauthenticated by design (a
@@ -76,6 +166,11 @@ export const verifyLimiter = rateLimit({
   limit: DEMO_MODE ? 1000 : 20,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  // Wording matters here: this response must never read as a verdict on the
+  // certificate. A school office checking several printouts in a row is the
+  // expected way to hit this, and telling them a genuine record is invalid
+  // would be worse than making them wait.
+  handler: limitHandler('Too many certificate checks from this device. This is not a verdict on the certificate.'),
 });
 
 app.use('/api/auth/login', authLimiter);

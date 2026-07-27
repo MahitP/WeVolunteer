@@ -23,7 +23,7 @@ describe('auto-select: deadline guard, re-draw reasons, and draw cap', () => {
   // must be created with a future deadline to pass creation, then the
   // deadline is pushed into the past directly so the draw can be tested).
   const withDb = (fn) => {
-    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
     try { return fn(db); } finally { db.close(); }
   };
 

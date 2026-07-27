@@ -47,7 +47,7 @@ export function createCertificatesTable(db) {
 }
 
 /**
- * A random `SBV-XXXX-XXXX` code. Uses `crypto.randomBytes`, never
+ * A random `WEV-XXXX-XXXX` code. Uses `crypto.randomBytes`, never
  * `Math.random` — this value is a bearer credential, so it has to be
  * unguessable, not merely well-distributed.
  *
@@ -68,7 +68,7 @@ function generateCode() {
     chars += ALPHABET[idx % ALPHABET.length];
   }
 
-  return `SBV-${chars.slice(0, 4)}-${chars.slice(4, 8)}`;
+  return `WEV-${chars.slice(0, 4)}-${chars.slice(4, 8)}`;
 }
 
 /**
