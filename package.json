@@ -1,8 +1,12 @@
 {
   "name": "wevolunteer-app",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Volunteer scheduling and service-hour tracking for schools and community organizations",
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "workspaces": [
     "server"
   ],
@@ -11,6 +15,7 @@
     "dev:server": "npm run dev --workspace=server",
     "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
     "build": "vite build",
+    "start": "npm start --workspace=server",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "oxlint",
