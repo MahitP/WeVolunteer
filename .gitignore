@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Real production build config. `.env.production.example` is the committed
+# template; the filled-in copy is per-deployment and stays out of git.
+.env.production
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -29,6 +33,13 @@ server/*.db
 
 # Generated knowledge-graph output
 graphify-out
+
+# Local scratch space — throwaway deployment-check copies of the project.
+# Never commit: it is ~122 MB of duplicated source, and because it contains
+# full copies of server/ and src/ it is also picked up by vitest and oxlint,
+# which turns a passing suite (25 files / 256 tests) into a failing one
+# (73 files / 36 failures) against code that is not part of the repository.
+scratch/
 
 # Saved reference webpage kept for design comparison, not project source
 SignUp Genius/
