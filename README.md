@@ -1,6 +1,6 @@
 # WeVolunteer
 
-A full-stack volunteer sign-up platform for South Brunswick, NJ — a SignUpGenius-style app where organizers post events with time slots, students apply for shifts, and confirmed attendance turns into certified community-service hours.
+A full-stack volunteer sign-up platform for communities and schools — a SignUpGenius-style app where organizers post events with time slots, students apply for shifts, and confirmed attendance turns into certified community-service hours.
 
 ## Stack
 
@@ -10,9 +10,11 @@ A full-stack volunteer sign-up platform for South Brunswick, NJ — a SignUpGeni
 
 ## Getting started
 
+This repository is an npm workspace monorepo. The server package lives in `server/` but is managed from the root, meaning a single install command handles both frontend and backend dependencies.
+
 ```bash
-npm install
-npm install --prefix server
+npm install          # development
+# (for deployment or clean installs, use `npm ci`)
 npm run dev          # starts Vite (5173) + API server (5050) together
 ```
 
@@ -63,14 +65,14 @@ APP_URL="https://volunteers.example.org" \
 CORS_ORIGINS="https://volunteers.example.org" \
 WEV_DB_PATH=/var/lib/wevolunteer/wevolunteer.db \
 SMTP_HOST=smtp.example.net SMTP_USER=... SMTP_PASS=... \
-npm start --prefix server
+npm run start --workspace=server
 ```
 
 > **Never run `npm run dev` on a server.** It sets `DEMO_MODE=true`, which seeds
 > demo accounts sharing the password published above — including an
 > administrator — and registers the database-reset endpoint. `DEMO_MODE` is only
 > refused when `NODE_ENV=production`, so on a host that has not set it there is
-> nothing to stop you. Production is always `npm start --prefix server`.
+> nothing to stop you. Production is always `npm run start --workspace=server`.
 
 For a real deployment use the systemd units in [`deploy/`](deploy/) and follow
 [`docs/operations/pilot-deployment-runbook.md`](docs/operations/pilot-deployment-runbook.md).

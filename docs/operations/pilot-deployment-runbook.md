@@ -378,8 +378,8 @@ Node upgrade as a change requiring the full smoke test in §10.
 
 ### npm
 
-**11.x.** Verified on **11.9.0** (the version bundled with Node 24.14.0). Both
-`package-lock.json` files are lockfileVersion 3. Use `npm ci`, never
+**11.x.** Verified on **11.9.0** (the version bundled with Node 24.14.0). The unified
+`package-lock.json` file is lockfileVersion 3. Use `npm ci`, never
 `npm install`, on the server.
 
 ### Operating system
@@ -636,7 +636,7 @@ does not corrupt data, but it does spam the log. Set `RestartSec=5` and a
 
 | | |
 |---|---|
-| **Required** | No — default to `WeVolunteer` and `South Brunswick, NJ`. |
+| **Required** | No — default to `WeVolunteer` and `WeVolunteer Community`. |
 | **Purpose** | `APP_NAME` appears in email subjects, bodies, and the default `From` name. `SCHOOL_NAME` is exported from `config.js` but not consumed by any server code at this commit — the client has its own `VITE_SCHOOL_NAME`. |
 | **Example** | `WeVolunteer` |
 | **Security** | None. Cosmetic. |
@@ -667,7 +667,7 @@ setting them on the running server has no effect.
 |---|---|---|---|---|---|
 | `VITE_DEMO_MODE` | No | Shows the demo account switcher and one-click seeded logins | *(never set)* | **Must never be set for a production build.** It surfaces sign-in-as-anyone shortcuts. It lives only in `.env.development`, which `vite build` does not read — so the safe default is structural. | Off. Correct. |
 | `VITE_APP_NAME` | No | Product name in the UI | `WeVolunteer` | None | `WeVolunteer` |
-| `VITE_SCHOOL_NAME` | No | District name in the UI | `South Brunswick, NJ` | None | `South Brunswick, NJ` |
+| `VITE_SCHOOL_NAME` | No | District name in the UI | `WeVolunteer Community` | None | `WeVolunteer Community` |
 | `VITE_ENABLE_LEADERBOARD` | No | Set to `false` to hide the leaderboard entirely | `false` | The leaderboard is already opt-in per student and default-off. Setting this to `false` is the belt-and-braces option if the district would rather not have one at all. | Enabled (but empty until students opt in) |
 | `VITE_DEFAULT_THEME_COLOR` | No | Theme colour | `#2563eb` | None | `#2563eb` |
 | `VITE_PRIVACY_URL` | **Set once the district publishes a privacy notice** | URL of the district's privacy notice. When set, signup shows a required acknowledgement checkbox linking to it. | `https://sbschools.example.org/privacy` | This platform holds minors' names, grades, schools and email addresses and shows some of it to organizers. The consent gate is deliberately inert until a real notice exists — a checkbox pointing at nothing would manufacture the appearance of a reviewed policy. | Unset: no checkbox, and Vite tree-shakes the block out of the bundle entirely. **This is a launch-gate item, not a code gap** — see §14 P0-11. |
