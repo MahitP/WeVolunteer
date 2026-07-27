@@ -1,8 +1,8 @@
-# SBVolunteers Production Hardening Implementation Plan
+# WeVolunteer Production Hardening Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax. Each task is one reviewable commit with its own test cycle; do not proceed past a failed verification.
 
-**Goal:** Close the remaining P1/P2 findings from the launch-readiness audit so SBVolunteers is safe for a public release beyond the pilot — enforced identity, no minor-data leaks, revocable sessions, validated workflows, unforgeable certificates.
+**Goal:** Close the remaining P1/P2 findings from the launch-readiness audit so WeVolunteer is safe for a public release beyond the pilot — enforced identity, no minor-data leaks, revocable sessions, validated workflows, unforgeable certificates.
 
 **Architecture:** Three phases in strict priority order. Phase 1 (security & privacy) rests on one keystone change — making `authenticateToken` read the user row from the database instead of trusting the JWT payload — after which email enforcement, deleted-user rejection, live roles, and session revocation are all small additions. Phase 2 hardens the event/application/selection/certificate workflows. Phase 3 clears reliability debt. Nothing is a rewrite; every task is an additive change to an existing file following patterns already in the codebase.
 
@@ -26,7 +26,7 @@
 
 `server/testServer.js` exports `startTestServer()` → `{ base, call, login, close }`, where `call(method, path, body?, token?) → { status, body }` and `login(email, password='password123') → JWT`. The harness sets `DEMO_MODE=true`, so seeded fixtures exist. **Exactly one `startTestServer()` per test file**, in a single file-level `beforeAll`, because `db.js` is module-cached. A test file that needs a config flag (e.g. `REQUIRE_EMAIL_VERIFICATION`) sets `process.env` **before** the dynamic `await import('./testServer.js')` inside `beforeAll` — see `server/routes.verification.test.js` for the pattern.
 
-Seeded accounts (password `password123`): students `leo.chen28@gmail.com`, `priya.patel.nhs@outlook.com`, `emiller2027@gmail.com`, `colin.carbin29@outlook.com`; organizers `jkatzenback@vikings.org` (approved, hosts seeded events), `rmiller@sbpl.info` (pending); admin `admin@sbvolunteers.gov`.
+Seeded accounts (password `password123`): students `leo.chen28@gmail.com`, `priya.patel.nhs@outlook.com`, `emiller2027@gmail.com`, `colin.carbin29@outlook.com`; organizers `jkatzenback@vikings.org` (approved, hosts seeded events), `rmiller@sbpl.info` (pending); admin `admin@example.gov`.
 
 ---
 
@@ -342,7 +342,7 @@ Seeded accounts (password `password123`): students `leo.chen28@gmail.com`, `priy
 **DECISION (approved): hard cutover (option A).** Old printed certificates stop verifying; no old-code fallback is kept. Pre-public, so acceptable; a grace period would re-open the vulnerability.
 
 **Files expected to change.**
-- Create: `server/certificates.js` — a dedicated module (mirroring `hoursLedger.js`): `createCertificatesTable(db)`, `backfillCertificates(db)`, `getOrCreateCertificateCode(db, userId, eventId)`. Random code via `crypto.randomBytes`, base32 Crockford, `SBV-XXXX-XXXX`.
+- Create: `server/certificates.js` — a dedicated module (mirroring `hoursLedger.js`): `createCertificatesTable(db)`, `backfillCertificates(db)`, `getOrCreateCertificateCode(db, userId, eventId)`. Random code via `crypto.randomBytes`, base32 Crockford, `WEV-XXXX-XXXX`.
 - Modify: `server/db.js` — call `createCertificatesTable(db)` and `backfillCertificates(db)` in `initDatabase()` (near the hours-ledger init), with a boot log line `[Certificates] Issued N code(s)`.
 - Modify: `server/utils.js` — **remove** the `certificateCode` function entirely.
 - Modify: all six `server/routes/*.js` — **remove `certificateCode` from the shared `import { … } from '../utils.js'` line** (it is imported in all six but used only in `attendanceRoutes.js`; removing the export breaks the ESM named import in every file, so all six import lines must drop it). This is mechanical (an unused-import removal in five of them) and required by the security fix.
@@ -356,11 +356,11 @@ Seeded accounts (password `password123`): students `leo.chen28@gmail.com`, `priy
 **Dependencies.** Task 11 (Phase 3) touches `app.js` ordering; keep this limiter mount consistent with the existing by-path mounts. No hard code dependency.
 
 **Implementation approach.**
-- Code generation: `crypto.randomBytes(5)` → 8 base32 chars (Crockford alphabet `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`, no 0/O/1/I) → `SBV-XXXX-XXXX`. Insert with `INSERT OR IGNORE` keyed on `(user_id, event_id)`; on the (astronomically rare) `code`-uniqueness conflict, regenerate; then read back the row so the returned code is always the stored one (stable per certificate).
+- Code generation: `crypto.randomBytes(5)` → 8 base32 chars (Crockford alphabet `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`, no 0/O/1/I) → `WEV-XXXX-XXXX`. Insert with `INSERT OR IGNORE` keyed on `(user_id, event_id)`; on the (astronomically rare) `code`-uniqueness conflict, regenerate; then read back the row so the returned code is always the stored one (stable per certificate).
 - Backfill: for every distinct `(user_id, event_id)` in `attendance WHERE present = 1` with no `certificates` row, create one. Idempotent (keyed insert). Runs at boot like the hours-ledger backfill; log the count.
 - Verify endpoint: `SELECT c.user_id, c.event_id, u.name, e.title, org.name, hours, last_end FROM certificates c JOIN attendance/... WHERE c.code = ?` — single indexed lookup, O(1). Uppercase-normalise input. Return `{ valid, volunteerName, eventTitle, organizerName, hours, completedAt }` — **no grade**. Recompute hours as `SUM(hours_awarded) WHERE present = 1` for that `(user, event)` so the figure stays the derived source-of-truth value.
 - Rate limit: `verifyLimiter` — `limit: DEMO_MODE ? 1000 : 20`, `windowMs: 15*60*1000`, **no** `skipSuccessfulRequests` (every check counts), mounted `app.use('/api/certificates/verify', verifyLimiter)`.
-- The printed certificate shape (`SBV-XXXX-XXXX`) is unchanged, so layout and client are unaffected — only the code VALUE is now random+stored, and old printed codes no longer verify (hard cutover, approved).
+- The printed certificate shape (`WEV-XXXX-XXXX`) is unchanged, so layout and client are unaffected — only the code VALUE is now random+stored, and old printed codes no longer verify (hard cutover, approved).
 
 **Tests required.**
 1. Two calls to `GET /api/certificates` for the same completed event return the **same** code (stable), and it verifies.

@@ -1,4 +1,4 @@
-# SBVolunteers
+# WeVolunteer
 
 A full-stack volunteer sign-up platform for South Brunswick, NJ — a SignUpGenius-style app where organizers post events with time slots, students apply for shifts, and confirmed attendance turns into certified community-service hours.
 
@@ -16,7 +16,7 @@ npm install --prefix server
 npm run dev          # starts Vite (5173) + API server (5050) together
 ```
 
-The Vite dev server proxies `/api/*` to the Express server. On first boot the API seeds `server/sbvolunteers.db` with demo users, events, and applications.
+The Vite dev server proxies `/api/*` to the Express server. On first boot the API seeds `server/wevolunteer.db` with demo users, events, and applications.
 
 **Demo accounts** (password `password123`, or use the one-click login buttons):
 
@@ -26,7 +26,7 @@ The Vite dev server proxies `/api/*` to the Express server. On first boot the AP
 | Student   | priya.patel.nhs@outlook.com  | has seeded history + pending |
 | Organizer | jkatzenback@vikings.org      | verified, hosts seed events  |
 | Organizer | rmiller@sbpl.info            | pending admin approval       |
-| Admin     | admin@sbvolunteers.gov       |                              |
+| Admin     | admin@example.gov       |                              |
 
 The "Reset DB" button in the demo bar (or `POST /api/auth/reset`) restores the seed data at any time. Both the demo bar and that endpoint exist **only** when demo mode is enabled — see Configuration below.
 
@@ -44,23 +44,56 @@ The "Reset DB" button in the demo bar (or `POST /api/auth/reset`) restores the s
 |----------------|------------------------------------------------|---------|
 | `API_PORT`     | `5050`                                         | Express server port |
 | `NODE_ENV`     | unset                                          | Set to `production` for a real deployment; enables the startup guards below |
-| `JWT_SECRET`   | dev fallback                                   | Token signing secret. **Required when `NODE_ENV=production` — the server refuses to start without it.** |
+| `JWT_SECRET`   | none — **required**                            | Token signing secret. **Always required. There is no fallback: the server throws `FATAL: JWT_SECRET must be set.` and refuses to start if it is missing, in every environment.** `npm run dev` supplies a clearly-labelled development value. |
 | `DEMO_MODE`    | `false`                                        | Registers the database reset endpoint. Opt-in only, and refused outright when `NODE_ENV=production`. `npm run dev` sets it. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://localhost:4173`  | Comma-separated allowlist of browser origins. Requests with no `Origin` header (curl, same-origin) always pass. |
 | `TRUST_PROXY`  | unset                                          | Set to the number of reverse proxies in front of the app (e.g. `1`) so rate limiting sees the real client IP. Leave unset when not behind a proxy — trusting `X-Forwarded-For` blindly lets clients bypass the limiter. |
-| `SBV_DB_PATH`  | `server/sbvolunteers.db`                       | Absolute path to the SQLite file. Used by tests; override in production to place the database on a backed-up volume. |
+| `WEV_DB_PATH`  | `server/wevolunteer.db`                       | Absolute path to the SQLite file. Used by tests; override in production to place the database on a backed-up volume. |
 | `REQUIRE_EMAIL_VERIFICATION` | `false`                          | When `true`, a new account must click a confirmation link before using the app. **Only turn this on once `SMTP_*` is configured** — without a working transport it locks every new user out. |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | unset | Transactional mail transport. With any of these unset, mail is printed to the server console instead of being sent. |
-| `APP_URL`      | `https://sbvolunteers.org` in production | Base URL used to build confirmation and password-reset links. |
+| `APP_URL`      | none in production — **required**       | Base URL used to build confirmation and password-reset links. **Required in production: the server refuses to start without it**, because a wrong or missing value emails live single-use tokens to a domain you do not control. Defaults to `http://localhost:5173` in development. |
 
-A minimal production start:
+A minimal production start. Every variable below is **required** — the server
+refuses to boot without `JWT_SECRET`, `SMTP_*`, or `APP_URL`:
 
 ```bash
 NODE_ENV=production \
 JWT_SECRET="$(openssl rand -hex 32)" \
-CORS_ORIGINS="https://sbvolunteers.example.org" \
+APP_URL="https://volunteers.example.org" \
+CORS_ORIGINS="https://volunteers.example.org" \
+WEV_DB_PATH=/var/lib/wevolunteer/wevolunteer.db \
+SMTP_HOST=smtp.example.net SMTP_USER=... SMTP_PASS=... \
 npm start --prefix server
 ```
+
+> **Never run `npm run dev` on a server.** It sets `DEMO_MODE=true`, which seeds
+> demo accounts sharing the password published above — including an
+> administrator — and registers the database-reset endpoint. `DEMO_MODE` is only
+> refused when `NODE_ENV=production`, so on a host that has not set it there is
+> nothing to stop you. Production is always `npm start --prefix server`.
+
+For a real deployment use the systemd units in [`deploy/`](deploy/) and follow
+[`docs/operations/pilot-deployment-runbook.md`](docs/operations/pilot-deployment-runbook.md).
+
+#### Client build configuration
+
+The `VITE_*` variables are baked into the bundle at build time, so they must be
+set **before** `npm run build` — setting them on the running server does
+nothing. Copy the template and fill it in:
+
+```bash
+cp .env.production.example .env.production   # then edit, then npm run build
+```
+
+`VITE_PRIVACY_URL` is the one to get right before launch: when unset, the
+signup consent checkbox is omitted from the bundle entirely. See the template
+for what the privacy notice needs to cover.
+
+#### Backups
+
+`bin/backup.sh` takes an integrity-checked, WAL-safe backup. Install the nightly
+schedule with the systemd timer in [`deploy/`](deploy/README.md) — nothing runs
+it automatically until you do.
 
 #### First admin on a fresh deployment
 
@@ -111,9 +144,9 @@ shutdown checkpoints the WAL), then copy all three paths — a `.db` copied
 without its `-wal` can be missing the newest writes:
 
 ```bash
-cp server/sbvolunteers.db     "sbvolunteers.$(date +%F).bak.db"
-cp server/sbvolunteers.db-wal "sbvolunteers.$(date +%F).bak.db-wal" 2>/dev/null || true
-cp server/sbvolunteers.db-shm "sbvolunteers.$(date +%F).bak.db-shm" 2>/dev/null || true
+cp server/wevolunteer.db     "wevolunteer.$(date +%F).bak.db"
+cp server/wevolunteer.db-wal "wevolunteer.$(date +%F).bak.db-wal" 2>/dev/null || true
+cp server/wevolunteer.db-shm "wevolunteer.$(date +%F).bak.db-shm" 2>/dev/null || true
 ```
 
 **Certificate codes were re-keyed to random stored values (hard cutover).**

@@ -1,4 +1,4 @@
-# SBVolunteers — Product Quality Roadmap (Milestone 4)
+# WeVolunteer — Product Quality Roadmap (Milestone 4)
 
 **Date:** 2026-07-25
 **Baseline:** `v1.0.0-pilot` (`7fc79cd`) — 241 tests, clean build, Phases 1–3 merged.

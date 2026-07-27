@@ -1,7 +1,7 @@
-# SBVolunteers — Launch Readiness Roadmap
+# WeVolunteer — Launch Readiness Roadmap
 
 **Date:** 2026-07-21
-**Scope:** Full codebase audit (client + server) and a phased plan to take SBVolunteers from a working demo to a platform South Brunswick students, organizers, and school administrators can actually depend on.
+**Scope:** Full codebase audit (client + server) and a phased plan to take WeVolunteer from a working demo to a platform South Brunswick students, organizers, and school administrators can actually depend on.
 **Constraint:** Preserve existing product decisions. Auto Select stays weighted-random. The application → approval → attendance → hours workflow stays. Volunteers stay individuals. Field Notes stays. Nothing is added because other apps have it.
 
 ---
@@ -50,7 +50,7 @@ Fourteen closed-set `kind` values, mapped client-side to icon/tone/filter. Writt
 
 ### Certificate system
 
-One certificate per completed event, generated from attendance. Verification code is deterministic: `certificateCode(userId, eventId)` FNV-style hash → `SBV-XXXX-XXXX`. Public verification endpoint exists. Printed certificate says *"Verify at sbvolunteers.org/verify/CODE"*.
+One certificate per completed event, generated from attendance. Verification code is deterministic: `certificateCode(userId, eventId)` FNV-style hash → `WEV-XXXX-XXXX`. Public verification endpoint exists. Printed certificate says *"Verify at wevolunteer.org/verify/CODE"*.
 
 ### Auto Select system
 
@@ -309,7 +309,7 @@ Field Notes, as described. Skip link, `aria-modal` dialogs with focus containmen
 **Difficulty** — Medium · **Priority** — P1
 
 ### 2.2 The certificate verification page
-**Why** — Every printed certificate says "Verify at sbvolunteers.org/verify/CODE" and that page does not exist. This is the one artifact that leaves the platform.
+**Why** — Every printed certificate says "Verify at wevolunteer.org/verify/CODE" and that page does not exist. This is the one artifact that leaves the platform.
 **Current** — API exists; no UI.
 **Recommended** — A public `/verify/:code` page: volunteer name, event, organizer, hours, date, confirmation. Rate-limit it. Also make the printed URL match the real deployed domain.
 **Difficulty** — Small · **Priority** — P1
@@ -415,7 +415,7 @@ Field Notes, as described. Skip link, `aria-modal` dialogs with focus containmen
 
 ---
 
-# SBVolunteers Launch Checklist
+# WeVolunteer Launch Checklist
 
 ### Functionality
 - [ ] Apply → accept → attend → hours → certificate verified end-to-end for both selection methods
