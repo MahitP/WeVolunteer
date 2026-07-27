@@ -1,11 +1,9 @@
 import express from 'express';
-import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
-import { VALID_GRADES, VALID_CATEGORIES, MAX_AUTO_SELECT_DRAWS } from '../config.js';
+
+import { VALID_CATEGORIES, MAX_AUTO_SELECT_DRAWS } from '../config.js';
 import { createRandom, performWeightedSelection } from '../weighting.js';
-import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
-import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion } from '../utils.js';
+import { attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
+import { authenticateToken, inTransaction, createNotification, notifyConfirmedVolunteers } from '../utils.js';
 import { db } from '../db.js';
 import { validateEventPayload } from '../validation.js';
 
@@ -271,7 +269,6 @@ router.post('/api/events', authenticateToken, (req, res) => {
       }
     });
 
-
     res.status(201).json({
       success: true,
       id: eventId,
@@ -409,7 +406,6 @@ router.put('/api/events/:id', authenticateToken, (req, res) => {
       });
     }
 
-
     res.json({ success: true, notified });
   } catch (error) {
     console.error('Update event details error:', error);
@@ -512,7 +508,6 @@ router.patch('/api/events/:id', authenticateToken, (req, res) => {
       db.prepare('UPDATE events SET attendee_visibility = ? WHERE id = ?')
         .run(attendeeVisibility === 'private' ? 'private' : 'accepted', eventId);
     }
-
 
     const updated = db.prepare('SELECT auto_approve, attendee_visibility FROM events WHERE id = ?').get(eventId);
     res.json({

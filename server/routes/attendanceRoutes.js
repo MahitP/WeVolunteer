@@ -1,11 +1,7 @@
 import express from 'express';
-import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
-import { VALID_GRADES } from '../config.js';
-import { createRandom, performWeightedSelection } from '../weighting.js';
-import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
-import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion } from '../utils.js';
+
+import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion } from '../attendance.js';
+import { authenticateToken, inTransaction, createNotification } from '../utils.js';
 import { getOrCreateCertificateCode } from '../certificates.js';
 import { db } from '../db.js';
 
@@ -231,7 +227,6 @@ router.get('/api/certificates', authenticateToken, (req, res) => {
     res.status(500).json({ error: 'Failed to load certificates' });
   }
 });
-
 
 // Public check of a certificate code — how a school office verifies a
 // printout. A single indexed lookup by the stored code — never a scan over

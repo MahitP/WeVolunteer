@@ -4,9 +4,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
 import { VALID_GRADES, JWT_SECRET, DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from '../config.js';
-import { createRandom, performWeightedSelection } from '../weighting.js';
-import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion, attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
-import { authenticateToken, formatUserResponse, inTransaction, createNotification, runNotificationSweep, countdownPhrase, notifyConfirmedVolunteers, handleWaitlistPromotion } from '../utils.js';
+
+import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
 import { db, initDatabase } from '../db.js';
 
 const router = express.Router();

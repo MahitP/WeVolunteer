@@ -17,10 +17,14 @@ export const VALID_GRADES = ['9', '10', '11', '12', 'Adult', 'N/A'];
 export const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 
 export const APP_NAME = process.env.APP_NAME || 'WeVolunteer';
-export const SCHOOL_NAME = process.env.SCHOOL_NAME || 'South Brunswick, NJ';
-export const MAX_AUTO_SELECT_APPLICANTS = Number(process.env.MAX_AUTO_SELECT_APPLICANTS) || 100;
 export const MAX_AUTO_SELECT_DRAWS = Number(process.env.MAX_AUTO_SELECT_DRAWS) || 5;
-export const DEFAULT_EMAIL_FROM = process.env.EMAIL_FROM || `"${APP_NAME}" <noreply@localhost>`;
+
+// Removed as dead exports: SCHOOL_NAME, MAX_AUTO_SELECT_APPLICANTS and
+// DEFAULT_EMAIL_FROM were declared here but imported nowhere. The first two
+// were actively misleading — MAX_AUTO_SELECT_APPLICANTS reads like a cap on
+// the Auto Select pool and enforced nothing. The client keeps its own
+// SCHOOL_NAME in src/config.js, which IS used; email.js keeps its own
+// EMAIL_FROM. Nothing here changes behaviour.
 
 export const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:4173')
   .split(',')
