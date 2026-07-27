@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { api } from '../utils/api';
 import { DEMO_MODE } from '../config';
 import { Mail, Lock, AlertCircle, CalendarCheck, Award, ClipboardList } from 'lucide-react';
-import { APP_NAME } from '../config';
+import { APP_NAME, SCHOOL_NAME } from '../config';
 
 const DEMO_ACCOUNTS = [
   { name: 'Leo Chen', email: 'leo.chen28@gmail.com', avatar: '🧑‍💻', role: 'Student' },
@@ -127,17 +127,17 @@ export default function Login({ onLoginSuccess, addToast }) {
       {/* Left: what this is, stated plainly. Not a marketing page. */}
       <aside className="auth-pitch">
         <div className="brand">
-          <span className="brand-mark">SB</span>
+          <span className="brand-mark">WV</span>
           <span className="brand-text">
             <span className="brand-name">{APP_NAME}</span>
-            <span className="brand-sub">South Brunswick, NJ</span>
+            <span className="brand-sub">{SCHOOL_NAME}</span>
           </span>
         </div>
 
         <div>
           <h1>Community service, organized.</h1>
           <p style={{ marginTop: 'var(--s4)', opacity: 0.82, maxWidth: '40ch' }}>
-            The sign-up system for South Brunswick school and community volunteering.
+            The sign-up system for your school and community volunteering.
           </p>
         </div>
 

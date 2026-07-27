@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Routes, Route, useNavigate, useLocation, useSearchParams, Navigate, useParams } from 'react-router-dom';
 import { api } from './utils/api';
-import { DEMO_MODE, APP_NAME } from './config';
+import { DEMO_MODE, APP_NAME, SCHOOL_NAME } from './config';
 import DemoBar from './components/DemoBar';
 import Login from './views/Login';
 import Signup from './views/Signup';
@@ -263,7 +263,7 @@ export default function App() {
     return (
       <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
         <div className="stack-sm" style={{ alignItems: 'center' }}>
-          <div className="brand-mark" style={{ width: 40, height: 40 }}>SB</div>
+          <div className="brand-mark" style={{ width: 40, height: 40 }}>WV</div>
           <p className="small dim row" style={{ marginTop: 8 }}>
             <Loader2 size={13} className="spin" /> Loading…
           </p>
@@ -326,7 +326,7 @@ export default function App() {
     return (
       <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 'var(--s4)' }}>
         <div className="card" style={{ maxWidth: 440, width: '100%', textAlign: 'center', padding: 'var(--s6)' }}>
-          <div className="brand-mark" style={{ width: 48, height: 48, margin: '0 auto var(--s5)' }}>SB</div>
+          <div className="brand-mark" style={{ width: 48, height: 48, margin: '0 auto var(--s5)' }}>WV</div>
           <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--s3)' }}>Verify your email</h1>
           <p className="lead" style={{ marginBottom: 'var(--s5)' }}>
             We've sent a verification link to <strong>{currentUser.email}</strong>.
@@ -384,10 +384,10 @@ export default function App() {
       {/* ── Sidebar (desktop / rail on tablet) ── */}
       <aside className="sidebar">
         <a className="brand" href="/" onClick={(e) => { e.preventDefault(); navigate('/'); }}>
-          <span className="brand-mark">SB</span>
+          <span className="brand-mark">WV</span>
           <span className="brand-text">
             <span className="brand-name">{APP_NAME}</span>
-            <span className="brand-sub">South Brunswick, NJ</span>
+            <span className="brand-sub">{SCHOOL_NAME}</span>
           </span>
         </a>
 

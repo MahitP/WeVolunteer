@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileText, ArrowRight, Printer, X, Ban, Trophy, MapPin, CalendarCheck, History, ShieldCheck
 } from 'lucide-react';
-import { APP_NAME } from '../config';
+import { APP_NAME, SCHOOL_NAME } from '../config';
 import { formatHours, formatDay, formatTimeRange, countdown } from '../utils/helpers';
 import { api } from '../utils/api';
 import Modal from '../components/Modal';
@@ -105,7 +105,7 @@ export default function VolunteerDashboard({
         </section>
       ) : mine.length === 0 && totalHours === 0 ? (
         <section className="card card-pad" style={{ background: 'var(--brand)', color: '#fff', border: 'none' }}>
-          <h2>Welcome to {APP_NAME}! 🎉</h2>
+          <h2 style={{ color: '#fff' }}>Welcome to {APP_NAME}! 🎉</h2>
           <p className="lead" style={{ marginTop: 8, color: 'rgba(255,255,255,0.9)', maxWidth: '60ch' }}>
             This is your dashboard. Once you start signing up for events, your upcoming shifts and completed hours will appear here.
           </p>
@@ -395,13 +395,13 @@ function CertificateModal({ user, shifts, onClose }) {
         <div className="modal-body" style={{ background: 'var(--surface-2)' }}>
           <div className="certificate" id="printable-certificate">
             <div style={{ textAlign: 'center' }}>
-              <div className="certificate-org">Township of South Brunswick · New Jersey</div>
+              <div className="certificate-org">{SCHOOL_NAME}</div>
               <div className="certificate-rule" />
               <h1>Certificate of Community Service</h1>
               <p style={{ marginTop: 'var(--s5)', color: '#57534e' }}>This certifies that</p>
               <div className="certificate-name">{user.name}</div>
               <p style={{ color: '#57534e', maxWidth: '46ch', margin: '0 auto' }}>
-                completed volunteer service through the South Brunswick Volunteer Network,
+                completed volunteer service through the {SCHOOL_NAME} Volunteer Network,
                 totalling
               </p>
               <div className="certificate-hours" style={{ margin: 'var(--s4) 0' }}>{formatHours(total)}</div>
