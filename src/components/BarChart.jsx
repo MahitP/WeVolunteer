@@ -24,7 +24,29 @@ export function BarChart({
 
   return (
     <div>
+      {/* The bars are shape only — the numeric labels beneath them are laid out
+          in a separate grid, so a screen reader reads a column of values with
+          no way to tell which label belongs to which. This table carries the
+          same data in a structure that pairs them, and is hidden visually so
+          the chart itself is unchanged. aria-hidden on the visual half stops
+          the figures being announced twice. */}
+      <table className="sr-only">
+        <caption>Hours by period</caption>
+        <thead>
+          <tr><th scope="col">Period</th><th scope="col">Hours</th></tr>
+        </thead>
+        <tbody>
+          {data.map((d, i) => (
+            <tr key={i}>
+              <th scope="row">{longLabel(d[labelKey])}</th>
+              <td>{fmt(d[valueKey])}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
       <div
+        aria-hidden="true"
         style={{
           display: 'grid',
           gridTemplateColumns: `repeat(${data.length}, 1fr)`,
@@ -56,6 +78,7 @@ export function BarChart({
       </div>
 
       <div
+        aria-hidden="true"
         style={{
           display: 'grid',
           gridTemplateColumns: `repeat(${data.length}, 1fr)`,
@@ -176,6 +199,22 @@ function shortLabel(label) {
   if (typeof label === 'string' && /^\d{4}-\d{2}$/.test(label)) {
     const [y, m] = label.split('-');
     return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString(undefined, { month: 'short' });
+  }
+  return label;
+}
+
+/**
+ * Full label for the accessible table.
+ *
+ * The visual axis can say "Jul" because the surrounding chart supplies the
+ * context. Read aloud in isolation, "Jul" — or worse, the raw "2026-07" —
+ * tells the listener nothing about which July.
+ */
+function longLabel(label) {
+  if (typeof label === 'string' && /^\d{4}-\d{2}$/.test(label)) {
+    const [y, m] = label.split('-');
+    return new Date(Number(y), Number(m) - 1, 1)
+      .toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   }
   return label;
 }

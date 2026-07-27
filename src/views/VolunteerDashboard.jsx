@@ -188,7 +188,17 @@ export default function VolunteerDashboard({
             </button>
           </div>
 
-          <div className="meter">
+          {/* The single number this product exists to communicate. As styled
+              divs it was decorative to a screen reader — the progress toward
+              the Silver Award simply did not exist for those users. */}
+          <div
+            className="meter"
+            role="progressbar"
+            aria-valuenow={Number(totalHours.toFixed(2))}
+            aria-valuemin={0}
+            aria-valuemax={HOUR_GOAL}
+            aria-label={`Service hours: ${formatHours(totalHours)} of ${HOUR_GOAL} hour goal`}
+          >
             <div className={`meter-fill ${goalMet ? 'full' : 'accent'}`} style={{ width: `${goalPct}%` }} />
           </div>
           <p className="small muted" style={{ marginTop: 'var(--s2)' }}>

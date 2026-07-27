@@ -5,10 +5,23 @@ const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = process.env.SMTP_PORT || 587;
 const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
-const APP_NAME = process.env.APP_NAME || 'SBVolunteers';
-const EMAIL_FROM = process.env.EMAIL_FROM || `"${APP_NAME}" <noreply@sbvolunteers.org>`;
+const APP_NAME = process.env.APP_NAME || 'WeVolunteer';
+const EMAIL_FROM = process.env.EMAIL_FROM || `"${APP_NAME}" <noreply@wevolunteer.org>`;
 
-const APP_URL = process.env.APP_URL || (IS_PRODUCTION ? 'https://sbvolunteers.org' : 'http://localhost:5173');
+/**
+ * Base URL for the links in verification and password-reset emails.
+ *
+ * In production this must be set explicitly. It used to fall back to
+ * `https://wevolunteer.org`, which is the most dangerous kind of default: a
+ * deployment that forgot it kept booting and kept sending mail, but every
+ * reset link carried a live single-use token to a domain the operator does not
+ * control. Nothing failed, nothing logged, and the only symptom was users
+ * reporting that reset links "don't work".
+ *
+ * Development keeps the convenient localhost default — there is no token to
+ * misdirect when the mail transport is the console mock.
+ */
+const APP_URL = process.env.APP_URL || (IS_PRODUCTION ? null : 'http://localhost:5173');
 
 let transporter;
 
@@ -43,6 +56,19 @@ if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
     }
   };
   console.log('[Email] Running in mock mode. Emails will be logged to console.');
+}
+
+// Checked after the SMTP transport so the order of startup failures stays
+// stable: JWT_SECRET (config.js) -> SMTP -> APP_URL. An operator fixes them in
+// that order, and the runbook documents it that way.
+if (IS_PRODUCTION && !APP_URL) {
+  console.error(
+    'FATAL: APP_URL must be set in production. It is the base URL for password-reset '
+    + 'and email-verification links; without it those links point at a domain the '
+    + 'deployment does not control and leak single-use tokens. '
+    + 'Example: APP_URL=https://volunteers.example.org'
+  );
+  process.exit(1);
 }
 
 export async function sendVerificationEmail(toEmail, token) {

@@ -16,7 +16,7 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
     priyaToken = await srv.login('priya.patel.nhs@outlook.com');
     hostingOrgToken = await srv.login('jkatzenback@vikings.org'); // hosts event-softball
     unrelatedOrgToken = await srv.login('rmiller@sbpl.info'); // pending, hosts nothing
-    adminToken = await srv.login('admin@sbvolunteers.gov');
+    adminToken = await srv.login('admin@example.gov');
 
     // A fresh student who applies to a freshly created event hosted by
     // jkatzenback, so we have a real, unambiguous "hosting organizer"
@@ -160,7 +160,7 @@ describe('leaderboard privacy', () => {
   });
 
   it('shows a student once leaderboard_opt_in is set to 1 directly in the DB', async () => {
-    const rawDb = new DatabaseSync(process.env.SBV_DB_PATH);
+    const rawDb = new DatabaseSync(process.env.WEV_DB_PATH);
     try {
       rawDb.prepare("UPDATE users SET leaderboard_opt_in = 1 WHERE id = 'user-student-3'").run();
     } finally {
@@ -173,7 +173,7 @@ describe('leaderboard privacy', () => {
     expect(ids).toContain('user-student-3');
 
     // Reset so this test doesn't leak state into the others below.
-    const rawDb2 = new DatabaseSync(process.env.SBV_DB_PATH);
+    const rawDb2 = new DatabaseSync(process.env.WEV_DB_PATH);
     try {
       rawDb2.prepare("UPDATE users SET leaderboard_opt_in = 0 WHERE id = 'user-student-3'").run();
     } finally {
@@ -182,7 +182,7 @@ describe('leaderboard privacy', () => {
   });
 
   it('never returns school or grade on leaderboard rows', async () => {
-    const rawDb = new DatabaseSync(process.env.SBV_DB_PATH);
+    const rawDb = new DatabaseSync(process.env.WEV_DB_PATH);
     try {
       rawDb.prepare("UPDATE users SET leaderboard_opt_in = 1 WHERE id = 'user-student-3'").run();
     } finally {
@@ -197,7 +197,7 @@ describe('leaderboard privacy', () => {
       expect(row).not.toHaveProperty('grade');
     }
 
-    const rawDb2 = new DatabaseSync(process.env.SBV_DB_PATH);
+    const rawDb2 = new DatabaseSync(process.env.WEV_DB_PATH);
     try {
       rawDb2.prepare("UPDATE users SET leaderboard_opt_in = 0 WHERE id = 'user-student-3'").run();
     } finally {
@@ -243,9 +243,9 @@ describe('privacy: event listing requires auth and scopes instructions', () => {
     leoToken = await srv.login('leo.chen28@gmail.com');
     priyaToken = await srv.login('priya.patel.nhs@outlook.com');
     hostingOrgToken = await srv.login('jkatzenback@vikings.org');
-    adminToken = await srv.login('admin@sbvolunteers.gov');
+    adminToken = await srv.login('admin@example.gov');
 
-    const rawDb = new DatabaseSync(process.env.SBV_DB_PATH);
+    const rawDb = new DatabaseSync(process.env.WEV_DB_PATH);
     try {
       rawDb.prepare("UPDATE events SET instructions = ? WHERE id = 'event-softball'").run(SOFTBALL_INSTRUCTIONS);
     } finally {
@@ -295,7 +295,7 @@ describe('privacy: event announcements gated to accepted volunteers and staff', 
     leoToken = await srv.login('leo.chen28@gmail.com');
     priyaToken = await srv.login('priya.patel.nhs@outlook.com');
     hostingOrgToken = await srv.login('jkatzenback@vikings.org');
-    adminToken = await srv.login('admin@sbvolunteers.gov');
+    adminToken = await srv.login('admin@example.gov');
   });
 
   it('returns an empty array to a not-accepted (pending) student', async () => {

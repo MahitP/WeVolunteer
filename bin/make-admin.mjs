@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dbPath = process.env.SBV_DB_PATH || path.join(__dirname, '..', 'server', 'sbvolunteers.db');
+const dbPath = process.env.WEV_DB_PATH || path.join(__dirname, '..', 'server', 'wevolunteer.db');
 
 const email = process.argv[2];
 

@@ -21,13 +21,13 @@ import {
  * never written.
  */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REAL_DB = path.join(__dirname, 'sbvolunteers.db');
+const REAL_DB = path.join(__dirname, 'wevolunteer.db');
 
 /**
  * This deliberately does NOT pin to a hardcoded set of totals.
  *
  * An earlier version did, using numbers captured from the live database. That
- * was wrong: `sbvolunteers.db` is demo data that anyone can legitimately reset,
+ * was wrong: `wevolunteer.db` is demo data that anyone can legitimately reset,
  * so the constant went stale the first time someone pressed the reset button
  * and the suite failed for a reason that had nothing to do with the code.
  *
@@ -54,9 +54,27 @@ function expectMeaningfulSnapshot(snap) {
  * never touched by this, only the additive table.
  */
 function copyRealDb() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbv-migration-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wev-migration-'));
   const dest = path.join(dir, 'copy.db');
+
+  // The `-wal` sidecar has to come with it.
+  //
+  // The database runs in WAL mode, so commits live in `<db>-wal` until a
+  // checkpoint folds them into the main file. Copying the `.db` alone yields a
+  // file that opens cleanly and is missing every recent write — which is
+  // exactly what happened here: against a freshly seeded database the main
+  // file was 4 KB with all 14 users still in the WAL, so this rehearsal ran
+  // against an empty copy and every assertion failed.
+  //
+  // Copying the sidecars alongside it lets the copy replay the WAL on open.
+  // Deliberately NOT checkpointing the source instead: a checkpoint is a write,
+  // and this rehearsal must never modify the real file.
   fs.copyFileSync(REAL_DB, dest);
+  for (const suffix of ['-wal', '-shm']) {
+    if (fs.existsSync(REAL_DB + suffix)) {
+      fs.copyFileSync(REAL_DB + suffix, dest + suffix);
+    }
+  }
 
   const db = new DatabaseSync(dest);
   db.exec('DROP TABLE IF EXISTS hours_ledger');

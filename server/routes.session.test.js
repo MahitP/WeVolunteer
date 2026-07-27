@@ -35,7 +35,7 @@ describe('authenticateToken: reads identity from the database', () => {
     expect(before.status).toBe(200);
 
     // Delete the row directly, out from under the still-unexpired token.
-    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);
     db.close();
 
@@ -55,7 +55,7 @@ describe('authenticateToken: reads identity from the database', () => {
     expect(decoded.role).toBe('student');
 
     // Promote the account directly in the DB — the token is untouched.
-    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
     db.prepare("UPDATE users SET role = 'organizer' WHERE id = ?").run(userId);
     db.close();
 
@@ -100,7 +100,7 @@ describe('authenticateToken: reads identity from the database', () => {
 
 describe('authenticateToken: token_version invalidates sessions on password reset', () => {
   const tokenFor = (userId) => {
-    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
     const row = db.prepare(
       'SELECT token FROM password_reset_tokens WHERE user_id = ? ORDER BY expires_at DESC LIMIT 1'
     ).get(userId);

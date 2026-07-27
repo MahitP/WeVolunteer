@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Routes, Route, useNavigate, useLocation, useSearchParams, Navigate } from 'react-router-dom';
+import { Routes, Route, useNavigate, useLocation, useSearchParams, Navigate, useParams } from 'react-router-dom';
 import { api } from './utils/api';
 import { DEMO_MODE, APP_NAME } from './config';
 import DemoBar from './components/DemoBar';
@@ -18,6 +18,7 @@ import EventModal from './components/EventModal';
 import NotificationsBell from './components/NotificationsBell';
 import ProfileEditModal from './components/ProfileEditModal';
 import ResetPassword from './views/ResetPassword';
+import ErrorBoundary from './components/ErrorBoundary';
 import CertificateVerification from './views/CertificateVerification';
 import VolunteerPortfolio from './views/VolunteerPortfolio';
 import CheckInView from './views/CheckInView';
@@ -464,6 +465,15 @@ export default function App() {
         </header>
 
         <main className="page" id="main-content" tabIndex={-1}>
+          {/* Scoped to the routed content so a failure inside a view leaves the
+              navigation, the notification bell, and sign-out still working —
+              the user can move somewhere else instead of being stuck. resetKey
+              clears a caught error once they do. */}
+          <ErrorBoundary
+            resetKey={`${currentPath}:${selectedEventId || ''}:${profileId || ''}`}
+            title="This page didn't load"
+            message="Something went wrong displaying this page. Your data is safe — nothing was changed. Try another tab, or reload."
+          >
           {viewingProfile ? (
             viewingProfile.type === 'organizer' ? (
               <OrganizerProfile
@@ -526,11 +536,14 @@ export default function App() {
                 ) : <Navigate to="/" replace />
               } />
               
-              <Route path="/events/:id/edit" element={
-                currentUser.role === 'organizer' && currentUser.verified ? (
-                  <CreateEvent onSubmitEvent={handleCreateEvent} addToast={addToast} setActiveTab={setActiveTab} />
-                ) : <Navigate to="/" replace />
-              } />
+              {/* /events/:id/edit used to render a blank CreateEvent whose submit
+                  handler called api.createEvent — so an organizer who reached it
+                  (bookmark, browser autocomplete, back button, or guessing the URL
+                  from /events/new) saw an empty form that PUBLISHED A SECOND EVENT
+                  instead of editing the one they asked for. Nothing in the app ever
+                  linked here; editing lives in EventModal. Redirect to the real
+                  event so the URL does the thing its path promises. */}
+              <Route path="/events/:id/edit" element={<RedirectToEvent />} />
 
               <Route path="/checkin/:eventId" element={
                 currentUser.role === 'organizer' ? (
@@ -575,6 +588,7 @@ export default function App() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           )}
+          </ErrorBoundary>
         </main>
       </div>
 
@@ -600,19 +614,33 @@ export default function App() {
       </nav>
 
       {/* ── Modals ── */}
+      {/* EventModal is 1,500+ lines covering viewing, editing, applicant review,
+          Auto Select, check-in and attendance. It is where nearly every
+          organizer action happens, and it renders data from six endpoints — so
+          it has the most ways to meet a shape it does not expect. Its own
+          boundary means a failure in there is a closeable panel, not a blank
+          application. */}
       {selectedEvent && (
-        <EventModal
-          event={selectedEvent}
-          currentUser={currentUser}
-          applications={applications}
-          onClose={() => setSelectedEventState(null)}
-          onStateChange={handleStateChange}
-          addToast={addToast}
-          onViewVolunteerProfile={(p) => { setSelectedEventState(null); viewVolunteer(p); }}
-          onViewOrganizer={(id) => { setSelectedEventState(null); viewOrganizer(id); }}
-          isFavorited={favorites.includes(selectedEvent.id)}
-          onToggleFavorite={handleToggleFavorite}
-        />
+        <ErrorBoundary
+          resetKey={selectedEvent.id}
+          title="This event didn't load"
+          message="Something went wrong displaying this event. Nothing was changed. Close this and try again — if it keeps happening, reload the page."
+          onDismiss={() => setSelectedEventState(null)}
+          dismissLabel="Close event"
+        >
+          <EventModal
+            event={selectedEvent}
+            currentUser={currentUser}
+            applications={applications}
+            onClose={() => setSelectedEventState(null)}
+            onStateChange={handleStateChange}
+            addToast={addToast}
+            onViewVolunteerProfile={(p) => { setSelectedEventState(null); viewVolunteer(p); }}
+            onViewOrganizer={(id) => { setSelectedEventState(null); viewOrganizer(id); }}
+            isFavorited={favorites.includes(selectedEvent.id)}
+            onToggleFavorite={handleToggleFavorite}
+          />
+        </ErrorBoundary>
       )}
       {editingProfile && (
         <ProfileEditModal
@@ -620,12 +648,24 @@ export default function App() {
           onClose={() => setEditingProfile(false)}
           onSave={(updated) => { setCurrentUser(updated); handleStateChange(); }}
           addToast={addToast}
+          onSignOut={() => { setEditingProfile(false); handleLogout(); }}
         />
       )}
 
       <Toasts toasts={toasts} onRemove={removeToast} />
     </div>
   );
+}
+
+/**
+ * Sends /events/:id/edit to the event itself, which is where editing actually
+ * happens (EventModal's edit mode). Kept as a redirect rather than deleted so
+ * an organizer who bookmarked the URL lands somewhere useful instead of on a
+ * 404 or, as before, on a form that quietly created a duplicate event.
+ */
+function RedirectToEvent() {
+  const { id } = useParams();
+  return <Navigate to={id ? `/events?event=${encodeURIComponent(id)}` : '/events'} replace />;
 }
 
 const TOAST_ICON = { success: CheckCircle2, error: AlertTriangle, info: Info };

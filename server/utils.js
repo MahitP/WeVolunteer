@@ -211,6 +211,53 @@ export function runNotificationSweep() {
         dedupeKey: `reminder:${row.slot_id}`
       })) created++;
     }
+
+    // ── Deadline passed, applicants still waiting ──────────────────────────
+    //
+    // Nothing in this system selects volunteers on its own. Auto Select is
+    // manual-trigger-only and there is no scheduler for it, so an organizer who
+    // forgets leaves applicants sitting in `pending` for ever — never accepted,
+    // never rejected, and never told anything. From the student's side that is
+    // indistinguishable from being ignored, which for a volunteer programme is
+    // the most expensive failure available.
+    //
+    // This tells the organizer, once per event. It deliberately does NOT run
+    // the draw: Auto Select is run-and-confirm so a human reviews the result
+    // before it becomes real, and automating that would remove a control that
+    // exists on purpose. Notify, don't decide.
+    //
+    // Only 'open' and 'closed' events qualify — a completed event is finished
+    // and a cancelled one has nothing to staff. Pending counts only ever fall
+    // after a deadline (applications are refused past it), so one notification
+    // per event is the whole story; the dedupe key keeps the 15-minute sweep
+    // from repeating it.
+    const stalled = db.prepare(`
+      SELECT e.id AS event_id, e.title, e.organizer_id, e.auto_approve,
+             COUNT(a.id) AS pending_count
+      FROM events e
+      JOIN applications a ON a.event_id = e.id AND a.status = 'pending'
+      WHERE e.status NOT IN ('completed', 'cancelled')
+        AND e.application_deadline <= ?
+      GROUP BY e.id
+    `).all(now.toISOString());
+
+    for (const row of stalled) {
+      const n = row.pending_count;
+      const applicants = `${n} applicant${n === 1 ? '' : 's'}`;
+      const nextStep = row.auto_approve === 1
+        ? 'Run Auto Select to choose volunteers.'
+        : 'Review them and choose who is accepted.';
+
+      if (createNotification({
+        userId: row.organizer_id,
+        kind: 'deadline',
+        title: 'Applications closed — your decision is needed',
+        body: `"${row.title}" stopped accepting applications and ${applicants} `
+            + `${n === 1 ? 'is' : 'are'} still waiting to hear back. ${nextStep}`,
+        link: `event:${row.event_id}`,
+        dedupeKey: `awaiting-decision:${row.event_id}`
+      })) created++;
+    }
   } catch (err) {
     console.error('Notification sweep failed:', err);
   }

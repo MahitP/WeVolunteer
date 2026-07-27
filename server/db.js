@@ -9,8 +9,8 @@ import { DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-// SBV_DB_PATH lets tests point at a throwaway file. Unset in normal operation.
-const dbPath = process.env.SBV_DB_PATH || path.join(__dirname, 'sbvolunteers.db');
+// WEV_DB_PATH lets tests point at a throwaway file. Unset in normal operation.
+const dbPath = process.env.WEV_DB_PATH || path.join(__dirname, 'wevolunteer.db');
 
 const db = new DatabaseSync(dbPath);
 
@@ -389,7 +389,21 @@ export function initDatabase() {
   if (userCount.count > 0) {
     console.log('Database already initialized.');
   } else if (DEMO_MODE) {
-    console.log('Seeding database...');
+    // Loud on purpose. The realistic way this fires unexpectedly is an operator
+    // running `npm run dev` on a server instead of `npm start` — DEMO_MODE is
+    // only refused when NODE_ENV=production, so on a host that has not set it
+    // this silently inserts accounts whose shared password is published in the
+    // README, and they persist after the service is later started correctly.
+    console.warn('');
+    console.warn('  ****************************************************************');
+    console.warn('  *  DEMO_MODE: seeding demo accounts into an empty database.     *');
+    console.warn('  *  These accounts share a PUBLISHED password and include an     *');
+    console.warn('  *  administrator. This must never happen on a real deployment.  *');
+    console.warn('  *  If you did not intend this, stop the server, delete the      *');
+    console.warn('  *  database file, and start it with `npm start --prefix server` *');
+    console.warn('  *  and NODE_ENV=production.                                     *');
+    console.warn('  ****************************************************************');
+    console.warn('');
     seedDatabase();
     console.log('Seeding complete.');
   } else {
@@ -475,7 +489,7 @@ function seedDatabase() {
   `);
 
   // Admins & Organizers
-  insertUser.run('user-admin', 'System Admin', 'admin@sbvolunteers.gov', passwordHash, 'N/A', 'admin', 1, '🛠️', 'Platform administrator.', 'South Brunswick', JSON.stringify(['Moderation']), nowStr);
+  insertUser.run('user-admin', 'System Admin', 'admin@example.gov', passwordHash, 'N/A', 'admin', 1, '🛠️', 'Platform administrator.', 'South Brunswick', JSON.stringify(['Moderation']), nowStr);
   insertUser.run('user-org-1', 'Jacquelyn Katzenback', 'jkatzenback@vikings.org', passwordHash, 'Adult', 'organizer', 1, '👩‍💼', 'Coordinator for Vikings Softball.', 'Vikings Softball', JSON.stringify(['Coordination']), nowStr);
   insertUser.run('user-org-pending', 'Robert Miller', 'rmiller@sbpl.info', passwordHash, 'Adult', 'organizer', 0, '👨‍🏫', 'Library Director. Pending admin approval.', 'SBPL', JSON.stringify(['Events']), nowStr);
 

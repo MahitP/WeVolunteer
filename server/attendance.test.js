@@ -9,7 +9,7 @@ import {
 
 /**
  * In-memory schema mirroring the real one for the tables attendance touches.
- * Nothing here can reach server/sbvolunteers.db.
+ * Nothing here can reach server/wevolunteer.db.
  */
 function makeDb() {
   const db = new DatabaseSync(':memory:');

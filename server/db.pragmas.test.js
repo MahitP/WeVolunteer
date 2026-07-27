@@ -22,7 +22,8 @@ import { DatabaseSync } from 'node:sqlite';
 function initInSubprocess(dbFile, readBack) {
   const root = process.cwd().replace(/\\/g, '/');
   const out = execFileSync(process.execPath, ['--input-type=module', '-e', `
-    process.env.SBV_DB_PATH = ${JSON.stringify(dbFile)};
+    process.env.WEV_DB_PATH = ${JSON.stringify(dbFile)};
+    process.env.JWT_SECRET = 'test';
     process.env.DEMO_MODE = 'true';
     const { db, initDatabase } = await import('${root}/server/db.js');
     initDatabase();
@@ -33,7 +34,7 @@ function initInSubprocess(dbFile, readBack) {
 
 describe('SQLite connection pragmas', () => {
   it('opens the database in WAL mode', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'sbv-pragma-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'wev-pragma-'));
     const dbFile = path.join(dir, 'test.db');
     const res = initInSubprocess(dbFile, `{
       journalMode: db.prepare('PRAGMA journal_mode').get().journal_mode
@@ -50,7 +51,7 @@ describe('SQLite connection pragmas', () => {
   });
 
   it('applies a non-zero busy_timeout to the connection', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'sbv-pragma-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'wev-pragma-'));
     const dbFile = path.join(dir, 'test.db');
     const res = initInSubprocess(dbFile, `{
       busyTimeout: db.prepare('PRAGMA busy_timeout').get().timeout
@@ -61,7 +62,7 @@ describe('SQLite connection pragmas', () => {
   });
 
   it('still migrates and seeds a fresh database correctly under WAL', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'sbv-pragma-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'wev-pragma-'));
     const dbFile = path.join(dir, 'test.db');
     const res = initInSubprocess(dbFile, `{
       users: db.prepare('SELECT COUNT(*) c FROM users').get().c,

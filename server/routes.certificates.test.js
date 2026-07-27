@@ -2,9 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer } from './testServer.js';
 
 // `db` and `backfillCertificates` are imported dynamically inside beforeAll,
-// AFTER startTestServer() has set SBV_DB_PATH and imported db.js itself.
+// AFTER startTestServer() has set WEV_DB_PATH and imported db.js itself.
 // A static top-level import here would run before that env var is set and
-// would open server/sbvolunteers.db (the real database) instead of the
+// would open server/wevolunteer.db (the real database) instead of the
 // throwaway test file — exactly what the harness's dynamic-import pattern in
 // testServer.js exists to avoid. Because ESM caches modules by specifier,
 // this dynamic import resolves to the very same already-initialized `db`
@@ -17,7 +17,7 @@ let db, backfillCertificates;
  * prove a code computed the old way no longer verifies.
  */
 function oldCertificateCode(userId, eventId) {
-  const source = `sbv::${userId}::${eventId}`;
+  const source = `wev::${userId}::${eventId}`;
   let h1 = 0x811c9dc5;
   let h2 = 0x01000193;
   for (let i = 0; i < source.length; i++) {
@@ -27,10 +27,10 @@ function oldCertificateCode(userId, eventId) {
   const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; // no 0/O/1/I
   const block = (n) => Array.from({ length: 4 }, (_, i) =>
     alphabet[(n >>> (i * 5)) % alphabet.length]).join('');
-  return `SBV-${block(h1)}-${block(h2)}`;
+  return `WEV-${block(h1)}-${block(h2)}`;
 }
 
-const CODE_FORMAT = /^SBV-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/;
+const CODE_FORMAT = /^WEV-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/;
 
 describe('certificates', () => {
   let srv, priyaToken;
@@ -83,7 +83,7 @@ describe('certificates', () => {
   });
 
   it('404s an unknown/garbage code', async () => {
-    const res = await srv.call('GET', '/api/certificates/verify/SBV-ZZZZ-ZZZZ');
+    const res = await srv.call('GET', '/api/certificates/verify/WEV-ZZZZ-ZZZZ');
     expect(res.status).toBe(404);
     expect(res.body.valid).toBe(false);
   });

@@ -61,13 +61,13 @@ describe('case-insensitive email uniqueness (API)', () => {
 
 /**
  * Migration tests run in a subprocess (clean module registry, throwaway
- * SBV_DB_PATH) since initDatabase() opens its database at module load —
+ * WEV_DB_PATH) since initDatabase() opens its database at module load —
  * following the pattern in routes.emailVerifiedMigration.test.js.
  */
 function initAgainst(dbFile, env = {}) {
   const root = process.cwd().replace(/\\/g, '/');
   execFileSync(process.execPath, ['--input-type=module', '-e', `
-    process.env.SBV_DB_PATH = ${JSON.stringify(dbFile)};
+    process.env.WEV_DB_PATH = ${JSON.stringify(dbFile)};
     ${Object.entries(env).map(([k, v]) => `process.env.${k} = ${JSON.stringify(v)};`).join('\n')}
     const { initDatabase } = await import('${root}/server/db.js');
     initDatabase();
@@ -143,7 +143,7 @@ function readState(dbFile) {
 
 describe('email dedupe migration (F-11, defensive/no data loss)', () => {
   it('keeps the higher-hours account unchanged, renames the other, bumps its token_version, adds the index, and touches no attendance row', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'sbv-email-dedupe-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'wev-email-dedupe-'));
     const dbFile = makeDuplicateDb(dir);
 
     initAgainst(dbFile);
@@ -174,7 +174,7 @@ describe('email dedupe migration (F-11, defensive/no data loss)', () => {
   });
 
   it('is idempotent: a second initDatabase() run changes nothing further and does not error', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'sbv-email-dedupe-idem-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'wev-email-dedupe-idem-'));
     const dbFile = makeDuplicateDb(dir);
 
     initAgainst(dbFile);

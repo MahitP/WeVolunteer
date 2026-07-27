@@ -7,7 +7,7 @@ import { createHoursLedgerTable, recordHoursChange, verifyLedgerParity } from '.
 import { createCheckinTable, finalizeAttendance } from './attendance.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REAL_DB = path.join(__dirname, 'sbvolunteers.db');
+const REAL_DB = path.join(__dirname, 'wevolunteer.db');
 
 function makeDb({ foreignKeys = true } = {}) {
   const db = new DatabaseSync(':memory:');

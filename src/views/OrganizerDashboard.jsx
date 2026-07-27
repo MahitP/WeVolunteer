@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  Calendar, Eye, Pencil, Trash2, Search, Copy, Download,
+  Calendar, Eye, Pencil, Trash2, Search, Copy, Download, ClipboardCheck,
   ShieldAlert, ShieldCheck, ArrowRight, Inbox, CalendarPlus, Lock, Unlock
 } from 'lucide-react';
 import {
-  formatHours, formatDay, formatTimeRange, isoToLocalInput, countdown, gradeLabel, eventPermissions
+  formatHours, formatDay, formatTimeRange, isoToLocalInput, countdown, timeAgo, gradeLabel, eventPermissions
 } from '../utils/helpers';
 import { api } from '../utils/api';
 import Modal, { ModalHead } from '../components/Modal';
@@ -19,6 +20,7 @@ export default function OrganizerDashboard({
   currentUser, events = [], applications = [], onStateChange, addToast,
   onViewDetails, onViewVolunteerProfile, setActiveTab
 }) {
+  const navigate = useNavigate();
   const [tab, setTab] = useState('active');
   const [query, setQuery] = useState('');
   const [editingEvent, setEditingEvent] = useState(null);
@@ -46,14 +48,46 @@ export default function OrganizerDashboard({
 
   // Events needing attention, most urgent first — this is the organizer's
   // actual job, so it leads the page instead of a stat wall.
-  const needsReview = useMemo(() => hosted
-    .map(event => ({
-      event,
-      pending: pendingApps.filter(a => a.eventId === event.id).length
-    }))
-    .filter(x => x.pending > 0)
-    .sort((a, b) => new Date(a.event.applicationDeadline) - new Date(b.event.applicationDeadline)),
-    [hosted, pendingApps]);
+  //
+  // `overdue` means the deadline has passed and applicants are still undecided.
+  // Nothing selects volunteers automatically, so those students are stuck:
+  // not accepted, not rejected, and told nothing. Those events sort above
+  // everything else because they are the only ones where the cost of another
+  // day's delay lands on someone other than the organizer.
+  const needsReview = useMemo(() => {
+    const now = Date.now();
+    return hosted
+      .map(event => ({
+        event,
+        pending: pendingApps.filter(a => a.eventId === event.id).length,
+        overdue: new Date(event.applicationDeadline).getTime() <= now
+      }))
+      .filter(x => x.pending > 0)
+      .sort((a, b) => (
+        (b.overdue - a.overdue) ||
+        (new Date(a.event.applicationDeadline) - new Date(b.event.applicationDeadline))
+      ));
+  }, [hosted, pendingApps]);
+
+  const overdueReview = needsReview.filter(x => x.overdue);
+  const stuckApplicants = overdueReview.reduce((sum, x) => sum + x.pending, 0);
+
+  // Events with a shift running today — the only ones check-in is useful for.
+  // Compared on local calendar day, not a 24h window: an organizer opening the
+  // app at 8am for a 6pm shift should still see it.
+  const todaysEvents = useMemo(() => {
+    const sameDay = (iso) => {
+      const d = new Date(iso);
+      const now = new Date();
+      return d.getFullYear() === now.getFullYear()
+        && d.getMonth() === now.getMonth()
+        && d.getDate() === now.getDate();
+    };
+    return hosted.filter(e =>
+      e.status !== 'cancelled' &&
+      (e.slots || []).some(s => sameDay(s.startDatetime))
+    );
+  }, [hosted]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -141,7 +175,7 @@ export default function OrganizerDashboard({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', 'sbvolunteers_roster_ledger.csv');
+    link.setAttribute('download', 'WeVolunteer_roster_ledger.csv');
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -211,34 +245,58 @@ export default function OrganizerDashboard({
     <div className="stack-lg">
       {/* ── What needs a decision ── */}
       {needsReview.length > 0 && (
-        <section className="card" style={{ borderColor: 'var(--warn)', borderLeftWidth: 3 }}>
+        <section
+          className="card"
+          style={{
+            borderColor: overdueReview.length > 0 ? 'var(--danger)' : 'var(--warn)',
+            borderLeftWidth: 3
+          }}
+        >
           <div className="card-body">
             <div className="row-between row-wrap" style={{ gap: 'var(--s3)' }}>
               <div>
-                <div className="eyebrow" style={{ color: 'var(--warn)' }}>Needs your decision</div>
+                <div
+                  className="eyebrow"
+                  style={{ color: overdueReview.length > 0 ? 'var(--danger)' : 'var(--warn)' }}
+                >
+                  {overdueReview.length > 0 ? 'Applications closed — waiting on you' : 'Needs your decision'}
+                </div>
                 <h2 style={{ marginTop: 2 }}>
                   {pendingApps.length} application{pendingApps.length !== 1 ? 's' : ''} waiting
                   {needsReview.length > 1 && ` across ${needsReview.length} events`}
                 </h2>
+                {/* Said plainly, because the consequence falls on the students,
+                    not on the organizer: nothing chooses volunteers on its own. */}
+                {stuckApplicants > 0 && (
+                  <p className="small" style={{ color: 'var(--danger)', marginTop: 4, maxWidth: '62ch' }}>
+                    {stuckApplicants} {stuckApplicants === 1 ? 'volunteer has' : 'volunteers have'} been
+                    waiting since the deadline passed on {overdueReview.length === 1 ? 'this event' : `${overdueReview.length} events`}.
+                    They are not told anything until you decide.
+                  </p>
+                )}
               </div>
               <button className="btn btn-primary" onClick={() => onViewDetails(needsReview[0].event)}>
-                Review {needsReview.length > 1 ? 'the closest deadline' : 'applications'} <ArrowRight size={15} />
+                Review {needsReview.length > 1 ? 'the most overdue' : 'applications'} <ArrowRight size={15} />
               </button>
             </div>
 
             {needsReview.length > 1 && (
               <div className="list" style={{ marginTop: 'var(--s4)' }}>
-                {needsReview.map(({ event, pending }) => (
+                {needsReview.map(({ event, pending, overdue }) => (
                   <button key={event.id} className="list-row" style={{ width: '100%', textAlign: 'left' }}
                     onClick={() => onViewDetails(event)}>
                     <DateChip iso={event.startDatetime} />
                     <span className="truncate" style={{ flex: 1 }}>
                       <span className="person-name truncate">{event.title}</span>
                       <span className="person-meta tnum">
-                        Applications close {countdown(event.applicationDeadline).toLowerCase()}
+                        {overdue
+                          ? `Applications closed ${timeAgo(event.applicationDeadline)}`
+                          : `Applications close ${countdown(event.applicationDeadline).toLowerCase()}`}
                       </span>
                     </span>
-                    <span className="tag tag-warn">{pending} pending</span>
+                    <span className={overdue ? 'tag tag-danger' : 'tag tag-warn'}>
+                      {pending} {overdue ? 'awaiting reply' : 'pending'}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -269,6 +327,40 @@ export default function OrganizerDashboard({
           <div className="stat-value accent">{formatHours(hoursCredited)}</div>
         </div>
       </section>
+
+      {/* ── Happening today ──────────────────────────────────────────────
+          Check-in is the one screen used standing up, outdoors, on a phone,
+          while volunteers arrive. Reaching it meant: open the app, find the
+          event in a list, open the modal, locate the check-in button among the
+          modal's other actions. Every one of those steps happens one-handed
+          while somebody is asking where to put the cooler.
+
+          So on the day, it leads the page and check-in is the primary action. */}
+      {todaysEvents.length > 0 && (
+        <section className="card" style={{ borderColor: 'var(--brand)', borderLeftWidth: 3 }}>
+          <div className="card-body">
+            <div className="eyebrow" style={{ color: 'var(--brand)' }}>Happening today</div>
+            <div className="list" style={{ marginTop: 'var(--s3)' }}>
+              {todaysEvents.map(event => (
+                <div key={event.id} className="list-row row-between row-wrap" style={{ gap: 'var(--s3)' }}>
+                  <span className="truncate" style={{ flex: 1, minWidth: 0 }}>
+                    <span className="person-name truncate">{event.title}</span>
+                    <span className="person-meta tnum">
+                      {formatTimeRange(event.startDatetime, event.endDatetime)} · {event.location}
+                    </span>
+                  </span>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => navigate(`/checkin/${event.id}`)}
+                  >
+                    <ClipboardCheck size={14} /> Check in volunteers
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ── Events ── */}
       <section>

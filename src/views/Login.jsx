@@ -9,7 +9,7 @@ const DEMO_ACCOUNTS = [
   { name: 'Priya Patel', email: 'priya.patel.nhs@outlook.com', avatar: '👩‍⚕️', role: 'Student' },
   { name: 'Jacquelyn K.', email: 'jkatzenback@vikings.org', avatar: '👩‍💼', role: 'Organizer' },
   { name: 'Robert M.', email: 'rmiller@sbpl.info', avatar: '👨‍🏫', role: 'Pending organizer' },
-  { name: 'System Admin', email: 'admin@sbvolunteers.gov', avatar: '🛠️', role: 'Administrator' }
+  { name: 'System Admin', email: 'admin@example.gov', avatar: '🛠️', role: 'Administrator' }
 ];
 
 const POINTS = [

@@ -20,7 +20,8 @@ import { DatabaseSync } from 'node:sqlite';
 function initAgainst(dbFile, env) {
   const root = process.cwd().replace(/\\/g, '/');
   execFileSync(process.execPath, ['--input-type=module', '-e', `
-    process.env.SBV_DB_PATH = ${JSON.stringify(dbFile)};
+    process.env.WEV_DB_PATH = ${JSON.stringify(dbFile)};
+    process.env.JWT_SECRET = 'test';
     ${Object.entries(env).map(([k, v]) => `process.env.${k} = ${JSON.stringify(v)};`).join('\n')}
     const { initDatabase } = await import('${root}/server/db.js');
     initDatabase();
@@ -57,7 +58,7 @@ const verifiedOf = (dbFile, id) => {
 
 describe('email_verified upgrade backfill (P1-A)', () => {
   it('verifies existing users when the column is added with verification REQUIRED', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'sbv-ev-on-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'wev-ev-on-'));
     const dbFile = makeLegacyDb(dir);
     initAgainst(dbFile, { REQUIRE_EMAIL_VERIFICATION: 'true' });
     const result = verifiedOf(dbFile, 'legacy-1');
@@ -66,7 +67,7 @@ describe('email_verified upgrade backfill (P1-A)', () => {
   });
 
   it('verifies existing users when the column is added with verification OFF', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'sbv-ev-off-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'wev-ev-off-'));
     const dbFile = makeLegacyDb(dir);
     initAgainst(dbFile, {});
     const result = verifiedOf(dbFile, 'legacy-1');
@@ -77,7 +78,7 @@ describe('email_verified upgrade backfill (P1-A)', () => {
   it('does not re-verify a genuinely unverified signup on a later boot with the flag ON', () => {
     // Second boot with the flag on must not reach back and verify someone who
     // signed up unverified after the column already existed.
-    const dir = mkdtempSync(path.join(tmpdir(), 'sbv-ev-keep-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'wev-ev-keep-'));
     const dbFile = makeLegacyDb(dir);
     initAgainst(dbFile, { REQUIRE_EMAIL_VERIFICATION: 'true' });
 

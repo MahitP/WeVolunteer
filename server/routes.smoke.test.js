@@ -23,6 +23,6 @@ describe('route test harness', () => {
   });
 
   it('does not touch the real database file', () => {
-    expect(process.env.SBV_DB_PATH).toContain('sbv-test-');
+    expect(process.env.WEV_DB_PATH).toContain('wev-test-');
   });
 });

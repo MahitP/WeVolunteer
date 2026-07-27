@@ -19,7 +19,7 @@ import path from 'path';
  * exits in production without SMTP.
  */
 function bootProdAndProbe() {
-  const dir = mkdtempSync(path.join(tmpdir(), 'sbv-ordering-'));
+  const dir = mkdtempSync(path.join(tmpdir(), 'wev-ordering-'));
   const dbFile = path.join(dir, 'test.db');
   const root = process.cwd().replace(/\\/g, '/');
   try {
@@ -33,13 +33,43 @@ function bootProdAndProbe() {
       const health = await fetch(base + '/health');
       const api404 = await fetch(base + '/api/does-not-exist-xyz');
       const spa = await fetch(base + '/some/spa/route');
+      // A browser sends Origin when fetching <script type="module">, even
+      // same-origin. CORS_ORIGINS is left at its localhost default here, so
+      // this origin is deliberately NOT on the allowlist.
+      const spaWithOrigin = await fetch(base + '/some/spa/route', {
+        headers: { Origin: base }
+      });
+      const apiForeignOrigin = await fetch(base + '/api/events', {
+        headers: { Origin: 'https://evil.example' }
+      });
+      const apiAllowedOrigin = await fetch(base + '/api/events', {
+        headers: { Origin: 'http://localhost:5173' }
+      });
+      // Browsers attach Origin to same-origin POSTs. 'base' is not on the
+      // allowlist, so this only passes via the same-origin comparison.
+      const apiSameOriginPost = await fetch(base + '/api/auth/login', {
+        method: 'POST',
+        headers: { Origin: base, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'nobody@example.org', password: 'wrong-password' })
+      });
+      const apiForeignPost = await fetch(base + '/api/auth/login', {
+        method: 'POST',
+        headers: { Origin: 'https://evil.example', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'nobody@example.org', password: 'wrong-password' })
+      });
       console.log('RESULT' + JSON.stringify({
         healthStatus: health.status,
         healthCT: health.headers.get('content-type') || '',
         healthBody: await health.text(),
         api404Status: api404.status,
         api404CT: api404.headers.get('content-type') || '',
-        spaCT: spa.headers.get('content-type') || ''
+        spaCT: spa.headers.get('content-type') || '',
+        spaWithOriginStatus: spaWithOrigin.status,
+        spaWithOriginCT: spaWithOrigin.headers.get('content-type') || '',
+        apiForeignOriginStatus: apiForeignOrigin.status,
+        apiAllowedOriginStatus: apiAllowedOrigin.status,
+        apiSameOriginPostStatus: apiSameOriginPost.status,
+        apiForeignPostStatus: apiForeignPost.status
       }));
       server.close();
     `], {
@@ -47,10 +77,12 @@ function bootProdAndProbe() {
       env: {
         ...process.env,
         NODE_ENV: 'production',
-        SBV_DB_PATH: dbFile,
+        WEV_DB_PATH: dbFile,
         DEMO_MODE: '',
         JWT_SECRET: 'test-secret-not-for-production',
-        SMTP_HOST: 'smtp.example.org', SMTP_USER: 'u', SMTP_PASS: 'p'
+        SMTP_HOST: 'smtp.example.org', SMTP_USER: 'u', SMTP_PASS: 'p',
+        // Required in production since email.js started enforcing it.
+        APP_URL: 'https://volunteers.example.org'
       },
       stdio: 'pipe',
       encoding: 'utf8'
@@ -81,5 +113,50 @@ describe('production middleware ordering (Task 11)', () => {
     // Proves /health returning JSON is not merely because the catch-all is
     // absent — a real SPA route still gets index.html.
     expect(probe.spaCT).toMatch(/text\/html/);
+  });
+});
+
+/**
+ * CORS must guard the API without being able to take the whole app offline.
+ *
+ * The bug: `cors()` was mounted globally, so it also guarded `dist/`. Browsers
+ * attach an `Origin` header when fetching `<script type="module">` — including
+ * same-origin — so any deployment whose CORS_ORIGINS did not exactly match its
+ * public origin answered its own JavaScript bundle with 403 and rendered a
+ * blank white page. Observed directly: assets 403, `#root` empty, no console
+ * error a user could act on.
+ *
+ * These probes use an origin that is NOT on the allowlist (the default is the
+ * two localhost dev ports), which is exactly the misconfigured-production case.
+ */
+describe('CORS scope', () => {
+  const probe = bootProdAndProbe();
+
+  it('serves the SPA even when the request carries an unlisted Origin', () => {
+    expect(probe.spaWithOriginStatus).toBe(200);
+    expect(probe.spaWithOriginCT).toMatch(/text\/html/);
+  });
+
+  it('still refuses an API call from an origin that is not allowed', () => {
+    expect(probe.apiForeignOriginStatus).toBe(403);
+  });
+
+  it('lets an allowed origin through to normal auth handling', () => {
+    // 401 (needs a token), not 403 (origin refused) — proves the allowlist is
+    // doing its job rather than being bypassed by the scoping change.
+    expect(probe.apiAllowedOriginStatus).toBe(401);
+  });
+
+  it('accepts a same-origin POST even when that origin is not on the allowlist', () => {
+    // The production topology serves the SPA and the API from one origin, and
+    // browsers attach Origin to POSTs. Without the same-origin comparison this
+    // was 403 — every login failed on any deployment whose CORS_ORIGINS did not
+    // exactly match its public URL, while GETs kept working.
+    // 401 = credentials rejected, i.e. the request reached the login handler.
+    expect(probe.apiSameOriginPostStatus).toBe(401);
+  });
+
+  it('still refuses a cross-origin POST', () => {
+    expect(probe.apiForeignPostStatus).toBe(403);
   });
 });

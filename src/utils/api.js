@@ -1,13 +1,54 @@
-// Client API Utility for SBVolunteers
+// Client API Utility for WeVolunteer
 
 const STORAGE_KEYS = {
-  TOKEN: 'sbv_auth_token',
-  USER: 'sbv_auth_user'
+  TOKEN: 'wev_auth_token',
+  USER: 'wev_auth_user'
 };
+
+/**
+ * A failed request, carrying enough for a caller to tell *why* it failed.
+ *
+ * The status is the point of this class. Without it every failure is an
+ * indistinguishable Error, so callers cannot separate "that code does not
+ * exist" (404) from "the server is unreachable" — which is how a mistyped
+ * certificate code came to be reported as a system outage.
+ *
+ * `isNetworkError` covers the case where the request never reached a server at
+ * all (offline, DNS failure, connection refused). It carries status 0, because
+ * there is no HTTP status to report.
+ */
+export class ApiError extends Error {
+  constructor(message, { status = 0, data = null, isNetworkError = false } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.data = data;
+    this.isNetworkError = isNetworkError;
+  }
+}
+
+/**
+ * Human-readable fallback for a response whose body we could not read.
+ *
+ * Error bodies are not always JSON: express-rate-limit answers 429 with
+ * `text/plain`, and a proxy or load balancer in front of the app will return
+ * its own HTML. Falling back to the raw status code put strings like
+ * "Request failed (429)" in front of students, which tells them nothing about
+ * what happened or what to do next.
+ */
+function messageForStatus(status) {
+  if (status === 429) return 'Too many attempts. Please wait a few minutes and try again.';
+  if (status === 401) return 'Your session has expired. Please sign in again.';
+  if (status === 403) return 'You do not have permission to do that.';
+  if (status === 404) return 'We could not find what you were looking for.';
+  if (status === 413) return 'That is too large to send.';
+  if (status >= 500) return 'The server is having trouble right now. Please try again in a moment.';
+  return 'Something went wrong. Please try again.';
+}
 
 async function apiFetch(endpoint, options = {}) {
   const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
-  
+
   const headers = {
     'Content-Type': 'application/json',
     ...(options.headers || {})
@@ -22,7 +63,18 @@ async function apiFetch(endpoint, options = {}) {
     headers
   };
 
-  const response = await fetch(endpoint, config);
+  let response;
+  try {
+    response = await fetch(endpoint, config);
+  } catch (err) {
+    // fetch only rejects when the request never completed — offline, DNS
+    // failure, connection refused, CORS rejection. An HTTP error status
+    // resolves normally and is handled below.
+    throw new ApiError(
+      'Could not reach the server. Check your connection and try again.',
+      { isNetworkError: true }
+    );
+  }
 
   // CSV responses are plain text — don't JSON parse them
   const isCSV = response.headers.get('content-type')?.includes('text/csv');
@@ -35,7 +87,9 @@ async function apiFetch(endpoint, options = {}) {
   }
 
   if (isCSV) {
-    if (!response.ok) throw new Error('Failed to export CSV');
+    if (!response.ok) {
+      throw new ApiError('Failed to export CSV', { status: response.status });
+    }
     return response.blob();
   }
 
@@ -43,10 +97,14 @@ async function apiFetch(endpoint, options = {}) {
   try {
     data = await response.json();
   } catch {
-    // Non-JSON body (e.g. proxy error page) — fall through to status check
+    // Non-JSON body (e.g. rate limiter text, proxy error page) — fall through
+    // to the status check, which supplies a readable message.
   }
   if (!response.ok) {
-    throw new Error(data?.error || `Request failed (${response.status})`);
+    throw new ApiError(data?.error || messageForStatus(response.status), {
+      status: response.status,
+      data
+    });
   }
 
   return data;
