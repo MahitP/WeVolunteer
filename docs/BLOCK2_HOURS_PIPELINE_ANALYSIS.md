@@ -63,7 +63,7 @@ flowchart TD
     H --> I & J & K & L & M & N & O & P & Q & R & S & T
 
     L --> U["certificateCode(userId, eventId)<br/><b>hash of ids only — NOT of hours</b>"]
-    U --> V["Printed certificate<br/>SBV-XXXX-XXXX + hours figure"]
+    U --> V["Printed certificate<br/>WEV-XXXX-XXXX + hours figure"]
     M --> W["Public verification<br/>reads live attendance at request time"]
     V -.->|"same code, hours may differ later"| W
 
@@ -267,7 +267,7 @@ CREATE INDEX IF NOT EXISTS idx_ledger_slot  ON hours_ledger(slot_id, user_id);
 
 ### Step 0 — Backup and baseline
 ```bash
-sqlite3 server/sbvolunteers.db ".backup /safe/pre-ledger-$(date +%s).db"
+sqlite3 server/wevolunteer.db ".backup /safe/pre-ledger-$(date +%s).db"
 ```
 `.backup` rather than `cp`, because `journal_mode = delete` means a file copy taken during a write is not guaranteed consistent.
 
@@ -378,7 +378,7 @@ Full path on a seeded database: apply → accept → attend → hours appear →
 
 ### Tier 4 — Migration rehearsal
 
-Run the full migration against a **copy of the real `sbvolunteers.db`**, not a synthetic fixture, and diff the baseline. Re-run it twice more to prove idempotency.
+Run the full migration against a **copy of the real `wevolunteer.db`**, not a synthetic fixture, and diff the baseline. Re-run it twice more to prove idempotency.
 
 ---
 

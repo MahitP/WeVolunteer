@@ -1,6 +1,6 @@
-# SBVolunteers P0 Launch Blockers — Implementation Plan
+# WeVolunteer P0 Launch Blockers — Implementation Plan
 
-**Goal:** Take SBVolunteers from "does not compile" to "a student, an organizer, and an admin can each complete their full journey end to end, and a forgotten password is recoverable."
+**Goal:** Take WeVolunteer from "does not compile" to "a student, an organizer, and an admin can each complete their full journey end to end, and a forgotten password is recoverable."
 
 **Architecture:** Nine sequenced tasks. Task 1 repairs the build (nothing else is verifiable until it does). Task 2 makes the Express routes testable by splitting boot-time side effects out of `server.js` — this is the prerequisite for TDD on every subsequent task, because today importing any router calls `app.listen()`. Tasks 3–9 each fix one P0 defect, test-first, against the harness Task 2 builds.
 
@@ -33,7 +33,7 @@ This plan covers **P0 launch blockers only** — the defects that make the app u
 | `server/config.js` | **Create.** All env-derived config. No side effects. | 2 |
 | `server/app.js` | **Create.** Express app assembly + routers. No `listen`. | 2 |
 | `server/server.js` | Shrinks to boot only: guards, `initDatabase`, `listen`, sweep | 2 |
-| `server/db.js` | Honour `SBV_DB_PATH`; gate seeding on `DEMO_MODE`; verified backfill | 2, 3, 4 |
+| `server/db.js` | Honour `WEV_DB_PATH`; gate seeding on `DEMO_MODE`; verified backfill | 2, 3, 4 |
 | `server/testServer.js` | **Create.** In-process route-test harness. | 2 |
 | `server/routes.auth.test.js` | **Create.** Auth journey tests. | 4, 5, 6, 8 |
 | `server/routes.applications.test.js` | **Create.** Withdraw / re-apply tests. | 7 |
@@ -220,15 +220,15 @@ export const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 export const DEMO_MODE = process.env.DEMO_MODE === 'true';
 export const PORT = Number(process.env.API_PORT) || 5050;
 
-export const JWT_SECRET = process.env.JWT_SECRET || 'sbvolunteers_secret_key_12345';
+export const JWT_SECRET = process.env.JWT_SECRET || 'wevolunteer_secret_key_12345';
 
 export const VALID_GRADES = ['9', '10', '11', '12', 'Adult', 'N/A'];
 export const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 
-export const APP_NAME = process.env.APP_NAME || 'SBVolunteers';
+export const APP_NAME = process.env.APP_NAME || 'WeVolunteer';
 export const SCHOOL_NAME = process.env.SCHOOL_NAME || 'South Brunswick, NJ';
 export const MAX_AUTO_SELECT_APPLICANTS = Number(process.env.MAX_AUTO_SELECT_APPLICANTS) || 100;
-export const DEFAULT_EMAIL_FROM = `"${APP_NAME}" <noreply@sbvolunteers.org>`;
+export const DEFAULT_EMAIL_FROM = `"${APP_NAME}" <noreply@wevolunteer.org>`;
 
 export const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:4173')
   .split(',')
@@ -367,7 +367,7 @@ runNotificationSweep();
 setInterval(runNotificationSweep, 15 * 60 * 1000);
 
 app.listen(PORT, '127.0.0.1', () => {
-  console.log(`SBVolunteers API Server listening on port ${PORT}`);
+  console.log(`WeVolunteer API Server listening on port ${PORT}`);
 });
 ```
 
@@ -376,14 +376,14 @@ app.listen(PORT, '127.0.0.1', () => {
 In `server/db.js`, replace line 10:
 
 ```js
-const dbPath = path.join(__dirname, 'sbvolunteers.db');
+const dbPath = path.join(__dirname, 'wevolunteer.db');
 ```
 
 with:
 
 ```js
-// SBV_DB_PATH lets tests point at a throwaway file. Unset in normal operation.
-const dbPath = process.env.SBV_DB_PATH || path.join(__dirname, 'sbvolunteers.db');
+// WEV_DB_PATH lets tests point at a throwaway file. Unset in normal operation.
+const dbPath = process.env.WEV_DB_PATH || path.join(__dirname, 'wevolunteer.db');
 ```
 
 - [ ] **Step 5: Repoint every `server.js` import to `config.js`**
@@ -418,8 +418,8 @@ import path from 'path';
  * are dynamic.
  */
 export async function startTestServer() {
-  const dir = mkdtempSync(path.join(tmpdir(), 'sbv-test-'));
-  process.env.SBV_DB_PATH = path.join(dir, 'test.db');
+  const dir = mkdtempSync(path.join(tmpdir(), 'wev-test-'));
+  process.env.WEV_DB_PATH = path.join(dir, 'test.db');
   process.env.DEMO_MODE = 'true';
   process.env.JWT_SECRET = 'test-secret-not-for-production';
 
@@ -488,7 +488,7 @@ describe('route test harness', () => {
   });
 
   it('does not touch the real database file', () => {
-    expect(process.env.SBV_DB_PATH).toContain('sbv-test-');
+    expect(process.env.WEV_DB_PATH).toContain('wev-test-');
   });
 });
 ```
@@ -506,7 +506,7 @@ npm test
 API_PORT=5099 node server/server.js
 ```
 
-Expected: `Tests 85 passed (85)`. The server prints `SBVolunteers API Server listening on port 5099`. Stop it with Ctrl-C.
+Expected: `Tests 85 passed (85)`. The server prints `WeVolunteer API Server listening on port 5099`. Stop it with Ctrl-C.
 
 - [ ] **Step 10: Commit**
 
@@ -520,7 +520,7 @@ setInterval() and app.listen() at module scope — so no route could be tested.
 - config.js: env-derived values, no side effects
 - app.js: express assembly, exports app without listening
 - server.js: boot only
-- db.js: honours SBV_DB_PATH for throwaway test databases
+- db.js: honours WEV_DB_PATH for throwaway test databases
 - testServer.js: in-process harness with a temp database
 
 No route behaviour changes."
@@ -530,7 +530,7 @@ No route behaviour changes."
 
 ## Task 3: Stop seeding demo accounts into production
 
-`initDatabase()` seeds 15 demo users whenever the `users` table is empty, with no `NODE_ENV` or `DEMO_MODE` guard. A fresh production database therefore creates `admin@sbvolunteers.gov` with password `password123` — credentials published in `README.md`. The intended alternative, `bin/make-admin.mjs`, imports `better-sqlite3`, which is not a dependency, so it crashes.
+`initDatabase()` seeds 15 demo users whenever the `users` table is empty, with no `NODE_ENV` or `DEMO_MODE` guard. A fresh production database therefore creates `admin@example.gov` with password `password123` — credentials published in `README.md`. The intended alternative, `bin/make-admin.mjs`, imports `better-sqlite3`, which is not a dependency, so it crashes.
 
 **Files:**
 - Modify: `server/db.js:280-288`
@@ -559,12 +559,12 @@ import { DatabaseSync } from 'node:sqlite';
  */
 describe('demo seeding is gated on DEMO_MODE', () => {
   it('does not seed when DEMO_MODE is off', async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'sbv-seed-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'wev-seed-'));
     const dbFile = path.join(dir, 'prod.db');
 
     const { execFileSync } = await import('child_process');
     execFileSync(process.execPath, ['-e', `
-      process.env.SBV_DB_PATH = ${JSON.stringify(dbFile)};
+      process.env.WEV_DB_PATH = ${JSON.stringify(dbFile)};
       delete process.env.DEMO_MODE;
       const { initDatabase } = await import('./server/db.js');
       initDatabase();
@@ -584,7 +584,7 @@ Note: `node -e` does not allow top-level `await` in CommonJS mode; use `--input-
 
 ```js
     execFileSync(process.execPath, ['--input-type=module', '-e', `
-      process.env.SBV_DB_PATH = ${JSON.stringify(dbFile)};
+      process.env.WEV_DB_PATH = ${JSON.stringify(dbFile)};
       delete process.env.DEMO_MODE;
       const { initDatabase } = await import('${process.cwd().replace(/\\/g, '/')}/server/db.js');
       initDatabase();
@@ -655,7 +655,7 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dbPath = process.env.SBV_DB_PATH || path.join(__dirname, '..', 'server', 'sbvolunteers.db');
+const dbPath = process.env.WEV_DB_PATH || path.join(__dirname, '..', 'server', 'wevolunteer.db');
 
 const email = process.argv[2];
 
@@ -691,9 +691,9 @@ try {
 - [ ] **Step 6: Verify make-admin runs end to end**
 
 ```bash
-rm -rf /tmp/sbv-admin-check && mkdir -p /tmp/sbv-admin-check
-SBV_DB_PATH=/tmp/sbv-admin-check/a.db DEMO_MODE=true node -e "import('./server/db.js').then(m => m.initDatabase())"
-SBV_DB_PATH=/tmp/sbv-admin-check/a.db node bin/make-admin.mjs leo.chen28@gmail.com
+rm -rf /tmp/wev-admin-check && mkdir -p /tmp/wev-admin-check
+WEV_DB_PATH=/tmp/wev-admin-check/a.db DEMO_MODE=true node -e "import('./server/db.js').then(m => m.initDatabase())"
+WEV_DB_PATH=/tmp/wev-admin-check/a.db node bin/make-admin.mjs leo.chen28@gmail.com
 ```
 
 Expected: `Successfully promoted leo.chen28@gmail.com to admin.` (No `ERR_MODULE_NOT_FOUND`.)
@@ -703,7 +703,7 @@ Expected: `Successfully promoted leo.chen28@gmail.com to admin.` (No `ERR_MODULE
 In the "Configuration → Server" section, add a row to the env var table:
 
 ```markdown
-| `SBV_DB_PATH`  | `server/sbvolunteers.db`                       | Absolute path to the SQLite file. Used by tests; override in production to place the database on a backed-up volume. |
+| `WEV_DB_PATH`  | `server/wevolunteer.db`                       | Absolute path to the SQLite file. Used by tests; override in production to place the database on a backed-up volume. |
 ```
 
 And immediately after the "A minimal production start" code block, add:
@@ -734,7 +734,7 @@ Expected: all tests pass (86 now).
 git add server/db.js bin/make-admin.mjs README.md server/routes.seeding.test.js
 git commit -m "fix: never seed demo accounts into a production database
 
-initDatabase() seeded 15 users, including admin@sbvolunteers.gov with the
+initDatabase() seeded 15 users, including admin@example.gov with the
 password published in the README, whenever the users table was empty — with
 no NODE_ENV or DEMO_MODE guard. A fresh production deploy was compromised on
 first boot.
@@ -766,7 +766,7 @@ The gate itself is correct — it just needs a real field behind it, and a way t
 
 Create `server/routes.auth.test.js`.
 
-> **Important — one server per test file.** `startTestServer()` sets `SBV_DB_PATH` and then dynamically imports `db.js`, which opens the database at module scope. Node caches that module, so a **second** call inside the same file would silently keep using the **first** database while helpers read the newer path. Vitest isolates each test *file*, so the rule is: exactly one `startTestServer()` per file, in a single top-level `beforeAll`, shared by every `describe` in that file. Tasks 5 and 8 append `describe` blocks to this file and reuse the same `srv`.
+> **Important — one server per test file.** `startTestServer()` sets `WEV_DB_PATH` and then dynamically imports `db.js`, which opens the database at module scope. Node caches that module, so a **second** call inside the same file would silently keep using the **first** database while helpers read the newer path. Vitest isolates each test *file*, so the rule is: exactly one `startTestServer()` per file, in a single top-level `beforeAll`, shared by every `describe` in that file. Tasks 5 and 8 append `describe` blocks to this file and reuse the same `srv`.
 
 ```js
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -955,7 +955,7 @@ Append to `server/routes.auth.test.js`. It reuses the file-level `srv` and the `
 ```js
 describe('auth: password reset', () => {
   const tokenFor = (userId) => {
-    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
     const row = db.prepare(
       'SELECT token FROM password_reset_tokens WHERE user_id = ? ORDER BY expires_at DESC LIMIT 1'
     ).get(userId);
@@ -1004,7 +1004,7 @@ describe('auth: password reset', () => {
     await srv.call('POST', '/api/auth/forgot-password', { email: 'emiller2027@gmail.com' });
     const token = tokenFor('user-student-3');
 
-    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
     db.prepare('UPDATE password_reset_tokens SET expires_at = ? WHERE token = ?')
       .run('2020-01-01T00:00:00.000Z', token);
     db.close();
@@ -1142,7 +1142,7 @@ npm run dev
    ```
    =================== EMAIL SENT ===================
    To:      leo.chen28@gmail.com
-   Subject: Password Reset - SBVolunteers
+   Subject: Password Reset - WeVolunteer
    ```
 3. Open the printed `http://localhost:5173/?reset=<token>` URL. `App.jsx:131` redirects to `/reset-password?token=…`.
 4. Set a new password, then sign in with it.
@@ -1203,7 +1203,7 @@ describe('auth: email verification (flag on)', () => {
   });
 
   const tokenFor = (userId) => {
-    const db = new DatabaseSync(process.env.SBV_DB_PATH);
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
     const row = db.prepare(
       'SELECT token FROM email_verification_tokens WHERE user_id = ? ORDER BY expires_at DESC LIMIT 1'
     ).get(userId);
@@ -1371,7 +1371,7 @@ Add to the server env var table:
 ```markdown
 | `REQUIRE_EMAIL_VERIFICATION` | `false`                          | When `true`, a new account must click a confirmation link before using the app. **Only turn this on once `SMTP_*` is configured** — without a working transport it locks every new user out. |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | unset | Transactional mail transport. With any of these unset, mail is printed to the server console instead of being sent. |
-| `APP_URL`      | `https://sbvolunteers.org` in production | Base URL used to build confirmation and password-reset links. |
+| `APP_URL`      | `https://wevolunteer.org` in production | Base URL used to build confirmation and password-reset links. |
 ```
 
 - [ ] **Step 8: Run the full suite and commit**
@@ -2125,13 +2125,13 @@ Expected: all pass. Roughly 115 tests across 11 files (82 pre-existing + ~33 add
 - [ ] **Step 3: Fresh production-shaped database comes up empty**
 
 ```bash
-rm -rf /tmp/sbv-prod-check && mkdir -p /tmp/sbv-prod-check
-SBV_DB_PATH=/tmp/sbv-prod-check/prod.db NODE_ENV=production JWT_SECRET=$(openssl rand -hex 32) \
+rm -rf /tmp/wev-prod-check && mkdir -p /tmp/wev-prod-check
+WEV_DB_PATH=/tmp/wev-prod-check/prod.db NODE_ENV=production JWT_SECRET=$(openssl rand -hex 32) \
   API_PORT=5098 node server/server.js &
 sleep 3
 curl -s -X POST localhost:5098/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@sbvolunteers.gov","password":"password123"}'
+  -d '{"email":"admin@example.gov","password":"password123"}'
 kill %1
 ```
 
