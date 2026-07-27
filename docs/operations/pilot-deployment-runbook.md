@@ -738,8 +738,7 @@ difference from `main` is the roadmap document.
 There are **two** `package.json` files. Both must be installed.
 
 ```bash
-sudo -u wev npm ci --include=dev               # root: React, Vite, vitest, oxlint (Vite is a dev dependency)
-sudo -u wev npm ci --omit=dev --prefix server  # server: express, helmet, jwt, bcryptjs, nodemailer
+sudo -u wev npm ci                 # root: Installs React, Vite, Express, sqlite, etc.
 ```
 
 Use `npm ci`, not `npm install` — it installs exactly the locked versions and
@@ -769,6 +768,9 @@ unset until the service starts.
 
 ```bash
 sudo -u wev npm run build
+
+# Remove development dependencies like Vite to save space and reduce surface area
+sudo -u wev npm prune --omit=dev
 ls -la dist/            # index.html, assets/, favicon.svg, icons.svg
 ```
 
@@ -1430,7 +1432,7 @@ Rolling back *code* and rolling back *data* are different operations with
 different risks.
 
 **Code rollback is straightforward** — `git checkout <previous-sha>`,
-`npm ci`, `npm ci --prefix server`, `npm run build`, restart. There is no
+`npm ci`, `npm run build`, `npm prune --omit=dev`, restart. There is no
 build-time coupling to the database.
 
 **Schema rollback is not supported.** Migrations are forward-only:
@@ -2385,8 +2387,8 @@ sudo -u wev git checkout <previous-sha>
 
 # 4. Reinstall and rebuild — dependency versions may differ.
 sudo -u wev npm ci
-sudo -u wev npm ci --prefix server
 sudo -u wev npm run build
+sudo -u wev npm prune --omit=dev
 
 # 5. Verify before starting.
 sudo -u wev sqlite3 /var/lib/wevolunteer/wevolunteer.db 'PRAGMA integrity_check;'
