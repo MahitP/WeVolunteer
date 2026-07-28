@@ -27,7 +27,7 @@ const CATEGORIES = [
 ];
 
 export default function EventModal({
-  event, currentUser, applications = [], onClose, onStateChange, addToast, onViewVolunteerProfile,
+  event, currentUser, applications = [], onClose, refreshEvents, refreshApplications, addToast, onViewVolunteerProfile,
   isFavorited, onToggleFavorite
 }) {
   const dialogRef = useModal(onClose);
@@ -241,7 +241,8 @@ export default function EventModal({
       if (res.eventCompleted) addToast('Every shift is accounted for — this event is now complete.', 'info');
       setMode('view');
       setAttendanceReason('');
-      onStateChange();
+      if (refreshEvents) refreshEvents();
+      if (refreshApplications) refreshApplications();
     } catch (err) {
       addToast(err.message, 'error');
     } finally {
@@ -278,7 +279,7 @@ export default function EventModal({
       addToast(`Draft selection ${newRun.runNumber} ready to review.`, 'success');
       setShowRedrawModal(false);
       await loadSelectionRuns();
-      onStateChange();
+      if (refreshApplications) refreshApplications();
     } catch (err) {
       // draw_cap_reached comes back from the server with its own message.
       addToast(`Could not run selection: ${err.message}`, 'error');
@@ -294,7 +295,7 @@ export default function EventModal({
       await api.confirmAutoSelect(event.id);
       addToast('Selection confirmed. Volunteers have been notified.', 'success');
       await loadSelectionRuns();
-      onStateChange();
+      if (refreshApplications) refreshApplications();
     } catch (err) {
       addToast(`Could not confirm selection: ${err.message}`, 'error');
     } finally {
@@ -322,7 +323,8 @@ export default function EventModal({
         addToast(`Could not apply: ${failed[0].reason.message}`, 'error');
       }
       setSelectedSlots([]);
-      onStateChange();
+      if (refreshEvents) refreshEvents();
+      if (refreshApplications) refreshApplications();
     } finally {
       setSubmitting(false);
     }
@@ -338,7 +340,8 @@ export default function EventModal({
     try {
       await api.withdrawApplication(app.id);
       addToast(confirmed ? 'Spot released. The organizer has been notified.' : 'Application withdrawn.', 'info');
-      onStateChange();
+      if (refreshEvents) refreshEvents();
+      if (refreshApplications) refreshApplications();
     } catch (err) {
       addToast(err.message, 'error');
     } finally {
@@ -352,7 +355,8 @@ export default function EventModal({
       await api.updateApplicationStatus(appId, status);
       const verb = { accepted: 'accepted', waitlisted: 'moved to the waitlist', rejected: 'rejected' }[status];
       addToast(`${name} ${verb}.`, 'success');
-      onStateChange();
+      if (refreshEvents) refreshEvents();
+      if (refreshApplications) refreshApplications();
     } catch (err) {
       addToast(`Could not update ${name}: ${err.message}`, 'error');
     } finally {
@@ -381,7 +385,8 @@ export default function EventModal({
       if (already > 0) parts.push(`${already} already accepted`);
 
       addToast(parts.join(' · '), full > 0 ? 'info' : 'success');
-      onStateChange();
+      if (refreshEvents) refreshEvents();
+      if (refreshApplications) refreshApplications();
     } catch (err) {
       addToast(`Bulk update failed: ${err.message}`, 'error');
     } finally {
@@ -395,7 +400,8 @@ export default function EventModal({
       const res = await api.runAutoApprove(event.id);
       if (res.approvedCount > 0) {
         addToast(`Accepted ${res.approvedCount} volunteer${res.approvedCount !== 1 ? 's' : ''}, fewest hours first.`, 'success');
-        onStateChange();
+        if (refreshEvents) refreshEvents();
+        if (refreshApplications) refreshApplications();
       } else {
         addToast('No one could be accepted — every shift is already full.', 'info');
       }
@@ -452,7 +458,7 @@ export default function EventModal({
       });
       addToast('Event updated.', 'success');
       setMode('view');
-      onStateChange();
+      if (refreshEvents) refreshEvents();
     } catch (err) {
       addToast(`Could not save: ${err.message}`, 'error');
     } finally {
