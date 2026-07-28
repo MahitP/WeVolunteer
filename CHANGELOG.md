@@ -5,6 +5,15 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — Unreleased
+
+### Added
+- **Server-side Logout** — Implemented an explicit `/api/auth/logout` endpoint that invalidates sessions by clearing the session cookie and incrementing the database `token_version`.
+
+### Changed
+- **Cookie Authentication** — Migrated authentication from `localStorage` JWTs in the `Authorization` header to `HttpOnly`, `SameSite=Lax` cookies, significantly reducing exposure to cross-site scripting (XSS).
+- **Password Minimum Length** — Raised the minimum password length requirement from 6 to 8 characters.
+
 ## [1.0.0] — 2026-07-27
 
 First production release. The platform is feature-complete for a single-district
