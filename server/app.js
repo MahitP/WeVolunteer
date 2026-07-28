@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import cookieParser from 'cookie-parser';
 import path from 'path';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -143,6 +144,10 @@ app.use('/api', cors((req, callback) => {
 }));
 
 app.use(express.json({ limit: '100kb' }));
+
+// Populates req.cookies for authenticateToken. Mounted before the routers and
+// before the rate limiters so every downstream handler sees the same shape.
+app.use(cookieParser());
 
 /**
  * Builds the 429 response for a limiter.
