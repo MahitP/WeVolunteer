@@ -30,18 +30,27 @@ export async function startTestServer() {
       method,
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
+        ...(token ? { Cookie: `wev_session=${token}` } : {})
       },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
     let parsed = null;
     try { parsed = await res.json(); } catch { /* empty or non-JSON body */ }
-    return { status: res.status, body: parsed };
+    
+    const setCookie = res.headers.get('set-cookie');
+    const cookie = setCookie ? setCookie.match(/wev_session=([^;]+)/)?.[1] : null;
+    
+    return { status: res.status, body: parsed, headers: res.headers, cookie };
   };
 
   const login = async (email, password = 'password123') => {
     const res = await call('POST', '/api/auth/login', { email, password });
-    return res.body?.token;
+    return res.cookie;
+  };
+  
+  const signup = async (email, password, rest) => {
+    const res = await call('POST', '/api/auth/signup', { email, password, ...rest });
+    return res.cookie;
   };
 
   const close = () => new Promise(resolve => {

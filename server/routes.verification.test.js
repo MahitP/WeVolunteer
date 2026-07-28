@@ -42,7 +42,7 @@ describe('auth: email verification (flag on)', () => {
     const verify = await srv.call('POST', '/api/auth/verify-email', { token });
     expect(verify.status).toBe(200);
 
-    const me = await srv.call('GET', '/api/auth/me', undefined, res.body.token);
+    const me = await srv.call('GET', '/api/auth/me', undefined, res.cookie);
     expect(me.body.emailVerified).toBe(true);
   });
 
@@ -62,7 +62,7 @@ describe('auth: email verification (flag on)', () => {
     const res = await signup('resend@example.org');
     const first = tokenFor(res.body.user.id);
 
-    const resend = await srv.call('POST', '/api/auth/resend-verification', undefined, res.body.token);
+    const resend = await srv.call('POST', '/api/auth/resend-verification', undefined, res.cookie);
     expect(resend.status).toBe(200);
     expect(tokenFor(res.body.user.id)).not.toBe(first);
   });
@@ -74,14 +74,14 @@ describe('auth: email verification (flag on)', () => {
 
   it('blocks an unverified user from a normal action route', async () => {
     const res = await signup('gated@example.org');
-    const apps = await srv.call('GET', '/api/applications', undefined, res.body.token);
+    const apps = await srv.call('GET', '/api/applications', undefined, res.cookie);
     expect(apps.status).toBe(403);
     expect(apps.body.code).toBe('email_unverified');
   });
 
   it('still allows the allowlisted routes for an unverified user', async () => {
     const res = await signup('allowlisted@example.org');
-    const token = res.body.token;
+    const token = res.cookie;
 
     const me = await srv.call('GET', '/api/auth/me', undefined, token);
     expect(me.status).toBe(200);
@@ -95,7 +95,7 @@ describe('auth: email verification (flag on)', () => {
 
   it('unblocks the same token once the account is verified', async () => {
     const res = await signup('unblock@example.org');
-    const token = res.body.token;
+    const token = res.cookie;
 
     const blocked = await srv.call('GET', '/api/applications', undefined, token);
     expect(blocked.status).toBe(403);

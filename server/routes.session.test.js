@@ -28,7 +28,7 @@ describe('authenticateToken: reads identity from the database', () => {
     const signupRes = await signup();
     expect(signupRes.status).toBe(201);
     const userId = signupRes.body.user.id;
-    const token = signupRes.body.token;
+    const token = signupRes.cookie;
 
     // The token is valid right now.
     const before = await srv.call('GET', '/api/auth/me', undefined, token);
@@ -48,7 +48,7 @@ describe('authenticateToken: reads identity from the database', () => {
     const signupRes = await signup();
     expect(signupRes.status).toBe(201);
     const userId = signupRes.body.user.id;
-    const token = signupRes.body.token; // minted with role: 'student'
+    const token = signupRes.cookie; // minted with role: 'student'
 
     // Confirm the token really was minted as a student.
     const decoded = jwt.decode(token);
@@ -113,7 +113,7 @@ describe('authenticateToken: token_version invalidates sessions on password rese
     expect(signupRes.status).toBe(201);
     const userId = signupRes.body.user.id;
     const email = signupRes.body.user.email;
-    const oldToken = signupRes.body.token;
+    const oldToken = signupRes.cookie;
 
     // The pre-reset token works right now.
     const before = await srv.call('GET', '/api/auth/me', undefined, oldToken);
@@ -136,7 +136,7 @@ describe('authenticateToken: token_version invalidates sessions on password rese
     // A fresh login with the new password works and yields a usable token.
     const relogin = await srv.call('POST', '/api/auth/login', { email, password: 'new-password1' });
     expect(relogin.status).toBe(200);
-    const newToken = relogin.body.token;
+    const newToken = relogin.cookie;
     const me = await srv.call('GET', '/api/auth/me', undefined, newToken);
     expect(me.status).toBe(200);
     expect(me.body.email).toBe(email);
@@ -145,7 +145,7 @@ describe('authenticateToken: token_version invalidates sessions on password rese
   it('a current-version token keeps working across an unrelated request', async () => {
     const signupRes = await signup();
     expect(signupRes.status).toBe(201);
-    const token = signupRes.body.token;
+    const token = signupRes.cookie;
 
     const first = await srv.call('GET', '/api/auth/me', undefined, token);
     expect(first.status).toBe(200);

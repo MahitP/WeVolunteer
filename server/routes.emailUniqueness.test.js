@@ -53,7 +53,7 @@ describe('case-insensitive email uniqueness (API)', () => {
     expect(su.status).toBe(201);
     expect(su.body.user.email).toBe('trim@example.com');
 
-    const me = await srv.call('GET', '/api/auth/me', undefined, su.body.token);
+    const me = await srv.call('GET', '/api/auth/me', undefined, su.cookie);
     expect(me.status).toBe(200);
     expect(me.body.email).toBe('trim@example.com');
   });
