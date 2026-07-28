@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sun, Moon, Monitor, SunMoon } from 'lucide-react';
+import { Sun, Moon, SunMoon } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
 
 export default function ThemeToggle() {

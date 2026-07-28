@@ -25,7 +25,7 @@ router.get('/api/notifications', authenticateToken, (req, res) => {
       })),
       unreadCount: unread
     });
-  } catch (err) {
+  } catch {
     console.error('Notifications list error:', err);
     res.status(500).json({ error: 'Failed to fetch notifications' });
   }
@@ -43,7 +43,7 @@ router.patch('/api/notifications', authenticateToken, (req, res) => {
         .run(...ids, req.user.id);
     }
     res.json({ success: true });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to update notifications' });
   }
 });
@@ -66,7 +66,7 @@ router.get('/api/events/:id/comments', authenticateToken, (req, res) => {
         id: r.user_id, name: r.author_name, avatar: r.author_avatar, role: r.author_role
       }
     })));
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to fetch comments' });
   }
 });
@@ -127,7 +127,7 @@ router.post('/api/events/:id/comments', authenticateToken, (req, res) => {
       body: created.body, createdAt: created.created_at,
       author: { id: created.user_id, name: created.author_name, avatar: created.author_avatar, role: created.author_role }
     });
-  } catch (err) {
+  } catch {
     console.error('Comment create error:', err);
     res.status(500).json({ error: 'Failed to post comment' });
   }
@@ -142,7 +142,7 @@ router.delete('/api/comments/:id', authenticateToken, (req, res) => {
     }
     db.prepare('DELETE FROM event_comments WHERE id = ?').run(req.params.id);
     res.json({ success: true });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to delete comment' });
   }
 });
@@ -189,7 +189,7 @@ router.get('/api/events/:id/attendees', authenticateToken, (req, res) => {
         id: r.id, name: r.name, avatar: r.avatar, grade: r.grade, school: r.school
       }))
     });
-  } catch (err) {
+  } catch {
     console.error('Attendees error:', err);
     res.status(500).json({ error: 'Failed to fetch attendees' });
   }
@@ -232,7 +232,7 @@ router.get('/api/events/:id/announcements', authenticateToken, (req, res) => {
       updatedAt: r.updated_at,
       author: { id: r.author_id, name: r.author_name, avatar: r.author_avatar, role: r.author_role }
     })));
-  } catch (err) {
+  } catch {
     console.error('Announcements list error:', err);
     res.status(500).json({ error: 'Failed to fetch announcements' });
   }
@@ -286,7 +286,7 @@ router.post('/api/events/:id/announcements', authenticateToken, (req, res) => {
       author: { id: created.author_id, name: created.author_name, avatar: created.author_avatar, role: created.author_role },
       notified: recipients.length
     });
-  } catch (err) {
+  } catch {
     console.error('Announcement create error:', err);
     res.status(500).json({ error: 'Failed to post announcement' });
   }
@@ -307,7 +307,7 @@ router.patch('/api/announcements/:id', authenticateToken, (req, res) => {
       .run(body.trim(), new Date().toISOString(), req.params.id);
 
     res.json({ success: true });
-  } catch (err) {
+  } catch {
     console.error('Announcement update error:', err);
     res.status(500).json({ error: 'Failed to update announcement' });
   }
@@ -322,7 +322,7 @@ router.delete('/api/announcements/:id', authenticateToken, (req, res) => {
     }
     db.prepare('DELETE FROM event_announcements WHERE id = ?').run(req.params.id);
     res.json({ success: true });
-  } catch (err) {
+  } catch {
     console.error('Announcement delete error:', err);
     res.status(500).json({ error: 'Failed to delete announcement' });
   }
@@ -339,7 +339,7 @@ router.get('/api/favorites', authenticateToken, (req, res) => {
       ORDER BY created_at DESC
     `).all(req.user.id);
     res.json(rows.map(r => ({ eventId: r.event_id, createdAt: r.created_at })));
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to fetch favorites' });
   }
 });
@@ -414,7 +414,7 @@ router.get('/api/stats/volunteer', authenticateToken, (req, res) => {
       applications: appStats.reduce((acc, s) => ({ ...acc, [s.status]: s.c }), {}),
       upcomingCount: upcoming
     });
-  } catch (err) {
+  } catch {
     console.error('Volunteer stats error:', err);
     res.status(500).json({ error: 'Failed to fetch stats' });
   }
@@ -469,7 +469,7 @@ router.get('/api/stats/organizer', authenticateToken, (req, res) => {
       hoursAwarded: Number(hoursAwarded),
       perEvent
     });
-  } catch (err) {
+  } catch {
     console.error('Organizer stats error:', err);
     res.status(500).json({ error: 'Failed to fetch stats' });
   }
@@ -562,7 +562,7 @@ router.get('/api/recommendations', authenticateToken, (req, res) => {
       applicationDeadline: s.event.application_deadline,
       organizerName: s.event.organizer_name, score: s.score
     })));
-  } catch (err) {
+  } catch {
     console.error('Recommendations error:', err);
     res.status(500).json({ error: 'Failed to fetch recommendations' });
   }
@@ -601,7 +601,7 @@ router.post('/api/reports', authenticateToken, (req, res) => {
     `).run(id, req.user.id, targetType, targetId, reason, now);
 
     res.json({ success: true, message: 'Report submitted successfully' });
-  } catch (err) {
+  } catch {
     console.error('Submit report error:', err);
     res.status(500).json({ error: 'Failed to submit report' });
   }

@@ -253,7 +253,7 @@ app.get('/health', (req, res) => {
   try {
     db.prepare('SELECT 1').get();
     res.json({ status: 'ok', database: 'connected', version: VERSION });
-  } catch (err) {
+  } catch {
     res.status(500).json({ status: 'error', database: 'disconnected' });
   }
 });
@@ -276,7 +276,7 @@ if (IS_PRODUCTION) {
 
 // Error handler registered LAST, so it catches errors from every layer above,
 // including the static/SPA block.
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
   if (String(err.message).startsWith('Origin not allowed by CORS')) {
     console.warn(err.message);
     return res.status(403).json({ error: 'Origin not allowed.' });
