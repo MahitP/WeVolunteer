@@ -3,6 +3,7 @@ import { Bell, CheckCheck, Inbox } from 'lucide-react';
 import { api } from '../utils/api';
 import { timeAgo, formatDay } from '../utils/helpers';
 import { notificationMeta, NOTIFICATION_FILTERS, groupByDay } from '../utils/notifications';
+import EmptyState from '../components/EmptyState';
 
 /**
  * The full notification history. The bell answers "anything new?"; this page
@@ -97,27 +98,27 @@ export default function Notifications({ onViewEvent, onCountChange }) {
       </div>
 
       {visible.length === 0 ? (
-        <div className="card empty">
-          <span className="empty-icon"><Inbox size={18} /></span>
-          <h3>
-            {unreadOnly ? 'Nothing unread' : filter === 'all' ? 'No notifications yet' : 'Nothing in this category'}
-          </h3>
-          <p>
-            {unreadOnly
+        <EmptyState
+          icon={<Inbox size={18} />}
+          title={unreadOnly ? 'Nothing unread' : filter === 'all' ? 'No notifications yet' : 'Nothing in this category'}
+          message={
+            unreadOnly
               ? "You've read everything here."
               : filter === 'all'
                 ? 'When an organizer replies to an application or posts an update, it lands here.'
-                : 'Try another category to see the rest of your activity.'}
-          </p>
-          {(unreadOnly || filter !== 'all') && (
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={() => { setUnreadOnly(false); setFilter('all'); }}
-            >
-              Show everything
-            </button>
-          )}
-        </div>
+                : 'Try another category to see the rest of your activity.'
+          }
+          action={
+            (unreadOnly || filter !== 'all') && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => { setUnreadOnly(false); setFilter('all'); }}
+              >
+                Show everything
+              </button>
+            )
+          }
+        />
       ) : (
         groups.map(group => (
           <section key={group.label}>
