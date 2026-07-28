@@ -57,5 +57,11 @@ export async function startTestServer() {
     server.close(() => { rmSync(dir, { recursive: true, force: true }); resolve(); });
   });
 
-  return { base, call, login, close };
+  return {
+    base,
+    close,
+    call,
+    login,
+    signup
+  };
 }
