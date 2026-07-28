@@ -2,10 +2,11 @@ import React from 'react';
 
 export default function LoadingSkeleton({ 
   heights = [120, 200], 
-  style = {} 
+  className = "stack-lg page",
+  style = { padding: 'var(--s6)' }
 }) {
   return (
-    <div className="stack-lg page" style={{ padding: 'var(--s6)', ...style }}>
+    <div className={className} style={style}>
       {heights.map((h, i) => (
         <div key={i} className="skeleton" style={{ height: h }} />
       ))}

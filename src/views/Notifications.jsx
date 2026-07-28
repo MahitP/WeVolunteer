@@ -3,7 +3,8 @@ import { Bell, CheckCheck, Inbox } from 'lucide-react';
 import { api } from '../utils/api';
 import { timeAgo, formatDay } from '../utils/helpers';
 import { notificationMeta, NOTIFICATION_FILTERS, groupByDay } from '../utils/notifications';
-import EmptyState from '../components/EmptyState';
+import EmptyState from '../components/common/EmptyState';
+import LoadingSkeleton from '../components/common/LoadingSkeleton';
 
 /**
  * The full notification history. The bell answers "anything new?"; this page
@@ -60,12 +61,7 @@ export default function Notifications({ onViewEvent, onCountChange }) {
   };
 
   if (loading) {
-    return (
-      <div className="stack">
-        <div className="skeleton" style={{ height: 44 }} />
-        {[0, 1, 2, 3, 4].map(i => <div key={i} className="skeleton skeleton-row" />)}
-      </div>
-    );
+    return <LoadingSkeleton className="stack" heights={[44, 44, 44, 44, 44]} />;
   }
 
   return (
@@ -99,7 +95,7 @@ export default function Notifications({ onViewEvent, onCountChange }) {
 
       {visible.length === 0 ? (
         <EmptyState
-          icon={<Inbox size={18} />}
+          icon={Inbox}
           title={unreadOnly ? 'Nothing unread' : filter === 'all' ? 'No notifications yet' : 'Nothing in this category'}
           message={
             unreadOnly

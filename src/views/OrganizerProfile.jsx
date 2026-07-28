@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import {
-  ShieldCheck, ShieldAlert, ArrowLeft, CalendarClock, Lock, Mail, Award
-} from 'lucide-react';
+import { CalendarClock, MapPin, Mail, Globe, Lock, ShieldCheck, Phone, ShieldAlert, ArrowLeft, Award } from 'lucide-react';
+import LoadingSkeleton from '../components/common/LoadingSkeleton';
+import EmptyState from '../components/common/EmptyState';
 import { api } from '../utils/api';
 import { formatHours, formatDay, countdown } from '../utils/helpers';
 import { DateChip } from '../components/Seats';
@@ -30,23 +30,17 @@ export default function OrganizerProfile({ userId, onBack, onViewEvent }) {
   }, [userId]);
 
   if (loading) {
-    return (
-      <div className="stack-lg">
-        <div className="skeleton" style={{ height: 130 }} />
-        <div className="skeleton" style={{ height: 88 }} />
-        <div className="skeleton" style={{ height: 200 }} />
-      </div>
-    );
+    return <LoadingSkeleton heights={[130, 88, 200]} className="stack-lg" style={{}} />;
   }
 
   if (error || !data) {
     return (
-      <div className="card empty">
-        <span className="empty-icon"><Lock size={18} /></span>
-        <h3>Profile unavailable</h3>
-        <p>{error || 'This organizer profile could not be loaded.'}</p>
-        {onBack && <button className="btn btn-secondary btn-sm" onClick={onBack}>Go back</button>}
-      </div>
+      <EmptyState 
+        icon={Lock} 
+        title="Profile unavailable" 
+        message={error || 'This profile is not accessible.'} 
+        action={onBack ? <button className="btn btn-secondary btn-sm" onClick={onBack}>Go back</button> : null}
+      />
     );
   }
 
@@ -163,11 +157,12 @@ export default function OrganizerProfile({ userId, onBack, onViewEvent }) {
           {upcoming.length > 0 && <span className="section-action small dim">{upcoming.length}</span>}
         </div>
         {upcoming.length === 0 ? (
-          <div className="card empty" style={{ padding: 'var(--s8) var(--s4)' }}>
-            <span className="empty-icon"><CalendarClock size={18} /></span>
-            <h3>Nothing scheduled</h3>
-            <p>This organizer has no upcoming events posted right now.</p>
-          </div>
+          <EmptyState 
+            icon={CalendarClock} 
+            title="Nothing scheduled" 
+            message="This organizer has no upcoming events posted right now." 
+            style={{ padding: 'var(--s8) var(--s4)' }} 
+          />
         ) : (
           <div className="list">
             {upcoming.map(e => <EventRow key={e.id} event={e} />)}

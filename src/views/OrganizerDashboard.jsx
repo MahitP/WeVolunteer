@@ -10,7 +10,7 @@ import {
 import { api } from '../utils/api';
 import Modal, { ModalHead } from '../components/Modal';
 import { Seats, DateChip } from '../components/Seats';
-import EmptyState from '../components/EmptyState';
+import EmptyState from '../components/common/EmptyState';
 
 const TABS = [
   { id: 'active', label: 'Active' },
@@ -416,7 +416,7 @@ export default function OrganizerDashboard({
 
         {filtered.length === 0 ? (
           <EmptyState
-            icon={<Calendar size={18} />}
+            icon={Calendar}
             title={query ? 'No events match that search' : tab === 'completed' ? 'No completed events yet' : 'No active events'}
             message={
               query

@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { formatHours, formatDay } from '../utils/helpers';
-import { ArrowLeft, Printer, ShieldCheck, Download } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Printer, ArrowLeft, Download, FileWarning } from 'lucide-react';
+import LoadingSkeleton from '../components/common/LoadingSkeleton';
+import EmptyState from '../components/common/EmptyState';
 import { APP_NAME, SCHOOL_NAME } from '../config';
 
 export default function VolunteerPortfolio({ currentUser }) {
@@ -31,21 +33,17 @@ export default function VolunteerPortfolio({ currentUser }) {
   }, [currentUser]);
 
   if (loading) {
-    return (
-      <div className="stack-lg page" style={{ padding: 'var(--s6)' }}>
-        <div className="skeleton" style={{ height: 120 }} />
-        <div className="skeleton" style={{ height: 400 }} />
-      </div>
-    );
+    return <LoadingSkeleton heights={[120, 400]} />;
   }
 
   if (error || !data) {
     return (
-      <div className="card empty" style={{ margin: 'var(--s6)' }}>
-        <h3>Portfolio unavailable</h3>
-        <p>{error || 'Could not load your service record.'}</p>
-        <button className="btn btn-secondary btn-sm" onClick={() => navigate(-1)}>Go back</button>
-      </div>
+      <EmptyState 
+        icon={FileWarning} 
+        title="Portfolio unavailable" 
+        message={error || 'Could not load service records.'} 
+        style={{ margin: 'var(--s6)' }} 
+      />
     );
   }
 
@@ -66,7 +64,7 @@ export default function VolunteerPortfolio({ currentUser }) {
       </div>
 
       {/* ── Printable Area ── */}
-      <div className="mx-auto" style={{ maxWidth: 800, padding: 'var(--s8) var(--s6)', backgroundColor: 'var(--surface)', color: 'var(--print-ink)', minHeight: '100vh' }}>
+      <div className="mx-auto" style={{ maxWidth: 800, padding: 'var(--s8) var(--s6)', backgroundColor: 'var(--print-paper)', color: 'var(--print-ink)', minHeight: '100vh' }}>
 
         {/* Header */}
         <header style={{ borderBottom: '2px solid var(--print-ink)', paddingBottom: 'var(--s5)', marginBottom: 'var(--s6)' }}>

@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
-import { Info, CalendarClock, Zap } from 'lucide-react';
+import { Info, CalendarClock, MapPin, Users, Check, Clock, Edit2 } from 'lucide-react';
 import { formatDay, formatTime, formatHours, usesAutoSelect } from '../utils/helpers';
 import { Seats } from './Seats';
+import EmptyState from './common/EmptyState';
 
 export default function EventShiftsTab({
   event,
@@ -79,11 +80,11 @@ export default function EventShiftsTab({
       </div>
 
       {days.length === 0 ? (
-        <div className="card empty">
-          <span className="empty-icon"><CalendarClock size={18} /></span>
-          <h3>No shifts yet</h3>
-          <p>This event doesn't have any shifts set up.</p>
-        </div>
+        <EmptyState 
+          icon={CalendarClock} 
+          title="No shifts yet" 
+          message="This event doesn't have any shifts set up." 
+        />
       ) : (
         <div className="sheet">
           {days.map(({ day, slots }) => (

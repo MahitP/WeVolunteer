@@ -1,15 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Users, AlertTriangle } from 'lucide-react';
 import { api } from '../utils/api';
-import { ArrowLeft, Users } from 'lucide-react';
 import { formatTimeRange } from '../utils/helpers';
+import LoadingSkeleton from '../components/common/LoadingSkeleton';
+import EmptyState from '../components/common/EmptyState';
 
 /**
  * Mobile-first day-of check-in view for organizers.
  * This does not finalize hours — it only records check-in status (present=null) 
  * so the organizer can see who showed up. Hours are finalized later via EventModal.
  */
-export default function CheckInView({ _currentUser }) {
+export default function CheckInView({ currentUser }) {
   const { eventId } = useParams();
   const navigate = useNavigate();
 
@@ -96,21 +98,17 @@ export default function CheckInView({ _currentUser }) {
   };
 
   if (loading) {
-    return (
-      <div className="stack-lg page" style={{ padding: 'var(--s4)' }}>
-        <div className="skeleton" style={{ height: 60 }} />
-        <div className="skeleton" style={{ height: 400 }} />
-      </div>
-    );
+    return <LoadingSkeleton heights={[60, 400]} className="stack-lg page" style={{ padding: 'var(--s4)' }} />;
   }
 
   if (error || !event) {
     return (
-      <div className="card empty" style={{ margin: 'var(--s6)' }}>
-        <h3>Cannot load check-in</h3>
-        <p>{error || 'Event not found.'}</p>
-        <button className="btn btn-secondary btn-sm" onClick={() => navigate(-1)}>Go back</button>
-      </div>
+      <EmptyState 
+        icon={AlertTriangle} 
+        title="Cannot load check-in" 
+        message={error || 'Event not found.'} 
+        style={{ margin: 'var(--s6)' }} 
+      />
     );
   }
 
@@ -124,7 +122,7 @@ export default function CheckInView({ _currentUser }) {
       {/* ── Top Bar ── */}
       <div style={{ backgroundColor: 'var(--surface-2)', borderBottom: '1px solid var(--rule)', padding: 'var(--s3) var(--s4)', position: 'sticky', top: 0, zIndex: 10 }}>
         <div className="row-between mx-auto" style={{ maxWidth: 600 }}>
-          <button className="btn btn-ghost btn-sm" style={{ paddingLeft: 0 }} onClick={() => navigate(-1)}>
+          <button className="btn btn-ghost btn-sm" style={{ paddingLeft: 0 }} onClick={() => navigate(-1)} aria-label="Go back">
             <ArrowLeft size={20} /> <span style={{ marginLeft: 4 }}>Back</span>
           </button>
           <div style={{ fontWeight: 600, fontSize: '1rem' }} className="truncate">{event.title}</div>
@@ -164,11 +162,12 @@ export default function CheckInView({ _currentUser }) {
         </div>
 
         {appsForCurrentSlot.length === 0 ? (
-          <div className="card empty" style={{ padding: 'var(--s6) var(--s4)' }}>
-            <span className="empty-icon"><Users size={20} /></span>
-            <h3>No volunteers here</h3>
-            <p>Nobody is scheduled for this shift.</p>
-          </div>
+          <EmptyState 
+            icon={Users} 
+            title="No volunteers here" 
+            message="Nobody is scheduled for this shift." 
+            style={{ padding: 'var(--s6) var(--s4)' }} 
+          />
         ) : (
           <div className="stack-sm">
             <div className="row row-wrap" style={{ gap: 'var(--s2)', marginBottom: 'var(--s2)' }}>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Info, Users } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from './common/LoadingSkeleton';
+import EmptyState from './common/EmptyState';
 import { formatHours, formatTimeRange } from '../utils/helpers';
 
 export default function EventAttendance({
@@ -148,19 +149,11 @@ export default function EventAttendance({
         </div>
 
         {markableApps.length === 0 ? (
-          <div className="empty">
-            <span className="empty-icon"><Users size={18} /></span>
-            <h3>
-              {acceptedApps.length === 0
-                ? 'No confirmed volunteers'
-                : 'No shifts have ended yet'}
-            </h3>
-            <p>
-              {acceptedApps.length === 0
-                ? 'Accept applicants first, then come back to record who attended.'
-                : 'Hours can only be finalised once a shift is over. Use check-in during the event.'}
-            </p>
-          </div>
+          <EmptyState 
+            icon={Users} 
+            title={acceptedApps.length === 0 ? 'No confirmed volunteers' : 'No shifts have ended yet'} 
+            message={acceptedApps.length === 0 ? 'Accept applicants first, then come back to record who attended.' : 'Hours can only be finalised once a shift is over. Use check-in during the event.'} 
+          />
         ) : (
           <>
             <div className="row-between row-wrap" style={{ marginBottom: 'var(--s4)', gap: 'var(--s2)' }}>

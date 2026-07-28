@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Award, CalendarCheck, History, MapPin, Pencil, ArrowLeft,
-  FileText, Medal, Lock, Sparkles
+  CalendarCheck, MapPin, Mail, Award, ArrowLeft, History, Medal, Sparkles, FileText, Lock, Pencil
 } from 'lucide-react';
+import LoadingSkeleton from '../components/common/LoadingSkeleton';
+import EmptyState from '../components/common/EmptyState';
 import { api } from '../utils/api';
 import { formatHours, formatDay, formatTimeRange, gradeLabel, countdown } from '../utils/helpers';
 import { DateChip } from '../components/Seats';
@@ -51,11 +52,10 @@ export default function VolunteerProfile({
   if (loading) {
     return (
       <div className="stack-lg">
-        <div className="skeleton" style={{ height: 120 }} />
-        <div className="skeleton" style={{ height: 88 }} />
+        <LoadingSkeleton heights={[120, 88]} className="" style={{}} />
         <div className="grid grid-2">
-          <div className="skeleton" style={{ height: 220 }} />
-          <div className="skeleton" style={{ height: 220 }} />
+          <LoadingSkeleton heights={[220]} className="" style={{}} />
+          <LoadingSkeleton heights={[220]} className="" style={{}} />
         </div>
       </div>
     );
@@ -76,6 +76,7 @@ export default function VolunteerProfile({
   const earned = milestones.filter(m => m.earned);
   const next = milestones.find(m => !m.earned);
   const goalPct = Math.min(100, (stats.hours / HOUR_GOAL) * 100);
+  const progressTone = goalPct < 33 ? 'danger' : goalPct < 100 ? 'warn' : 'ok';
 
   return (
     <div className="stack-lg">
@@ -128,7 +129,7 @@ export default function VolunteerProfile({
       <section className="stats">
         <div className="stat">
           <div className="stat-label">Hours served</div>
-          <div className="stat-value accent">{formatHours(stats.hours)}</div>
+          <div className={`stat-value ${progressTone}`}>{formatHours(stats.hours)}</div>
         </div>
         <div className="stat">
           <div className="stat-label">Events completed</div>
@@ -162,7 +163,7 @@ export default function VolunteerProfile({
             aria-label={`Progress to the ${HOUR_GOAL}-hour Silver Award: ${formatHours(stats.hours)} of ${HOUR_GOAL} hours`}
           >
             <div
-              className={`meter-fill ${stats.hours >= HOUR_GOAL ? 'full' : 'accent'}`}
+              className={`meter-fill ${progressTone}`}
               style={{ width: `${goalPct}%` }}
             />
           </div>
@@ -175,11 +176,12 @@ export default function VolunteerProfile({
           <section>
             <div className="section-head"><h2>Coming up</h2></div>
             {upcoming.length === 0 ? (
-              <div className="card empty" style={{ padding: 'var(--s8) var(--s4)' }}>
-                <span className="empty-icon"><CalendarCheck size={18} /></span>
-                <h3>No upcoming shifts</h3>
-                <p>{isSelf ? 'Opportunities you get accepted for will appear here.' : 'Nothing scheduled right now.'}</p>
-              </div>
+              <EmptyState 
+                icon={CalendarCheck} 
+                title="No upcoming shifts" 
+                message={isSelf ? 'Opportunities you get accepted for will appear here.' : 'Nothing scheduled right now.'} 
+                style={{ padding: 'var(--s8) var(--s4)' }} 
+              />
             ) : (
               <div className="list">
                 {upcoming.map(u => (
@@ -208,15 +210,12 @@ export default function VolunteerProfile({
               {completed.length > 0 && <span className="section-action small dim">{completed.length}</span>}
             </div>
             {completed.length === 0 ? (
-              <div className="card empty" style={{ padding: 'var(--s8) var(--s4)' }}>
-                <span className="empty-icon"><History size={18} /></span>
-                <h3>No completed events yet</h3>
-                <p>
-                  {isSelf
-                    ? 'Once an organizer confirms you attended, the event and its hours are recorded here.'
-                    : 'This volunteer has not completed an event yet.'}
-                </p>
-              </div>
+              <EmptyState 
+                icon={History} 
+                title="No completed events yet" 
+                message={isSelf ? 'Once an organizer confirms you attended, the event and its hours are recorded here.' : 'This volunteer has not completed an event yet.'} 
+                style={{ padding: 'var(--s8) var(--s4)' }} 
+              />
             ) : (
               <div className="list">
                 {completed.map(c => (
@@ -301,11 +300,12 @@ export default function VolunteerProfile({
                 </h2>
               </div>
               {certificates.length === 0 ? (
-                <div className="card empty" style={{ padding: 'var(--s6) var(--s4)' }}>
-                  <span className="empty-icon"><FileText size={18} /></span>
-                  <h3>No certificates yet</h3>
-                  <p>You earn one for each event you complete.</p>
-                </div>
+                <EmptyState 
+                  icon={FileText} 
+                  title="No certificates yet" 
+                  message="You earn one for each event you complete." 
+                  style={{ padding: 'var(--s6) var(--s4)' }} 
+                />
               ) : (
                 <div className="list">
                   {certificates.map(c => (
