@@ -175,3 +175,30 @@ describe('authenticateToken accepts the session cookie', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('server-side logout', () => {
+  it('clears the cookie and increments token_version to invalidate the old session', async () => {
+    const loginRes = await fetch(`${srv.base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'password123' })
+    });
+    const setCookie = loginRes.headers.get('set-cookie');
+    const cookieString = setCookie.split(';')[0];
+    
+    const logoutRes = await fetch(`${srv.base}/api/auth/logout`, {
+      method: 'POST',
+      headers: { 'Cookie': cookieString }
+    });
+    
+    expect(logoutRes.status).toBe(200);
+    const logoutCookie = logoutRes.headers.get('set-cookie');
+    expect(logoutCookie).toMatch(/wev_session=;/); // Value cleared
+    
+    const meRes = await fetch(`${srv.base}/api/auth/me`, {
+      headers: { 'Cookie': cookieString }
+    });
+    // Old cookie is now rejected because token_version was incremented
+    expect(meRes.status).toBe(401);
+  });
+});
