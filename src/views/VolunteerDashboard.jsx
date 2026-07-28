@@ -84,7 +84,7 @@ export default function VolunteerDashboard({
       {nextShift ? (
         <section className="nextshift">
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="eyebrow" style={{ color: 'rgba(255,255,255,.7)' }}>Your next shift</div>
+            <div className="eyebrow" style={{ color: 'var(--ink-inv-3)' }}>Your next shift</div>
             <div className="nextshift-when">{countdown(nextShift.slot?.startDatetime)}</div>
             <div className="nextshift-what truncate">
               {nextShift.event.title} · {nextShift.slot?.name}
@@ -104,13 +104,13 @@ export default function VolunteerDashboard({
           </button>
         </section>
       ) : mine.length === 0 && totalHours === 0 ? (
-        <section className="card card-pad" style={{ background: 'var(--brand)', color: '#fff', border: 'none' }}>
-          <h2 style={{ color: '#fff' }}>Welcome to {APP_NAME}! 🎉</h2>
-          <p className="lead" style={{ marginTop: 8, color: 'rgba(255,255,255,0.9)', maxWidth: '60ch' }}>
+        <section className="card card-pad" style={{ background: 'var(--brand)', color: 'var(--ink-inv)', border: 'none' }}>
+          <h2 style={{ color: 'var(--ink-inv)' }}>Welcome to {APP_NAME}! 🎉</h2>
+          <p className="lead" style={{ marginTop: 8, color: 'var(--ink-inv-2)', maxWidth: '60ch' }}>
             This is your dashboard. Once you start signing up for events, your upcoming shifts and completed hours will appear here.
           </p>
           <div style={{ marginTop: 'var(--s4)' }}>
-            <button className="btn btn-primary" style={{ background: '#fff', color: 'var(--brand)' }} onClick={() => setActiveTab('browse')}>
+            <button className="btn btn-primary" style={{ background: 'var(--ink-inv)', color: 'var(--brand)' }} onClick={() => setActiveTab('browse')}>
               Find your first opportunity <ArrowRight size={15} />
             </button>
           </div>
@@ -398,9 +398,9 @@ function CertificateModal({ user, shifts, onClose }) {
               <div className="certificate-org">{SCHOOL_NAME}</div>
               <div className="certificate-rule" />
               <h1>Certificate of Community Service</h1>
-              <p style={{ marginTop: 'var(--s5)', color: '#57534e' }}>This certifies that</p>
+              <p style={{ marginTop: 'var(--s5)', color: 'var(--certificate-ink-2)' }}>This certifies that</p>
               <div className="certificate-name">{user.name}</div>
-              <p style={{ color: '#57534e', maxWidth: '46ch', margin: '0 auto' }}>
+              <p style={{ color: 'var(--certificate-ink-2)', maxWidth: '46ch', margin: '0 auto' }}>
                 completed volunteer service through the {SCHOOL_NAME} Volunteer Network,
                 totalling
               </p>
@@ -419,9 +419,9 @@ function CertificateModal({ user, shifts, onClose }) {
               <tbody>
                 {shifts.map(({ app, event, slot }) => (
                   <tr key={app.id}>
-                    <td style={{ color: '#78716c' }} className="tnum">{formatDay(slot?.startDatetime)}</td>
+                    <td style={{ color: 'var(--certificate-ink-3)' }} className="tnum">{formatDay(slot?.startDatetime)}</td>
                     <td><strong>{event.title}</strong> — {slot?.name}</td>
-                    <td style={{ color: '#78716c' }}>{event.location?.split('(')[0]}</td>
+                    <td style={{ color: 'var(--certificate-ink-3)' }}>{event.location?.split('(')[0]}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700 }} className="tnum">
                       {formatHours(app.attendance?.hoursAwarded)}
                     </td>
