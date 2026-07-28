@@ -151,7 +151,7 @@ That is a deliberate choice rather than a limitation. The workload is a few hund
 
 **Database.** SQLite through Node's built-in `node:sqlite`, in WAL mode with a five-second busy timeout. Sixteen tables. Migrations are additive and applied idempotently on every boot, so deploying new code and restarting is the whole upgrade procedure.
 
-**Authentication.** Email and bcrypt, JWT with a seven-day expiry. Identity is re-read from the database on every request rather than trusted from the token payload, so a role change or account deletion takes effect immediately. A `token_version` column allows a password reset to invalidate every existing session.
+**Authentication.** Email and bcrypt, JWT with a seven-day expiry transported in a secure `HttpOnly` cookie. Identity is re-read from the database on every request rather than trusted from the token payload, so a role change or account deletion takes effect immediately. A `token_version` column allows a password reset or logout to invalidate every existing session.
 
 **Deployment.** The process binds loopback only and sits behind a reverse proxy that terminates TLS. Three misconfigurations refuse to start rather than running in a degraded state.
 
@@ -265,7 +265,7 @@ Templates for both are in the repository: [`deploy/wevolunteer.env.example`](dep
 
 ## Security
 
-**Authentication.** Passwords are hashed with bcrypt. Sessions are JWTs with a seven-day expiry. Authorization is never taken from the token payload — the user row is re-read on every request, so a deleted account or a changed role takes effect at once. A `token_version` column lets a password reset invalidate all existing sessions.
+**Authentication.** Passwords are hashed with bcrypt and must be at least 8 characters long. Sessions are JWTs with a seven-day expiry transported in a secure `HttpOnly` cookie. Authorization is never taken from the token payload — the user row is re-read on every request, so a deleted account or a changed role takes effect at once. A `token_version` column lets a password reset or logout invalidate all existing sessions.
 
 **Startup guards.** Three misconfigurations cause the process to exit rather than run in a degraded state, in this order:
 

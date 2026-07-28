@@ -231,8 +231,8 @@ with nothing failing and nothing logged. Development keeps a localhost default.
 
 ### Authentication
 
-Email + bcrypt (cost 10) + JWT, 7-day expiry, token in `localStorage` under
-`wev_auth_token`. `authenticateToken`
+Email + bcrypt (cost 10) + JWT, 7-day expiry, token in a secure `HttpOnly` cookie under
+`wev_session`. `authenticateToken`
 ([server/utils.js:6-50](../../server/utils.js#L6)) does not trust the token
 payload for authorization — it re-reads the user row on every request, so a
 deleted account's token stops working and a role change takes effect
@@ -438,9 +438,7 @@ data — see the next point.
 
 **HTTPS is mandatory, not advisory**, for reasons specific to this codebase:
 
-- The JWT is stored in `localStorage` and sent as a bearer header on every
-  request. Over plaintext HTTP it is trivially captured, and it is valid for
-  seven days.
+- The JWT is stored in an `HttpOnly` cookie and sent automatically by the browser. Over plaintext HTTP, it could still be captured or exposed to downgrade attacks.
 - Password reset and email verification tokens travel in URLs. A plaintext link
   in an email is an account takeover.
 - The data is about minors: names, grades, schools, email addresses, and
