@@ -990,6 +990,51 @@ router.post('/api/events/:id/auto-select/confirm', authenticateToken, (req, res)
   }
 });
 
+// Broadcast email to confirmed roster
+router.post('/api/events/:id/broadcast', authenticateToken, async (req, res) => {
+  const { id: eventId } = req.params;
+  const { subject, message } = req.body;
+
+  if (!subject || !message) {
+    return res.status(400).json({ error: 'Subject and message are required' });
+  }
+
+  try {
+    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    
+    if (req.user.role !== 'admin' && event.organizer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const confirmedApps = db.prepare(`
+      SELECT DISTINCT u.email 
+      FROM applications a
+      JOIN users u ON a.user_id = u.id
+      WHERE a.event_id = ? 
+        AND a.status = 'accepted'
+        AND u.email_opt_out = 0
+    `).all(eventId);
+
+    if (confirmedApps.length === 0) {
+      return res.status(400).json({ error: 'No confirmed volunteers to email' });
+    }
+
+    const { sendNotificationEmail } = await import('../email.js');
+    
+    const emailPromises = confirmedApps.map(u => 
+      sendNotificationEmail(u.email, `Update: ${event.title} - ${subject}`, message)
+    );
+
+    Promise.allSettled(emailPromises).catch(err => console.error('Broadcast error:', err));
+
+    res.json({ success: true, count: confirmedApps.length });
+  } catch (err) {
+    console.error('Broadcast route error:', err);
+    res.status(500).json({ error: 'Failed to broadcast message' });
+  }
+});
+
 // Unknown API routes get JSON instead of an HTML 404 page
 
 export default router;

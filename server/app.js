@@ -45,15 +45,10 @@ app.use(helmet({
       scriptSrc: ["'self'"],
 
       /**
-       * 'unsafe-inline' is required here and is a deliberate, bounded
-       * concession: the client uses 576 inline `style={{}}` blocks, and
-       * removing them is a far larger refactor than a security release should
-       * smuggle in. It is recorded as a v1.2 candidate.
-       *
-       * The asymmetry with scriptSrc is the point — inline *style* cannot
-       * exfiltrate a session; inline *script* can.
+       * The client previously used 576 inline `style={{}}` blocks, but they have been
+       * refactored. The few remaining dynamic styles use element.style which is CSP safe.
        */
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      styleSrc: ["'self'", 'https://fonts.googleapis.com'],
 
       // index.css:1 imports Bricolage Grotesque and Public Sans.
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
