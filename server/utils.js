@@ -4,8 +4,7 @@ import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST, COOKIE_NA
 
 // --- AUTHENTICATION MIDDLEWARE ---
 export function authenticateToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = (req.cookies && req.cookies[COOKIE_NAME]) || (authHeader && authHeader.split(' ')[1]); // Format: Bearer TOKEN
+  const token = req.cookies && req.cookies[COOKIE_NAME];
 
   if (!token) return res.status(401).json({ error: 'Access token required' });
 
