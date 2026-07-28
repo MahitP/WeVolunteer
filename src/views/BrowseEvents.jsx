@@ -3,6 +3,7 @@ import EventCard from '../components/EventCard';
 import { Search, Sparkles, SlidersHorizontal, CalendarX2, Star, Filter, X } from 'lucide-react';
 import { formatHours } from '../utils/helpers';
 import { api } from '../utils/api';
+import EmptyState from '../components/EmptyState';
 
 const CATEGORIES = ['All', 'School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 
@@ -269,18 +270,20 @@ export default function BrowseEvents({
         )}
 
         {filtered.length === 0 ? (
-          <div className="card empty">
-            <span className="empty-icon"><CalendarX2 size={18} /></span>
-            <h3>{hasFilters ? 'No events match those filters' : 'No opportunities posted yet'}</h3>
-            <p>
-              {hasFilters
+          <EmptyState
+            icon={<CalendarX2 size={18} />}
+            title={hasFilters ? 'No events match those filters' : 'No opportunities posted yet'}
+            message={
+              hasFilters
                 ? 'Try a broader search, or clear the filters to see everything that\'s been posted.'
-                : 'When an organizer posts a sign-up sheet, it will appear here.'}
-            </p>
-            {hasFilters && (
-              <button className="btn btn-secondary btn-sm" onClick={clearFilters}>Clear filters</button>
-            )}
-          </div>
+                : 'When an organizer posts a sign-up sheet, it will appear here.'
+            }
+            action={
+              hasFilters && (
+                <button className="btn btn-secondary btn-sm" onClick={clearFilters}>Clear filters</button>
+              )
+            }
+          />
         ) : (
           <>
             <p className="small dim" style={{ marginBottom: 'var(--s3)' }}>

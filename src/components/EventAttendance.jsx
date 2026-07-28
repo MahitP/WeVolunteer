@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Info, Users } from 'lucide-react';
 import { api } from '../utils/api';
+import LoadingSkeleton from './common/LoadingSkeleton';
 import { formatHours, formatTimeRange } from '../utils/helpers';
 
 export default function EventAttendance({
@@ -123,11 +124,7 @@ export default function EventAttendance({
   };
 
   if (loading) {
-    return (
-      <div className="modal-body" style={{ padding: 'var(--s8)', textAlign: 'center' }}>
-        <p className="dim">Loading attendance data...</p>
-      </div>
-    );
+    return <LoadingSkeleton heights={[44, 44, 44]} />;
   }
 
   const markedCount = markableApps.filter(a => touchedIds.has(a.id)).length;

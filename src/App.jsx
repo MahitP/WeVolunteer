@@ -19,6 +19,7 @@ import NotificationsBell from './components/NotificationsBell';
 import ProfileEditModal from './components/ProfileEditModal';
 import ResetPassword from './views/ResetPassword';
 import ErrorBoundary from './components/ErrorBoundary';
+import LoadingSkeleton from './components/common/LoadingSkeleton';
 import CertificateVerification from './views/CertificateVerification';
 import VolunteerPortfolio from './views/VolunteerPortfolio';
 import CheckInView from './views/CheckInView';
@@ -273,13 +274,8 @@ export default function App() {
   /* ── Session check ─────────────────────────────────────────── */
   if (isCheckingSession) {
     return (
-      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
-        <div className="stack-sm" style={{ alignItems: 'center' }}>
-          <div className="brand-mark" style={{ width: 40, height: 40 }}>WV</div>
-          <p className="small dim row" style={{ marginTop: 8 }}>
-            <Loader2 size={13} className="spin" /> Loading…
-          </p>
-        </div>
+      <div style={{ maxWidth: 800, margin: '0 auto', paddingTop: 'var(--s8)' }}>
+        <LoadingSkeleton heights={[40, 120, 300, 100]} />
       </div>
     );
   }

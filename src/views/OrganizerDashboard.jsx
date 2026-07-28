@@ -10,6 +10,7 @@ import {
 import { api } from '../utils/api';
 import Modal, { ModalHead } from '../components/Modal';
 import { Seats, DateChip } from '../components/Seats';
+import EmptyState from '../components/EmptyState';
 
 const TABS = [
   { id: 'active', label: 'Active' },
@@ -390,22 +391,24 @@ export default function OrganizerDashboard({
         </div>
 
         {filtered.length === 0 ? (
-          <div className="card empty">
-            <span className="empty-icon"><Calendar size={18} /></span>
-            <h3>{query ? 'No events match that search' : tab === 'completed' ? 'No completed events yet' : 'No active events'}</h3>
-            <p>
-              {query
+          <EmptyState
+            icon={<Calendar size={18} />}
+            title={query ? 'No events match that search' : tab === 'completed' ? 'No completed events yet' : 'No active events'}
+            message={
+              query
                 ? 'Try a different name or location.'
                 : tab === 'completed'
                   ? 'Events move here once you take attendance.'
-                  : 'Create a sign-up sheet and volunteers can start claiming shifts.'}
-            </p>
-            {!query && tab === 'active' && (
-              <button className="btn btn-primary btn-sm" onClick={() => setActiveTab('create')}>
-                <CalendarPlus size={14} /> Create your first event
-              </button>
-            )}
-          </div>
+                  : 'Create a sign-up sheet and volunteers can start claiming shifts.'
+            }
+            action={
+              !query && tab === 'active' && (
+                <button className="btn btn-primary btn-sm" onClick={() => setActiveTab('create')}>
+                  <CalendarPlus size={14} /> Create your first event
+                </button>
+              )
+            }
+          />
         ) : (
           <div className="tablewrap">
             <div className="tablescroll">
