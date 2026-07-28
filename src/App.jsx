@@ -23,6 +23,7 @@ import LoadingSkeleton from './components/common/LoadingSkeleton';
 import CertificateVerification from './views/CertificateVerification';
 import VolunteerPortfolio from './views/VolunteerPortfolio';
 import CheckInView from './views/CheckInView';
+import ThemeToggle from './components/ThemeToggle';
 import {
   LayoutDashboard, Compass, CalendarPlus, ShieldCheck, LogOut, CalendarDays,
   UserCog, CheckCircle2, AlertTriangle, Info, X, ChevronsUpDown, Loader2, Bell, UserRound
@@ -37,7 +38,7 @@ const NAV = [
   { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, roles: ['student', 'organizer'] },
   { id: 'create', path: '/events/new', label: 'New event', icon: CalendarPlus, roles: ['organizer'], requiresVerified: true },
   { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, roles: ['student', 'organizer', 'admin'] },
-  { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, roles: ['student'] }
+  { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, roles: ['student', 'organizer'] }
 ];
 
 const PAGE_META = {
@@ -53,7 +54,8 @@ const PAGE_META = {
     browse: { title: 'Opportunities', sub: 'Everything posted across the district' },
     calendar: { title: 'Calendar', sub: 'Events you host and when applications close' },
     create: { title: 'New event', sub: 'Build a sign-up sheet with dates and shifts' },
-    notifications: { title: 'Notifications', sub: 'Applications, questions, and updates' }
+    notifications: { title: 'Notifications', sub: 'Applications, questions, and updates' },
+    profile: { title: 'My profile', sub: 'Your public track record and organizer status' }
   },
   admin: {
     dashboard: { title: 'Review queue', sub: 'Approve organizers and moderate events' },
@@ -442,6 +444,7 @@ export default function App() {
                   <UserCog size={15} /> Edit profile
                 </button>
                 <div className="menu-sep" />
+
                 <button className="menu-item danger" role="menuitem" onClick={handleLogout}>
                   <LogOut size={15} /> Sign out
                 </button>
@@ -462,7 +465,8 @@ export default function App() {
             <h1 className="topbar-title truncate">{meta.title}</h1>
             {meta.sub && <div className="topbar-sub truncate">{meta.sub}</div>}
           </div>
-          <div className="topbar-actions">
+          <div className="topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)' }}>
+            <ThemeToggle />
             <NotificationsBell
               key={currentUser.id}
               refreshKey={notifKey}
@@ -511,6 +515,7 @@ export default function App() {
                     addToast={addToast}
                     setActiveTab={setActiveTab}
                     refreshEvents={refreshEvents}
+                    refreshApplications={refreshApplications}
                     onViewDetails={openEventById}
                   />
                 ) : (
@@ -584,6 +589,11 @@ export default function App() {
                     onEditProfile={() => setEditingProfile(true)}
                     onViewEvent={openEventById}
                     addToast={addToast}
+                  />
+                ) : currentUser.role === 'organizer' ? (
+                  <OrganizerProfile
+                    userId={currentUser.id}
+                    onViewEvent={openEventById}
                   />
                 ) : <Navigate to="/" replace />
               } />

@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
-  UserCheck, UserX, Trash2, Search, ShieldCheck, Calendar, Flag, CheckCircle
+  Calendar, ShieldCheck, Flag, Shield, UserCog, Ban, Mail
 } from 'lucide-react';
+import LoadingSkeleton from '../components/common/LoadingSkeleton';
+import EmptyState from '../components/common/EmptyState';
 import { api } from '../utils/api';
 import { formatHours, formatDay, eventPermissions } from '../utils/helpers';
 import { BarChart } from '../components/BarChart';
@@ -91,13 +93,7 @@ export default function AdminDashboard({ addToast }) {
   };
 
   if (loading) {
-    return (
-      <div className="stack">
-        <div className="skeleton" style={{ height: 84 }} />
-        <div className="skeleton" style={{ height: 200 }} />
-        <div className="skeleton" style={{ height: 280 }} />
-      </div>
-    );
+    return <LoadingSkeleton heights={[84, 200, 280]} />;
   }
 
   const q = query.trim().toLowerCase();
@@ -212,13 +208,11 @@ export default function AdminDashboard({ addToast }) {
         </div>
 
         {pendingOrganizers.length === 0 ? (
-          <div className="card empty">
-            <span className="empty-icon" style={{ background: 'var(--ok-tint)', color: 'var(--ok)' }}>
-              <ShieldCheck size={18} />
-            </span>
-            <h3>Nothing to review</h3>
-            <p>New organizer requests will appear here for approval.</p>
-          </div>
+          <EmptyState 
+            icon={ShieldCheck} 
+            title="Nothing to review" 
+            message="New organizer requests will appear here for approval." 
+          />
         ) : (
           <div className="stack">
             {pendingOrganizers.map(org => (
@@ -272,13 +266,11 @@ export default function AdminDashboard({ addToast }) {
         </div>
 
         {reports.length === 0 ? (
-          <div className="card empty">
-            <span className="empty-icon" style={{ background: 'var(--ok-tint)', color: 'var(--ok)' }}>
-              <Flag size={18} />
-            </span>
-            <h3>No reports</h3>
-            <p>Community reports will appear here for review.</p>
-          </div>
+          <EmptyState 
+            icon={Flag} 
+            title="No reports" 
+            message="Community reports will appear here for review." 
+          />
         ) : (
           <div className="stack">
             {reports.map(report => (
@@ -351,11 +343,11 @@ export default function AdminDashboard({ addToast }) {
         </div>
 
         {filteredEvents.length === 0 ? (
-          <div className="card empty">
-            <span className="empty-icon"><Calendar size={18} /></span>
-            <h3>No events match that search</h3>
-            <p>Try a different organizer name, event title, or location.</p>
-          </div>
+          <EmptyState 
+            icon={Calendar} 
+            title="No events match that search" 
+            message="Try a different organizer name, event title, or location." 
+          />
         ) : (
           <div className="tablewrap">
             <div className="tablescroll">

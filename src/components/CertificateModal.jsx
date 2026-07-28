@@ -92,10 +92,13 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
             </div>
           </div>
 
-          <p className="small dim no-print row" style={{ gap: 6, justifyContent: 'center', marginTop: 'var(--s4)' }}>
-            <ShieldCheck size={13} />
-            Hours on this certificate were confirmed by the organizer after the event.
-          </p>
+          <div className="small dim no-print row-between" style={{ marginTop: 'var(--s4)' }}>
+            <span className="row" style={{ gap: 6 }}>
+              <ShieldCheck size={13} />
+              Hours on this certificate were confirmed by the organizer after the event.
+            </span>
+            <span>Generated on {formatDay(new Date().toISOString())}</span>
+          </div>
         </div>
 
         <div className="modal-foot no-print">

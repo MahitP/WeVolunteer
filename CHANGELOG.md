@@ -8,11 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.1.0] — Unreleased
 
 ### Added
-- **Server-side Logout** — Implemented an explicit `/api/auth/logout` endpoint that invalidates sessions by clearing the session cookie and incrementing the database `token_version`.
+- **Content-Security-Policy** — Enabled CSP headers with `script-src 'self'` (no `unsafe-inline` for scripts). `style-src` allows `unsafe-inline` as a bounded concession until inline styles are refactored.
+- **Dark mode** — Full dark theme with system-preference detection, manual toggle (light / system / dark), and localStorage persistence. Pre-paint script prevents flash of wrong theme. All design tokens overridden for dark surfaces.
+- **Theme toggle** — Segmented control in the topbar for switching between light, system, and dark themes.
+- **Server-side logout** — `/api/auth/logout` endpoint that invalidates sessions by clearing the session cookie and incrementing the database `token_version`.
+- **Test harness** — jsdom + React Testing Library setup, cookie auth tests, component tests (EventModal, EmptyState, useTheme), hardcoded color linting test.
+- **Empty states** — Reusable `EmptyState` component for zero-data scenarios across dashboards, profiles, and modal tabs.
+- **Loading skeletons** — `LoadingSkeleton` component for consistent loading states.
 
 ### Changed
-- **Cookie Authentication** — Migrated authentication from `localStorage` JWTs in the `Authorization` header to `HttpOnly`, `SameSite=Lax` cookies, significantly reducing exposure to cross-site scripting (XSS).
-- **Password Minimum Length** — Raised the minimum password length requirement from 6 to 8 characters.
+- **Cookie authentication** — Migrated from `localStorage` JWTs in the `Authorization` header to `HttpOnly`, `SameSite=Lax` cookies, reducing XSS exposure.
+- **Password minimum length** — Raised from 6 to 8 characters.
+- **EventModal refactor** — Extracted `EventApplicantsTab`, `EventAttendance`, `EventEditForm`, `EventShiftsTab`, and `EventAnnouncements` into standalone components.
+- **Design tokens** — Replaced ~50 hardcoded colour literals across CSS and JSX with design tokens. Component-specific tokens (topbar, modal overlay, toast, alert, demobar, certificate) now centralized in `:root`.
+- **Query invalidation** — Replaced global `refreshAll()` calls with targeted `refreshEvents()` / `refreshApplications()` for better performance.
+- **CORS scoping** — CORS middleware moved from global to `/api`-only to prevent static asset blocking.
+
+### Improved
+- **Accessibility** — ARIA tablist with roving tabindex on EventModal tabs, skip-to-content link, `role="progressbar"` on hours meter, keyboard navigation on notifications, screen-reader-only text for badge counts, improved mobile touch targets.
+- **Mobile layout** — Larger touch targets, improved tap areas, responsive refinements.
 
 ## [1.0.0] — 2026-07-27
 
