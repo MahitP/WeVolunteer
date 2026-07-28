@@ -3,7 +3,7 @@ import EventCard from '../components/EventCard';
 import { Search, Sparkles, SlidersHorizontal, CalendarX2, Star, Filter, X } from 'lucide-react';
 import { formatHours } from '../utils/helpers';
 import { api } from '../utils/api';
-import EmptyState from '../components/EmptyState';
+import EmptyState from '../components/common/EmptyState';
 
 const CATEGORIES = ['All', 'School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 
@@ -271,7 +271,7 @@ export default function BrowseEvents({
 
         {filtered.length === 0 ? (
           <EmptyState
-            icon={<CalendarX2 size={18} />}
+            icon={CalendarX2}
             title={hasFilters ? 'No events match those filters' : 'No opportunities posted yet'}
             message={
               hasFilters

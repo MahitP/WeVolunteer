@@ -2,15 +2,14 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { useModal } from '../utils/useModal';
 import {
-  X, CalendarClock, Users, Check, Clock4, Plus, Trash2, Zap, ShieldCheck,
+  X, CalendarClock, Users, Zap, ShieldCheck,
   Pencil, ClipboardCheck, AlertCircle, Megaphone, MessageSquare, ListChecks, Info, Star, Flag
 } from 'lucide-react';
 import { api } from '../utils/api';
 import {
-  formatHours, formatDay, formatTime, formatTimeRange, isoToLocalInput, countdown, gradeLabel,
-  usesAutoSelect, selectionMethodLabel, eventPermissions
+  formatDay, formatTime, formatTimeRange, countdown,
+  selectionMethodLabel, eventPermissions, usesAutoSelect
 } from '../utils/helpers';
-import { Seats } from './Seats';
 import EventEditForm from './EventEditForm';
 import EventAttendance from './EventAttendance';
 import EventComments from './EventComments';
@@ -21,13 +20,6 @@ import AttendeeList from './AttendeeList';
 import ReportModal from './ReportModal';
 import Modal from './Modal';
 
-const CATEGORIES = [
-  { value: 'School', label: 'School project' },
-  { value: '5K', label: '5K run / athletics' },
-  { value: 'Food Pantry', label: 'Food pantry' },
-  { value: 'Fundraiser', label: 'Fundraiser' },
-  { value: 'Other', label: 'Other community service' }
-];
 
 export default function EventModal({
   event, currentUser, applications = [], onClose, refreshEvents, refreshApplications, addToast, onViewVolunteerProfile,
@@ -593,7 +585,7 @@ export default function EventModal({
 
       {showRedrawModal && (
         <RedrawReasonModal
-          runNumber={autoSelectRuns.length + 1}
+          runNumber={selectionRuns.length + 1}
           reason={redrawReason}
           onChange={setRedrawReason}
           submitting={submitting}

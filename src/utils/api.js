@@ -52,15 +52,10 @@ async function apiFetch(endpoint, options = {}) {
   };
 
   const config = {
-    credentials: 'init', // Wait, this needs to be 'include'
+    credentials: 'include',
     ...options,
     headers
   };
-  
-  // Set credentials to 'include' by default for all API requests to send cookies
-  if (config.credentials === 'init') {
-    config.credentials = 'include';
-  }
 
   let response;
   try {

@@ -8,12 +8,12 @@ import { api } from '../utils/api';
 import Modal from '../components/Modal';
 import { BarChart, DonutChart } from '../components/BarChart';
 import { DateChip } from '../components/Seats';
-import EmptyState from '../components/EmptyState';
+import EmptyState from '../components/common/EmptyState';
 
 const HOUR_GOAL = 25;
 
 export default function VolunteerDashboard({
-  currentUser, events = [], applications = [], addToast, setActiveTab, onStateChange, onViewDetails
+  currentUser, events = [], applications = [], addToast, setActiveTab, refreshEvents, refreshApplications, onViewDetails
 }) {
   const [showCertificate, setShowCertificate] = useState(false);
   const [withdrawingId, setWithdrawingId] = useState(null);
@@ -61,6 +61,7 @@ export default function VolunteerDashboard({
   const totalHours = currentUser.volunteeredHours || 0;
   const goalPct = Math.min(100, (totalHours / HOUR_GOAL) * 100);
   const goalMet = totalHours >= HOUR_GOAL;
+  const progressTone = goalPct < 33 ? 'danger' : goalPct < 100 ? 'warn' : 'ok';
 
   const handleWithdraw = async (app, title, confirmed) => {
     const message = confirmed
@@ -71,7 +72,8 @@ export default function VolunteerDashboard({
     try {
       await api.withdrawApplication(app.id);
       addToast(confirmed ? 'Spot released. The organizer has been notified.' : 'Application withdrawn.', 'info');
-      onStateChange();
+      if (refreshEvents) refreshEvents();
+      if (refreshApplications) refreshApplications();
     } catch (err) {
       addToast(err.message, 'error');
     } finally {
@@ -175,7 +177,7 @@ export default function VolunteerDashboard({
             <div>
               <div className="eyebrow">Service hours this year</div>
               <div className="row" style={{ gap: 'var(--s2)', marginTop: 2 }}>
-                <span className="stat-value accent">{formatHours(totalHours)}</span>
+                <span className={`stat-value ${progressTone}`}>{formatHours(totalHours)}</span>
                 <span className="muted small">of {HOUR_GOAL} hr goal</span>
               </div>
             </div>
@@ -200,7 +202,7 @@ export default function VolunteerDashboard({
             aria-valuemax={HOUR_GOAL}
             aria-label={`Service hours: ${formatHours(totalHours)} of ${HOUR_GOAL} hour goal`}
           >
-            <div className={`meter-fill ${goalMet ? 'full' : 'accent'}`} style={{ width: `${goalPct}%` }} />
+            <div className={`meter-fill ${progressTone}`} style={{ width: `${goalPct}%` }} />
           </div>
           <p className="small muted" style={{ marginTop: 'var(--s2)' }}>
             {goalMet
@@ -250,7 +252,7 @@ export default function VolunteerDashboard({
             </div>
             {upcoming.length === 0 ? (
               <EmptyState
-                icon={<CalendarCheck size={18} />}
+                icon={CalendarCheck}
                 title="Nothing on the calendar"
                 message="Once an organizer confirms you for a shift, it will show up here."
                 action={
@@ -316,7 +318,7 @@ export default function VolunteerDashboard({
             <div className="card card-pad">
               {completed.length === 0 ? (
                 <EmptyState
-                  icon={<History size={18} />}
+                  icon={History}
                   title="No completed shifts yet"
                   message="Hours appear here once an organizer confirms you attended."
                   compact={true}

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Check, Clock4 } from 'lucide-react';
+import EmptyState from './common/EmptyState';
 import { formatHours, gradeLabel } from '../utils/helpers';
 import ApplicantReview from './ApplicantReview';
 
@@ -59,9 +60,7 @@ export default function EventApplicantsTab({
               {acceptedApps.length > 0 && <span className="section-action tag tag-ok">{acceptedApps.length}</span>}
             </div>
             {acceptedApps.length === 0 ? (
-              <div className="card empty">
-                <p>No volunteers were accepted.</p>
-              </div>
+              <EmptyState title="No volunteers were accepted" style={{ padding: 'var(--s4)' }} />
             ) : (
               <div className="list">
                 {acceptedApps.map(app => (
@@ -90,9 +89,7 @@ export default function EventApplicantsTab({
               {waitlistApps.length > 0 && <span className="section-action tag tag-warn">{waitlistApps.length}</span>}
             </div>
             {waitlistApps.length === 0 ? (
-              <div className="card empty">
-                <p>Waitlist is empty.</p>
-              </div>
+              <EmptyState title="Waitlist is empty" style={{ padding: 'var(--s4)' }} />
             ) : (
               <div className="list">
                 {[...waitlistApps]
@@ -217,7 +214,7 @@ export default function EventApplicantsTab({
                             {previewSelectedApps.length > 0 && <span className="section-action tag tag-ok">{previewSelectedApps.length}</span>}
                           </div>
                           {previewSelectedApps.length === 0 ? (
-                            <div className="card empty"><p>No volunteers selected.</p></div>
+                            <EmptyState title="No volunteers selected" style={{ padding: 'var(--s4)' }} />
                           ) : (
                             <div className="list">
                               {previewSelectedApps.map(app => (
@@ -246,7 +243,7 @@ export default function EventApplicantsTab({
                             {previewWaitlistApps.length > 0 && <span className="section-action tag tag-warn">{previewWaitlistApps.length}</span>}
                           </div>
                           {previewWaitlistApps.length === 0 ? (
-                            <div className="card empty"><p>Waitlist is empty.</p></div>
+                            <EmptyState title="Waitlist is empty" style={{ padding: 'var(--s4)' }} />
                           ) : (
                             <div className="list">
                               {latestDraft.waitlistIds.map((id, idx) => {

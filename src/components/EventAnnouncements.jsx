@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Megaphone, Pencil, Trash2, Check, X } from 'lucide-react';
+import LoadingSkeleton from './common/LoadingSkeleton';
+import EmptyState from './common/EmptyState';
 import { api } from '../utils/api';
 import { timeAgo } from '../utils/helpers';
 
@@ -77,7 +79,7 @@ export default function EventAnnouncements({ eventId, canPost, addToast }) {
   };
 
   if (loading) {
-    return <div className="skeleton skeleton-row" />;
+    return <LoadingSkeleton heights={[80, 80]} className="stack" />;
   }
 
   return (
@@ -107,15 +109,12 @@ export default function EventAnnouncements({ eventId, canPost, addToast }) {
       )}
 
       {items.length === 0 ? (
-        <div className="empty" style={{ padding: 'var(--s6) var(--s4)' }}>
-          <span className="empty-icon"><Megaphone size={18} /></span>
-          <h3>No updates yet</h3>
-          <p>
-            {canPost
-              ? 'Post here if anything changes — location, timing, or what to bring.'
-              : 'If the organizer posts changes to this event, they\'ll appear here.'}
-          </p>
-        </div>
+        <EmptyState 
+          icon={Megaphone} 
+          title="No updates yet" 
+          message={canPost ? 'Post here if anything changes — location, timing, or what to bring.' : 'The organizer hasn\'t posted any updates.'} 
+          style={{ padding: 'var(--s6) var(--s4)' }} 
+        />
       ) : (
         <div className="stack-sm">
           {items.map(item => (

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { MessageSquare, Send, Trash2, Loader2, Flag } from 'lucide-react';
+import { MessageSquare, Send, Trash2, Flag } from 'lucide-react';
+import LoadingSkeleton from './common/LoadingSkeleton';
 import { api } from '../utils/api';
 import { timeAgo } from '../utils/helpers';
 import ReportModal from './ReportModal';
@@ -59,10 +60,7 @@ export default function EventComments({ eventId, currentUser, addToast }) {
       </h3>
 
       {loading ? (
-        <div className="stack-sm">
-          <div className="skeleton skeleton-line" style={{ width: '60%' }} />
-          <div className="skeleton skeleton-line" style={{ width: '85%' }} />
-        </div>
+        <LoadingSkeleton heights={[20, 20]} className="stack-sm" style={{ opacity: 0.5 }} />
       ) : comments.length === 0 ? (
         <p className="small dim" style={{ marginBottom: 'var(--s4)' }}>
           No questions yet. Ask about parking, what to wear, or anything else.
