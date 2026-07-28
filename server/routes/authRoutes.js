@@ -98,10 +98,8 @@ router.post('/api/auth/signup', (req, res) => {
     }
     const token = jwt.sign({ id: user.id, role: user.role, email: user.email, name: user.name, tokenVersion: userRow.token_version ?? 0 }, JWT_SECRET, { expiresIn: '7d' });
 
-    // The token also stays in the body for now; Task 9 removes it once the
-    // test harness and client both read the cookie.
     res.cookie(COOKIE_NAME, token, cookieOptions());
-    res.status(201).json({ user, token });
+    res.status(201).json({ user });
   } catch (error) {
     console.error('Signup error:', error);
     if (error.message.includes('UNIQUE')) {
@@ -138,7 +136,7 @@ router.post('/api/auth/login', (req, res) => {
     const token = jwt.sign({ id: user.id, role: user.role, email: user.email, name: user.name, tokenVersion: userRow.token_version ?? 0 }, JWT_SECRET, { expiresIn: '7d' });
 
     res.cookie(COOKIE_NAME, token, cookieOptions());
-    res.json({ user, token });
+    res.json({ user });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error during login' });

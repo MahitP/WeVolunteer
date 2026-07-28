@@ -202,3 +202,39 @@ describe('server-side logout', () => {
     expect(meRes.status).toBe(401);
   });
 });
+
+describe('severed Authorization header fallback', () => {
+  it('rejects a request with an Authorization header but no cookie', async () => {
+    const loginRes = await fetch(`${srv.base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'password123' })
+    });
+    const setCookie = loginRes.headers.get('set-cookie');
+    const token = setCookie.match(/wev_session=([^;]+)/)?.[1];
+
+    const meRes = await fetch(`${srv.base}/api/auth/me`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    expect(meRes.status).toBe(401);
+  });
+  
+  it('does not return a token in the JSON body of login or signup', async () => {
+    const loginRes = await fetch(`${srv.base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'password123' })
+    });
+    const loginBody = await loginRes.json();
+    expect(loginBody.token).toBeUndefined();
+    
+    const signupRes = await fetch(`${srv.base}/api/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'test_no_token@example.com', password: 'password123', name: 'Test', role: 'student', grade: '9', username: 'test_no_token' })
+    });
+    const signupBody = await signupRes.json();
+    expect(signupBody.token).toBeUndefined();
+  });
+});
