@@ -15,7 +15,7 @@ const SEED_USERS = [
  * Demo-only account switcher. Deliberately recessive: it is scaffolding for
  * exploring the product, not part of the product.
  */
-export default function DemoBar({ currentUser, onStateChange, addToast }) {
+export default function DemoBar({ currentUser, refreshAll, addToast }) {
   const isSeedUser = currentUser && SEED_USERS.some(u => u.id === currentUser.id);
 
   const handleSwitch = async (e) => {
@@ -24,7 +24,7 @@ export default function DemoBar({ currentUser, onStateChange, addToast }) {
     try {
       await api.login(seed.email, 'password123');
       addToast(`Now viewing as ${seed.name}.`, 'success');
-      onStateChange();
+      refreshAll();
     } catch (err) {
       addToast(`Could not switch account: ${err.message}`, 'error');
     }
@@ -39,7 +39,7 @@ export default function DemoBar({ currentUser, onStateChange, addToast }) {
       await api.resetDatabase();
       await api.login('leo.chen28@gmail.com', 'password123');
       addToast('Demo data restored. Signed in as Leo Chen.', 'success');
-      onStateChange();
+      refreshAll();
     } catch (err) {
       addToast(`Could not reset demo data: ${err.message}`, 'error');
     }

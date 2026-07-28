@@ -17,7 +17,7 @@ const TABS = [
 ];
 
 export default function OrganizerDashboard({
-  currentUser, events = [], applications = [], onStateChange, addToast,
+  currentUser, events = [], applications = [], refreshEvents, addToast,
   onViewDetails, onViewVolunteerProfile, setActiveTab
 }) {
   const navigate = useNavigate();
@@ -113,7 +113,7 @@ export default function OrganizerDashboard({
     try {
       await api.deleteEvent(event.id);
       addToast(`"${event.title}" deleted.`, 'success');
-      onStateChange();
+      if (refreshEvents) refreshEvents();
     } catch (err) {
       addToast(`Could not delete: ${err.message}`, 'error');
     }
@@ -124,7 +124,7 @@ export default function OrganizerDashboard({
     try {
       await api.toggleEventStatus(event.id, next);
       addToast(next === 'open' ? 'Applications reopened.' : 'Applications closed.', 'success');
-      onStateChange();
+      if (refreshEvents) refreshEvents();
     } catch (err) {
       addToast(`Could not update: ${err.message}`, 'error');
     }
@@ -134,7 +134,7 @@ export default function OrganizerDashboard({
     try {
       await api.duplicateEvent(event.id);
       addToast(`Copied "${event.title}" with dates moved forward one week.`, 'success');
-      onStateChange();
+      if (refreshEvents) refreshEvents();
     } catch (err) {
       addToast(`Could not duplicate: ${err.message}`, 'error');
     }
@@ -201,7 +201,7 @@ export default function OrganizerDashboard({
       });
       addToast('Event updated.', 'success');
       setEditingEvent(null);
-      onStateChange();
+      if (refreshEvents) refreshEvents();
     } catch (err) {
       addToast(`Could not save: ${err.message}`, 'error');
     }

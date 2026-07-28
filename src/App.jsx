@@ -69,7 +69,6 @@ export default function App() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [isCheckingSession, setIsCheckingSession] = useState(true);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [currentUser, setCurrentUser] = useState(null);
   const [events, setEvents] = useState([]);
   const [applications, setApplications] = useState([]);
@@ -109,54 +108,68 @@ export default function App() {
   else if (currentPath.startsWith('/notifications')) activeTab = 'notifications';
   else if (currentPath.startsWith('/profile')) activeTab = 'profile';
 
-  // Verify JWT session on mount and reload data whenever state changes
-  useEffect(() => {
-    const validateSession = async () => {
-      try {
-        if (searchParams.has('verify')) {
-          const token = searchParams.get('verify');
-          
-          // Clear it from URL immediately
-          const newParams = new URLSearchParams(searchParams);
-          newParams.delete('verify');
-          setSearchParams(newParams, { replace: true });
-          
-          try {
-            await api.verifyEmail(token);
-            addToast('Email verified successfully!', 'success');
-          } catch (err) {
-            addToast(err.message || 'Failed to verify email', 'error');
-          }
-        }
+  const refreshEvents = async () => {
+    try { setEvents(await api.fetchEvents()); } catch (err) { console.error('Failed to refresh events:', err); }
+  };
 
-        const user = await api.getMe();
-        if (!user) {
-          setCurrentUser(null);
-          setIsCheckingSession(false);
-          return;
-        }
-        setCurrentUser(user);
-        
-        const promises = [api.fetchEvents(), api.fetchApplications()];
-        if (user.role === 'student') {
-          promises.push(api.fetchFavorites().catch(() => []));
-        }
+  const refreshApplications = async () => {
+    try { setApplications(await api.fetchApplications()); } catch (err) { console.error('Failed to refresh applications:', err); }
+  };
 
-        const [evs, apps, favs] = await Promise.all(promises);
-        setEvents(evs);
-        setApplications(apps);
-        if (user.role === 'student' && favs) {
-          setFavorites(favs.map(f => f.event_id || f.eventId));
-        }
-        setIsCheckingSession(false);
-      } catch (err) {
-        console.error('Session check failed:', err);
+
+
+  const refreshAll = async () => {
+    setIsCheckingSession(true);
+    try {
+      const user = await api.getMe();
+      if (!user) {
         setCurrentUser(null);
-        setIsCheckingSession(false);
+        return;
       }
+      setCurrentUser(user);
+      
+      const promises = [api.fetchEvents(), api.fetchApplications()];
+      if (user.role === 'student') {
+        promises.push(api.fetchFavorites().catch(() => []));
+      }
+
+      const [evs, apps, favs] = await Promise.all(promises);
+      setEvents(evs);
+      setApplications(apps);
+      if (user.role === 'student' && favs) {
+        setFavorites(favs.map(f => f.event_id || f.eventId));
+      }
+    } catch (err) {
+      console.error('Session check failed:', err);
+      setCurrentUser(null);
+    } finally {
+      setIsCheckingSession(false);
+    }
+  };
+
+  const verifyToken = searchParams.get('verify');
+
+  // Verify JWT session on mount
+  useEffect(() => {
+    const init = async () => {
+      if (verifyToken) {
+        // Clear it from URL immediately
+        const newParams = new URLSearchParams(searchParams);
+        newParams.delete('verify');
+        setSearchParams(newParams, { replace: true });
+        
+        try {
+          await api.verifyEmail(verifyToken);
+          addToast('Email verified successfully!', 'success');
+        } catch (err) {
+          addToast(err.message || 'Failed to verify email', 'error');
+        }
+      }
+      await refreshAll();
     };
-    validateSession();
-  }, [refreshKey, searchParams, setSearchParams]);
+    init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verifyToken]);
 
   const handleToggleFavorite = async (eventId) => {
     try {
@@ -187,7 +200,6 @@ export default function App() {
     };
   }, [userMenuOpen]);
 
-  const handleStateChange = () => setRefreshKey(prev => prev + 1);
 
   const addToast = (message, type = 'info') => {
     const id = Date.now() + Math.random();
@@ -198,7 +210,7 @@ export default function App() {
 
   const handleCreateEvent = async (eventData) => {
     await api.createEvent(eventData);
-    handleStateChange();
+    refreshEvents();
     navigate('/');
   };
 
@@ -212,7 +224,7 @@ export default function App() {
   };
 
   const handleLoginSuccess = () => {
-    handleStateChange();
+    refreshAll();
     navigate('/');
   };
 
@@ -446,7 +458,7 @@ export default function App() {
       {/* ── Content column ── */}
       <div className="content">
         {DEMO_MODE && (
-          <DemoBar currentUser={currentUser} onStateChange={handleStateChange} addToast={addToast} />
+          <DemoBar currentUser={currentUser} refreshAll={refreshAll} addToast={addToast} />
         )}
 
         <header className="topbar">
@@ -502,7 +514,7 @@ export default function App() {
                     applications={applications}
                     addToast={addToast}
                     setActiveTab={setActiveTab}
-                    onStateChange={handleStateChange}
+                    refreshEvents={refreshEvents}
                     onViewDetails={openEventById}
                   />
                 ) : (
@@ -510,7 +522,8 @@ export default function App() {
                     currentUser={currentUser}
                     events={events}
                     applications={applications}
-                    onStateChange={handleStateChange}
+                    refreshEvents={refreshEvents}
+                    refreshApplications={refreshApplications}
                     addToast={addToast}
                     setActiveTab={setActiveTab}
                     onViewDetails={openEventById}
@@ -633,7 +646,8 @@ export default function App() {
             currentUser={currentUser}
             applications={applications}
             onClose={() => setSelectedEventState(null)}
-            onStateChange={handleStateChange}
+            refreshEvents={refreshEvents}
+            refreshApplications={refreshApplications}
             addToast={addToast}
             onViewVolunteerProfile={(p) => { setSelectedEventState(null); viewVolunteer(p); }}
             onViewOrganizer={(id) => { setSelectedEventState(null); viewOrganizer(id); }}
@@ -646,7 +660,7 @@ export default function App() {
         <ProfileEditModal
           user={currentUser}
           onClose={() => setEditingProfile(false)}
-          onSave={(updated) => { setCurrentUser(updated); handleStateChange(); }}
+          onSave={(updated) => { setCurrentUser(updated); refreshEvents(); }}
           addToast={addToast}
           onSignOut={() => { setEditingProfile(false); handleLogout(); }}
         />
