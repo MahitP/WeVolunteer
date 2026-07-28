@@ -20,7 +20,7 @@ export default function EventAnnouncements({ eventId, canPost, addToast }) {
   const [editingId, setEditingId] = useState(null);
   const [editBody, setEditBody] = useState('');
 
-  const load = async () => {
+  const load = React.useCallback(async () => {
     try {
       setItems(await api.fetchAnnouncements(eventId));
     } catch (e) {
@@ -28,9 +28,9 @@ export default function EventAnnouncements({ eventId, canPost, addToast }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [eventId]);
 
-  useEffect(() => { if (eventId) load(); }, [eventId]);
+  useEffect(() => { if (eventId) load(); }, [eventId, load]);
 
   const post = async (e) => {
     e.preventDefault();

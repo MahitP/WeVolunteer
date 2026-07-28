@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Info, CalendarClock, MapPin, Users, Check, Clock, Edit2 } from 'lucide-react';
+import { Info, CalendarClock } from 'lucide-react';
 import { formatDay, formatTime, formatHours, usesAutoSelect } from '../utils/helpers';
 import { Seats } from './Seats';
 import EmptyState from './common/EmptyState';

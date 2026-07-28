@@ -16,7 +16,7 @@ export default function Notifications({ onViewEvent, onCountChange }) {
   const [filter, setFilter] = useState('all');
   const [unreadOnly, setUnreadOnly] = useState(false);
 
-  const load = async () => {
+  const load = React.useCallback(async () => {
     try {
       const res = await api.fetchNotifications(200);
       setItems(res.notifications || []);
@@ -26,9 +26,9 @@ export default function Notifications({ onViewEvent, onCountChange }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [onCountChange]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const markRead = async (id) => {
     setItems(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));

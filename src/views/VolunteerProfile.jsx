@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  CalendarCheck, MapPin, Mail, Award, ArrowLeft, History, Medal, Sparkles, FileText, Lock, Pencil
+  CalendarCheck, MapPin, Award, ArrowLeft, History, Medal, Sparkles, FileText, Lock, Pencil
 } from 'lucide-react';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
