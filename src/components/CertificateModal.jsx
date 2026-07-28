@@ -54,13 +54,13 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
               <div className="certificate-rule" />
               <h1>Certificate of Community Service</h1>
 
-              <p style={{ marginTop: 'var(--s5)', color: '#57534e' }}>This certifies that</p>
+              <p style={{ marginTop: 'var(--s5)', color: 'var(--certificate-ink-2)' }}>This certifies that</p>
               <div className="certificate-name">{volunteer?.name}</div>
               {volunteer?.grade && (
                 <p className="certificate-sub">{gradeLabel(volunteer.grade)}</p>
               )}
 
-              <p style={{ color: '#57534e', maxWidth: '48ch', margin: 'var(--s5) auto 0' }}>
+              <p style={{ color: 'var(--certificate-ink-2)', maxWidth: '48ch', margin: 'var(--s5) auto 0' }}>
                 volunteered at
               </p>
               <div className="certificate-event">{certificate.title}</div>

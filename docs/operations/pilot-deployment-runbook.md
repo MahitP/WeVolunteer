@@ -668,7 +668,6 @@ setting them on the running server has no effect.
 | `VITE_APP_NAME` | No | Product name in the UI | `WeVolunteer` | None | `WeVolunteer` |
 | `VITE_SCHOOL_NAME` | No | District name in the UI | `WeVolunteer Community` | None | `WeVolunteer Community` |
 | `VITE_ENABLE_LEADERBOARD` | No | Set to `false` to hide the leaderboard entirely | `false` | The leaderboard is already opt-in per student and default-off. Setting this to `false` is the belt-and-braces option if the district would rather not have one at all. | Enabled (but empty until students opt in) |
-| `VITE_DEFAULT_THEME_COLOR` | No | Theme colour | `#2563eb` | None | `#2563eb` |
 | `VITE_PRIVACY_URL` | **Set once the district publishes a privacy notice** | URL of the district's privacy notice. When set, signup shows a required acknowledgement checkbox linking to it. | `https://sbschools.example.org/privacy` | This platform holds minors' names, grades, schools and email addresses and shows some of it to organizers. The consent gate is deliberately inert until a real notice exists — a checkbox pointing at nothing would manufacture the appearance of a reviewed policy. | Unset: no checkbox, and Vite tree-shakes the block out of the bundle entirely. **This is a launch-gate item, not a code gap** — see §14 P0-11. |
 
 ### Variables that must NEVER carry a development default into production

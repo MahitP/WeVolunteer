@@ -119,7 +119,7 @@ export default function EventAnnouncements({ eventId, canPost, addToast }) {
       ) : (
         <div className="stack-sm">
           {items.map(item => (
-            <article key={item.id} className="card card-pad" style={{ background: 'var(--warn-tint)', borderColor: '#fedf89' }}>
+            <article key={item.id} className="card card-pad" style={{ background: 'var(--warn-tint)', borderColor: 'var(--warn-tint-2)' }}>
               <div className="row" style={{ gap: 'var(--s2)', marginBottom: 'var(--s2)' }}>
                 <Megaphone size={14} style={{ color: 'var(--warn)' }} />
                 <span className="small strong">{item.author.name}</span>
