@@ -635,7 +635,7 @@ time { font-variant-numeric: tabular-nums; }
   transition: background var(--t-fast), color var(--t-fast);
 }
 .segmented button:hover { color: var(--ink); }
-.segmented button[aria-pressed='true'] {
+.segmented button[aria-selected='true'] {
   background: var(--surface);
   color: var(--ink);
   box-shadow: var(--sh-1);

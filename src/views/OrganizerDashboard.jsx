@@ -373,9 +373,31 @@ export default function OrganizerDashboard({
         </div>
 
         <div className="toolbar">
-          <div className="segmented">
-            {TABS.map(t => (
-              <button key={t.id} aria-pressed={tab === t.id} onClick={() => setTab(t.id)}>
+          <div className="segmented" role="tablist" aria-label="Event status">
+            {TABS.map((t, index) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={tab === t.id}
+                aria-controls="org-events-panel"
+                id={`org-tab-${t.id}`}
+                tabIndex={tab === t.id ? 0 : -1}
+                onClick={() => setTab(t.id)}
+                onKeyDown={e => {
+                  let nextIndex = index;
+                  if (e.key === 'ArrowRight') nextIndex = (index + 1) % TABS.length;
+                  else if (e.key === 'ArrowLeft') nextIndex = (index - 1 + TABS.length) % TABS.length;
+                  else if (e.key === 'Home') nextIndex = 0;
+                  else if (e.key === 'End') nextIndex = TABS.length - 1;
+                  else return;
+
+                  e.preventDefault();
+                  const nextId = TABS[nextIndex].id;
+                  setTab(nextId);
+                  // Use setTimeout to ensure React updates the DOM before focusing
+                  setTimeout(() => document.getElementById(`org-tab-${nextId}`)?.focus(), 0);
+                }}
+              >
                 {t.label}
               </button>
             ))}
@@ -389,6 +411,8 @@ export default function OrganizerDashboard({
             />
           </div>
         </div>
+
+        <div id="org-events-panel" role="tabpanel" aria-labelledby={`org-tab-${tab}`} tabIndex={0}>
 
         {filtered.length === 0 ? (
           <EmptyState
@@ -518,6 +542,7 @@ export default function OrganizerDashboard({
             </div>
           </div>
         )}
+        </div>
       </section>
 
       {/* ── Volunteer roster ── */}

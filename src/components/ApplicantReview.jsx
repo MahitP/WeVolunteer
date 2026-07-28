@@ -132,6 +132,7 @@ export default function ApplicantReview({ applications, onDecide, onBulkDecide, 
               }
             }}
             style={{ accentColor: 'var(--brand)', width: 16, height: 16, cursor: 'pointer' }}
+            aria-label="Select all applicants"
           />
           <span className="small dim">Select all {sorted.length} volunteers</span>
         </div>
@@ -156,6 +157,7 @@ export default function ApplicantReview({ applications, onDecide, onBulkDecide, 
                     setSelectedIds(next);
                   }}
                   style={{ accentColor: 'var(--brand)', width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
+                  aria-label={`Select ${v.name || 'applicant'}`}
                 />
               )}
               
