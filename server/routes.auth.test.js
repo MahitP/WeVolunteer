@@ -43,7 +43,7 @@ describe('auth: email verification state', () => {
     db.prepare('UPDATE users SET email_verified = 0 WHERE id = ?').run(res.body.user.id);
     db.close();
 
-    const apps = await srv.call('GET', '/api/applications', undefined, res.body.token);
+    const apps = await srv.call('GET', '/api/applications', undefined, res.cookie);
     expect(apps.status).toBe(200);
   });
 });

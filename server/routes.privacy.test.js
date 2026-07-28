@@ -31,7 +31,7 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
     });
     expect(signupRes.status).toBe(201);
     freshStudentId = signupRes.body.user.id;
-    freshStudentToken = signupRes.body.token;
+    freshStudentToken = signupRes.cookie;
 
     const future = new Date(Date.now() + 30 * 24 * 3600 * 1000);
     const futureEnd = new Date(future.getTime() + 3 * 3600 * 1000);
