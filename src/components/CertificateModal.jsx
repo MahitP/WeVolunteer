@@ -12,7 +12,11 @@ import { publicOrigin } from '../config';
  * platform. It is a bearer credential for "whoever holds this piece of
  * paper" — possession of the code is what it proves, nothing more.
  */
-export default function CertificateModal({ certificate, volunteer, onClose }) {
+export default function CertificateModal({
+  certificate,
+  volunteer,
+  onClose
+}) {
   // Bail out BEFORE useModal runs. useModal locks body scrolling for as long as
   // it is mounted; calling it and then returning null left the page unscrollable
   // with no dialog on screen and no visible way out — which read to users as the
@@ -20,23 +24,16 @@ export default function CertificateModal({ certificate, volunteer, onClose }) {
   if (!certificate) return null;
   return <CertificateDialog certificate={certificate} volunteer={volunteer} onClose={onClose} />;
 }
-
-function CertificateDialog({ certificate, volunteer, onClose }) {
+function CertificateDialog({
+  certificate,
+  volunteer,
+  onClose
+}) {
   const dialogRef = useModal(onClose);
-
   const verifyPath = `/verify/${certificate.code}`;
   const verifyHost = publicOrigin();
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div
-        ref={dialogRef}
-        className="modal modal-lg"
-        onClick={e => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Certificate for ${certificate.title}`}
-      >
+  return <div className="modal-overlay" onClick={onClose}>
+      <div ref={dialogRef} className="modal modal-lg" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={`Certificate for ${certificate.title}`}>
         <div className="modal-head no-print">
           <div>
             <h2>Certificate of service</h2>
@@ -45,22 +42,20 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
           <button className="modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
 
-        <div className="modal-body" style={{ background: 'var(--surface-2)' }}>
+        <div className="modal-body s-bb56a4">
           <div className="certificate" id="printable-certificate">
-            <div style={{ textAlign: 'center' }}>
+            <div className="s-cdd8ca">
               <div className="certificate-org">
                 WeVolunteer Network
               </div>
               <div className="certificate-rule" />
               <h1>Certificate of Community Service</h1>
 
-              <p style={{ marginTop: 'var(--s5)', color: 'var(--certificate-ink-2)' }}>This certifies that</p>
+              <p className="s-b4eebf">This certifies that</p>
               <div className="certificate-name">{volunteer?.name}</div>
-              {volunteer?.grade && (
-                <p className="certificate-sub">{gradeLabel(volunteer.grade)}</p>
-              )}
+              {volunteer?.grade && <p className="certificate-sub">{gradeLabel(volunteer.grade)}</p>}
 
-              <p style={{ color: 'var(--certificate-ink-2)', maxWidth: '48ch', margin: 'var(--s5) auto 0' }}>
+              <p className="s-428345">
                 volunteered at
               </p>
               <div className="certificate-event">{certificate.title}</div>
@@ -68,7 +63,7 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
                 {certificate.location} · {formatDay(certificate.startDatetime)}
               </p>
 
-              <div className="certificate-hours" style={{ marginTop: 'var(--s6)' }}>
+              <div className="certificate-hours s-473e7f">
                 {formatHours(certificate.hours)}
               </div>
               <p className="certificate-sub">of verified community service</p>
@@ -83,7 +78,7 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
                 <div className="certificate-sign-label">Confirmed by</div>
               </div>
 
-              <div style={{ textAlign: 'right' }}>
+              <div className="s-7851db">
                 <div className="certificate-code">{certificate.code}</div>
                 <div className="certificate-sign-label">
                   Verify at {verifyHost}{verifyPath}
@@ -92,8 +87,8 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
             </div>
           </div>
 
-          <div className="small dim no-print row-between" style={{ marginTop: 'var(--s4)' }}>
-            <span className="row" style={{ gap: 6 }}>
+          <div className="small dim no-print row-between s-2b52df">
+            <span className="row s-a19c85">
               <ShieldCheck size={13} />
               Hours on this certificate were confirmed by the organizer after the event.
             </span>
@@ -108,6 +103,5 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
           </button>
         </div>
       </div>
-    </div>
-  );
+    </div>;
 }
