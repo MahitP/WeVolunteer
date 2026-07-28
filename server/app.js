@@ -26,7 +26,51 @@ if (process.env.TRUST_PROXY) {
 }
 
 app.use(helmet({
-  contentSecurityPolicy: false,
+  /**
+   * CSP was disabled outright in v1.0, which left cross-site scripting with no
+   * mitigation at all — the same threat that motivated moving the session token
+   * out of localStorage. An HttpOnly cookie stops an injected script *reading*
+   * the session; it does nothing to stop the script running and making
+   * authenticated same-origin requests with it. This directive set is the half
+   * of that pair that addresses the vector rather than the consequence.
+   */
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+
+      // No 'unsafe-inline'. This is the directive that matters: it is what
+      // stops an injected <script> from executing. Stage 3's theme pre-paint
+      // script is an external file in public/ specifically to satisfy this.
+      scriptSrc: ["'self'"],
+
+      /**
+       * 'unsafe-inline' is required here and is a deliberate, bounded
+       * concession: the client uses 576 inline `style={{}}` blocks, and
+       * removing them is a far larger refactor than a security release should
+       * smuggle in. It is recorded as a v1.2 candidate.
+       *
+       * The asymmetry with scriptSrc is the point — inline *style* cannot
+       * exfiltrate a session; inline *script* can.
+       */
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+
+      // index.css:1 imports Bricolage Grotesque and Public Sans.
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+
+      // data: covers the inline SVG favicon and any base64 image.
+      imgSrc: ["'self'", 'data:'],
+
+      // The API is same-origin in both topologies: production serves the SPA
+      // and the API from this process, and development proxies /api through
+      // Vite. Nothing legitimate calls a third-party origin.
+      connectSrc: ["'self'"],
+
+      frameAncestors: ["'none'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"]
+    }
+  },
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
