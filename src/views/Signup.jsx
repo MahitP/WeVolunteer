@@ -34,7 +34,7 @@ export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) next.email = 'That doesn\'t look like an email address';
     
     if (!form.password) next.password = 'Choose a password';
-    else if (form.password.length < 6) next.password = 'Use at least 6 characters';
+    else if (form.password.length < 8) next.password = 'Use at least 8 characters';
 
     // Only enforced when a notice actually exists to read.
     if (PRIVACY_URL && !form.privacyAccepted) {

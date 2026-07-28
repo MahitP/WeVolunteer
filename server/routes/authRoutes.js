@@ -34,8 +34,8 @@ router.post('/api/auth/signup', (req, res) => {
   if (!VALID_GRADES.includes(grade)) {
     return res.status(400).json({ error: `Grade must be one of: ${VALID_GRADES.join(', ')}` });
   }
-  if (String(password).length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters long' });
   }
 
   // Normalise on write: case and surrounding whitespace are not meaningful
@@ -214,8 +214,8 @@ router.post('/api/auth/reset-password', (req, res) => {
   if (!token || !password) {
     return res.status(400).json({ error: 'Token and password are required' });
   }
-  if (String(password).length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters long' });
   }
 
   try {

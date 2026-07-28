@@ -9,7 +9,7 @@ export default function ResetPassword({ token, onSuccess, onCancel }) {
 
   const handleReset = async (e) => {
     e.preventDefault();
-    if (password.length < 6) return setError('Password must be at least 6 characters long');
+    if (password.length < 8) return setError('Password must be at least 8 characters long');
     
     setError('');
     setLoading(true);
