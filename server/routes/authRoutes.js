@@ -158,6 +158,17 @@ router.get('/api/auth/me', authenticateToken, (req, res) => {
   }
 });
 
+router.post('/api/auth/logout', authenticateToken, (req, res) => {
+  try {
+    db.prepare('UPDATE users SET token_version = token_version + 1 WHERE id = ?').run(req.user.id);
+    res.clearCookie(COOKIE_NAME);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Logout error:', err);
+    res.status(500).json({ error: 'Failed to logout' });
+  }
+});
+
 /**
  * Step 1 of password reset: issue a single-use, expiring token and mail it.
  *
