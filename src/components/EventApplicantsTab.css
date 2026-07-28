@@ -1,0 +1,139 @@
+.eat-summary-card {
+  padding: var(--s4);
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  margin-bottom: var(--s4);
+}
+
+.eat-summary-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.eat-summary-date {
+  margin: 4px 0 12px 0;
+}
+
+.eat-summary-row {
+  gap: var(--s4);
+}
+
+.eat-summary-item {
+  flex: 1;
+  min-width: 100px;
+}
+
+.eat-summary-item-wide {
+  flex: 1.5;
+  min-width: 150px;
+}
+
+.eat-empty-state {
+  padding: var(--s4);
+}
+
+.eat-waitlist-badge {
+  margin-right: 8px;
+  background: var(--rule);
+  color: var(--ink-2);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.eat-section-desc {
+  margin-top: -8px;
+  margin-bottom: var(--s3);
+}
+
+.eat-margin-bottom {
+  margin-bottom: var(--s4);
+}
+
+.eat-skeleton-width {
+  width: 60%;
+}
+
+.eat-action-card {
+  padding: var(--s4);
+  text-align: center;
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  margin-bottom: var(--s4);
+}
+
+.eat-action-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.eat-action-desc {
+  margin: var(--s2) 0 var(--s4) 0;
+}
+
+.eat-preview-stats-row {
+  gap: var(--s4);
+  margin-bottom: var(--s4);
+}
+
+.eat-preview-actions {
+  gap: 12px;
+}
+
+.eat-audit-section {
+  margin-top: var(--s4);
+}
+
+.eat-audit-card {
+  padding: var(--s3) var(--s4);
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.eat-audit-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.eat-audit-list {
+  margin-top: 8px;
+}
+
+.eat-audit-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.eat-audit-item-row {
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.eat-audit-run-confirmed {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.eat-audit-run-normal {
+  color: inherit;
+  font-weight: normal;
+}
+
+.eat-audit-reason {
+  color: var(--ink-2);
+  font-style: italic;
+  padding-left: 8px;
+  border-left: 2px solid var(--rule);
+}
+
+.eat-waitlist-actions {
+  gap: 4px;
+  margin-left: auto;
+}

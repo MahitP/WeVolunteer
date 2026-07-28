@@ -47,3 +47,5 @@ SignUp Genius/
 # SQLite WAL sidecars (created at runtime alongside *.db)
 *.db-wal
 *.db-shm
+playwright-report/
+test-results/
