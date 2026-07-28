@@ -2296,7 +2296,9 @@ time { font-variant-numeric: tabular-nums; }
 @media (hover: none) and (pointer: coarse), (max-width: 700px) {
   .btn,
   .btn-sm,
-  .btn-lg {
+  .btn-lg,
+  .input,
+  .select {
     min-height: 44px;
   }
   /* Square icon buttons need width too, or they stay a thin 44px-tall sliver. */
