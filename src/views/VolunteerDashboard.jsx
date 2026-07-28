@@ -8,6 +8,7 @@ import { api } from '../utils/api';
 import Modal from '../components/Modal';
 import { BarChart, DonutChart } from '../components/BarChart';
 import { DateChip } from '../components/Seats';
+import EmptyState from '../components/EmptyState';
 
 const HOUR_GOAL = 25;
 
@@ -248,14 +249,16 @@ export default function VolunteerDashboard({
               {upcoming.length > 0 && <span className="section-action small dim">{upcoming.length}</span>}
             </div>
             {upcoming.length === 0 ? (
-              <div className="card empty">
-                <span className="empty-icon"><CalendarCheck size={18} /></span>
-                <h3>Nothing on the calendar</h3>
-                <p>Once an organizer confirms you for a shift, it will show up here.</p>
-                <button className="btn btn-secondary btn-sm" onClick={() => setActiveTab('browse')}>
-                  Browse opportunities
-                </button>
-              </div>
+              <EmptyState
+                icon={<CalendarCheck size={18} />}
+                title="Nothing on the calendar"
+                message="Once an organizer confirms you for a shift, it will show up here."
+                action={
+                  <button className="btn btn-secondary btn-sm" onClick={() => setActiveTab('browse')}>
+                    Browse opportunities
+                  </button>
+                }
+              />
             ) : (
               <div className="list">
                 {upcoming.map(({ app, event, slot }) => (
@@ -312,11 +315,12 @@ export default function VolunteerDashboard({
             <div className="section-head"><h2>Service history</h2></div>
             <div className="card card-pad">
               {completed.length === 0 ? (
-                <div className="empty" style={{ padding: 'var(--s6) 0' }}>
-                  <span className="empty-icon"><History size={18} /></span>
-                  <h3>No completed shifts yet</h3>
-                  <p>Hours appear here once an organizer confirms you attended.</p>
-                </div>
+                <EmptyState
+                  icon={<History size={18} />}
+                  title="No completed shifts yet"
+                  message="Hours appear here once an organizer confirms you attended."
+                  compact={true}
+                />
               ) : (
                 <div className="timeline">
                   {completed.map(({ app, event, slot }) => (
