@@ -1,7 +1,6 @@
 // Client API Utility for WeVolunteer
 
 const STORAGE_KEYS = {
-  TOKEN: 'wev_auth_token',
   USER: 'wev_auth_user'
 };
 
@@ -47,21 +46,21 @@ function messageForStatus(status) {
 }
 
 async function apiFetch(endpoint, options = {}) {
-  const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
-
   const headers = {
     'Content-Type': 'application/json',
     ...(options.headers || {})
   };
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
   const config = {
+    credentials: 'init', // Wait, this needs to be 'include'
     ...options,
     headers
   };
+  
+  // Set credentials to 'include' by default for all API requests to send cookies
+  if (config.credentials === 'init') {
+    config.credentials = 'include';
+  }
 
   let response;
   try {
@@ -82,7 +81,6 @@ async function apiFetch(endpoint, options = {}) {
   // Only 401 means the session itself is invalid. 403 is a role/ownership
   // denial for a specific action and must not log the user out.
   if (response.status === 401) {
-    localStorage.removeItem(STORAGE_KEYS.TOKEN);
     localStorage.removeItem(STORAGE_KEYS.USER);
   }
 
@@ -120,7 +118,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, password })
     });
-    localStorage.setItem(STORAGE_KEYS.TOKEN, data.token);
     localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
     return data.user;
   },
@@ -130,7 +127,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(signupData)
     });
-    localStorage.setItem(STORAGE_KEYS.TOKEN, data.token);
     localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
     return data.user;
   },
@@ -162,19 +158,22 @@ export const api = {
     });
   },
 
-  logout: () => {
-    localStorage.removeItem(STORAGE_KEYS.TOKEN);
+  logout: async () => {
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+      // Ignored: best-effort. If they are offline, they are logged out locally.
+    }
     localStorage.removeItem(STORAGE_KEYS.USER);
   },
 
   getMe: async () => {
-    const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
-    if (!token) return null;
     try {
       return await apiFetch('/api/auth/me');
     } catch (e) {
-      localStorage.removeItem(STORAGE_KEYS.TOKEN);
-      localStorage.removeItem(STORAGE_KEYS.USER);
+      if (e.status === 401) {
+        localStorage.removeItem(STORAGE_KEYS.USER);
+      }
       return null;
     }
   },
