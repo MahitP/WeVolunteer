@@ -73,16 +73,31 @@
   --info-tint: #eff4ff;
 
   /* — Chart: BarChart/DonutChart categorical palette ————
-     Mostly reuses semantic tokens above (accent leads because these charts
-     read hours) plus one hue with no semantic meaning of its own, needed
-     only to keep a sixth category visually distinguishable. */
-  --chart-violet: #5b21b6;
+     These are categorical slots, not colours with a meaning of their own —
+     their only job is to be distinguishable from one another, so they are
+     numbered rather than named for a hue or a semantic they do not carry
+     (unlike --brand/--accent/--ink above, which are named for what they
+     mean). --chart-1 leads with --accent because these charts read hours.
+     --chart-1 through --chart-5 deliberately alias existing semantic
+     tokens, so a category keeps the product's colour language; only
+     --chart-6 needs a value of its own, since nothing else fits it. When
+     dark mode themes this palette, it is one numbered block to override,
+     not six scattered decisions. */
+  --chart-1: var(--accent);
+  --chart-2: var(--brand);
+  --chart-3: var(--info);
+  --chart-4: var(--accent-ink);
+  --chart-5: var(--ok);
+  --chart-6: #5b21b6;
 
   /* — Certificate: literal print palette ————————
      The certificate is the app's one printed/serif surface (see the top of
      this file) and is styled with its own warm stone tones rather than the
-     platform's cool --ink family, so it reads as a physical document. These
-     name values already used unnamed in the .certificate-* rules below. */
+     platform's cool --ink family, so it reads as a physical document.
+     --certificate-ink-3 names a value already used unnamed in the
+     .certificate-* rules below (#78716c, e.g. .certificate-org/th/sub);
+     --certificate-ink-2 (#57534e) existed only as the JSX literal these
+     replace, with no prior CSS occurrence. */
   --certificate-ink-2: #57534e; /* secondary certificate text, e.g. "This certifies that" */
   --certificate-ink-3: #78716c; /* muted certificate text, e.g. table date/location cells */
 
