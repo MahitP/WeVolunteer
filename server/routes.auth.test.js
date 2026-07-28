@@ -30,6 +30,15 @@ describe('auth: email verification state', () => {
     expect(res.body.user.emailVerified).toBe(true);
   });
 
+  it('rejects a signup password below the minimum length', async () => {
+    const res = await srv.call('POST', '/api/auth/signup', {
+      email: 'short.pass@example.org', password: 'short',
+      name: 'Short Pass', role: 'student', grade: '10', username: 'short_pass'
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Password must be at least 8 characters long');
+  });
+
   it('does not block an unverified user when the flag is off (anti-lockout)', async () => {
     const res = await srv.call('POST', '/api/auth/signup', {
       email: 'unverified.flagoff@example.org', password: 'password123',
