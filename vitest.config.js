@@ -7,12 +7,15 @@ import { defineConfig, configDefaults } from 'vitest/config';
  * `server/*.test.js` files and turn a passing run into a failing one
  * against code that is not part of the repository.
  *
+ * Measured when this was first hit: dropping the exclusion turned a passing
+ * run of 25 files / 256 tests into 73 files / 36 failures.
+ *
  * The defaults are spread back in rather than replaced — omitting them
  * would re-enable scanning of node_modules and dist.
  *
- * Shared by both projects below. This is not optional in either: at the time
- * of writing `scratch/` contains 101 test files, so dropping it from one
- * project reintroduces the failure immediately and visibly.
+ * Shared by both projects below, and not optional in either: `scratch/`
+ * currently holds 101 test files, so dropping it from one project
+ * reintroduces the failure immediately and visibly.
  */
 const EXCLUDE = [...configDefaults.exclude, '**/scratch/**'];
 
@@ -30,7 +33,7 @@ const EXCLUDE = [...configDefaults.exclude, '**/scratch/**'];
  * repeatedly fails every time, with a failure count that varies by test-file
  * scheduling order (observed 2, then 4, then 2 failures across three runs) —
  * module-level state such as the rate limiters' counters survives across files
- * that share a worker.
+ * that share a worker. Pinned, the suite is green on every run.
  *
  * So do not remove this pin to "simplify" the config: it is load-bearing today,
  * and without it CI becomes order-dependently flaky rather than obviously
