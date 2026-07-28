@@ -138,6 +138,7 @@
   --demobar-bg: #6ee7b7;
   --demobar-dot: #6ee7b7;
   --demobar-text: rgba(255, 255, 255, 0.72);
+  --demobar-text-strong: #ffffff;
   --demobar-select-bg: rgba(255, 255, 255, 0.1);
   --demobar-select-border: rgba(255, 255, 255, 0.18);
   --demobar-button: rgba(255, 255, 255, 0.72);
@@ -246,6 +247,7 @@
   --demobar-bg: #064e3b;
   --demobar-dot: #10b981;
   --demobar-text: rgba(255, 255, 255, 0.72);
+  --demobar-text-strong: #ffffff;
   --demobar-select-bg: rgba(255, 255, 255, 0.1);
   --demobar-select-border: rgba(255, 255, 255, 0.18);
   --demobar-button: rgba(255, 255, 255, 0.72);
@@ -2049,7 +2051,7 @@ time { font-variant-numeric: tabular-nums; }
   align-items: center;
   gap: 0.375rem;
   font-weight: 600;
-  color: var(--ink-inv);
+  color: var(--demobar-text-strong);
   letter-spacing: 0.02em;
 }
 .demobar-dot {
@@ -2061,7 +2063,7 @@ time { font-variant-numeric: tabular-nums; }
 .demobar select {
   background: var(--demobar-select-bg);
   border: 1px solid var(--demobar-select-border);
-  color: var(--ink-inv);
+  color: var(--demobar-text-strong);
   border-radius: var(--r-sm);
   padding: 0.1875rem 0.4375rem;
   font-size: 0.75rem;
@@ -2079,7 +2081,7 @@ time { font-variant-numeric: tabular-nums; }
   border-radius: var(--r-sm);
   transition: background var(--t-fast), color var(--t-fast);
 }
-.demobar button:hover { background: var(--demobar-button-hover); color: var(--ink-inv); }
+.demobar button:hover { background: var(--demobar-button-hover); color: var(--demobar-text-strong); }
 
 /* ==========================================================================
    Auth
