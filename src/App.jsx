@@ -202,8 +202,8 @@ export default function App() {
     navigate('/');
   };
 
-  const handleLogout = () => {
-    api.logout();
+  const handleLogout = async () => {
+    await api.logout();
     setCurrentUser(null);
     setEvents([]);
     setApplications([]);
