@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Test harness** — jsdom + React Testing Library setup, cookie auth tests, component tests (EventModal, EmptyState, useTheme), hardcoded color linting test.
 - **Empty states** — Reusable `EmptyState` component for zero-data scenarios across dashboards, profiles, and modal tabs.
 - **Loading skeletons** — `LoadingSkeleton` component for consistent loading states.
+- **Email notifications** — Automated email dispatch for critical event workflows (applications accepted/declined/waitlisted, hours awarded, and events cancelled).
+- **Email opt-out** — Added a toggle in the user profile to disable email notifications.
 
 ### Changed
 - **Cookie authentication** — Migrated from `localStorage` JWTs in the `Authorization` header to `HttpOnly`, `SameSite=Lax` cookies, reducing XSS exposure.

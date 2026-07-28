@@ -16,7 +16,8 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
     school: user?.school || '',
     grade: user?.grade || '10',
     skillsInput: (user?.skills || []).join(', '),
-    leaderboardOptIn: user?.leaderboardOptIn || false
+    leaderboardOptIn: user?.leaderboardOptIn || false,
+    emailOptOut: user?.emailOptOut || false
   });
   const [saving, setSaving] = useState(false);
 
@@ -39,7 +40,8 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
         school: form.school,
         grade: form.grade,
         skills: form.skillsInput.split(',').map(s => s.trim()).filter(Boolean),
-        leaderboardOptIn: form.leaderboardOptIn
+        leaderboardOptIn: form.leaderboardOptIn,
+        emailOptOut: form.emailOptOut
       });
       addToast('Profile updated.', 'success');
       onSave(res.user);
@@ -137,6 +139,20 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
             <div className="stack-xs">
               <label htmlFor="pf-leaderboard" style={{ margin: 0 }}>Leaderboard Participation</label>
               <span className="field-hint">Allow your name, avatar, and total hours to appear on the public leaderboard. If unchecked, your profile is only visible to you and event organizers.</span>
+            </div>
+          </div>
+
+          <div className="field row" style={{ alignItems: 'flex-start', gap: 12 }}>
+            <input 
+              id="pf-email-opt-out" 
+              type="checkbox" 
+              checked={form.emailOptOut}
+              onChange={e => set('emailOptOut', e.target.checked)}
+              style={{ marginTop: 4 }}
+            />
+            <div className="stack-xs">
+              <label htmlFor="pf-email-opt-out" style={{ margin: 0 }}>Disable Email Notifications</label>
+              <span className="field-hint">If checked, you will not receive emails when your applications are accepted, rejected, or when your service hours are confirmed.</span>
             </div>
           </div>
           {/* Sign out lives here because this is the only account surface every

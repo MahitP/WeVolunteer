@@ -538,7 +538,7 @@ router.get('/api/organizers/:id/profile', authenticateToken, (req, res) => {
 
 router.patch('/api/auth/profile', authenticateToken, (req, res) => {
   try {
-    const { name, avatar, bio, school, skills, grade, leaderboardOptIn } = req.body;
+    const { name, avatar, bio, school, skills, grade, leaderboardOptIn, emailOptOut } = req.body;
     const updates = [];
     const values = [];
 
@@ -554,6 +554,7 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
     }
     if (skills !== undefined) { updates.push('skills = ?'); values.push(JSON.stringify(skills || [])); }
     if (leaderboardOptIn !== undefined) { updates.push('leaderboard_opt_in = ?'); values.push(leaderboardOptIn ? 1 : 0); }
+    if (emailOptOut !== undefined) { updates.push('email_opt_out = ?'); values.push(emailOptOut ? 1 : 0); }
 
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
     values.push(req.user.id);
