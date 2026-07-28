@@ -1,11 +1,11 @@
 import jwt from 'jsonwebtoken';
 import { db } from './db.js';
-import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST } from './config.js';
+import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST, COOKIE_NAME } from './config.js';
 
 // --- AUTHENTICATION MIDDLEWARE ---
 export function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Format: Bearer TOKEN
+  const token = (req.cookies && req.cookies[COOKIE_NAME]) || (authHeader && authHeader.split(' ')[1]); // Format: Bearer TOKEN
 
   if (!token) return res.status(401).json({ error: 'Access token required' });
 

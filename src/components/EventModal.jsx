@@ -96,12 +96,21 @@ export default function EventModal({
     } finally {
       setRunsLoading(false);
     }
-  }, [event?.id, event?.autoApprove]);
+  }, [event]);
 
   // Hooks must run on every render, so this sits above the early return.
   useEffect(() => {
     if (tab === 'applicants' && canSeeRuns) loadSelectionRuns();
   }, [tab, canSeeRuns, loadSelectionRuns]);
+
+  useEffect(() => {
+    if (mode === 'attendance' && touchedIds.size > 0) {
+      localStorage.setItem(`wev_draft_attendance_${event?.id}`, JSON.stringify({
+        draftMap: attendanceMap,
+        draftTouched: Array.from(touchedIds)
+      }));
+    }
+  }, [attendanceMap, touchedIds, mode, event?.id]);
 
   if (!event) return null;
 
@@ -170,16 +179,6 @@ export default function EventModal({
     setAttendanceReason('');
     setMode('attendance');
   };
-
-  useEffect(() => {
-    if (mode === 'attendance' && touchedIds.size > 0) {
-      localStorage.setItem(`wev_draft_attendance_${event?.id}`, JSON.stringify({
-        draftMap: attendanceMap,
-        draftTouched: Array.from(touchedIds)
-      }));
-    }
-  }, [attendanceMap, touchedIds, mode, event?.id]);
-
   const startCheckin = async () => {
     // Navigate to the mobile-first check-in view
     navigate(`/checkin/${event.id}`);
