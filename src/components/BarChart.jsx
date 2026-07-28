@@ -7,7 +7,10 @@ import React from 'react';
  * means the same thing here as everywhere else in the product. The palette
  * is a small set of distinguishable hues rather than a rainbow ramp.
  */
-const PALETTE = ['#b45309', '#0f6b45', '#175cd3', '#7c3a06', '#067647', '#5b21b6'];
+const PALETTE = [
+  'var(--accent)', 'var(--brand)', 'var(--info)',
+  'var(--accent-ink)', 'var(--ok)', 'var(--chart-violet)'
+];
 
 export function BarChart({
   data = [],

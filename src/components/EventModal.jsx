@@ -1185,7 +1185,7 @@ export default function EventModal({
                         <strong>{selectedSlots.length} shift{selectedSlots.length !== 1 ? 's' : ''}</strong> selected
                       </span>
                       <button className="btn btn-ghost btn-sm"
-                        style={{ color: 'rgba(255,255,255,.7)', marginLeft: 'auto' }}
+                        style={{ color: 'var(--ink-inv-3)', marginLeft: 'auto' }}
                         onClick={() => setSelectedSlots([])}>
                         Clear
                       </button>

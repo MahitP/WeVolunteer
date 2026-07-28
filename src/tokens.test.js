@@ -31,18 +31,22 @@ function definedTokens() {
 /**
  * Every `var(--…)` reference under src/, with the file it appears in.
  *
- * This file is skipped: it carries no styling, and its own prose examples would
- * otherwise be reported as undefined tokens.
+ * Test files are skipped: they carry no styling, and their own prose examples
+ * (e.g. a guard test's docstring saying `var(--x)` to illustrate what it
+ * checks) would otherwise be reported as undefined tokens. This used to skip
+ * only this file, but any test file's comments can hit the same false
+ * positive — noHardcodedColors.test.js's docstring literally contains
+ * `var(--x)` as prose, not a real reference, and was being flagged as if it
+ * were one.
  */
 function referencedTokens() {
-  const SELF = path.basename(new URL(import.meta.url).pathname);
   const refs = new Map(); // token -> Set(relative file)
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { walk(full); continue; }
       if (!/\.(jsx?|css)$/.test(entry.name)) continue;
-      if (entry.name === SELF) continue;
+      if (entry.name.endsWith('.test.js') || entry.name.endsWith('.test.jsx')) continue;
       const text = fs.readFileSync(full, 'utf8');
       for (const m of text.matchAll(/var\(\s*(--[a-zA-Z0-9-]+)/g)) {
         const rel = path.relative(process.cwd(), full);

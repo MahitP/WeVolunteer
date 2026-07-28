@@ -16,7 +16,6 @@ export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 export const APP_NAME = import.meta.env.VITE_APP_NAME || 'WeVolunteer';
 export const SCHOOL_NAME = import.meta.env.VITE_SCHOOL_NAME || 'WeVolunteer Community';
 export const ENABLE_LEADERBOARD = import.meta.env.VITE_ENABLE_LEADERBOARD !== 'false';
-export const DEFAULT_THEME_COLOR = import.meta.env.VITE_DEFAULT_THEME_COLOR || '#2563eb';
 
 /**
  * Where the district's privacy notice lives.
