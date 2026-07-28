@@ -8,12 +8,12 @@ beforeAll(async () => { srv = await startTestServer(); });
 afterAll(async () => { await srv.close(); });
 
 describe('privacy: student profile PII scoping (grade/school/bio/email)', () => {
-  let leoToken, priyaToken, hostingOrgToken, unrelatedOrgToken, adminToken;
+  let leoToken, _priyaToken, hostingOrgToken, unrelatedOrgToken, adminToken;
   let freshStudentId, freshStudentToken;
 
   beforeAll(async () => {
     leoToken = await srv.login('leo.chen28@gmail.com');
-    priyaToken = await srv.login('priya.patel.nhs@outlook.com');
+    _priyaToken = await srv.login('priya.patel.nhs@outlook.com');
     hostingOrgToken = await srv.login('jkatzenback@vikings.org'); // hosts event-softball
     unrelatedOrgToken = await srv.login('rmiller@sbpl.info'); // pending, hosts nothing
     adminToken = await srv.login('admin@example.gov');
@@ -206,7 +206,7 @@ describe('leaderboard privacy', () => {
   });
 
   it('round-trips the opt-in through PATCH /api/auth/profile (the write-path guard)', async () => {
-    const priyaToken = await srv.login('priya.patel.nhs@outlook.com');
+    const _priyaToken = await srv.login('priya.patel.nhs@outlook.com');
 
     // Opt in.
     const optInRes = await srv.call('PATCH', '/api/auth/profile', { leaderboardOptIn: true }, priyaToken);
@@ -231,7 +231,7 @@ describe('leaderboard privacy', () => {
 // Task 6: GET /api/events requires auth and scopes `instructions` to accepted
 // volunteers/staff; announcements are gated the same way `attendees` already is.
 describe('privacy: event listing requires auth and scopes instructions', () => {
-  let leoToken, priyaToken, hostingOrgToken, adminToken;
+  let leoToken, _priyaToken, hostingOrgToken, adminToken;
 
   // Seeded event-softball has app-sb-6 (Leo, accepted) and app-sb-10 (Priya,
   // pending — not accepted). The seed script leaves `instructions` null, so
@@ -241,7 +241,7 @@ describe('privacy: event listing requires auth and scopes instructions', () => {
 
   beforeAll(async () => {
     leoToken = await srv.login('leo.chen28@gmail.com');
-    priyaToken = await srv.login('priya.patel.nhs@outlook.com');
+    _priyaToken = await srv.login('priya.patel.nhs@outlook.com');
     hostingOrgToken = await srv.login('jkatzenback@vikings.org');
     adminToken = await srv.login('admin@example.gov');
 
@@ -289,11 +289,11 @@ describe('privacy: event listing requires auth and scopes instructions', () => {
 });
 
 describe('privacy: event announcements gated to accepted volunteers and staff', () => {
-  let leoToken, priyaToken, hostingOrgToken, adminToken;
+  let leoToken, _priyaToken, hostingOrgToken, adminToken;
 
   beforeAll(async () => {
     leoToken = await srv.login('leo.chen28@gmail.com');
-    priyaToken = await srv.login('priya.patel.nhs@outlook.com');
+    _priyaToken = await srv.login('priya.patel.nhs@outlook.com');
     hostingOrgToken = await srv.login('jkatzenback@vikings.org');
     adminToken = await srv.login('admin@example.gov');
   });

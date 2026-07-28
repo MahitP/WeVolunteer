@@ -261,7 +261,7 @@ router.get('/api/certificates/verify/:code', (req, res) => {
       hours: Number(row.hours),
       completedAt: row.last_end
     });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Verification failed' });
   }
 });
