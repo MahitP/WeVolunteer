@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { db } from './db.js';
+import { sendNotificationEmail } from './email.js';
 import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST, COOKIE_NAME } from './config.js';
 
 // --- AUTHENTICATION MIDDLEWARE ---
@@ -70,6 +71,7 @@ export function formatUserResponse(row) {
     verified: row.verified === 1,
     emailVerified: row.email_verified === 1,
     leaderboardOptIn: row.leaderboard_opt_in === 1,
+    emailOptOut: row.email_opt_out === 1,
     avatar: row.avatar,
     volunteeredHours: totalHours,
     bio: row.bio,
@@ -138,6 +140,19 @@ export function createNotification({ userId, kind, title, body, link = null, ded
       INSERT INTO notifications (id, user_id, kind, title, body, link, read, created_at, dedupe_key)
       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
     `).run(id, userId, kind, title, body || '', link, new Date().toISOString(), dedupeKey);
+    
+    // Stage 5: Email Notification Dispatch
+    const IMPORTANT_EMAIL_KINDS = ['accepted', 'declined', 'promoted', 'hours', 'cancelled'];
+    if (IMPORTANT_EMAIL_KINDS.includes(kind)) {
+      const user = db.prepare('SELECT email, email_opt_out FROM users WHERE id = ?').get(userId);
+      if (user && user.email_opt_out !== 1) {
+        // Fire and forget, we don't want to block the request on SMTP
+        sendNotificationEmail(user.email, title, body || '').catch(err => {
+          console.error(`Failed to send notification email to ${user.email}:`, err);
+        });
+      }
+    }
+    
     return id;
   } catch (e) {
     // A UNIQUE violation means we already sent this one — that's success.

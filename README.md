@@ -94,7 +94,7 @@ The code is a bearer credential — possession of the printout is what it proves
 
 ### Notifications
 
-In-app notifications cover selection results, waitlist promotions, hours credited, announcements, and cancellations. A sweep runs every fifteen minutes to generate time-based reminders — a shift starting within 24 hours, an application deadline approaching on a favorited event, and an organizer alert when a deadline has passed with applicants still undecided. All are deduplicated so a repeating sweep never produces a duplicate.
+In-app and email notifications cover selection results, waitlist promotions, hours credited, announcements, and cancellations. A sweep runs every fifteen minutes to generate time-based reminders — a shift starting within 24 hours, an application deadline approaching on a favorited event, and an organizer alert when a deadline has passed with applicants still undecided. All are deduplicated so a repeating sweep never produces a duplicate. Volunteers can opt out of email notifications in their profile.
 
 ### Administration
 
@@ -350,8 +350,6 @@ Complete procedures — provisioning, environment setup, database initialisation
 ## Roadmap
 
 WeVolunteer is feature-complete for its first release. The following are known gaps rather than aspirations, listed roughly in the order they would be worth doing.
-
-**Email notifications.** Selection results, waitlist promotions, and cancellations are currently in-app only. A student who does not open the application does not learn they were selected. This is the most significant functional gap.
 
 **Offline-tolerant check-in.** The day-of screen assumes connectivity. Events happen in parks and basements. A local queue with retry would make it dependable where it is most needed.
 
