@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
-import { VALID_GRADES, JWT_SECRET, DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from '../config.js';
+import { VALID_GRADES, JWT_SECRET, DEMO_MODE, REQUIRE_EMAIL_VERIFICATION, COOKIE_NAME, cookieOptions } from '../config.js';
 
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
 import { db, initDatabase } from '../db.js';
@@ -98,6 +98,9 @@ router.post('/api/auth/signup', (req, res) => {
     }
     const token = jwt.sign({ id: user.id, role: user.role, email: user.email, name: user.name, tokenVersion: userRow.token_version ?? 0 }, JWT_SECRET, { expiresIn: '7d' });
 
+    // The token also stays in the body for now; Task 9 removes it once the
+    // test harness and client both read the cookie.
+    res.cookie(COOKIE_NAME, token, cookieOptions());
     res.status(201).json({ user, token });
   } catch (error) {
     console.error('Signup error:', error);
@@ -134,6 +137,7 @@ router.post('/api/auth/login', (req, res) => {
     const user = formatUserResponse(userRow);
     const token = jwt.sign({ id: user.id, role: user.role, email: user.email, name: user.name, tokenVersion: userRow.token_version ?? 0 }, JWT_SECRET, { expiresIn: '7d' });
 
+    res.cookie(COOKIE_NAME, token, cookieOptions());
     res.json({ user, token });
   } catch (error) {
     console.error('Login error:', error);
