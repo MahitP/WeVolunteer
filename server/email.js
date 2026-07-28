@@ -121,3 +121,25 @@ export async function sendPasswordResetEmail(toEmail, token) {
     return false;
   }
 }
+
+export async function sendNotificationEmail(toEmail, subject, text, html) {
+  const mailOptions = {
+    from: EMAIL_FROM,
+    to: toEmail,
+    subject: `${subject} - ${APP_NAME}`,
+    text: `${text}\n\nLog in at ${APP_URL || ''} to see more details.`,
+    html: `
+      <h2>${subject}</h2>
+      <p>${html || text.replace(/\n/g, '<br/>')}</p>
+      <p><a href="${APP_URL || ''}">Log in to your account</a></p>
+    `
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    return true;
+  } catch (err) {
+    console.error('Error sending notification email:', err);
+    return false;
+  }
+}
