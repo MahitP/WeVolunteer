@@ -1,6 +1,22 @@
 import { defineConfig, configDefaults } from 'vitest/config';
 
 /**
+ * `scratch/` holds throwaway full copies of the project made during
+ * deployment checks. Vitest walks the filesystem rather than git, so
+ * .gitignore does not keep it out: those copies contribute their own
+ * `server/*.test.js` files and turn a passing run into a failing one
+ * against code that is not part of the repository.
+ *
+ * The defaults are spread back in rather than replaced — omitting them
+ * would re-enable scanning of node_modules and dist.
+ *
+ * Shared by both projects below. This is not optional in either: at the time
+ * of writing `scratch/` contains 101 test files, so dropping it from one
+ * project reintroduces the failure immediately and visibly.
+ */
+const EXCLUDE = [...configDefaults.exclude, '**/scratch/**'];
+
+/**
  * Test isolation is load-bearing here, so it is declared rather than inherited.
  *
  * Several server suites set process-wide state before importing the app:
@@ -14,7 +30,7 @@ import { defineConfig, configDefaults } from 'vitest/config';
  * repeatedly fails every time, with a failure count that varies by test-file
  * scheduling order (observed 2, then 4, then 2 failures across three runs) —
  * module-level state such as the rate limiters' counters survives across files
- * that share a worker. `isolate: true` produces 241/241 on every run.
+ * that share a worker.
  *
  * So do not remove this pin to "simplify" the config: it is load-bearing today,
  * and without it CI becomes order-dependently flaky rather than obviously
@@ -22,19 +38,38 @@ import { defineConfig, configDefaults } from 'vitest/config';
  */
 export default defineConfig({
   test: {
-    isolate: true,
-
     /**
-     * `scratch/` holds throwaway full copies of the project made during
-     * deployment checks. Vitest walks the filesystem rather than git, so
-     * .gitignore does not keep it out: those copies contribute their own
-     * `server/*.test.js` files and turn a passing run (25 files / 256 tests)
-     * into a failing one (73 files / 36 failures) against code that is not
-     * part of the repository.
+     * Environment is per-directory, not global.
      *
-     * The defaults are spread back in rather than replaced — omitting them
-     * would re-enable scanning of node_modules and dist.
+     * The server suites talk to node:sqlite, bind a real port, and read
+     * process.env — they must keep running under `node`. Only the client
+     * suites need a DOM. Setting `environment: 'jsdom'` globally would put
+     * every server test inside a fake browser, where `fetch` against
+     * 127.0.0.1 and DatabaseSync behave differently than in production and
+     * failures would be blamed on the code rather than the harness.
      */
-    exclude: [...configDefaults.exclude, '**/scratch/**']
+    projects: [
+      {
+        test: {
+          name: 'client',
+          include: ['src/**/*.test.{js,jsx}'],
+          exclude: EXCLUDE,
+          environment: 'jsdom',
+          // Only the client project loads this; server suites never import
+          // @testing-library and must not pay for it.
+          setupFiles: ['./src/setupTests.js'],
+          isolate: true
+        }
+      },
+      {
+        test: {
+          name: 'server',
+          include: ['server/**/*.test.js'],
+          exclude: EXCLUDE,
+          environment: 'node',
+          isolate: true
+        }
+      }
+    ]
   }
 });
