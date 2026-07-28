@@ -143,3 +143,35 @@ describe('login and signup issue a session cookie', () => {
     expect(parseCookie(res.headers.get('set-cookie'), 'wev_session')).not.toBeNull();
   });
 });
+
+describe('authenticateToken accepts the session cookie', () => {
+  it('authenticates a request carrying a valid session cookie', async () => {
+    const loginRes = await fetch(`${srv.base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'password123' })
+    });
+    const setCookie = loginRes.headers.get('set-cookie');
+    const cookieString = setCookie.split(';')[0]; // Extract just the name=value part
+
+    const meRes = await fetch(`${srv.base}/api/auth/me`, {
+      headers: { 'Cookie': cookieString }
+    });
+    
+    expect(meRes.status).toBe(200);
+    const body = await meRes.json();
+    expect(body.email).toBe('leo.chen28@gmail.com');
+  });
+
+  it('rejects a request with no cookie and no header', async () => {
+    const res = await fetch(`${srv.base}/api/auth/me`);
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects a malformed cookie', async () => {
+    const res = await fetch(`${srv.base}/api/auth/me`, {
+      headers: { 'Cookie': 'wev_session=not-a-valid-jwt' }
+    });
+    expect(res.status).toBe(403);
+  });
+});

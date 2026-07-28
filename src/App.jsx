@@ -24,7 +24,7 @@ import VolunteerPortfolio from './views/VolunteerPortfolio';
 import CheckInView from './views/CheckInView';
 import {
   LayoutDashboard, Compass, CalendarPlus, ShieldCheck, LogOut, CalendarDays,
-  UserCog, CheckCircle2, AlertTriangle, Info, X, ChevronsUpDown, Loader2, Bell, UserRound, Mail
+  UserCog, CheckCircle2, AlertTriangle, Info, X, ChevronsUpDown, Loader2, Bell, UserRound
 } from 'lucide-react';
 
 /* Navigation is defined once and filtered by role, so every role gets the
@@ -156,7 +156,7 @@ export default function App() {
       }
     };
     validateSession();
-  }, [refreshKey]);
+  }, [refreshKey, searchParams, setSearchParams]);
 
   const handleToggleFavorite = async (eventId) => {
     try {
@@ -168,7 +168,7 @@ export default function App() {
         setFavorites(prev => prev.filter(id => id !== eventId));
         addToast('Removed from favorites.', 'info');
       }
-    } catch (err) {
+    } catch {
       addToast('Could not toggle favorite.', 'error');
     }
   };

@@ -361,7 +361,7 @@ router.post('/api/favorites/:eventId', authenticateToken, (req, res) => {
       INSERT INTO user_favorites (user_id, event_id, created_at) VALUES (?, ?, ?)
     `).run(req.user.id, eventId, new Date().toISOString());
     res.json({ favorited: true });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to toggle favorite' });
   }
 });
@@ -493,7 +493,7 @@ router.get('/api/leaderboard', authenticateToken, (req, res) => {
       rank: i + 1, id: r.id, name: r.name, avatar: r.avatar,
       hours: Number(r.hours), shifts: r.shifts
     })));
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to fetch leaderboard' });
   }
 });

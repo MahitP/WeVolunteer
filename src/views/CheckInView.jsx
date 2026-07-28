@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
-import { ArrowLeft, Check, Users, ShieldCheck, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Users } from 'lucide-react';
 import { formatTimeRange } from '../utils/helpers';
 
 /**
@@ -9,7 +9,7 @@ import { formatTimeRange } from '../utils/helpers';
  * This does not finalize hours — it only records check-in status (present=null) 
  * so the organizer can see who showed up. Hours are finalized later via EventModal.
  */
-export default function CheckInView({ currentUser }) {
+export default function CheckInView({ _currentUser }) {
   const { eventId } = useParams();
   const navigate = useNavigate();
 
