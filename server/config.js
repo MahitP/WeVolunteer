@@ -49,3 +49,51 @@ export const EMAIL_GATE_ALLOWLIST = [
   '/api/auth/resend-verification',
   '/api/notifications'
 ];
+
+/**
+ * Session cookie.
+ *
+ * Replaces the v1.0 scheme of a JWT in localStorage sent as an Authorization
+ * header. The token itself is unchanged — same claims, same 7-day expiry, same
+ * signing secret. Only the transport moved, into a place script cannot read.
+ */
+export const COOKIE_NAME = 'wev_session';
+
+/** Must match the JWT's `expiresIn: '7d'` — a cookie that outlives its token
+ *  produces a confusing 403 on a session the browser still believes in. */
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Options for the session cookie.
+ *
+ * `sameSite: 'lax'` and NO CSRF token, deliberately.
+ *
+ * Cookies reintroduce CSRF, which an Authorization header is structurally
+ * immune to — so this is only an upgrade if that exposure is actually closed.
+ * It is, by the topology: production serves the SPA and the API from one
+ * Express process (app.js), and development proxies /api through Vite, so the
+ * browser sees a single origin in both. `Lax` blocks cross-site POST, PATCH and
+ * DELETE, which is the entire CSRF surface available here.
+ *
+ * A double-submit token would add nothing against that threat model — it
+ * defends against a same-site attacker on a sibling subdomain, which this
+ * deployment does not have. Adding one now would be unjustified complexity.
+ *
+ * REVISIT THIS if the app is ever served from a subdomain alongside another
+ * application, or if the API moves to a different origin from the SPA. Either
+ * change invalidates the reasoning above and makes a CSRF token necessary.
+ *
+ * `secure` is gated on production because development runs over plain HTTP
+ * through the Vite proxy; a Secure cookie is silently dropped there, which
+ * presents as "login succeeds but every subsequent request is 401" — a failure
+ * with no visible cause.
+ */
+export function cookieOptions() {
+  return {
+    httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: 'lax',
+    maxAge: SEVEN_DAYS_MS,
+    path: '/'
+  };
+}
