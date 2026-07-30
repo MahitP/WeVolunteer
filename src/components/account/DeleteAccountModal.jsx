@@ -1,7 +1,22 @@
 import React, { useState } from 'react';
 import { api } from '../../utils/api';
-import { AlertTriangle, Trash2 } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
+import Modal from '../Modal';
 
+/**
+ * Confirm and perform account deletion.
+ *
+ * Uses the shared `Modal` shell, which it previously did not — it hand-rolled
+ * its own `.modal-overlay` markup and so was the ONE dialog in the app with no
+ * dialog semantics at all: no `role="dialog"`, no `aria-modal`, no focus moved
+ * in on open or restored on close, no focus containment, no Escape, no scroll
+ * lock, and a close control labelled only with the character "×".
+ *
+ * That it was this dialog is what makes it worth calling out. A keyboard or
+ * screen-reader user could be dropped into an irreversible, unannounced form
+ * with no way out but the mouse. Every other modal in the app already went
+ * through `Modal`/`useModal`; this one just never got moved over.
+ */
 export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, username }) {
   const [deleteText, setDeleteText] = useState('');
   const [password, setPassword] = useState('');
@@ -49,42 +64,52 @@ export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, us
   };
 
   return (
-    <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: '540px' }}>
-        <div className="modal-head" style={{ borderBottom: 'none', paddingBottom: 0 }}>
-          <button className="modal-close" onClick={onClose} disabled={isSubmitting}>×</button>
-        </div>
-        
-        <div className="modal-body" style={{ paddingTop: 0 }}>
+    <Modal onClose={isSubmitting ? () => {} : onClose} label="Delete your account" className="modal-delete-account">
+      <div className="modal-head modal-head-bare">
+        <button
+          className="modal-close"
+          onClick={onClose}
+          disabled={isSubmitting}
+          aria-label="Close without deleting"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="modal-body modal-body-flush">
           <div className="stack-lg">
-            <div style={{ textAlign: 'center', marginBottom: 'var(--s2)' }}>
-              <div style={{ background: 'var(--danger-tint)', padding: 'var(--s4)', borderRadius: 'var(--r-full)', display: 'inline-block', marginBottom: 'var(--s4)' }}>
-                <AlertTriangle size={40} color="var(--danger)" />
+            <div className="delete-hero">
+              <div className="delete-hero-icon">
+                <AlertTriangle size={40} aria-hidden="true" />
               </div>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--ink)' }}>Delete Account?</h2>
-              <p className="lead" style={{ marginTop: 'var(--s3)', margin: 'var(--s3) auto 0' }}>
+              {/* h2, and the dialog's accessible name comes from Modal's
+                  aria-label — so the heading is announced as content rather
+                  than being the only thing identifying the dialog. */}
+              <h2 className="delete-hero-title">Delete Account?</h2>
+              <p className="lead delete-hero-lead">
                 Deleting your account removes your profile, settings, and login access.
                 Your verified volunteer records and certificates may be preserved for verification purposes.
               </p>
             </div>
 
-            <div className="card" style={{ background: 'var(--surface-2)', borderRadius: 'var(--r-md)' }}>
+            <div className="card delete-summary">
               <div className="card-pad stack-md">
-                <p className="strong" style={{ marginBottom: 'var(--s2)' }}>Before deleting:</p>
-                
-                <div className="row" style={{ alignItems: 'flex-start', gap: 'var(--s6)' }}>
-                  <div className="stack-sm" style={{ flex: 1 }}>
-                    <p className="strong small" style={{ color: 'var(--danger)' }}>Removed</p>
-                    <ul className="small dim" style={{ paddingLeft: 'var(--s4)', margin: 0, lineHeight: 1.6 }}>
+                <p className="strong stack-heading">Before deleting:</p>
+
+                <div className="row delete-summary-cols">
+                  <div className="stack-sm delete-summary-col">
+                    <p className="strong small delete-summary-removed">Removed</p>
+                    <ul className="small dim delete-summary-list">
                       <li>Profile information</li>
                       <li>Preferences</li>
                       <li>Login access</li>
+                      <li>Your place on any upcoming shift</li>
                     </ul>
                   </div>
-                  
-                  <div className="stack-sm" style={{ flex: 1 }}>
-                    <p className="strong small" style={{ color: 'var(--ok)' }}>Preserved</p>
-                    <ul className="small dim" style={{ paddingLeft: 'var(--s4)', margin: 0, lineHeight: 1.6 }}>
+
+                  <div className="stack-sm delete-summary-col">
+                    <p className="strong small delete-summary-kept">Preserved</p>
+                    <ul className="small dim delete-summary-list">
                       <li>Certificates</li>
                       <li>Verified volunteer hours</li>
                       <li>Historical records</li>
@@ -94,20 +119,30 @@ export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, us
               </div>
             </div>
 
+            {/* role="alert" so the failure is announced. Previously a plain
+                styled div: a screen-reader user pressed the button, nothing was
+                read out, and the form appeared simply not to respond. */}
             {error && (
-              <div style={{ background: 'var(--danger-tint)', padding: 'var(--s3)', borderRadius: 'var(--r-sm)', border: '1px solid var(--danger-border)' }}>
-                <p className="small" style={{ color: 'var(--danger-ink)', margin: 0, textAlign: 'center' }}>
-                  {error}
-                </p>
+              <div className="alert alert-danger" role="alert">
+                <AlertTriangle size={16} aria-hidden="true" />
+                <span>{error}</span>
               </div>
             )}
 
-            <form id="delete-form" onSubmit={handleDelete} className="stack-md" style={{ marginTop: 'var(--s2)' }}>
+            <form id="delete-form" onSubmit={handleDelete} className="stack-md delete-form">
               <div className="stack-sm">
-                <label className="strong small">To continue, type: DELETE</label>
-                <input 
-                  type="text" 
-                  className="input" 
+                {/* The label was not associated with its input at all — no
+                    htmlFor, no id — so clicking it did nothing and a screen
+                    reader announced an unlabelled text box. */}
+                <label className="strong small" htmlFor="delete-confirm-text">To continue, type: DELETE</label>
+                <input
+                  id="delete-confirm-text"
+                  type="text"
+                  className="input"
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck="false"
                   value={deleteText}
                   onChange={(e) => setDeleteText(e.target.value)}
                   placeholder="DELETE"
@@ -156,7 +191,7 @@ export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, us
               )}
             </form>
 
-            <div className="row" style={{ justifyContent: 'flex-end', gap: 'var(--s3)', marginTop: 'var(--s4)' }}>
+            <div className="row delete-actions">
               <button className="btn btn-ghost btn-lg" type="button" onClick={onClose} disabled={isSubmitting}>
                 Cancel
               </button>
@@ -170,12 +205,11 @@ export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, us
                   || (needsUsername && confirmUsername.trim().toLowerCase() !== String(username || '').toLowerCase())
                 }
               >
-                {isSubmitting ? 'Deleting...' : 'Delete My Account'}
+                {isSubmitting ? 'Deleting…' : 'Delete My Account'}
               </button>
             </div>
           </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }

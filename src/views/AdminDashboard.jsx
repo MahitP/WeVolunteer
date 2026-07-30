@@ -1,6 +1,18 @@
 import React, { useEffect, useState } from 'react';
+/**
+ * Every icon rendered below must be imported here.
+ *
+ * Five were not — UserX, UserCheck, CheckCircle, Search and Trash2 — and
+ * `UserX`/`UserCheck` are the Deny and Approve controls in the organizer review
+ * queue. React threw `ReferenceError: UserX is not defined` the moment the queue
+ * had a single pending organizer, so the whole screen fell into the error
+ * boundary and no organizer could ever be approved — which means no organizer
+ * could ever post an event. `oxlint` reports these as `jsx-no-undef`; the
+ * warning is not cosmetic, it is a guaranteed render crash.
+ */
 import {
-  Calendar, ShieldCheck, Flag, Shield, UserCog, Ban, Mail
+  Calendar, ShieldCheck, Flag,
+  UserX, UserCheck, CheckCircle, Search, Trash2
 } from 'lucide-react';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';

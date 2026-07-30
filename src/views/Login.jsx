@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { Mail, Lock, AlertCircle, ArrowLeft, Eye, EyeOff, User, CheckCircle2 } from 'lucide-react';
 import ProviderButtons from '../components/auth/ProviderButtons';
@@ -18,12 +18,36 @@ export default function Login({ onLoginSuccess, addToast }) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  /** Which input the server blamed, so the message can sit beside it. */
+  const [errorField, setErrorField] = useState(null);
   const [loading, setLoading] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const linkData = location.state?.linkData;
 
-  const [mode, setMode] = useState(linkData ? 'link' : 'login');
+  /**
+   * The sub-mode lives in the URL.
+   *
+   * It was React state, which broke the one navigation control a phone always
+   * has: pressing the system back button from "Reset your password" left the app
+   * entirely instead of returning to sign-in, and a refresh mid-flow silently
+   * dropped the user back to a form they had already left. `?mode=forgot` costs
+   * nothing and makes back, forward and reload all behave.
+   *
+   * `link` stays state-driven — it depends on `location.state.linkData` from the
+   * OAuth callback, which a URL cannot carry.
+   */
+  const urlMode = searchParams.get('mode');
+  const mode = linkData ? 'link' : (['forgot', 'forgot-success'].includes(urlMode) ? urlMode : 'login');
+
+  const setMode = (next) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'login') params.delete('mode');
+    else params.set('mode', next);
+    setSearchParams(params, { replace: false });
+  };
+
   const [sentTo, setSentTo] = useState('');
 
   /**
@@ -33,16 +57,29 @@ export default function Login({ onLoginSuccess, addToast }) {
    * anything happened — the alert renders above the fields they are still
    * sitting in, out of reading order and never announced.
    */
+  /**
+   * Focus moves to whatever the user has to act on.
+   *
+   * Without this a screen-reader user submits the form and gets no indication
+   * anything happened — the alert renders above the fields they are still
+   * sitting in, out of reading order and never announced.
+   *
+   * When the server named a field, focus goes to that input rather than to the
+   * banner: it is both the announcement and the thing they need to edit, so one
+   * move does the work of two.
+   */
   const errorRef = useRef(null);
   useEffect(() => {
-    if (error && errorRef.current) errorRef.current.focus();
-  }, [error]);
+    if (!error) return;
+    if (errorField) {
+      document.getElementById(errorField === 'password' ? 'login-password' : 'login-identifier')?.focus();
+    } else {
+      errorRef.current?.focus();
+    }
+  }, [error, errorField]);
 
   useEffect(() => {
-    if (linkData) {
-      setMode('link');
-      setIdentifier(linkData.email);
-    }
+    if (linkData) setIdentifier(linkData.email);
   }, [linkData]);
 
   const startOAuth = async (provider) => {
@@ -73,6 +110,7 @@ export default function Login({ onLoginSuccess, addToast }) {
 
   const performLogin = async (loginId, loginPassword) => {
     setError('');
+    setErrorField(null);
     setLoading(true);
     try {
       const result = await api.login(loginId, loginPassword);
@@ -86,6 +124,20 @@ export default function Login({ onLoginSuccess, addToast }) {
       onLoginSuccess();
     } catch (err) {
       setError(err.message || 'That email or password is not correct.');
+      /**
+       * The API says which credential was wrong; show it on that input.
+       *
+       * `code` was being thrown away entirely, so an unrecognised username and
+       * a mistyped password produced the same undifferentiated banner above two
+       * fields that both looked fine — the exact ambiguity the specific error
+       * messages exist to remove.
+       */
+      const code = err.data?.code;
+      setErrorField(
+        code === 'wrong_password' ? 'password'
+          : code === 'no_such_account' ? 'identifier'
+            : null
+      );
       setLoading(false);
     }
   };
@@ -112,7 +164,14 @@ export default function Login({ onLoginSuccess, addToast }) {
     }
   };
 
-  const errorBanner = error && (
+  /**
+   * The banner carries anything NOT attributable to one field.
+   *
+   * When the server did name a field, the message is rendered beside that input
+   * instead — showing it in both places says the same thing twice and makes the
+   * screen read as two separate problems.
+   */
+  const errorBanner = error && !errorField && (
     <div
       className="alert alert-danger"
       role="alert"
@@ -155,7 +214,7 @@ export default function Login({ onLoginSuccess, addToast }) {
     return (
       <div className="auth">
         <main className="auth-form auth-form-narrow" aria-labelledby="forgot-heading">
-          <button className="auth-back" onClick={() => { setMode('login'); setError(''); }}>
+          <button className="auth-back" onClick={() => { setMode('login'); setError(''); setErrorField(null); }}>
             <ArrowLeft size={16} aria-hidden="true" /> Back to sign in
           </button>
 
@@ -321,11 +380,18 @@ export default function Login({ onLoginSuccess, addToast }) {
                 spellCheck="false"
                 placeholder="you@example.com or your username"
                 value={identifier}
-                onChange={e => setIdentifier(e.target.value)}
+                onChange={e => { setIdentifier(e.target.value); if (errorField === 'identifier') setErrorField(null); }}
+                aria-invalid={errorField === 'identifier'}
+                aria-describedby={errorField === 'identifier' ? 'login-identifier-error' : undefined}
                 required
                 disabled={loading}
               />
             </div>
+            {errorField === 'identifier' && (
+              <span className="field-error" id="login-identifier-error">
+                <AlertCircle size={12} aria-hidden="true" />{error}
+              </span>
+            )}
           </div>
 
           <div className="field">
@@ -334,7 +400,7 @@ export default function Login({ onLoginSuccess, addToast }) {
               <button
                 type="button"
                 className="auth-link auth-inline-link small"
-                onClick={() => { setMode('forgot'); setError(''); }}
+                onClick={() => { setMode('forgot'); setError(''); setErrorField(null); }}
               >
                 Forgot?
               </button>
@@ -349,7 +415,9 @@ export default function Login({ onLoginSuccess, addToast }) {
                 autoComplete="current-password"
                 placeholder="Your password"
                 value={password}
-                onChange={e => setPassword(e.target.value)}
+                onChange={e => { setPassword(e.target.value); if (errorField === 'password') setErrorField(null); }}
+                aria-invalid={errorField === 'password'}
+                aria-describedby={errorField === 'password' ? 'login-password-error' : undefined}
                 required
                 disabled={loading}
               />
@@ -363,6 +431,11 @@ export default function Login({ onLoginSuccess, addToast }) {
                 {showPassword ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
               </button>
             </div>
+            {errorField === 'password' && (
+              <span className="field-error" id="login-password-error">
+                <AlertCircle size={12} aria-hidden="true" />{error}
+              </span>
+            )}
           </div>
 
           <button

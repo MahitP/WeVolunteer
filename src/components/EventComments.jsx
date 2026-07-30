@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { MessageSquare, Send, Trash2, Flag } from 'lucide-react';
+// Loader2 renders while a comment is posting. It was missing from this import,
+// so oxlint's jsx-no-undef fired and the button threw
+// `ReferenceError: Loader2 is not defined` the instant anyone pressed Post —
+// taking the comment thread down with it, on the success path.
+import { MessageSquare, Send, Trash2, Flag, Loader2 } from 'lucide-react';
 import LoadingSkeleton from './common/LoadingSkeleton';
 import { api } from '../utils/api';
 import { timeAgo } from '../utils/helpers';
