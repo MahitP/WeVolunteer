@@ -265,7 +265,18 @@ export const api = {
     try {
       return await apiFetch('/api/auth/me');
     } catch (e) {
-      if (e.status === 401) {
+      /**
+       * 403 as well as 401.
+       *
+       * authenticateToken answers 401 for a missing session but 403 for one it
+       * cannot verify — which is exactly what every existing user gets after the
+       * signing secret is rotated, since their cookie was signed with the old
+       * one. Clearing on 401 only meant the cached user object (name, email,
+       * role) stayed in localStorage after the session it belonged to had been
+       * rejected. Both statuses mean the same thing to a client: the server does
+       * not accept this session.
+       */
+      if (e.status === 401 || e.status === 403) {
         localStorage.removeItem(STORAGE_KEYS.USER);
       }
       return null;
@@ -279,6 +290,25 @@ export const api = {
 
   // ── Events ──────────────────────────────────────
   fetchEvents: async () => apiFetch('/api/events'),
+
+  /**
+   * One page of events: `{ events, pagination }`.
+   *
+   * Deliberately a separate method rather than optional arguments on
+   * `fetchEvents`, because the two return different shapes — a bare array versus
+   * an envelope — and a single function that does both invites a caller to
+   * forget which it got.
+   *
+   * NOT yet used by the SPA. `App.jsx` holds the full event list as a local
+   * index: the calendar resolves each application to its event, the organizer
+   * dashboard filters for its own events, and opening an event from a
+   * notification looks it up by id. Feeding those a page would not error — it
+   * would quietly show a student the wrong calendar. Migrating them needs
+   * scoped queries (`?scope=mine`) and a student-readable single-event endpoint
+   * first; `/api/events/:id` is staff-only today.
+   */
+  fetchEventsPage: async ({ limit = 50, offset = 0 } = {}) =>
+    apiFetch(`/api/events?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`),
 
   fetchEventDetails: async (eventId) => apiFetch(`/api/events/${eventId}`),
 
