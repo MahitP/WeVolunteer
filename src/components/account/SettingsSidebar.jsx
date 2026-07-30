@@ -1,7 +1,10 @@
 import React from 'react';
-import { Palette, Bell, Shield, Lock, MessageSquare, HelpCircle, ChevronRight, ArrowLeft } from 'lucide-react';
+import { UserCog, Palette, Bell, Shield, Lock, MessageSquare, HelpCircle, ChevronRight } from 'lucide-react';
 
 const SECTIONS = [
+  // Account first: it holds the two things a person is most likely to have
+  // come here to fix — the email address on the account and their username.
+  { id: 'account', label: 'Account', icon: UserCog },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'privacy', label: 'Privacy', icon: Shield },

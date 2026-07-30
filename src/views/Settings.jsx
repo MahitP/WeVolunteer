@@ -7,6 +7,8 @@ import DeleteAccountModal from '../components/account/DeleteAccountModal';
 import DataExportCard from '../components/account/DataExportCard';
 import ConnectedAccounts from '../components/account/ConnectedAccounts';
 import PasswordCard from '../components/account/PasswordCard';
+import EmailCard from '../components/account/EmailCard';
+import UsernameCard from '../components/account/UsernameCard';
 import { api } from '../utils/api';
 import { useTheme } from '../hooks/useTheme';
 import { Sun, Moon, SunMoon, ExternalLink } from 'lucide-react';
@@ -93,6 +95,13 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
 
   const renderSection = () => {
     switch (activeSection) {
+      case 'account':
+        return (
+          <SettingsSection title="Account" isMobile={isMobile} onBack={handleBack}>
+            <EmailCard currentUser={currentUser} addToast={addToast} onProfileChange={onProfileChange} />
+            <UsernameCard currentUser={currentUser} addToast={addToast} onProfileChange={onProfileChange} />
+          </SettingsSection>
+        );
       case 'appearance':
         return (
           <SettingsSection title="Appearance" isMobile={isMobile} onBack={handleBack}>

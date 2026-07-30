@@ -183,6 +183,29 @@ export const api = {
   /** Invalidate every other session. Also previously a toast and nothing else. */
   signOutOtherDevices: async () => apiFetch('/api/auth/sign-out-others', { method: 'POST' }),
 
+  /**
+   * Email address changes, in two steps.
+   *
+   * `changeEmail` only starts the request — the address does not move until the
+   * link sent to it is opened. That matters for the caller's copy: it must say
+   * "check your new inbox", never "your email has been changed".
+   */
+  changeEmail: async (newEmail, password) => apiFetch('/api/auth/change-email', {
+    method: 'POST',
+    body: JSON.stringify({ newEmail, password })
+  }),
+  confirmEmailChange: async (token) => apiFetch('/api/auth/confirm-email-change', {
+    method: 'POST',
+    body: JSON.stringify({ token })
+  }),
+  cancelEmailChange: async () => apiFetch('/api/auth/cancel-email-change', { method: 'POST' }),
+  fetchPendingEmailChange: async () => apiFetch('/api/auth/pending-email-change'),
+
+  changeUsername: async (username) => apiFetch('/api/auth/change-username', {
+    method: 'POST',
+    body: JSON.stringify({ username })
+  }),
+
   deleteAccount: async ({ password, confirmUsername }) => apiFetch('/api/auth/account', {
     method: 'DELETE',
     body: JSON.stringify({ password, confirmUsername })
