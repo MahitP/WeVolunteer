@@ -8,6 +8,7 @@ import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
+import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
 
 const router = express.Router();
 
@@ -104,34 +105,62 @@ router.get('/api/events', authenticateToken, (req, res) => {
       offset = Math.floor(rawOffset);
     }
 
-    const total = db.prepare('SELECT COUNT(*) AS c FROM events').get().c;
+    const parsed = parseEventFilters(req.query);
+    if (!parsed.ok) {
+      return res.status(400).json({ error: parsed.error, field: parsed.field });
+    }
+    const filters = parsed.value;
 
-    // COALESCE puts events with no slots last instead of first — a NULL sorts
-    // before every real date in SQLite, which would otherwise float unscheduled
-    // events to the top of the browse list.
-    const ORDER = `
-      ORDER BY COALESCE(
-        (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id),
-        '9999-12-31'
-      ) ASC, e.id ASC
+    /**
+     * Filtering, sorting and the distance calculation all run in SQL now.
+     *
+     * BrowseEvents used to receive every event and do this in JavaScript, which
+     * is exactly why the endpoint could not paginate: a text search over "the
+     * pages loaded so far" is a wrong answer, not a partial one. See
+     * ../eventQuery.js for each predicate and how it maps to the client behaviour
+     * it replaces.
+     *
+     * The aggregate CTE exists because `spots_remaining` and `total_hours` are
+     * derived rather than stored, and both the WHERE and the ORDER BY need to
+     * reference them.
+     */
+    const { aggCte, distanceSelect, spotsSelect } = eventQueryFragments(filters);
+    const { where, params } = buildEventWhere(filters, req.user.id);
+    const order = buildEventOrder(filters.sort);
+
+    const FROM = `
+      FROM events e
+      JOIN users u ON e.organizer_id = u.id
+      JOIN agg ON agg.event_id = e.id
+      LEFT JOIN acc ON acc.event_id = e.id
+      ${where}
     `;
 
+    // `total` counts the rows MATCHING THE FILTERS, not the whole table — a
+    // pagination total that ignored the filters would make hasMore and the "N
+    // events" count disagree with what the caller can actually page through.
+    const total = db.prepare(`WITH ${aggCte} SELECT COUNT(*) AS c ${FROM}`).get(params).c;
+
+    const SELECT = `
+      SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
+             u.school as organizer_school,
+             ${spotsSelect},
+             ${distanceSelect}
+    `;
+
+    /**
+     * The row query needs lat/lng for the distance expression in its SELECT list;
+     * the COUNT above does not, and node:sqlite refuses a bound parameter that
+     * the statement never references.
+     */
+    const rowParams = filters.lat != null
+      ? { ...params, lat: filters.lat, lng: filters.lng }
+      : params;
+
     const events = paginated
-      ? db.prepare(`
-          SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
-                 u.school as organizer_school
-          FROM events e
-          JOIN users u ON e.organizer_id = u.id
-          ${ORDER}
-          LIMIT ? OFFSET ?
-        `).all(limit, offset)
-      : db.prepare(`
-          SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
-                 u.school as organizer_school
-          FROM events e
-          JOIN users u ON e.organizer_id = u.id
-          ${ORDER}
-        `).all();
+      ? db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @limit OFFSET @offset`)
+          .all({ ...rowParams, limit, offset })
+      : db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order}`).all(rowParams);
 
     if (!paginated && total > EVENTS_WARN_THRESHOLD) {
       console.warn(
@@ -243,6 +272,14 @@ router.get('/api/events', authenticateToken, (req, res) => {
         autoApprove: event.auto_approve === 1,
         attendeeVisibility: event.attendee_visibility || 'accepted',
         selectionSummary: event.selection_summary ? JSON.parse(event.selection_summary) : null,
+        /**
+         * Distance in MILES, computed in SQL when the caller supplied lat/lng.
+         *
+         * Null when no coordinates were given, or when the event has none — the
+         * client's EventCard already treats null as "no distance to show", and
+         * the sort places nulls last, matching the `?? Infinity` it replaced.
+         */
+        distance: event.distance_miles != null ? Number(event.distance_miles) : null,
         slots: formattedSlots
       };
     });
@@ -260,6 +297,22 @@ router.get('/api/events', authenticateToken, (req, res) => {
       return res.json(formattedEvents);
     }
 
+    /**
+     * `places` is computed over the whole listable set, deliberately ignoring the
+     * filters.
+     *
+     * It populates the location dropdown, and a dropdown whose options are
+     * filtered by the current selection is a trap: choosing a place would remove
+     * every other option and the user could not get back without clearing. The
+     * client built this list from the full event array it used to hold, so it has
+     * to come from somewhere now that the array is a filtered page.
+     */
+    const places = db.prepare(`
+      SELECT DISTINCT location FROM events
+      WHERE status IN ('open', 'closed') AND location IS NOT NULL AND location != ''
+      ORDER BY location COLLATE NOCASE
+    `).all().map(r => r.location);
+
     res.json({
       events: formattedEvents,
       pagination: {
@@ -272,7 +325,11 @@ router.get('/api/events', authenticateToken, (req, res) => {
         // rather than doing the arithmetic itself.
         nextOffset: offset + formattedEvents.length < total ? offset + formattedEvents.length : null,
         maxLimit: EVENTS_MAX_LIMIT
-      }
+      },
+      places,
+      // Echoed back so a client can tell which filters the server actually
+      // applied, rather than assuming its request was understood verbatim.
+      filters
     });
   } catch (error) {
     console.error('Fetch events error:', error);

@@ -333,7 +333,24 @@ export const api = {
    * @param {function} opts.shouldContinue  return false to abandon the walk
    * @returns {Promise<object[]>} every event, in server order
    */
-  fetchEventsProgressive: async ({ pageSize = 500, onPage, shouldContinue } = {}) => {
+  /**
+   * One page of the browse list, filtered and sorted by the SERVER.
+   *
+   * Returns `{ events, pagination, places, filters }`. Every predicate lives in
+   * SQL (see server/eventQuery.js), which is what makes paging correct: while the
+   * client owned the filtering, a search could only ever see the pages already
+   * loaded, and a partial search result is a wrong answer rather than a slow one.
+   */
+  fetchEventsFiltered: async (filters = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(filters)) {
+      if (v === undefined || v === null || v === '' || v === false) continue;
+      qs.set(k, String(v));
+    }
+    return apiFetch(`/api/events?${qs.toString()}`);
+  },
+
+  fetchEventsProgressive: async ({ pageSize = 500, onPage, shouldContinue, params = {} } = {}) => {
     /**
      * First page sequentially, the rest in parallel.
      *
@@ -356,9 +373,14 @@ export const api = {
     const CONCURRENCY = 5;
     const MAX_PAGES = 200;
 
-    const get = (offset) => apiFetch(
-      `/api/events?limit=${encodeURIComponent(pageSize)}&offset=${encodeURIComponent(offset)}`
-    );
+    const get = (offset) => {
+      const qs = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
+      for (const [k, v] of Object.entries(params)) {
+        if (v === undefined || v === null || v === '' || v === false) continue;
+        qs.set(k, String(v));
+      }
+      return apiFetch(`/api/events?${qs.toString()}`);
+    };
 
     if (shouldContinue && !shouldContinue()) return [];
 
