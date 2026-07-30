@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { MessageSquare, Send, Trash2, Flag, Loader2 } from 'lucide-react';
+import { MessageSquare, Send, Trash2, Flag } from 'lucide-react';
 import LoadingSkeleton from './common/LoadingSkeleton';
 import { api } from '../utils/api';
 import { timeAgo } from '../utils/helpers';
@@ -12,7 +12,7 @@ export default function EventComments({ eventId, currentUser, addToast }) {
   const [posting, setPosting] = useState(false);
   const [reportTarget, setReportTarget] = useState(null);
 
-  const load = React.useCallback(async () => {
+  const load = async () => {
     try {
       setComments(await api.fetchComments(eventId));
     } catch (e) {
@@ -20,9 +20,9 @@ export default function EventComments({ eventId, currentUser, addToast }) {
     } finally {
       setLoading(false);
     }
-  }, [eventId]);
+  };
 
-  useEffect(() => { if (eventId) load(); }, [eventId, load]);
+  useEffect(() => { if (eventId) load(); }, [eventId]);
 
   const handlePost = async (e) => {
     e.preventDefault();
