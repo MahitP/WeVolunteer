@@ -3,30 +3,30 @@ import { Routes, Route, useNavigate, useLocation, useSearchParams, Navigate, use
 import { api } from './utils/api';
 import { DEMO_MODE, APP_NAME, SCHOOL_NAME } from './config';
 import DemoBar from './components/DemoBar';
-const Login = React.lazy(() => import('./views/Login'));
-const Signup = React.lazy(() => import('./views/Signup'));
-const BrowseEvents = React.lazy(() => import('./views/BrowseEvents'));
-const CreateEvent = React.lazy(() => import('./views/CreateEvent'));
-const VolunteerDashboard = React.lazy(() => import('./views/VolunteerDashboard'));
-const OrganizerDashboard = React.lazy(() => import('./views/OrganizerDashboard'));
-const AdminDashboard = React.lazy(() => import('./views/AdminDashboard'));
-const Notifications = React.lazy(() => import('./views/Notifications'));
-const CalendarView = React.lazy(() => import('./views/CalendarView'));
-const VolunteerProfile = React.lazy(() => import('./views/VolunteerProfile'));
-const OrganizerProfile = React.lazy(() => import('./views/OrganizerProfile'));
-const ResetPassword = React.lazy(() => import('./views/ResetPassword'));
-const CertificateVerification = React.lazy(() => import('./views/CertificateVerification'));
-const VolunteerPortfolio = React.lazy(() => import('./views/VolunteerPortfolio'));
-const CheckInView = React.lazy(() => import('./views/CheckInView'));
+import Login from './views/Login';
+import Signup from './views/Signup';
+import BrowseEvents from './views/BrowseEvents';
+import CreateEvent from './views/CreateEvent';
+import VolunteerDashboard from './views/VolunteerDashboard';
+import OrganizerDashboard from './views/OrganizerDashboard';
+import AdminDashboard from './views/AdminDashboard';
+import Notifications from './views/Notifications';
+import CalendarView from './views/CalendarView';
+import VolunteerProfile from './views/VolunteerProfile';
+import OrganizerProfile from './views/OrganizerProfile';
 import EventModal from './components/EventModal';
 import NotificationsBell from './components/NotificationsBell';
 import ProfileEditModal from './components/ProfileEditModal';
+import ResetPassword from './views/ResetPassword';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
+import CertificateVerification from './views/CertificateVerification';
+import VolunteerPortfolio from './views/VolunteerPortfolio';
+import CheckInView from './views/CheckInView';
 import ThemeToggle from './components/ThemeToggle';
 import {
   LayoutDashboard, Compass, CalendarPlus, ShieldCheck, LogOut, CalendarDays,
-  UserCog, CheckCircle2, AlertTriangle, Info, X, ChevronsUpDown, Bell, UserRound
+  UserCog, CheckCircle2, AlertTriangle, Info, X, ChevronsUpDown, Loader2, Bell, UserRound
 } from 'lucide-react';
 
 /* Navigation is defined once and filtered by role, so every role gets the
@@ -285,19 +285,16 @@ export default function App() {
   // Public Routes (like certificate verification) bypass auth checks
   if (currentPath.startsWith('/verify/')) {
     return (
-      <React.Suspense fallback={<LoadingSkeleton heights={[400]} />}>
-        <Routes>
+      <Routes>
         <Route path="/verify/:code" element={<CertificateVerification />} />
-        </Routes>
-      </React.Suspense>
+      </Routes>
     );
   }
 
   if (!currentUser) {
     return (
       <>
-        <React.Suspense fallback={<LoadingSkeleton heights={[400]} />}>
-          <Routes>
+        <Routes>
           <Route path="/login" element={
             <Login
               onLoginSuccess={(mode) => (mode === 'signup' ? navigate('/signup') : handleLoginSuccess())}
@@ -331,7 +328,6 @@ export default function App() {
           />
         </Routes>
         <Toasts toasts={toasts} onRemove={removeToast} />
-      </React.Suspense>
       </>
     );
   }
@@ -508,8 +504,7 @@ export default function App() {
               />
             )
           ) : (
-            <React.Suspense fallback={<div style={{ padding: 'var(--s6)' }}><LoadingSkeleton heights={[200, 400]} /></div>}>
-              <Routes>
+            <Routes>
               <Route path="/" element={
                 currentUser.role === 'admin' ? <AdminDashboard addToast={addToast} /> :
                 currentUser.role === 'student' ? (
@@ -611,7 +606,6 @@ export default function App() {
               
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
-        </React.Suspense>
           )}
           </ErrorBoundary>
         </main>

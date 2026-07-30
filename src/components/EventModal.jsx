@@ -44,7 +44,21 @@ export default function EventModal({
     [applications, event?.id]
   );
 
-
+  // Grouped before the early return so hook order stays stable
+  const days = useMemo(() => {
+    const map = new Map();
+    for (const slot of event?.slots || []) {
+      const key = new Date(slot.startDatetime).toDateString();
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(slot);
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => new Date(a) - new Date(b))
+      .map(([day, slots]) => ({
+        day,
+        slots: [...slots].sort((a, b) => new Date(a.startDatetime) - new Date(b.startDatetime))
+      }));
+  }, [event?.slots]);
 
   const permissions = eventPermissions(event);
   const isOwner = currentUser?.role === 'organizer' && currentUser.id === event?.organizerId;
