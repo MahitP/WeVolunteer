@@ -30,10 +30,13 @@ function importCookieOptions(env) {
       cwd: process.cwd(),
       // Start from a clean slate so the host's own env cannot leak in.
       // JWT_SECRET is required by config.js at import time. The value is
-      // unused here — the test only reads cookieOptions() — but a missing
-      // value throws before the import resolves, and the throw would mask the
-      // real test signal (the cookie shape).
-      env: { ...process.env, NODE_ENV: '', JWT_SECRET: 'test-secret-not-for-production', ...env },
+      // unused here — the test only reads cookieOptions() — but a missing or
+      // WEAK value throws before the import resolves, and the throw would mask
+      // the real test signal (the cookie shape). config.js now rejects a secret
+      // under 32 characters in production, so this has to be a realistic one;
+      // the previous 30-character placeholder made these cases fail for a reason
+      // that had nothing to do with cookies.
+      env: { ...process.env, NODE_ENV: '', JWT_SECRET: 'JXAvK3n2Qp7RtY9wLmZbC4dE6fG8hJ1kN5oP0qS2uV4xA7yB9cD3eF5gH8iJ0kLm', ...env },
       stdio: 'pipe',
       encoding: 'utf8'
     });

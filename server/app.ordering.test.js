@@ -81,7 +81,7 @@ function bootProdAndProbe() {
         NODE_ENV: 'production',
         WEV_DB_PATH: dbFile,
         DEMO_MODE: '',
-        JWT_SECRET: 'test-secret-not-for-production',
+        JWT_SECRET: 'JXAvK3n2Qp7RtY9wLmZbC4dE6fG8hJ1kN5oP0qS2uV4xA7yB9cD3eF5gH8iJ0kLm',
         SMTP_HOST: 'smtp.example.org', SMTP_USER: 'u', SMTP_PASS: 'p',
         // Required in production since email.js started enforcing it.
         APP_URL: 'https://volunteers.example.org'

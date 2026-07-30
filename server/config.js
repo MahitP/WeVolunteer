@@ -10,8 +10,84 @@ export const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 export const DEMO_MODE = process.env.DEMO_MODE === 'true';
 export const PORT = Number(process.env.API_PORT) || 5050;
 
-export const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET) throw new Error('FATAL: JWT_SECRET must be set.');
+/**
+ * Session signing secret.
+ *
+ * Every session cookie in the system is signed with this. If it is guessable,
+ * anyone can mint a token for any account — including an administrator — so a
+ * weak value here defeats every other control in this file.
+ *
+ * Three things are enforced, and the split between them matters:
+ *
+ *   • Missing, in any environment → fatal. Unchanged.
+ *   • A known placeholder or an obviously weak value, in PRODUCTION → fatal.
+ *     The previous check only caught a missing secret, so shipping with the
+ *     literal `your-super-secret-jwt-key` from .env.example passed silently.
+ *     That is the realistic failure: not an empty variable, but a template value
+ *     nobody replaced.
+ *   • The same in development → a loud warning, not a crash. Refusing to boot
+ *     locally over a weak secret would make people paste a real production
+ *     secret into their dev .env to get past it, which is worse.
+ *
+ * The dev fallback lives here rather than in package.json's `dev` script. It was
+ * there as `JWT_SECRET=${JWT_SECRET:-…}`, which set a shell variable — and a
+ * shell variable takes precedence over `--env-file`, so it silently overrode a
+ * real secret in .env. Development and production would then sign with different
+ * keys, and setting a proper secret would appear to do nothing locally.
+ */
+const DEV_FALLBACK_SECRET = 'dev-only-insecure-secret-do-not-use-in-production';
+
+/** Values that indicate nobody chose a secret. Compared case-insensitively. */
+const PLACEHOLDER_SECRETS = [
+  'your-super-secret-jwt-key',
+  'your-secret-key',
+  'change-me',
+  'changeme',
+  'secret',
+  'test',
+  'test-secret',
+  DEV_FALLBACK_SECRET
+];
+
+function describeWeakSecret(value) {
+  if (!value) return null;
+  const normalised = value.trim().toLowerCase();
+  if (PLACEHOLDER_SECRETS.includes(normalised)) return 'it is a placeholder from the template';
+  if (value.trim().length < 32) return `it is only ${value.trim().length} characters (32 minimum)`;
+  // A single repeated character passes a length check but carries no entropy.
+  if (new Set(value.trim()).size < 8) return 'it has too few distinct characters to carry real entropy';
+  return null;
+}
+
+let resolvedSecret = process.env.JWT_SECRET;
+
+if (!resolvedSecret) {
+  if (IS_PRODUCTION) {
+    throw new Error(
+      'FATAL: JWT_SECRET must be set. Generate one with:\n'
+      + '  openssl rand -base64 48\n'
+      + 'and set it in the deployment environment (never in a committed file).'
+    );
+  }
+  resolvedSecret = DEV_FALLBACK_SECRET;
+  console.warn(
+    '[config] JWT_SECRET is not set — using an insecure development fallback.\n'
+    + '         Sessions signed with it are trivially forgeable. Set a real value in .env.'
+  );
+}
+
+const weakness = describeWeakSecret(resolvedSecret);
+if (weakness) {
+  const message =
+    `JWT_SECRET is not usable as a signing secret: ${weakness}.\n`
+    + 'Every session cookie is signed with it, so a guessable value lets anyone\n'
+    + 'mint a token for any account, including an administrator.\n'
+    + 'Generate one with:  openssl rand -base64 48';
+  if (IS_PRODUCTION) throw new Error(`FATAL: ${message}`);
+  console.warn(`[config] WARNING: ${message}`);
+}
+
+export const JWT_SECRET = resolvedSecret;
 
 export const VALID_GRADES = ['9', '10', '11', '12', 'Adult', 'N/A'];
 export const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
