@@ -13,7 +13,15 @@ export default function BrowseEvents({
   applications = [],
   onViewDetails,
   favorites = [],
-  onToggleFavorite
+  onToggleFavorite,
+  /**
+   * True while later pages of the event list are still arriving.
+   *
+   * Events load a page at a time, so this screen can be legitimately incomplete
+   * while it renders. Without this the empty state would claim "No events match
+   * those filters" during a load, which is a wrong answer rather than a slow one.
+   */
+  isLoadingMore = false
 }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
@@ -268,9 +276,11 @@ export default function BrowseEvents({
             </div>
           </div>}
 
-        {filtered.length === 0 ? <EmptyState icon={CalendarX2} title={hasFilters ? 'No events match those filters' : 'No opportunities posted yet'} message={hasFilters ? 'Try a broader search, or clear the filters to see everything that\'s been posted.' : 'When an organizer posts a sign-up sheet, it will appear here.'} action={hasFilters && <button className="btn btn-secondary btn-sm" onClick={clearFilters}>Clear filters</button>} /> : <>
-            <p className="small dim s-450599">
+        {filtered.length === 0 && isLoadingMore ? <p className="small dim" role="status" aria-live="polite">Loading opportunities…</p>
+          : filtered.length === 0 ? <EmptyState icon={CalendarX2} title={hasFilters ? 'No events match those filters' : 'No opportunities posted yet'} message={hasFilters ? 'Try a broader search, or clear the filters to see everything that\'s been posted.' : 'When an organizer posts a sign-up sheet, it will appear here.'} action={hasFilters && <button className="btn btn-secondary btn-sm" onClick={clearFilters}>Clear filters</button>} /> : <>
+            <p className="small dim s-450599" role="status" aria-live="polite">
               {filtered.length} event{filtered.length !== 1 ? 's' : ''}
+              {isLoadingMore && <> · <span className="dim">still loading more…</span></>}
             </p>
             {/*
               Only the rows near the viewport are mounted. Rendering the whole
