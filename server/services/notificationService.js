@@ -53,10 +53,8 @@ class NotificationService {
         this._insertEmailJob(event, payload, userId, dedupeKey);
       }
       
-      console.log(`[DEBUG] dispatch successful for event ${event}, userId ${userId}, dedupeKey ${dedupeKey}`);
       return true;
     } catch (e) {
-      console.log(`[DEBUG] dispatch error: ${e.message}`, e);
       if (String(e.message).includes('UNIQUE')) return null; // Dedupe catch
       console.error(`Failed to dispatch notification ${event}:`, e);
       return null;

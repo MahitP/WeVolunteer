@@ -88,6 +88,62 @@ describe('oauth', () => {
   });
 
   /**
+   * Server-side single use of the state nonce.
+   *
+   * The audit found replay prevented ONLY by clearing the HttpOnly nonce cookie.
+   * A browser honours that, but a client that simply retains the cookie could
+   * present the same state again — the server kept no record of having seen it.
+   * The `oauth_states` row is now consumed on first use, so the second attempt
+   * fails on the server rather than on the client's good manners.
+   *
+   * Not exploitable on its own (the authorization code is single-use at the real
+   * provider) but it is the layer that should not depend on that.
+   */
+  it('refuses a state that has already been used, even with the cookie replayed', async () => {
+    const { state, nonceCookie } = await begin('google');
+    const code = identity();
+
+    const first = await callback('google', { code, state, nonceCookie });
+    expect(first.status).toBe(200);
+
+    // Same state, same nonce cookie, deliberately re-presented.
+    const second = await callback('google', { code, state, nonceCookie });
+    expect(second.status).toBe(400);
+    expect(second.body.error).toMatch(/expired or already used/i);
+  });
+
+  it('consumes the oauth_states row on first use', async () => {
+    const { state, nonceCookie } = await begin('google');
+    const nonce = JSON.parse(
+      Buffer.from(state.split('.')[1], 'base64url').toString()
+    ).nonce;
+
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
+    const before = db.prepare('SELECT COUNT(*) AS c FROM oauth_states WHERE nonce = ?').get(nonce).c;
+
+    await callback('google', { code: identity(), state, nonceCookie });
+
+    const after = db.prepare('SELECT COUNT(*) AS c FROM oauth_states WHERE nonce = ?').get(nonce).c;
+    db.close();
+
+    expect(before).toBe(1);
+    expect(after).toBe(0);
+  });
+
+  it('refuses a state whose nonce was never issued', async () => {
+    // A structurally valid, correctly signed state for a nonce with no row —
+    // which is what a forged or long-expired state looks like.
+    const { state, nonceCookie } = await begin('google');
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
+    db.prepare('DELETE FROM oauth_states').run();
+    db.close();
+
+    const res = await callback('google', { code: identity(), state, nonceCookie });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/expired or already used/i);
+  });
+
+  /**
    * Regression, privilege escalation. The pending-signup blob was written
    * straight into the users table on the way back, with no validation at all,
    * so `role: "admin"` in it self-registered an administrator — bypassing the

@@ -75,12 +75,13 @@ function currentUserFromRequest(req) {
   }
 }
 
-/** Expired pending signups are dead weight and hold personal details. Sweep on use. */
 function purgeExpiredSignupSessions() {
   try {
-    db.prepare('DELETE FROM oauth_signup_sessions WHERE expires_at < ?').run(new Date().toISOString());
+    const now = new Date().toISOString();
+    db.prepare('DELETE FROM oauth_signup_sessions WHERE expires_at < ?').run(now);
+    db.prepare('DELETE FROM oauth_states WHERE expires_at < ?').run(now);
   } catch (err) {
-    console.error('Failed to purge expired OAuth signup sessions:', err);
+    console.error('Failed to purge expired OAuth sessions/states:', err);
   }
 }
 
@@ -170,6 +171,11 @@ router.post('/api/oauth/:provider/url', (req, res) => {
 
   const state = jwt.sign(statePayload, JWT_SECRET, { expiresIn: '15m' });
 
+  // Store state on the server to prevent replay attacks
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 15 * 60 * 1000); // 15 minutes
+  db.prepare('INSERT INTO oauth_states (nonce, created_at, expires_at) VALUES (?, ?, ?)').run(nonce, now.toISOString(), expiresAt.toISOString());
+
   let url;
   try {
     url = provider.getAuthUrl(state);
@@ -224,6 +230,14 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
   if (!expectedNonce || expectedNonce !== decodedState.nonce) {
     return res.status(400).json({ error: 'Security validation failed. Please ensure cookies are enabled and try again.' });
   }
+
+  // Server-side state invalidation (prevents replay attacks)
+  const stateRow = db.prepare('SELECT 1 FROM oauth_states WHERE nonce = ?').get(decodedState.nonce);
+  if (!stateRow) {
+    return res.status(400).json({ error: 'Sign-in session expired or already used. Please try again.' });
+  }
+  db.prepare('DELETE FROM oauth_states WHERE nonce = ?').run(decodedState.nonce);
+
   res.clearCookie(`${OAUTH_STATE_COOKIE}_${cookieId}`);
 
   try {
