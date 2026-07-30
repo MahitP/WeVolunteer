@@ -112,7 +112,23 @@ export const EMAIL_GATE_ALLOWLIST = [
   // use nor get rid of.
   '/api/auth/logout',
   '/api/auth/account',
-  '/api/notifications'
+  '/api/notifications',
+  /**
+   * Correcting a mistyped address is the whole point of the gate being
+   * escapable, so these are load-bearing rather than a convenience.
+   *
+   * The account most likely to be sitting behind this gate is one whose address
+   * has a typo in it — which is precisely the account that can never confirm,
+   * and therefore never reach anything not on this list. Leaving the
+   * email-change routes off it would mean the only way out stayed "abandon the
+   * account", and an abandoned account holds its email and username forever.
+   *
+   * `confirm-email-change` is unauthenticated and so never reaches this check;
+   * it is listed for completeness of the flow it belongs to.
+   */
+  '/api/auth/change-email',
+  '/api/auth/cancel-email-change',
+  '/api/auth/pending-email-change'
 ];
 
 /**

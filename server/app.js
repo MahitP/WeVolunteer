@@ -267,6 +267,19 @@ app.use('/api/auth/verify-email', authLimiter);
 app.use('/api/auth/change-password', authLimiter);
 app.use('/api/auth/account', authLimiter);
 
+/**
+ * Changing the email address sends two mails per request — a confirmation to
+ * the new address and a security notice to the old one — so it belongs on the
+ * mail limiter, not just the auth one. Without it, a live session could be used
+ * to flood an arbitrary address with confirmation mail from this domain.
+ *
+ * It also takes the account password, which makes it a password oracle on the
+ * same footing as /change-password.
+ */
+app.use('/api/auth/change-email', mailLimiter);
+app.use('/api/auth/confirm-email-change', authLimiter);
+app.use('/api/auth/change-username', authLimiter);
+
 // Mounted on the prefix rather than per-route, so /link is counted once. The
 // callback mints sessions and /url writes a pending-signup row, so neither
 // belongs at general API volume either. authLimiter skips successful requests,
