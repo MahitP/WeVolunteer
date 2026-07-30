@@ -7,11 +7,13 @@ import DeleteAccountModal from '../components/account/DeleteAccountModal';
 import DataExportCard from '../components/account/DataExportCard';
 import ConnectedAccounts from '../components/account/ConnectedAccounts';
 import PasswordCard from '../components/account/PasswordCard';
+import ConfirmDialog from '../components/common/ConfirmDialog';
 import EmailCard from '../components/account/EmailCard';
 import UsernameCard from '../components/account/UsernameCard';
 import { api } from '../utils/api';
 import { useTheme } from '../hooks/useTheme';
-import { Sun, Moon, SunMoon, ExternalLink } from 'lucide-react';
+import { APP_NAME, SCHOOL_NAME, SUPPORT_EMAIL, STUDENT_GUIDE_URL, ORGANIZER_GUIDE_URL } from '../config';
+import { Sun, Moon, SunMoon, ExternalLink, Mail } from 'lucide-react';
 
 export default function Settings({ currentUser, addToast, onProfileChange }) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -20,6 +22,7 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [confirmSignOutOthers, setConfirmSignOutOthers] = useState(false);
   const [savingPrivacy, setSavingPrivacy] = useState(false);
   const [leaderboardOptIn, setLeaderboardOptIn] = useState(Boolean(currentUser?.leaderboardOptIn));
 
@@ -53,16 +56,11 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
    * for a security control, because it stops them taking a real step.
    */
   const handleSignOutOthers = async () => {
-    const confirmed = window.confirm(
-      'Sign out everywhere else?\n\nAnyone signed in as you on another phone, tablet or computer '
-      + 'will be signed out immediately. This device stays signed in.'
-    );
-    if (!confirmed) return;
-
     setSigningOut(true);
     try {
       await api.signOutOtherDevices();
       addToast('Signed out on all your other devices.', 'success');
+      setConfirmSignOutOthers(false);
     } catch (err) {
       addToast(err.message || 'Could not sign out your other devices. Please try again.', 'error');
     } finally {
@@ -186,9 +184,26 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                 If you have signed in on a shared or lost device, sign out everywhere else.
                 You will stay signed in here.
               </p>
-              <button className="btn btn-danger" onClick={handleSignOutOthers} disabled={signingOut}>
+              <button className="btn btn-danger" onClick={() => setConfirmSignOutOthers(true)} disabled={signingOut}>
                 {signingOut ? 'Signing out…' : 'Sign out on all other devices'}
               </button>
+
+              {confirmSignOutOthers && (
+                <ConfirmDialog
+                  title="Sign out everywhere else?"
+                  confirmLabel="Sign out other devices"
+                  destructive
+                  busy={signingOut}
+                  onConfirm={handleSignOutOthers}
+                  onCancel={() => setConfirmSignOutOthers(false)}
+                >
+                  <p>
+                    Anyone signed in as you on another phone, tablet or computer will be
+                    signed out immediately.
+                  </p>
+                  <p className="dim small">This device stays signed in.</p>
+                </ConfirmDialog>
+              )}
             </div>
 
             <ConnectedAccounts addToast={addToast} currentUser={currentUser} />
@@ -247,31 +262,64 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
             </div>
           </SettingsSection>
         );
-      case 'help':
+      case 'help': {
+        /**
+         * Only real destinations are listed.
+         *
+         * This screen previously showed four `<a href="#">` items — Student
+         * Guide, Organizer Guide, Report a Problem, About — every one of which
+         * scrolled the page and did nothing. Next to "Report a Problem" in
+         * particular, on a screen someone reaches when they are already stuck,
+         * a control that silently fails is worse than an absent one.
+         */
+        const links = [
+          STUDENT_GUIDE_URL && { label: 'Student guide', href: STUDENT_GUIDE_URL, external: true },
+          ORGANIZER_GUIDE_URL && { label: 'Organizer guide', href: ORGANIZER_GUIDE_URL, external: true },
+          SUPPORT_EMAIL && {
+            label: 'Report a problem',
+            href: `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} problem report`)}`,
+            external: false
+          }
+        ].filter(Boolean);
+
         return (
           <SettingsSection title="Help & Support" isMobile={isMobile} onBack={handleBack}>
-            <div className="card">
-              <div className="nav">
-                <a href="#" className="nav-item" style={{ padding: 'var(--s4)', borderRadius: 0, borderBottom: '1px solid var(--rule)' }}>
-                  <span style={{ flex: 1, color: 'var(--ink)' }}>Student Guide</span>
-                  <ExternalLink size={16} className="dim" />
-                </a>
-                <a href="#" className="nav-item" style={{ padding: 'var(--s4)', borderRadius: 0, borderBottom: '1px solid var(--rule)' }}>
-                  <span style={{ flex: 1, color: 'var(--ink)' }}>Organizer Guide</span>
-                  <ExternalLink size={16} className="dim" />
-                </a>
-                <a href="#" className="nav-item" style={{ padding: 'var(--s4)', borderRadius: 0, borderBottom: '1px solid var(--rule)' }}>
-                  <span style={{ flex: 1, color: 'var(--ink)' }}>Report a Problem</span>
-                  <ExternalLink size={16} className="dim" />
-                </a>
-                <a href="#" className="nav-item" style={{ padding: 'var(--s4)', borderRadius: 0 }}>
-                  <span style={{ flex: 1, color: 'var(--ink)' }}>About WeVolunteer</span>
-                  <ExternalLink size={16} className="dim" />
-                </a>
+            {links.length > 0 ? (
+              <div className="card">
+                <div className="nav">
+                  {links.map(({ label, href, external }, i) => (
+                    <a
+                      key={label}
+                      className={`nav-item settings-help-link${i === links.length - 1 ? ' is-last' : ''}`}
+                      href={href}
+                      {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                    >
+                      <span className="settings-help-label">{label}</span>
+                      {external
+                        ? <ExternalLink size={16} className="dim" aria-label="Opens in a new tab" />
+                        : <Mail size={16} className="dim" aria-hidden="true" />}
+                    </a>
+                  ))}
+                </div>
               </div>
+            ) : (
+              <div className="card card-pad">
+                <h3 className="stack-heading">Getting help</h3>
+                <p className="dim small">
+                  Your school has not published support links yet. Ask the staff member
+                  who runs {APP_NAME} at your school — for volunteer shifts, the
+                  organizer of the event is usually the fastest person to reach.
+                </p>
+              </div>
+            )}
+
+            <div className="card card-pad settings-card-spaced">
+              <h3 className="stack-heading">About</h3>
+              <p className="dim small">{APP_NAME} — volunteer coordination for {SCHOOL_NAME}.</p>
             </div>
           </SettingsSection>
         );
+      }
       default:
         return null;
     }

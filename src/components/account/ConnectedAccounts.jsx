@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../../utils/api';
 import { AlertCircle, Link as LinkIcon, Unlink, Check } from 'lucide-react';
 import ProviderMark from '../auth/ProviderMark';
+import ConfirmDialog from '../common/ConfirmDialog';
 
 export default function ConnectedAccounts({ addToast, currentUser }) {
   const [providers, setProviders] = useState([]);
@@ -9,6 +10,7 @@ export default function ConnectedAccounts({ addToast, currentUser }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(null);
+  const [confirming, setConfirming] = useState(null); // { id, label } | null
 
   const load = useCallback(async () => {
     try {
@@ -57,16 +59,12 @@ export default function ConnectedAccounts({ addToast, currentUser }) {
     }
   };
 
-  const handleDisconnect = async (provider, label) => {
-    const confirmed = window.confirm(
-      `Disconnect ${label}?\n\nYou will no longer be able to sign in with it. You can reconnect at any time.`
-    );
-    if (!confirmed) return;
-
-    setBusy(provider);
+  const handleDisconnect = async ({ id, label }) => {
+    setBusy(id);
     try {
-      await api.disconnectOAuth(provider);
+      await api.disconnectOAuth(id);
       addToast(`${label} disconnected.`, 'success');
+      setConfirming(null);
       await load();
     } catch (err) {
       addToast(err.message, 'error');
@@ -151,7 +149,7 @@ export default function ConnectedAccounts({ addToast, currentUser }) {
                 connected ? (
                   <button
                     className="btn btn-secondary btn-sm"
-                    onClick={() => handleDisconnect(provider.id, provider.label)}
+                    onClick={() => setConfirming({ id: provider.id, label: provider.label })}
                     disabled={busy === provider.id}
                   >
                     <Unlink size={14} aria-hidden="true" />
@@ -172,6 +170,24 @@ export default function ConnectedAccounts({ addToast, currentUser }) {
           );
         })}
       </ul>
+
+      {confirming && (
+        <ConfirmDialog
+          title={`Disconnect ${confirming.label}?`}
+          confirmLabel={`Disconnect ${confirming.label}`}
+          destructive
+          busy={busy === confirming.id}
+          onConfirm={() => handleDisconnect(confirming)}
+          onCancel={() => setConfirming(null)}
+        >
+          <p>You will no longer be able to sign in with it.</p>
+          <p className="dim small">
+            {hasPassword
+              ? 'You can still sign in with your email address and password, and you can reconnect at any time.'
+              : 'You can reconnect at any time.'}
+          </p>
+        </ConfirmDialog>
+      )}
     </section>
   );
 }
