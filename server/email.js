@@ -307,6 +307,81 @@ export async function sendPasswordResetEmail(toEmail, token) {
   }
 }
 
+/**
+ * Confirmation link for a pending email-address change, sent to the NEW address.
+ *
+ * The change does not take effect until this link is opened, so the whole flow
+ * rests on this mail reaching a mailbox the person can actually read — which is
+ * the same proof of control the welcome link asks for.
+ */
+export async function sendEmailChangeConfirmation(toEmail, token) {
+  const confirmLink = `${APP_URL}/?emailchange=${encodeURIComponent(token)}`;
+
+  const contentHTML = `
+    <h1>Confirm your new email address</h1>
+    <p>You asked to use this address for your <strong>${APP_NAME}</strong> account.</p>
+    <p>Click the button below to confirm it. Until you do, your account keeps its old address.</p>
+    <p style="color: #66736d; font-size: 14px;">This link expires in 24 hours. If you did not ask for this, you can safely ignore this email — nothing will change.</p>
+  `;
+
+  const mailOptions = {
+    from: EMAIL_FROM,
+    to: toEmail,
+    subject: `Confirm your new email address - ${APP_NAME}`,
+    text: `You asked to use this address for your ${APP_NAME} account.\n\nConfirm it by opening the link below:\n${confirmLink}\n\nThis link expires in 24 hours. If you did not ask for this, ignore this email — nothing will change.`,
+    html: buildHtmlTemplate('Confirm your new email address', contentHTML, 'Confirm this address', confirmLink)
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    return true;
+  } catch (err) {
+    console.error('Error sending email-change confirmation:', err);
+    return false;
+  }
+}
+
+/**
+ * Heads-up to the OLD address that a change was requested. Carries no link.
+ *
+ * This is the security-critical half of the flow and is not optional. If someone
+ * with a stolen session moves the account to an address they control, the only
+ * person who can notice is whoever still reads the old mailbox — and the only
+ * way they can notice is if we tell them. Deliberately no action link: the safe
+ * response is to change the password, which they reach through the app.
+ *
+ * The new address is partly masked. The owner of the old mailbox needs to know
+ * that a change is pending and roughly where to, not to be handed a third
+ * party's full address by an automated mail.
+ */
+export async function sendEmailChangeNotice(toEmail, newEmail) {
+  const [local, domain] = String(newEmail).split('@');
+  const masked = `${local.slice(0, 2)}${'•'.repeat(Math.max(1, local.length - 2))}@${domain}`;
+
+  const contentHTML = `
+    <h1>Someone asked to change your email address</h1>
+    <p>A request was made to move your <strong>${APP_NAME}</strong> account to <strong>${masked}</strong>.</p>
+    <p>The change only takes effect once that address is confirmed. This address is still on the account until then.</p>
+    <p><strong>If this was not you</strong>, sign in and change your password straight away — someone else may have access to your account.</p>
+  `;
+
+  const mailOptions = {
+    from: EMAIL_FROM,
+    to: toEmail,
+    subject: `Security notice: email change requested - ${APP_NAME}`,
+    text: `A request was made to move your ${APP_NAME} account to ${masked}.\n\nThe change only takes effect once that address is confirmed.\n\nIf this was not you, sign in and change your password straight away — someone else may have access to your account.`,
+    html: buildHtmlTemplate('Email change requested', contentHTML)
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    return true;
+  } catch (err) {
+    console.error('Error sending email-change notice:', err);
+    return false;
+  }
+}
+
 export async function sendNotificationEmail(toEmail, subject, text, htmlContent) {
   const contentHTML = `
     <h1>${subject}</h1>

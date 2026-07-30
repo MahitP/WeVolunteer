@@ -240,6 +240,40 @@ export default function App() {
   };
 
   const verifyToken = searchParams.get('verify');
+  const emailChangeToken = searchParams.get('emailchange');
+
+  /**
+   * Confirming a new email address, from the link sent to that address.
+   *
+   * Single-presentation for the same three reasons the `verify` handler below
+   * documents: StrictMode double-invokes effects, stripping the parameter
+   * re-triggers the effect that reads it, and the token is single use — so
+   * without the ref a successful confirmation is immediately painted over with
+   * "that link is not valid".
+   */
+  const emailChangeAttempted = useRef(false);
+
+  useEffect(() => {
+    if (!emailChangeToken || emailChangeAttempted.current) return;
+    emailChangeAttempted.current = true;
+
+    (async () => {
+      try {
+        await api.confirmEmailChange(emailChangeToken);
+        addToast('Email address confirmed. This is now the address on your account.', 'success');
+      } catch (err) {
+        addToast(err.message || 'That link did not work. Request the change again from Settings.', 'error');
+      } finally {
+        const newParams = new URLSearchParams(searchParams);
+        newParams.delete('emailchange');
+        setSearchParams(newParams, { replace: true });
+        // Confirming bumps token_version and issues a fresh cookie, so the
+        // in-memory user is stale either way — re-read it rather than guess.
+        await refreshAll();
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailChangeToken]);
 
   /**
    * A confirmation token is single use, so it must be presented exactly once.
@@ -917,6 +951,43 @@ function VerifyEmailWall({ user, addToast, onSignOut, onVerified }) {
   const [checking, setChecking] = useState(false);
   const [sentAt, setSentAt] = useState(null);
 
+  /**
+   * Correcting the address, from behind the wall.
+   *
+   * This is the case the wall exists for and the one it used to handle worst.
+   * The old copy said: if the address is wrong, "sign out and create your
+   * account again with the right address" — which cannot work, because the
+   * abandoned account still holds that email AND that username, so the second
+   * attempt can reuse neither and the first is unusable forever.
+   *
+   * /api/auth/change-email is on the email-gate allowlist precisely so this
+   * screen can reach it.
+   */
+  const [fixing, setFixing] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fixError, setFixError] = useState('');
+  const [pending, setPending] = useState(null);
+  const needsPassword = user.hasPassword !== false;
+
+  const submitFix = async (e) => {
+    e.preventDefault();
+    setFixError('');
+    setSending(true);
+    try {
+      const res = await api.changeEmail(newEmail.trim(), password);
+      setPending(res.pending);
+      setFixing(false);
+      setNewEmail('');
+      setPassword('');
+      addToast(`Confirmation link sent to ${res.pending}.`, 'success');
+    } catch (err) {
+      setFixError(err.message || 'Could not change that address.');
+    } finally {
+      setSending(false);
+    }
+  };
+
   const resend = async () => {
     setSending(true);
     try {
@@ -950,27 +1021,116 @@ function VerifyEmailWall({ user, addToast, onSignOut, onVerified }) {
 
         <h1 id="verify-heading" className="auth-title">Confirm your email</h1>
         <p className="auth-subtitle">
-          We sent a link to <strong>{user.email}</strong>. Open it to finish setting up your
-          account. The link expires 24 hours after it is sent.
+          We sent a link to <strong>{pending || user.email}</strong>. Open it to finish setting up
+          your account. The link expires 24 hours after it is sent.
         </p>
 
-        <div className="auth-actions stack-sm">
-          <button className="btn btn-primary btn-block btn-lg" onClick={recheck} disabled={checking}>
-            {checking ? 'Checking…' : "I've confirmed — continue"}
-          </button>
-          <button className="btn btn-secondary btn-block" onClick={resend} disabled={sending}>
-            {sending ? 'Sending…' : sentAt ? 'Send it again' : 'Resend the link'}
-          </button>
-          <button className="btn btn-ghost btn-block" onClick={onSignOut}>
-            Sign out
-          </button>
-        </div>
+        {pending && (
+          <div className="alert alert-info" role="status">
+            <Mail size={16} aria-hidden="true" />
+            <span>
+              Your account address is still <strong>{user.email}</strong> until you open the
+              link we just sent to <strong>{pending}</strong>.
+            </span>
+          </div>
+        )}
 
-        <p className="auth-footer">
-          Nothing arriving? Check your spam folder. If <strong>{user.email}</strong> is wrong,
-          sign out and create your account again with the right address — this one has no
-          access to anything yet.
-        </p>
+        {!fixing ? (
+          <>
+            <div className="auth-actions stack-sm">
+              <button className="btn btn-primary btn-block btn-lg" onClick={recheck} disabled={checking}>
+                {checking ? 'Checking…' : "I've confirmed — continue"}
+              </button>
+              <button className="btn btn-secondary btn-block" onClick={resend} disabled={sending}>
+                {sending ? 'Sending…' : sentAt ? 'Send it again' : 'Resend the link'}
+              </button>
+              <button className="btn btn-ghost btn-block" onClick={() => setFixing(true)}>
+                That address is wrong — change it
+              </button>
+              <button className="btn btn-ghost btn-block" onClick={onSignOut}>
+                Sign out
+              </button>
+            </div>
+
+            <p className="auth-footer">
+              Nothing arriving? Check your spam folder first — confirmation mail often
+              lands there. If <strong>{user.email}</strong> has a typo in it, change it
+              above rather than starting again: this account is holding that address and
+              your username.
+            </p>
+          </>
+        ) : (
+          <form onSubmit={submitFix} className="stack-md auth-form-inner" noValidate>
+            <p className="auth-subtitle">
+              Enter the right address and we will send the link there instead. Nothing
+              changes until you open it.
+            </p>
+
+            {fixError && (
+              <div className="alert alert-danger" role="alert">
+                <AlertTriangle size={16} aria-hidden="true" />
+                <span>{fixError}</span>
+              </div>
+            )}
+
+            <div className="field">
+              <label htmlFor="fix-email">Your email address</label>
+              <div className="input-affix">
+                <Mail size={16} aria-hidden="true" />
+                <input
+                  id="fix-email"
+                  type="email"
+                  className="input input-lg"
+                  autoComplete="email"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck="false"
+                  placeholder="you@example.com"
+                  value={newEmail}
+                  onChange={e => setNewEmail(e.target.value)}
+                  disabled={sending}
+                  autoFocus
+                  required
+                />
+              </div>
+            </div>
+
+            {needsPassword && (
+              <div className="field">
+                <label htmlFor="fix-password">Your password</label>
+                <input
+                  id="fix-password"
+                  type="password"
+                  className="input input-lg"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  disabled={sending}
+                  required
+                />
+              </div>
+            )}
+
+            <div className="auth-actions stack-sm">
+              <button
+                type="submit"
+                className="btn btn-primary btn-block btn-lg"
+                disabled={sending || !newEmail.trim() || (needsPassword && !password)}
+              >
+                {sending ? 'Sending…' : 'Send the link here instead'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-block"
+                onClick={() => { setFixing(false); setFixError(''); }}
+                disabled={sending}
+              >
+                Never mind
+              </button>
+            </div>
+          </form>
+        )}
       </main>
     </div>
   );

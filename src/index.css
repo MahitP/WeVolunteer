@@ -4735,3 +4735,35 @@ input:disabled + .premium-slider {
   .auth-spinner { animation-duration: 2s; }
   .auth-strength-fill { transition: none; }
 }
+
+/* ==========================================================================
+   Account settings cards (email address, username)
+   ==========================================================================
+   Shared by EmailCard and UsernameCard. These previously carried inline style
+   objects; they live here so the two cards cannot drift apart and so the
+   spacing comes from the same scale as everything else. */
+
+.stack-heading { margin-bottom: var(--s2); }
+
+.settings-card-intro { margin-bottom: var(--s4); }
+
+.settings-card-spaced { margin-top: var(--s4); }
+
+/* The current value, read before anything else on the card. */
+.settings-value {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  margin-bottom: var(--s4);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.settings-pending { margin-bottom: var(--s4); }
+
+.settings-actions { gap: var(--s3); }
+
+/* Wraps the inline "change your address" form on the verification wall, which
+   sits inside a centred auth card rather than a settings card. */
+.auth-form-inner { text-align: left; margin-top: var(--s4); }

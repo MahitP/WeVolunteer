@@ -563,6 +563,26 @@ export function initDatabase() {
     )
   `);
 
+  /**
+   * Pending email-address changes.
+   *
+   * The new address lives here, not on the users row, until the person proves
+   * they can read it. Writing it straight to `users.email` would let a typo — or
+   * someone else's address — take over the account's only recovery channel
+   * before anyone had confirmed it was reachable.
+   *
+   * One live request per user, enforced by the caller deleting first.
+   */
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS email_change_tokens (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      new_email TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
   // Columns added after the first release. CREATE TABLE IF NOT EXISTS won't
   // add them to an existing database, so they're applied explicitly.
   // Lets a repeating sweep (deadline reminders, shift reminders) know it has

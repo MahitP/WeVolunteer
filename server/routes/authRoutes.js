@@ -2,7 +2,12 @@ import express from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../email.js';
+import {
+  sendVerificationEmail,
+  sendPasswordResetEmail,
+  sendEmailChangeConfirmation,
+  sendEmailChangeNotice
+} from '../email.js';
 import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
@@ -835,6 +840,262 @@ router.post('/api/auth/sign-out-others', authenticateToken, (req, res) => {
   } catch (err) {
     console.error('Sign out others error:', err);
     res.status(500).json({ error: 'Could not sign out your other devices.' });
+  }
+});
+
+/** How long a pending email-address change stays open. */
+const EMAIL_CHANGE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Step 1 of changing the account's email address.
+ *
+ * Why this exists at all: there was no way to change an address, and the
+ * verification wall told anyone who mistyped theirs to "sign out and create your
+ * account again with the right address". That advice does not work — the
+ * abandoned account keeps both the mistyped email and the username, so the
+ * second attempt can reuse neither, and the person is left with a permanently
+ * unusable account holding an address they cannot read.
+ *
+ * The new address is only written to `users` once it has been proven reachable
+ * (step 2). Until then the account keeps the address it has, so a typo here is
+ * recoverable by simply asking again.
+ */
+router.post('/api/auth/change-email', authenticateToken, async (req, res) => {
+  const { newEmail, password } = req.body;
+
+  const check = validateEmail(newEmail);
+  if (!check.ok) {
+    return res.status(400).json({ error: check.error, field: 'newEmail' });
+  }
+  const target = check.value;
+
+  try {
+    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    if (!userRow) return res.status(404).json({ error: 'User not found' });
+
+    if (target === String(userRow.email).toLowerCase()) {
+      return res.status(400).json({
+        error: 'That is already your email address.',
+        field: 'newEmail'
+      });
+    }
+
+    // Deliberately the same answer whether the address is on an active account
+    // or a deletion tombstone: both mean "not available", and distinguishing
+    // them would tell the caller something about somebody else.
+    if (db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE AND id != ?').get(target, req.user.id)) {
+      return res.status(409).json({
+        error: 'Another account already uses that email address.',
+        field: 'newEmail'
+      });
+    }
+
+    /**
+     * A password account re-proves the password; a provider-only account cannot,
+     * so its live session is the proof — the same rule change-password already
+     * applies, for the same reason.
+     */
+    if (userRow.password_hash !== OAUTH_ONLY) {
+      if (!password) {
+        return res.status(400).json({ error: 'Enter your password to change your email address.', field: 'password' });
+      }
+      if (!bcrypt.compareSync(password, userRow.password_hash)) {
+        return res.status(401).json({ error: 'That is not your password.', field: 'password' });
+      }
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + EMAIL_CHANGE_TTL_MS).toISOString();
+
+    // One live request per user: asking again supersedes the previous link
+    // rather than leaving two addresses able to claim the account.
+    db.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(req.user.id);
+    db.prepare('INSERT INTO email_change_tokens (token, user_id, new_email, expires_at) VALUES (?, ?, ?, ?)')
+      .run(token, req.user.id, target, expiresAt);
+
+    await sendEmailChangeConfirmation(target, token);
+
+    /**
+     * Tell the OLD address too, and do not fail the request if that mail
+     * bounces. If a stolen session moves an account to an attacker's address,
+     * the only person who can notice is whoever still reads the old mailbox.
+     */
+    sendEmailChangeNotice(userRow.email, target).catch(err =>
+      console.error('Email-change notice failed to send:', err)
+    );
+
+    res.json({ success: true, pending: target });
+  } catch (err) {
+    console.error('Change email error:', err);
+    res.status(500).json({ error: 'Could not start that email change.' });
+  }
+});
+
+/**
+ * Step 2: confirm the new address from the link sent to it. Single use.
+ *
+ * Unauthenticated on purpose. The link may well be opened on a device that has
+ * never signed in — a phone reading a school mailbox — and the token itself is
+ * the proof of control, exactly as with the welcome link.
+ */
+router.post('/api/auth/confirm-email-change', (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: 'Token is required' });
+
+  try {
+    const row = db.prepare('SELECT * FROM email_change_tokens WHERE token = ?').get(token);
+    if (!row) {
+      return res.status(400).json({ error: 'That link is not valid. Request the change again from Settings.' });
+    }
+    if (new Date(row.expires_at) < new Date()) {
+      db.prepare('DELETE FROM email_change_tokens WHERE token = ?').run(token);
+      return res.status(400).json({ error: 'That link has expired. Request the change again from Settings.' });
+    }
+
+    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
+    if (!userRow || userRow.account_status !== 'active') {
+      db.prepare('DELETE FROM email_change_tokens WHERE token = ?').run(token);
+      return res.status(400).json({ error: 'That link is not valid. Request the change again from Settings.' });
+    }
+
+    // Re-check availability: the address was free when the request was made,
+    // and someone else may have claimed it during the 24-hour window.
+    if (db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE AND id != ?').get(row.new_email, row.user_id)) {
+      db.prepare('DELETE FROM email_change_tokens WHERE token = ?').run(token);
+      return res.status(409).json({
+        error: 'Another account claimed that email address while this request was open. Try a different one.'
+      });
+    }
+
+    inTransaction(() => {
+      /**
+       * Bumping token_version signs every session out, including whichever one
+       * asked for the change.
+       *
+       * That is the point. The email address is the account's recovery channel,
+       * so changing it is exactly as security-relevant as changing the password
+       * — and if the request came from a session that should not have had it,
+       * leaving that session live would make the notice to the old address
+       * useless.
+       */
+      db.prepare(
+        'UPDATE users SET email = ?, email_verified = 1, token_version = token_version + 1 WHERE id = ?'
+      ).run(row.new_email, row.user_id);
+
+      db.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(row.user_id);
+      // Reset links already in flight were mailed to the OLD address and must
+      // not stay usable now that the account answers somewhere else.
+      db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(row.user_id);
+      db.prepare('DELETE FROM email_verification_tokens WHERE user_id = ?').run(row.user_id);
+    });
+
+    const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
+    const user = formatUserResponse(fresh);
+
+    // Opening the link proves control of the new mailbox, so the person holding
+    // it gets a working session — otherwise confirming from a phone would leave
+    // them signed out everywhere with no explanation.
+    issueSession(res, user, fresh.token_version);
+    clearLoginFailuresForUser(fresh.id);
+
+    res.json({ success: true, user, emailVerified: true });
+  } catch (err) {
+    console.error('Confirm email change error:', err);
+    res.status(500).json({ error: 'Could not confirm that address.' });
+  }
+});
+
+/** Cancels a pending email-address change. */
+router.post('/api/auth/cancel-email-change', authenticateToken, (req, res) => {
+  try {
+    const { changes } = db.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(req.user.id);
+    res.json({ success: true, cancelled: changes > 0 });
+  } catch (err) {
+    console.error('Cancel email change error:', err);
+    res.status(500).json({ error: 'Could not cancel that request.' });
+  }
+});
+
+/** Reports whether a change is waiting on confirmation, for the Settings card. */
+router.get('/api/auth/pending-email-change', authenticateToken, (req, res) => {
+  try {
+    const row = db.prepare(
+      'SELECT new_email, expires_at FROM email_change_tokens WHERE user_id = ? AND expires_at > ?'
+    ).get(req.user.id, new Date().toISOString());
+    res.json(row ? { pending: row.new_email, expiresAt: row.expires_at } : { pending: null });
+  } catch (err) {
+    console.error('Pending email change error:', err);
+    res.status(500).json({ error: 'Could not check that.' });
+  }
+});
+
+/**
+ * Change the account's username.
+ *
+ * There was no way to do this at all, which mattered more than it sounds: the
+ * username is half of the sign-in identity and the dedupe migration can rename
+ * an account without being asked, so an account could end up wearing a handle
+ * its owner never chose and could not change.
+ */
+const USERNAME_COOLDOWN_DAYS = 30;
+
+router.post('/api/auth/change-username', authenticateToken, (req, res) => {
+  const check = validateUsername(req.body.username);
+  if (!check.ok) {
+    return res.status(400).json({ error: check.error, field: 'username' });
+  }
+  const target = check.value;
+
+  try {
+    const userRow = db.prepare('SELECT username, username_changed_at FROM users WHERE id = ?').get(req.user.id);
+    if (!userRow) return res.status(404).json({ error: 'User not found' });
+
+    const current = String(userRow.username || '');
+    if (target === current) {
+      return res.status(400).json({ error: 'That is already your username.', field: 'username' });
+    }
+
+    /**
+     * A change of capitalisation only is free and starts no cooldown.
+     *
+     * It cannot collide with anyone — the uniqueness index is case-insensitive —
+     * so nobody else is affected, and someone fixing `alice` to `Alice` should
+     * not be told to come back in a month. Refusing that would be pedantry.
+     */
+    const caseOnly = target.toLowerCase() === current.toLowerCase();
+
+    if (!caseOnly && userRow.username_changed_at) {
+      const nextAllowed = new Date(new Date(userRow.username_changed_at).getTime()
+        + USERNAME_COOLDOWN_DAYS * 24 * 60 * 60 * 1000);
+      if (nextAllowed > new Date()) {
+        const days = Math.max(1, Math.ceil((nextAllowed - Date.now()) / (24 * 60 * 60 * 1000)));
+        return res.status(429).json({
+          error: `You can change your username again in ${days} day${days === 1 ? '' : 's'}.`,
+          code: 'username_cooldown',
+          field: 'username',
+          retryAfterDays: days,
+          nextAllowedAt: nextAllowed.toISOString()
+        });
+      }
+    }
+
+    if (!caseOnly && db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE AND id != ?').get(target, req.user.id)) {
+      return res.status(409).json({ error: 'That username is already taken.', field: 'username' });
+    }
+
+    // No token_version bump: a username authenticates nothing, so changing it
+    // is no reason to sign anyone out.
+    db.prepare('UPDATE users SET username = ?, username_changed_at = ? WHERE id = ?')
+      .run(target, caseOnly ? userRow.username_changed_at : new Date().toISOString(), req.user.id);
+
+    const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    res.json({ success: true, user: formatUserResponse(fresh) });
+  } catch (err) {
+    console.error('Change username error:', err);
+    if (String(err.message).includes('UNIQUE')) {
+      return res.status(409).json({ error: 'That username is already taken.', field: 'username' });
+    }
+    res.status(500).json({ error: 'Could not change your username.' });
   }
 });
 
