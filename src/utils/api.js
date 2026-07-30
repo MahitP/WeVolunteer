@@ -60,7 +60,7 @@ async function apiFetch(endpoint, options = {}) {
   let response;
   try {
     response = await fetch(endpoint, config);
-  } catch {
+  } catch (err) {
     // fetch only rejects when the request never completed — offline, DNS
     // failure, connection refused, CORS rejection. An HTTP error status
     // resolves normally and is handled below.
@@ -156,7 +156,7 @@ export const api = {
   logout: async () => {
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
-    } catch {
+    } catch (e) {
       // Ignored: best-effort. If they are offline, they are logged out locally.
     }
     localStorage.removeItem(STORAGE_KEYS.USER);
@@ -165,7 +165,7 @@ export const api = {
   getMe: async () => {
     try {
       return await apiFetch('/api/auth/me');
-    } catch {
+    } catch (e) {
       if (e.status === 401) {
         localStorage.removeItem(STORAGE_KEYS.USER);
       }

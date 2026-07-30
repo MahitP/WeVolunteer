@@ -11,7 +11,7 @@ import EmptyState from '../components/common/EmptyState';
  * This does not finalize hours — it only records check-in status (present=null) 
  * so the organizer can see who showed up. Hours are finalized later via EventModal.
  */
-export default function CheckInView({ _currentUser }) {
+export default function CheckInView({ currentUser }) {
   const { eventId } = useParams();
   const navigate = useNavigate();
 

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Calendar, ShieldCheck, Flag,
-  CheckCircle, Search, Trash2, UserCheck, UserX
+  Calendar, ShieldCheck, Flag, Shield, UserCog, Ban, Mail
 } from 'lucide-react';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
@@ -18,7 +17,7 @@ export default function AdminDashboard({ addToast }) {
   const [query, setQuery] = useState('');
   const [busyId, setBusyId] = useState(null);
 
-  const loadData = React.useCallback(async () => {
+  const loadData = async () => {
     try {
       const [orgs, evts, stats, rpts] = await Promise.all([
         api.apiFetch('/api/admin/organizers/pending'),
@@ -35,9 +34,9 @@ export default function AdminDashboard({ addToast }) {
     } finally {
       setLoading(false);
     }
-  }, [addToast]);
+  };
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { loadData(); }, []);
 
   const resolveReport = async (reportId, status) => {
     setBusyId(reportId);

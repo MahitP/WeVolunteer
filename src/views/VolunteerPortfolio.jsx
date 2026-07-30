@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { formatHours, formatDay } from '../utils/helpers';
-import { Printer, ArrowLeft, FileWarning } from 'lucide-react';
+import { Printer, ArrowLeft, Download, FileWarning } from 'lucide-react';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import { APP_NAME, SCHOOL_NAME } from '../config';
