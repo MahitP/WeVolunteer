@@ -11,7 +11,7 @@ afterAll(async () => { await srv.close(); });
 
 const signup = (over = {}) => srv.call('POST', '/api/auth/signup', {
   email: `session-${Math.random().toString(36).slice(2, 9)}@example.org`,
-  password: 'password123', name: 'Session Test', role: 'student', grade: '10',
+  password: 'Password123', name: 'Session Test', role: 'student', grade: '10',
   username: `session_${Math.random().toString(36).slice(2, 9)}`,
   ...over
 });
@@ -56,7 +56,7 @@ describe('authenticateToken: reads identity from the database', () => {
 
     // Promote the account directly in the DB — the token is untouched.
     const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    db.prepare("UPDATE users SET role = 'organizer' WHERE id = ?").run(userId);
+    db.prepare("UPDATE users SET role = 'organizer', email_verified = 1 WHERE id = ?").run(userId);
     db.close();
 
     // Hit an organizer-only endpoint with the SAME (still student-shaped) token.
@@ -109,7 +109,7 @@ describe('authenticateToken: token_version invalidates sessions on password rese
   };
 
   it('rejects a token minted before a password reset, but a fresh login after the reset works', async () => {
-    const signupRes = await signup({ password: 'orig-password1' });
+    const signupRes = await signup({ password: 'OrigPassword1' });
     expect(signupRes.status).toBe(201);
     const userId = signupRes.body.user.id;
     const email = signupRes.body.user.email;
@@ -125,7 +125,7 @@ describe('authenticateToken: token_version invalidates sessions on password rese
     const resetToken = tokenFor(userId);
     expect(resetToken).toBeTruthy();
 
-    const reset = await srv.call('POST', '/api/auth/reset-password', { token: resetToken, password: 'new-password1' });
+    const reset = await srv.call('POST', '/api/auth/reset-password', { token: resetToken, password: 'NewPassword1' });
     expect(reset.status).toBe(200);
 
     // The old token is now invalid.
@@ -134,7 +134,7 @@ describe('authenticateToken: token_version invalidates sessions on password rese
     expect(after.body.error).toBe('Session expired, please sign in again');
 
     // A fresh login with the new password works and yields a usable token.
-    const relogin = await srv.call('POST', '/api/auth/login', { email, password: 'new-password1' });
+    const relogin = await srv.call('POST', '/api/auth/login', { email, password: 'NewPassword1' });
     expect(relogin.status).toBe(200);
     const newToken = relogin.cookie;
     const me = await srv.call('GET', '/api/auth/me', undefined, newToken);

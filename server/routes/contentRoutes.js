@@ -1,31 +1,33 @@
 import express from 'express';
 import crypto from 'crypto';
 
-import { authenticateToken, createNotification } from '../utils.js';
+import { authenticateToken } from '../utils.js';
+import { notificationService } from '../services/notificationService.js';
+import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
 
 const router = express.Router();
 
 router.get('/api/notifications', authenticateToken, (req, res) => {
   try {
-    // The centre asks for more than the bell does
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    const offset = Math.max(0, Number(req.query.offset) || 0);
     const rows = db.prepare(`
       SELECT * FROM notifications WHERE user_id = ?
-      ORDER BY created_at DESC LIMIT ?
-    `).all(req.user.id, limit);
+      ORDER BY created_at DESC LIMIT ? OFFSET ?
+    `).all(req.user.id, limit, offset);
     const unread = db.prepare(`
       SELECT COUNT(*) as c FROM notifications WHERE user_id = ? AND read = 0
     `).get(req.user.id).c;
     res.json({
       notifications: rows.map(r => ({
-        id: r.id, kind: r.kind, title: r.title, body: r.body,
+        id: r.id, kind: r.kind, priority: r.priority, title: r.title, body: r.body,
         link: r.link, read: r.read === 1,
         createdAt: r.created_at
       })),
       unreadCount: unread
     });
-  } catch {
+  } catch (err) {
     console.error('Notifications list error:', err);
     res.status(500).json({ error: 'Failed to fetch notifications' });
   }
@@ -37,13 +39,16 @@ router.patch('/api/notifications', authenticateToken, (req, res) => {
     const { ids, all } = req.body;
     if (all) {
       db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?').run(req.user.id);
+      emitToUser(req.user.id, 'notification.read', null, { all: true });
     } else if (Array.isArray(ids) && ids.length > 0) {
       const placeholders = ids.map(() => '?').join(',');
       db.prepare(`UPDATE notifications SET read = 1 WHERE id IN (${placeholders}) AND user_id = ?`)
         .run(...ids, req.user.id);
+      emitToUser(req.user.id, 'notification.read', null, { ids });
     }
     res.json({ success: true });
-  } catch {
+  } catch (err) {
+    console.error('Update notifications error:', err);
     res.status(500).json({ error: 'Failed to update notifications' });
   }
 });
@@ -90,13 +95,7 @@ router.post('/api/events/:id/comments', authenticateToken, (req, res) => {
     if (event.organizer_id !== req.user.id) {
       const commenterRow = db.prepare('SELECT name FROM users WHERE id = ?').get(req.user.id);
       const commenterName = commenterRow ? commenterRow.name : 'Someone';
-      createNotification({
-        userId: event.organizer_id,
-        kind: 'comment',
-        title: 'New question on your event',
-        body: `${commenterName} commented on "${event.title}".`,
-        link: `event:${event.id}`
-      });
+      notificationService.dispatch('EVENT_COMMENT', { eventId: event.id, eventTitle: event.title }, event.organizer_id);
     } else {
       // The organizer is the commenter. Notify all pending or accepted applicants.
       const applicants = db.prepare(`
@@ -106,13 +105,7 @@ router.post('/api/events/:id/comments', authenticateToken, (req, res) => {
 
       for (const app of applicants) {
         if (app.user_id !== req.user.id) {
-          createNotification({
-            userId: app.user_id,
-            kind: 'comment',
-            title: 'Host posted an update',
-            body: `The coordinator commented on "${event.title}": "${body.substring(0, 60)}${body.length > 60 ? '...' : ''}"`,
-            link: `event:${event.id}`
-          });
+          notificationService.dispatch('EVENT_COMMENT', { eventId: event.id, eventTitle: event.title }, app.user_id);
         }
       }
     }
@@ -263,13 +256,7 @@ router.post('/api/events/:id/announcements', authenticateToken, (req, res) => {
     `).all(req.params.id);
 
     for (const r of recipients) {
-      createNotification({
-        userId: r.user_id,
-        kind: 'announcement',
-        title: `Update: ${event.title}`,
-        body: body.trim().slice(0, 140),
-        link: `event:${event.id}`
-      });
+      notificationService.dispatch('IMPORTANT_ANNOUNCEMENT', { eventId: event.id, eventTitle: event.title, body: body.trim().slice(0, 140) }, r.user_id);
     }
 
     const created = db.prepare(`

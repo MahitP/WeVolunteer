@@ -18,7 +18,7 @@ const MAX_SLOT_DESCRIPTION_LENGTH = 1000;
 const MIN_MAX_SPOTS = 1;
 const MAX_MAX_SPOTS = 100;
 
-export function validateEventPayload({ title, description, location, instructions, applicationDeadline, slots }) {
+export function validateEventPayload({ title, description, location, instructions, applicationDeadline, slots, address, latitude, longitude }) {
   const deadlineMs = Date.parse(applicationDeadline);
   if (isNaN(deadlineMs)) {
     return { ok: false, error: 'The application deadline must be a valid date in the future.' };
@@ -87,6 +87,30 @@ export function validateEventPayload({ title, description, location, instruction
     if (typeof instructions !== 'string' || instructions.length > MAX_INSTRUCTIONS_LENGTH) {
       return { ok: false, error: `Instructions must be text of ${MAX_INSTRUCTIONS_LENGTH} characters or fewer.` };
     }
+  }
+
+  // Location Picker: optional structured geo fields.
+  const MAX_ADDRESS_LENGTH = 500;
+  if (address !== undefined && address !== null && address !== '') {
+    if (typeof address !== 'string' || address.length > MAX_ADDRESS_LENGTH) {
+      return { ok: false, error: `Address must be text of ${MAX_ADDRESS_LENGTH} characters or fewer.` };
+    }
+  }
+  if (latitude !== undefined && latitude !== null) {
+    if (typeof latitude !== 'number' || latitude < -90 || latitude > 90) {
+      return { ok: false, error: 'Latitude must be a number between -90 and 90.' };
+    }
+  }
+  if (longitude !== undefined && longitude !== null) {
+    if (typeof longitude !== 'number' || longitude < -180 || longitude > 180) {
+      return { ok: false, error: 'Longitude must be a number between -180 and 180.' };
+    }
+  }
+  // If one coordinate is provided, both must be.
+  const hasLat = latitude !== undefined && latitude !== null;
+  const hasLng = longitude !== undefined && longitude !== null;
+  if (hasLat !== hasLng) {
+    return { ok: false, error: 'Both latitude and longitude must be provided together.' };
   }
 
   return { ok: true };

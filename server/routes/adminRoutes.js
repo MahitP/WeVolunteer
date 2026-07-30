@@ -1,7 +1,8 @@
 import express from 'express';
 
-import { authenticateToken, formatUserResponse, createNotification } from '../utils.js';
+import { authenticateToken, formatUserResponse } from '../utils.js';
 import { db } from '../db.js';
+import { notificationService } from '../services/notificationService.js';
 
 const router = express.Router();
 
@@ -30,12 +31,21 @@ router.post('/api/admin/organizers/:id/approve', authenticateToken, (req, res) =
 
   try {
     db.prepare('UPDATE users SET verified = 1 WHERE id = ?').run(orgId);
-    createNotification({
-      userId: orgId,
-      kind: 'approval',
-      title: 'Account approved!',
-      body: 'Your organizer account is verified. You can now post events.'
-    });
+    
+    // Log the audit event
+    db.prepare(`
+      INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      `audit-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      req.user.id,
+      'APPROVE_ORGANIZER',
+      orgId,
+      'Approved pending organizer account',
+      new Date().toISOString()
+    );
+
+    notificationService.dispatch('ORGANIZER_APPROVED', {}, orgId);
     res.json({ success: true });
   } catch (error) {
     console.error('Verify organizer error:', error);
@@ -68,6 +78,20 @@ router.post('/api/admin/organizers/:id/deny', authenticateToken, (req, res) => {
     }
 
     db.prepare("DELETE FROM users WHERE id = ? AND role = 'organizer' AND verified = 0").run(orgId);
+    
+    // Log the audit event
+    db.prepare(`
+      INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      `audit-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      req.user.id,
+      'DENY_ORGANIZER',
+      orgId,
+      'Denied and deleted pending organizer account request',
+      new Date().toISOString()
+    );
+
     res.json({ success: true });
   } catch (error) {
     console.error('Deny organizer error:', error);
@@ -228,6 +252,71 @@ router.patch('/api/admin/reports/:id', authenticateToken, (req, res) => {
     console.error('Update report error:', err);
     res.status(500).json({ error: 'Failed to update report' });
   }
+});
+
+// A5. Export Data to CSV
+router.get('/api/admin/reports/export', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  
+  try {
+    const students = db.prepare(`
+      SELECT 
+        u.id, 
+        u.name, 
+        u.email, 
+        u.school, 
+        u.created_at,
+        COALESCE(SUM(at.hours_awarded), 0) as total_hours
+      FROM users u
+      LEFT JOIN attendance at ON at.user_id = u.id AND at.present = 1
+      WHERE u.role = 'student'
+      GROUP BY u.id
+      ORDER BY u.name ASC
+    `).all();
+
+    const sanitizeCsv = (val) => {
+      let str = String(val || '');
+      if (/^[=+\-@\t\r]/.test(str)) {
+        str = "'" + str;
+      }
+      return `"${str.replace(/"/g, '""')}"`;
+    };
+
+    // Create CSV content
+    const headers = ['ID', 'Name', 'Email', 'School/Affiliation', 'Joined Date', 'Total Credited Hours'];
+    const rows = students.map(s => [
+      s.id,
+      sanitizeCsv(s.name),
+      sanitizeCsv(s.email),
+      sanitizeCsv(s.school),
+      s.created_at,
+      s.total_hours
+    ]);
+    
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="wevolunteer_students_export.csv"');
+    res.send(csvContent);
+  } catch (err) {
+    console.error('Export error:', err);
+    res.status(500).json({ error: 'Failed to generate CSV export' });
+  }
+});
+
+// A6. System Status
+router.get('/api/admin/system/status', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  
+  const smtpConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+  
+  res.json({
+    smtpConfigured
+  });
 });
 
 export default router;

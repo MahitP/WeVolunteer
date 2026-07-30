@@ -19,7 +19,7 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
   let srv, runNotificationSweep, db;
 
   const ORGANIZER = 'user-org-1';          // hosts event-softball
-  const DEDUPE = 'awaiting-decision:event-softball';
+  const DEDUPE = 'awaiting-decision:event-sweep-test';
 
   const notificationsFor = (userId, dedupeKey) => db.prepare(
     'SELECT * FROM notifications WHERE user_id = ? AND dedupe_key = ?'
@@ -29,12 +29,26 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
     srv = await startTestServer();
     ({ runNotificationSweep } = await import('./utils.js'));
     ({ db } = await import('./db.js'));
+    
+    // Create an event with a past deadline to test the sweep
+    const past = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const now = new Date().toISOString();
+    db.exec(`
+      INSERT INTO events (id, title, description, category, location, application_deadline,
+                          organizer_id, status, auto_approve, created_at)
+      VALUES ('event-sweep-test', 'Sweep Test', 'd', 'Other', 'loc', '${past}',
+              '${ORGANIZER}', 'open', 0, '${now}');
+      INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
+      VALUES ('slot-sweep-test', 'event-sweep-test', 'Shift', 'd', '${now}', '${now}', 5);
+      INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
+      VALUES ('app-sweep-test', 'user-student-1', 'event-sweep-test', 'slot-sweep-test', 'pending', '${now}');
+    `);
   });
   afterAll(async () => { await srv.close(); });
 
   it('notifies the organizer, once, naming how many are waiting', () => {
     const pending = db.prepare(
-      "SELECT COUNT(*) c FROM applications WHERE event_id = 'event-softball' AND status = 'pending'"
+      "SELECT COUNT(*) c FROM applications WHERE event_id = 'event-sweep-test' AND status = 'pending'"
     ).get().c;
     expect(pending).toBeGreaterThan(0);   // the situation under test really exists
 
@@ -42,10 +56,10 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
 
     const sent = notificationsFor(ORGANIZER, DEDUPE);
     expect(sent).toHaveLength(1);
-    expect(sent[0].kind).toBe('deadline');
-    expect(sent[0].title).toMatch(/decision is needed/i);
+    expect(sent[0].kind).toBe('APPLICATION');
+    expect(sent[0].title).toMatch(/decision needed/i);
     expect(sent[0].body).toContain(String(pending));
-    expect(sent[0].link).toBe('event:event-softball');
+    expect(sent[0].link).toBe('event:event-sweep-test');
   });
 
   it('does not repeat on the next sweep', () => {
@@ -58,7 +72,7 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
 
   it('tells the organizer, not the applicants', () => {
     const applicants = db.prepare(
-      "SELECT DISTINCT user_id FROM applications WHERE event_id = 'event-softball' AND status = 'pending'"
+      "SELECT DISTINCT user_id FROM applications WHERE event_id = 'event-sweep-test' AND status = 'pending'"
     ).all().map(r => r.user_id);
 
     expect(applicants.length).toBeGreaterThan(0);

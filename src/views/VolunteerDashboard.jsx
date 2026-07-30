@@ -81,8 +81,70 @@ export default function VolunteerDashboard({
     }
   };
 
+  const greetingMessage = useMemo(() => {
+    const name = currentUser.name.split(' ')[0];
+    const hour = new Date().getHours();
+    
+    const morning = [
+      `Good morning, ${name} ☀️`,
+      `Morning, ${name}! Ready?`,
+      `Rise and shine, ${name}`,
+      `Ready to make an impact, ${name}?`,
+      `New day, new impact, ${name}`,
+      `Fresh chances await, ${name}`,
+      `Let’s do some good, ${name}`,
+      `Ready to lend a hand, ${name}?`
+    ];
+    
+    const afternoon = [
+      `Good afternoon, ${name} 👋`,
+      `Welcome back, ${name}`,
+      `Ready to help, ${name}?`,
+      `More good ahead, ${name}`,
+      `Keep the momentum going, ${name}`,
+      `Still time to make an impact, ${name}`,
+      `Back for more good, ${name}?`,
+      `Let’s keep helping, ${name}`
+    ];
+    
+    const evening = [
+      `Good evening, ${name} 🌙`,
+      `Nice to see you, ${name}`,
+      `Evening, ${name}`,
+      `Still making an impact, ${name}?`,
+      `Your impact matters, ${name}`,
+      `Another good day, ${name}`,
+      `Keep making a difference, ${name}`,
+      `More good awaits, ${name}`
+    ];
+    
+    const generic = [
+      `Ready to help, ${name}? 💙`,
+      `Your next mission awaits, ${name}`,
+      `Time to make an impact, ${name}`,
+      `Find your next opportunity, ${name}`,
+      `New ways to help await, ${name}`,
+      `Let’s make a difference, ${name}`,
+      `Your kindness matters, ${name}`,
+      `Causes need you, ${name}`,
+      `Your next adventure starts here, ${name}`,
+      `Make today count, ${name}`
+    ];
+
+    let pool = Math.random() > 0.3
+      ? (hour < 12 ? morning : hour < 17 ? afternoon : evening)
+      : generic;
+      
+    return pool[Math.floor(Math.random() * pool.length)];
+  }, [currentUser.name]);
+
   return (
     <div className="stack-lg">
+      <div className="dashboard-greeting" style={{ marginBottom: '-var(--s4)' }}>
+        <h1 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
+          {greetingMessage}
+        </h1>
+      </div>
       {/* ── What's next: the single most useful thing on the page ── */}
       {nextShift ? (
         <section className="nextshift">
@@ -107,7 +169,7 @@ export default function VolunteerDashboard({
           </button>
         </section>
       ) : mine.length === 0 && totalHours === 0 ? (
-        <section className="card card-pad" style={{ background: 'var(--brand)', color: 'var(--ink-inv)', border: 'none' }}>
+        <section className="card card-pad brand-panel" style={{ background: 'var(--brand)', color: 'var(--ink-inv)', border: 'none' }}>
           <h2 style={{ color: 'var(--ink-inv)' }}>Welcome to {APP_NAME}! 🎉</h2>
           <p className="lead" style={{ marginTop: 8, color: 'var(--ink-inv-2)', maxWidth: '60ch' }}>
             This is your dashboard. Once you start signing up for events, your upcoming shifts and completed hours will appear here.

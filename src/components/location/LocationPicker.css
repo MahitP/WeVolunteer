@@ -1,0 +1,120 @@
+/* ── Location Picker ───────────────────────────── */
+
+.location-picker {
+  position: relative;
+}
+
+.location-picker .input-affix {
+  position: relative;
+}
+
+.location-selected {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.location-selected-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+.location-selected-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  min-width: 0;
+}
+
+.location-selected-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.location-selected-address {
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+}
+
+/* ── Search Results Dropdown ───────────────────── */
+
+.location-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  margin-top: var(--s1);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  max-height: 280px;
+  overflow-y: auto;
+  list-style: none;
+  padding: var(--s1) 0;
+}
+
+.location-result {
+  padding: var(--s2) var(--s3);
+  cursor: pointer;
+  transition: background 0.15s;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.location-result:hover,
+.location-result[aria-selected="true"] {
+  background: var(--brand-tint);
+}
+
+.location-result-name {
+  font-weight: 500;
+  color: var(--ink);
+  font-size: 0.875rem;
+}
+
+.location-result-address {
+  font-size: 0.75rem;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.location-results-status {
+  padding: var(--s3);
+  text-align: center;
+  color: var(--ink-3);
+  font-size: 0.8125rem;
+}
+
+.location-results-status svg {
+  display: block;
+  margin: 0 auto var(--s2);
+  color: var(--ink-3);
+}
+
+/* ── Spinner ───────────────────────────────────── */
+
+.location-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--rule);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: location-spin 0.6s linear infinite;
+  display: inline-block;
+}
+
+@keyframes location-spin {
+  to { transform: rotate(360deg); }
+}
+

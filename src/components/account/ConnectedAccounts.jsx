@@ -1,0 +1,177 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { api } from '../../utils/api';
+import { AlertCircle, Link as LinkIcon, Unlink, Check } from 'lucide-react';
+import ProviderMark from '../auth/ProviderMark';
+
+export default function ConnectedAccounts({ addToast, currentUser }) {
+  const [providers, setProviders] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      /*
+       * Both of these calls previously sent `Authorization: Bearer
+       * ${api.token}` — and `api.token` has never existed on the api object,
+       * so the literal string "Bearer undefined" went out on every request.
+       * They worked at all only because the session cookie rode along by
+       * accident. Going through `api` uses credentials: 'include' and the real
+       * session, which also makes silent linking below possible.
+       */
+      const [providerList, accountList] = await Promise.all([
+        api.fetchOAuthProviders(),
+        api.fetchConnectedAccounts()
+      ]);
+      setProviders(providerList);
+      setAccounts(accountList);
+      setError('');
+    } catch (err) {
+      setError(err.message || 'Could not load your connected accounts.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleConnect = async (provider) => {
+    setBusy(provider);
+    try {
+      /*
+       * The server now reads the signed-in user from the session cookie when
+       * it builds the OAuth state, so coming back from the provider links the
+       * account silently. That path existed before but could never fire: the
+       * server looked for the user in an Authorization header the client had
+       * stopped sending, so connecting your own Google account to your own
+       * signed-in account demanded your password — or, if the Google address
+       * differed from your account address, dropped you into the signup form
+       * while you were already signed in.
+       */
+      const { url } = await api.startOAuth(provider);
+      window.location.href = url;
+    } catch (err) {
+      addToast(err.message || `Could not start connecting ${provider}.`, 'error');
+      setBusy(null);
+    }
+  };
+
+  const handleDisconnect = async (provider, label) => {
+    const confirmed = window.confirm(
+      `Disconnect ${label}?\n\nYou will no longer be able to sign in with it. You can reconnect at any time.`
+    );
+    if (!confirmed) return;
+
+    setBusy(provider);
+    try {
+      await api.disconnectOAuth(provider);
+      addToast(`${label} disconnected.`, 'success');
+      await load();
+    } catch (err) {
+      addToast(err.message, 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <section className="card card-pad" style={{ marginTop: 'var(--s4)' }}>
+        <h3>Connected accounts</h3>
+        <p className="dim small" role="status" aria-live="polite">Loading…</p>
+      </section>
+    );
+  }
+
+  const hasPassword = currentUser?.hasPassword !== false;
+  const onlyWayIn = !hasPassword && accounts.length === 1;
+
+  return (
+    <section className="card card-pad" style={{ marginTop: 'var(--s4)' }} aria-labelledby="connected-heading">
+      <h3 id="connected-heading" style={{ marginBottom: 'var(--s2)' }}>Connected accounts</h3>
+      <p className="dim small" style={{ marginBottom: 'var(--s4)' }}>
+        Sign in with a provider instead of typing a password.
+        {onlyWayIn && ' This is currently your only way to sign in, so it cannot be removed until you set a password above.'}
+      </p>
+
+      {error && (
+        <div className="alert alert-danger" role="alert" style={{ marginBottom: 'var(--s4)' }}>
+          <AlertCircle size={16} aria-hidden="true" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <ul className="stack-md" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        {providers.map(provider => {
+          const connected = accounts.find(a => a.provider === provider.id);
+          const unavailable = !provider.enabled;
+
+          return (
+            <li
+              key={provider.id}
+              className="row"
+              style={{
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 'var(--s3)',
+                padding: 'var(--s3)',
+                border: '1px solid var(--rule)',
+                borderRadius: 'var(--radius)'
+              }}
+            >
+              <span className="row" style={{ alignItems: 'center', gap: 'var(--s3)', minWidth: 0 }}>
+                <span
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 36,
+                    height: 36,
+                    flex: 'none',
+                    background: 'var(--bg-alt)',
+                    borderRadius: 'var(--r-full)'
+                  }}
+                >
+                  <ProviderMark provider={provider.id} />
+                </span>
+                <span className="stack-xs" style={{ minWidth: 0 }}>
+                  <span className="strong">{provider.label}</span>
+                  <span className="dim small truncate">
+                    {!provider.implemented ? 'Not available yet'
+                      : unavailable ? 'Not set up on this site'
+                        : connected
+                          ? <><Check size={12} aria-hidden="true" /> Connected as {connected.provider_email}</>
+                          : 'Not connected'}
+                  </span>
+                </span>
+              </span>
+
+              {!unavailable && (
+                connected ? (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleDisconnect(provider.id, provider.label)}
+                    disabled={busy === provider.id}
+                  >
+                    <Unlink size={14} aria-hidden="true" />
+                    <span>{busy === provider.id ? 'Working…' : 'Disconnect'}</span>
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleConnect(provider.id)}
+                    disabled={busy === provider.id}
+                  >
+                    <LinkIcon size={14} aria-hidden="true" />
+                    <span>{busy === provider.id ? 'Redirecting…' : 'Connect'}</span>
+                  </button>
+                )
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}

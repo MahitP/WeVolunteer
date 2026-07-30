@@ -22,18 +22,18 @@ describe('case-insensitive email uniqueness (API)', () => {
   });
 
   const signup = (email, overrides = {}) => srv.call('POST', '/api/auth/signup', {
-    email, password: 'password123', name: 'Test User',
+    email, password: 'Password123', name: 'Test User',
     username: `u${Math.random().toString(36).slice(2, 9)}`,
     role: 'student', grade: '10',
     ...overrides
   });
 
-  it('refuses a case-variant duplicate signup with 400 naming email', async () => {
+  it('refuses a case-variant duplicate signup with 409 naming email', async () => {
     const first = await signup('alex@x.com');
     expect(first.status).toBe(201);
 
     const second = await signup('ALEX@x.com');
-    expect(second.status).toBe(400);
+    expect(second.status).toBe(409);
     expect(second.body.error.toLowerCase()).toContain('email');
   });
 
@@ -41,10 +41,10 @@ describe('case-insensitive email uniqueness (API)', () => {
     const su = await signup('MixedCase@Example.com');
     expect(su.status).toBe(201);
 
-    const tokenLower = await srv.login('mixedcase@example.com');
+    const tokenLower = await srv.login('mixedcase@example.com', 'Password123');
     expect(tokenLower).toBeTruthy();
 
-    const tokenUpper = await srv.login('MIXEDCASE@EXAMPLE.COM');
+    const tokenUpper = await srv.login('MIXEDCASE@EXAMPLE.COM', 'Password123');
     expect(tokenUpper).toBeTruthy();
   });
 

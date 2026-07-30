@@ -1,6 +1,7 @@
 import express from 'express';
 
-import { authenticateToken, inTransaction, createNotification, handleWaitlistPromotion } from '../utils.js';
+import { authenticateToken, inTransaction, handleWaitlistPromotion } from '../utils.js';
+import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 
 const router = express.Router();
@@ -45,6 +46,11 @@ router.get('/api/applications', authenticateToken, (req, res) => {
     const attendanceByKey = new Map();
     for (const a of db.prepare('SELECT slot_id, user_id, present, hours_awarded FROM attendance').all()) {
       attendanceByKey.set(`${a.slot_id}:${a.user_id}`, a);
+    }
+
+    const conflictsByAppId = new Set();
+    for (const c of db.prepare('SELECT application_id FROM application_conflicts').all()) {
+      conflictsByAppId.add(c.application_id);
     }
 
     const formattedApps = rows.map(r => {
@@ -98,7 +104,8 @@ router.get('/api/applications', authenticateToken, (req, res) => {
           bio: r.bio,
           skills: r.skills ? JSON.parse(r.skills) : []
         },
-        attendance
+        attendance,
+        hasConflict: conflictsByAppId.has(r.id)
       };
     });
 
@@ -137,6 +144,38 @@ router.post('/api/events/:id/apply', authenticateToken, (req, res) => {
       return res.status(400).json({ error: 'Application deadline has passed. Sign-ups are closed.' });
     }
 
+    // Schedule Conflict Detection
+    // Check if the user has any pending, accepted, or waitlisted slots that overlap
+    // with this slot's time. Overlap occurs if existing_start < new_end AND existing_end > new_start.
+    const overlap = db.prepare(`
+      SELECT a.id as app_id, a.status, e.title, s.name as slot_name, s.start_datetime, s.end_datetime
+      FROM applications a
+      JOIN slots s ON a.slot_id = s.id
+      JOIN events e ON a.event_id = e.id
+      WHERE a.user_id = ?
+        AND a.status IN ('pending', 'accepted', 'waitlisted')
+        AND a.slot_id != ?
+        AND s.start_datetime < ?
+        AND s.end_datetime > ?
+      LIMIT 1
+    `).get(req.user.id, slotId, slot.end_datetime, slot.start_datetime);
+
+    if (overlap && !req.body.overrideConflict) {
+      return res.status(409).json({ 
+        error: 'Schedule conflict detected', 
+        details: `You already have a volunteer commitment during this time: ${overlap.title} (${overlap.slot_name}).`,
+        conflict: {
+          level: overlap.status === 'accepted' ? 2 : 1,
+          existingAppId: overlap.app_id,
+          title: overlap.title,
+          slotName: overlap.slot_name,
+          start: overlap.start_datetime,
+          end: overlap.end_datetime,
+          status: overlap.status
+        }
+      });
+    }
+
     // A withdrawn application is not a live one. Withdrawing by mistake should
     // cost the student nothing while applications are still open, so the old
     // row is revived rather than blocking — UNIQUE(user_id, slot_id) means a
@@ -163,14 +202,18 @@ router.post('/api/events/:id/apply', authenticateToken, (req, res) => {
       `).run(appId, req.user.id, eventId, slotId, status, appliedAt);
     }
 
+    if (overlap && req.body.overrideConflict) {
+      const conflictId = `conf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      db.prepare(`
+        INSERT INTO application_conflicts (id, application_id, conflicting_application_id, conflict_type, acknowledged_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(conflictId, appId, overlap.app_id, overlap.status, appliedAt, appliedAt);
+
+      notificationService.dispatch('SCHEDULE_CONFLICT_WARNING', { eventId: event.id, eventTitle: event.title }, req.user.id);
+    }
+
     // Notify organizer
-    createNotification({
-      userId: event.organizer_id,
-      kind: 'application',
-      title: 'New volunteer application',
-      body: `A student applied to "${event.title}".`,
-      link: `event:${event.id}`
-    });
+    notificationService.dispatch('NEW_APPLICATION', { eventId: event.id, eventTitle: event.title }, event.organizer_id);
 
     res.status(201).json({
       success: true,
@@ -285,13 +328,13 @@ router.patch('/api/applications/bulk', authenticateToken, (req, res) => {
       handleWaitlistPromotion(p.slotId, p.eventId, p.eventTitle, p.organizerId);
     }
     for (const a of applied) {
-      createNotification({
-        userId: a.userId,
-        kind: status === 'accepted' ? 'accepted' : status === 'waitlisted' ? 'waitlisted' : 'declined',
-        title: `Application ${status}`,
-        body: `Your application for "${a.eventTitle}" was ${status}.`,
-        link: `event:${a.eventId}`
-      });
+      if (status === 'accepted') {
+        notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: a.eventId, eventTitle: a.eventTitle }, a.userId);
+      } else if (status === 'waitlisted') {
+        notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: a.eventId, eventTitle: a.eventTitle }, a.userId);
+      } else if (status === 'rejected') {
+        notificationService.dispatch('APPLICATION_REJECTED', { eventId: a.eventId, eventTitle: a.eventTitle }, a.userId);
+      }
     }
 
     res.json({ success: true, updated: applied.length, applied, skipped });
@@ -342,22 +385,10 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
 
       if (wasConfirmed) {
         // Notify student releasing spot
-        createNotification({
-          userId: app.user_id,
-          kind: 'application',
-          title: 'Spot released',
-          body: `You successfully released your spot for "${app.event_title}" — ${app.slot_name}.`,
-          link: `event:${app.event_id}`
-        });
+        notificationService.dispatch('SPOT_RELEASED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
 
         // Notify organizer
-        createNotification({
-          userId: app.organizer_id,
-          kind: 'application',
-          title: 'A volunteer released their spot',
-          body: `${req.user.name || 'A volunteer'} can no longer make "${app.event_title}" — ${app.slot_name}. The spot has been filled or reopened.`,
-          link: `event:${app.event_id}`
-        });
+        notificationService.dispatch('VOLUNTEER_RELEASED_SPOT', { eventId: app.event_id, eventTitle: app.event_title }, app.organizer_id);
 
         // Auto Select waitlist promotion check
         const event = db.prepare('SELECT auto_approve FROM events WHERE id = ?').get(app.event_id);
@@ -436,13 +467,13 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
     }
 
     // Notify the volunteer
-    createNotification({
-      userId: app.user_id,
-      kind: status === 'accepted' ? 'accepted' : status === 'waitlisted' ? 'waitlisted' : 'declined',
-      title: `Application ${status}`,
-      body: `Your application for "${app.event_title}" was ${status}.`,
-      link: `event:${app.event_id}`
-    });
+    if (status === 'accepted') {
+      notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
+    } else if (status === 'waitlisted') {
+      notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
+    } else if (status === 'rejected') {
+      notificationService.dispatch('APPLICATION_REJECTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
+    }
 
     res.json({
       success: true,

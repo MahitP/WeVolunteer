@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, CalendarDays, MapPin, Clock } from 'lucide-react';
 import { formatHours, formatTimeRange, formatDay } from '../utils/helpers';
-
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /**
@@ -14,43 +13,71 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
  *   hosting  — an event you run (brand, organizer view)
  */
 const KIND_META = {
-  shift: { tone: 'brand', label: 'Confirmed shift' },
-  pending: { tone: 'warn', label: 'Awaiting decision' },
-  deadline: { tone: 'danger', label: 'Application deadline' },
-  hosting: { tone: 'brand', label: 'You are hosting' }
+  shift: {
+    tone: 'brand',
+    label: 'Confirmed shift'
+  },
+  pending: {
+    tone: 'warn',
+    label: 'Awaiting decision'
+  },
+  history: {
+    tone: 'muted',
+    label: 'Past shift'
+  },
+  deadline: {
+    tone: 'danger',
+    label: 'Application deadline'
+  },
+  hosting: {
+    tone: 'brand',
+    label: 'You are hosting'
+  }
 };
-
-const dayKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-
-export default function CalendarView({ currentUser, events = [], applications = [], onViewEvent }) {
+const dayKey = d => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+export default function CalendarView({
+  currentUser,
+  events = [],
+  applications = [],
+  onViewEvent
+}) {
   // Fixed for the lifetime of the view so memos have a stable dependency
   const [today] = useState(() => new Date());
   const [cursor, setCursor] = useState(() => {
     const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1);
+    // In month mode we usually start at the 1st, but to support week mode gracefully,
+    // let's keep the cursor on the actual current day initially.
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
   });
   const [selected, setSelected] = useState(null);
-
+  const [viewMode, setViewMode] = useState('month'); // 'month' or 'week'
+  const [filter, setFilter] = useState('all'); // 'all', 'upcoming', 'pending', 'history'
   const isOrganizer = currentUser?.role === 'organizer';
 
   /** Everything with a date, flattened into calendar entries. */
   const entries = useMemo(() => {
     const out = [];
-
     if (isOrganizer) {
       for (const event of events) {
         if (event.organizerId !== currentUser.id) continue;
         for (const slot of event.slots || []) {
           out.push({
-            kind: 'hosting', date: new Date(slot.startDatetime), event,
-            title: event.title, detail: slot.name,
-            startDatetime: slot.startDatetime, endDatetime: slot.endDatetime
+            kind: 'hosting',
+            date: new Date(slot.startDatetime),
+            event,
+            title: event.title,
+            detail: slot.name,
+            startDatetime: slot.startDatetime,
+            endDatetime: slot.endDatetime
           });
         }
         if (event.applicationDeadline && event.status === 'open') {
           out.push({
-            kind: 'deadline', date: new Date(event.applicationDeadline), event,
-            title: event.title, detail: 'Applications close'
+            kind: 'deadline',
+            date: new Date(event.applicationDeadline),
+            event,
+            title: event.title,
+            detail: 'Applications close'
           });
         }
       }
@@ -63,19 +90,28 @@ export default function CalendarView({ currentUser, events = [], applications = 
       if (!app.slot?.startDatetime) continue;
       const event = events.find(e => e.id === app.eventId);
       if (!event || event.status === 'cancelled') continue;
-
       if (app.status === 'accepted') {
         out.push({
-          kind: 'shift', date: new Date(app.slot.startDatetime), event,
-          title: event.title, detail: app.slot.name,
-          startDatetime: app.slot.startDatetime, endDatetime: app.slot.endDatetime,
-          hours: app.slot.hours
+          kind: new Date(app.slot.endDatetime) < new Date() ? 'history' : 'shift',
+          date: new Date(app.slot.startDatetime),
+          event,
+          title: event.title,
+          detail: app.slot.name,
+          startDatetime: app.slot.startDatetime,
+          endDatetime: app.slot.endDatetime,
+          hours: app.slot.hours,
+          attendance: app.attendance
         });
       } else if (app.status === 'pending' || app.status === 'waitlisted') {
+        if (new Date(app.slot.startDatetime) < new Date()) continue; // Skip past pending
         out.push({
-          kind: 'pending', date: new Date(app.slot.startDatetime), event,
-          title: event.title, detail: app.slot.name,
-          startDatetime: app.slot.startDatetime, endDatetime: app.slot.endDatetime
+          kind: 'pending',
+          date: new Date(app.slot.startDatetime),
+          event,
+          title: event.title,
+          detail: app.slot.name,
+          startDatetime: app.slot.startDatetime,
+          endDatetime: app.slot.endDatetime
         });
       }
     }
@@ -86,16 +122,27 @@ export default function CalendarView({ currentUser, events = [], applications = 
       if (event.status !== 'open' || appliedIds.has(event.id)) continue;
       if (new Date(event.applicationDeadline) < new Date()) continue;
       out.push({
-        kind: 'deadline', date: new Date(event.applicationDeadline), event,
-        title: event.title, detail: 'Applications close'
+        kind: 'deadline',
+        date: new Date(event.applicationDeadline),
+        event,
+        title: event.title,
+        detail: 'Applications close'
       });
     }
     return out;
   }, [events, applications, currentUser, isOrganizer]);
 
+  const filteredEntries = useMemo(() => {
+    if (filter === 'all') return entries;
+    if (filter === 'upcoming') return entries.filter(e => e.kind === 'shift' || e.kind === 'hosting');
+    if (filter === 'pending') return entries.filter(e => e.kind === 'pending' || e.kind === 'deadline');
+    if (filter === 'history') return entries.filter(e => e.kind === 'history');
+    return entries;
+  }, [entries, filter]);
+
   const byDay = useMemo(() => {
     const map = new Map();
-    for (const e of entries) {
+    for (const e of filteredEntries) {
       if (isNaN(e.date.getTime())) continue;
       const key = dayKey(e.date);
       if (!map.has(key)) map.set(key, []);
@@ -105,193 +152,243 @@ export default function CalendarView({ currentUser, events = [], applications = 
       list.sort((a, b) => a.date - b.date);
     }
     return map;
-  }, [entries]);
+  }, [filteredEntries]);
 
   /**
    * Four shifts of one event on one day is one thing happening, not four.
    * The grid shows it once with a count; the day detail still lists each shift.
    */
-  const chipsFor = (dayEntries) => {
+  const chipsFor = dayEntries => {
     const seen = new Map();
     for (const e of dayEntries) {
       const key = `${e.event?.id}:${e.kind}`;
-      if (seen.has(key)) seen.get(key).count++;
-      else seen.set(key, { ...e, count: 1 });
+      if (seen.has(key)) seen.get(key).count++;else seen.set(key, {
+        ...e,
+        count: 1
+      });
     }
     return [...seen.values()];
   };
 
-  // Month grid, Monday-first, padded to whole weeks
+  // Month or Week grid, Monday-first
   const grid = useMemo(() => {
     const year = cursor.getFullYear();
     const month = cursor.getMonth();
+    const date = cursor.getDate();
+    
+    if (viewMode === 'week') {
+      const first = new Date(year, month, date);
+      const offset = (first.getDay() + 6) % 7; // Sunday=0 → Monday-first
+      const start = new Date(year, month, date - offset);
+      const cells = [];
+      for (let i = 0; i < 7; i++) {
+        cells.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+      }
+      return cells;
+    }
+
     const first = new Date(year, month, 1);
-    const offset = (first.getDay() + 6) % 7; // Sunday=0 → Monday-first
+    const offset = (first.getDay() + 6) % 7;
     const start = new Date(year, month, 1 - offset);
     const cells = [];
     for (let i = 0; i < 42; i++) {
       const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
       cells.push(d);
     }
-    // Drop a trailing all-next-month week
     return cells.slice(0, cells[35].getMonth() === month ? 42 : 35);
-  }, [cursor]);
+  }, [cursor, viewMode]);
 
-  const monthLabel = cursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-  const selectedEntries = selected ? (byDay.get(dayKey(selected)) || []) : [];
+  const monthLabel = cursor.toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric'
+  });
+  
+  const weekLabel = useMemo(() => {
+    if (!grid.length) return '';
+    const start = grid[0];
+    const end = grid[6];
+    if (start.getMonth() === end.getMonth()) {
+      return `${start.toLocaleDateString(undefined, { month: 'short' })} ${start.getDate()} - ${end.getDate()}, ${start.getFullYear()}`;
+    }
+    return `${start.toLocaleDateString(undefined, { month: 'short' })} ${start.getDate()} - ${end.toLocaleDateString(undefined, { month: 'short' })} ${end.getDate()}, ${end.getFullYear()}`;
+  }, [grid]);
 
-  const move = (delta) => {
-    setCursor(c => new Date(c.getFullYear(), c.getMonth() + delta, 1));
+  const selectedEntries = selected ? byDay.get(dayKey(selected)) || [] : [];
+  const move = delta => {
+    if (viewMode === 'week') {
+      setCursor(c => new Date(c.getFullYear(), c.getMonth(), c.getDate() + (delta * 7)));
+    } else {
+      setCursor(c => new Date(c.getFullYear(), c.getMonth() + delta, 1));
+    }
     setSelected(null);
   };
   const goToday = () => {
     const now = new Date();
-    setCursor(new Date(now.getFullYear(), now.getMonth(), 1));
+    setCursor(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
     setSelected(now);
   };
-
-  const upcoming = useMemo(() => entries
-    .filter(e => e.date >= new Date(today.getFullYear(), today.getMonth(), today.getDate()))
-    .sort((a, b) => a.date - b.date)
-    .slice(0, 5), [entries, today]);
-
-  return (
-    <div className="stack-lg">
-      <div className="toolbar" style={{ marginBottom: 0 }}>
-        <div className="row" style={{ gap: 'var(--s2)' }}>
-          <button className="btn btn-secondary btn-icon btn-sm" onClick={() => move(-1)} aria-label="Previous month">
+  
+  const agendaUpcoming = useMemo(() => entries.filter(e => (e.kind === 'shift' || e.kind === 'hosting') && e.date >= new Date(today.getFullYear(), today.getMonth(), today.getDate())).sort((a, b) => a.date - b.date).slice(0, 5), [entries, today]);
+  const agendaPending = useMemo(() => entries.filter(e => (e.kind === 'pending' || e.kind === 'deadline') && e.date >= new Date(today.getFullYear(), today.getMonth(), today.getDate())).sort((a, b) => a.date - b.date).slice(0, 5), [entries, today]);
+  const agendaHistory = useMemo(() => entries.filter(e => e.kind === 'history').sort((a, b) => b.date - a.date).slice(0, 5), [entries]);
+  
+  return <div className="stack-lg">
+      <div className="toolbar s-7ba55e">
+        <div className="row s-65ce96">
+          <button className="btn btn-secondary btn-icon btn-sm" onClick={() => move(-1)} aria-label="Previous">
             <ChevronLeft size={15} />
           </button>
-          <button className="btn btn-secondary btn-icon btn-sm" onClick={() => move(1)} aria-label="Next month">
+          <button className="btn btn-secondary btn-icon btn-sm" onClick={() => move(1)} aria-label="Next">
             <ChevronRight size={15} />
           </button>
-          <h2 style={{ marginLeft: 'var(--s2)', minWidth: '9ch' }}>{monthLabel}</h2>
+          <h2 className="s-badf1b">{viewMode === 'week' ? weekLabel : monthLabel}</h2>
         </div>
 
-        <button className="btn btn-ghost btn-sm" onClick={goToday}>Today</button>
+        <div className="row">
+          <button className="btn btn-ghost btn-sm" onClick={goToday} aria-current={dayKey(cursor) === dayKey(today) ? 'date' : undefined}>Today</button>
+          <div className="row" style={{ background: 'var(--surface-3)', borderRadius: 'var(--r-md)', padding: 2, border: '1px solid var(--rule)' }}>
+            <button 
+              className={`btn btn-sm ${viewMode === 'month' ? 's-d61cc5' : 'btn-ghost'}`} 
+              onClick={() => setViewMode('month')}
+              style={{ margin: 0, borderRadius: 'calc(var(--r-md) - 2px)', background: viewMode === 'month' ? 'var(--surface)' : 'transparent', color: viewMode === 'month' ? 'var(--ink)' : 'var(--ink-2)', boxShadow: viewMode === 'month' ? 'var(--control-shadow)' : 'none' }}
+            >Month</button>
+            <button 
+              className={`btn btn-sm ${viewMode === 'week' ? 's-d61cc5' : 'btn-ghost'}`} 
+              onClick={() => setViewMode('week')}
+              style={{ margin: 0, borderRadius: 'calc(var(--r-md) - 2px)', background: viewMode === 'week' ? 'var(--surface)' : 'transparent', color: viewMode === 'week' ? 'var(--ink)' : 'var(--ink-2)', boxShadow: viewMode === 'week' ? 'var(--control-shadow)' : 'none' }}
+            >Week</button>
+          </div>
+        </div>
 
-        <div className="row row-wrap small dim" style={{ gap: 'var(--s3)', marginLeft: 'auto' }}>
-          {(isOrganizer ? ['hosting', 'deadline'] : ['shift', 'pending', 'deadline']).map(k => (
-            <span key={k} className="row" style={{ gap: 5 }}>
+        <div className="row row-wrap small dim s-4f3bdc">
+          {(isOrganizer ? ['hosting', 'deadline'] : ['shift', 'pending', 'history']).map(k => <span key={k} className="row s-a39dc0">
               <span className={`cal-key tone-${KIND_META[k].tone}`} />
               {KIND_META[k].label}
-            </span>
-          ))}
+            </span>)}
         </div>
       </div>
 
-      <div className="calendar">
+      <div className="row" style={{ gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+        {['all', 'upcoming', 'pending', 'history'].map(f => {
+           if (isOrganizer && (f === 'pending' || f === 'history')) return null;
+           const labels = { all: 'Everything', upcoming: 'Upcoming', pending: 'Awaiting', history: 'History' };
+           return (
+             <button 
+               key={f}
+               className={`btn btn-sm ${filter === f ? 'btn-primary' : 'btn-secondary'}`}
+               onClick={() => setFilter(f)}
+               style={{ borderRadius: 20 }}
+             >
+               {labels[f]}
+             </button>
+           );
+        })}
+      </div>
+
+      <div className={`calendar ${viewMode === 'week' ? 'calendar-week' : 'calendar-month'}`}>
         <div className="cal-head">
           {WEEKDAYS.map(d => <div key={d} className="cal-weekday">{d}</div>)}
         </div>
 
-        <div className="cal-grid">
+        <div className="cal-grid" style={viewMode === 'week' ? { gridTemplateRows: 'minmax(120px, 1fr)' } : {}}>
           {grid.map(date => {
-            const inMonth = date.getMonth() === cursor.getMonth();
-            const isToday = dayKey(date) === dayKey(today);
-            const isSelected = selected && dayKey(date) === dayKey(selected);
-            const dayEntries = byDay.get(dayKey(date)) || [];
-            const chips = chipsFor(dayEntries);
-
-            return (
-              <button
-                key={date.toISOString()}
-                className={`cal-day ${inMonth ? '' : 'is-outside'} ${isToday ? 'is-today' : ''} ${isSelected ? 'is-selected' : ''}`}
-                onClick={() => setSelected(date)}
-                aria-label={`${formatDay(date.toISOString())}${dayEntries.length ? `, ${dayEntries.length} item${dayEntries.length !== 1 ? 's' : ''}` : ''}`}
-                aria-pressed={isSelected}
-              >
+          const inMonth = viewMode === 'week' || date.getMonth() === cursor.getMonth();
+          const isToday = dayKey(date) === dayKey(today);
+          const isSelected = selected && dayKey(date) === dayKey(selected);
+          const dayEntries = byDay.get(dayKey(date)) || [];
+          const chips = chipsFor(dayEntries);
+          return <button key={date.toISOString()} className={`cal-day ${inMonth ? '' : 'is-outside'} ${isToday ? 'is-today' : ''} ${isSelected ? 'is-selected' : ''}`} onClick={() => setSelected(date)} aria-label={`${formatDay(date.toISOString())}${dayEntries.length ? `, ${dayEntries.length} item${dayEntries.length !== 1 ? 's' : ''}` : ''}`} aria-pressed={isSelected}>
                 <span className="cal-date">{date.getDate()}</span>
                 <span className="cal-entries">
-                  {chips.slice(0, 3).map((e, i) => (
-                    <span key={i} className={`cal-chip tone-${KIND_META[e.kind].tone}`}>
+                  {chips.slice(0, viewMode === 'week' ? 10 : 3).map((e, i) => <span key={i} className={`cal-chip tone-${KIND_META[e.kind].tone}`}>
                       {e.title}{e.count > 1 && ` ×${e.count}`}
-                    </span>
-                  ))}
-                  {chips.length > 3 && (
-                    <span className="cal-more">+{chips.length - 3} more</span>
-                  )}
+                    </span>)}
+                  {chips.length > (viewMode === 'week' ? 10 : 3) && <span className="cal-more">+{chips.length - (viewMode === 'week' ? 10 : 3)} more</span>}
                 </span>
-              </button>
-            );
-          })}
+              </button>;
+        })}
         </div>
       </div>
 
       {/* ── Detail for the chosen day, or what's next ── */}
-      {selected ? (
-        <section>
+      {selected ? <section>
           <div className="section-head">
             <h2>{formatDay(selected.toISOString())}</h2>
             <button className="btn btn-ghost btn-sm section-action" onClick={() => setSelected(null)}>
               Clear
             </button>
           </div>
-          {selectedEntries.length === 0 ? (
-            <div className="card empty" style={{ padding: 'var(--s8) var(--s4)' }}>
+          {selectedEntries.length === 0 ? <div className="card empty" style={{ background: 'var(--surface-2)', borderColor: 'var(--rule)', color: 'var(--ink-3)' }}>
               <span className="empty-icon"><CalendarDays size={18} /></span>
-              <h3>Nothing on this day</h3>
+              <h3 style={{ color: 'var(--ink)' }}>Nothing on this day</h3>
               <p>Pick another date, or browse opportunities to fill it.</p>
-            </div>
-          ) : (
-            <div className="list">
+            </div> : <div className="list">
               {selectedEntries.map((e, i) => <EntryRow key={i} entry={e} onViewEvent={onViewEvent} />)}
-            </div>
-          )}
-        </section>
-      ) : (
-        <section>
-          <div className="section-head"><h2>Coming up</h2></div>
-          {upcoming.length === 0 ? (
-            <div className="card empty" style={{ padding: 'var(--s8) var(--s4)' }}>
-              <span className="empty-icon"><CalendarDays size={18} /></span>
-              <h3>Nothing scheduled</h3>
-              <p>
-                {isOrganizer
-                  ? 'Events you host will appear here once you post them.'
-                  : 'Shifts you are accepted for and deadlines you care about will appear here.'}
-              </p>
-            </div>
-          ) : (
-            <div className="list">
-              {upcoming.map((e, i) => <EntryRow key={i} entry={e} onViewEvent={onViewEvent} showDate />)}
-            </div>
-          )}
-        </section>
-      )}
-    </div>
-  );
+            </div>}
+        </section> : (
+          <div className="stack-lg">
+            <section>
+              <div className="section-head"><h2>Upcoming Shifts</h2></div>
+              {agendaUpcoming.length === 0 ? <div className="card empty" style={{ background: 'var(--surface-2)', borderColor: 'var(--rule)', color: 'var(--ink-3)' }}>
+                  <span className="empty-icon"><CalendarDays size={18} /></span>
+                  <h3 style={{ color: 'var(--ink)' }}>Nothing scheduled</h3>
+                  <p>
+                    {isOrganizer ? 'Events you host will appear here once you post them.' : 'Shifts you are accepted for will appear here.'}
+                  </p>
+                </div> : <div className="list">
+                  {agendaUpcoming.map((e, i) => <EntryRow key={i} entry={e} onViewEvent={onViewEvent} showDate />)}
+                </div>}
+            </section>
+            
+            {!isOrganizer && (
+              <div className="row" style={{ alignItems: 'flex-start', gap: 'var(--s6)' }}>
+                <section style={{ flex: 1 }}>
+                  <div className="section-head"><h2>Awaiting Decision</h2></div>
+                  {agendaPending.length === 0 ? (
+                    <div className="card empty" style={{ background: 'var(--surface-2)', borderColor: 'var(--rule)', padding: 'var(--s4)' }}>
+                      <p className="small dim">No pending applications.</p>
+                    </div>
+                  ) : <div className="list">
+                    {agendaPending.map((e, i) => <EntryRow key={i} entry={e} onViewEvent={onViewEvent} showDate />)}
+                  </div>}
+                </section>
+                <section style={{ flex: 1 }}>
+                  <div className="section-head"><h2>History</h2></div>
+                  {agendaHistory.length === 0 ? (
+                    <div className="card empty" style={{ background: 'var(--surface-2)', borderColor: 'var(--rule)', padding: 'var(--s4)' }}>
+                      <p className="small dim">No past shifts yet.</p>
+                    </div>
+                  ) : <div className="list">
+                    {agendaHistory.map((e, i) => <EntryRow key={i} entry={e} onViewEvent={onViewEvent} showDate />)}
+                  </div>}
+                </section>
+              </div>
+            )}
+          </div>
+        )}
+    </div>;
 }
-
-function EntryRow({ entry, onViewEvent, showDate }) {
+function EntryRow({
+  entry,
+  onViewEvent,
+  showDate
+}) {
   const meta = KIND_META[entry.kind];
-  return (
-    <button
-      className="list-row"
-      style={{ width: '100%', textAlign: 'left' }}
-      onClick={() => onViewEvent?.(entry.event.id)}
-    >
-      <span className={`cal-key tone-${meta.tone}`} style={{ width: 4, height: 34, borderRadius: 2 }} />
-      <span className="truncate" style={{ flex: 1 }}>
+  return <button className="list-row s-0a650c" onClick={() => onViewEvent?.(entry.event.id)}>
+      <span className={`cal-key tone-${meta.tone} s-47a499`} />
+      <span className="truncate s-49cdf8">
         <span className="person-name truncate">{entry.title}</span>
-        <span className="person-meta truncate row" style={{ gap: 'var(--s3)' }}>
+        <span className="person-meta truncate row s-615dbe">
           <span>{entry.detail}</span>
-          {entry.startDatetime && (
-            <span className="row tnum" style={{ gap: 4 }}>
+          {entry.startDatetime && <span className="row tnum s-9d3307">
               <Clock size={11} /> {formatTimeRange(entry.startDatetime, entry.endDatetime)}
-            </span>
-          )}
-          {entry.event?.location && (
-            <span className="row truncate" style={{ gap: 4 }}>
+            </span>}
+          {entry.event?.location && <span className="row truncate s-9d3307">
               <MapPin size={11} /> {entry.event.location}
-            </span>
-          )}
+            </span>}
         </span>
       </span>
-      {showDate && (
-        <span className="small dim nowrap tnum">{formatDay(entry.date.toISOString())}</span>
-      )}
+      {showDate && <span className="small dim nowrap tnum">{formatDay(entry.date.toISOString())}</span>}
       {entry.hours > 0 && <span className="hourspill">{formatHours(entry.hours)}</span>}
-    </button>
-  );
+    </button>;
 }

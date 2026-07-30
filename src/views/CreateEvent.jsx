@@ -1,69 +1,104 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Calendar, Plus, AlertCircle, Trash2, MapPin, Info, X } from 'lucide-react';
+import { Calendar, Plus, AlertCircle, Trash2, Info, X } from 'lucide-react';
 import { formatHours } from '../utils/helpers';
-
-const CATEGORIES = [
-  { value: 'School', label: 'School project' },
-  { value: '5K', label: '5K run / athletics' },
-  { value: 'Food Pantry', label: 'Food pantry' },
-  { value: 'Fundraiser', label: 'Fundraiser' },
-  { value: 'Other', label: 'Other community service' }
-];
-
-export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
+import { LocationPicker } from '../components/location';
+const CATEGORIES = [{
+  value: 'School',
+  label: 'School project'
+}, {
+  value: '5K',
+  label: '5K run / athletics'
+}, {
+  value: 'Food Pantry',
+  label: 'Food pantry'
+}, {
+  value: 'Fundraiser',
+  label: 'Fundraiser'
+}, {
+  value: 'Other',
+  label: 'Other community service'
+}];
+export default function CreateEvent({
+  onSubmitEvent,
+  addToast,
+  setActiveTab
+}) {
   const [form, setForm] = useState({
-    title: '', category: 'School', description: '', instructions: '', location: '',
-    applicationDeadline: '', autoApprove: false, attendeeVisibility: 'accepted'
+    title: '',
+    category: 'School',
+    description: '',
+    instructions: '',
+    location: { location: '', address: null, latitude: null, longitude: null },
+    applicationDeadline: '',
+    autoApprove: false,
+    attendeeVisibility: 'accepted'
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const slotCounter = useRef(0);
-
   const [dateInput, setDateInput] = useState('');
   const [dates, setDates] = useState([]);
-
   const [shift, setShift] = useState({
-    name: '', description: '', startTime: '09:00', endTime: '11:00', maxSpots: '2', onDate: ''
+    name: '',
+    description: '',
+    startTime: '09:00',
+    endTime: '11:00',
+    maxSpots: '2',
+    onDate: ''
   });
   const [slots, setSlots] = useState([]);
-
   const shiftHours = useMemo(() => {
     const [sh, sm] = shift.startTime.split(':').map(Number);
     const [eh, em] = shift.endTime.split(':').map(Number);
-    const mins = (eh * 60 + em) - (sh * 60 + sm);
+    const mins = eh * 60 + em - (sh * 60 + sm);
     return mins > 0 ? Number((mins / 60).toFixed(2)) : 0;
   }, [shift.startTime, shift.endTime]);
-
   useEffect(() => {
-    if (dates.length && !dates.includes(shift.onDate)) setShift(s => ({ ...s, onDate: dates[0] }));
+    if (dates.length && !dates.includes(shift.onDate)) setShift(s => ({
+      ...s,
+      onDate: dates[0]
+    }));
   }, [dates, shift.onDate]);
-
   const set = (name, value) => {
-    setForm(prev => ({ ...prev, [name]: value }));
-    if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
+    setForm(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    if (errors[name]) setErrors(prev => ({
+      ...prev,
+      [name]: ''
+    }));
   };
-
   const addDate = () => {
     if (!dateInput) return addToast('Pick a date first.', 'error');
     if (dates.includes(dateInput)) return addToast('That date is already on the list.', 'info');
     setDates(prev => [...prev, dateInput].sort());
     setDateInput('');
-    setErrors(prev => ({ ...prev, dates: '' }));
+    setErrors(prev => ({
+      ...prev,
+      dates: ''
+    }));
   };
-
-  const removeDate = (date) => {
+  const removeDate = date => {
     setDates(prev => prev.filter(d => d !== date));
     setSlots(prev => prev.filter(s => s.date !== date));
   };
-
   const validShift = () => {
-    if (!shift.name.trim()) { addToast('Name the shift, e.g. “Grill helper”.', 'error'); return false; }
-    if (shiftHours <= 0) { addToast('The end time must be after the start time.', 'error'); return false; }
-    if (Number(shift.maxSpots) < 1) { addToast('A shift needs at least one spot.', 'error'); return false; }
+    if (!shift.name.trim()) {
+      addToast('Name the shift, e.g. “Grill helper”.', 'error');
+      return false;
+    }
+    if (shiftHours <= 0) {
+      addToast('The end time must be after the start time.', 'error');
+      return false;
+    }
+    if (Number(shift.maxSpots) < 1) {
+      addToast('A shift needs at least one spot.', 'error');
+      return false;
+    }
     return true;
   };
-
-  const buildSlot = (date) => {
+  const buildSlot = date => {
     slotCounter.current += 1;
     return {
       id: `temp-${slotCounter.current}-${date}`,
@@ -78,31 +113,31 @@ export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
       endTime: shift.endTime
     };
   };
-
-  const addShift = (scope) => {
+  const addShift = scope => {
     if (dates.length === 0) return addToast('Add at least one date first.', 'error');
     if (!validShift()) return;
     const targets = scope === 'all' ? dates : [shift.onDate].filter(Boolean);
     if (targets.length === 0) return addToast('Choose which date this shift is on.', 'error');
     setSlots(prev => [...prev, ...targets.map(buildSlot)]);
-    addToast(
-      scope === 'all'
-        ? `Added “${shift.name}” to all ${dates.length} dates.`
-        : `Added “${shift.name}”.`,
-      'success'
-    );
-    setShift(s => ({ ...s, name: '', description: '' }));
-    setErrors(prev => ({ ...prev, slots: '' }));
+    addToast(scope === 'all' ? `Added “${shift.name}” to all ${dates.length} dates.` : `Added “${shift.name}”.`, 'success');
+    setShift(s => ({
+      ...s,
+      name: '',
+      description: ''
+    }));
+    setErrors(prev => ({
+      ...prev,
+      slots: ''
+    }));
   };
-
   const validate = () => {
     const next = {};
     if (!form.title.trim()) next.title = 'Give the event a name';
     if (!form.description.trim()) next.description = 'Tell volunteers what they\'ll be doing';
-    if (!form.location.trim()) next.location = 'Add a location';
+    const locText = typeof form.location === 'string' ? form.location : form.location?.location;
+    if (!locText?.trim()) next.location = 'Add a location';
     if (!form.applicationDeadline) next.applicationDeadline = 'Set an application deadline';
     if (slots.length === 0) next.slots = 'Add at least one shift before publishing';
-
     if (form.applicationDeadline && slots.length > 0) {
       const first = new Date([...slots].sort((a, b) => a.startDatetime.localeCompare(b.startDatetime))[0].startDatetime);
       if (new Date(form.applicationDeadline) >= first) {
@@ -112,8 +147,7 @@ export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
     setErrors(next);
     return Object.keys(next).length === 0;
   };
-
-  const handleSubmit = async (e) => {
+  const handleSubmit = async e => {
     e.preventDefault();
     if (!validate()) {
       addToast('Check the highlighted fields before publishing.', 'error');
@@ -121,12 +155,18 @@ export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
     }
     setSubmitting(true);
     try {
+      const loc = typeof form.location === 'string'
+        ? { location: form.location, address: null, latitude: null, longitude: null }
+        : form.location;
       await onSubmitEvent({
         title: form.title,
         description: form.description,
         instructions: form.instructions,
         category: form.category,
-        location: form.location,
+        location: loc.location,
+        address: loc.address || null,
+        latitude: loc.latitude != null ? loc.latitude : null,
+        longitude: loc.longitude != null ? loc.longitude : null,
         applicationDeadline: new Date(form.applicationDeadline).toISOString(),
         autoApprove: form.autoApprove,
         attendeeVisibility: form.attendeeVisibility,
@@ -146,83 +186,60 @@ export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
       setSubmitting(false);
     }
   };
-
   const byDate = slots.reduce((acc, slot) => {
     (acc[slot.date] ||= []).push(slot);
     return acc;
   }, {});
   const totalSpots = slots.reduce((sum, s) => sum + s.maxSpots, 0);
   const totalHours = slots.reduce((sum, s) => sum + s.hours, 0);
-
-  return (
-    <form onSubmit={handleSubmit} style={{ maxWidth: 760 }}>
+  return <form onSubmit={handleSubmit} className="s-da7ecf">
       <div className="stack-lg">
 
         {/* ── 1. What and where ── */}
         <section className="card">
           <div className="card-head"><h2>About the event</h2></div>
           <div className="card-body">
-            <div className="field" style={{ marginTop: 0 }}>
+            <div className="field s-535b39">
               <label htmlFor="ce-title">Event name</label>
-              <input
-                id="ce-title" className="input" value={form.title}
-                placeholder="Softball tournament snack shack"
-                aria-invalid={!!errors.title} onChange={e => set('title', e.target.value)}
-              />
+              <input id="ce-title" className="input" value={form.title} placeholder="Softball tournament snack shack" aria-invalid={!!errors.title} onChange={e => set('title', e.target.value)} />
               {errors.title && <span className="field-error"><AlertCircle size={12} />{errors.title}</span>}
             </div>
 
             <div className="field-row">
-              <div className="field" style={{ marginTop: 0 }}>
+              <div className="field s-535b39">
                 <label htmlFor="ce-cat">Category</label>
                 <select id="ce-cat" className="select" value={form.category} onChange={e => set('category', e.target.value)}>
                   {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
               </div>
-              <div className="field" style={{ marginTop: 0 }}>
-                <label htmlFor="ce-loc">Location</label>
-                <div className="input-affix">
-                  <MapPin size={15} />
-                  <input
-                    id="ce-loc" className="input" value={form.location} placeholder="Reichler Park"
-                    aria-invalid={!!errors.location} onChange={e => set('location', e.target.value)}
-                  />
-                </div>
-                {errors.location && <span className="field-error"><AlertCircle size={12} />{errors.location}</span>}
+              <div className="field s-535b39">
+                <label>Location</label>
+                <LocationPicker
+                  value={form.location}
+                  onChange={(loc) => set('location', loc)}
+                  datetime={form.startDatetime}
+                  error={errors.location}
+                />
               </div>
             </div>
 
             <div className="field">
               <label htmlFor="ce-desc">What volunteers need to know</label>
-              <textarea
-                id="ce-desc" className="textarea" value={form.description}
-                placeholder="Every shift needs one adult because of the grill. Wear closed-toe shoes."
-                aria-invalid={!!errors.description} onChange={e => set('description', e.target.value)}
-              />
+              <textarea id="ce-desc" className="textarea" value={form.description} placeholder="Every shift needs one adult because of the grill. Wear closed-toe shoes." aria-invalid={!!errors.description} onChange={e => set('description', e.target.value)} />
               {errors.description && <span className="field-error"><AlertCircle size={12} />{errors.description}</span>}
             </div>
 
             <div className="field">
               <label htmlFor="ce-deadline">Applications close</label>
-              <input
-                id="ce-deadline" type="datetime-local" className="input"
-                value={form.applicationDeadline} aria-invalid={!!errors.applicationDeadline}
-                onChange={e => set('applicationDeadline', e.target.value)}
-              />
-              {errors.applicationDeadline
-                ? <span className="field-error"><AlertCircle size={12} />{errors.applicationDeadline}</span>
-                : <span className="field-hint">Must be before your first shift starts.</span>}
+              <input id="ce-deadline" type="datetime-local" className="input" value={form.applicationDeadline} aria-invalid={!!errors.applicationDeadline} onChange={e => set('applicationDeadline', e.target.value)} />
+              {errors.applicationDeadline ? <span className="field-error"><AlertCircle size={12} />{errors.applicationDeadline}</span> : <span className="field-hint">Must be before your first shift starts.</span>}
             </div>
 
             <div className="field">
               <label htmlFor="ce-instr">
-                Arrival instructions <span className="dim" style={{ fontWeight: 400 }}>(optional)</span>
+                Arrival instructions <span className="dim s-fe3f5c">(optional)</span>
               </label>
-              <textarea
-                id="ce-instr" className="textarea" style={{ minHeight: 64 }} value={form.instructions}
-                placeholder="Park in the south lot and check in at the snack shack window."
-                onChange={e => set('instructions', e.target.value)}
-              />
+              <textarea id="ce-instr" className="textarea s-635b9f" value={form.instructions} placeholder="Park in the south lot and check in at the snack shack window." onChange={e => set('instructions', e.target.value)} />
               <span className="field-hint">
                 Shown to volunteers once they're confirmed. You can post changes later as an update.
               </span>
@@ -232,8 +249,7 @@ export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
               <span className="label">Selection Method</span>
               <div className="stack-sm">
                 <label className="check" data-checked={!form.autoApprove ? 'true' : 'false'}>
-                  <input type="radio" name="approval" checked={!form.autoApprove}
-                    onChange={() => set('autoApprove', false)} />
+                  <input type="radio" name="approval" checked={!form.autoApprove} onChange={() => set('autoApprove', false)} />
                   <span>
                     <span className="check-title">Manual Review</span>
                     <span className="check-desc">
@@ -242,8 +258,7 @@ export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
                   </span>
                 </label>
                 <label className="check" data-checked={form.autoApprove ? 'true' : 'false'}>
-                  <input type="radio" name="approval" checked={form.autoApprove}
-                    onChange={() => set('autoApprove', true)} />
+                  <input type="radio" name="approval" checked={form.autoApprove} onChange={() => set('autoApprove', true)} />
                   <span>
                     <span className="check-title">Auto Select</span>
                     <span className="check-desc">
@@ -258,8 +273,7 @@ export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
               <span className="label">Who can see the volunteer list</span>
               <div className="stack-sm">
                 <label className="check" data-checked={form.attendeeVisibility === 'accepted' ? 'true' : 'false'}>
-                  <input type="radio" name="visibility" checked={form.attendeeVisibility === 'accepted'}
-                    onChange={() => set('attendeeVisibility', 'accepted')} />
+                  <input type="radio" name="visibility" checked={form.attendeeVisibility === 'accepted'} onChange={() => set('attendeeVisibility', 'accepted')} />
                   <span>
                     <span className="check-title">Confirmed volunteers</span>
                     <span className="check-desc">
@@ -268,8 +282,7 @@ export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
                   </span>
                 </label>
                 <label className="check" data-checked={form.attendeeVisibility === 'private' ? 'true' : 'false'}>
-                  <input type="radio" name="visibility" checked={form.attendeeVisibility === 'private'}
-                    onChange={() => set('attendeeVisibility', 'private')} />
+                  <input type="radio" name="visibility" checked={form.attendeeVisibility === 'private'} onChange={() => set('attendeeVisibility', 'private')} />
                   <span>
                     <span className="check-title">Only me</span>
                     <span className="check-desc">Volunteers see how many spots are taken, but not who has them.</span>
@@ -287,37 +300,33 @@ export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
             <span className="small dim">{dates.length} added</span>
           </div>
           <div className="card-body">
-            <p className="small muted" style={{ marginBottom: 'var(--s4)' }}>
+            <p className="small muted s-22c500">
               Add every day this event runs. You'll attach shifts to them next.
             </p>
 
-            <div className="row" style={{ alignItems: 'flex-end', gap: 'var(--s2)' }}>
-              <div className="field" style={{ flex: 1, marginTop: 0 }}>
+            <div className="row s-dffffd">
+              <div className="field s-983db5">
                 <label htmlFor="ce-date">Date</label>
-                <input
-                  id="ce-date" type="date" className="input" value={dateInput}
-                  onChange={e => setDateInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addDate(); } }}
-                />
+                <input id="ce-date" type="date" className="input" value={dateInput} onChange={e => setDateInput(e.target.value)} onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  addDate();
+                }
+              }} />
               </div>
               <button type="button" className="btn btn-secondary" onClick={addDate}>
                 <Plus size={14} /> Add date
               </button>
             </div>
 
-            {dates.length > 0 && (
-              <div className="row row-wrap" style={{ gap: 'var(--s2)', marginTop: 'var(--s4)' }}>
-                {dates.map(date => (
-                  <span key={date} className="tag tag-brand" style={{ padding: '0.25rem 0.25rem 0.25rem 0.5rem', fontSize: '0.75rem' }}>
+            {dates.length > 0 && <div className="row row-wrap s-631d16">
+                {dates.map(date => <span key={date} className="tag tag-brand s-b7cc9c">
                     {longDate(date)}
-                    <button type="button" onClick={() => removeDate(date)} aria-label={`Remove ${longDate(date)}`}
-                      style={{ display: 'flex', color: 'inherit', opacity: 0.7 }}>
+                    <button type="button" onClick={() => removeDate(date)} aria-label={`Remove ${longDate(date)}`} className="s-1daf8d">
                       <X size={12} />
                     </button>
-                  </span>
-                ))}
-              </div>
-            )}
+                  </span>)}
+              </div>}
           </div>
         </section>
 
@@ -328,76 +337,76 @@ export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
             <span className="small dim">{slots.length} added</span>
           </div>
           <div className="card-body">
-            {dates.length === 0 && (
-              <div className="alert alert-warn" style={{ marginBottom: 'var(--s4)' }}>
-                <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+            {dates.length === 0 && <div className="alert alert-warn s-22c500">
+                <Info size={15} className="s-d1467f" />
                 <span>Add a date above before creating shifts.</span>
-              </div>
-            )}
+              </div>}
 
-            <div className="field-row" style={{ marginTop: 0 }}>
-              <div className="field" style={{ marginTop: 0 }}>
+            <div className="field-row s-535b39">
+              <div className="field s-535b39">
                 <label htmlFor="ce-role">Role</label>
-                <input
-                  id="ce-role" className="input" value={shift.name} placeholder="Grill helper"
-                  onChange={e => setShift(s => ({ ...s, name: e.target.value }))}
-                />
+                <input id="ce-role" className="input" value={shift.name} placeholder="Grill helper" onChange={e => setShift(s => ({
+                ...s,
+                name: e.target.value
+              }))} />
               </div>
-              <div className="field" style={{ marginTop: 0 }}>
+              <div className="field s-535b39">
                 <label htmlFor="ce-spots">Spots</label>
-                <input
-                  id="ce-spots" type="number" min="1" className="input" value={shift.maxSpots}
-                  onChange={e => setShift(s => ({ ...s, maxSpots: e.target.value }))}
-                />
+                <input id="ce-spots" type="number" min="1" className="input" value={shift.maxSpots} onChange={e => setShift(s => ({
+                ...s,
+                maxSpots: e.target.value
+              }))} />
               </div>
             </div>
 
             <div className="field-row">
-              <div className="field" style={{ marginTop: 0 }}>
+              <div className="field s-535b39">
                 <label htmlFor="ce-start">Starts</label>
-                <input id="ce-start" type="time" className="input" value={shift.startTime}
-                  onChange={e => setShift(s => ({ ...s, startTime: e.target.value }))} />
+                <input id="ce-start" type="time" className="input" value={shift.startTime} onChange={e => setShift(s => ({
+                ...s,
+                startTime: e.target.value
+              }))} />
               </div>
-              <div className="field" style={{ marginTop: 0 }}>
+              <div className="field s-535b39">
                 <label htmlFor="ce-end">Ends</label>
-                <input id="ce-end" type="time" className="input" value={shift.endTime}
-                  onChange={e => setShift(s => ({ ...s, endTime: e.target.value }))} />
+                <input id="ce-end" type="time" className="input" value={shift.endTime} onChange={e => setShift(s => ({
+                ...s,
+                endTime: e.target.value
+              }))} />
               </div>
             </div>
 
             <div className="field">
-              <label htmlFor="ce-sdesc">Details <span className="dim" style={{ fontWeight: 400 }}>(optional)</span></label>
-              <input
-                id="ce-sdesc" className="input" value={shift.description}
-                placeholder="Walk the field and pick up litter"
-                onChange={e => setShift(s => ({ ...s, description: e.target.value }))}
-              />
+              <label htmlFor="ce-sdesc">Details <span className="dim s-fe3f5c">(optional)</span></label>
+              <input id="ce-sdesc" className="input" value={shift.description} placeholder="Walk the field and pick up litter" onChange={e => setShift(s => ({
+              ...s,
+              description: e.target.value
+            }))} />
             </div>
 
-            <div className="inset row-between row-wrap" style={{ marginTop: 'var(--s4)', gap: 'var(--s3)' }}>
+            <div className="inset row-between row-wrap s-262f5d">
               <span className="small">
                 Credits{' '}
-                <span className={shiftHours > 0 ? 'strong' : ''} style={{ color: shiftHours > 0 ? 'var(--accent)' : 'var(--danger)' }}>
+                <span className={shiftHours > 0 ? 'strong' : ''} style={{
+                color: shiftHours > 0 ? 'var(--accent)' : 'var(--danger)'
+              }}>
                   {shiftHours > 0 ? formatHours(shiftHours) : 'invalid times'}
                 </span>{' '}
                 <span className="dim">per volunteer</span>
               </span>
 
-              <div className="row row-wrap" style={{ gap: 'var(--s2)' }}>
-                {dates.length > 1 && (
-                  <>
-                    <select
-                      className="select" value={shift.onDate} aria-label="Date for this shift"
-                      onChange={e => setShift(s => ({ ...s, onDate: e.target.value }))}
-                      style={{ minWidth: 150 }}
-                    >
+              <div className="row row-wrap s-65ce96">
+                {dates.length > 1 && <>
+                    <select className="select s-684a19" value={shift.onDate} aria-label="Date for this shift" onChange={e => setShift(s => ({
+                  ...s,
+                  onDate: e.target.value
+                }))}>
                       {dates.map(d => <option key={d} value={d}>{longDate(d)}</option>)}
                     </select>
                     <button type="button" className="btn btn-secondary btn-sm" onClick={() => addShift('one')}>
                       Add to this date
                     </button>
-                  </>
-                )}
+                  </>}
                 <button type="button" className="btn btn-primary btn-sm" onClick={() => addShift(dates.length > 1 ? 'all' : 'one')}>
                   <Plus size={13} /> {dates.length > 1 ? `Add to all ${dates.length} dates` : 'Add shift'}
                 </button>
@@ -410,67 +419,50 @@ export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
         <section className="card">
           <div className="card-head">
             <h2>Preview</h2>
-            {slots.length > 0 && (
-              <span className="small dim tnum">
+            {slots.length > 0 && <span className="small dim tnum">
                 {slots.length} shift{slots.length !== 1 ? 's' : ''} · {totalSpots} spots · up to {formatHours(totalHours)}
-              </span>
-            )}
+              </span>}
           </div>
 
-          {errors.slots && (
-            <div style={{ padding: 'var(--s4) var(--s5) 0' }}>
+          {errors.slots && <div className="s-031457">
               <div className="alert alert-danger">
-                <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                <AlertCircle size={15} className="s-d1467f" />
                 <span>{errors.slots}</span>
               </div>
-            </div>
-          )}
+            </div>}
 
-          {slots.length === 0 ? (
-            <div className="empty">
+          {slots.length === 0 ? <div className="empty">
               <span className="empty-icon"><Calendar size={18} /></span>
               <h3>Nothing to preview yet</h3>
               <p>Add dates and shifts above and your sign-up sheet builds itself here.</p>
-            </div>
-          ) : (
-            <div className="card-body">
+            </div> : <div className="card-body">
               <div className="sheet">
-                {Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).map(([date, daySlots]) => (
-                  <div key={date} className="sheet-daygroup">
+                {Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).map(([date, daySlots]) => <div key={date} className="sheet-daygroup">
                     <div className="sheet-dayhead">
                       <Calendar size={12} /> {longDate(date)}
                     </div>
-                    {daySlots.map(slot => (
-                      <div key={slot.id} className="sheet-row">
+                    {daySlots.map(slot => <div key={slot.id} className="sheet-row">
                         <div>
                           <div className="sheet-time">{time12(slot.startTime)}</div>
                           <div className="sheet-dur">to {time12(slot.endTime)} · {formatHours(slot.hours)}</div>
                         </div>
-                        <div style={{ minWidth: 0 }}>
+                        <div className="s-9e6bc3">
                           <div className="sheet-role">{slot.name}</div>
                           {slot.description && <div className="sheet-desc">{slot.description}</div>}
                         </div>
                         <div className="sheet-action">
                           <span className="seats-label">{slot.maxSpots} spot{slot.maxSpots !== 1 ? 's' : ''}</span>
-                          <button
-                            type="button" className="btn btn-ghost btn-sm btn-icon"
-                            style={{ color: 'var(--danger)' }}
-                            onClick={() => setSlots(prev => prev.filter(s => s.id !== slot.id))}
-                            aria-label={`Remove ${slot.name}`}
-                          >
+                          <button type="button" className="btn btn-ghost btn-sm btn-icon s-973ad1" onClick={() => setSlots(prev => prev.filter(s => s.id !== slot.id))} aria-label={`Remove ${slot.name}`}>
                             <Trash2 size={13} />
                           </button>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                ))}
+                      </div>)}
+                  </div>)}
               </div>
-            </div>
-          )}
+            </div>}
         </section>
 
-        <div className="row" style={{ justifyContent: 'flex-end', gap: 'var(--s2)' }}>
+        <div className="row s-47d731">
           <button type="button" className="btn btn-ghost" onClick={() => setActiveTab('dashboard')}>
             Cancel
           </button>
@@ -479,16 +471,15 @@ export default function CreateEvent({ onSubmitEvent, addToast, setActiveTab }) {
           </button>
         </div>
       </div>
-    </form>
-  );
+    </form>;
 }
-
 function longDate(date) {
   return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
-    weekday: 'short', month: 'short', day: 'numeric'
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric'
   });
 }
-
 function time12(time) {
   const [h, m] = time.split(':').map(Number);
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;

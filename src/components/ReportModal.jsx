@@ -1,18 +1,24 @@
 import { useState } from 'react';
 import { X, AlertTriangle } from 'lucide-react';
 import { api } from '../utils/api';
-
-export default function ReportModal({ targetType, targetId, onClose, addToast }) {
+export default function ReportModal({
+  targetType,
+  targetId,
+  onClose,
+  addToast
+}) {
   const [reason, setReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const handleSubmit = async (e) => {
+  const handleSubmit = async e => {
     e.preventDefault();
     if (!reason.trim()) return;
-
     setIsSubmitting(true);
     try {
-      await api.submitReport({ targetType, targetId, reason: reason.trim() });
+      await api.submitReport({
+        targetType,
+        targetId,
+        reason: reason.trim()
+      });
       addToast('Report submitted successfully. Thank you.', 'success');
       onClose();
     } catch (err) {
@@ -22,17 +28,15 @@ export default function ReportModal({ targetType, targetId, onClose, addToast })
       setIsSubmitting(false);
     }
   };
-
-  return (
-    <div className="modal-backdrop">
-      <div className="modal-content" style={{ maxWidth: 450 }}>
+  return <div className="modal-backdrop">
+      <div className="modal-content s-2383b5">
         <button className="modal-close" onClick={onClose} aria-label="Close">
           <X size={24} />
         </button>
 
         <div className="stack-lg">
           <div className="stack-sm">
-            <h2 style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)', color: 'var(--danger)' }}>
+            <h2 className="s-a9d228">
               <AlertTriangle size={24} />
               Report {targetType === 'event' ? 'Event' : 'Comment'}
             </h2>
@@ -44,19 +48,10 @@ export default function ReportModal({ targetType, targetId, onClose, addToast })
           <form onSubmit={handleSubmit} className="stack-md">
             <div className="form-group">
               <label htmlFor="report-reason">Please describe the issue:</label>
-              <textarea
-                id="report-reason"
-                className="input"
-                rows={4}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="E.g., Inappropriate content, spam, etc."
-                required
-                autoFocus
-              />
+              <textarea id="report-reason" className="input" rows={4} value={reason} onChange={e => setReason(e.target.value)} placeholder="E.g., Inappropriate content, spam, etc." required autoFocus />
             </div>
 
-            <div className="row" style={{ justifyContent: 'flex-end', gap: 'var(--s3)', marginTop: 'var(--s4)' }}>
+            <div className="row s-0ed3ee">
               <button type="button" className="btn btn-ghost" onClick={onClose} disabled={isSubmitting}>
                 Cancel
               </button>
@@ -67,6 +62,5 @@ export default function ReportModal({ targetType, targetId, onClose, addToast })
           </form>
         </div>
       </div>
-    </div>
-  );
+    </div>;
 }

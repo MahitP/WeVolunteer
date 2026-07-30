@@ -5,6 +5,8 @@ import './index.css'
 import App from './App.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 
+import { LocationProvider } from './contexts/LocationContext.jsx'
+
 // Last-resort boundary. The in-app boundaries cover the routed views and the
 // event modal; this one catches anything thrown by the shell itself (session
 // handling, navigation, the auth screens) which would otherwise still blank the
@@ -16,9 +18,11 @@ createRoot(document.getElementById('root')).render(
       title="WeVolunteer couldn't start"
       message="Something went wrong loading the app. Your data is safe — nothing was changed. Reloading usually fixes it."
     >
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <LocationProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </LocationProvider>
     </ErrorBoundary>
   </StrictMode>,
 )

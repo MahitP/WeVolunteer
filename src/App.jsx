@@ -189,16 +189,33 @@ export default function App() {
 
       connectSocket();
 
-      const promises = [api.fetchEvents(), api.fetchApplications()];
-      if (user.role === 'student') {
-        promises.push(api.fetchFavorites().catch(() => []));
-      }
+      /**
+       * A failure loading page data is not a failure of the session.
+       *
+       * These fetches used to sit under the same catch as `getMe`, which set
+       * `currentUser` to null — so a single 500 from /api/events, or a dropped
+       * connection mid-refresh, silently signed the user out and dumped them on
+       * the sign-in screen. The session was fine; only the data was missing.
+       *
+       * `getMe` above is the authority on whether the session is alive, and it
+       * already returns null (rather than throwing) for a 401. Everything below
+       * degrades to empty state and says so.
+       */
+      try {
+        const promises = [api.fetchEvents(), api.fetchApplications()];
+        if (user.role === 'student') {
+          promises.push(api.fetchFavorites().catch(() => []));
+        }
 
-      const [evs, apps, favs] = await Promise.all(promises);
-      setEvents(evs);
-      setApplications(apps);
-      if (user.role === 'student' && favs) {
-        setFavorites(favs.map(f => f.event_id || f.eventId));
+        const [evs, apps, favs] = await Promise.all(promises);
+        setEvents(evs);
+        setApplications(apps);
+        if (user.role === 'student' && favs) {
+          setFavorites(favs.map(f => f.event_id || f.eventId));
+        }
+      } catch (err) {
+        console.error('Failed to load page data:', err);
+        addToast('Some of your information could not be loaded. Reload to try again.', 'error');
       }
 
       try {
@@ -308,7 +325,12 @@ export default function App() {
     disconnectSocket();
     setEvents([]);
     setApplications([]);
+    setFavorites([]);
     setUserMenuOpen(false);
+    // Otherwise the next person to sign in in this tab — a second student on a
+    // shared computer — has their unread-notification greeting suppressed by
+    // the previous user's flag.
+    sessionStorage.removeItem('notif_toast_shown');
     navigate('/login');
   };
 
