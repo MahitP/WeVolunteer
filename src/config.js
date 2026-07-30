@@ -55,3 +55,22 @@ export function publicOrigin() {
   const raw = configured || (typeof window !== 'undefined' ? window.location.origin : '');
   return String(raw).replace(/\/+$/, '').replace(/^https?:\/\//, '');
 }
+
+/**
+ * Help and support destinations.
+ *
+ * Deliberately empty by default, following the same rule as PRIVACY_URL: the
+ * Help screen previously listed four items — Student Guide, Organizer Guide,
+ * Report a Problem, About — each an `<a href="#">`. Every one of them scrolled
+ * the page and did nothing. On a screen a student reaches when they are already
+ * stuck, and next to a "Report a Problem" link in particular, a control that
+ * silently fails is worse than an absent one: it spends the person's trust and
+ * then their patience.
+ *
+ * Each entry renders only when the district has supplied a real destination.
+ * SUPPORT_EMAIL is the one that matters most — it is the fallback that makes the
+ * screen useful even with nothing else configured.
+ */
+export const SUPPORT_EMAIL = import.meta.env.VITE_SUPPORT_EMAIL || '';
+export const STUDENT_GUIDE_URL = import.meta.env.VITE_STUDENT_GUIDE_URL || '';
+export const ORGANIZER_GUIDE_URL = import.meta.env.VITE_ORGANIZER_GUIDE_URL || '';

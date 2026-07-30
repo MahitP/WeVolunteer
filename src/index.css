@@ -4767,3 +4767,238 @@ input:disabled + .premium-slider {
 /* Wraps the inline "change your address" form on the verification wall, which
    sits inside a centred auth card rather than a settings card. */
 .auth-form-inner { text-align: left; margin-top: var(--s4); }
+
+/* ==========================================================================
+   Confirmation dialog
+   ==========================================================================
+   Used by the two security actions that previously called window.confirm —
+   "sign out on all other devices" and disconnecting a sign-in provider. See
+   components/common/ConfirmDialog.jsx for why the native dialog was wrong for
+   those in particular. */
+
+.modal-confirm { max-width: 32rem; }
+
+.confirm-body { padding: var(--s6); }
+
+.confirm-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.confirm-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--r-full);
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+.confirm-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+}
+
+.confirm-text { color: var(--ink-2); }
+.confirm-text p { margin: 0; }
+
+.confirm-actions {
+  justify-content: flex-end;
+  gap: var(--s3);
+  margin-top: var(--s2);
+}
+
+/* On a phone the two buttons get the full width and stack, so neither is a
+   small target sitting next to a destructive one. */
+@media (max-width: 480px) {
+  .confirm-actions { flex-direction: column-reverse; }
+  .confirm-actions .btn { width: 100%; }
+}
+
+/* ==========================================================================
+   Delete-account dialog
+   ==========================================================================
+   Moved onto the shared Modal shell; these replace the inline style objects it
+   used to carry. */
+
+.modal-delete-account { max-width: 34rem; }
+
+.modal-head-bare { border-bottom: none; padding-bottom: 0; }
+.modal-body-flush { padding-top: 0; }
+
+.delete-hero { text-align: center; margin-bottom: var(--s2); }
+
+.delete-hero-icon {
+  display: inline-block;
+  padding: var(--s4);
+  margin-bottom: var(--s4);
+  border-radius: var(--r-full);
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+.delete-hero-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.delete-hero-lead { margin: var(--s3) auto 0; }
+
+.delete-summary {
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+}
+
+.delete-summary-cols { align-items: flex-start; gap: var(--s6); }
+.delete-summary-col { flex: 1; }
+.delete-summary-removed { color: var(--danger); }
+.delete-summary-kept { color: var(--ok); }
+
+.delete-summary-list {
+  padding-left: var(--s4);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.delete-form { margin-top: var(--s2); }
+
+.delete-actions {
+  justify-content: flex-end;
+  gap: var(--s3);
+  margin-top: var(--s4);
+}
+
+/* Same reasoning as the confirm dialog: full-width stacked targets on a phone,
+   with the destructive action furthest from the thumb's resting position. */
+@media (max-width: 480px) {
+  .delete-summary-cols { flex-direction: column; gap: var(--s4); }
+  .delete-actions { flex-direction: column-reverse; }
+  .delete-actions .btn { width: 100%; }
+}
+
+/* ==========================================================================
+   Help & Support links
+   ========================================================================== */
+
+.settings-help-link {
+  padding: var(--s4);
+  border-radius: 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.settings-help-link.is-last { border-bottom: none; }
+
+.settings-help-label { flex: 1; color: var(--ink); }
+
+/* ==========================================================================
+   Form sizing and touch targets
+   ==========================================================================
+
+   `.input-lg` is applied to 22 inputs across the auth and account screens and
+   was never defined — so every field that was designed as a large, comfortable
+   target actually rendered at the compact 0.875rem default. Defining it fixes
+   the visual intent and, more importantly, the mobile behaviour below. */
+
+.input-lg,
+.select.input-lg {
+  /*
+   * 1rem is not a style choice — it is the iOS Safari threshold.
+   *
+   * Safari on iOS force-zooms the page whenever a focused input has a
+   * font-size below 16px. At the inherited 0.875rem (14px), tapping the email
+   * field on the sign-in screen zoomed the entire layout in and left the user
+   * to pinch back out — on the first interaction of their first visit.
+   */
+  font-size: 1rem;
+  padding: 0.6875rem 0.875rem;
+  border-radius: var(--r-md);
+}
+
+.input-affix .input-lg { padding-left: 2.375rem; }
+.input-affix:has(.btn-icon-right) .input-lg { padding-right: 3rem; }
+
+/*
+ * Touch targets, applied only where there is no fine pointer.
+ *
+ * Scoped to `(hover: none) and (pointer: coarse)` so desktop typography and
+ * density are untouched — the density is deliberate there and a mouse does not
+ * need a 44px target. On a phone these were all well under the 44px minimum:
+ *
+ *   • the show/hide password toggle at 28x28 — the control most likely to be
+ *     tapped on a phone, because nobody can see what they typed
+ *   • "Forgot?" at 32px tall, sitting directly above the password field
+ *   • the "Create an account" / "Sign in" footer links at 23px
+ *   • the settings navigation rows at 39px
+ */
+@media (hover: none) and (pointer: coarse) {
+  /* Every input, not just .input-lg — the 16px rule applies wherever a phone
+     keyboard can open, and the app has forms outside the auth screens. */
+  .input,
+  .select,
+  .textarea { font-size: 1rem; }
+
+  .input-affix .btn-icon-right {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    right: 0.125rem;
+  }
+
+  .auth-link,
+  .auth-inline-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+  }
+
+  .settings-nav-item { min-height: 2.75rem; }
+
+  /* The skip link is the first thing a switch-control or keyboard user reaches. */
+  .skip-link { min-height: 2.75rem; }
+}
+
+/*
+ * Unconditional target floors.
+ *
+ * The `(pointer: coarse)` block above raises these to 44px on a phone, which is
+ * the comfortable size — but it cannot be the only fix, for two reasons. A
+ * touch-screen laptop reports a fine pointer while still being tapped, and
+ * WCAG 2.5.8 (AA) requires 24x24 CSS px for EVERY pointer, not just coarse
+ * ones. The "Create an account" footer link measured 23px tall, so it failed
+ * that outright on desktop.
+ *
+ * These floors are therefore applied everywhere and the media query is the
+ * enhancement on top, not the whole story.
+ */
+.input-affix .btn-icon-right {
+  min-width: 2rem;
+  min-height: 2rem;
+}
+
+.auth-link,
+.auth-inline-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+}
+
+/*
+ * A link sitting inside a sentence cannot be a flex box — that would break the
+ * centred inline flow of "New here? Create an account". `inline-block` keeps it
+ * in the sentence while still honouring vertical padding, which is what grows
+ * the hit box: the link measured 23px tall, below the 24px WCAG AA floor, and
+ * `min-height` has no effect on a purely inline element.
+ */
+.auth-footer .auth-link,
+.welcome-trust .auth-link,
+.settings-pending .auth-link {
+  display: inline-block;
+  min-height: 0;
+  padding-block: 0.3125rem;
+}
