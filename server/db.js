@@ -62,6 +62,58 @@ function addColumnIfMissing(table, column, definition) {
  * deleting would cascade away the account's credited hours. The renamed
  * account's records stay intact-but-parked for an admin to reconcile by hand.
  */
+function dedupeCaseInsensitiveEmails(db) {
+  const groups = db.prepare(
+    'SELECT LOWER(email) AS key FROM users GROUP BY key HAVING COUNT(*) > 1'
+  ).all();
+  if (groups.length === 0) return;
+
+  db.exec('BEGIN TRANSACTION');
+  try {
+    const hoursForUser = db.prepare(
+      'SELECT COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ? AND present = 1'
+    );
+    const renameStmt = db.prepare(
+      'UPDATE users SET email = ?, token_version = token_version + 1 WHERE rowid = ?'
+    );
+
+    for (const { key } of groups) {
+      const members = db.prepare(
+        'SELECT rowid, id, email, created_at FROM users WHERE LOWER(email) = ?'
+      ).all(key);
+
+      const withHours = members.map(m => ({
+        ...m,
+        hours: hoursForUser.get(m.id).hours
+      }));
+
+      // Survivor: most credited hours, then oldest created_at, then lowest rowid.
+      withHours.sort((a, b) => {
+        if (b.hours !== a.hours) return b.hours - a.hours;
+        if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+        return a.rowid - b.rowid;
+      });
+      const survivor = withHours[0];
+
+      for (const member of withHours) {
+        if (member.rowid === survivor.rowid) continue;
+
+        const at = member.email.lastIndexOf('@');
+        const newEmail = at === -1
+          ? `${member.email}+dup-${member.rowid}`
+          : `${member.email.slice(0, at)}+dup-${member.rowid}${member.email.slice(at)}`;
+
+        renameStmt.run(newEmail, member.rowid);
+        console.log(`[Email dedupe] ${member.email} -> ${newEmail} (id ${member.id})`);
+      }
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
+    throw err;
+  }
+}
+
 /**
  * Reconciles pre-existing case-variant USERNAME duplicates before the
  * case-insensitive unique index is created.
@@ -151,58 +203,6 @@ function dedupeCaseInsensitiveUsernames(db) {
           now
         );
         console.log(`[Username dedupe] ${member.username} -> ${renamed} (id ${member.id})`);
-      }
-    }
-    db.exec('COMMIT');
-  } catch (err) {
-    try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
-    throw err;
-  }
-}
-
-function dedupeCaseInsensitiveEmails(db) {
-  const groups = db.prepare(
-    'SELECT LOWER(email) AS key FROM users GROUP BY key HAVING COUNT(*) > 1'
-  ).all();
-  if (groups.length === 0) return;
-
-  db.exec('BEGIN TRANSACTION');
-  try {
-    const hoursForUser = db.prepare(
-      'SELECT COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ? AND present = 1'
-    );
-    const renameStmt = db.prepare(
-      'UPDATE users SET email = ?, token_version = token_version + 1 WHERE rowid = ?'
-    );
-
-    for (const { key } of groups) {
-      const members = db.prepare(
-        'SELECT rowid, id, email, created_at FROM users WHERE LOWER(email) = ?'
-      ).all(key);
-
-      const withHours = members.map(m => ({
-        ...m,
-        hours: hoursForUser.get(m.id).hours
-      }));
-
-      // Survivor: most credited hours, then oldest created_at, then lowest rowid.
-      withHours.sort((a, b) => {
-        if (b.hours !== a.hours) return b.hours - a.hours;
-        if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
-        return a.rowid - b.rowid;
-      });
-      const survivor = withHours[0];
-
-      for (const member of withHours) {
-        if (member.rowid === survivor.rowid) continue;
-
-        const at = member.email.lastIndexOf('@');
-        const newEmail = at === -1
-          ? `${member.email}+dup-${member.rowid}`
-          : `${member.email.slice(0, at)}+dup-${member.rowid}${member.email.slice(at)}`;
-
-        renameStmt.run(newEmail, member.rowid);
-        console.log(`[Email dedupe] ${member.email} -> ${newEmail} (id ${member.id})`);
       }
     }
     db.exec('COMMIT');
@@ -806,30 +806,59 @@ function seedDatabase() {
   const passwordHash = bcrypt.hashSync('password123', salt);
   const nowStr = new Date().toISOString();
 
+  /**
+   * Seeded accounts carry a username.
+   *
+   * They previously did not — the column was simply omitted from this INSERT —
+   * so every demo account had `username = NULL`. Signing in with a username is
+   * a headline feature of the sign-in screen, and there was no account on a
+   * demo or test database that could exercise it. `migrate_usernames.js`
+   * backfills real deployments, but it is a manual one-off and never runs here.
+   */
   const insertUser = db.prepare(`
-    INSERT INTO users (id, name, email, password_hash, grade, role, verified, avatar, bio, school, skills, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, avatar, bio, school, skills, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   // Admins & Organizers
-  insertUser.run('user-admin', 'System Admin', 'admin@example.gov', passwordHash, 'N/A', 'admin', 1, '🛠️', 'Platform administrator.', 'South Brunswick', JSON.stringify(['Moderation']), nowStr);
-  insertUser.run('user-org-1', 'Jacquelyn Katzenback', 'jkatzenback@vikings.org', passwordHash, 'Adult', 'organizer', 1, '👩‍💼', 'Coordinator for Vikings Softball.', 'Vikings Softball', JSON.stringify(['Coordination']), nowStr);
-  insertUser.run('user-org-pending', 'Robert Miller', 'rmiller@sbpl.info', passwordHash, 'Adult', 'organizer', 0, '👨‍🏫', 'Library Director. Pending admin approval.', 'SBPL', JSON.stringify(['Events']), nowStr);
+  insertUser.run('user-admin', 'System Admin', 'admin@example.gov', 'sysadmin', passwordHash, 'N/A', 'admin', 1, '🛠️', 'Platform administrator.', 'South Brunswick', JSON.stringify(['Moderation']), nowStr);
+  insertUser.run('user-org-1', 'Jacquelyn Katzenback', 'jkatzenback@vikings.org', 'jkatzenback', passwordHash, 'Adult', 'organizer', 1, '👩‍💼', 'Coordinator for Vikings Softball.', 'Vikings Softball', JSON.stringify(['Coordination']), nowStr);
+  insertUser.run('user-org-pending', 'Robert Miller', 'rmiller@sbpl.info', 'rmiller', passwordHash, 'Adult', 'organizer', 0, '👨‍🏫', 'Library Director. Pending admin approval.', 'SBPL', JSON.stringify(['Events']), nowStr);
 
   // Softball volunteers
-  insertUser.run('user-diana', 'Diana Sanger', 'diana.sanger@gmail.com', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'SB Softball Booster', JSON.stringify(['Cooking']), nowStr);
-  insertUser.run('user-matthew', 'Matthew Polizzotto', 'mpolizzotto@outlook.com', passwordHash, 'Adult', 'student', 1, '👨', 'Parent volunteer.', 'SB Softball Booster', JSON.stringify(['Grilling']), nowStr);
-  insertUser.run('user-norma', 'Norma Carbin', 'ncarbin@comcast.net', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer, glad to restock and reset.', 'SB Softball Booster', JSON.stringify(['Restocking']), nowStr);
-  insertUser.run('user-colin', 'Colin Carbin', 'colin.carbin29@outlook.com', passwordHash, '11', 'student', 1, '🧑', 'High school volunteer.', 'South Brunswick HS', JSON.stringify(['Cashier']), nowStr);
-  insertUser.run('user-alexia', 'Alexia Burnett', 'aburnett@gmail.com', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'SB Softball Booster', JSON.stringify(['Cooking']), nowStr);
-  insertUser.run('user-advait', 'Advaitkrishna G.', 'advait.g@yahoo.com', passwordHash, '10', 'student', 1, '🧑', 'High school volunteer.', 'South Brunswick HS', JSON.stringify(['Food Prep']), nowStr);
-  insertUser.run('user-david', 'David Sanger', 'dsanger@outlook.com', passwordHash, 'Adult', 'student', 1, '👨', 'Parent volunteer, usually on clean-up.', 'SB Softball Booster', JSON.stringify(['Cleanup']), nowStr);
-  insertUser.run('user-pranathi', 'Pranathi Sukumar', 'pranathi.s@gmail.com', passwordHash, '11', 'student', 1, '👩', 'Interested in environmental clean-ups.', 'South Brunswick HS', JSON.stringify(['Litter cleanup']), nowStr);
+  insertUser.run('user-diana', 'Diana Sanger', 'diana.sanger@gmail.com', 'dianasanger', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'SB Softball Booster', JSON.stringify(['Cooking']), nowStr);
+  insertUser.run('user-matthew', 'Matthew Polizzotto', 'mpolizzotto@outlook.com', 'mpolizzotto', passwordHash, 'Adult', 'student', 1, '👨', 'Parent volunteer.', 'SB Softball Booster', JSON.stringify(['Grilling']), nowStr);
+  insertUser.run('user-norma', 'Norma Carbin', 'ncarbin@comcast.net', 'ncarbin', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer, glad to restock and reset.', 'SB Softball Booster', JSON.stringify(['Restocking']), nowStr);
+  insertUser.run('user-colin', 'Colin Carbin', 'colin.carbin29@outlook.com', 'colincarbin', passwordHash, '11', 'student', 1, '🧑', 'High school volunteer.', 'South Brunswick HS', JSON.stringify(['Cashier']), nowStr);
+  insertUser.run('user-alexia', 'Alexia Burnett', 'aburnett@gmail.com', 'aburnett', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'SB Softball Booster', JSON.stringify(['Cooking']), nowStr);
+  insertUser.run('user-advait', 'Advaitkrishna G.', 'advait.g@yahoo.com', 'advaitg', passwordHash, '10', 'student', 1, '🧑', 'High school volunteer.', 'South Brunswick HS', JSON.stringify(['Food Prep']), nowStr);
+  insertUser.run('user-david', 'David Sanger', 'dsanger@outlook.com', 'dsanger', passwordHash, 'Adult', 'student', 1, '👨', 'Parent volunteer, usually on clean-up.', 'SB Softball Booster', JSON.stringify(['Cleanup']), nowStr);
+  insertUser.run('user-pranathi', 'Pranathi Sukumar', 'pranathi.s@gmail.com', 'pranathis', passwordHash, '11', 'student', 1, '👩', 'Interested in environmental clean-ups.', 'South Brunswick HS', JSON.stringify(['Litter cleanup']), nowStr);
 
   // Core simulated students
-  insertUser.run('user-student-1', 'Leo Chen', 'leo.chen28@gmail.com', passwordHash, '10', 'student', 1, '🧑‍💻', 'First year volunteering — keen to try everything.', 'South Brunswick HS', JSON.stringify(['Setup', 'Math']), nowStr);
-  insertUser.run('user-student-2', 'Priya Patel', 'priya.patel.nhs@outlook.com', passwordHash, '11', 'student', 1, '👩‍⚕️', 'Happy to help with anything hands-on.', 'South Brunswick HS', JSON.stringify(['First Aid']), nowStr);
-  insertUser.run('user-student-3', 'Ethan Miller', 'emiller2027@gmail.com', passwordHash, '12', 'student', 1, '🧑‍🎨', 'Enjoys set-up and anything creative.', 'South Brunswick HS', JSON.stringify(['Art']), nowStr);
+  insertUser.run('user-student-1', 'Leo Chen', 'leo.chen28@gmail.com', 'leochen', passwordHash, '10', 'student', 1, '🧑‍💻', 'First year volunteering — keen to try everything.', 'South Brunswick HS', JSON.stringify(['Setup', 'Math']), nowStr);
+  insertUser.run('user-student-2', 'Priya Patel', 'priya.patel.nhs@outlook.com', 'priyapatel', passwordHash, '11', 'student', 1, '👩‍⚕️', 'Happy to help with anything hands-on.', 'South Brunswick HS', JSON.stringify(['First Aid']), nowStr);
+  insertUser.run('user-student-3', 'Ethan Miller', 'emiller2027@gmail.com', 'ethanmiller', passwordHash, '12', 'student', 1, '🧑‍🎨', 'Enjoys set-up and anything creative.', 'South Brunswick HS', JSON.stringify(['Art']), nowStr);
+
+  /**
+   * Seed dates are relative to seeding time, never absolute.
+   *
+   * They were hardcoded — the only open event's shifts were pinned to
+   * 2026-07-11 — so from 2026-07-12 onwards a freshly seeded demo database had
+   * no upcoming shift at all. Every screen the product is judged on came up
+   * empty: nothing to browse, nothing to apply to, an empty dashboard and an
+   * empty calendar, with no hint that the cause was a stale constant. A demo
+   * that silently expires is worse than one that fails loudly, because whoever
+   * is being shown it concludes the product does not work.
+   *
+   * `atDay` keeps the wall-clock time of day so the seeded shifts still read as
+   * plausible morning slots rather than landing at whatever time seeding ran.
+   */
+  const atDay = (daysFromNow, hh, mm = 0) => {
+    const d = new Date(Date.now() + daysFromNow * 24 * 60 * 60 * 1000);
+    d.setUTCHours(hh, mm, 0, 0);
+    return d.toISOString();
+  };
 
   // Seed Events
   const insertEvent = db.prepare(`
@@ -856,7 +885,7 @@ function seedDatabase() {
     'Load delivery boxes and sort food cans for South Brunswick families.',
     'Food Pantry',
     'SB Food Pantry Hall',
-    '2026-07-04T17:00:00.000Z',
+    atDay(-26, 17),
     'user-org-1',
     'completed',
     0,
@@ -870,16 +899,16 @@ function seedDatabase() {
   `);
 
   // Softball slots
-  insertSlot.run('slot-softball-1', 'event-softball', 'Adult', 'Grilling & cooking helper (Adult volunteer).', '2026-07-11T07:30:00.000Z', '2026-07-11T09:30:00.000Z', 1);
-  insertSlot.run('slot-softball-2', 'event-softball', 'Volunteer (any age)', 'High school volunteer or additional parent help.', '2026-07-11T07:30:00.000Z', '2026-07-11T09:30:00.000Z', 2);
-  insertSlot.run('slot-softball-3', 'event-softball', 'Adult', 'Grilling & cooking helper (Adult volunteer).', '2026-07-11T09:30:00.000Z', '2026-07-11T11:30:00.000Z', 1);
-  insertSlot.run('slot-softball-4', 'event-softball', 'Volunteer (any age)', 'High school volunteer or additional parent help.', '2026-07-11T09:30:00.000Z', '2026-07-11T11:30:00.000Z', 2);
-  insertSlot.run('slot-softball-5', 'event-softball', 'Adult', 'Grilling & cooking helper (Adult volunteer).', '2026-07-11T11:30:00.000Z', '2026-07-11T13:30:00.000Z', 1);
-  insertSlot.run('slot-softball-6', 'event-softball', 'Volunteer (any age)', 'High school volunteer or additional parent help.', '2026-07-11T11:30:00.000Z', '2026-07-11T13:30:00.000Z', 2);
-  insertSlot.run('slot-softball-7', 'event-softball', 'Check park for litter', 'Walk around entire softball area. Pick up and throw away any litter.', '2026-07-11T11:30:00.000Z', '2026-07-11T13:30:00.000Z', 2);
+  insertSlot.run('slot-softball-1', 'event-softball', 'Adult', 'Grilling & cooking helper (Adult volunteer).', atDay(12, 7, 30), atDay(12, 9, 30), 1);
+  insertSlot.run('slot-softball-2', 'event-softball', 'Volunteer (any age)', 'High school volunteer or additional parent help.', atDay(12, 7, 30), atDay(12, 9, 30), 2);
+  insertSlot.run('slot-softball-3', 'event-softball', 'Adult', 'Grilling & cooking helper (Adult volunteer).', atDay(12, 9, 30), atDay(12, 11, 30), 1);
+  insertSlot.run('slot-softball-4', 'event-softball', 'Volunteer (any age)', 'High school volunteer or additional parent help.', atDay(12, 9, 30), atDay(12, 11, 30), 2);
+  insertSlot.run('slot-softball-5', 'event-softball', 'Adult', 'Grilling & cooking helper (Adult volunteer).', atDay(12, 11, 30), atDay(12, 13, 30), 1);
+  insertSlot.run('slot-softball-6', 'event-softball', 'Volunteer (any age)', 'High school volunteer or additional parent help.', atDay(12, 11, 30), atDay(12, 13, 30), 2);
+  insertSlot.run('slot-softball-7', 'event-softball', 'Check park for litter', 'Walk around entire softball area. Pick up and throw away any litter.', atDay(12, 11, 30), atDay(12, 13, 30), 2);
 
   // Past event slots
-  insertSlot.run('slot-pantry-1', 'event-pantry-past', 'Box Packer', 'Sort and pack grocery boxes.', '2026-07-05T09:00:00.000Z', '2026-07-05T12:00:00.000Z', 2);
+  insertSlot.run('slot-pantry-1', 'event-pantry-past', 'Box Packer', 'Sort and pack grocery boxes.', atDay(-25, 9), atDay(-25, 12), 2);
 
   // Seed Applications
   const insertApp = db.prepare(`

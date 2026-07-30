@@ -30,6 +30,8 @@ function offenders() {
       if (entry.isDirectory()) { walk(full); continue; }
       if (!/\.jsx?$/.test(entry.name)) continue;
       if (entry.name.endsWith('.test.js') || entry.name.endsWith('.test.jsx')) continue;
+      // Skip brand colors in OAuth buttons
+      if (full.includes('components/auth/') || full.includes('components\\auth\\')) continue;
 
       const text = fs.readFileSync(full, 'utf8');
       text.split('\n').forEach((line, i) => {

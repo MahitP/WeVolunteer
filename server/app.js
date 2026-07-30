@@ -15,7 +15,11 @@ import applicationRoutes from './routes/applicationRoutes.js';
 import attendanceRoutes from './routes/attendanceRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import contentRoutes from './routes/contentRoutes.js';
-
+import geocodeRoutes from './routes/geocodeRoutes.js';
+import weatherRoutes from './routes/weatherRoutes.js';
+import messageRoutes from './routes/messageRoutes.js';
+import privacyRoutes from './routes/privacyRoutes.js';
+import oauthRoutes from './routes/oauthRoutes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -54,12 +58,12 @@ app.use(helmet({
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
 
       // data: covers the inline SVG favicon and any base64 image.
-      imgSrc: ["'self'", 'data:'],
+      imgSrc: ["'self'", 'data:', 'https://*.tile.openstreetmap.org', 'https://*.basemaps.cartocdn.com'],
 
       // The API is same-origin in both topologies: production serves the SPA
       // and the API from this process, and development proxies /api through
       // Vite. Nothing legitimate calls a third-party origin.
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", 'https://*.tile.openstreetmap.org', 'https://*.basemaps.cartocdn.com'],
 
       frameAncestors: ["'none'"],
       objectSrc: ["'none'"],
@@ -107,7 +111,13 @@ app.use('/api', cors((req, callback) => {
   if (!IS_PRODUCTION) {
     try {
       const { hostname } = new URL(origin);
-      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
+      const isLocalNetwork = hostname === 'localhost' || 
+                             hostname === '127.0.0.1' || 
+                             hostname === '[::1]' || 
+                             hostname.startsWith('192.168.') || 
+                             hostname.startsWith('10.') || 
+                             /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname);
+      if (isLocalNetwork) {
         return callback(null, allow);
       }
     } catch { /* malformed Origin — fall through to the checks below */ }
@@ -218,21 +228,69 @@ export const verifyLimiter = rateLimit({
   handler: limitHandler('Too many certificate checks from this device. This is not a verdict on the certificate.'),
 });
 
+/**
+ * Availability probes for the signup form.
+ *
+ * These answer "does this person have an account here" to anyone who asks, and
+ * the people here are mostly minors. The form needs them — a username field
+ * with no live check is a worse experience for everyone — but the honest
+ * ceiling for one person filling in one form is a few dozen probes, not the
+ * 600 that the blanket apiLimiter allowed. `skipSuccessfulRequests` is
+ * deliberately off: a successful lookup is exactly what harvesting looks like.
+ */
+export const lookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: DEMO_MODE ? 5000 : 60,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  handler: limitHandler('Too many lookups from this device.'),
+});
+
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/signup', authLimiter);
 app.use('/api/auth/forgot-password', mailLimiter);
 app.use('/api/auth/resend-verification', mailLimiter);
 app.use('/api/auth/reset-password', authLimiter);
 app.use('/api/auth/verify-email', authLimiter);
+
+/**
+ * Endpoints that check a password but are not /login.
+ *
+ * Each of these was reachable 600 times per window under apiLimiter alone,
+ * which made every one of them a better brute-force target than the login form
+ * it sat beside:
+ *   • /api/oauth/link       — takes an account password with an unauthenticated
+ *                             15-minute token, so it is a pure password oracle.
+ *   • /api/auth/change-password — takes the current password.
+ *   • DELETE /api/auth/account  — takes the password, and succeeds destructively.
+ */
+app.use('/api/auth/change-password', authLimiter);
+app.use('/api/auth/account', authLimiter);
+
+// Mounted on the prefix rather than per-route, so /link is counted once. The
+// callback mints sessions and /url writes a pending-signup row, so neither
+// belongs at general API volume either. authLimiter skips successful requests,
+// so the read-only /providers and /accounts calls the UI makes cost nothing.
+app.use('/api/oauth', authLimiter);
+
+app.use('/api/auth/check-username', lookupLimiter);
+app.use('/api/auth/check-email', lookupLimiter);
+
 app.use('/api/certificates/verify', verifyLimiter);
 app.use('/api', apiLimiter);
 
 app.use(authRoutes);
+app.use(oauthRoutes);
 app.use(eventRoutes);
 app.use(applicationRoutes);
 app.use(attendanceRoutes);
 app.use(adminRoutes);
 app.use(contentRoutes);
+app.use(geocodeRoutes);
+app.use(weatherRoutes);
+app.use(messageRoutes);
+app.use(privacyRoutes);
+
 
 // Read once at import rather than per request. Derived from package.json so it
 // cannot drift from the released version the way a hardcoded literal did — this

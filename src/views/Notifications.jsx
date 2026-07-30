@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Bell, CheckCheck, Inbox } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { timeAgo, formatDay } from '../utils/helpers';
-import { notificationMeta, NOTIFICATION_FILTERS, groupByDay } from '../utils/notifications';
+import { notificationMeta, NOTIFICATION_FILTERS, groupByDay, groupNotifications } from '../utils/notifications';
+import { subscribeSocket } from '../services/socket';
 import EmptyState from '../components/common/EmptyState';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 
@@ -15,6 +17,7 @@ export default function Notifications({ onViewEvent, onCountChange }) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const navigate = useNavigate();
 
   const load = async () => {
     try {
@@ -30,9 +33,52 @@ export default function Notifications({ onViewEvent, onCountChange }) {
 
   useEffect(() => { load(); }, []);
 
-  const markRead = async (id) => {
-    setItems(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
-    try { await api.markNotificationsRead({ ids: [id] }); } finally { load(); }
+  useEffect(() => {
+    const handleNewNotification = (payload) => {
+      setItems(prev => {
+        const existing = prev.find(n => n.id === payload.notification.id);
+        if (existing) return prev;
+        const updated = [payload.notification, ...prev];
+        onCountChange?.(updated.filter(n => !n.read).length);
+        return updated;
+      });
+    };
+    
+    const handleReadNotification = (payload) => {
+      setItems(prev => {
+        let updated = prev;
+        if (payload.all) {
+          updated = prev.map(n => ({ ...n, read: true }));
+        } else if (payload.ids) {
+          updated = prev.map(n => payload.ids.includes(n.id) ? { ...n, read: true } : n);
+        }
+        onCountChange?.(updated.filter(n => !n.read).length);
+        return updated;
+      });
+    };
+    
+    const unsubscribeCreated = subscribeSocket('notification.created', handleNewNotification);
+    const unsubscribeRead = subscribeSocket('notification.read', handleReadNotification);
+    
+    // Refresh fully on socket reconnect to fetch anything missed while offline
+    const handleReconnect = () => load();
+    window.addEventListener('wev:socket_connect', handleReconnect);
+    
+    return () => {
+      unsubscribeCreated();
+      unsubscribeRead();
+      window.removeEventListener('wev:socket_connect', handleReconnect);
+    };
+  }, [onCountChange]);
+
+  const markRead = async (ids) => {
+    const idsToMark = Array.isArray(ids) ? ids : [ids];
+    setItems(prev => {
+      const next = prev.map(n => idsToMark.includes(n.id) ? { ...n, read: true } : n);
+      onCountChange?.(next.filter(n => !n.read).length);
+      return next;
+    });
+    try { await api.markNotificationsRead({ ids: idsToMark }); } finally { load(); }
   };
 
   const markAllRead = async () => {
@@ -42,21 +88,28 @@ export default function Notifications({ onViewEvent, onCountChange }) {
   };
 
   const open = (n) => {
-    if (!n.read) markRead(n.id);
+    const idsToMark = n.isGroup ? n.originalItems.map(item => item.id) : [n.id];
+    if (!n.read) markRead(idsToMark);
     if (n.link?.startsWith('event:')) onViewEvent?.(n.link.split(':')[1]);
+    else if (n.link?.startsWith('/')) navigate(n.link);
   };
 
   const activeKinds = NOTIFICATION_FILTERS.find(f => f.id === filter)?.kinds;
-  const visible = useMemo(() => items.filter(n =>
+  
+  // 1. Group the items first (so a group of 3 updates becomes 1 item)
+  const groupedItems = useMemo(() => groupNotifications(items), [items]);
+
+  // 2. Filter the grouped items based on category and unread status
+  const visible = useMemo(() => groupedItems.filter(n =>
     (!activeKinds || activeKinds.includes(n.kind)) && (!unreadOnly || !n.read)
-  ), [items, activeKinds, unreadOnly]);
+  ), [groupedItems, activeKinds, unreadOnly]);
 
   const groups = useMemo(() => groupByDay(visible), [visible]);
-  const unread = items.filter(n => !n.read).length;
+  const unreadCount = items.filter(n => !n.read).length;
 
-  // Counts per filter so a student can see where the activity is
+  // Counts per filter
   const countFor = (f) => {
-    const pool = f.kinds ? items.filter(n => f.kinds.includes(n.kind)) : items;
+    const pool = f.kinds ? groupedItems.filter(n => f.kinds.includes(n.kind)) : groupedItems;
     return unreadOnly ? pool.filter(n => !n.read).length : pool.length;
   };
 
@@ -86,7 +139,7 @@ export default function Notifications({ onViewEvent, onCountChange }) {
           <span className="small nowrap">Unread only</span>
         </label>
 
-        {unread > 0 && (
+        {unreadCount > 0 && (
           <button className="btn btn-secondary btn-sm" onClick={markAllRead}>
             <CheckCheck size={14} /> Mark all read
           </button>
@@ -116,63 +169,69 @@ export default function Notifications({ onViewEvent, onCountChange }) {
           }
         />
       ) : (
-        groups.map(group => (
-          <section key={group.label}>
-            <div className="section-head">
-              <h2>{group.label}</h2>
-              <span className="section-action small dim">{group.items.length}</span>
-            </div>
-            <div className="list">
-              {group.items.map(n => {
-                const meta = notificationMeta(n.kind);
-                const Icon = meta.icon;
-                const clickable = !!n.link;
-                return (
-                  <div
-                    key={n.id}
-                    className={`list-row notif-row ${n.read ? '' : 'is-unread'}`}
-                    role={clickable ? 'button' : undefined}
-                    tabIndex={clickable ? 0 : undefined}
-                    onClick={clickable ? () => open(n) : undefined}
-                    onKeyDown={clickable ? (e) => {
-                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(n); }
-                    } : undefined}
-                    style={{ cursor: clickable ? 'pointer' : 'default' }}
-                  >
-                    <span className={`notif-icon tone-${meta.tone}`}>
-                      <Icon size={15} />
-                    </span>
-
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="row" style={{ gap: 'var(--s2)' }}>
-                        <span className="person-name">{n.title}</span>
-                        <span className={`tag tag-${meta.tone === 'muted' ? '' : meta.tone}`}>{meta.label}</span>
-                        {!n.read && <span className="unread-dot" aria-label="Unread" />}
+        <div className="premium-list" style={{ background: 'var(--surface)', borderRadius: '16px', border: '1px solid var(--border)', overflow: 'hidden' }}>
+          {groups.map((group, groupIdx) => (
+            <section key={group.label}>
+              <div className="section-head" style={{ padding: '16px', background: 'var(--surface-hover)', borderBottom: '1px solid var(--border)', margin: 0 }}>
+                <h2 style={{ fontSize: '14px', margin: 0 }}>{group.label}</h2>
+              </div>
+              <div className="list" style={{ gap: 0 }}>
+                {group.items.map(n => {
+                  const meta = notificationMeta(n.kind);
+                  const Icon = meta.icon;
+                  const clickable = !!n.link;
+                  const isCritical = n.priority === 'CRITICAL';
+                  return (
+                    <div
+                      key={n.id}
+                      className={`premium-notif-row ${n.read ? '' : 'is-unread'} ${isCritical ? 'is-critical' : ''}`}
+                      role={clickable ? 'button' : undefined}
+                      tabIndex={clickable ? 0 : undefined}
+                      onClick={clickable ? () => open(n) : undefined}
+                      onKeyDown={clickable ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(n); }
+                      } : undefined}
+                      style={{ cursor: clickable ? 'pointer' : 'default', padding: '16px 20px' }}
+                    >
+                      <div className={`premium-notif-icon tone-${meta.tone} ${isCritical ? 'tone-critical' : ''}`}>
+                        <Icon size={18} />
                       </div>
-                      <p className="small muted" style={{ marginTop: 2 }}>{n.body}</p>
-                      <p className="small dim tnum" style={{ marginTop: 4 }}>
-                        {timeAgo(n.createdAt)} · {formatDay(n.createdAt)}
-                      </p>
-                    </div>
 
-                    {!n.read && (
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={e => { e.stopPropagation(); markRead(n.id); }}
-                      >
-                        Mark read
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        ))
+                      <div className="premium-notif-content">
+                        <div className="row" style={{ gap: 'var(--s2)' }}>
+                          <span className="premium-notif-title">
+                            {n.title}
+                            {n.isGroup && <span className="group-badge">{n.originalItems.length} updates</span>}
+                          </span>
+                        </div>
+                        <p className="premium-notif-body" style={{ marginTop: 2 }}>{n.body}</p>
+                        <p className="premium-notif-time" style={{ marginTop: 4 }}>
+                          {timeAgo(n.createdAt)} · {formatDay(n.createdAt)}
+                        </p>
+                      </div>
+
+                      {!n.read && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={e => { 
+                            e.stopPropagation(); 
+                            markRead(n.isGroup ? n.originalItems.map(item => item.id) : [n.id]); 
+                          }}
+                        >
+                          Mark read
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
       )}
 
       {items.length > 0 && (
-        <p className="small dim row" style={{ gap: 6, justifyContent: 'center' }}>
+        <p className="small dim row" style={{ gap: 6, justifyContent: 'center', marginTop: '16px' }}>
           <Bell size={12} /> Showing your {items.length} most recent notifications
         </p>
       )}

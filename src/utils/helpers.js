@@ -165,3 +165,58 @@ export function timeAgo(iso) {
   if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
   return new Date(iso).toLocaleDateString();
 }
+
+/**
+ * Generates and triggers a download of an .ics calendar file for a given event and slot.
+ * @param {object} event 
+ * @param {object} slot 
+ */
+export function downloadIcs(event, slot) {
+  if (!event || !slot) return;
+  const formatDates = (dateIso) => dateIso.replace(/[-:]|\.\d+/g, '');
+  
+  const start = new Date(slot.startDatetime).toISOString();
+  const end = new Date(slot.endDatetime).toISOString();
+  const now = new Date().toISOString();
+
+  const icsString = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//WeVolunteer//EN',
+    'BEGIN:VEVENT',
+    `UID:${slot.id}@wevolunteer.app`,
+    `DTSTAMP:${formatDates(now)}`,
+    `DTSTART:${formatDates(start)}`,
+    `DTEND:${formatDates(end)}`,
+    `SUMMARY:${event.title || 'Volunteer Shift'}`,
+    `LOCATION:${[event.location, event.address].filter(Boolean).join(', ') || ''}`,
+    `DESCRIPTION:Shift: ${slot.name}\\n\\n${event.description ? event.description.replace(/\\n/g, '\\\\n') : ''}`,
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+
+  const blob = new Blob([icsString], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `${(event.title || 'shift').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.ics`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+/**
+ * Calculates the great-circle distance between two points in miles
+ * using the Haversine formula.
+ */
+export function haversineDistance(lat1, lon1, lat2, lon2) {
+  const R = 3958.8; // Earth radius in miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}

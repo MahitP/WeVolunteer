@@ -1,25 +1,27 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Calendar, Eye, Pencil, Trash2, Search, Copy, Download, ClipboardCheck,
-  ShieldAlert, ShieldCheck, ArrowRight, Inbox, CalendarPlus, Lock, Unlock
-} from 'lucide-react';
-import {
-  formatHours, formatDay, formatTimeRange, isoToLocalInput, countdown, timeAgo, gradeLabel, eventPermissions
-} from '../utils/helpers';
+import { Calendar, Eye, Pencil, Trash2, Search, Copy, Download, ClipboardCheck, ShieldAlert, ShieldCheck, ArrowRight, Inbox, CalendarPlus, Lock, Unlock } from 'lucide-react';
+import { formatHours, formatDay, formatTimeRange, isoToLocalInput, countdown, timeAgo, gradeLabel, eventPermissions } from '../utils/helpers';
 import { api } from '../utils/api';
 import Modal, { ModalHead } from '../components/Modal';
 import { Seats, DateChip } from '../components/Seats';
 import EmptyState from '../components/common/EmptyState';
-
-const TABS = [
-  { id: 'active', label: 'Active' },
-  { id: 'completed', label: 'Completed' }
-];
-
+const TABS = [{
+  id: 'active',
+  label: 'Active'
+}, {
+  id: 'completed',
+  label: 'Completed'
+}];
 export default function OrganizerDashboard({
-  currentUser, events = [], applications = [], refreshEvents, addToast,
-  onViewDetails, onViewVolunteerProfile, setActiveTab
+  currentUser,
+  events = [],
+  applications = [],
+  refreshEvents,
+  addToast,
+  onViewDetails,
+  onViewVolunteerProfile,
+  setActiveTab
 }) {
   const navigate = useNavigate();
   const [tab, setTab] = useState('active');
@@ -27,23 +29,15 @@ export default function OrganizerDashboard({
   const [editingEvent, setEditingEvent] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [stats, setStats] = useState(null);
-
   useEffect(() => {
     let cancelled = false;
     api.fetchOrganizerStats().then(s => !cancelled && setStats(s)).catch(() => {});
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [currentUser.id, events.length, applications.length]);
-
-  const hosted = useMemo(
-    () => events.filter(e => e.organizerId === currentUser.id),
-    [events, currentUser.id]
-  );
-
-  const appsForMe = useMemo(
-    () => applications.filter(a => hosted.some(e => e.id === a.eventId)),
-    [applications, hosted]
-  );
-
+  const hosted = useMemo(() => events.filter(e => e.organizerId === currentUser.id), [events, currentUser.id]);
+  const appsForMe = useMemo(() => applications.filter(a => hosted.some(e => e.id === a.eventId)), [applications, hosted]);
   const pendingApps = appsForMe.filter(a => a.status === 'pending');
   const acceptedApps = appsForMe.filter(a => a.status === 'accepted');
 
@@ -57,19 +51,12 @@ export default function OrganizerDashboard({
   // day's delay lands on someone other than the organizer.
   const needsReview = useMemo(() => {
     const now = Date.now();
-    return hosted
-      .map(event => ({
-        event,
-        pending: pendingApps.filter(a => a.eventId === event.id).length,
-        overdue: new Date(event.applicationDeadline).getTime() <= now
-      }))
-      .filter(x => x.pending > 0)
-      .sort((a, b) => (
-        (b.overdue - a.overdue) ||
-        (new Date(a.event.applicationDeadline) - new Date(b.event.applicationDeadline))
-      ));
+    return hosted.map(event => ({
+      event,
+      pending: pendingApps.filter(a => a.eventId === event.id).length,
+      overdue: new Date(event.applicationDeadline).getTime() <= now
+    })).filter(x => x.pending > 0).sort((a, b) => b.overdue - a.overdue || new Date(a.event.applicationDeadline) - new Date(b.event.applicationDeadline));
   }, [hosted, pendingApps]);
-
   const overdueReview = needsReview.filter(x => x.overdue);
   const stuckApplicants = overdueReview.reduce((sum, x) => sum + x.pending, 0);
 
@@ -77,39 +64,26 @@ export default function OrganizerDashboard({
   // Compared on local calendar day, not a 24h window: an organizer opening the
   // app at 8am for a 6pm shift should still see it.
   const todaysEvents = useMemo(() => {
-    const sameDay = (iso) => {
+    const sameDay = iso => {
       const d = new Date(iso);
       const now = new Date();
-      return d.getFullYear() === now.getFullYear()
-        && d.getMonth() === now.getMonth()
-        && d.getDate() === now.getDate();
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
     };
-    return hosted.filter(e =>
-      e.status !== 'cancelled' &&
-      (e.slots || []).some(s => sameDay(s.startDatetime))
-    );
+    return hosted.filter(e => e.status !== 'cancelled' && (e.slots || []).some(s => sameDay(s.startDatetime)));
   }, [hosted]);
-
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const source = tab === 'completed'
-      ? hosted.filter(e => e.status === 'completed')
-      : hosted.filter(e => e.status !== 'completed' && e.status !== 'cancelled');
-    return source
-      .filter(e => !q || e.title.toLowerCase().includes(q) || e.location.toLowerCase().includes(q))
-      .sort((a, b) => new Date(a.startDatetime) - new Date(b.startDatetime));
+    const source = tab === 'completed' ? hosted.filter(e => e.status === 'completed') : hosted.filter(e => e.status !== 'completed' && e.status !== 'cancelled');
+    return source.filter(e => !q || e.title.toLowerCase().includes(q) || e.location.toLowerCase().includes(q)).sort((a, b) => new Date(a.startDatetime) - new Date(b.startDatetime));
   }, [hosted, tab, query]);
-
   const uniqueVolunteers = new Set(acceptedApps.map(a => a.userId)).size;
   const hoursCredited = stats?.hoursAwarded ?? 0;
 
   /* ── Actions ─────────────────────────────────────────────── */
 
-  const handleDelete = async (event) => {
+  const handleDelete = async event => {
     const signups = appsForMe.filter(a => a.eventId === event.id).length;
-    const warning = signups > 0
-      ? `\n\n${signups} volunteer sign-up${signups !== 1 ? 's' : ''} will be removed with it.`
-      : '';
+    const warning = signups > 0 ? `\n\n${signups} volunteer sign-up${signups !== 1 ? 's' : ''} will be removed with it.` : '';
     if (!window.confirm(`Delete "${event.title}"?${warning}\n\nThis cannot be undone.`)) return;
     try {
       await api.deleteEvent(event.id);
@@ -119,8 +93,7 @@ export default function OrganizerDashboard({
       addToast(`Could not delete: ${err.message}`, 'error');
     }
   };
-
-  const handleToggleStatus = async (event) => {
+  const handleToggleStatus = async event => {
     const next = event.status === 'open' ? 'closed' : 'open';
     try {
       await api.toggleEventStatus(event.id, next);
@@ -130,8 +103,7 @@ export default function OrganizerDashboard({
       addToast(`Could not update: ${err.message}`, 'error');
     }
   };
-
-  const handleDuplicate = async (event) => {
+  const handleDuplicate = async event => {
     try {
       await api.duplicateEvent(event.id);
       addToast(`Copied "${event.title}" with dates moved forward one week.`, 'success');
@@ -140,8 +112,7 @@ export default function OrganizerDashboard({
       addToast(`Could not duplicate: ${err.message}`, 'error');
     }
   };
-
-  const handleExport = async (event) => {
+  const handleExport = async event => {
     try {
       const blob = await api.exportRosterCSV(event.id);
       const url = URL.createObjectURL(blob);
@@ -157,22 +128,13 @@ export default function OrganizerDashboard({
       addToast(`Could not export: ${err.message}`, 'error');
     }
   };
-
   const downloadRosterCSV = () => {
-    const escCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const escCell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const roster = rosterOf(acceptedApps);
-    const rows = [
-      ['Volunteer Name', 'Grade', 'Email', 'Shifts With You', 'Total Volunteered Hours'].map(escCell).join(','),
-      ...roster.map(r => [
-        r.name,
-        gradeLabel(r.grade),
-        r.volunteer?.email || '',
-        r.shifts,
-        Number(r.hours).toFixed(2)
-      ].map(escCell).join(','))
-    ].join('\n');
-
-    const blob = new Blob([rows], { type: 'text/csv;charset=utf-8;' });
+    const rows = [['Volunteer Name', 'Grade', 'Email', 'Shifts With You', 'Total Volunteered Hours'].map(escCell).join(','), ...roster.map(r => [r.name, gradeLabel(r.grade), r.volunteer?.email || '', r.shifts, Number(r.hours).toFixed(2)].map(escCell).join(','))].join('\n');
+    const blob = new Blob([rows], {
+      type: 'text/csv;charset=utf-8;'
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -183,8 +145,7 @@ export default function OrganizerDashboard({
     URL.revokeObjectURL(url);
     addToast('Roster downloaded.', 'success');
   };
-
-  const saveEdit = async (e) => {
+  const saveEdit = async e => {
     e.preventDefault();
     if (!editForm.title?.trim()) {
       addToast('Give the event a name.', 'error');
@@ -207,8 +168,7 @@ export default function OrganizerDashboard({
       addToast(`Could not save: ${err.message}`, 'error');
     }
   };
-
-  const startEdit = (event) => {
+  const startEdit = event => {
     setEditingEvent(event);
     setEditForm({
       title: event.title,
@@ -222,9 +182,8 @@ export default function OrganizerDashboard({
 
   /* ── Unverified organizers can't do anything yet ─────────── */
   if (!currentUser.verified) {
-    return (
-      <div className="card empty" style={{ maxWidth: 520, margin: '0 auto' }}>
-        <span className="empty-icon" style={{ background: 'var(--warn-tint)', color: 'var(--warn)' }}>
+    return <div className="card empty s-fd1ec5">
+        <span className="empty-icon s-dce988">
           <ShieldAlert size={20} />
         </span>
         <h3>Your organizer account is awaiting approval</h3>
@@ -232,79 +191,127 @@ export default function OrganizerDashboard({
           A school administrator needs to verify <span className="strong">{currentUser.email}</span> before
           you can post events. You can browse opportunities in the meantime.
         </p>
-        <div className="alert alert-info" style={{ marginTop: 'var(--s4)', textAlign: 'left' }}>
+        <div className="alert alert-info s-2db5ef">
           <span>
             <span className="alert-title">Testing the demo?</span>{' '}
             Switch to the System Admin account in the demo bar above to approve yourself.
           </span>
         </div>
-      </div>
-    );
+      </div>;
   }
+  const greetingMessage = useMemo(() => {
+    const name = currentUser.name.split(' ')[0];
+    const hour = new Date().getHours();
+    
+    const morning = [
+      `Good morning, ${name} ☀️`,
+      `Morning, ${name}! Ready?`,
+      `Rise and shine, ${name}`,
+      `Ready to make an impact, ${name}?`,
+      `New day, new impact, ${name}`,
+      `Fresh chances await, ${name}`,
+      `Let’s do some good, ${name}`,
+      `Ready to lend a hand, ${name}?`
+    ];
+    
+    const afternoon = [
+      `Good afternoon, ${name} 👋`,
+      `Welcome back, ${name}`,
+      `Ready to help, ${name}?`,
+      `More good ahead, ${name}`,
+      `Keep the momentum going, ${name}`,
+      `Still time to make an impact, ${name}`,
+      `Back for more good, ${name}?`,
+      `Let’s keep helping, ${name}`
+    ];
+    
+    const evening = [
+      `Good evening, ${name} 🌙`,
+      `Nice to see you, ${name}`,
+      `Evening, ${name}`,
+      `Still making an impact, ${name}?`,
+      `Your impact matters, ${name}`,
+      `Another good day, ${name}`,
+      `Keep making a difference, ${name}`,
+      `More good awaits, ${name}`
+    ];
+    
+    const generic = [
+      `Ready to help, ${name}? 💙`,
+      `Your next mission awaits, ${name}`,
+      `Time to make an impact, ${name}`,
+      `Find your next opportunity, ${name}`,
+      `New ways to help await, ${name}`,
+      `Let’s make a difference, ${name}`,
+      `Your kindness matters, ${name}`,
+      `Causes need you, ${name}`,
+      `Your next adventure starts here, ${name}`,
+      `Make today count, ${name}`
+    ];
 
-  return (
-    <div className="stack-lg">
+    let pool = Math.random() > 0.3
+      ? (hour < 12 ? morning : hour < 17 ? afternoon : evening)
+      : generic;
+      
+    return pool[Math.floor(Math.random() * pool.length)];
+  }, [currentUser.name]);
+
+  return <div className="stack-lg">
+      <div className="dashboard-greeting" style={{ marginBottom: '-var(--s4)' }}>
+        <h1 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
+          {greetingMessage}
+        </h1>
+      </div>
       {/* ── What needs a decision ── */}
-      {needsReview.length > 0 && (
-        <section
-          className="card"
-          style={{
-            borderColor: overdueReview.length > 0 ? 'var(--danger)' : 'var(--warn)',
-            borderLeftWidth: 3
-          }}
-        >
+      {needsReview.length > 0 && <section className="card" style={{
+      borderColor: overdueReview.length > 0 ? 'var(--danger)' : 'var(--warn)',
+      borderLeftWidth: 3
+    }}>
           <div className="card-body">
-            <div className="row-between row-wrap" style={{ gap: 'var(--s3)' }}>
+            <div className="row-between row-wrap s-615dbe">
               <div>
-                <div
-                  className="eyebrow"
-                  style={{ color: overdueReview.length > 0 ? 'var(--danger)' : 'var(--warn)' }}
-                >
+                <div className="eyebrow" style={{
+              color: overdueReview.length > 0 ? 'var(--danger)' : 'var(--warn)'
+            }}>
                   {overdueReview.length > 0 ? 'Applications closed — waiting on you' : 'Needs your decision'}
                 </div>
-                <h2 style={{ marginTop: 2 }}>
+                <h2 className="s-956c6f">
                   {pendingApps.length} application{pendingApps.length !== 1 ? 's' : ''} waiting
                   {needsReview.length > 1 && ` across ${needsReview.length} events`}
                 </h2>
                 {/* Said plainly, because the consequence falls on the students,
                     not on the organizer: nothing chooses volunteers on its own. */}
-                {stuckApplicants > 0 && (
-                  <p className="small" style={{ color: 'var(--danger)', marginTop: 4, maxWidth: '62ch' }}>
+                {stuckApplicants > 0 && <p className="small s-00e727">
                     {stuckApplicants} {stuckApplicants === 1 ? 'volunteer has' : 'volunteers have'} been
                     waiting since the deadline passed on {overdueReview.length === 1 ? 'this event' : `${overdueReview.length} events`}.
                     They are not told anything until you decide.
-                  </p>
-                )}
+                  </p>}
               </div>
               <button className="btn btn-primary" onClick={() => onViewDetails(needsReview[0].event)}>
                 Review {needsReview.length > 1 ? 'the most overdue' : 'applications'} <ArrowRight size={15} />
               </button>
             </div>
 
-            {needsReview.length > 1 && (
-              <div className="list" style={{ marginTop: 'var(--s4)' }}>
-                {needsReview.map(({ event, pending, overdue }) => (
-                  <button key={event.id} className="list-row" style={{ width: '100%', textAlign: 'left' }}
-                    onClick={() => onViewDetails(event)}>
+            {needsReview.length > 1 && <div className="list s-2b52df">
+                {needsReview.map(({
+            event,
+            pending,
+            overdue
+          }) => <button key={event.id} className="list-row s-0a650c" onClick={() => onViewDetails(event)}>
                     <DateChip iso={event.startDatetime} />
-                    <span className="truncate" style={{ flex: 1 }}>
+                    <span className="truncate s-49cdf8">
                       <span className="person-name truncate">{event.title}</span>
                       <span className="person-meta tnum">
-                        {overdue
-                          ? `Applications closed ${timeAgo(event.applicationDeadline)}`
-                          : `Applications close ${countdown(event.applicationDeadline).toLowerCase()}`}
+                        {overdue ? `Applications closed ${timeAgo(event.applicationDeadline)}` : `Applications close ${countdown(event.applicationDeadline).toLowerCase()}`}
                       </span>
                     </span>
                     <span className={overdue ? 'tag tag-danger' : 'tag tag-warn'}>
                       {pending} {overdue ? 'awaiting reply' : 'pending'}
                     </span>
-                  </button>
-                ))}
-              </div>
-            )}
+                  </button>)}
+              </div>}
           </div>
-        </section>
-      )}
+        </section>}
 
       {/* ── Programme at a glance ── */}
       <section className="stats">
@@ -319,7 +326,9 @@ export default function OrganizerDashboard({
         </div>
         <div className="stat">
           <div className="stat-label">Awaiting review</div>
-          <div className="stat-value" style={{ color: pendingApps.length ? 'var(--warn)' : undefined }}>
+          <div className="stat-value" style={{
+          color: pendingApps.length ? 'var(--warn)' : undefined
+        }}>
             {pendingApps.length}
           </div>
         </div>
@@ -335,33 +344,25 @@ export default function OrganizerDashboard({
           event in a list, open the modal, locate the check-in button among the
           modal's other actions. Every one of those steps happens one-handed
           while somebody is asking where to put the cooler.
-
-          So on the day, it leads the page and check-in is the primary action. */}
-      {todaysEvents.length > 0 && (
-        <section className="card" style={{ borderColor: 'var(--brand)', borderLeftWidth: 3 }}>
+           So on the day, it leads the page and check-in is the primary action. */}
+      {todaysEvents.length > 0 && <section className="card s-f231de">
           <div className="card-body">
-            <div className="eyebrow" style={{ color: 'var(--brand)' }}>Happening today</div>
-            <div className="list" style={{ marginTop: 'var(--s3)' }}>
-              {todaysEvents.map(event => (
-                <div key={event.id} className="list-row row-between row-wrap" style={{ gap: 'var(--s3)' }}>
-                  <span className="truncate" style={{ flex: 1, minWidth: 0 }}>
+            <div className="eyebrow s-89c83f">Happening today</div>
+            <div className="list s-eabd0a">
+              {todaysEvents.map(event => <div key={event.id} className="list-row row-between row-wrap s-615dbe">
+                  <span className="truncate s-7b2db8">
                     <span className="person-name truncate">{event.title}</span>
                     <span className="person-meta tnum">
                       {formatTimeRange(event.startDatetime, event.endDatetime)} · {event.location}
                     </span>
                   </span>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={() => navigate(`/checkin/${event.id}`)}
-                  >
+                  <button className="btn btn-primary btn-sm" onClick={() => navigate(`/checkin/${event.id}`)}>
                     <ClipboardCheck size={14} /> Check in volunteers
                   </button>
-                </div>
-              ))}
+                </div>)}
             </div>
           </div>
-        </section>
-      )}
+        </section>}
 
       {/* ── Events ── */}
       <section>
@@ -374,92 +375,51 @@ export default function OrganizerDashboard({
 
         <div className="toolbar">
           <div className="segmented" role="tablist" aria-label="Event status">
-            {TABS.map((t, index) => (
-              <button
-                key={t.id}
-                role="tab"
-                aria-selected={tab === t.id}
-                aria-controls="org-events-panel"
-                id={`org-tab-${t.id}`}
-                tabIndex={tab === t.id ? 0 : -1}
-                onClick={() => setTab(t.id)}
-                onKeyDown={e => {
-                  let nextIndex = index;
-                  if (e.key === 'ArrowRight') nextIndex = (index + 1) % TABS.length;
-                  else if (e.key === 'ArrowLeft') nextIndex = (index - 1 + TABS.length) % TABS.length;
-                  else if (e.key === 'Home') nextIndex = 0;
-                  else if (e.key === 'End') nextIndex = TABS.length - 1;
-                  else return;
-
-                  e.preventDefault();
-                  const nextId = TABS[nextIndex].id;
-                  setTab(nextId);
-                  // Use setTimeout to ensure React updates the DOM before focusing
-                  setTimeout(() => document.getElementById(`org-tab-${nextId}`)?.focus(), 0);
-                }}
-              >
+            {TABS.map((t, index) => <button key={t.id} role="tab" aria-selected={tab === t.id} aria-controls="org-events-panel" id={`org-tab-${t.id}`} tabIndex={tab === t.id ? 0 : -1} onClick={() => setTab(t.id)} onKeyDown={e => {
+            let nextIndex = index;
+            if (e.key === 'ArrowRight') nextIndex = (index + 1) % TABS.length;else if (e.key === 'ArrowLeft') nextIndex = (index - 1 + TABS.length) % TABS.length;else if (e.key === 'Home') nextIndex = 0;else if (e.key === 'End') nextIndex = TABS.length - 1;else return;
+            e.preventDefault();
+            const nextId = TABS[nextIndex].id;
+            setTab(nextId);
+            // Use setTimeout to ensure React updates the DOM before focusing
+            setTimeout(() => document.getElementById(`org-tab-${nextId}`)?.focus(), 0);
+          }}>
                 {t.label}
-              </button>
-            ))}
+              </button>)}
           </div>
-          <div className="input-affix" style={{ maxWidth: 300 }}>
+          <div className="input-affix s-c0dc2c">
             <Search size={15} />
-            <input
-              type="search" className="input" placeholder="Find an event…"
-              value={query} onChange={e => setQuery(e.target.value)}
-              aria-label="Search your events"
-            />
+            <input type="search" className="input" placeholder="Find an event…" value={query} onChange={e => setQuery(e.target.value)} aria-label="Search your events" />
           </div>
         </div>
 
         <div id="org-events-panel" role="tabpanel" aria-labelledby={`org-tab-${tab}`} tabIndex={0}>
 
-        {filtered.length === 0 ? (
-          <EmptyState
-            icon={Calendar}
-            title={query ? 'No events match that search' : tab === 'completed' ? 'No completed events yet' : 'No active events'}
-            message={
-              query
-                ? 'Try a different name or location.'
-                : tab === 'completed'
-                  ? 'Events move here once you take attendance.'
-                  : 'Create a sign-up sheet and volunteers can start claiming shifts.'
-            }
-            action={
-              !query && tab === 'active' && (
-                <button className="btn btn-primary btn-sm" onClick={() => setActiveTab('create')}>
+        {filtered.length === 0 ? <EmptyState icon={Calendar} title={query ? 'No events match that search' : tab === 'completed' ? 'No completed events yet' : 'No active events'} message={query ? 'Try a different name or location.' : tab === 'completed' ? 'Events move here once you take attendance.' : 'Create a sign-up sheet and volunteers can start claiming shifts.'} action={!query && tab === 'active' && <button className="btn btn-primary btn-sm" onClick={() => setActiveTab('create')}>
                   <CalendarPlus size={14} /> Create your first event
-                </button>
-              )
-            }
-          />
-        ) : (
-          <div className="tablewrap">
+                </button>} /> : <div className="tablewrap">
             <div className="tablescroll">
               <table className="table">
                 <thead>
                   <tr>
                     <th>Event</th>
                     <th>Date</th>
-                    <th style={{ minWidth: 160 }}>Sign-ups</th>
+                    <th className="s-8b224a">Sign-ups</th>
                     <th>Status</th>
                     <th className="cell-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map(event => {
-                    const evApps = appsForMe.filter(a => a.eventId === event.id);
-                    const pending = evApps.filter(a => a.status === 'pending').length;
-                    const accepted = evApps.filter(a => a.status === 'accepted').length;
-                    const closed = event.status === 'closed' ||
-                      new Date() > new Date(event.applicationDeadline);
-                    const perms = eventPermissions(event);
-
-                    return (
-                      <tr key={event.id}>
+                  const evApps = appsForMe.filter(a => a.eventId === event.id);
+                  const pending = evApps.filter(a => a.status === 'pending').length;
+                  const accepted = evApps.filter(a => a.status === 'accepted').length;
+                  const closed = event.status === 'closed' || new Date() > new Date(event.applicationDeadline);
+                  const perms = eventPermissions(event);
+                  return <tr key={event.id}>
                         <td>
-                          <div className="cell-title truncate" style={{ maxWidth: 280 }}>{event.title}</div>
-                          <div className="small dim truncate" style={{ maxWidth: 280 }}>
+                          <div className="cell-title truncate s-83eed1">{event.title}</div>
+                          <div className="small dim truncate s-83eed1">
                             {event.category} · {event.location}
                           </div>
                         </td>
@@ -471,77 +431,44 @@ export default function OrganizerDashboard({
                         </td>
                         <td>
                           <Seats filled={accepted} total={event.maxSpots} />
-                          {pending > 0 && (
-                            <button
-                              className="tag tag-warn"
-                              style={{ marginTop: 6, cursor: 'pointer' }}
-                              onClick={() => onViewDetails(event)}
-                            >
+                          {pending > 0 && <button className="tag tag-warn s-9c7e4f" onClick={() => onViewDetails(event)}>
                               {pending} to review
-                            </button>
-                          )}
+                            </button>}
                         </td>
                         <td>
-                          {event.status === 'completed' ? (
-                            <span className="status status-muted">Completed</span>
-                          ) : closed ? (
-                            <span className="status status-muted">Closed</span>
-                          ) : (
-                            <span className="status status-ok">Open</span>
-                          )}
+                          {event.status === 'completed' ? <span className="status status-muted">Completed</span> : closed ? <span className="status status-muted">Closed</span> : <span className="status status-ok">Open</span>}
                         </td>
                         <td className="cell-actions">
-                          <div className="row" style={{ gap: 2 }}>
-                            <button className="btn btn-ghost btn-sm btn-icon" title="Open event"
-                              onClick={() => onViewDetails(event)}>
+                          <div className="row s-b7a2f0">
+                            <button className="btn btn-ghost btn-sm btn-icon" title="Open event" onClick={() => onViewDetails(event)}>
                               <Eye size={14} />
                             </button>
-                            {perms.canEditDetails && (
-                              <button className="btn btn-ghost btn-sm btn-icon" title="Edit details"
-                                onClick={() => startEdit(event)}>
+                            {perms.canEditDetails && <button className="btn btn-ghost btn-sm btn-icon" title="Edit details" onClick={() => startEdit(event)}>
                                 <Pencil size={14} />
-                              </button>
-                            )}
-                            {perms.canChangeStatus && (
-                              <button
-                                className="btn btn-ghost btn-sm btn-icon"
-                                title={event.status === 'open' ? 'Close sign-ups' : 'Reopen sign-ups'}
-                                onClick={() => handleToggleStatus(event)}
-                              >
+                              </button>}
+                            {perms.canChangeStatus && <button className="btn btn-ghost btn-sm btn-icon" title={event.status === 'open' ? 'Close sign-ups' : 'Reopen sign-ups'} onClick={() => handleToggleStatus(event)}>
                                 {event.status === 'open' ? <Lock size={14} /> : <Unlock size={14} />}
-                              </button>
-                            )}
-                            <button className="btn btn-ghost btn-sm btn-icon" title="Duplicate, one week later"
-                              onClick={() => handleDuplicate(event)}>
+                              </button>}
+                            <button className="btn btn-ghost btn-sm btn-icon" title="Duplicate, one week later" onClick={() => handleDuplicate(event)}>
                               <Copy size={14} />
                             </button>
-                            <button className="btn btn-ghost btn-sm btn-icon" title="Download roster as CSV"
-                              onClick={() => handleExport(event)}>
+                            <button className="btn btn-ghost btn-sm btn-icon" title="Download roster as CSV" onClick={() => handleExport(event)}>
                               <Download size={14} />
                             </button>
-                            {perms.canDelete && (
-                              <button className="btn btn-ghost btn-sm btn-icon" title="Delete event"
-                                style={{ color: 'var(--danger)' }}
-                                onClick={() => handleDelete(event)}>
+                            {perms.canDelete && <button className="btn btn-ghost btn-sm btn-icon s-973ad1" title="Delete event" onClick={() => handleDelete(event)}>
                                 <Trash2 size={14} />
-                              </button>
-                            )}
-                            {!perms.canDelete && (
-                              <span className="btn btn-ghost btn-sm btn-icon" title={perms.blockedReason}
-                                style={{ color: 'var(--ink-3)', cursor: 'default' }} aria-label={perms.blockedReason}>
+                              </button>}
+                            {!perms.canDelete && <span className="btn btn-ghost btn-sm btn-icon s-17fa6c" title={perms.blockedReason} aria-label={perms.blockedReason}>
                                 <ShieldCheck size={14} />
-                              </span>
-                            )}
+                              </span>}
                           </div>
                         </td>
-                      </tr>
-                    );
-                  })}
+                      </tr>;
+                })}
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
+          </div>}
         </div>
       </section>
 
@@ -549,28 +476,21 @@ export default function OrganizerDashboard({
       <section>
         <div className="section-head">
           <h2>Your volunteers</h2>
-          {acceptedApps.length > 0 && (
-            <button className="btn btn-secondary btn-sm section-action" onClick={downloadRosterCSV}>
+          {acceptedApps.length > 0 && <button className="btn btn-secondary btn-sm section-action" onClick={downloadRosterCSV}>
               <Download size={14} /> Download ledger
-            </button>
-          )}
+            </button>}
         </div>
-        {acceptedApps.length === 0 ? (
-          <div className="card empty">
+        {acceptedApps.length === 0 ? <div className="card empty">
             <span className="empty-icon"><Inbox size={18} /></span>
             <h3>No confirmed volunteers yet</h3>
             <p>Once you confirm applications, the people helping at your events show up here.</p>
-          </div>
-        ) : (
-          <div className="list">
-            {rosterOf(acceptedApps).map(person => (
-              <div key={person.id} className="list-row">
+          </div> : <div className="list">
+            {rosterOf(acceptedApps).map(person => <div key={person.id} className="list-row">
                 <span className="avatar">{person.avatar || '👤'}</span>
-                <div className="truncate" style={{ flex: 1 }}>
+                <div className="truncate s-49cdf8">
                   <div className="person-name truncate">{person.name}</div>
                   <div className="person-meta truncate">
-                    {[gradeLabel(person.grade), `${person.shifts} shift${person.shifts !== 1 ? 's' : ''} with you`]
-                      .filter(Boolean).join(' · ')}
+                    {[gradeLabel(person.grade), `${person.shifts} shift${person.shifts !== 1 ? 's' : ''} with you`].filter(Boolean).join(' · ')}
                   </div>
                 </div>
                 <span className={`hourspill ${!person.hours ? 'zero' : ''}`}>
@@ -579,33 +499,30 @@ export default function OrganizerDashboard({
                 <button className="btn btn-ghost btn-sm" onClick={() => onViewVolunteerProfile(person.volunteer)}>
                   Profile
                 </button>
-              </div>
-            ))}
-          </div>
-        )}
+              </div>)}
+          </div>}
       </section>
 
       {/* ── Quick edit ── */}
-      {editingEvent && (
-        <Modal onClose={() => setEditingEvent(null)} label="Edit event">
-          <ModalHead
-            title="Edit event"
-            description="Shifts and times are edited on the event's sign-up sheet."
-            onClose={() => setEditingEvent(null)}
-          />
+      {editingEvent && <Modal onClose={() => setEditingEvent(null)} label="Edit event">
+          <ModalHead title="Edit event" description="Shifts and times are edited on the event's sign-up sheet." onClose={() => setEditingEvent(null)} />
 
             <form id="quick-edit" className="modal-body" onSubmit={saveEdit}>
               <div className="field">
                 <label htmlFor="qe-title">Event name</label>
-                <input id="qe-title" className="input" value={editForm.title || ''}
-                  onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))} />
+                <input id="qe-title" className="input" value={editForm.title || ''} onChange={e => setEditForm(f => ({
+            ...f,
+            title: e.target.value
+          }))} />
               </div>
 
               <div className="field-row">
                 <div className="field">
                   <label htmlFor="qe-cat">Category</label>
-                  <select id="qe-cat" className="select" value={editForm.category || 'School'}
-                    onChange={e => setEditForm(f => ({ ...f, category: e.target.value }))}>
+                  <select id="qe-cat" className="select" value={editForm.category || 'School'} onChange={e => setEditForm(f => ({
+              ...f,
+              category: e.target.value
+            }))}>
                     <option value="School">School project</option>
                     <option value="5K">5K run / athletics</option>
                     <option value="Food Pantry">Food pantry</option>
@@ -615,22 +532,27 @@ export default function OrganizerDashboard({
                 </div>
                 <div className="field">
                   <label htmlFor="qe-deadline">Applications close</label>
-                  <input id="qe-deadline" type="datetime-local" className="input"
-                    value={editForm.applicationDeadline || ''}
-                    onChange={e => setEditForm(f => ({ ...f, applicationDeadline: e.target.value }))} />
+                  <input id="qe-deadline" type="datetime-local" className="input" value={editForm.applicationDeadline || ''} onChange={e => setEditForm(f => ({
+              ...f,
+              applicationDeadline: e.target.value
+            }))} />
                 </div>
               </div>
 
               <div className="field">
                 <label htmlFor="qe-loc">Location</label>
-                <input id="qe-loc" className="input" value={editForm.location || ''}
-                  onChange={e => setEditForm(f => ({ ...f, location: e.target.value }))} />
+                <input id="qe-loc" className="input" value={editForm.location || ''} onChange={e => setEditForm(f => ({
+            ...f,
+            location: e.target.value
+          }))} />
               </div>
 
               <div className="field">
                 <label htmlFor="qe-desc">What volunteers need to know</label>
-                <textarea id="qe-desc" className="textarea" value={editForm.description || ''}
-                  onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} />
+                <textarea id="qe-desc" className="textarea" value={editForm.description || ''} onChange={e => setEditForm(f => ({
+            ...f,
+            description: e.target.value
+          }))} />
               </div>
 
               {/* Mirrors the wording on the create form exactly — the same
@@ -639,10 +561,10 @@ export default function OrganizerDashboard({
                 <span className="label">Selection method</span>
                 <div className="stack-sm">
                   <label className="check" data-checked={!editForm.autoApprove ? 'true' : 'false'}>
-                    <input
-                      type="radio" name="edit-selection" checked={!editForm.autoApprove}
-                      onChange={() => setEditForm(f => ({ ...f, autoApprove: false }))}
-                    />
+                    <input type="radio" name="edit-selection" checked={!editForm.autoApprove} onChange={() => setEditForm(f => ({
+                ...f,
+                autoApprove: false
+              }))} />
                     <span>
                       <span className="check-title">Manual review</span>
                       <span className="check-desc">
@@ -651,10 +573,10 @@ export default function OrganizerDashboard({
                     </span>
                   </label>
                   <label className="check" data-checked={editForm.autoApprove ? 'true' : 'false'}>
-                    <input
-                      type="radio" name="edit-selection" checked={!!editForm.autoApprove}
-                      onChange={() => setEditForm(f => ({ ...f, autoApprove: true }))}
-                    />
+                    <input type="radio" name="edit-selection" checked={!!editForm.autoApprove} onChange={() => setEditForm(f => ({
+                ...f,
+                autoApprove: true
+              }))} />
                     <span>
                       <span className="check-title">Auto Select</span>
                       <span className="check-desc">
@@ -670,10 +592,8 @@ export default function OrganizerDashboard({
             <button className="btn btn-ghost" onClick={() => setEditingEvent(null)}>Cancel</button>
             <button className="btn btn-primary" type="submit" form="quick-edit">Save changes</button>
           </div>
-        </Modal>
-      )}
-    </div>
-  );
+        </Modal>}
+    </div>;
 }
 
 /** Collapse shift assignments into one row per person. */

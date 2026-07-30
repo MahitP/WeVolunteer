@@ -1,7 +1,8 @@
 import express from 'express';
 
 import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion } from '../attendance.js';
-import { authenticateToken, inTransaction, createNotification } from '../utils.js';
+import { authenticateToken, inTransaction } from '../utils.js';
+import { notificationService } from '../services/notificationService.js';
 import { getOrCreateCertificateCode } from '../certificates.js';
 import { db } from '../db.js';
 
@@ -98,23 +99,29 @@ router.post('/api/events/:id/attendance', authenticateToken, (req, res) => {
     });
 
     for (const c of outcome.credited) {
-      createNotification({
-        userId: c.userId,
-        kind: 'hours',
-        title: `${Number(c.hours).toFixed(1)} hours credited`,
-        body: `Your attendance was confirmed for "${event.title}" — ${c.slotName}.`,
-        link: `event:${event.id}`
-      });
+      notificationService.dispatch(
+        'HOURS_APPROVED',
+        { eventId: event.id, eventTitle: event.title, hours: Number(c.hours) },
+        c.userId
+      );
+      
+      // If the event is fully completed and this user was credited hours, their certificate is ready
+      if (outcome.eventCompleted) {
+        notificationService.dispatch(
+          'CERTIFICATE_AVAILABLE',
+          { eventId: event.id, eventTitle: event.title },
+          c.userId,
+          `cert:${event.id}` // dedupe key
+        );
+      }
     }
     for (const r of outcome.revoked) {
       if (!r.wasCredited) continue; // never credited, so nothing was taken away
-      createNotification({
-        userId: r.userId,
-        kind: 'hours',
-        title: 'Attendance record corrected',
-        body: `Your attendance for "${event.title}" — ${r.slotName} was updated to absent. Speak to the organizer if that looks wrong.`,
-        link: `event:${event.id}`
-      });
+      notificationService.dispatch(
+        'HOURS_ADJUSTED',
+        { eventId: event.id, eventTitle: event.title, hours: 0 },
+        r.userId
+      );
     }
 
     res.json({ success: true, ...outcome });
@@ -237,8 +244,19 @@ router.get('/api/certificates', authenticateToken, (req, res) => {
 router.get('/api/certificates/verify/:code', (req, res) => {
   try {
     const code = String(req.params.code || '').toUpperCase();
-    const cert = db.prepare('SELECT user_id, event_id FROM certificates WHERE code = ?').get(code);
+    const cert = db.prepare('SELECT * FROM certificates WHERE code = ?').get(code);
     if (!cert) return res.status(404).json({ valid: false, error: 'No certificate matches that code' });
+
+    if (cert.volunteer_name_snapshot) {
+      return res.json({
+        valid: true,
+        volunteerName: cert.volunteer_name_snapshot,
+        eventTitle: cert.event_name_snapshot,
+        organizerName: cert.organization_snapshot,
+        hours: Number(cert.hours_snapshot),
+        completedAt: cert.completed_at_snapshot
+      });
+    }
 
     const row = db.prepare(`
       SELECT u.name AS volunteer_name, e.title, org.name AS organizer_name,

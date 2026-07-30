@@ -35,6 +35,8 @@ export default function EventModal({
   const [redrawReason, setRedrawReason] = useState('');
   const tabRefs = useRef({});
   const [selectedSlots, setSelectedSlots] = useState([]);
+  const [conflictData, setConflictData] = useState(null);
+  const [pendingApplySlot, setPendingApplySlot] = useState(null);
 
   const [selectionRuns, setSelectionRuns] = useState([]);
   const [runsLoading, setRunsLoading] = useState(false);
@@ -141,13 +143,30 @@ export default function EventModal({
     }
   };
 
-  const handleApply = async () => {
-    if (selectedSlots.length === 0) return;
+  const handleApply = async (overrideSlotId = null) => {
+    const slotsToApply = overrideSlotId ? [overrideSlotId] : selectedSlots;
+    if (slotsToApply.length === 0) return;
     setSubmitting(true);
+    setConflictData(null);
     try {
-      const results = await Promise.allSettled(selectedSlots.map(id => api.applyToSlot(event.id, id)));
+      const results = await Promise.allSettled(
+        slotsToApply.map(id => api.applyToSlot(event.id, id, !!overrideSlotId))
+      );
       const failed = results.filter(r => r.status === 'rejected');
       const ok = results.length - failed.length;
+      
+      const conflictError = failed.find(f => f.reason.data?.conflict);
+      if (conflictError && !overrideSlotId) {
+        setConflictData(conflictError.reason.data.conflict);
+        setPendingApplySlot(slotsToApply.find(id => id === conflictError.reason.data.conflict.slotId) || slotsToApply[0]);
+        // If there were other slots that succeeded, we should still clear them from selectedSlots
+        if (ok > 0) {
+           setSelectedSlots(prev => prev.filter(id => id === pendingApplySlot));
+           addToast(`Applied for ${ok} shift${ok !== 1 ? 's' : ''}, but one had a conflict.`, 'info');
+        }
+        return; // Pause for user input
+      }
+
       if (failed.length === 0) {
         addToast(
           usesAutoSelect(event)
@@ -161,6 +180,7 @@ export default function EventModal({
         addToast(`Could not apply: ${failed[0].reason.message}`, 'error');
       }
       setSelectedSlots([]);
+      setPendingApplySlot(null);
       if (refreshEvents) refreshEvents();
       if (refreshApplications) refreshApplications();
     } finally {
@@ -581,6 +601,47 @@ export default function EventModal({
           onClose={() => setShowReportModal(false)}
           addToast={addToast}
         />
+      )}
+      
+      {conflictData && (
+        <div className="modal-overlay" onClick={() => setConflictData(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <div className="modal-header">
+              <h3>⚠️ {conflictData.level === 2 ? 'Existing Volunteer Commitment' : 'Schedule Conflict'}</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setConflictData(null)}>×</button>
+            </div>
+            <div className="modal-body stack">
+              {conflictData.level === 2 ? (
+                <p>You are already accepted for another volunteer shift during this time. Continuing may create an attendance conflict. Do you still want to apply?</p>
+              ) : (
+                <p>You already applied to another volunteer opportunity during this time.</p>
+              )}
+              
+              <div className="sheet" style={{ marginTop: 'var(--s2)' }}>
+                <div className="sheet-row">
+                  <div>
+                    <div className="small dim">Existing Commitment</div>
+                    <strong>{conflictData.title}</strong>
+                    <div className="small">{conflictData.slotName}</div>
+                    <div className="small dim">{formatTime(conflictData.start)} - {formatTime(conflictData.end)}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setConflictData(null)}>
+                {conflictData.level === 2 ? 'Cancel' : 'Go Back'}
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={() => handleApply(pendingApplySlot)}
+                disabled={submitting}
+              >
+                {conflictData.level === 2 ? 'Continue Anyway' : 'Apply Anyway'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showRedrawModal && (

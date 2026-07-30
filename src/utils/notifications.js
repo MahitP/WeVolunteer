@@ -1,56 +1,32 @@
 import {
-  CheckCircle2, Clock4, ArrowUpCircle, XCircle, CalendarClock, Bell,
-  Megaphone, MapPin, Award, Ban, UserPlus, ShieldCheck, MessageSquare, Info
+  ClipboardList, Calendar, Star, MessageSquare, UserRound, Settings, Bell
 } from 'lucide-react';
 
 /**
- * One place that decides how every notification kind looks and reads.
- *
- * `tone` maps to the status colours already in the design system, so an
- * acceptance is green and a cancellation is red without any component
- * inventing its own palette.
+ * Maps each notification category to its icon, brand color, and label.
  */
-export const NOTIFICATION_META = {
-  accepted:     { icon: CheckCircle2,  tone: 'ok',     label: 'Accepted' },
-  waitlisted:   { icon: Clock4,        tone: 'info',   label: 'Waitlisted' },
-  promoted:     { icon: ArrowUpCircle, tone: 'ok',     label: 'Promoted' },
-  declined:     { icon: XCircle,       tone: 'muted',  label: 'Not selected' },
-  deadline:     { icon: CalendarClock, tone: 'warn',   label: 'Deadline' },
-  reminder:     { icon: Bell,          tone: 'brand',  label: 'Reminder' },
-  announcement: { icon: Megaphone,     tone: 'warn',   label: 'Update' },
-  location:     { icon: MapPin,        tone: 'warn',   label: 'Location' },
-  hours:        { icon: Award,         tone: 'accent', label: 'Hours' },
-  cancelled:    { icon: Ban,           tone: 'danger', label: 'Cancelled' },
-  application:  { icon: UserPlus,      tone: 'info',   label: 'Application' },
-  approval:     { icon: ShieldCheck,   tone: 'ok',     label: 'Account' },
-  comment:      { icon: MessageSquare, tone: 'info',   label: 'Question' },
-  info:         { icon: Info,          tone: 'muted',  label: 'Info' }
+export const NOTIFICATION_CATEGORIES = {
+  APPLICATION: { icon: ClipboardList, tone: 'brand',  label: 'Applications' },
+  EVENT:       { icon: Calendar,      tone: 'info',   label: 'Events' },
+  VOLUNTEER:   { icon: Star,          tone: 'accent', label: 'Volunteering' },
+  MESSAGES:    { icon: MessageSquare, tone: 'ok',     label: 'Messages' },
+  ACCOUNT:     { icon: UserRound,     tone: 'muted',  label: 'Account' },
+  SYSTEM:      { icon: Settings,      tone: 'warn',   label: 'System' },
 };
 
-export function notificationMeta(kind) {
-  return NOTIFICATION_META[kind] || NOTIFICATION_META.info;
+export function notificationMeta(category) {
+  return NOTIFICATION_CATEGORIES[category] || { icon: Bell, tone: 'muted', label: 'Notification' };
 }
 
-/**
- * Filter groups for the notification centre. Deliberately few — a student
- * should never have to think hard about which bucket something is in.
- */
 export const NOTIFICATION_FILTERS = [
   { id: 'all', label: 'All', kinds: null },
-  {
-    id: 'applications',
-    label: 'My applications',
-    kinds: ['accepted', 'waitlisted', 'promoted', 'declined']
-  },
-  {
-    id: 'events',
-    label: 'Event updates',
-    kinds: ['announcement', 'location', 'cancelled', 'reminder', 'deadline']
-  },
-  { id: 'hours', label: 'Hours', kinds: ['hours', 'approval'] }
+  { id: 'applications', label: 'Applications', kinds: ['APPLICATION'] },
+  { id: 'events', label: 'Events', kinds: ['EVENT'] },
+  { id: 'volunteering', label: 'Volunteering', kinds: ['VOLUNTEER'] },
+  { id: 'messages', label: 'Messages', kinds: ['MESSAGES'] }
 ];
 
-/** Buckets notifications into Today / Yesterday / Earlier, newest first. */
+/** Buckets notifications into Today / Yesterday / This Week / Earlier, newest first. */
 export function groupByDay(items) {
   const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const today = startOfDay(new Date());
@@ -70,4 +46,64 @@ export function groupByDay(items) {
 
   const order = ['Today', 'Yesterday', 'This week', 'This month', 'Earlier'];
   return order.filter(l => groups.has(l)).map(label => ({ label, items: groups.get(label) }));
+}
+
+/** 
+ * Groups notifications intelligently:
+ * Combines multiple notifications for the same event/context if they occurred recently.
+ */
+export function groupNotifications(items) {
+  const grouped = [];
+  const processed = new Set();
+  
+  for (const item of items) {
+    if (processed.has(item.id)) continue;
+    
+    // Check if we can group this item with others
+    const eventId = item.link?.startsWith('event:') ? item.link.split(':')[1] : null;
+    
+    if (eventId && item.kind === 'EVENT' && item.priority !== 'CRITICAL') {
+      const similar = items.filter(other => 
+        !processed.has(other.id) &&
+        other.kind === 'EVENT' &&
+        other.link === item.link &&
+        other.priority !== 'CRITICAL' &&
+        Math.abs(new Date(item.createdAt) - new Date(other.createdAt)) < 86400000 * 3 // within 3 days
+      );
+      
+      if (similar.length > 1) {
+        similar.forEach(s => processed.add(s.id));
+        const unreadCount = similar.filter(s => !s.read).length;
+        
+        // Summarize changes if possible
+        const allChanges = new Set();
+        similar.forEach(s => {
+          if (s.title.includes('details changed') && s.body.startsWith('Details changed: ')) {
+            const changesText = s.body.replace('Details changed: ', '').replace('.', '');
+            changesText.split(', ').forEach(c => allChanges.add(c));
+          }
+        });
+        
+        let bodyText = `${similar.length} new updates regarding this event.`;
+        if (allChanges.size > 0) {
+          bodyText = `Details changed: ${Array.from(allChanges).join(', ')}.`;
+        }
+        
+        grouped.push({
+          ...item,
+          isGroup: true,
+          title: `Updates for ${item.title.replace(/^(Event Updated|Event Cancelled|.* details changed|.*: )/, '') || 'Event'}`,
+          body: bodyText,
+          read: unreadCount === 0,
+          originalItems: similar
+        });
+        continue;
+      }
+    }
+    
+    processed.add(item.id);
+    grouped.push(item);
+  }
+  
+  return grouped;
 }

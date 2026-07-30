@@ -53,6 +53,36 @@ export async function startTestServer() {
     return res.cookie;
   };
 
+  /**
+   * Confirms an account's address the way clicking the emailed link would.
+   *
+   * A signup is unconfirmed by default, and authenticateToken confines an
+   * unconfirmed account to a small allowlist — so a fixture that exists only
+   * to exercise something else (data export, PII scoping) has to get past
+   * that first, or every assertion in the suite reads as a 403.
+   *
+   * Goes through the real endpoint rather than writing email_verified
+   * directly, so the fixtures keep exercising the actual flow.
+   */
+  const confirmEmail = async (userId) => {
+    const { db } = await import('./db.js');
+    const row = db.prepare(
+      'SELECT token FROM email_verification_tokens WHERE user_id = ? ORDER BY expires_at DESC LIMIT 1'
+    ).get(userId);
+    if (!row) throw new Error(`No verification token outstanding for ${userId}`);
+    const res = await call('POST', '/api/auth/verify-email', { token: row.token });
+    if (res.status !== 200) throw new Error(`Could not confirm ${userId}: ${JSON.stringify(res.body)}`);
+    return res.cookie;
+  };
+
+  /** Signs up and confirms in one step, returning a session cookie ready to use. */
+  const signupConfirmed = async (payload) => {
+    const res = await call('POST', '/api/auth/signup', payload);
+    if (res.status !== 201) throw new Error(`Signup failed: ${JSON.stringify(res.body)}`);
+    const cookie = await confirmEmail(res.body.user.id);
+    return { cookie, user: res.body.user };
+  };
+
   const close = () => new Promise(resolve => {
     server.close(() => { rmSync(dir, { recursive: true, force: true }); resolve(); });
   });
@@ -62,6 +92,8 @@ export async function startTestServer() {
     close,
     call,
     login,
-    signup
+    signup,
+    confirmEmail,
+    signupConfirmed
   };
 }

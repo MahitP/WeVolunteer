@@ -3,7 +3,8 @@ import express from 'express';
 import { VALID_CATEGORIES, MAX_AUTO_SELECT_DRAWS } from '../config.js';
 import { createRandom, performWeightedSelection } from '../weighting.js';
 import { attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
-import { authenticateToken, inTransaction, createNotification, notifyConfirmedVolunteers } from '../utils.js';
+import { authenticateToken, inTransaction, notifyConfirmedVolunteers } from '../utils.js';
+import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 import { validateEventPayload } from '../validation.js';
 
@@ -102,6 +103,9 @@ router.get('/api/events', authenticateToken, (req, res) => {
         description: event.description,
         category: event.category,
         location: event.location,
+        address: event.address || null,
+        latitude: event.latitude != null ? Number(event.latitude) : null,
+        longitude: event.longitude != null ? Number(event.longitude) : null,
         startDatetime: startDatetime,
         endDatetime: endDatetime,
         hoursAwarded: hoursAwarded,
@@ -183,6 +187,9 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
         description: event.description,
         category: event.category,
         location: event.location,
+        address: event.address || null,
+        latitude: event.latitude != null ? Number(event.latitude) : null,
+        longitude: event.longitude != null ? Number(event.longitude) : null,
         instructions: event.instructions || '',
         applicationDeadline: event.application_deadline,
         organizerId: event.organizer_id,
@@ -212,7 +219,8 @@ router.post('/api/events', authenticateToken, (req, res) => {
 
   const {
     title, description, category, location, applicationDeadline, slots,
-    autoApprove, instructions, attendeeVisibility
+    autoApprove, instructions, attendeeVisibility,
+    address, latitude, longitude
   } = req.body;
 
   if (!title || !description || !category || !location || !applicationDeadline || !slots || !Array.isArray(slots) || slots.length === 0) {
@@ -224,7 +232,7 @@ router.post('/api/events', authenticateToken, (req, res) => {
     return res.status(400).json({ error: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}` });
   }
 
-  const validation = validateEventPayload({ title, description, location, instructions, applicationDeadline, slots });
+  const validation = validateEventPayload({ title, description, location, instructions, applicationDeadline, slots, address, latitude, longitude });
   if (!validation.ok) return res.status(400).json({ error: validation.error });
 
   try {
@@ -235,8 +243,9 @@ router.post('/api/events', authenticateToken, (req, res) => {
       // A. Insert Event
       db.prepare(`
         INSERT INTO events (id, title, description, category, location, application_deadline,
-                            organizer_id, status, created_at, auto_approve, instructions, attendee_visibility)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)
+                            organizer_id, status, created_at, auto_approve, instructions, attendee_visibility,
+                            address, latitude, longitude)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)
       `).run(
         eventId,
         title,
@@ -248,7 +257,10 @@ router.post('/api/events', authenticateToken, (req, res) => {
         nowStr,
         autoApprove ? 1 : 0,
         instructions || '',
-        attendeeVisibility === 'private' ? 'private' : 'accepted'
+        attendeeVisibility === 'private' ? 'private' : 'accepted',
+        address || null,
+        latitude != null ? latitude : null,
+        longitude != null ? longitude : null
       );
 
       // B. Insert slots
@@ -276,6 +288,9 @@ router.post('/api/events', authenticateToken, (req, res) => {
       description,
       category,
       location,
+      address: address || null,
+      latitude: latitude != null ? latitude : null,
+      longitude: longitude != null ? longitude : null,
       applicationDeadline,
       organizerId: req.user.id,
       status: 'open',
@@ -289,7 +304,7 @@ router.post('/api/events', authenticateToken, (req, res) => {
 
 // 6. Fetch All Applications (Enriched with Student profile, Slot, and Event details)
 
-router.put('/api/events/:id', authenticateToken, (req, res) => {
+router.put('/api/events/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'organizer') {
     return res.status(403).json({ error: 'Access denied' });
   }
@@ -297,7 +312,8 @@ router.put('/api/events/:id', authenticateToken, (req, res) => {
   const eventId = req.params.id;
   const {
     title, description, category, location, applicationDeadline, slots,
-    autoApprove, instructions, attendeeVisibility
+    autoApprove, instructions, attendeeVisibility,
+    address, latitude, longitude
   } = req.body;
 
   if (!title || !description || !category || !location || !applicationDeadline || !slots || !Array.isArray(slots)) {
@@ -307,7 +323,7 @@ router.put('/api/events/:id', authenticateToken, (req, res) => {
     return res.status(400).json({ error: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}` });
   }
 
-  const validation = validateEventPayload({ title, description, location, instructions, applicationDeadline, slots });
+  const validation = validateEventPayload({ title, description, location, instructions, applicationDeadline, slots, address, latitude, longitude });
   if (!validation.ok) return res.status(400).json({ error: validation.error });
 
   try {
@@ -324,9 +340,11 @@ router.put('/api/events/:id', authenticateToken, (req, res) => {
       });
     }
 
-    // A moved meeting place is the change most likely to make someone turn up
-    // at the wrong address, so confirmed volunteers are told about it.
-    const locationChanged = event.location !== location;
+    const changes = [];
+    if (event.title !== title) changes.push('title');
+    if (event.location !== location || event.address !== address) changes.push('location');
+    if (event.application_deadline !== applicationDeadline) changes.push('deadline');
+    if (event.description !== description) changes.push('description');
 
     // Removing a shift used to take its attendance rows with it, silently
     // destroying hours volunteers had already earned. Credited service is not
@@ -351,9 +369,10 @@ router.put('/api/events/:id', authenticateToken, (req, res) => {
       // 1. Update event details
       db.prepare(`
         UPDATE events
-        SET title = ?, description = ?, category = ?, location = ?, application_deadline = ?
+        SET title = ?, description = ?, category = ?, location = ?, application_deadline = ?,
+            address = ?, latitude = ?, longitude = ?
         WHERE id = ?
-      `).run(title, description, category, location, applicationDeadline, eventId);
+      `).run(title, description, category, location, applicationDeadline, address || null, latitude != null ? latitude : null, longitude != null ? longitude : null, eventId);
 
       if (autoApprove !== undefined) {
         db.prepare('UPDATE events SET auto_approve = ? WHERE id = ?').run(autoApprove ? 1 : 0, eventId);
@@ -398,12 +417,8 @@ router.put('/api/events/:id', authenticateToken, (req, res) => {
     });
 
     let notified = 0;
-    if (locationChanged) {
-      notified = notifyConfirmedVolunteers(eventId, {
-        kind: 'location',
-        title: `New location: ${title}`,
-        body: `The meeting place moved to ${location}. Check the event page before you go.`
-      });
+    if (changes.length > 0) {
+      notified = await notifyConfirmedVolunteers(eventId, 'EVENT_UPDATED', { eventId: eventId, eventTitle: title, changes: changes });
     }
 
     res.json({ success: true, notified });
@@ -462,13 +477,7 @@ router.post('/api/events/:id/auto-approve', authenticateToken, (req, res) => {
       for (const app of enriched.slice(0, remaining)) {
         approveStmt.run(app.id);
         approvedCount++;
-        createNotification({
-          userId: app.user_id,
-          kind: 'accepted',
-          title: 'Application accepted',
-          body: `You were auto-approved for "${event.title}" — ${slot.name}.`,
-          link: `event:${event.id}`
-        });
+        notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: event.id, eventTitle: event.title }, app.user_id);
       }
     }
 
@@ -578,7 +587,7 @@ router.delete('/api/events/:id', authenticateToken, (req, res) => {
 });
 
 // A5. Toggle Event Status (Organizer only)
-router.patch('/api/events/:id/status', authenticateToken, (req, res) => {
+router.patch('/api/events/:id/status', authenticateToken, async (req, res) => {
   if (req.user.role !== 'organizer' && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Access denied' });
   }
@@ -609,12 +618,7 @@ router.patch('/api/events/:id/status', authenticateToken, (req, res) => {
     // hear about immediately — they may have arranged a ride around it.
     let notified = 0;
     if (status === 'cancelled' && event.status !== 'cancelled') {
-      notified = notifyConfirmedVolunteers(eventId, {
-        kind: 'cancelled',
-        title: `Cancelled: ${event.title}`,
-        body: `${event.title} has been called off. You no longer need to attend.`,
-        dedupeKey: `cancelled:${eventId}`
-      });
+      notified = await notifyConfirmedVolunteers(eventId, 'EVENT_CANCELLED', { eventId: event.id, eventTitle: event.title }, `cancelled:${eventId}`);
     }
 
     res.json({ success: true, status, notified });
@@ -884,13 +888,7 @@ router.post('/api/events/:id/auto-select/confirm', authenticateToken, (req, res)
         `).get(id);
 
         if (appRow) {
-          createNotification({
-            userId: appRow.user_id,
-            kind: 'accepted',
-            title: 'Application accepted',
-            body: `You were auto-selected and accepted for "${event.title}" — ${appRow.slot_name}!`,
-            link: `event:${event.id}`
-          });
+          notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: event.id, eventTitle: event.title }, appRow.user_id);
         }
       }
 
@@ -917,13 +915,7 @@ router.post('/api/events/:id/auto-select/confirm', authenticateToken, (req, res)
         const slot = db.prepare('SELECT name FROM slots WHERE id = ?').get(app.slot_id);
         const slotName = slot ? slot.name : 'Shift';
 
-        createNotification({
-          userId: app.user_id,
-          kind: 'waitlisted',
-          title: 'Waitlisted',
-          body: `You were placed on the waitlist (Rank #${rank}) for "${event.title}" — ${slotName}.`,
-          link: `event:${event.id}`
-        });
+        notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: event.id, eventTitle: event.title, waitlistRank: rank }, app.user_id);
       }
 
       // 4. Compute selection summary
@@ -1008,12 +1000,11 @@ router.post('/api/events/:id/broadcast', authenticateToken, async (req, res) => 
     }
 
     const confirmedApps = db.prepare(`
-      SELECT DISTINCT u.email 
+      SELECT DISTINCT u.id, u.email 
       FROM applications a
       JOIN users u ON a.user_id = u.id
       WHERE a.event_id = ? 
         AND a.status = 'accepted'
-        AND u.email_opt_out = 0
     `).all(eventId);
 
     if (confirmedApps.length === 0) {
@@ -1021,10 +1012,17 @@ router.post('/api/events/:id/broadcast', authenticateToken, async (req, res) => 
     }
 
     const { sendNotificationEmail } = await import('../email.js');
+    const { notificationService } = await import('../services/notificationService.js');
     
-    const emailPromises = confirmedApps.map(u => 
-      sendNotificationEmail(u.email, `Update: ${event.title} - ${subject}`, message)
-    );
+    const emailPromises = [];
+    for (const u of confirmedApps) {
+      // Create in-app notification
+      notificationService.dispatch('IMPORTANT_ANNOUNCEMENT', { eventId: event.id, eventTitle: event.title, body: message }, u.id);
+      // Send email if not opted out
+      if (u.email && u.email_opt_out === 0) {
+        emailPromises.push(sendNotificationEmail(u.email, `Update: ${event.title} - ${subject}`, message));
+      }
+    }
 
     Promise.allSettled(emailPromises).catch(err => console.error('Broadcast error:', err));
 
@@ -1032,6 +1030,57 @@ router.post('/api/events/:id/broadcast', authenticateToken, async (req, res) => 
   } catch (err) {
     console.error('Broadcast route error:', err);
     res.status(500).json({ error: 'Failed to broadcast message' });
+  }
+});
+
+
+
+// 12. ICS Calendar Export (Public / Authenticated depending on requirements)
+// We allow anyone with the link to download the ICS so that calendar apps can parse it easily,
+// but they need the eventId and slotId.
+router.get('/api/events/:eventId/slots/:slotId/ics', (req, res) => {
+  const { eventId, slotId } = req.params;
+  
+  try {
+    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    const slot = db.prepare('SELECT * FROM slots WHERE id = ? AND event_id = ?').get(slotId, eventId);
+    
+    if (!event || !slot) {
+      return res.status(404).send('Event or slot not found');
+    }
+
+    const formatICSDate = (dateString) => {
+      const d = new Date(dateString);
+      return d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    };
+
+    const dtStart = formatICSDate(slot.start_datetime);
+    const dtEnd = formatICSDate(slot.end_datetime);
+    const dtStamp = formatICSDate(new Date().toISOString());
+
+    const icsContent = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//WeVolunteer//Calendar//EN',
+      'CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT',
+      `UID:${slot.id}@wevolunteer.org`,
+      `DTSTAMP:${dtStamp}`,
+      `DTSTART:${dtStart}`,
+      `DTEND:${dtEnd}`,
+      `SUMMARY:${event.title} (${slot.name})`,
+      `DESCRIPTION:${event.description}\\n\\n${slot.description}`,
+      `LOCATION:${event.location}`,
+      'END:VEVENT',
+      'END:VCALENDAR'
+    ].join('\\r\\n');
+
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="wevolunteer-${event.title.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${slot.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.ics"`);
+    res.send(icsContent);
+  } catch (err) {
+    console.error('ICS Export error:', err);
+    res.status(500).send('Internal server error generating calendar file');
   }
 });
 
