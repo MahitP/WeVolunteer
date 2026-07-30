@@ -7,6 +7,7 @@ import { authenticateToken, inTransaction, notifyConfirmedVolunteers } from '../
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 import { validateEventPayload } from '../validation.js';
+import { buildShiftIcs } from '../ics.js';
 
 const router = express.Router();
 
@@ -1049,31 +1050,22 @@ router.get('/api/events/:eventId/slots/:slotId/ics', (req, res) => {
       return res.status(404).send('Event or slot not found');
     }
 
-    const formatICSDate = (dateString) => {
-      const d = new Date(dateString);
-      return d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-    };
-
-    const dtStart = formatICSDate(slot.start_datetime);
-    const dtEnd = formatICSDate(slot.end_datetime);
-    const dtStamp = formatICSDate(new Date().toISOString());
-
-    const icsContent = [
-      'BEGIN:VCALENDAR',
-      'VERSION:2.0',
-      'PRODID:-//WeVolunteer//Calendar//EN',
-      'CALSCALE:GREGORIAN',
-      'BEGIN:VEVENT',
-      `UID:${slot.id}@wevolunteer.org`,
-      `DTSTAMP:${dtStamp}`,
-      `DTSTART:${dtStart}`,
-      `DTEND:${dtEnd}`,
-      `SUMMARY:${event.title} (${slot.name})`,
-      `DESCRIPTION:${event.description}\\n\\n${slot.description}`,
-      `LOCATION:${event.location}`,
-      'END:VEVENT',
-      'END:VCALENDAR'
-    ].join('\\r\\n');
+    /**
+     * Serialisation lives in ../ics.js so it can be tested against RFC 5545
+     * rather than against substrings of its own output. The version that was
+     * inline here joined its lines with a literal `\r\n` TEXT sequence and
+     * produced a one-line file no calendar application could parse.
+     */
+    const icsContent = buildShiftIcs({
+      uid: `${slot.id}@wevolunteer.org`,
+      start: slot.start_datetime,
+      end: slot.end_datetime,
+      summary: `${event.title} (${slot.name})`,
+      // A blank line between the event blurb and the shift-specific note. The
+      // escaping in buildShiftIcs turns these into the `\n` TEXT escape.
+      description: `${event.description}\n\n${slot.description}`,
+      location: event.location
+    });
 
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="wevolunteer-${event.title.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${slot.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.ics"`);

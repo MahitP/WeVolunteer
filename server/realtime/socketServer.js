@@ -1,5 +1,5 @@
 import { Server } from 'socket.io';
-import { ALLOWED_ORIGINS, JWT_SECRET } from '../config.js';
+import { ALLOWED_ORIGINS, IS_PRODUCTION, COOKIE_NAME, JWT_SECRET } from '../config.js';
 import { setRealtimeServer } from './events.js';
 import cookie from 'cookie';
 import jwt from 'jsonwebtoken';
@@ -7,10 +7,37 @@ import { db } from '../db.js';
 
 const SESSION_CHECK_INTERVAL = Number(process.env.SOCKET_SESSION_CHECK_INTERVAL_MS) || 5 * 60 * 1000;
 
+/**
+ * Origin policy for the realtime channel.
+ *
+ * Mirrors the reasoning in app.js rather than pinning ALLOWED_ORIGINS directly.
+ * A WebSocket upgrade ALWAYS carries an `Origin` header — unlike a same-origin
+ * GET, which may omit it — so in development the header is the Vite origin, and
+ * Vite picks a fresh port whenever 5173 is taken. Pinning the allowlist meant a
+ * dev server on any other port had its upgrade rejected by CORS even once the
+ * proxy existed, which would have masked the real fix.
+ *
+ * Loopback and private ranges are allowed in development only, exactly as
+ * app.js does; a production build never reaches that branch.
+ */
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  if (!IS_PRODUCTION) {
+    try {
+      const { hostname } = new URL(origin);
+      return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+        || hostname.startsWith('192.168.') || hostname.startsWith('10.')
+        || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname);
+    } catch { return false; }
+  }
+  return false;
+}
+
 export function initSocketServer(httpServer) {
   const io = new Server(httpServer, {
     cors: {
-      origin: ALLOWED_ORIGINS,
+      origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
       credentials: true
     }
   });
@@ -20,24 +47,50 @@ export function initSocketServer(httpServer) {
   io.use((socket, next) => {
     try {
       const cookies = cookie.parse(socket.request.headers.cookie || '');
-      const token = cookies.wev_session;
+      const token = cookies[COOKIE_NAME];
       if (!token) {
         return next(new Error('Authentication error: Missing session'));
       }
-      
+
       const payload = jwt.verify(token, JWT_SECRET);
-      const user = db.prepare('SELECT id, role, token_version FROM users WHERE id = ?').get(payload.userId);
-      
+
+      /**
+       * `payload.id`, not `payload.userId`.
+       *
+       * The session token is signed with `{ id, role, email, name, tokenVersion }`
+       * (authRoutes.js issueSession), and the REST middleware reads
+       * `decodedUser.id`. This read `payload.userId`, which is always undefined —
+       * and `node:sqlite` throws when a bind parameter is undefined rather than
+       * treating it as NULL, so every handshake fell into the catch below and was
+       * rejected as "Invalid session".
+       *
+       * The effect was that EVERY socket connection was refused, in development
+       * and in production: no live notifications, no live messages, no typing
+       * indicators, no read receipts. Nothing surfaced it because no test opened
+       * a socket, and the client retried forever in silence.
+       */
+      const user = db.prepare(
+        'SELECT id, role, token_version, account_status FROM users WHERE id = ?'
+      ).get(payload.id);
+
       if (!user) {
         return next(new Error('Authentication error: User not found'));
       }
-      
-      if (user.token_version !== payload.tokenVersion) {
+
+      // A deleted or suspended account must not hold a live channel, the same
+      // way authenticateToken refuses one a REST request.
+      if (user.account_status !== 'active') {
+        return next(new Error('Authentication error: Account not active'));
+      }
+
+      // `?? 0` to match authenticateToken: a token minted before the column
+      // existed carries no tokenVersion, and must not be read as a mismatch.
+      if (user.token_version !== (payload.tokenVersion ?? 0)) {
         return next(new Error('Authentication error: Session stale'));
       }
-      
+
       socket.data.user = { id: user.id, role: user.role };
-      socket.data.tokenVersion = payload.tokenVersion;
+      socket.data.tokenVersion = payload.tokenVersion ?? 0;
       next();
     } catch (err) {
       return next(new Error('Authentication error: Invalid session'));

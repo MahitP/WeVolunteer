@@ -53,3 +53,25 @@ test-results/
 
 # Pilot environment credentials
 docs/operations/pilot-credentials.md
+backups/
+
+# ── Secrets ─────────────────────────────────────────────────────────────────
+# `.env` was committed once (audit finding C-3) because only `.env.production`
+# was ignored. It carried a live GOOGLE_CLIENT_SECRET. The rules below ignore
+# every local env file by default and re-allow only the committed templates,
+# so a new variant (.env.staging, .env.pilot, .env.local) is ignored the moment
+# it is created rather than the first time somebody remembers to add a rule.
+.env
+.env.*
+!.env.example
+!.env.development
+!.env.production.example
+
+# Credential material that must never enter the repository.
+*.p8
+*.p12
+*.pem
+*.key
+!**/*.pub.pem
+service-account*.json
+gha-creds-*.json
