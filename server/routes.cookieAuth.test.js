@@ -135,7 +135,7 @@ describe('login and signup issue a session cookie', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: `cookie-${suffix}@example.org`, password: 'password123',
+        email: `cookie-${suffix}@example.org`, password: 'Password123',
         name: 'Cookie Test', role: 'student', grade: '10', username: `cookie_${suffix}`
       })
     });
@@ -177,29 +177,82 @@ describe('authenticateToken accepts the session cookie', () => {
 });
 
 describe('server-side logout', () => {
-  it('clears the cookie and increments token_version to invalidate the old session', async () => {
-    const loginRes = await fetch(`${srv.base}/api/auth/login`, {
+  const signIn = async () => {
+    const res = await fetch(`${srv.base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'password123' })
     });
-    const setCookie = loginRes.headers.get('set-cookie');
-    const cookieString = setCookie.split(';')[0];
-    
+    expect(res.status).toBe(200);
+    return res.headers.get('set-cookie').split(';')[0];
+  };
+
+  it('clears the session cookie', async () => {
+    const cookieString = await signIn();
+
     const logoutRes = await fetch(`${srv.base}/api/auth/logout`, {
       method: 'POST',
       headers: { 'Cookie': cookieString }
     });
-    
+
     expect(logoutRes.status).toBe(200);
+
     const logoutCookie = logoutRes.headers.get('set-cookie');
-    expect(logoutCookie).toMatch(/wev_session=;/); // Value cleared
-    
-    const meRes = await fetch(`${srv.base}/api/auth/me`, {
-      headers: { 'Cookie': cookieString }
+    expect(logoutCookie).toMatch(/wev_session=;/);
+    // The clearing cookie must carry an expiry in the past. clearCookie sets
+    // `expires` to the epoch, but res.cookie recomputes it from `maxAge`
+    // whenever maxAge is present — so passing the full cookieOptions() through
+    // would quietly set a seven-day cookie instead of deleting one.
+    expect(logoutCookie).toMatch(/Expires=Thu, 01 Jan 1970/i);
+    expect(logoutCookie).not.toMatch(/Max-Age=[1-9]/);
+  });
+
+  /**
+   * Logging out of one device must not log the account out of the others.
+   *
+   * Logout used to increment token_version, which invalidates every session the
+   * account holds — so signing out of a shared school computer also signed the
+   * same student out on their own phone, with no way to do one without the
+   * other. The deliberate global case has its own route, asserted below.
+   */
+  it('leaves the account signed in on other devices', async () => {
+    const phone = await signIn();
+    const laptop = await signIn();
+
+    const logoutRes = await fetch(`${srv.base}/api/auth/logout`, {
+      method: 'POST',
+      headers: { 'Cookie': laptop }
     });
-    // Old cookie is now rejected because token_version was incremented
-    expect(meRes.status).toBe(401);
+    expect(logoutRes.status).toBe(200);
+
+    const phoneRes = await fetch(`${srv.base}/api/auth/me`, {
+      headers: { 'Cookie': phone }
+    });
+    expect(phoneRes.status).toBe(200);
+  });
+
+  it('sign-out-others invalidates every other session', async () => {
+    const phone = await signIn();
+    const laptop = await signIn();
+
+    const res = await fetch(`${srv.base}/api/auth/sign-out-others`, {
+      method: 'POST',
+      headers: { 'Cookie': laptop }
+    });
+    expect(res.status).toBe(200);
+
+    // The other device is gone...
+    const phoneRes = await fetch(`${srv.base}/api/auth/me`, {
+      headers: { 'Cookie': phone }
+    });
+    expect(phoneRes.status).toBe(401);
+
+    // ...and the device that asked stays signed in, on a reissued cookie.
+    const reissued = res.headers.get('set-cookie').split(';')[0];
+    const stillMe = await fetch(`${srv.base}/api/auth/me`, {
+      headers: { 'Cookie': reissued }
+    });
+    expect(stillMe.status).toBe(200);
   });
 });
 
@@ -232,7 +285,7 @@ describe('severed Authorization header fallback', () => {
     const signupRes = await fetch(`${srv.base}/api/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'test_no_token@example.com', password: 'password123', name: 'Test', role: 'student', grade: '9', username: 'test_no_token' })
+      body: JSON.stringify({ email: 'test_no_token@example.com', password: 'Password123', name: 'Test', role: 'student', grade: '9', username: 'test_no_token' })
     });
     const signupBody = await signupRes.json();
     expect(signupBody.token).toBeUndefined();
