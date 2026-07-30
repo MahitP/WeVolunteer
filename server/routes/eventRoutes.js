@@ -34,14 +34,98 @@ export function formatSlot(s, acceptedCount = 0) {
   };
 }
 
+/** Largest page a caller may request. Above this, `limit` is clamped, not rejected. */
+export const EVENTS_MAX_LIMIT = 200;
+
+/**
+ * Above this many rows, an unpaginated response is logged as a warning.
+ *
+ * Not a cap. Silently truncating the default would be the worst outcome
+ * available here: the SPA uses this response as a complete local index — the
+ * calendar resolves every application to its event, the organizer dashboard
+ * filters for its own events, and opening an event from a notification looks it
+ * up by id — so a short response would not error, it would quietly show a
+ * student the wrong calendar. The warning exists so the ceiling is visible
+ * before it is reached.
+ */
+const EVENTS_WARN_THRESHOLD = 400;
+
+/**
+ * List events.
+ *
+ * Pagination is OPT-IN. With no `limit`, the response is the bare array it has
+ * always been, because every current client consumer treats it as a complete
+ * index (see the note on EVENTS_WARN_THRESHOLD). Pass `limit` and the response
+ * becomes an envelope with `{ events, pagination }` instead.
+ *
+ *   GET /api/events                    -> Event[]                (legacy)
+ *   GET /api/events?limit=50           -> { events, pagination }
+ *   GET /api/events?limit=50&offset=50 -> { events, pagination }
+ *
+ * Ordering is by soonest shift, then id. The id tiebreak is not cosmetic: two
+ * events starting at the same moment have no inherent order, and without a
+ * stable tiebreak SQLite may return them in a different sequence on each query —
+ * which makes `offset` unsound and lets a row appear on two pages or on none.
+ * The previous query had no ORDER BY at all, so pagination could not have been
+ * added on top of it correctly.
+ */
 router.get('/api/events', authenticateToken, (req, res) => {
   try {
-    const events = db.prepare(`
-      SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
-             u.school as organizer_school
-      FROM events e
-      JOIN users u ON e.organizer_id = u.id
-    `).all();
+    const paginated = req.query.limit !== undefined;
+
+    let limit = null;
+    let offset = 0;
+    if (paginated) {
+      const rawLimit = Number(req.query.limit);
+      const rawOffset = Number(req.query.offset ?? 0);
+      if (!Number.isFinite(rawLimit) || rawLimit < 1) {
+        return res.status(400).json({ error: '`limit` must be a positive integer.', field: 'limit' });
+      }
+      if (!Number.isFinite(rawOffset) || rawOffset < 0) {
+        return res.status(400).json({ error: '`offset` must be zero or greater.', field: 'offset' });
+      }
+      // Clamped rather than rejected: a caller asking for too much should get a
+      // valid page, not an error it has to learn to handle.
+      limit = Math.min(Math.floor(rawLimit), EVENTS_MAX_LIMIT);
+      offset = Math.floor(rawOffset);
+    }
+
+    const total = db.prepare('SELECT COUNT(*) AS c FROM events').get().c;
+
+    // COALESCE puts events with no slots last instead of first — a NULL sorts
+    // before every real date in SQLite, which would otherwise float unscheduled
+    // events to the top of the browse list.
+    const ORDER = `
+      ORDER BY COALESCE(
+        (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id),
+        '9999-12-31'
+      ) ASC, e.id ASC
+    `;
+
+    const events = paginated
+      ? db.prepare(`
+          SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
+                 u.school as organizer_school
+          FROM events e
+          JOIN users u ON e.organizer_id = u.id
+          ${ORDER}
+          LIMIT ? OFFSET ?
+        `).all(limit, offset)
+      : db.prepare(`
+          SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
+                 u.school as organizer_school
+          FROM events e
+          JOIN users u ON e.organizer_id = u.id
+          ${ORDER}
+        `).all();
+
+    if (!paginated && total > EVENTS_WARN_THRESHOLD) {
+      console.warn(
+        `[events] Serialised ${total} events unpaginated for user ${req.user.id}. `
+        + `Above ${EVENTS_WARN_THRESHOLD} this response is the largest payload the app sends; `
+        + `migrate the caller to ?limit=&offset=.`
+      );
+    }
 
     // Arrival details (instructions) are only for people who are actually
     // going, or who run the event — not the open internet, and not every
@@ -52,25 +136,47 @@ router.get('/api/events', authenticateToken, (req, res) => {
         .all(req.user.id).map(r => r.event_id)
     );
 
-    // Batch-load slots and accepted counts once instead of per-event queries
+    /**
+     * The three batch loads below are scoped to the rows actually being
+     * returned.
+     *
+     * They previously read `slots`, every accepted application, and every
+     * attendance row for the WHOLE table regardless of what was being sent —
+     * so a paginated request for 20 events would still have loaded a district's
+     * entire slot and attendance history to answer it, and the page would have
+     * cost the same as the full list. A parameter list is built from the page's
+     * event ids instead.
+     */
+    const pageIds = events.map(e => e.id);
+    const placeholders = pageIds.length ? pageIds.map(() => '?').join(',') : null;
+
     const slotsByEvent = new Map();
-    for (const s of db.prepare('SELECT * FROM slots').all()) {
-      if (!slotsByEvent.has(s.event_id)) slotsByEvent.set(s.event_id, []);
-      slotsByEvent.get(s.event_id).push(s);
+    if (placeholders) {
+      for (const s of db.prepare(`SELECT * FROM slots WHERE event_id IN (${placeholders})`).all(...pageIds)) {
+        if (!slotsByEvent.has(s.event_id)) slotsByEvent.set(s.event_id, []);
+        slotsByEvent.get(s.event_id).push(s);
+      }
     }
+
     const acceptedBySlot = new Map();
-    for (const r of db.prepare(`
-      SELECT slot_id, COUNT(*) as count FROM applications
-      WHERE status = 'accepted' GROUP BY slot_id
-    `).all()) {
-      acceptedBySlot.set(r.slot_id, r.count);
+    if (placeholders) {
+      for (const r of db.prepare(`
+        SELECT slot_id, COUNT(*) as count FROM applications
+        WHERE status = 'accepted' AND event_id IN (${placeholders})
+        GROUP BY slot_id
+      `).all(...pageIds)) {
+        acceptedBySlot.set(r.slot_id, r.count);
+      }
     }
 
     // Whether any hours have been recorded against this event. The client needs
     // it to stop offering a delete button the server will refuse — an action
     // that is always going to fail should not be presented as available.
     const withAttendance = new Set(
-      db.prepare('SELECT DISTINCT event_id FROM attendance').all().map(r => r.event_id)
+      placeholders
+        ? db.prepare(`SELECT DISTINCT event_id FROM attendance WHERE event_id IN (${placeholders})`)
+            .all(...pageIds).map(r => r.event_id)
+        : []
     );
 
     const formattedEvents = events.map(event => {
@@ -126,7 +232,34 @@ router.get('/api/events', authenticateToken, (req, res) => {
         slots: formattedSlots
       };
     });
-    res.json(formattedEvents);
+
+    /**
+     * Two shapes, chosen by whether the caller asked to paginate.
+     *
+     * A bare array for a legacy caller and an envelope for a paginated one keeps
+     * this backward compatible without a version bump or a second route. The
+     * envelope carries everything a caller needs to walk the pages without
+     * guessing: the total, the clamp that was actually applied, and an explicit
+     * `hasMore` so nobody has to infer the end from a short page.
+     */
+    if (!paginated) {
+      return res.json(formattedEvents);
+    }
+
+    res.json({
+      events: formattedEvents,
+      pagination: {
+        total,
+        limit,
+        offset,
+        returned: formattedEvents.length,
+        hasMore: offset + formattedEvents.length < total,
+        // Null at the end of the list, so a caller can loop until it is null
+        // rather than doing the arithmetic itself.
+        nextOffset: offset + formattedEvents.length < total ? offset + formattedEvents.length : null,
+        maxLimit: EVENTS_MAX_LIMIT
+      }
+    });
   } catch (error) {
     console.error('Fetch events error:', error);
     res.status(500).json({ error: 'Internal server error fetching events' });
