@@ -11,6 +11,8 @@ import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS } from './config.js';
 import { db } from './db.js';
 
 import authRoutes from './routes/authRoutes.js';
+import accountRoutes from './routes/accountRoutes.js';
+import userRoutes from './routes/userRoutes.js';
 import eventRoutes from './routes/eventRoutes.js';
 import applicationRoutes from './routes/applicationRoutes.js';
 import attendanceRoutes from './routes/attendanceRoutes.js';
@@ -329,6 +331,8 @@ app.use('/api/certificates/verify', verifyLimiter);
 app.use('/api', apiLimiter);
 
 app.use(authRoutes);
+app.use(accountRoutes);
+app.use(userRoutes);
 app.use(oauthRoutes);
 app.use(eventRoutes);
 app.use(applicationRoutes);

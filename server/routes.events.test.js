@@ -66,6 +66,39 @@ describe('events: ICS Export', () => {
     expect(lines).toContain('END:VEVENT');
   });
 
+  /**
+   * The ICS route must require a session.
+   *
+   * It had none, and returned 200 to an anonymous caller — disclosing an event's
+   * title, description, exact times and LOCATION, which for this product is the
+   * physical whereabouts of a minor at a known time. It is authenticated now, and
+   * nothing was stopping that from being undone: the route had no auth assertion
+   * at all, which is how it went unnoticed in the first place.
+   */
+  it('refuses an unauthenticated ICS request', async () => {
+    const oToken = await srv.login('jkatzenback@vikings.org');
+    const res = await srv.call('POST', '/api/events', {
+      title: 'Auth Guard', description: 'd', category: 'Other', location: 'Secret Location',
+      applicationDeadline: new Date(Date.now() + 2 * 864e5).toISOString(),
+      slots: [{ name: 'Slot A', description: 'd', startDatetime: new Date(Date.now() + 5 * 864e5).toISOString(), endDatetime: new Date(Date.now() + 5 * 864e5 + 7200e3).toISOString(), maxSpots: 5 }]
+    }, oToken);
+    const evId = res.body.id;
+    const slot = (await srv.call('GET', '/api/events', undefined, oToken)).body.find(e => e.id === evId).slots[0];
+
+    const anon = await fetch(`${srv.base}/api/events/${evId}/slots/${slot.id}/ics`);
+    expect([401, 403]).toContain(anon.status);
+
+    // And the location must not have leaked in the body either.
+    const leaked = await anon.text();
+    expect(leaked).not.toContain('Secret Location');
+
+    // A signed-in caller still gets the file.
+    const ok = await fetch(`${srv.base}/api/events/${evId}/slots/${slot.id}/ics`, {
+      headers: { Cookie: `wev_session=${oToken}` }
+    });
+    expect(ok.status).toBe(200);
+  });
+
   it('escapes a comma in the location so the value is not truncated', async () => {
     const oToken = await srv.login('jkatzenback@vikings.org');
     const res = await srv.call('POST', '/api/events', {
