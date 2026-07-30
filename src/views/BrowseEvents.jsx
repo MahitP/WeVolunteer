@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import EventCard from '../components/EventCard';
 import { Search, Sparkles, SlidersHorizontal, CalendarX2, Star, Filter, X } from 'lucide-react';
-import { formatHours, haversineDistance } from '../utils/helpers';
+import { formatHours } from '../utils/helpers';
 import { api } from '../utils/api';
 import EmptyState from '../components/common/EmptyState';
 import { useLocationContext } from '../contexts/LocationContext';
@@ -9,19 +9,19 @@ import { useWindowedRows } from '../hooks/useWindowedRows';
 const CATEGORIES = ['All', 'School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 export default function BrowseEvents({
   currentUser,
-  events = [],
   applications = [],
   onViewDetails,
   favorites = [],
   onToggleFavorite,
   /**
-   * True while later pages of the event list are still arriving.
+   * Records the events this screen has rendered.
    *
-   * Events load a page at a time, so this screen can be legitimately incomplete
-   * while it renders. Without this the empty state would claim "No events match
-   * those filters" during a load, which is a wrong answer rather than a slow one.
+   * Browse queries the server directly, so it can show an event the app's local
+   * index does not contain — one the user neither hosts nor has applied to.
+   * Without this the event modal could not resolve it and the user would be told
+   * "That event is no longer available" about something on screen.
    */
-  isLoadingMore = false
+  onEventsSeen
 }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
@@ -38,78 +38,129 @@ export default function BrowseEvents({
   const [place, setPlace] = useState('All');
   const [closingSoon, setClosingSoon] = useState(false);
   const [maxDistance, setMaxDistance] = useState('');
-  
+
   const { location, requestLocation, loading: locLoading, permissionDenied } = useLocationContext();
 
   const isStudent = currentUser?.role === 'student';
+
+  /* ── Server-driven results ────────────────────────────────────────────────
+     Every filter, the sort and the distance calculation run in SQL. They used
+     to run here over the complete event list, which is precisely why the
+     endpoint had to return the whole table: a text search over "the pages
+     loaded so far" is a wrong answer, not a partial one. */
+  const [results, setResults] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [places, setPlaces] = useState(['All']);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState('');
+  const [nextOffset, setNextOffset] = useState(null);
+
+  const PAGE_SIZE = 60;
+
+  /** Exactly what the server needs; `undefined` values are dropped by the api layer. */
+  const serverFilters = useMemo(() => ({
+    scope: 'listable',
+    q: query.trim() || undefined,
+    category: category !== 'All' ? category : undefined,
+    place: place !== 'All' ? place : undefined,
+    openOnly: openOnly || undefined,
+    favoritesOnly: showFavoritesOnly || undefined,
+    from: fromDate || undefined,
+    to: toDate || undefined,
+    minHours: minHours || undefined,
+    closingSoon: closingSoon || undefined,
+    // Coordinates travel only when they are actually needed, so a user who has
+    // not granted location is never asked for it implicitly.
+    lat: (maxDistance || sortBy === 'distance') && location ? location.latitude : undefined,
+    lng: (maxDistance || sortBy === 'distance') && location ? location.longitude : undefined,
+    maxDistance: location ? (maxDistance || undefined) : undefined,
+    sort: sortBy
+  }), [query, category, place, openOnly, showFavoritesOnly, fromDate, toDate, minHours, closingSoon, maxDistance, sortBy, location]);
+
+  /**
+   * Debounced, and guarded against out-of-order responses.
+   *
+   * Typing fires a request per keystroke otherwise, and a slow early response can
+   * land after a later one and show results for a query the user has already
+   * changed. The generation check discards anything superseded.
+   */
+  const searchGeneration = useRef(0);
+
+  useEffect(() => {
+    const generation = ++searchGeneration.current;
+    const isCurrent = () => searchGeneration.current === generation;
+
+    setLoading(true);
+    setError('');
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.fetchEventsFiltered({ ...serverFilters, limit: PAGE_SIZE, offset: 0 });
+        if (!isCurrent()) return;
+        setResults(res.events || []);
+        setTotal(res.pagination?.total ?? (res.events || []).length);
+        setNextOffset(res.pagination?.nextOffset ?? null);
+        if (res.places) setPlaces(['All', ...res.places]);
+        onEventsSeen?.(res.events || []);
+      } catch (err) {
+        if (isCurrent()) setError(err.message || 'Could not load opportunities.');
+      } finally {
+        if (isCurrent()) setLoading(false);
+      }
+    }, query ? 300 : 0);   // only the text field needs debouncing
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverFilters]);
+
+  const loadMore = async () => {
+    if (nextOffset == null || loadingMore) return;
+    const generation = searchGeneration.current;
+    setLoadingMore(true);
+    try {
+      const res = await api.fetchEventsFiltered({ ...serverFilters, limit: PAGE_SIZE, offset: nextOffset });
+      // A filter change while this was in flight makes the page irrelevant.
+      if (searchGeneration.current !== generation) return;
+      setResults(prev => [...prev, ...(res.events || [])]);
+      setNextOffset(res.pagination?.nextOffset ?? null);
+      onEventsSeen?.(res.events || []);
+    } catch (err) {
+      setError(err.message || 'Could not load more.');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
   useEffect(() => {
     if (!isStudent) return;
     let cancelled = false;
     api.fetchRecommendations().then(recs => {
       if (!cancelled) setRecommendations(recs || []);
     }).catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [currentUser?.id, isStudent, events]);
-  const listable = useMemo(() => events.filter(e => e.status === 'open' || e.status === 'closed'), [events]);
-  const places = useMemo(() => ['All', ...[...new Set(listable.map(e => e.location).filter(Boolean))].sort()], [listable]);
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    
-    // First map over events to attach distances if we have the user's location
-    const results = listable.map(event => {
-      let distance = null;
-      if (location && event.latitude != null && event.longitude != null) {
-        distance = haversineDistance(location.latitude, location.longitude, event.latitude, event.longitude);
-      }
-      return { ...event, distance };
-    }).filter(event => {
-      const matchesQuery = !q || event.title.toLowerCase().includes(q) || event.description.toLowerCase().includes(q) || event.location.toLowerCase().includes(q) || event.organizerName?.toLowerCase().includes(q);
-      const matchesCategory = category === 'All' || event.category === category;
-      const isOpen = event.status === 'open' && event.spotsRemaining > 0 && new Date(event.applicationDeadline) > new Date();
-      const matchesFavorite = !showFavoritesOnly || favorites.includes(event.id);
-      const start = new Date(event.startDatetime);
-      const matchesFrom = !fromDate || start >= new Date(`${fromDate}T00:00:00`);
-      const matchesTo = !toDate || start <= new Date(`${toDate}T23:59:59`);
-      const matchesHours = !minHours || (event.hoursAwarded || 0) >= Number(minHours);
-      const matchesPlace = place === 'All' || event.location === place;
-      const matchesDistance = !maxDistance || (event.distance != null && event.distance <= Number(maxDistance));
+    return () => { cancelled = true; };
+  }, [currentUser?.id, isStudent]);
 
-      // "Closing soon" means you have a week or less to decide
-      const deadline = new Date(event.applicationDeadline);
-      const daysLeft = (deadline - new Date()) / 86400000;
-      const matchesClosing = !closingSoon || daysLeft >= 0 && daysLeft <= 7;
-      
-      return matchesQuery && matchesCategory && (!openOnly || isOpen) && matchesFavorite && matchesFrom && matchesTo && matchesHours && matchesPlace && matchesClosing && matchesDistance;
-    });
-    const sorters = {
-      soonest: (a, b) => new Date(a.startDatetime) - new Date(b.startDatetime),
-      deadline: (a, b) => new Date(a.applicationDeadline) - new Date(b.applicationDeadline),
-      spots: (a, b) => b.spotsRemaining - a.spotsRemaining,
-      hours: (a, b) => b.hoursAwarded - a.hoursAwarded,
-      alpha: (a, b) => a.title.localeCompare(b.title),
-      distance: (a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity)
-    };
-    return [...results].sort(sorters[sortBy] || sorters.soonest);
-  }, [listable, query, category, sortBy, openOnly, showFavoritesOnly, favorites, fromDate, toDate, minHours, place, closingSoon, maxDistance, location]);
-  const recommended = useMemo(() => {
-    return recommendations.map(r => {
-      const found = events.find(e => e.id === r.id);
-      return found ? {
-        ...found,
-        score: r.score
-      } : null;
-    }).filter(e => e && e.status === 'open' && e.spotsRemaining > 0).slice(0, 3);
-  }, [recommendations, events]);
+  /**
+   * Recommendations arrive with only summary fields, so they are rendered from
+   * that payload rather than looked up in a local event list — which is no longer
+   * present here.
+   */
+  const recommended = useMemo(
+    () => recommendations.filter(r => r && r.id).slice(0, 3),
+    [recommendations]
+  );
   const hasMatches = useMemo(() => recommended.some(e => (e.score || 0) > 0), [recommended]);
+
   const advancedCount = [fromDate, toDate, minHours, place !== 'All' ? place : '', closingSoon ? 'x' : '', maxDistance].filter(Boolean).length;
+
+  const filtered = results;
+
   /**
    * Row windowing for the results grid.
    *
-   * `filtered` can be the district's entire event history. Only the rows near
-   * the viewport are mounted; see hooks/useWindowedRows.js for why this windows
-   * by row rather than by item.
+   * Still worth it even though pages are bounded: a user can press "Load more"
+   * repeatedly, and each page is 60 cards.
    */
   const gridRef = useRef(null);
   const { start, end, padTop, padBottom } = useWindowedRows({ count: filtered.length, gridRef });
@@ -131,7 +182,7 @@ export default function BrowseEvents({
   return <div className="stack-lg">
       {isStudent && <div className="row-between row-wrap">
           <p className="lead">
-            {listable.length} opportunit{listable.length === 1 ? 'y' : 'ies'} posted ·{' '}
+            {total} opportunit{total === 1 ? 'y' : 'ies'} posted ·{' '}
             <span className="strong">{formatHours(currentUser?.volunteeredHours || 0)}</span> credited to you so far
           </p>
         </div>}
@@ -157,6 +208,10 @@ export default function BrowseEvents({
         </section>}
 
       <section>
+        {error && <div className="alert alert-danger" role="alert" style={{ marginBottom: 'var(--s4)' }}>
+            <span>{error}</span>
+          </div>}
+
         <div className="toolbar">
           <div className="input-affix">
             <Search size={15} />
@@ -276,11 +331,10 @@ export default function BrowseEvents({
             </div>
           </div>}
 
-        {filtered.length === 0 && isLoadingMore ? <p className="small dim" role="status" aria-live="polite">Loading opportunities…</p>
+        {loading ? <p className="small dim" role="status" aria-live="polite">Loading opportunities…</p>
           : filtered.length === 0 ? <EmptyState icon={CalendarX2} title={hasFilters ? 'No events match those filters' : 'No opportunities posted yet'} message={hasFilters ? 'Try a broader search, or clear the filters to see everything that\'s been posted.' : 'When an organizer posts a sign-up sheet, it will appear here.'} action={hasFilters && <button className="btn btn-secondary btn-sm" onClick={clearFilters}>Clear filters</button>} /> : <>
             <p className="small dim s-450599" role="status" aria-live="polite">
-              {filtered.length} event{filtered.length !== 1 ? 's' : ''}
-              {isLoadingMore && <> · <span className="dim">still loading more…</span></>}
+              Showing {filtered.length} of {total} event{total !== 1 ? 's' : ''}
             </p>
             {/*
               Only the rows near the viewport are mounted. Rendering the whole
@@ -296,6 +350,15 @@ export default function BrowseEvents({
               {visibleEvents.map(event => <EventCard key={event.id} event={event} currentUser={currentUser} applications={applications} onViewDetails={onViewDetails} isFavorited={favorites.includes(event.id)} onToggleFavorite={onToggleFavorite} />)}
               {padBottom > 0 && <div aria-hidden="true" className="windowed-spacer" style={{ height: padBottom }} />}
             </div>
+
+            {/* Paging is explicit rather than infinite-scroll: a button is
+                reachable by keyboard and screen reader, announces its own state,
+                and never fires a request because someone scrolled past. */}
+            {nextOffset != null && <div className="row s-a19c85" style={{ justifyContent: 'center', marginTop: 'var(--s4)' }}>
+                <button className="btn btn-secondary" onClick={loadMore} disabled={loadingMore}>
+                  {loadingMore ? 'Loading…' : `Load more (${total - filtered.length} remaining)`}
+                </button>
+              </div>}
           </>}
       </section>
     </div>;

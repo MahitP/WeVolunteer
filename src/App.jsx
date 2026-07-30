@@ -119,9 +119,33 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const userMenuRef = useRef(null);
 
+  /**
+   * Events seen outside the index, keyed by id.
+   *
+   * BrowseEvents now fetches its own filtered pages, so it can show an event the
+   * index does not contain — one the user neither hosts nor has applied to.
+   * `events.find` alone would then fail to open it and the user would be told
+   * "That event is no longer available" about something they are looking at.
+   * Anything browse renders is recorded here so the modal can still resolve it.
+   */
+  const [seenEvents, setSeenEvents] = useState({});
+  const rememberEvents = React.useCallback((list) => {
+    if (!list?.length) return;
+    setSeenEvents(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const e of list) {
+        if (e?.id && next[e.id] !== e) { next[e.id] = e; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
   // Derived state from URL
   const selectedEventId = searchParams.get('event');
-  const selectedEvent = selectedEventId ? events.find(e => e.id === selectedEventId) || null : null;
+  const selectedEvent = selectedEventId
+    ? (events.find(e => e.id === selectedEventId) || seenEvents[selectedEventId] || null)
+    : null;
   const profileId = searchParams.get('profile');
   const profileType = searchParams.get('type');
   const viewingProfile = profileId && profileType ? { type: profileType, id: profileId } : null;
@@ -167,7 +191,13 @@ export default function App() {
    */
   const eventsLoadGeneration = useRef(0);
 
-  const loadEvents = async () => {
+  /**
+   * @param {string} [role] the signed-in user's role, when the caller already
+   *   knows it. refreshAll has it in hand before `currentUser` state has settled,
+   *   and reading the stale state there would send `mine=true` for an admin on
+   *   the first load.
+   */
+  const loadEvents = async (role) => {
     const generation = ++eventsLoadGeneration.current;
     const isCurrent = () => eventsLoadGeneration.current === generation;
 
@@ -180,6 +210,18 @@ export default function App() {
         // large. See EVENTS_MAX_LIMIT in server/routes/eventRoutes.js for the
         // measurements behind that.
         pageSize: 500,
+        /**
+         * Only events this user is involved in.
+         *
+         * This is the change that makes the whole exercise worthwhile. The index
+         * exists so the calendar can resolve each application to its event and
+         * the dashboards can filter for their own — none of which needs the
+         * district's entire history. Bounded by the user's own activity, it is
+         * one small request instead of the whole table. Admins are excluded
+         * because the review queue legitimately moderates everything, and it
+         * already makes its own separate call.
+         */
+        params: (role ?? currentUser?.role) === 'admin' ? {} : { mine: 'true' },
         shouldContinue: isCurrent,
         // Applied per page, so the first screenful renders without waiting for
         // the whole table. `slice()` because the accumulator is mutated in place.
@@ -251,7 +293,7 @@ export default function App() {
          * whole walk back on the critical path and undo the reason for paging.
          * The small fixed-size fetches still run in parallel with it.
          */
-        const eventsDone = loadEvents();
+        const eventsDone = loadEvents(user.role);
 
         const promises = [api.fetchApplications()];
         if (user.role === 'student') {
@@ -459,8 +501,15 @@ export default function App() {
   // call sites — `viewVolunteer` below already takes the same approach.
   const openEventById = (eventOrId) => {
     const id = typeof eventOrId === 'string' ? eventOrId : eventOrId?.id;
-    const match = id && events.find(e => e.id === id);
-    if (match) setSelectedEventState(id);
+    if (!id) return addToast('That event is no longer available.', 'info');
+
+    // Given the whole object — which is what a card passes — trust it and record
+    // it, rather than insisting it also be in the index. Browse pages are
+    // filtered server-side now and legitimately contain events the index does not.
+    if (typeof eventOrId === 'object' && eventOrId) rememberEvents([eventOrId]);
+
+    const known = events.some(e => e.id === id) || !!seenEvents[id] || typeof eventOrId === 'object';
+    if (known) setSelectedEventState(id);
     else addToast('That event is no longer available.', 'info');
   };
 
@@ -730,15 +779,14 @@ export default function App() {
               <Route path="/events" element={
                 <BrowseEvents
                   currentUser={currentUser}
-                  events={events}
                   applications={applications}
                   onViewDetails={openEventById}
                   favorites={favorites}
                   onToggleFavorite={handleToggleFavorite}
-                  /* Events arrive a page at a time, so the list can be
-                     legitimately incomplete while it renders. Saying so is the
-                     difference between "no results" and "not finished yet". */
-                  isLoadingMore={eventsLoading}
+                  /* Browse fetches its own server-filtered pages, so it no longer
+                     takes the index. Anything it renders is recorded so the event
+                     modal can resolve an event the index does not hold. */
+                  onEventsSeen={rememberEvents}
                 />
               } />
               
