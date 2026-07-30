@@ -3,7 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      viewport-fit=cover is what makes env(safe-area-inset-*) resolve to real
+      values on iOS. index.css already accounts for the notch and the home
+      indicator in twelve places — including padding-bottom on .mobilenav and
+      .app — but without this attribute Safari reports every inset as 0px, so all
+      of that work was inert and the bottom navigation and message composer sat
+      inside the home-indicator gesture area on every iPhone since the X.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>WeVolunteer — South Brunswick Volunteer Network</title>
     <script src="/theme.js"></script>
   </head>

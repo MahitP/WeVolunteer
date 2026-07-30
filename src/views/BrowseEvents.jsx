@@ -1,10 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import EventCard from '../components/EventCard';
 import { Search, Sparkles, SlidersHorizontal, CalendarX2, Star, Filter, X } from 'lucide-react';
 import { formatHours, haversineDistance } from '../utils/helpers';
 import { api } from '../utils/api';
 import EmptyState from '../components/common/EmptyState';
 import { useLocationContext } from '../contexts/LocationContext';
+import { useWindowedRows } from '../hooks/useWindowedRows';
 const CATEGORIES = ['All', 'School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 export default function BrowseEvents({
   currentUser,
@@ -95,6 +96,17 @@ export default function BrowseEvents({
   }, [recommendations, events]);
   const hasMatches = useMemo(() => recommended.some(e => (e.score || 0) > 0), [recommended]);
   const advancedCount = [fromDate, toDate, minHours, place !== 'All' ? place : '', closingSoon ? 'x' : '', maxDistance].filter(Boolean).length;
+  /**
+   * Row windowing for the results grid.
+   *
+   * `filtered` can be the district's entire event history. Only the rows near
+   * the viewport are mounted; see hooks/useWindowedRows.js for why this windows
+   * by row rather than by item.
+   */
+  const gridRef = useRef(null);
+  const { start, end, padTop, padBottom } = useWindowedRows({ count: filtered.length, gridRef });
+  const visibleEvents = useMemo(() => filtered.slice(start, end), [filtered, start, end]);
+
   const hasFilters = query || category !== 'All' || !openOnly || showFavoritesOnly || advancedCount > 0;
   const clearFilters = () => {
     setQuery('');
@@ -260,8 +272,19 @@ export default function BrowseEvents({
             <p className="small dim s-450599">
               {filtered.length} event{filtered.length !== 1 ? 's' : ''}
             </p>
-            <div className="eventgrid">
-              {filtered.map(event => <EventCard key={event.id} event={event} currentUser={currentUser} applications={applications} onViewDetails={onViewDetails} isFavorited={favorites.includes(event.id)} onToggleFavorite={onToggleFavorite} />)}
+            {/*
+              Only the rows near the viewport are mounted. Rendering the whole
+              list produced 23,815 DOM nodes at 502 events; below the hook's
+              threshold nothing is windowed, so a school with a dozen events
+              renders exactly as before.
+
+              The spacers carry the height of the rows that are not mounted, so
+              the scrollbar and the scroll position stay truthful.
+            */}
+            <div className="eventgrid" ref={gridRef}>
+              {padTop > 0 && <div aria-hidden="true" className="windowed-spacer" style={{ height: padTop }} />}
+              {visibleEvents.map(event => <EventCard key={event.id} event={event} currentUser={currentUser} applications={applications} onViewDetails={onViewDetails} isFavorited={favorites.includes(event.id)} onToggleFavorite={onToggleFavorite} />)}
+              {padBottom > 0 && <div aria-hidden="true" className="windowed-spacer" style={{ height: padBottom }} />}
             </div>
           </>}
       </section>

@@ -5002,3 +5002,12 @@ input:disabled + .premium-slider {
   min-height: 0;
   padding-block: 0.3125rem;
 }
+
+/* Spacers standing in for the grid rows that windowing has not mounted. They
+   carry the height of the absent rows so the scrollbar and any scroll-position
+   restore stay honest. `grid-column: 1 / -1` makes each span the full row so it
+   never occupies a card slot and shifts the layout. */
+.windowed-spacer {
+  grid-column: 1 / -1;
+  pointer-events: none;
+}
