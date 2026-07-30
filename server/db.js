@@ -322,6 +322,14 @@ export function initDatabase() {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS oauth_states (
+      nonce TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    )
+  `);
+
   // ── V2: New tables for enhanced features ──
   db.exec(`
     CREATE TABLE IF NOT EXISTS notifications (

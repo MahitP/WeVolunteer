@@ -1240,10 +1240,9 @@ router.post('/api/events/:id/broadcast', authenticateToken, async (req, res) => 
 
 
 
-// 12. ICS Calendar Export (Public / Authenticated depending on requirements)
-// We allow anyone with the link to download the ICS so that calendar apps can parse it easily,
-// but they need the eventId and slotId.
-router.get('/api/events/:eventId/slots/:slotId/ics', (req, res) => {
+// 12. ICS Calendar Export (Authenticated)
+// Allows volunteers to download ICS files for slots they've applied to.
+router.get('/api/events/:eventId/slots/:slotId/ics', authenticateToken, (req, res) => {
   const { eventId, slotId } = req.params;
   
   try {
