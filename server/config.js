@@ -19,6 +19,52 @@ export const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'O
 export const APP_NAME = process.env.APP_NAME || 'WeVolunteer';
 export const MAX_AUTO_SELECT_DRAWS = Number(process.env.MAX_AUTO_SELECT_DRAWS) || 5;
 
+/**
+ * OAuth configuration.
+ *
+ * SECURITY — the mock transport.
+ *
+ * Both providers carry a test transport that skips the real code exchange and
+ * takes the identity straight from the `code` parameter. Previously it switched
+ * itself on whenever the client id was absent, via
+ * `process.env.GOOGLE_CLIENT_ID || 'mock-client-id'`. That made a *missing*
+ * environment variable — the single most likely deployment mistake there is —
+ * silently turn the callback into an unauthenticated login-as-anyone endpoint:
+ *
+ *     POST /api/oauth/google/callback
+ *     { "code": "{\"email\":\"admin@district.org\",\"sub\":\"1\"}", "state": "..." }
+ *
+ * The mock is now opt-in and impossible to reach in production. It requires
+ * OAUTH_ALLOW_MOCK=true, and NODE_ENV must not be production. A production
+ * process that sets the flag refuses to boot rather than starting insecure.
+ */
+export const OAUTH_ALLOW_MOCK = process.env.OAUTH_ALLOW_MOCK === 'true';
+if (OAUTH_ALLOW_MOCK && IS_PRODUCTION) {
+  throw new Error(
+    'FATAL: OAUTH_ALLOW_MOCK=true is set in a production process. The mock OAuth '
+    + 'transport accepts an unsigned identity from the request body and would let '
+    + 'anyone sign in as any user. Unset it, and configure real provider credentials.'
+  );
+}
+
+export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+export const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || '';
+export const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET || '';
+export const OAUTH_REDIRECT_URI = process.env.OAUTH_REDIRECT_URI || 'http://localhost:5173/oauth/callback';
+
+/**
+ * Whether a provider can actually be used, so the UI can hide a button that
+ * would otherwise fail after the user has already left the site. Unconfigured
+ * is a normal state (a district may run email-only), not an error.
+ */
+export const OAUTH_PROVIDERS_ENABLED = {
+  google: OAUTH_ALLOW_MOCK || Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET),
+  microsoft: OAUTH_ALLOW_MOCK || Boolean(MICROSOFT_CLIENT_ID && MICROSOFT_CLIENT_SECRET),
+  // Apple has no implementation behind it — see oauth/providers/apple.js.
+  apple: false
+};
+
 // Removed as dead exports: SCHOOL_NAME, MAX_AUTO_SELECT_APPLICANTS and
 // DEFAULT_EMAIL_FROM were declared here but imported nowhere. The first two
 // were actively misleading — MAX_AUTO_SELECT_APPLICANTS reads like a cap on
@@ -34,11 +80,25 @@ export const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:51
 /**
  * Whether a new account must confirm its email address before using the app.
  *
- * Off by default: turning it on without a working SMTP transport locks every
- * user out with no way through. Turn it on once SMTP_* is configured (see
- * Task 6 / README).
+ * ON by default, inverted from the previous behaviour.
+ *
+ * It used to default off, and the anti-lockout reasoning for that ("turning it
+ * on without a working SMTP transport locks every user out") no longer holds:
+ * email.js refuses to boot a production process that has no SMTP transport,
+ * and in development the mock transport prints the link to the console, so
+ * there is no configuration in which the flag is on and confirmation is
+ * impossible.
+ *
+ * Meanwhile the cost of the old default was severe and invisible. Nothing in
+ * the login path ever consulted `email_verified`, so an unconfirmed account
+ * could sign in and call every endpoint; only the SPA refused to render, and
+ * the SPA is not a security boundary. On a platform holding minors' records
+ * that means anyone able to type an address they do not own — a student using
+ * a teacher's address, say — got a working account.
+ *
+ * Set REQUIRE_EMAIL_VERIFICATION=false to opt out deliberately.
  */
-export const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION === 'true';
+export const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION !== 'false';
 
 // Paths an authenticated-but-unverified user may still reach when
 // REQUIRE_EMAIL_VERIFICATION is on: enough to see their own account and finish
@@ -47,6 +107,11 @@ export const EMAIL_GATE_ALLOWLIST = [
   '/api/auth/me',
   '/api/auth/verify-email',
   '/api/auth/resend-verification',
+  // Signing out and deleting an unconfirmed account must always be possible —
+  // otherwise a typo in an address creates an account its owner can neither
+  // use nor get rid of.
+  '/api/auth/logout',
+  '/api/auth/account',
   '/api/notifications'
 ];
 
@@ -96,4 +161,20 @@ export function cookieOptions() {
     maxAge: SEVEN_DAYS_MS,
     path: '/'
   };
+}
+
+/**
+ * Options for DELETING the session cookie.
+ *
+ * Deliberately not `cookieOptions()`. Express's `res.clearCookie` merges the
+ * options it is given over its own `expires: new Date(1)`, and `res.cookie`
+ * then recomputes `expires` from `maxAge` whenever `maxAge` is present — so
+ * passing the full options through sets the cookie to expire in seven days
+ * instead of clearing it. The attributes that matter for deletion are the ones
+ * the browser matches on (name, path, domain); the rest must not carry a
+ * lifetime.
+ */
+export function clearCookieOptions() {
+  const { maxAge: _drop, ...rest } = cookieOptions();
+  return rest;
 }

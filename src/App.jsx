@@ -4,6 +4,7 @@ import { api } from './utils/api';
 import { DEMO_MODE, APP_NAME, SCHOOL_NAME } from './config';
 import DemoBar from './components/DemoBar';
 import Login from './views/Login';
+import Welcome from './views/Welcome';
 import Signup from './views/Signup';
 import BrowseEvents from './views/BrowseEvents';
 import CreateEvent from './views/CreateEvent';
@@ -18,15 +19,20 @@ import EventModal from './components/EventModal';
 import NotificationsBell from './components/NotificationsBell';
 import ProfileEditModal from './components/ProfileEditModal';
 import ResetPassword from './views/ResetPassword';
+import OAuthCallback from './views/OAuthCallback';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
 import CertificateVerification from './views/CertificateVerification';
 import VolunteerPortfolio from './views/VolunteerPortfolio';
 import CheckInView from './views/CheckInView';
 import ThemeToggle from './components/ThemeToggle';
+import Messages from './views/Messages';
+import ProfileMenu from './components/account/ProfileMenu';
+import Settings from './views/Settings';
+import { connectSocket, disconnectSocket } from './services/socket';
 import {
   LayoutDashboard, Compass, CalendarPlus, ShieldCheck, LogOut, CalendarDays,
-  UserCog, CheckCircle2, AlertTriangle, Info, X, ChevronsUpDown, Loader2, Bell, UserRound
+  UserCog, CheckCircle2, AlertTriangle, Info, X, ChevronsUpDown, Loader2, Bell, UserRound, MessageSquare, MoreHorizontal, Mail, Settings as SettingsIcon
 } from 'lucide-react';
 
 /* Navigation is defined once and filtered by role, so every role gets the
@@ -36,6 +42,7 @@ const NAV = [
   { id: 'dashboard', path: '/', label: 'Review queue', icon: ShieldCheck, roles: ['admin'] },
   { id: 'browse', path: '/events', label: 'Opportunities', icon: Compass, roles: ['student', 'organizer', 'admin'] },
   { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, roles: ['student', 'organizer'] },
+  { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, roles: ['student', 'organizer'] },
   { id: 'create', path: '/events/new', label: 'New event', icon: CalendarPlus, roles: ['organizer'], requiresVerified: true },
   { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, roles: ['student', 'organizer', 'admin'] },
   { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, roles: ['student', 'organizer'] }
@@ -43,18 +50,19 @@ const NAV = [
 
 const PAGE_META = {
   student: {
-    dashboard: { title: 'My volunteering', sub: 'Your shifts, hours, and history' },
+    dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
     browse: { title: 'Opportunities', sub: 'Find a shift and apply — organizers confirm who attends' },
     calendar: { title: 'Calendar', sub: 'Your shifts and the deadlines that matter' },
+    messages: { title: 'Messages', sub: 'Coordinate directly with organizers regarding your shifts' },
     notifications: { title: 'Notifications', sub: 'Replies, reminders, and event updates' },
     profile: { title: 'My profile', sub: 'Your service record, milestones, and certificates' }
   },
   organizer: {
-    dashboard: { title: 'My events', sub: 'Manage sign-ups, applicants, and attendance' },
-    browse: { title: 'Opportunities', sub: 'Everything posted across the district' },
+    dashboard: { title: 'Dashboard', sub: 'Track your volunteers, hours, and pending reviews' },
+    browse: { title: 'Recruit', sub: 'All events visible to volunteers on the network' },
     calendar: { title: 'Calendar', sub: 'Events you host and when applications close' },
-    create: { title: 'New event', sub: 'Build a sign-up sheet with dates and shifts' },
-    notifications: { title: 'Notifications', sub: 'Applications, questions, and updates' },
+    messages: { title: 'Messages', sub: 'Coordinate directly with volunteers regarding your events' },
+    notifications: { title: 'Notifications', sub: 'Application updates and community alerts' },
     profile: { title: 'My profile', sub: 'Your public track record and organizer status' }
   },
   admin: {
@@ -65,6 +73,13 @@ const PAGE_META = {
 };
 
 const ROLE_LABEL = { admin: 'Administrator', organizer: 'Organizer', student: 'Volunteer' };
+
+/**
+ * Paths that arrive as a link from an email or an OAuth provider, and so must
+ * resolve whether or not a session exists. Handled ahead of the session
+ * branches in App — see the comment at the check itself.
+ */
+const AUTH_FLOW_PATHS = ['/oauth/callback', '/reset-password'];
 
 export default function App() {
   const navigate = useNavigate();
@@ -77,6 +92,15 @@ export default function App() {
   const [applications, setApplications] = useState([]);
   const [favorites, setFavorites] = useState([]);
   
+  // Global intercept for password reset links
+  useEffect(() => {
+    if (searchParams.has('reset') && location.pathname !== '/reset-password') {
+      navigate(`/reset-password?token=${encodeURIComponent(searchParams.get('reset'))}`, { replace: true });
+    }
+  }, [searchParams, location.pathname, navigate]);
+
+  const [showMobileMore, setShowMobileMore] = useState(false);
+  const mobileNavRef = useRef(null);
   const setActiveTab = (tab) => {
     const map = {
       dashboard: '/',
@@ -110,6 +134,20 @@ export default function App() {
   else if (currentPath.startsWith('/calendar')) activeTab = 'calendar';
   else if (currentPath.startsWith('/notifications')) activeTab = 'notifications';
   else if (currentPath.startsWith('/profile')) activeTab = 'profile';
+  else if (currentPath.startsWith('/settings')) activeTab = 'settings';
+  else if (currentPath.startsWith('/messages')) activeTab = 'messages';
+
+  // Auto-scroll the active item into view on mobile
+  useEffect(() => {
+    if (mobileNavRef.current) {
+      const activeBtn = mobileNavRef.current.querySelector('[aria-current="page"]');
+      if (activeBtn) {
+        // center the button in the view
+        const scrollLeft = activeBtn.offsetLeft - (mobileNavRef.current.offsetWidth / 2) + (activeBtn.offsetWidth / 2);
+        mobileNavRef.current.scrollTo({ left: scrollLeft, behavior: 'smooth' });
+      }
+    }
+  }, [activeTab]);
 
   const refreshEvents = async () => {
     try { setEvents(await api.fetchEvents()); } catch (err) { console.error('Failed to refresh events:', err); }
@@ -127,10 +165,30 @@ export default function App() {
       const user = await api.getMe();
       if (!user) {
         setCurrentUser(null);
+        disconnectSocket();
         return;
       }
       setCurrentUser(user);
-      
+
+      /**
+       * Stop here for an account that has not confirmed its address.
+       *
+       * authenticateToken confines an unconfirmed session to a small allowlist,
+       * so every call below answers 403 — and the catch at the bottom of this
+       * function reads that as a dead session and signs the user out. The
+       * result would be an endless bounce back to the sign-in screen for
+       * exactly the people who need to reach the "resend confirmation" button.
+       *
+       * The verification wall renders from `currentUser` alone and needs none
+       * of this data.
+       */
+      if (user.emailVerified === false) {
+        setIsCheckingSession(false);
+        return;
+      }
+
+      connectSocket();
+
       const promises = [api.fetchEvents(), api.fetchApplications()];
       if (user.role === 'student') {
         promises.push(api.fetchFavorites().catch(() => []));
@@ -142,6 +200,20 @@ export default function App() {
       if (user.role === 'student' && favs) {
         setFavorites(favs.map(f => f.event_id || f.eventId));
       }
+
+      try {
+        const notifs = await api.fetchNotifications(10);
+        if (notifs.unreadCount > 0 && !sessionStorage.getItem('notif_toast_shown')) {
+          if (notifs.unreadCount === 1 && notifs.notifications.length > 0) {
+            addToast(notifs.notifications[0].body, 'info');
+          } else {
+            addToast(`You have ${notifs.unreadCount} new notifications. Check your notifications center.`, 'info');
+          }
+          sessionStorage.setItem('notif_toast_shown', 'true');
+        }
+      } catch (err) {
+        console.error('Failed to fetch notifications for toast', err);
+      }
     } catch (err) {
       console.error('Session check failed:', err);
       setCurrentUser(null);
@@ -152,20 +224,33 @@ export default function App() {
 
   const verifyToken = searchParams.get('verify');
 
-  // Verify JWT session on mount
+  /**
+   * A confirmation token is single use, so it must be presented exactly once.
+   *
+   * Three things previously conspired to present it twice: StrictMode
+   * double-invokes effects in development; `setSearchParams` inside the effect
+   * changed `verifyToken`, which is the effect's own dependency, re-running
+   * it; and each run raced the other. The second attempt always failed, so a
+   * successful confirmation was immediately overwritten with the toast "That
+   * confirmation link is not valid."
+   */
+  const verifyAttempted = useRef(false);
+
   useEffect(() => {
     const init = async () => {
-      if (verifyToken) {
-        // Clear it from URL immediately
-        const newParams = new URLSearchParams(searchParams);
-        newParams.delete('verify');
-        setSearchParams(newParams, { replace: true });
-        
+      if (verifyToken && !verifyAttempted.current) {
+        verifyAttempted.current = true;
         try {
           await api.verifyEmail(verifyToken);
-          addToast('Email verified successfully!', 'success');
+          addToast('Email confirmed. Welcome to WeVolunteer.', 'success');
         } catch (err) {
-          addToast(err.message || 'Failed to verify email', 'error');
+          addToast(err.message || 'That confirmation link did not work. Request a new one.', 'error');
+        } finally {
+          // Strip the token only after it has been spent, so a reload during
+          // the request does not silently drop it.
+          const newParams = new URLSearchParams(searchParams);
+          newParams.delete('verify');
+          setSearchParams(newParams, { replace: true });
         }
       }
       await refreshAll();
@@ -220,6 +305,7 @@ export default function App() {
   const handleLogout = async () => {
     await api.logout();
     setCurrentUser(null);
+    disconnectSocket();
     setEvents([]);
     setApplications([]);
     setUserMenuOpen(false);
@@ -291,10 +377,67 @@ export default function App() {
     );
   }
 
+  /**
+   * Screens reached by a link from outside the app, handled BEFORE the session
+   * branches below.
+   *
+   * Both of these used to live only in the signed-out route table, which meant
+   * the authenticated shell's `*` catch-all swallowed them:
+   *
+   *   • /oauth/callback — pressing "Connect" in Settings sent the user to
+   *     Google and brought them back to a path that redirected to the
+   *     dashboard. The authorization code was never exchanged, so nothing was
+   *     linked, and nothing said so. The server's entire `auto_linked` branch
+   *     was unreachable in practice.
+   *   • /reset-password — a user already signed in on their phone who tapped
+   *     the reset link in their email landed on the dashboard instead.
+   *
+   * Neither is a "signed-out screen". The sender of the link cannot know
+   * whether a session exists, so the route has to resolve in all three states
+   * (no session, unconfirmed session, confirmed session).
+   */
+  if (AUTH_FLOW_PATHS.includes(currentPath)) {
+    return (
+      <>
+        <Routes>
+          <Route path="/oauth/callback" element={
+            <OAuthCallback
+              onLoginSuccess={handleLoginSuccess}
+              /* Someone who started this from Settings wants to end up back in
+                 Settings, not on the dashboard. */
+              onLinked={() => { refreshAll(); navigate('/settings?section=security', { replace: true }); }}
+              addToast={addToast}
+            />
+          } />
+          <Route path="/reset-password" element={
+            <ResetPassword
+              token={searchParams.get('token')}
+              onSuccess={() => {
+                /**
+                 * A reset bumps token_version, so any session this tab still
+                 * holds is already dead and `currentUser` in memory is stale.
+                 * A hard navigation is the honest move: it drops the stale
+                 * state in both session states rather than letting a soft
+                 * route change render an authenticated shell that will 401 on
+                 * its first request.
+                 */
+                addToast('Password updated. Please sign in.', 'success');
+                window.location.assign('/login');
+              }}
+              onCancel={() => navigate('/login', { replace: true })}
+            />
+          } />
+        </Routes>
+        <Toasts toasts={toasts} onRemove={removeToast} />
+      </>
+    );
+  }
+
   if (!currentUser) {
     return (
       <>
         <Routes>
+          <Route path="/welcome" element={<Welcome />} />
           <Route path="/login" element={
             <Login
               onLoginSuccess={(mode) => (mode === 'signup' ? navigate('/signup') : handleLoginSuccess())}
@@ -308,22 +451,15 @@ export default function App() {
               addToast={addToast}
             />
           } />
-          <Route path="/reset-password" element={
-            <ResetPassword
-              token={searchParams.get('token')}
-              onSuccess={() => {
-                addToast('Password updated successfully. Please sign in.', 'success');
-                navigate('/login');
-              }}
-              onCancel={() => navigate('/login')}
-            />
-          } />
+          {/* /reset-password and /oauth/callback are handled above, before the
+              session branches, because both are reached by a link from outside
+              the app and must work in every session state. */}
           <Route
             path="*"
             element={
               searchParams.has('reset')
                 ? <Navigate to={`/reset-password?token=${encodeURIComponent(searchParams.get('reset'))}`} replace />
-                : <Navigate to="/login" replace />
+                : <Navigate to="/welcome" replace />
             }
           />
         </Routes>
@@ -334,44 +470,15 @@ export default function App() {
 
   if (!currentUser.emailVerified) {
     return (
-      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 'var(--s4)' }}>
-        <div className="card" style={{ maxWidth: 440, width: '100%', textAlign: 'center', padding: 'var(--s6)' }}>
-          <div className="brand-mark" style={{ width: 48, height: 48, margin: '0 auto var(--s5)' }}>WV</div>
-          <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--s3)' }}>Verify your email</h1>
-          <p className="lead" style={{ marginBottom: 'var(--s5)' }}>
-            We've sent a verification link to <strong>{currentUser.email}</strong>.
-            Please click the link to verify your account and continue.
-          </p>
-          <button 
-            className="btn btn-primary btn-block"
-            onClick={async (e) => {
-              const btn = e.target;
-              btn.disabled = true;
-              btn.textContent = 'Sending...';
-              try {
-                await api.resendVerification();
-                addToast('Verification email resent', 'success');
-              } catch (err) {
-                addToast(err.message || 'Failed to resend email', 'error');
-              } finally {
-                btn.disabled = false;
-                btn.textContent = 'Resend verification email';
-              }
-            }}
-          >
-            Resend verification email
-          </button>
-          
-          <button 
-            className="btn btn-text btn-block" 
-            style={{ marginTop: 'var(--s3)' }}
-            onClick={handleLogout}
-          >
-            Sign out
-          </button>
-        </div>
+      <>
+        <VerifyEmailWall
+          user={currentUser}
+          addToast={addToast}
+          onSignOut={handleLogout}
+          onVerified={refreshAll}
+        />
         <Toasts toasts={toasts} onRemove={removeToast} />
-      </div>
+      </>
     );
   }
 
@@ -379,6 +486,9 @@ export default function App() {
   const navItems = NAV
     .filter(n => n.roles.includes(currentUser.role))
     .filter(n => !n.requiresVerified || currentUser.verified);
+
+  const primaryNavItems = navItems.slice(0, 4);
+  const secondaryNavItems = navItems.slice(4);
 
   const meta = PAGE_META[currentUser.role]?.[activeTab] || { title: APP_NAME, sub: '' };
 
@@ -419,38 +529,11 @@ export default function App() {
         </nav>
 
         <div className="sidebar-foot">
-          <div className="usermenu" ref={userMenuRef}>
-            <button
-              className="userchip"
-              onClick={() => setUserMenuOpen(o => !o)}
-              aria-expanded={userMenuOpen}
-              aria-haspopup="menu"
-            >
-              <span className="avatar">{currentUser.avatar || '👤'}</span>
-              <span className="userchip-text truncate">
-                <span className="userchip-name truncate">{currentUser.name}</span>
-                <span className="userchip-role">
-                  {currentUser.role === 'organizer' && !currentUser.verified
-                    ? 'Pending approval'
-                    : ROLE_LABEL[currentUser.role]}
-                </span>
-              </span>
-              <ChevronsUpDown size={13} style={{ marginLeft: 'auto', color: 'var(--ink-3)' }} />
-            </button>
-
-            {userMenuOpen && (
-              <div className="popover menu" role="menu" style={{ bottom: '100%', left: 0, right: 0, marginBottom: 6 }}>
-                <button className="menu-item" role="menuitem" onClick={() => { setEditingProfile(true); setUserMenuOpen(false); }}>
-                  <UserCog size={15} /> Edit profile
-                </button>
-                <div className="menu-sep" />
-
-                <button className="menu-item danger" role="menuitem" onClick={handleLogout}>
-                  <LogOut size={15} /> Sign out
-                </button>
-              </div>
-            )}
-          </div>
+          <ProfileMenu 
+            user={currentUser} 
+            onEditProfile={() => setEditingProfile(true)} 
+            onSignOut={handleLogout} 
+          />
         </div>
       </aside>
 
@@ -581,6 +664,12 @@ export default function App() {
                 />
               } />
               
+              <Route path="/messages" element={
+                (currentUser.role === 'student' || currentUser.role === 'organizer') ? (
+                  <Messages />
+                ) : <Navigate to="/" replace />
+              } />
+
               <Route path="/profile" element={
                 currentUser.role === 'student' ? (
                   <VolunteerProfile
@@ -603,6 +692,10 @@ export default function App() {
                   <VolunteerPortfolio currentUser={currentUser} />
                 ) : <Navigate to="/" replace />
               } />
+
+              <Route path="/settings" element={
+                <Settings currentUser={currentUser} addToast={addToast} onProfileChange={refreshAll} />
+              } />
               
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
@@ -612,8 +705,8 @@ export default function App() {
       </div>
 
       {/* ── Mobile navigation ── */}
-      <nav className="mobilenav" aria-label="Main">
-        {navItems.map(({ id, path, label, icon: Icon }) => (
+      <nav className="mobilenav" aria-label="Main" ref={mobileNavRef}>
+        {primaryNavItems.map(({ id, path, label, icon: Icon }) => (
           <button
             key={id + label}
             className="mobilenav-item"
@@ -624,13 +717,91 @@ export default function App() {
             {label}
           </button>
         ))}
-        {currentUser.role !== 'student' && (
-          <button className="mobilenav-item" onClick={() => setEditingProfile(true)}>
-            <UserCog size={19} strokeWidth={2} />
-            Profile
+        {secondaryNavItems.length > 0 && (
+          <button
+            className="mobilenav-item"
+            aria-current={showMobileMore ? 'page' : undefined}
+            onClick={() => setShowMobileMore(true)}
+          >
+            <MoreHorizontal size={19} strokeWidth={2} />
+            More
           </button>
         )}
       </nav>
+
+      {/* Mobile More Sheet */}
+      {showMobileMore && (
+        <>
+          <div className="mobile-more-backdrop" onClick={() => setShowMobileMore(false)} />
+          <div className="mobile-more-sheet">
+            <div className="mobile-more-header" style={{ alignItems: 'flex-start', paddingBottom: 'var(--s4)' }}>
+              <div style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center' }}>
+                <span className="avatar lg">{currentUser.avatar || '👤'}</span>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span className="mobile-more-title truncate">{currentUser.name}</span>
+                  <span style={{ fontSize: '0.875rem', color: 'var(--ink-2)' }}>{ROLE_LABEL[currentUser.role] || 'Volunteer'}</span>
+                </div>
+              </div>
+              <button className="btn btn-ghost btn-icon" style={{ marginTop: '-4px', marginRight: '-4px' }} onClick={() => setShowMobileMore(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <div className="mobile-more-menu">
+              {secondaryNavItems.map(({ id, path, label, icon: Icon }) => (
+                <button
+                  key={id + label}
+                  className="mobile-more-btn"
+                  onClick={() => {
+                    setShowMobileMore(false);
+                    setViewingProfileState(null);
+                    navigate(path);
+                  }}
+                >
+                  <Icon size={20} />
+                  <span>{label}</span>
+                </button>
+              ))}
+              {currentUser.role !== 'student' && (
+                <button
+                  className="mobile-more-btn"
+                  onClick={() => {
+                    setShowMobileMore(false);
+                    setEditingProfile(true);
+                  }}
+                >
+                  <UserCog size={20} />
+                  <span>Edit Profile</span>
+                </button>
+              )}
+              
+              <button
+                className="mobile-more-btn"
+                onClick={() => {
+                  setShowMobileMore(false);
+                  navigate('/settings');
+                }}
+              >
+                <SettingsIcon size={20} />
+                <span>Settings</span>
+              </button>
+              
+              <div className="menu-sep" style={{ margin: 'var(--s2) 0' }} />
+              
+              <button
+                className="mobile-more-btn danger"
+                style={{ color: 'var(--danger)' }}
+                onClick={() => {
+                  setShowMobileMore(false);
+                  handleLogout();
+                }}
+              >
+                <LogOut size={20} />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── Modals ── */}
       {/* EventModal is 1,500+ lines covering viewing, editing, applicant review,
@@ -705,6 +876,80 @@ function Toasts({ toasts, onRemove }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * The wall an account sees until it confirms its email address.
+ *
+ * Replaces an inline block that mutated the DOM directly inside its own click
+ * handler — `btn.disabled = true; btn.textContent = 'Sending...'` — which
+ * React then overwrote on the next render, so the button could flip back to
+ * its idle label mid-request. It also offered exactly two ways out (resend,
+ * sign out) and no acknowledgement that the most likely reason for being
+ * stuck here is a mistyped address, which neither of them fixes.
+ */
+function VerifyEmailWall({ user, addToast, onSignOut, onVerified }) {
+  const [sending, setSending] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [sentAt, setSentAt] = useState(null);
+
+  const resend = async () => {
+    setSending(true);
+    try {
+      await api.resendVerification();
+      setSentAt(Date.now());
+      addToast('Sent. Give it a minute to arrive.', 'success');
+    } catch (err) {
+      addToast(err.message || 'Could not resend that link.', 'error');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  /* Confirming happens in whichever tab the email opened, which may not be
+     this one. Rather than making the user guess, let them re-check here. */
+  const recheck = async () => {
+    setChecking(true);
+    try {
+      const me = await api.getMe();
+      if (me?.emailVerified) await onVerified();
+      else addToast('Not confirmed yet. Open the link in the email first.', 'info');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div className="auth">
+      <main className="auth-form auth-form-narrow auth-centered" aria-labelledby="verify-heading">
+        <div className="auth-icon" aria-hidden="true"><Mail size={26} /></div>
+
+        <h1 id="verify-heading" className="auth-title">Confirm your email</h1>
+        <p className="auth-subtitle">
+          We sent a link to <strong>{user.email}</strong>. Open it to finish setting up your
+          account. The link expires 24 hours after it is sent.
+        </p>
+
+        <div className="auth-actions stack-sm">
+          <button className="btn btn-primary btn-block btn-lg" onClick={recheck} disabled={checking}>
+            {checking ? 'Checking…' : "I've confirmed — continue"}
+          </button>
+          <button className="btn btn-secondary btn-block" onClick={resend} disabled={sending}>
+            {sending ? 'Sending…' : sentAt ? 'Send it again' : 'Resend the link'}
+          </button>
+          <button className="btn btn-ghost btn-block" onClick={onSignOut}>
+            Sign out
+          </button>
+        </div>
+
+        <p className="auth-footer">
+          Nothing arriving? Check your spam folder. If <strong>{user.email}</strong> is wrong,
+          sign out and create your account again with the right address — this one has no
+          access to anything yet.
+        </p>
+      </main>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
@@ -61,6 +62,104 @@ function addColumnIfMissing(table, column, definition) {
  * deleting would cascade away the account's credited hours. The renamed
  * account's records stay intact-but-parked for an admin to reconcile by hand.
  */
+/**
+ * Reconciles pre-existing case-variant USERNAME duplicates before the
+ * case-insensitive unique index is created.
+ *
+ * The same asymmetry email had, found by the v1.1 audit and left behind when
+ * the email half was fixed: `username TEXT UNIQUE` and `idx_users_username`
+ * are both case-SENSITIVE, while every application-level check runs
+ * `COLLATE NOCASE`. Two concurrent signups for `Alice` and `alice` therefore
+ * both pass their SELECT and both INSERT — and login's
+ * `WHERE ... OR username = ? COLLATE NOCASE` uses `.get()`, so it returns one
+ * arbitrary row of the two and the other person can never sign in with their
+ * username again.
+ *
+ * Resolution differs from the email case on purpose. An email is a route to a
+ * human being, so a duplicate there is parked for an admin. A username is a
+ * label, so the oldest account keeps it and the newer ones are given a numeric
+ * suffix — nobody loses access, and each renamed account is told what happened
+ * and why. No user_id changes, nothing is merged, nothing is deleted, and
+ * token_version is untouched because a username does not authenticate anything.
+ *
+ * A fresh seeded database has no collisions, so this is a no-op there.
+ */
+function dedupeCaseInsensitiveUsernames(db) {
+  const groups = db.prepare(`
+    SELECT LOWER(username) AS key FROM users
+    WHERE username IS NOT NULL AND username != ''
+    GROUP BY key HAVING COUNT(*) > 1
+  `).all();
+  if (groups.length === 0) return;
+
+  db.exec('BEGIN TRANSACTION');
+  try {
+    const isTaken = db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE');
+    const renameStmt = db.prepare('UPDATE users SET username = ? WHERE rowid = ?');
+    const notifyStmt = db.prepare(`
+      INSERT INTO notifications (id, user_id, kind, title, body, link, read, created_at)
+      VALUES (?, ?, 'info', ?, ?, NULL, 0, ?)
+    `);
+    // admin_id is NOT NULL with a foreign key to users, and no administrator
+    // performed this — the migration did. Attribute it to the affected account,
+    // which is what the self-deletion audit row already does for the same
+    // reason, so the row is traceable without inventing a user.
+    const auditStmt = db.prepare(`
+      INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
+      VALUES (?, ?, 'USERNAME_DEDUPED', ?, ?, ?)
+    `);
+    const now = new Date().toISOString();
+
+    for (const { key } of groups) {
+      const members = db.prepare(`
+        SELECT rowid, id, username, created_at FROM users
+        WHERE LOWER(username) = ?
+        ORDER BY created_at ASC, rowid ASC
+      `).all(key);
+
+      // Oldest account keeps the username it has been using.
+      for (const member of members.slice(1)) {
+        // USERNAME_MAX is 20, so the base has to give up room for the suffix
+        // rather than produce a name the validator would now reject.
+        let renamed = null;
+        for (let n = 2; n < 1000; n++) {
+          const suffix = String(n);
+          const base = member.username.slice(0, Math.max(1, 20 - suffix.length));
+          const candidate = `${base}${suffix}`;
+          if (!isTaken.get(candidate)) { renamed = candidate; break; }
+        }
+        // Exhausting 998 candidates means something pathological; fall back to
+        // the row id, which is unique by construction, rather than give up and
+        // leave the index uncreatable.
+        if (!renamed) renamed = `user${member.rowid}`.slice(0, 20);
+
+        renameStmt.run(renamed, member.rowid);
+        notifyStmt.run(
+          `notif-dedupe-${member.id}`,
+          member.id,
+          'Your username changed',
+          `Another account was already using "${member.username}" with different capitalisation, `
+            + `which stopped one of you from signing in with it. Your username is now "${renamed}" — `
+            + `you can change it in Settings. Your email address and password are unchanged.`,
+          now
+        );
+        auditStmt.run(
+          `audit-${crypto.randomUUID()}`,
+          member.id,
+          member.id,
+          `Case-insensitive username collision on "${key}": renamed "${member.username}" to "${renamed}"`,
+          now
+        );
+        console.log(`[Username dedupe] ${member.username} -> ${renamed} (id ${member.id})`);
+      }
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
+    throw err;
+  }
+}
+
 function dedupeCaseInsensitiveEmails(db) {
   const groups = db.prepare(
     'SELECT LOWER(email) AS key FROM users GROUP BY key HAVING COUNT(*) > 1'
@@ -195,18 +294,163 @@ export function initDatabase() {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS oauth_accounts (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      provider_user_id TEXT NOT NULL,
+      provider_email TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_used_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(provider, provider_user_id)
+    )
+  `);
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_accounts_user_provider ON oauth_accounts (user_id, provider)
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS oauth_signup_sessions (
+      id TEXT PRIMARY KEY,
+      signup_data TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    )
+  `);
+
   // ── V2: New tables for enhanced features ──
   db.exec(`
     CREATE TABLE IF NOT EXISTS notifications (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       kind TEXT NOT NULL,
+      priority TEXT DEFAULT 'NORMAL',
       title TEXT NOT NULL,
       body TEXT NOT NULL,
       link TEXT,
       read INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notification_preferences (
+      user_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (user_id, category, channel),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notification_jobs (
+      id TEXT PRIMARY KEY,
+      channel TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      attempts INTEGER DEFAULT 0,
+      next_attempt_at TEXT NOT NULL,
+      error_log TEXT,
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      student_id TEXT NOT NULL,
+      organizer_id TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_message_id TEXT,
+      last_message_at TEXT,
+      lifecycle_state TEXT CHECK(lifecycle_state IN ('active', 'read_only')) DEFAULT 'active',
+      read_only_reason TEXT,
+      read_only_at TEXT,
+      archived_by_system_at TEXT,
+      FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+      FOREIGN KEY(student_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(organizer_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(student_id, organizer_id, event_id)
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS application_conflicts (
+      id TEXT PRIMARY KEY,
+      application_id TEXT NOT NULL,
+      conflicting_application_id TEXT NOT NULL,
+      conflict_type TEXT CHECK(conflict_type IN ('pending', 'accepted', 'waitlisted')) NOT NULL,
+      acknowledged_at TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(application_id) REFERENCES applications(id) ON DELETE CASCADE,
+      FOREIGN KEY(conflicting_application_id) REFERENCES applications(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS conversation_participants (
+      conversation_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role_at_creation TEXT NOT NULL,
+      last_read_message_id TEXT,
+      last_read_at TEXT,
+      archived_at TEXT,
+      muted_until TEXT,
+      joined_at TEXT NOT NULL,
+      PRIMARY KEY(conversation_id, user_id),
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      edited_at TEXT,
+      deleted_at TEXT,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+      FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS conversation_reports (
+      id TEXT PRIMARY KEY,
+      reporter_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      reason TEXT NOT NULL CHECK(reason IN ('inappropriate', 'spam', 'safety', 'other')),
+      details TEXT,
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'reviewing', 'resolved', 'dismissed')),
+      snapshot_created_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(reporter_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS conversation_report_messages (
+      report_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(report_id, message_id),
+      FOREIGN KEY(report_id) REFERENCES conversation_reports(id) ON DELETE CASCADE
     )
   `);
 
@@ -243,6 +487,31 @@ export function initDatabase() {
       status TEXT DEFAULT 'open' CHECK(status IN ('open', 'resolved', 'dismissed')),
       created_at TEXT NOT NULL,
       FOREIGN KEY(reporter_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS admin_audit_logs (
+      id TEXT PRIMARY KEY,
+      admin_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      target_user_id TEXT,
+      details TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(admin_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS data_export_jobs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending', 'processing', 'completed', 'failed', 'expired')),
+      file_location TEXT,
+      created_at TEXT NOT NULL,
+      completed_at TEXT,
+      expires_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
 
@@ -299,6 +568,7 @@ export function initDatabase() {
   // Lets a repeating sweep (deadline reminders, shift reminders) know it has
   // already told this user about this thing, so notifications never duplicate.
   addColumnIfMissing('notifications', 'dedupe_key', 'TEXT');
+  addColumnIfMissing('notifications', 'priority', "TEXT DEFAULT 'NORMAL'");
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedupe ON notifications(user_id, dedupe_key) WHERE dedupe_key IS NOT NULL');
 
   addColumnIfMissing('events', 'instructions', 'TEXT');
@@ -309,6 +579,14 @@ export function initDatabase() {
   addColumnIfMissing('users', 'leaderboard_opt_in', 'INTEGER DEFAULT 0');
   addColumnIfMissing('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('users', 'email_opt_out', 'INTEGER DEFAULT 0');
+  addColumnIfMissing('users', 'account_status', "TEXT CHECK(account_status IN ('active', 'deleted', 'suspended')) DEFAULT 'active'");
+  addColumnIfMissing('users', 'deleted_at', 'TEXT');
+
+
+  // Location Picker: structured geo data alongside the existing text `location`.
+  addColumnIfMissing('events', 'address', 'TEXT');
+  addColumnIfMissing('events', 'latitude', 'REAL');
+  addColumnIfMissing('events', 'longitude', 'REAL');
 
   const addedEmailVerified = addColumnIfMissing('users', 'email_verified', 'INTEGER DEFAULT 0');
   if (addedEmailVerified) {
@@ -350,6 +628,28 @@ export function initDatabase() {
   // Pre-pilot social/profile prep
   addColumnIfMissing('users', 'username', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL');
+
+  // When the account last changed its username, for the change cooldown. NULL
+  // means "never changed" and so is never in cooldown.
+  addColumnIfMissing('users', 'username_changed_at', 'TEXT');
+
+  /**
+   * The case-insensitive backstop for username uniqueness.
+   *
+   * `idx_users_username` above is case-SENSITIVE, so it let `Alice` and `alice`
+   * coexist while every application check said they collide — which locked one
+   * of the two people out of username sign-in permanently. This index is what
+   * makes the application-level check enforceable rather than advisory.
+   *
+   * The case-sensitive index is kept: this one is strictly stricter, so it is
+   * redundant rather than wrong, and dropping an index on live pilot data buys
+   * nothing. Collisions are reconciled first, or CREATE UNIQUE INDEX fails.
+   */
+  dedupeCaseInsensitiveUsernames(db);
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase '
+    + 'ON users(username COLLATE NOCASE) WHERE username IS NOT NULL'
+  );
   addColumnIfMissing('users', 'profile_visibility', "TEXT CHECK(profile_visibility IN ('private', 'friends', 'public')) DEFAULT 'private'");
 
   // F-11: email uniqueness was case-sensitive while forgot-password already
@@ -363,10 +663,16 @@ export function initDatabase() {
 
   // Indexes for performance
   db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_conversation_participants_user ON conversation_participants(user_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_conversations_event ON conversations(event_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_comments_event ON event_comments(event_id, created_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_announcements_event ON event_announcements(event_id, created_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_applications_event ON applications(event_id, status)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_user ON attendance(user_id, present)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_export_jobs_user ON data_export_jobs(user_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_export_jobs_status ON data_export_jobs(status)`);
 
   // Added after a query-plan audit found these filters running full table scans.
   // Each one is on a path the app hits constantly, so at district scale they
@@ -411,12 +717,22 @@ export function initDatabase() {
     console.log('Empty database initialized. DEMO_MODE is off, so no demo accounts were created.');
   }
 
-  if (!REQUIRE_EMAIL_VERIFICATION) {
-    // Runs after seeding: freshly seeded/inserted rows default to
-    // email_verified = 0, and nothing to confirm while the feature is off, so
-    // a stale 0 would put an otherwise-fine account behind a wall it cannot
-    // get past. Idempotent, and it stops applying the moment verification is
-    // switched on.
+  if (DEMO_MODE) {
+    /**
+     * Seeded fixtures are always confirmed.
+     *
+     * The seed addresses are invented (leo.chen28@gmail.com and friends) and
+     * no confirmation mail can ever reach them, so leaving them unconfirmed
+     * puts every demo account behind a wall with nothing behind it — the demo
+     * sign-in buttons land on "check your email" forever, and the whole test
+     * suite 403s. This is scoped to DEMO_MODE, so it can never quietly confirm
+     * a real person's address in a live deployment.
+     */
+    db.exec('UPDATE users SET email_verified = 1 WHERE email_verified = 0');
+  } else if (!REQUIRE_EMAIL_VERIFICATION) {
+    // Verification switched off deliberately: a stale 0 would put an otherwise
+    // fine account behind a wall it cannot get past. Idempotent, and it stops
+    // applying the moment verification is switched back on.
     db.exec('UPDATE users SET email_verified = 1 WHERE email_verified = 0');
   }
 
@@ -426,6 +742,12 @@ export function initDatabase() {
 
   initHoursLedger();
   initCertificates();
+
+  addColumnIfMissing('certificates', 'volunteer_name_snapshot', 'TEXT');
+  addColumnIfMissing('certificates', 'event_name_snapshot', 'TEXT');
+  addColumnIfMissing('certificates', 'organization_snapshot', 'TEXT');
+  addColumnIfMissing('certificates', 'hours_snapshot', 'REAL');
+  addColumnIfMissing('certificates', 'completed_at_snapshot', 'TEXT');
 }
 
 /**
@@ -521,7 +843,7 @@ function seedDatabase() {
     'Every shift must have an adult volunteer due to cooking/grilling. The remaining slots can be taken by either high school volunteers, or additional parents. We are requesting that each family signs up for at least one time slot. Thank you!',
     'Other',
     'Reichler Park',
-    '2026-07-24T18:00:00.000Z',
+    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
     'user-org-1',
     'open',
     0,
