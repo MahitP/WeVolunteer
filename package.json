@@ -11,7 +11,7 @@
     "server"
   ],
   "scripts": {
-    "dev:client": "vite",
+    "dev:client": "vite --host",
     "dev:server": "npm run dev --workspace=server",
     "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
     "build": "vite build",
@@ -22,10 +22,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "leaflet": "^1.9.4",
     "lucide-react": "^1.24.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1"
+    "react-leaflet": "^5.0.0",
+    "react-router-dom": "^7.18.1",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.0",

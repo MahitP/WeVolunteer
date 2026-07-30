@@ -12,6 +12,10 @@ vi.mock('../utils/api', () => ({
   }
 }));
 
+vi.mock('../contexts/LocationContext', () => ({
+  useLocationContext: () => ({ location: null })
+}));
+
 const mockEvent = {
   id: 'event-1',
   title: 'Test Event',

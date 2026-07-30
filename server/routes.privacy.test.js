@@ -8,12 +8,11 @@ beforeAll(async () => { srv = await startTestServer(); });
 afterAll(async () => { await srv.close(); });
 
 describe('privacy: student profile PII scoping (grade/school/bio/email)', () => {
-  let leoToken, _priyaToken, hostingOrgToken, unrelatedOrgToken, adminToken;
+  let leoToken, hostingOrgToken, unrelatedOrgToken, adminToken;
   let freshStudentId, freshStudentToken;
 
   beforeAll(async () => {
     leoToken = await srv.login('leo.chen28@gmail.com');
-    _priyaToken = await srv.login('priya.patel.nhs@outlook.com');
     hostingOrgToken = await srv.login('jkatzenback@vikings.org'); // hosts event-softball
     unrelatedOrgToken = await srv.login('rmiller@sbpl.info'); // pending, hosts nothing
     adminToken = await srv.login('admin@example.gov');
@@ -24,14 +23,16 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
     // Priya<->jkatzenback link. A future slot also gives us a non-vacuous
     // upcomingCount to assert on.
     const signupRes = await srv.call('POST', '/api/auth/signup', {
-      email: 'privacy.fresh.student@example.org', password: 'password123',
+      email: 'privacy.fresh.student@example.org', password: 'Password123',
       name: 'Privacy Fresh Student', role: 'student', grade: '9',
       school: 'Test High School',
       username: 'privacy_fresh_stu'
     });
     expect(signupRes.status).toBe(201);
     freshStudentId = signupRes.body.user.id;
-    freshStudentToken = signupRes.cookie;
+    // Signups start unconfirmed, and an unconfirmed account is confined to the
+    // allowlist — confirm before using it to exercise anything else.
+    freshStudentToken = await srv.confirmEmail(freshStudentId);
 
     const future = new Date(Date.now() + 30 * 24 * 3600 * 1000);
     const futureEnd = new Date(future.getTime() + 3 * 3600 * 1000);
@@ -206,7 +207,7 @@ describe('leaderboard privacy', () => {
   });
 
   it('round-trips the opt-in through PATCH /api/auth/profile (the write-path guard)', async () => {
-    const _priyaToken = await srv.login('priya.patel.nhs@outlook.com');
+    const priyaToken = await srv.login('priya.patel.nhs@outlook.com');
 
     // Opt in.
     const optInRes = await srv.call('PATCH', '/api/auth/profile', { leaderboardOptIn: true }, priyaToken);
@@ -231,7 +232,7 @@ describe('leaderboard privacy', () => {
 // Task 6: GET /api/events requires auth and scopes `instructions` to accepted
 // volunteers/staff; announcements are gated the same way `attendees` already is.
 describe('privacy: event listing requires auth and scopes instructions', () => {
-  let leoToken, _priyaToken, hostingOrgToken, adminToken;
+  let leoToken, priyaToken, hostingOrgToken, adminToken;
 
   // Seeded event-softball has app-sb-6 (Leo, accepted) and app-sb-10 (Priya,
   // pending — not accepted). The seed script leaves `instructions` null, so
@@ -241,7 +242,7 @@ describe('privacy: event listing requires auth and scopes instructions', () => {
 
   beforeAll(async () => {
     leoToken = await srv.login('leo.chen28@gmail.com');
-    _priyaToken = await srv.login('priya.patel.nhs@outlook.com');
+    priyaToken = await srv.login('priya.patel.nhs@outlook.com');
     hostingOrgToken = await srv.login('jkatzenback@vikings.org');
     adminToken = await srv.login('admin@example.gov');
 
@@ -289,11 +290,11 @@ describe('privacy: event listing requires auth and scopes instructions', () => {
 });
 
 describe('privacy: event announcements gated to accepted volunteers and staff', () => {
-  let leoToken, _priyaToken, hostingOrgToken, adminToken;
+  let leoToken, priyaToken, hostingOrgToken, adminToken;
 
   beforeAll(async () => {
     leoToken = await srv.login('leo.chen28@gmail.com');
-    _priyaToken = await srv.login('priya.patel.nhs@outlook.com');
+    priyaToken = await srv.login('priya.patel.nhs@outlook.com');
     hostingOrgToken = await srv.login('jkatzenback@vikings.org');
     adminToken = await srv.login('admin@example.gov');
   });
@@ -322,5 +323,44 @@ describe('privacy: event announcements gated to accepted volunteers and staff', 
     const res = await srv.call('GET', '/api/events/event-softball/announcements', undefined, adminToken);
     expect(res.status).toBe(200);
     expect(res.body.map(a => a.id)).toContain('ann-1');
+  });
+});
+
+describe('privacy: data export', () => {
+  let studentToken, studentId;
+
+  beforeAll(async () => {
+    const signupRes = await srv.call('POST', '/api/auth/signup', {
+      email: 'export.student@example.org', password: 'Password123',
+      name: 'Export Student', role: 'student', grade: '9',
+      school: 'Test High School',
+      username: 'export_student_123'
+    });
+    studentId = signupRes.body.user.id;
+    studentToken = await srv.confirmEmail(studentId);
+  });
+
+  it('allows a user to request a data export and creates a pending job', async () => {
+    const res = await srv.call('POST', '/api/privacy/export', undefined, studentToken);
+    expect(res.status).toBe(202);
+    expect(res.body.jobId).toBeTruthy();
+
+    const statusRes = await srv.call('GET', '/api/privacy/export/status', undefined, studentToken);
+    expect(statusRes.status).toBe(200);
+    expect(statusRes.body.status).toBe('pending');
+  });
+
+  it('rejects concurrent export requests', async () => {
+    const res = await srv.call('POST', '/api/privacy/export', undefined, studentToken);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/already in progress/i);
+  });
+
+  it('400s if download is requested before it is completed', async () => {
+    const statusRes = await srv.call('GET', '/api/privacy/export/status', undefined, studentToken);
+    const jobId = statusRes.body.id;
+
+    const res = await srv.call('GET', `/api/privacy/export/download/${jobId}`, undefined, studentToken);
+    expect(res.status).toBe(400);
   });
 });

@@ -61,6 +61,12 @@ async function apiFetch(endpoint, options = {}) {
   try {
     response = await fetch(endpoint, config);
   } catch (err) {
+    // A cancelled request is not a failure — the live availability checks on
+    // the signup form abort the previous probe on every keystroke, and
+    // reporting each one as "could not reach the server" would flash an
+    // outage warning at someone who is simply still typing.
+    if (err?.name === 'AbortError') throw err;
+
     // fetch only rejects when the request never completed — offline, DNS
     // failure, connection refused, CORS rejection. An HTTP error status
     // resolves normally and is handled below.
@@ -108,13 +114,21 @@ export const api = {
   apiFetch,
 
   // ── Authentication ──────────────────────────────
+  /**
+   * Returns the whole response, not just the user.
+   *
+   * Sign-in can now succeed while still needing something from the person —
+   * an unconfirmed address is signed in but confined — and the caller has to
+   * be able to see `emailVerified` to route them to the right screen instead
+   * of dropping them into an app that will 403 on their first action.
+   */
   login: async (email, password) => {
     const data = await apiFetch('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password })
     });
     localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
-    return data.user;
+    return data;
   },
 
   signup: async (signupData) => {
@@ -122,8 +136,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(signupData)
     });
-    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
-    return data.user;
+    if (data.user) {
+      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
+    }
+    return data;
   },
 
   verifyEmail: async (token) => {
@@ -152,6 +168,66 @@ export const api = {
       body: JSON.stringify({ token, password })
     });
   },
+
+  /**
+   * Change (or, for a provider-only account, set) the password.
+   *
+   * Settings previously had a "Change Password" button whose whole
+   * implementation was a success toast — no endpoint, no request, no change.
+   */
+  changePassword: async (currentPassword, newPassword) => apiFetch('/api/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword })
+  }),
+
+  /** Invalidate every other session. Also previously a toast and nothing else. */
+  signOutOtherDevices: async () => apiFetch('/api/auth/sign-out-others', { method: 'POST' }),
+
+  deleteAccount: async ({ password, confirmUsername }) => apiFetch('/api/auth/account', {
+    method: 'DELETE',
+    body: JSON.stringify({ password, confirmUsername })
+  }),
+
+  // ── OAuth ───────────────────────────────────────
+  // Which buttons to render. A provider with no credentials configured must
+  // not be offered: the failure would otherwise happen after the user has
+  // already left the site.
+  fetchOAuthProviders: async () => apiFetch('/api/oauth/providers'),
+
+  /**
+   * Begin a provider flow.
+   *
+   * POST, and `signupData` goes in the body. It used to be a GET with the blob
+   * — including the plaintext password — base64'd into the query string, which
+   * put a live credential into every access log along the path.
+   */
+  startOAuth: async (provider, signupData) => apiFetch(`/api/oauth/${provider}/url`, {
+    method: 'POST',
+    body: JSON.stringify(signupData ? { signupData } : {})
+  }),
+
+  completeOAuth: async (provider, code, state) => apiFetch(`/api/oauth/${provider}/callback`, {
+    method: 'POST',
+    body: JSON.stringify({ code, state })
+  }),
+
+  linkOAuthAccount: async (linkToken, password) => apiFetch('/api/oauth/link', {
+    method: 'POST',
+    body: JSON.stringify({ linkToken, password })
+  }),
+
+  fetchConnectedAccounts: async () => apiFetch('/api/oauth/accounts'),
+
+  disconnectOAuth: async (provider) => apiFetch('/api/oauth/disconnect', {
+    method: 'POST',
+    body: JSON.stringify({ provider })
+  }),
+
+  checkUsername: async (username, signal) =>
+    apiFetch(`/api/auth/check-username?username=${encodeURIComponent(username)}`, { signal }),
+
+  checkEmail: async (email, signal) =>
+    apiFetch(`/api/auth/check-email?email=${encodeURIComponent(email)}`, { signal }),
 
   logout: async () => {
     try {
@@ -216,9 +292,9 @@ export const api = {
   // ── Applications ────────────────────────────────
   fetchApplications: async () => apiFetch('/api/applications'),
 
-  applyToSlot: async (eventId, slotId) => apiFetch(`/api/events/${eventId}/apply`, {
+  applyToSlot: async (eventId, slotId, overrideConflict = false) => apiFetch(`/api/events/${eventId}/apply`, {
     method: 'POST',
-    body: JSON.stringify({ slotId })
+    body: JSON.stringify({ slotId, overrideConflict })
   }),
 
   updateApplicationStatus: async (applicationId, status) => apiFetch(`/api/applications/${applicationId}`, {
@@ -262,6 +338,11 @@ export const api = {
     method: 'PATCH',
     body: JSON.stringify({ ids, all })
   }),
+  fetchUserPreferences: async () => apiFetch('/api/user/preferences'),
+  updateUserPreference: async (category, channel, enabled) => apiFetch('/api/user/preferences', {
+    method: 'POST',
+    body: JSON.stringify({ category, channel, enabled })
+  }),
 
   // ── Profiles ───────────────────────────────────
   fetchVolunteerProfile: async (userId) => apiFetch(`/api/users/${userId}/profile`),
@@ -298,6 +379,26 @@ export const api = {
   // ── V2: Favorites ──────────────────────────────
   fetchFavorites: async () => apiFetch('/api/favorites'),
   toggleFavorite: async (eventId) => apiFetch(`/api/favorites/${eventId}`, { method: 'POST' }),
+  // ── Messaging ─────────────────────────────────
+  fetchConversations: async () => apiFetch('/api/messages/conversations'),
+  searchMessagesUsers: async (q) => apiFetch(`/api/messages/users/search?q=${encodeURIComponent(q)}`),
+  resolveConversation: async (eventId, studentId) => apiFetch('/api/messages/conversations/resolve', {
+    method: 'POST',
+    body: JSON.stringify({ eventId, studentId })
+  }),
+  fetchMessages: async (conversationId) => apiFetch(`/api/messages/conversations/${conversationId}/messages`),
+  sendMessage: async (conversationId, body) => apiFetch(`/api/messages/conversations/${conversationId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ body })
+  }),
+  markConversationRead: async (conversationId, lastReadMessageId) => apiFetch(`/api/messages/conversations/${conversationId}/read`, {
+    method: 'POST',
+    body: JSON.stringify({ lastReadMessageId })
+  }),
+  updateConversationPreferences: async (conversationId, updates) => apiFetch(`/api/messages/conversations/${conversationId}/preferences`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates)
+  }),
 
   // ── Certificate Verification ─────────────────────
   verifyCertificate: async (code) => apiFetch(`/api/certificates/verify/${encodeURIComponent(code)}`),
@@ -328,5 +429,9 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ reason }) 
   }),
-  confirmAutoSelect: async (eventId) => apiFetch(`/api/events/${eventId}/auto-select/confirm`, { method: 'POST' })
+  confirmAutoSelect: async (eventId) => apiFetch(`/api/events/${eventId}/auto-select/confirm`, { method: 'POST' }),
+  
+  // ── Privacy & Data ─────────────────────────────
+  requestExport: async () => apiFetch('/api/privacy/export', { method: 'POST' }),
+  getExportStatus: async () => apiFetch('/api/privacy/export/status')
 };

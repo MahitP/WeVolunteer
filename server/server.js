@@ -1,5 +1,7 @@
 import { app } from './app.js';
 import { PORT, IS_PRODUCTION, DEMO_MODE } from './config.js';
+import { createServer } from 'http';
+import { initSocketServer } from './realtime/socketServer.js';
 import { initDatabase } from './db.js';
 import { runNotificationSweep } from './utils.js';
 
@@ -13,11 +15,19 @@ if (IS_PRODUCTION && DEMO_MODE) {
   process.exit(1);
 }
 
+import { startNotificationWorker } from './workers/notificationWorker.js';
+import { startExportWorker } from './workers/exportWorker.js';
+
 initDatabase();
 
 runNotificationSweep();
 setInterval(runNotificationSweep, 15 * 60 * 1000);
+startNotificationWorker();
+startExportWorker();
 
-app.listen(PORT, '127.0.0.1', () => {
+const httpServer = createServer(app);
+initSocketServer(httpServer);
+
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`WeVolunteer API Server listening on port ${PORT}`);
 });

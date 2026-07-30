@@ -15,45 +15,92 @@ describe('auth: email verification state', () => {
     expect(me.body).toHaveProperty('emailVerified');
   });
 
-  it('marks a seeded user verified when verification is not required', async () => {
+  // Seeded demo fixtures are confirmed on purpose — their addresses are
+  // invented, so no confirmation mail could ever reach them.
+  it('marks a seeded demo user verified', async () => {
     const token = await srv.login('leo.chen28@gmail.com');
     const me = await srv.call('GET', '/api/auth/me', undefined, token);
     expect(me.body.emailVerified).toBe(true);
   });
 
-  it('marks a new signup verified when verification is not required', async () => {
+  it('creates a new signup unconfirmed and signs it in anyway', async () => {
     const res = await srv.call('POST', '/api/auth/signup', {
-      email: 'verify.check@example.org', password: 'password123',
+      email: 'verify.check@example.org', password: 'Password123',
       name: 'Verify Check', role: 'student', grade: '10', username: 'verify_check'
     });
     expect(res.status).toBe(201);
-    expect(res.body.user.emailVerified).toBe(true);
+    expect(res.body.user.emailVerified).toBe(false);
+    expect(res.body.action).toBe('verification_required');
+    // A session is issued regardless: without one, "resend verification"
+    // (which requires authentication) is unreachable for the very people who
+    // need it.
+    expect(res.cookie).toBeTruthy();
   });
 
-  it('rejects a signup password below the minimum length', async () => {
+  it('rejects a signup password that fails the complexity rules', async () => {
     const res = await srv.call('POST', '/api/auth/signup', {
       email: 'short.pass@example.org', password: 'short',
       name: 'Short Pass', role: 'student', grade: '10', username: 'short_pass'
     });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Password must be at least 8 characters long');
+    expect(res.body.field).toBe('password');
+    expect(res.body.error).toMatch(/at least 8 characters/i);
   });
 
-  it('does not block an unverified user when the flag is off (anti-lockout)', async () => {
+  it('names every unmet password rule at once rather than one at a time', async () => {
     const res = await srv.call('POST', '/api/auth/signup', {
-      email: 'unverified.flagoff@example.org', password: 'password123',
-      name: 'Unverified Flag Off', role: 'student', grade: '10', username: 'unverified_flagoff'
+      email: 'weak.pass@example.org', password: 'aaaaaaaa',
+      name: 'Weak Pass', role: 'student', grade: '10', username: 'weak_pass'
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/uppercase/i);
+    expect(res.body.error).toMatch(/number/i);
+  });
+
+  it('confines an unconfirmed account to the allowlist, and frees it on confirmation', async () => {
+    const res = await srv.call('POST', '/api/auth/signup', {
+      email: 'gated.signup@example.org', password: 'Password123',
+      name: 'Gated Signup', role: 'student', grade: '10', username: 'gated_signup'
     });
     expect(res.status).toBe(201);
 
-    // Flag-off signup marks the account verified by design, so force it back
-    // to unverified directly in the DB to simulate a historical/edge-case row.
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    db.prepare('UPDATE users SET email_verified = 0 WHERE id = ?').run(res.body.user.id);
-    db.close();
+    // An action route is refused...
+    const blocked = await srv.call('GET', '/api/applications', undefined, res.cookie);
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.code).toBe('email_unverified');
 
-    const apps = await srv.call('GET', '/api/applications', undefined, res.cookie);
-    expect(apps.status).toBe(200);
+    // ...but the routes needed to finish verifying are not.
+    expect((await srv.call('GET', '/api/auth/me', undefined, res.cookie)).status).toBe(200);
+
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
+    const row = db.prepare('SELECT token FROM email_verification_tokens WHERE user_id = ?')
+      .get(res.body.user.id);
+    db.close();
+    expect(row?.token).toBeTruthy();
+
+    expect((await srv.call('POST', '/api/auth/verify-email', { token: row.token })).status).toBe(200);
+    expect((await srv.call('GET', '/api/applications', undefined, res.cookie)).status).toBe(200);
+  });
+
+  /**
+   * Regression: /api/auth/login never consulted email_verified, so the signup
+   * route's refusal to issue a session achieved nothing — the same account
+   * signed in a second later with full access.
+   */
+  it('does not let an unconfirmed account act by signing in again', async () => {
+    const email = 'bypass.attempt@example.org';
+    await srv.call('POST', '/api/auth/signup', {
+      email, password: 'Password123',
+      name: 'Bypass Attempt', role: 'student', grade: '10', username: 'bypass_attempt'
+    });
+
+    const login = await srv.call('POST', '/api/auth/login', { email, password: 'Password123' });
+    expect(login.status).toBe(200);
+    expect(login.body.emailVerified).toBe(false);
+
+    const apps = await srv.call('GET', '/api/applications', undefined, login.cookie);
+    expect(apps.status).toBe(403);
+    expect(apps.body.code).toBe('email_unverified');
   });
 });
 
@@ -84,11 +131,11 @@ describe('auth: password reset', () => {
     await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen28@gmail.com' });
     const token = tokenFor('user-student-1');
 
-    const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'brand-new-pass' });
+    const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'BrandNewPass1' });
     expect(res.status).toBe(200);
 
     const relogin = await srv.call('POST', '/api/auth/login', {
-      email: 'leo.chen28@gmail.com', password: 'brand-new-pass'
+      email: 'leo.chen28@gmail.com', password: 'BrandNewPass1'
     });
     expect(relogin.status).toBe(200);
   });
@@ -97,10 +144,10 @@ describe('auth: password reset', () => {
     await srv.call('POST', '/api/auth/forgot-password', { email: 'priya.patel.nhs@outlook.com' });
     const token = tokenFor('user-student-2');
 
-    const first = await srv.call('POST', '/api/auth/reset-password', { token, password: 'first-change' });
+    const first = await srv.call('POST', '/api/auth/reset-password', { token, password: 'FirstChange1' });
     expect(first.status).toBe(200);
 
-    const replay = await srv.call('POST', '/api/auth/reset-password', { token, password: 'second-change' });
+    const replay = await srv.call('POST', '/api/auth/reset-password', { token, password: 'SecondChange1' });
     expect(replay.status).toBe(400);
   });
 
@@ -113,7 +160,7 @@ describe('auth: password reset', () => {
       .run('2020-01-01T00:00:00.000Z', token);
     db.close();
 
-    const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'too-late-pass' });
+    const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'TooLatePass1' });
     expect(res.status).toBe(400);
   });
 
@@ -128,7 +175,7 @@ describe('auth: password reset', () => {
 describe('auth: username', () => {
   const signup = (over = {}) => srv.call('POST', '/api/auth/signup', {
     email: `u${Math.random().toString(36).slice(2, 9)}@example.org`,
-    password: 'password123', name: 'Some Person', role: 'student', grade: '10',
+    password: 'Password123', name: 'Some Person', role: 'student', grade: '10',
     username: `u${Math.random().toString(36).slice(2, 9)}`,
     ...over
   });
@@ -142,14 +189,15 @@ describe('auth: username', () => {
   it('rejects a duplicate username', async () => {
     await signup({ username: 'taken_name' });
     const res = await signup({ username: 'taken_name' });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/username/i);
+    expect(res.body.field).toBe('username');
   });
 
   it('rejects a duplicate regardless of case', async () => {
     await signup({ username: 'casecheck' });
     const res = await signup({ username: 'CaseCheck' });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
   });
 
   it('rejects characters the signup form does not allow', async () => {
@@ -176,8 +224,8 @@ describe('auth: volunteer profile does not leak whereabouts to other students', 
     // Earlier in this file, "auth: password reset" actually resets these two
     // seeded students' passwords while exercising the reset flow — their live
     // passwords are no longer the seeded 'password123'.
-    leoToken = await srv.login('leo.chen28@gmail.com', 'brand-new-pass');
-    priyaToken = await srv.login('priya.patel.nhs@outlook.com', 'first-change');
+    leoToken = await srv.login('leo.chen28@gmail.com', 'BrandNewPass1');
+    priyaToken = await srv.login('priya.patel.nhs@outlook.com', 'FirstChange1');
     adminToken = await srv.login('admin@example.gov');
 
     // Build a real confirmed future shift for Priya via the actual API, so the

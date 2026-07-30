@@ -1,0 +1,991 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90m/Users/mahit/Documents/Important Coding Files/New Projects/SBVolunteers App[39m
+
+[90mstdout[2m | server/routes.auth.test.js
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+[90mstdout[2m | server/routes.applications.test.js
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+[90mstdout[2m | server/routes.applications.test.js
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+[90mstdout[2m | server/routes.auth.test.js
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: email verification state[2m > [22mreturns emailVerified on the user object[33m 1208[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/api.test.js[2m > [22mAPI Client[2m > [22msends credentials: include on all requests by default[32m 26[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/api.test.js[2m > [22mAPI Client[2m > [22mdoes not send Authorization headers[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/noHardcodedColors.test.js[2m > [22mcolour literals[2m > [22mare absent from JSX under src/[32m 50[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/hooks/useTheme.test.js[2m > [22museTheme hook[2m > [22mdefaults to system theme when no localStorage value exists[32m 51[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/hooks/useTheme.test.js[2m > [22museTheme hook[2m > [22mapplies dark theme if system prefers dark mode[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/hooks/useTheme.test.js[2m > [22museTheme hook[2m > [22mloads saved theme from localStorage[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/hooks/useTheme.test.js[2m > [22museTheme hook[2m > [22msets new theme, updates DOM, and saves to localStorage[32m 7[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/hooks/useTheme.test.js[2m > [22museTheme hook[2m > [22mremoves localStorage item when system is selected[32m 24[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/tokens.test.js[2m > [22mdesign tokens[2m > [22mdefines every custom property referenced under src/[32m 29[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/tokens.test.js[2m > [22mdesign tokens[2m > [22mfinds the token definitions and references it is meant to scan[32m 73[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22meventPermissions — completed events are locked[2m > [22mlocks details, settings, status and deletion[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22meventPermissions — completed events are locked[2m > [22mstill allows duplication, because that writes a new event[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22meventPermissions — completed events are locked[2m > [22mexplains why, so the UI can say something useful[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22meventPermissions — completed events are locked[2m > [22mlocks a completed event even with no attendance recorded[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22meventPermissions — attendance protects an event from deletion[2m > [22mblocks deletion on an open event that already has hours[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22meventPermissions — attendance protects an event from deletion[2m > [22mpoints the organizer at cancellation rather than a dead end[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22meventPermissions — everything is available on a fresh event[2m > [22mallows all actions[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22meventPermissions — everything is available on a fresh event[2m > [22mtreats closed and cancelled as still editable[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22meventPermissions — everything is available on a fresh event[2m > [22mfails safe on a missing or malformed event[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22meventPermissions — everything is available on a fresh event[2m > [22mtreats a missing hasAttendance flag as no attendance[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22mformatting helpers used on hours surfaces[2m > [22mrenders zero as hours rather than minutes[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22mformatting helpers used on hours surfaces[2m > [22mrenders partial hours the way people say them[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/utils/helpers.test.js[2m > [22mAuto Select naming stays behind the legacy field[2m > [22mreads the legacy autoApprove flag through an honest name[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: email verification state[2m > [22mmarks a seeded user verified when verification is not required[33m 1335[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: withdrawal and re-application[2m > [22maccepts the withdrawn status the client actually sends[32m 106[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: withdrawal and re-application[2m > [22mrecords it as withdrawn, not rejected[32m 7[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: withdrawal and re-application[2m > [22mlets the student re-apply to the same shift[32m 26[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: withdrawal and re-application[2m > [22mstill blocks a duplicate application while one is live[32m 42[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: withdrawal and re-application[2m > [22mdoes not let a student withdraw someone elses application[33m 568[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: email verification state[2m > [22mmarks a new signup verified when verification is not required[33m 491[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: email verification state[2m > [22mrejects a signup password below the minimum length[32m 47[2mms[22m[39m
+[90mstdout[2m | server/routes.auth.test.js[2m > [22m[2mauth: password reset[2m > [22m[2missues a reset token for a known address
+[22m[39m
+=================== EMAIL SENT ===================
+To:      leo.chen28@gmail.com
+Subject: Password Reset - WeVolunteer
+--------------------------------------------------
+We received a request to reset your password.
+
+Click the link below to choose a new password:
+http://localhost:5173/?reset=fc4c6151b786e3f70ebdf97e8fa0e1354fbf11bbf49c34f895f4e16f77d99a8d
+
+If you did not request this, please ignore this email.
+==================================================
+
+
+[90mstdout[2m | server/routes.auth.test.js[2m > [22m[2mauth: password reset[2m > [22m[2mdoes not reveal whether an address exists
+[22m[39m
+=================== EMAIL SENT ===================
+To:      leo.chen28@gmail.com
+Subject: Password Reset - WeVolunteer
+--------------------------------------------------
+We received a request to reset your password.
+
+Click the link below to choose a new password:
+http://localhost:5173/?reset=006062f8c2a0e163015911a99b54bc1978e6d9ff6ba3ab5c4a32c52d0c77af19
+
+If you did not request this, please ignore this email.
+==================================================
+
+
+[90mstdout[2m | server/routes.auth.test.js[2m > [22m[2mauth: password reset[2m > [22m[2mresets the password and lets the user sign in with it
+[22m[39m
+=================== EMAIL SENT ===================
+To:      leo.chen28@gmail.com
+Subject: Password Reset - WeVolunteer
+--------------------------------------------------
+We received a request to reset your password.
+
+Click the link below to choose a new password:
+http://localhost:5173/?reset=48be12e266c226dc742f37ed59cab355ec66125ae00aad6529374b73aaffdabd
+
+If you did not request this, please ignore this email.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: withdrawal and re-application[2m > [22mdoes not let a student self-accept[32m 125[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: email verification state[2m > [22mdoes not block an unverified user when the flag is off (anti-lockout)[33m 735[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: password reset[2m > [22missues a reset token for a known address[32m 34[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: password reset[2m > [22mdoes not reveal whether an address exists[32m 24[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: password reset[2m > [22mresets the password and lets the user sign in with it[33m 1084[2mms[22m[39m
+[90mstdout[2m | server/routes.auth.test.js[2m > [22m[2mauth: password reset[2m > [22m[2mburns the token so it cannot be replayed
+[22m[39m
+=================== EMAIL SENT ===================
+To:      priya.patel.nhs@outlook.com
+Subject: Password Reset - WeVolunteer
+--------------------------------------------------
+We received a request to reset your password.
+
+Click the link below to choose a new password:
+http://localhost:5173/?reset=558a5c509d755a30587d7b68cf2121644d085a9e4405f90fdf8e844f0417f2c3
+
+If you did not request this, please ignore this email.
+==================================================
+
+
+ [32m✓[39m [30m[42m client [49m[39m src/components/common/EmptyState.test.jsx[2m > [22mEmptyState[2m > [22mrenders the title and message it is given[33m 1044[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/components/common/EmptyState.test.jsx[2m > [22mEmptyState[2m > [22mrenders an action when one is supplied, and omits the wrapper when not[32m 175[2mms[22m[39m
+ [32m✓[39m [30m[42m client [49m[39m src/components/common/EmptyState.test.jsx[2m > [22mEmptyState[2m > [22maccepts a custom icon without erroring[32m 48[2mms[22m[39m
+[90mstdout[2m | server/routes.privacy.test.js
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+[90mstdout[2m | server/routes.cookieAuth.test.js
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+[90mstdout[2m | server/routes.autoselect.test.js[2m > [22m[2mauto-select: deadline guard, re-draw reasons, and draw cap
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+[90mstdout[2m | server/routes.emailUniqueness.test.js[2m > [22m[2mcase-insensitive email uniqueness (API)
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+[90mstdout[2m | server/routes.session.test.js
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+[90mstdout[2m | server/routes.auth.test.js[2m > [22m[2mauth: password reset[2m > [22m[2mrejects an expired token
+[22m[39m
+=================== EMAIL SENT ===================
+To:      emiller2027@gmail.com
+Subject: Password Reset - WeVolunteer
+--------------------------------------------------
+We received a request to reset your password.
+
+Click the link below to choose a new password:
+http://localhost:5173/?reset=c19a8569cd6ccfa68a378cc10c3ae46a758221ff319a2751e8d2be1b15775f9d
+
+If you did not request this, please ignore this email.
+==================================================
+
+
+[90mstdout[2m | server/routes.auth.test.js[2m > [22m[2mauth: password reset[2m > [22m[2mrejects a password below the minimum length
+[22m[39m
+=================== EMAIL SENT ===================
+To:      advait.g@yahoo.com
+Subject: Password Reset - WeVolunteer
+--------------------------------------------------
+We received a request to reset your password.
+
+Click the link below to choose a new password:
+http://localhost:5173/?reset=4b8a3462a36341f25a4bc868a11c252fc61596d23275191cab02d35638284a37
+
+If you did not request this, please ignore this email.
+==================================================
+
+
+ [32m✓[39m [30m[42m client [49m[39m src/components/EventModal.test.jsx[2m > [22mEventModal Characterization[2m > [22mrenders event details[33m 521[2mms[22m[39m
+[90mstdout[2m | server/routes.applications.test.js[2m > [22m[2mapplications: bulk organizer actions[2m > [22m[2mbulk-accepts every named application
+[22m[39m
+=================== EMAIL SENT ===================
+To:      leo.chen28@gmail.com
+Subject: Application accepted - WeVolunteer
+--------------------------------------------------
+Your application for "Bulk Test" was accepted.
+
+Log in at http://localhost:5173 to see more details.
+==================================================
+
+
+=================== EMAIL SENT ===================
+To:      priya.patel.nhs@outlook.com
+Subject: Application accepted - WeVolunteer
+--------------------------------------------------
+Your application for "Bulk Test" was accepted.
+
+Log in at http://localhost:5173 to see more details.
+==================================================
+
+
+=================== EMAIL SENT ===================
+To:      emiller2027@gmail.com
+Subject: Application accepted - WeVolunteer
+--------------------------------------------------
+Your application for "Bulk Test" was accepted.
+
+Log in at http://localhost:5173 to see more details.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: bulk organizer actions[2m > [22mbulk-accepts every named application[33m 2514[2mms[22m[39m
+[90mstdout[2m | server/routes.cookieAuth.test.js
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+ [32m✓[39m [30m[42m client [49m[39m src/components/EventModal.test.jsx[2m > [22mEventModal Characterization[2m > [22mcan enter edit mode[32m 237[2mms[22m[39m
+[90mstdout[2m | server/routes.privacy.test.js
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+[90mstdout[2m | server/routes.autoselect.test.js[2m > [22m[2mauto-select: deadline guard, re-draw reasons, and draw cap
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+[90mstdout[2m | server/routes.emailUniqueness.test.js[2m > [22m[2mcase-insensitive email uniqueness (API)
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+ [32m✓[39m [30m[42m client [49m[39m src/components/EventModal.test.jsx[2m > [22mEventModal Characterization[2m > [22mcan enter attendance mode[32m 147[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: password reset[2m > [22mburns the token so it cannot be replayed[33m 597[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: password reset[2m > [22mrejects an expired token[32m 15[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: password reset[2m > [22mrejects a password below the minimum length[32m 15[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mContent-Security-Policy[2m > [22mis sent on the health endpoint[33m 359[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mContent-Security-Policy[2m > [22mrestricts script to self, which is what stops injected script running[32m 14[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mContent-Security-Policy[2m > [22mallows the Google Fonts origins on the directives that actually need them[32m 19[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: bulk organizer actions[2m > [22mhits the bulk handler, not the :id route (registration order)[32m 4[2mms[22m[39m
+[90mstdout[2m | server/routes.session.test.js
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: username[2m > [22mstores the username the signup form sends[33m 526[2mms[22m[39m
+[90mstdout[2m | server/routes.verification.test.js[2m > [22m[2mauth: email verification (flag on)
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mContent-Security-Policy[2m > [22mforbids framing and plugin content[32m 8[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mContent-Security-Policy[2m > [22mis sent on API responses too, not only static ones[32m 18[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.emailUniqueness.test.js[2m > [22mcase-insensitive email uniqueness (API)[2m > [22mrefuses a case-variant duplicate signup with 400 naming email[33m 774[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: username[2m > [22mrejects a duplicate username[33m 453[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.session.test.js[2m > [22mauthenticateToken: reads identity from the database[2m > [22mauthenticates a valid token for an existing (seeded) user[33m 709[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: bulk organizer actions[2m > [22mrefuses a student[33m 1447[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mlogin and signup issue a session cookie[2m > [22msets wev_session on a successful login[33m 473[2mms[22m[39m
+[90mstdout[2m | server/routes.verification.test.js[2m > [22m[2mauth: email verification (flag on)
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: username[2m > [22mrejects a duplicate regardless of case[33m 484[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: username[2m > [22mrejects characters the signup form does not allow[32m 23[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: username[2m > [22mrejects a username that is too short or too long[32m 19[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: username[2m > [22mrequires a username[32m 23[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mlogin and signup issue a session cookie[2m > [22mmarks the cookie HttpOnly, Lax, and rooted at /[33m 508[2mms[22m[39m
+[90mstdout[2m | server/routes.malformed.test.js
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.emailUniqueness.test.js[2m > [22mcase-insensitive email uniqueness (API)[2m > [22mlets a mixed-case signup log in with any casing of the same address[33m 1212[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.session.test.js[2m > [22mauthenticateToken: reads identity from the database[2m > [22mrejects a token belonging to a user who has since been deleted[33m 401[2mms[22m[39m
+[90mstdout[2m | server/routes.verification.test.js[2m > [22m[2mauth: email verification (flag on)[2m > [22m[2mcreates a new account unverified and issues a token
+[22m[39m
+=================== EMAIL SENT ===================
+To:      unverified@example.org
+Subject: Please verify your email - WeVolunteer
+--------------------------------------------------
+Welcome to WeVolunteer!
+
+Please verify your email address by clicking the link below:
+http://localhost:5173/?verify=5ae0b36c89b0e32479e64c169899bd1e3f2dfff0734d627639c207423b1959e4
+
+If you did not sign up, please ignore this email.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.verification.test.js[2m > [22mauth: email verification (flag on)[2m > [22mcreates a new account unverified and issues a token[33m 808[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mlogin and signup issue a session cookie[2m > [22mdoes not mark the cookie Secure outside production[33m 369[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: bulk organizer actions[2m > [22mrejects an invalid status[33m 980[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.autoselect.test.js[2m > [22mauto-select: deadline guard, re-draw reasons, and draw cap[2m > [22mrefuses to run the draw before the application deadline[33m 2375[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mlogin and signup issue a session cookie[2m > [22msets no cookie when the password is wrong[33m 523[2mms[22m[39m
+[90mstdout[2m | server/routes.autoselect.test.js[2m > [22m[2mauto-select: deadline guard, re-draw reasons, and draw cap[2m > [22m[2msurfaces runCount and redrawReasons in the confirmed selection summary
+[22m[39m
+=================== EMAIL SENT ===================
+To:      emiller2027@gmail.com
+Subject: Application accepted - WeVolunteer
+--------------------------------------------------
+You were auto-selected and accepted for "Auto Select Draw Test" — Shift!
+
+Log in at http://localhost:5173 to see more details.
+==================================================
+
+
+[90mstdout[2m | server/routes.malformed.test.js
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.session.test.js[2m > [22mauthenticateToken: reads identity from the database[2m > [22mreads role live from the database rather than trusting the token payload[33m 579[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.session.test.js[2m > [22mauthenticateToken: reads identity from the database[2m > [22mstill returns 403 for a forged token (wrong signing secret)[32m 22[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.session.test.js[2m > [22mauthenticateToken: reads identity from the database[2m > [22mstill returns 403 for garbage in the Authorization header[32m 11[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.autoselect.test.js[2m > [22mauto-select: deadline guard, re-draw reasons, and draw cap[2m > [22mruns the first draw after the deadline with no reason required, and stores no reason[32m 29[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.autoselect.test.js[2m > [22mauto-select: deadline guard, re-draw reasons, and draw cap[2m > [22mrejects a re-draw with no reason[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.autoselect.test.js[2m > [22mauto-select: deadline guard, re-draw reasons, and draw cap[2m > [22maccepts and stores a reason on a re-draw[32m 17[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.autoselect.test.js[2m > [22mauto-select: deadline guard, re-draw reasons, and draw cap[2m > [22mrefuses a draw once the cap is reached, even with a reason supplied[32m 10[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.autoselect.test.js[2m > [22mauto-select: deadline guard, re-draw reasons, and draw cap[2m > [22msurfaces runCount and redrawReasons in the confirmed selection summary[32m 41[2mms[22m[39m
+[90mstdout[2m | server/routes.session.test.js[2m > [22m[2mauthenticateToken: token_version invalidates sessions on password reset[2m > [22m[2mrejects a token minted before a password reset, but a fresh login after the reset works
+[22m[39m
+=================== EMAIL SENT ===================
+To:      session-jiohctg@example.org
+Subject: Password Reset - WeVolunteer
+--------------------------------------------------
+We received a request to reset your password.
+
+Click the link below to choose a new password:
+http://localhost:5173/?reset=616b784b430624f4940daae3754332e40ccc17fcdfd826ad83253abebad2522a
+
+If you did not request this, please ignore this email.
+==================================================
+
+
+[90mstdout[2m | server/routes.verification.test.js[2m > [22m[2mauth: email verification (flag on)[2m > [22m[2mmarks the account verified when the token is presented
+[22m[39m
+=================== EMAIL SENT ===================
+To:      confirms@example.org
+Subject: Please verify your email - WeVolunteer
+--------------------------------------------------
+Welcome to WeVolunteer!
+
+Please verify your email address by clicking the link below:
+http://localhost:5173/?verify=bb990a0d72bc23db2ddcce775714a4f731dae821dd8eb72a5271f66b8df1b944
+
+If you did not sign up, please ignore this email.
+==================================================
+
+
+[90mstdout[2m | server/routes.privacy.test.js[2m > [22m[2mprivacy: student profile PII scoping (grade/school/bio/email)
+[22m[39m
+=================== EMAIL SENT ===================
+To:      privacy.fresh.student@example.org
+Subject: Application accepted - WeVolunteer
+--------------------------------------------------
+Your application for "Privacy Test Event" was accepted.
+
+Log in at http://localhost:5173 to see more details.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mlogin and signup issue a session cookie[2m > [22msets the cookie on signup as well, so a new account is signed in[32m 210[2mms[22m[39m
+[90mstdout[2m | server/routes.auth.test.js[2m > [22m[2mauth: volunteer profile does not leak whereabouts to other students
+[22m[39m
+=================== EMAIL SENT ===================
+To:      priya.patel.nhs@outlook.com
+Subject: Application accepted - WeVolunteer
+--------------------------------------------------
+Your application for "Whereabouts Test Event" was accepted.
+
+Log in at http://localhost:5173 to see more details.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: volunteer profile does not leak whereabouts to other students[2m > [22mhides another student's upcoming shifts from a fellow student, even though a confirmed future shift exists[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: volunteer profile does not leak whereabouts to other students[2m > [22mgives the student their own populated upcoming array, including location[32m 7[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: volunteer profile does not leak whereabouts to other students[2m > [22mgives an organizer an empty upcoming array but a correct non-zero upcomingCount[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: volunteer profile does not leak whereabouts to other students[2m > [22mdoes not regress the organizer applicant-review workflow: email and completed history still show[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.auth.test.js[2m > [22mauth: volunteer profile does not leak whereabouts to other students[2m > [22malso hides the upcoming array from an admin, staying self-only[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.emailUniqueness.test.js[2m > [22mcase-insensitive email uniqueness (API)[2m > [22mnormalises a signup email (trim + lowercase) on write[33m 348[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.emailUniqueness.test.js[2m > [22memail dedupe migration (F-11, defensive/no data loss)[2m > [22mkeeps the higher-hours account unchanged, renames the other, bumps its token_version, adds the index, and touches no attendance row[32m 264[2mms[22m[39m
+[90mstdout[2m | server/routes.verification.test.js[2m > [22m[2mauth: email verification (flag on)[2m > [22m[2mburns the token so it cannot be replayed
+[22m[39m
+=================== EMAIL SENT ===================
+To:      replay@example.org
+Subject: Please verify your email - WeVolunteer
+--------------------------------------------------
+Welcome to WeVolunteer!
+
+Please verify your email address by clicking the link below:
+http://localhost:5173/?verify=e043665ba39bc5ecf018fbb5e737fa611e4f1eb7c32cded7dd896e3bb2ce5a2b
+
+If you did not sign up, please ignore this email.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.verification.test.js[2m > [22mauth: email verification (flag on)[2m > [22mmarks the account verified when the token is presented[33m 386[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.verification.test.js[2m > [22mauth: email verification (flag on)[2m > [22mrejects an unknown token[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: student profile PII scoping (grade/school/bio/email)[2m > [22mhides grade/school/bio/email from another (unrelated) student[32m 13[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: student profile PII scoping (grade/school/bio/email)[2m > [22mhides grade/school/bio/email from an organizer who does not host any event the student applied to[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: student profile PII scoping (grade/school/bio/email)[2m > [22mreveals grade/school/bio/email to an organizer who hosts an event the student applied to[32m 7[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: student profile PII scoping (grade/school/bio/email)[2m > [22mreveals grade/school/bio/email to the seeded hosting-organizer relationship (Priya <-> jkatzenback)[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: student profile PII scoping (grade/school/bio/email)[2m > [22mreveals grade/school/bio/email to an admin viewing any student[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: student profile PII scoping (grade/school/bio/email)[2m > [22mreveals grade/school/bio/email to the student viewing their own profile[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: student profile PII scoping (grade/school/bio/email)[2m > [22mgives an unrelated viewer upcomingCount 0, but a hosting organizer, admin, and self the real count[32m 19[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: student profile PII scoping (grade/school/bio/email)[2m > [22mkeeps aggregate stats and service history visible to an unrelated student viewer (not PII)[32m 10[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: bulk organizer actions[2m > [22mapplies nothing if any named application is invalid (atomic)[33m 621[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mauthenticateToken accepts the session cookie[2m > [22mauthenticates a request carrying a valid session cookie[32m 236[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mauthenticateToken accepts the session cookie[2m > [22mrejects a request with no cookie and no header[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mauthenticateToken accepts the session cookie[2m > [22mrejects a malformed cookie[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22mserver-side logout[2m > [22mclears the cookie and increments token_version to invalidate the old session[32m 286[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.emailUniqueness.test.js[2m > [22memail dedupe migration (F-11, defensive/no data loss)[2m > [22mis idempotent: a second initDatabase() run changes nothing further and does not error[33m 484[2mms[22m[39m
+[90mstdout[2m | server/routes.verification.test.js[2m > [22m[2mauth: email verification (flag on)[2m > [22m[2mresends a fresh token to the signed-in user
+[22m[39m
+=================== EMAIL SENT ===================
+To:      resend@example.org
+Subject: Please verify your email - WeVolunteer
+--------------------------------------------------
+Welcome to WeVolunteer!
+
+Please verify your email address by clicking the link below:
+http://localhost:5173/?verify=ceb4b89777c515556b36f1cc56a98291d35afdd979577c0f42f393925574a48f
+
+If you did not sign up, please ignore this email.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.verification.test.js[2m > [22mauth: email verification (flag on)[2m > [22mburns the token so it cannot be replayed[32m 261[2mms[22m[39m
+[90mstdout[2m | server/routes.verification.test.js[2m > [22m[2mauth: email verification (flag on)[2m > [22m[2mresends a fresh token to the signed-in user
+[22m[39m
+=================== EMAIL SENT ===================
+To:      resend@example.org
+Subject: Please verify your email - WeVolunteer
+--------------------------------------------------
+Welcome to WeVolunteer!
+
+Please verify your email address by clicking the link below:
+http://localhost:5173/?verify=e6b5f49a908a22e166fe3f020d7f06c23fe6db45c1dac6d96a8dc7e3621937a8
+
+If you did not sign up, please ignore this email.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mleaderboard privacy[2m > [22mis empty of seeded students while everyone defaults to leaderboard_opt_in = 0[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mleaderboard privacy[2m > [22mshows a student once leaderboard_opt_in is set to 1 directly in the DB[32m 8[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mleaderboard privacy[2m > [22mnever returns school or grade on leaderboard rows[32m 8[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.session.test.js[2m > [22mauthenticateToken: token_version invalidates sessions on password reset[2m > [22mrejects a token minted before a password reset, but a fresh login after the reset works[33m 1172[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22msevered Authorization header fallback[2m > [22mrejects a request with an Authorization header but no cookie[32m 207[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.malformed.test.js[2m > [22mmalformed input returns 400, not 500[2m > [22mrejects a null entry in slots[32m 34[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.malformed.test.js[2m > [22mmalformed input returns 400, not 500[2m > [22mrejects a non-object entry in slots[32m 8[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.malformed.test.js[2m > [22mmalformed input returns 400, not 500[2m > [22mrejects a non-string title[32m 10[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.malformed.test.js[2m > [22mmalformed input returns 400, not 500[2m > [22mrejects a non-string location[32m 16[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.malformed.test.js[2m > [22mmalformed input returns 400, not 500[2m > [22mrejects a non-string slot name[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.malformed.test.js[2m > [22mmalformed input returns 400, not 500[2m > [22mrejects a non-string report targetId[32m 29[2mms[22m[39m
+[90mstdout[2m | server/routes.verification.test.js[2m > [22m[2mauth: email verification (flag on)[2m > [22m[2mblocks an unverified user from a normal action route
+[22m[39m
+=================== EMAIL SENT ===================
+To:      gated@example.org
+Subject: Please verify your email - WeVolunteer
+--------------------------------------------------
+Welcome to WeVolunteer!
+
+Please verify your email address by clicking the link below:
+http://localhost:5173/?verify=e4264794004f9b981cc884f53b3c76eeb78817e9131e1f3b0b084986d23df11b
+
+If you did not sign up, please ignore this email.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.verification.test.js[2m > [22mauth: email verification (flag on)[2m > [22mresends a fresh token to the signed-in user[33m 399[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.verification.test.js[2m > [22mauth: email verification (flag on)[2m > [22mrequires authentication to resend[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.cookieAuth.test.js[2m > [22msevered Authorization header fallback[2m > [22mdoes not return a token in the JSON body of login or signup[33m 429[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mleaderboard privacy[2m > [22mround-trips the opt-in through PATCH /api/auth/profile (the write-path guard)[33m 406[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.autoselect.test.js[2m > [22mauto-select: deadline guard, re-draw reasons, and draw cap[2m > [22mexposes the re-draw reason on the runs audit endpoint before confirmation[33m 1292[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.malformed.test.js[2m > [22mmalformed input returns 400, not 500[2m > [22mrejects a non-string report reason[32m 19[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.malformed.test.js[2m > [22mmalformed input returns 400, not 500[2m > [22mstill accepts a well-formed event (no over-tightening)[32m 14[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.malformed.test.js[2m > [22mmalformed input returns 400, not 500[2m > [22mstill accepts a well-formed report[32m 7[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.malformed.test.js[2m > [22merror codes stay meaningfully distinct[2m > [22munauthenticated requests are 401, not 400[32m 5[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.autoselect.test.js[2m > [22mauto-select: deterministic seeded draw[2m > [22mproduces the same selection for the same seed and the same ordered applicant list[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.malformed.test.js[2m > [22merror codes stay meaningfully distinct[2m > [22mforbidden requests are 403, not 400[33m 346[2mms[22m[39m
+[90mstdout[2m | server/routes.verification.test.js[2m > [22m[2mauth: email verification (flag on)[2m > [22m[2mstill allows the allowlisted routes for an unverified user
+[22m[39m
+=================== EMAIL SENT ===================
+To:      allowlisted@example.org
+Subject: Please verify your email - WeVolunteer
+--------------------------------------------------
+Welcome to WeVolunteer!
+
+Please verify your email address by clicking the link below:
+http://localhost:5173/?verify=eb8ec6605364d3aa72de5c41ad7e1bc16d27995b586932a9c2ffa1d412354d04
+
+If you did not sign up, please ignore this email.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.verification.test.js[2m > [22mauth: email verification (flag on)[2m > [22mblocks an unverified user from a normal action route[32m 263[2mms[22m[39m
+[90mstdout[2m | server/routes.verification.test.js[2m > [22m[2mauth: email verification (flag on)[2m > [22m[2mstill allows the allowlisted routes for an unverified user
+[22m[39m
+=================== EMAIL SENT ===================
+To:      allowlisted@example.org
+Subject: Please verify your email - WeVolunteer
+--------------------------------------------------
+Welcome to WeVolunteer!
+
+Please verify your email address by clicking the link below:
+http://localhost:5173/?verify=d2be35dd20f0fde48137ecef3a881ca57ecf529fd05ca621672158b324592ad7
+
+If you did not sign up, please ignore this email.
+==================================================
+
+
+[90mstdout[2m | server/routes.checkin.test.js[2m > [22m[2mcheck-in
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.session.test.js[2m > [22mauthenticateToken: token_version invalidates sessions on password reset[2m > [22ma current-version token keeps working across an unrelated request[32m 282[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.session.test.js[2m > [22mauthenticateToken: token_version invalidates sessions on password reset[2m > [22ma legacy token with no tokenVersion claim still authenticates against a version-0 row[33m 475[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: valid input[2m > [22mpasses a fully valid payload[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: deadline rules[2m > [22mrejects a deadline in the past[32m 12[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: deadline rules[2m > [22mrejects an unparseable deadline[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: deadline rules[2m > [22mrejects a deadline after the first shift starts[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: deadline rules[2m > [22mallows a deadline exactly at the first shift start[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: slot time rules[2m > [22mrejects a slot whose end is before its start[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: slot time rules[2m > [22mrejects a slot whose end equals its start[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: slot time rules[2m > [22mrejects an unparseable slot date[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: slot time rules[2m > [22mrejects an empty slots array[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: maxSpots rules[2m > [22mrejects maxSpots of 0[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: maxSpots rules[2m > [22mrejects a negative maxSpots[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: maxSpots rules[2m > [22mrejects maxSpots over 100[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: maxSpots rules[2m > [22mrejects a non-integer maxSpots[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: maxSpots rules[2m > [22mallows the boundary values 1 and 100[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: length caps[2m > [22mrejects an over-long title[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: length caps[2m > [22mrejects an over-long description[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: length caps[2m > [22mrejects an over-long location[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: length caps[2m > [22mrejects over-long instructions[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: length caps[2m > [22mallows empty/undefined instructions[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: length caps[2m > [22mrejects an over-long slot name[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mvalidateEventPayload: length caps[2m > [22mrejects an over-long slot description[32m 0[2mms[22m[39m
+[90mstdout[2m | server/routes.verification.test.js[2m > [22m[2mauth: email verification (flag on)[2m > [22m[2munblocks the same token once the account is verified
+[22m[39m
+=================== EMAIL SENT ===================
+To:      unblock@example.org
+Subject: Please verify your email - WeVolunteer
+--------------------------------------------------
+Welcome to WeVolunteer!
+
+Please verify your email address by clicking the link below:
+http://localhost:5173/?verify=b6ea4904474adb1a9c95467f278e17f9e7b52eb51c72758ab37792e35ed3cc16
+
+If you did not sign up, please ignore this email.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.verification.test.js[2m > [22mauth: email verification (flag on)[2m > [22mstill allows the allowlisted routes for an unverified user[33m 422[2mms[22m[39m
+[90mstdout[2m | server/routes.checkin.test.js[2m > [22m[2mcheck-in
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+[90mstdout[2m | server/routes.smoke.test.js[2m > [22m[2mroute test harness
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.verification.test.js[2m > [22mauth: email verification (flag on)[2m > [22munblocks the same token once the account is verified[33m 651[2mms[22m[39m
+[90mstdout[2m | server/routes.certificates.test.js[2m > [22m[2mcertificates
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+[90mstdout[2m | server/routes.admin.test.js
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: bulk organizer actions[2m > [22mrefuses a batch containing an application on an event the caller does not host[33m 2298[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: event listing requires auth and scopes instructions[2m > [22mrequires a token for GET /api/events[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: event listing requires auth and scopes instructions[2m > [22mblanks instructions for a signed-in student who is not accepted (Priya, pending)[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: event listing requires auth and scopes instructions[2m > [22mreveals real instructions to an accepted student (Leo)[32m 14[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: event listing requires auth and scopes instructions[2m > [22mreveals real instructions to the hosting organizer[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: event listing requires auth and scopes instructions[2m > [22mreveals real instructions to an admin[32m 17[2mms[22m[39m
+[90mstdout[2m | server/routes.smoke.test.js[2m > [22m[2mroute test harness
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+[90mstdout[2m | server/validation.test.js[2m > [22m[2mPOST/PUT /api/events: server-side validation wiring
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+ [32m✓[39m [30m[42m server [49m[39m server/db.pragmas.test.js[2m > [22mSQLite connection pragmas[2m > [22mopens the database in WAL mode[33m 968[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/email.production.test.js[2m > [22memail transport boot policy (P1-F)[2m > [22mexits non-zero in production when SMTP is not configured[33m 407[2mms[22m[39m
+[90mstdout[2m | server/routes.certificates.test.js[2m > [22m[2mcertificates
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.checkin.test.js[2m > [22mcheck-in[2m > [22mserves a single event with its applications[32m 11[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.checkin.test.js[2m > [22mcheck-in[2m > [22mrefuses a single event to a student[33m 506[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.checkin.test.js[2m > [22mcheck-in[2m > [22m404s an unknown event[32m 16[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.checkin.test.js[2m > [22mcheck-in[2m > [22mrecords a check-in keyed by application id[32m 10[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.checkin.test.js[2m > [22mcheck-in[2m > [22mreads the mark back[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.checkin.test.js[2m > [22mcheck-in[2m > [22mreports keys it could not match rather than silently dropping them[32m 22[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/email.production.test.js[2m > [22memail transport boot policy (P1-F)[2m > [22mboots in production when SMTP and APP_URL are fully configured[32m 227[2mms[22m[39m
+[90mstdout[2m | server/routes.admin.test.js
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+[90mstdout[2m | server/validation.test.js[2m > [22m[2mPOST/PUT /api/events: server-side validation wiring
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.smoke.test.js[2m > [22mroute test harness[2m > [22mserves the seeded events list[33m 721[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/email.production.test.js[2m > [22mAPP_URL boot policy[2m > [22mexits non-zero in production when APP_URL is not set[32m 260[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/db.pragmas.test.js[2m > [22mSQLite connection pragmas[2m > [22mapplies a non-zero busy_timeout to the connection[33m 592[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/email.production.test.js[2m > [22mAPP_URL boot policy[2m > [22mdoes not require APP_URL outside production[32m 215[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: event announcements gated to accepted volunteers and staff[2m > [22mreturns an empty array to a not-accepted (pending) student[32m 12[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: event announcements gated to accepted volunteers and staff[2m > [22mreturns the real announcements to an accepted student (Leo)[32m 10[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: event announcements gated to accepted volunteers and staff[2m > [22mreturns the real announcements to the hosting organizer[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.privacy.test.js[2m > [22mprivacy: event announcements gated to accepted volunteers and staff[2m > [22mreturns the real announcements to an admin[32m 14[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.certificates.test.js[2m > [22mcertificates[2m > [22missues a certificate for a completed, credited event[32m 34[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.certificates.test.js[2m > [22mcertificates[2m > [22mreturns the SAME code on a second call (stable, stored)[32m 22[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.certificates.test.js[2m > [22mcertificates[2m > [22mverifies a real code and returns the volunteer, event and hours, with no grade field[32m 22[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.certificates.test.js[2m > [22mcertificates[2m > [22mrejects a code computed by the old deterministic algorithm[32m 14[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.certificates.test.js[2m > [22mcertificates[2m > [22m404s an unknown/garbage code[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.smoke.test.js[2m > [22mroute test harness[2m > [22mauthenticates a seeded user[33m 378[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.smoke.test.js[2m > [22mroute test harness[2m > [22mdoes not touch the real database file[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.admin.test.js[2m > [22mAdmin CSV Export Route[2m > [22mrejects unauthenticated requests[32m 134[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mPOST/PUT /api/events: server-side validation wiring[2m > [22mrejects create with an inverted-time slot[32m 22[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mPOST/PUT /api/events: server-side validation wiring[2m > [22mrejects create with a negative maxSpots[32m 20[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mPOST/PUT /api/events: server-side validation wiring[2m > [22mrejects create with a past deadline[32m 12[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mPOST/PUT /api/events: server-side validation wiring[2m > [22maccepts a fully valid create[32m 23[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/validation.test.js[2m > [22mPOST/PUT /api/events: server-side validation wiring[2m > [22mrejects update with an invalid payload[32m 22[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/email.production.test.js[2m > [22mAPP_URL boot policy[2m > [22mreports SMTP first when both SMTP and APP_URL are missing[33m 327[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.certificates.test.js[2m > [22mcertificates[2m > [22mgives two different certificates different, correctly formatted codes[33m 409[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.certificates.test.js[2m > [22mcertificates[2m > [22mgetOrCreateCertificateCode backfill is idempotent — a second run inserts nothing[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/db.pragmas.test.js[2m > [22mSQLite connection pragmas[2m > [22mstill migrates and seeds a fresh database correctly under WAL[33m 656[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.admin.test.js[2m > [22mAdmin CSV Export Route[2m > [22mrejects student requests[33m 520[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/email.production.test.js[2m > [22mAPP_URL boot policy[2m > [22mstill uses the console mock outside production[33m 330[2mms[22m[39m
+[90mstdout[2m | server/routes.applications.test.js[2m > [22m[2mapplications: bulk organizer actions[2m > [22m[2mnever exceeds slot capacity when accepting more than there is room for
+[22m[39m
+=================== EMAIL SENT ===================
+To:      leo.chen28@gmail.com
+Subject: Application accepted - WeVolunteer
+--------------------------------------------------
+Your application for "Bulk Test" was accepted.
+
+Log in at http://localhost:5173 to see more details.
+==================================================
+
+
+=================== EMAIL SENT ===================
+To:      priya.patel.nhs@outlook.com
+Subject: Application accepted - WeVolunteer
+--------------------------------------------------
+Your application for "Bulk Test" was accepted.
+
+Log in at http://localhost:5173 to see more details.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: bulk organizer actions[2m > [22mnever exceeds slot capacity when accepting more than there is room for[33m 2022[2mms[22m[39m
+[90mstdout[2m | server/notificationSweep.test.js[2m > [22m[2mnotification sweep: deadline passed with applicants waiting
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.admin.test.js[2m > [22mAdmin CSV Export Route[2m > [22mrejects organizer requests[33m 367[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.emailVerifiedMigration.test.js[2m > [22memail_verified upgrade backfill (P1-A)[2m > [22mverifies existing users when the column is added with verification REQUIRED[32m 269[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/config.cookieOptions.test.js[2m > [22mcookieOptions()[2m > [22mmarks the cookie Secure in production[32m 135[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/migration.test.js[2m > [22mmigration rehearsal against a copy of the real database[2m > [22mhas volunteer hours worth protecting[32m 18[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/migration.test.js[2m > [22mmigration rehearsal against a copy of the real database[2m > [22mleaves every volunteer total byte-identical after migrating[32m 51[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/migration.test.js[2m > [22mmigration rehearsal against a copy of the real database[2m > [22mreaches parity between ledger and attendance[32m 32[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.emailVerifiedMigration.test.js[2m > [22memail_verified upgrade backfill (P1-A)[2m > [22mverifies existing users when the column is added with verification OFF[32m 208[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/config.cookieOptions.test.js[2m > [22mcookieOptions()[2m > [22mdoes not mark the cookie Secure outside production[32m 116[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/migration.test.js[2m > [22mmigration rehearsal against a copy of the real database[2m > [22mis idempotent — running three times changes nothing after the first[32m 31[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/migration.test.js[2m > [22mmigration rehearsal against a copy of the real database[2m > [22mre-running createHoursLedgerTable does not disturb existing entries[32m 29[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/migration.test.js[2m > [22mmigration rehearsal against a copy of the real database[2m > [22mis fully reversible — dropping the ledger restores the original state[32m 52[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/migration.test.js[2m > [22mmigration rehearsal against a copy of the real database[2m > [22mpreserves the retained hours value on rows marked absent[32m 33[2mms[22m[39m
+[90mstdout[2m | server/routes.rateLimit.test.js[2m > [22m[2mmail endpoints are rate limited
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+[90mstdout[2m | server/backup.test.js
+[22m[39m[Email] Running in mock mode. Emails will be logged to console.
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.seeding.test.js[2m > [22mdemo seeding is gated on DEMO_MODE[2m > [22mdoes not seed when DEMO_MODE is off[32m 284[2mms[22m[39m
+[90mstdout[2m | server/notificationSweep.test.js[2m > [22m[2mnotification sweep: deadline passed with applicants waiting
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+ [32m✓[39m [30m[42m server [49m[39m server/config.cookieOptions.test.js[2m > [22mcookieOptions()[2m > [22mkeeps the cookie shape constant across environments[33m 349[2mms[22m[39m
+[90mstdout[2m | server/notificationSweep.test.js[2m > [22m[2mnotification sweep: deadline passed with applicants waiting[2m > [22m[2mnotifies the organizer, once, naming how many are waiting
+[22m[39m[Notifications] Sent 1 time-based notification(s).
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.admin.test.js[2m > [22mAdmin CSV Export Route[2m > [22mreturns a valid CSV file for admins[33m 384[2mms[22m[39m
+[90mstdout[2m | server/notificationSweep.test.js[2m > [22m[2mnotification sweep: deadline passed with applicants waiting[2m > [22m[2mfires for a closed event that still has undecided applicants
+[22m[39m[Notifications] Sent 1 time-based notification(s).
+
+ [32m✓[39m [30m[42m server [49m[39m server/notificationSweep.test.js[2m > [22mnotification sweep: deadline passed with applicants waiting[2m > [22mnotifies the organizer, once, naming how many are waiting[32m 22[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/notificationSweep.test.js[2m > [22mnotification sweep: deadline passed with applicants waiting[2m > [22mdoes not repeat on the next sweep[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/notificationSweep.test.js[2m > [22mnotification sweep: deadline passed with applicants waiting[2m > [22mtells the organizer, not the applicants[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/notificationSweep.test.js[2m > [22mnotification sweep: deadline passed with applicants waiting[2m > [22mignores an event whose deadline has not passed yet[32m 26[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/notificationSweep.test.js[2m > [22mnotification sweep: deadline passed with applicants waiting[2m > [22mignores cancelled and completed events[32m 19[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/notificationSweep.test.js[2m > [22mnotification sweep: deadline passed with applicants waiting[2m > [22mfires for a closed event that still has undecided applicants[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.emailVerifiedMigration.test.js[2m > [22memail_verified upgrade backfill (P1-A)[2m > [22mdoes not re-verify a genuinely unverified signup on a later boot with the flag ON[33m 591[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/config.cookieOptions.test.js[2m > [22mcookieOptions()[2m > [22msets maxAge to 7 days and the cookie name to wev_session[32m 258[2mms[22m[39m
+[90mstdout[2m | server/routes.applications.test.js[2m > [22m[2mapplications: an organizer cannot reactivate a withdrawn application (P1-D)[2m > [22m[2mrefuses a single accept of a withdrawn application
+[22m[39m
+=================== EMAIL SENT ===================
+To:      leo.chen28@gmail.com
+Subject: Application accepted - WeVolunteer
+--------------------------------------------------
+Your application for "Withdraw Test" was accepted.
+
+Log in at http://localhost:5173 to see more details.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: an organizer cannot reactivate a withdrawn application (P1-D)[2m > [22mrefuses a single accept of a withdrawn application[33m 1194[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.admin.test.js[2m > [22mAdmin Audit Logging[2m > [22mlogs when an admin approves an organizer[33m 743[2mms[22m[39m
+[90mstdout[2m | server/routes.rateLimit.test.js[2m > [22m[2mmail endpoints are rate limited
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+[90mstdout[2m | server/backup.test.js
+[22m[39mMigration: added notifications.dedupe_key
+Migration: added events.instructions
+Migration: added events.attendee_visibility
+Migration: added users.token_version
+Migration: added users.email_opt_out
+Migration: added users.email_verified
+Seeding complete.
+[Hours ledger] Backfilled 2 entries from 2 attendance record(s).
+[Hours ledger] Parity verified against attendance for 2 volunteer(s).
+[Certificates] Issued 1 code(s).
+
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mslotDuration & slotHasEnded[2m > [22mprices a slot from its duration with a floor[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mslotDuration & slotHasEnded[2m > [22mtreats a slot as ended only once its end time has passed[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mL5 — hours cannot be credited before a shift has ended[2m > [22mrefuses finalisation for a shift still to come[32m 8[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mL2 — no accidental over-crediting[2m > [22mcredits only volunteers explicitly named in the request[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mL2 — no accidental over-crediting[2m > [22man empty request credits nobody[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mL6 — a partial or stale request never marks anyone absent[2m > [22mleaves unnamed existing credits untouched[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mL1 / constraint 3 — attendance is historical, not application state[2m > [22mkeeps hours when the application is later withdrawn or rejected[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mL1 / constraint 3 — attendance is historical, not application state[2m > [22mstill allows correcting the record of a volunteer since un-accepted[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mL1 / constraint 3 — attendance is historical, not application state[2m > [22mrefuses to invent a record for someone never accepted[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mL4 / decision 3 — hours are snapshots and are never re-priced[2m > [22mkeeps the original credit after the slot duration is corrected[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mdecision 2 — corrections require a reason and an actor[2m > [22mrefuses to change an existing record without a reason[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mdecision 2 — corrections require a reason and an actor[2m > [22mdoes not require a reason for a first-time credit[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mdecision 2 — corrections require a reason and an actor[2m > [22mattributes every entry to an actor and stores the reason on corrections[32m 73[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mcreateHoursLedgerTable[2m > [22mis idempotent[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mcreateHoursLedgerTable[2m > [22mhas no foreign keys, so an entry survives deletion of what it describes[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mrecordHoursChange[2m > [22mcomputes delta from before/after rather than trusting the caller[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mrecordHoursChange[2m > [22mtreats absence as a zero-delta event, not a missing one[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mrecordHoursChange[2m > [22mproduces a negative delta when a credit is revoked[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mrecordHoursChange[2m > [22mproduces the difference when hours are adjusted[32m 24[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mrecordHoursChange[2m > [22mrejects unknown actions and sources[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mrecordHoursChange[2m > [22mrequires the identifying triple[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mrecordHoursChange[2m > [22mrounds to avoid floating point drift accumulating across entries[32m 29[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mbackfillHoursLedger[2m > [22mwrites one migrated entry per attendance row and never touches attendance[32m 12[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mdecision 2 — corrections require a reason and an actor[2m > [22mrejects a whitespace-only reason[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mconstraint 5 — every hours change writes a ledger entry[2m > [22mwrites exactly one entry per changed record and none for no-ops[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mconstraint 5 — every hours change writes a ledger entry[2m > [22mkeeps ledger deltas in step with credited hours[32m 24[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mconstraint 5 — every hours change writes a ledger entry[2m > [22mrecords an absent-from-the-start mark with a zero delta[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mdecision 5 — check-in is separate from awarding hours[2m > [22mrecords marks during a shift without crediting anything[32m 13[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mdecision 5 — check-in is separate from awarding hours[2m > [22mis freely re-editable[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mdecision 5 — check-in is separate from awarding hours[2m > [22mignores applications that are not accepted[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mdecision 1 — multi-day events do not complete after the first shift[2m > [22mis not complete while later shifts remain[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mdecision 1 — multi-day events do not complete after the first shift[2m > [22mis not complete while an accepted volunteer has no record[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mdecision 1 — multi-day events do not complete after the first shift[2m > [22mcompletes once every shift has ended and everyone is accounted for[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mdecision 1 — multi-day events do not complete after the first shift[2m > [22mnever auto-completes an event with no slots or no volunteers[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mL3 / L7 — destructive paths are detectable before they run[2m > [22mreports the volunteers a slot removal would harm[32m 7[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mL3 / L7 — destructive paths are detectable before they run[2m > [22mreports nothing for slots with no attendance[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mL3 / L7 — destructive paths are detectable before they run[2m > [22mcounts attendance so event deletion can be refused[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mrequest hygiene[2m > [22mignores applications belonging to another event[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/attendance.test.js[2m > [22mrequest hygiene[2m > [22mignores unknown application ids[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mbackfillHoursLedger[2m > [22mis idempotent — re-running inserts nothing[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mbackfillHoursLedger[2m > [22muses an id derived from the attendance primary key[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mbackfillHoursLedger[2m > [22mdoes not invent history it cannot know[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mbackfillHoursLedger[2m > [22mkeeps migrated entries permanently distinguishable from observed ones[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mbackfillHoursLedger[2m > [22mcarries absent rows across with a zero delta[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mbackfillHoursLedger[2m > [22mhandles an empty attendance table[32m 5[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mverifyLedgerParity[2m > [22mpasses after a clean backfill[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mverifyLedgerParity[2m > [22mdetects a ledger entry with no matching attendance[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mverifyLedgerParity[2m > [22mdetects attendance with no matching ledger entry[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mverifyLedgerParity[2m > [22mholds as an invariant across an arbitrary sequence of changes[32m 61[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/hoursLedger.test.js[2m > [22mledger is append-only in practice[2m > [22mrecords a full history rather than overwriting[32m 2[2mms[22m[39m
+[90mstdout[2m | server/routes.rateLimit.test.js[2m > [22m[2mmail endpoints are rate limited[2m > [22m[2mcounts successful forgot-password requests and eventually returns 429
+[22m[39m
+=================== EMAIL SENT ===================
+To:      leo.chen28@gmail.com
+Subject: Password Reset - WeVolunteer
+--------------------------------------------------
+We received a request to reset your password.
+
+Click the link below to choose a new password:
+http://localhost:5173/?reset=a950806d923aaf7a03d8ea83ee47f6ec7c680a25fe0a5265baa2006f1048b22a
+
+If you did not request this, please ignore this email.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.admin.test.js[2m > [22mAdmin Audit Logging[2m > [22mlogs when an admin denies an organizer[33m 889[2mms[22m[39m
+[90mstdout[2m | server/routes.rateLimit.test.js[2m > [22m[2mmail endpoints are rate limited[2m > [22m[2mcounts successful forgot-password requests and eventually returns 429
+[22m[39m
+=================== EMAIL SENT ===================
+To:      leo.chen28@gmail.com
+Subject: Password Reset - WeVolunteer
+--------------------------------------------------
+We received a request to reset your password.
+
+Click the link below to choose a new password:
+http://localhost:5173/?reset=cfa565c50a023cc5e8163d2814aa6e5f185822eadbbb9e1425d7d38c05393032
+
+If you did not request this, please ignore this email.
+==================================================
+
+
+[90mstdout[2m | server/routes.rateLimit.test.js[2m > [22m[2mmail endpoints are rate limited[2m > [22m[2mcounts successful forgot-password requests and eventually returns 429
+[22m[39m
+=================== EMAIL SENT ===================
+To:      leo.chen28@gmail.com
+Subject: Password Reset - WeVolunteer
+--------------------------------------------------
+We received a request to reset your password.
+
+Click the link below to choose a new password:
+http://localhost:5173/?reset=404872e4156553ace12cf6a90a7644265ad3368c1ec0d109438c6d6c816ccece
+
+If you did not request this, please ignore this email.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.rateLimit.test.js[2m > [22mmail endpoints are rate limited[2m > [22mcounts successful forgot-password requests and eventually returns 429[32m 244[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.rateLimit.test.js[2m > [22mmail endpoints are rate limited[2m > [22mrate-limits resend-verification through the same mail limiter[32m 12[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.rateLimit.test.js[2m > [22mmail endpoints are rate limited[2m > [22manswers a limited request with JSON the client can display[32m 13[2mms[22m[39m
+[90mstdout[2m | server/routes.applications.test.js[2m > [22m[2mapplications: an organizer cannot reactivate a withdrawn application (P1-D)[2m > [22m[2mrefuses a single waitlist of a withdrawn application
+[22m[39m
+=================== EMAIL SENT ===================
+To:      leo.chen28@gmail.com
+Subject: Application accepted - WeVolunteer
+--------------------------------------------------
+Your application for "Withdraw Test" was accepted.
+
+Log in at http://localhost:5173 to see more details.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/dataIntegrity.test.js[2m > [22mhours adjustment readiness[2m > [22maccepts an adjustment that changes hours while staying present[32m 23[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/dataIntegrity.test.js[2m > [22mhours adjustment readiness[2m > [22msupports a downward adjustment[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/dataIntegrity.test.js[2m > [22mhours adjustment readiness[2m > [22mcarries the attribution an adjustment workflow will need[32m 7[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/dataIntegrity.test.js[2m > [22mhours adjustment readiness[2m > [22mexposes admin_correction as a first-class source, distinct from routine saves[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/dataIntegrity.test.js[2m > [22msoft-delete requirement — characterising the residual cascade risk[2m > [22mDOCUMENTS: deleting a user still destroys their attendance via CASCADE[32m 5[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/dataIntegrity.test.js[2m > [22msoft-delete requirement — characterising the residual cascade risk[2m > [22mDOCUMENTS: the ledger survives that deletion, so the loss is at least evidenced[32m 5[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/dataIntegrity.test.js[2m > [22msoft-delete requirement — characterising the residual cascade risk[2m > [22mDOCUMENTS: parity verification detects hours destroyed behind the API[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/dataIntegrity.test.js[2m > [22mproduction schema invariants[2m > [22menforces foreign keys, which the cascade guarantees depend on[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/dataIntegrity.test.js[2m > [22mproduction schema invariants[2m > [22mcarries the indexes the hot read paths rely on[32m 5[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/dataIntegrity.test.js[2m > [22mproduction schema invariants[2m > [22mkeeps the attendance primary key on (slot_id, user_id)[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/dataIntegrity.test.js[2m > [22mproduction schema invariants[2m > [22mconstrains present and status columns rather than trusting callers[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/dataIntegrity.test.js[2m > [22mproduction schema invariants[2m > [22mhas no foreign keys on the ledger, so it outlives what it describes[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: an organizer cannot reactivate a withdrawn application (P1-D)[2m > [22mrefuses a single waitlist of a withdrawn application[33m 724[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/backup.test.js[2m > [22mBackup script verification[2m > [22msuccessfully creates a verified backup archive[33m 522[2mms[22m[39m
+[90mstdout[2m | server/routes.applications.test.js[2m > [22m[2mapplications: an organizer cannot reactivate a withdrawn application (P1-D)[2m > [22m[2mrefuses a bulk action that includes a withdrawn application, and touches nothing
+[22m[39m
+=================== EMAIL SENT ===================
+To:      leo.chen28@gmail.com
+Subject: Application accepted - WeVolunteer
+--------------------------------------------------
+Your application for "Withdraw Test" was accepted.
+
+Log in at http://localhost:5173 to see more details.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: an organizer cannot reactivate a withdrawn application (P1-D)[2m > [22mrefuses a bulk action that includes a withdrawn application, and touches nothing[33m 618[2mms[22m[39m
+[90mstdout[2m | server/routes.applications.test.js[2m > [22m[2mapplications: an organizer cannot reactivate a withdrawn application (P1-D)[2m > [22m[2mstill lets the student re-apply themselves
+[22m[39m
+=================== EMAIL SENT ===================
+To:      leo.chen28@gmail.com
+Subject: Application accepted - WeVolunteer
+--------------------------------------------------
+Your application for "Withdraw Test" was accepted.
+
+Log in at http://localhost:5173 to see more details.
+==================================================
+
+
+ [32m✓[39m [30m[42m server [49m[39m server/routes.applications.test.js[2m > [22mapplications: an organizer cannot reactivate a withdrawn application (P1-D)[2m > [22mstill lets the student re-apply themselves[33m 358[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/app.ordering.test.js[2m > [22mproduction middleware ordering (Task 11)[2m > [22m/health returns JSON, never the SPA HTML, in production[32m 3[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/app.ordering.test.js[2m > [22mproduction middleware ordering (Task 11)[2m > [22man unknown /api path still returns a JSON 404 in production[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/app.ordering.test.js[2m > [22mproduction middleware ordering (Task 11)[2m > [22mthe SPA catch-all is present and serving HTML for non-API routes (so the health check is a meaningful test)[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/app.ordering.test.js[2m > [22mCORS scope[2m > [22mserves the SPA even when the request carries an unlisted Origin[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/app.ordering.test.js[2m > [22mCORS scope[2m > [22mstill refuses an API call from an origin that is not allowed[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/app.ordering.test.js[2m > [22mCORS scope[2m > [22mlets an allowed origin through to normal auth handling[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/app.ordering.test.js[2m > [22mCORS scope[2m > [22maccepts a same-origin POST even when that origin is not on the allowlist[32m 0[2mms[22m[39m
+ [32m✓[39m [30m[42m server [49m[39m server/app.ordering.test.js[2m > [22mCORS scope[2m > [22mstill refuses a cross-origin POST[32m 0[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m34 passed[39m[22m[90m (34)[39m
+[2m      Tests [22m [1m[32m298 passed[39m[22m[90m (298)[39m
+[2m   Start at [22m 19:01:35
+[2m   Duration [22m 18.92s[2m (transform 6.13s, setup 11.36s, import 8.06s, tests 98.03s, environment 24.04s)[22m
+

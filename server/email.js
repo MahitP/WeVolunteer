@@ -71,20 +71,204 @@ if (IS_PRODUCTION && !APP_URL) {
   process.exit(1);
 }
 
+export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = null) => {
+  const brandColor = '#0f6b45';
+  const paperColor = '#f7f7f5';
+  const inkColor = '#14231c';
+  const inkMuted = '#66736d';
+  
+  const ctaButtonHTML = ctaText && ctaUrl ? `
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin-top: 24px;">
+      <tr>
+        <td align="left">
+          <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+            <tr>
+              <td>
+                <a href="${ctaUrl}" target="_blank" style="display: inline-block; padding: 12px 24px; font-family: 'Public Sans', sans-serif; font-size: 16px; font-weight: 600; color: #ffffff; background-color: ${brandColor}; text-decoration: none; border-radius: 6px;">${ctaText}</a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  ` : '';
+
+  return `
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="x-apple-disable-message-reformatting">
+  <title>${title}</title>
+  <style>
+    html, body {
+      margin: 0 auto !important;
+      padding: 0 !important;
+      height: 100% !important;
+      width: 100% !important;
+      background: ${paperColor};
+      font-family: 'Public Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+      color: ${inkColor};
+    }
+    * {
+      -ms-text-size-adjust: 100%;
+      -webkit-text-size-adjust: 100%;
+    }
+    table, td {
+      mso-table-lspace: 0pt !important;
+      mso-table-rspace: 0pt !important;
+    }
+    img {
+      -ms-interpolation-mode:bicubic;
+    }
+    a {
+      text-decoration: none;
+      color: ${brandColor};
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    .wrapper {
+      width: 100%;
+      table-layout: fixed;
+      background-color: ${paperColor};
+      padding-bottom: 40px;
+    }
+    .main {
+      background: #ffffff;
+      margin: 0 auto;
+      width: 100%;
+      max-width: 600px;
+      border-radius: 8px;
+      border: 1px solid #e4e7e5;
+      overflow: hidden;
+      margin-top: 40px;
+    }
+    .header {
+      padding: 32px 32px 0 32px;
+      text-align: left;
+    }
+    .brand-mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 48px;
+      height: 48px;
+      background: ${brandColor};
+      color: #ffffff;
+      border-radius: 8px;
+      font-family: 'Bricolage Grotesque', sans-serif;
+      font-weight: 700;
+      font-size: 20px;
+      letter-spacing: -0.5px;
+      text-decoration: none !important;
+    }
+    .content {
+      padding: 24px 32px 32px 32px;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    .content h1 {
+      font-family: 'Bricolage Grotesque', sans-serif;
+      font-size: 24px;
+      font-weight: 600;
+      margin-top: 0;
+      margin-bottom: 16px;
+      color: ${inkColor};
+    }
+    .content p {
+      margin-top: 0;
+      margin-bottom: 16px;
+    }
+    .footer {
+      text-align: center;
+      padding: 24px;
+      font-size: 14px;
+      color: ${inkMuted};
+    }
+    @media (prefers-color-scheme: dark) {
+      html, body {
+        background: #111 !important;
+        color: #eee !important;
+      }
+      .wrapper {
+        background-color: #111 !important;
+      }
+      .main {
+        background: #1e1e1e !important;
+        border-color: #333 !important;
+      }
+      .content h1, .content p {
+        color: #eee !important;
+      }
+      .footer {
+        color: #888 !important;
+      }
+    }
+  </style>
+</head>
+<body width="100%" style="margin: 0; padding: 0 !important; mso-line-height-rule: exactly; background-color: ${paperColor};">
+  <center style="width: 100%; background-color: ${paperColor};">
+    <div class="wrapper">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" width="100%" style="max-width: 600px;">
+        <tr>
+          <td>
+            <table class="main" role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+              <tr>
+                <td class="header">
+                  <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                    <tr>
+                      <td style="background-color: ${brandColor}; border-radius: 8px; width: 48px; height: 48px; text-align: center; vertical-align: middle;">
+                        <span style="color: #ffffff; font-family: 'Arial', sans-serif; font-size: 20px; font-weight: bold; letter-spacing: -0.5px; line-height: 48px;">WV</span>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td class="content">
+                  ${contentHTML}
+                  ${ctaButtonHTML}
+                </td>
+              </tr>
+            </table>
+            
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+              <tr>
+                <td class="footer">
+                  <p style="margin: 0;">&copy; ${new Date().getFullYear()} ${APP_NAME}</p>
+                  <p style="margin: 8px 0 0 0;">This email was sent by ${APP_NAME}.</p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+  </center>
+</body>
+</html>
+  `;
+};
+
 export async function sendVerificationEmail(toEmail, token) {
   const verifyLink = `${APP_URL}/?verify=${encodeURIComponent(token)}`;
   
+  const contentHTML = `
+    <h1>Verify your email</h1>
+    <p>Welcome to <strong>${APP_NAME}</strong>!</p>
+    <p>Please verify your email address by clicking the button below to complete your registration.</p>
+    <p style="color: #66736d; font-size: 14px;">If you did not sign up for an account, please safely ignore this email.</p>
+  `;
+
   const mailOptions = {
     from: EMAIL_FROM,
     to: toEmail,
     subject: `Please verify your email - ${APP_NAME}`,
     text: `Welcome to ${APP_NAME}!\n\nPlease verify your email address by clicking the link below:\n${verifyLink}\n\nIf you did not sign up, please ignore this email.`,
-    html: `
-      <h2>Welcome to ${APP_NAME}!</h2>
-      <p>Please verify your email address by clicking the link below:</p>
-      <p><a href="${verifyLink}">${verifyLink}</a></p>
-      <p>If you did not sign up, please ignore this email.</p>
-    `
+    html: buildHtmlTemplate('Verify your email', contentHTML, 'Verify Email Address', verifyLink)
   };
 
   try {
@@ -99,18 +283,19 @@ export async function sendVerificationEmail(toEmail, token) {
 export async function sendPasswordResetEmail(toEmail, token) {
   const resetLink = `${APP_URL}/?reset=${encodeURIComponent(token)}`;
   
+  const contentHTML = `
+    <h1>Password Reset</h1>
+    <p>We received a request to reset the password for your <strong>${APP_NAME}</strong> account.</p>
+    <p>Click the button below to choose a new password.</p>
+    <p style="color: #66736d; font-size: 14px;">If you did not request a password reset, please safely ignore this email. Your password will not change.</p>
+  `;
+
   const mailOptions = {
     from: EMAIL_FROM,
     to: toEmail,
     subject: `Password Reset - ${APP_NAME}`,
     text: `We received a request to reset your password.\n\nClick the link below to choose a new password:\n${resetLink}\n\nIf you did not request this, please ignore this email.`,
-    html: `
-      <h2>Password Reset</h2>
-      <p>We received a request to reset your password.</p>
-      <p>Click the link below to choose a new password:</p>
-      <p><a href="${resetLink}">${resetLink}</a></p>
-      <p>If you did not request this, please ignore this email.</p>
-    `
+    html: buildHtmlTemplate('Password Reset', contentHTML, 'Reset Password', resetLink)
   };
 
   try {
@@ -122,17 +307,20 @@ export async function sendPasswordResetEmail(toEmail, token) {
   }
 }
 
-export async function sendNotificationEmail(toEmail, subject, text, html) {
+export async function sendNotificationEmail(toEmail, subject, text, htmlContent) {
+  const contentHTML = `
+    <h1>${subject}</h1>
+    <p>${htmlContent || text.replace(/\n/g, '<br/>')}</p>
+  `;
+
+  const loginUrl = APP_URL || 'https://wevolunteer.org';
+
   const mailOptions = {
     from: EMAIL_FROM,
     to: toEmail,
     subject: `${subject} - ${APP_NAME}`,
-    text: `${text}\n\nLog in at ${APP_URL || ''} to see more details.`,
-    html: `
-      <h2>${subject}</h2>
-      <p>${html || text.replace(/\n/g, '<br/>')}</p>
-      <p><a href="${APP_URL || ''}">Log in to your account</a></p>
-    `
+    text: `${text}\n\nLog in at ${loginUrl} to see more details.`,
+    html: buildHtmlTemplate(subject, contentHTML, 'Log in to your account', loginUrl)
   };
 
   try {
@@ -141,5 +329,21 @@ export async function sendNotificationEmail(toEmail, subject, text, html) {
   } catch (err) {
     console.error('Error sending notification email:', err);
     return false;
+  }
+}
+
+export async function sendMail({ to, subject, text, html }) {
+  try {
+    await transporter.sendMail({
+      from: EMAIL_FROM,
+      to,
+      subject,
+      text,
+      html
+    });
+    return true;
+  } catch (err) {
+    console.error('Error sending mail:', err);
+    throw err; // throw to let the worker handle retry
   }
 }

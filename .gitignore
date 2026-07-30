@@ -50,3 +50,6 @@ SignUp Genius/
 *.db-shm
 playwright-report/
 test-results/
+
+# Pilot environment credentials
+docs/operations/pilot-credentials.md

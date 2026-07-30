@@ -1,17 +1,92 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
-import { APP_NAME, PRIVACY_URL, SCHOOL_NAME } from '../config';
-import { AlertCircle, ArrowLeft } from 'lucide-react';
+import { PRIVACY_URL } from '../config';
+import { AlertCircle, ArrowLeft, Mail, Check, X, Loader2, Eye, EyeOff } from 'lucide-react';
+import ProviderButtons from '../components/auth/ProviderButtons';
 
 const AVATARS = ['👤', '🧑‍💻', '👩‍⚕️', '🧑‍🎨', '👩‍🎓', '👩‍💼', '🦁', '🦉', '🦊', '🎨'];
 
-export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
+/**
+ * Password rules, mirroring server/accountValidation.js.
+ *
+ * Duplicated deliberately: the client needs them synchronously on every
+ * keystroke, and the server can never trust the client's opinion. The pairing
+ * is covered by a test that submits a password failing each rule.
+ */
+const PASSWORD_RULES = [
+  { id: 'length', label: 'At least 8 characters', test: p => p.length >= 8 },
+  { id: 'upper', label: 'An uppercase letter', test: p => /[A-Z]/.test(p) },
+  { id: 'lower', label: 'A lowercase letter', test: p => /[a-z]/.test(p) },
+  { id: 'number', label: 'A number', test: p => /[0-9]/.test(p) }
+];
+
+const USERNAME_RULES = [
+  { id: 'length', label: '3–20 characters', test: u => u.length >= 3 && u.length <= 20 },
+  { id: 'charset', label: 'Letters, numbers and underscores only', test: u => /^[a-zA-Z0-9_]+$/.test(u) },
+  { id: 'start', label: 'Starts with a letter', test: u => /^[a-zA-Z]/.test(u) }
+];
+
+/** A live checklist. Colour is never the only signal — the glyph changes too. */
+function RuleList({ rules, value, describedById }) {
+  const touched = value.length > 0;
+  return (
+    <ul className="auth-rules" id={describedById}>
+      {rules.map(rule => {
+        const met = rule.test(value);
+        const state = !touched ? 'idle' : met ? 'met' : 'failed';
+        return (
+          <li key={rule.id} className="auth-rule" data-state={state}>
+            <span className="auth-rule-icon" aria-hidden="true">
+              {state === 'met' ? <Check size={13} /> : state === 'failed' ? <X size={13} /> : '•'}
+            </span>
+            <span>{rule.label}</span>
+            {/* The visible glyph is decorative; this is what a screen reader
+                reads, so the state is never conveyed by colour or icon alone. */}
+            <span className="sr-only">{state === 'met' ? ' — met' : state === 'failed' ? ' — not yet met' : ''}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+export default function Signup({ onSignupSuccess, addToast }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  /** Set when the user arrives here from a provider that had no account yet. */
+  const oauthSignup = location.state?.signupData || null;
+  const providerLabel = oauthSignup?.provider
+    ? oauthSignup.provider.charAt(0).toUpperCase() + oauthSignup.provider.slice(1)
+    : null;
+
+  const [step, setStep] = useState(1);
   const [form, setForm] = useState({
-    name: '', username: '', email: '', password: '', role: 'student',
-    grade: '10', avatar: '👤', bio: '', school: '', skillsInput: '', privacyAccepted: false
+    name: oauthSignup?.name || '',
+    username: '',
+    email: oauthSignup?.email || '',
+    password: '',
+    confirmPassword: '',
+    role: 'student',
+    grade: '10',
+    avatar: '👤',
+    school: '',
+    skillsInput: '',
+    privacyAccepted: false
   });
+
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [usernameStatus, setUsernameStatus] = useState('idle'); // idle|checking|available|taken|unknown
+  const [emailStatus, setEmailStatus] = useState('idle');
+  const [showPassword, setShowPassword] = useState(false);
+  const [method, setMethod] = useState(null); // null | 'email'
+
+  const errorRef = useRef(null);
+  useEffect(() => {
+    if (errors.api && errorRef.current) errorRef.current.focus();
+  }, [errors.api]);
 
   const set = (name, value) => {
     setForm(prev => {
@@ -22,165 +97,459 @@ export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
   };
 
-  const validate = () => {
-    const next = {};
-    if (!form.name.trim()) next.name = 'Enter your full name';
-    
-    if (!form.username.trim()) next.username = 'Choose a username';
-    else if (form.username.length < 3 || form.username.length > 20) next.username = 'Must be between 3 and 20 characters';
-    else if (!/^[a-zA-Z0-9_]+$/.test(form.username)) next.username = 'Letters, numbers, and underscores only';
-    
-    if (!form.email.trim()) next.email = 'Enter your email address';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) next.email = 'That doesn\'t look like an email address';
-    
-    if (!form.password) next.password = 'Choose a password';
-    else if (form.password.length < 8) next.password = 'Use at least 8 characters';
+  const usernameFormatOk = USERNAME_RULES.every(r => r.test(form.username));
 
-    // Only enforced when a notice actually exists to read.
-    if (PRIVACY_URL && !form.privacyAccepted) {
-      next.privacyAccepted = 'Please confirm you have read the privacy notice';
-    }
-    
-    setErrors(next);
-    return Object.keys(next).length === 0;
-  };
+  /* Live availability. Aborts the in-flight probe on each keystroke so a slow
+     early response cannot land after a later one and show a stale verdict. */
+  useEffect(() => {
+    if (!usernameFormatOk) { setUsernameStatus('idle'); return; }
+    setUsernameStatus('checking');
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const data = await api.checkUsername(form.username, controller.signal);
+        setUsernameStatus(data.available ? 'available' : 'taken');
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+        // The check is a convenience, not a gate. If it cannot run we let the
+        // user continue and let the signup POST be the authority — the old
+        // code treated every failure as "unavailable" and blocked the form.
+        setUsernameStatus('unknown');
+      }
+    }, 400);
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [form.username, usernameFormatOk]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!validate()) return;
+  const emailFormatOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email);
+
+  useEffect(() => {
+    if (method !== 'email' || !emailFormatOk) { setEmailStatus('idle'); return; }
+    setEmailStatus('checking');
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const data = await api.checkEmail(form.email, controller.signal);
+        setEmailStatus(data.available ? 'available' : 'taken');
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+        setEmailStatus('unknown');
+      }
+    }, 400);
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [form.email, emailFormatOk, method]);
+
+  /* ── What blocks each step, stated in one place ─────────────────────
+     A disabled button with no explanation is the single most common way a
+     signup form loses someone: they cannot tell whether they missed a field,
+     the page is broken, or they are simply not allowed. Every branch below
+     produces a sentence the user can act on. */
+
+  const detailsBlocker = (() => {
+    if (!form.name.trim()) return 'Enter your full name.';
+    if (!form.username.trim()) return 'Choose a username.';
+    const failed = USERNAME_RULES.find(r => !r.test(form.username));
+    if (failed) return `Username: ${failed.label.toLowerCase()}.`;
+    if (usernameStatus === 'checking') return 'Checking whether that username is free…';
+    if (usernameStatus === 'taken') return 'That username is already taken.';
+    if (PRIVACY_URL && !form.privacyAccepted) return 'Please confirm you have read the privacy notice.';
+    return null;
+  })();
+
+  const emailBlocker = (() => {
+    if (!form.email.trim()) return 'Enter your email address.';
+    if (!emailFormatOk) return 'That does not look like an email address.';
+    if (emailStatus === 'checking') return 'Checking that address…';
+    if (emailStatus === 'taken') return 'An account already uses that address. Sign in instead.';
+    const failed = PASSWORD_RULES.find(r => !r.test(form.password));
+    if (!form.password) return 'Choose a password.';
+    if (failed) return `Password needs: ${failed.label.toLowerCase()}.`;
+    if (form.password !== form.confirmPassword) return 'The two passwords do not match.';
+    return null;
+  })();
+
+  const submit = async (payload, successMessage) => {
     setLoading(true);
+    setErrors({});
     try {
-      const user = await api.signup({
-        name: form.name,
-        username: form.username,
-        email: form.email,
-        password: form.password,
-        role: form.role,
-        grade: form.grade,
-        avatar: form.avatar,
-        bio: form.bio,
-        school: form.role === 'student' ? form.school : form.school || 'Community organization',
-        skills: form.skillsInput.split(',').map(s => s.trim()).filter(Boolean)
-      });
-      addToast(
-        form.role === 'organizer'
-          ? 'Account created. An administrator will review it shortly.'
-          : `Welcome, ${user.name.split(' ')[0]}.`,
-        form.role === 'organizer' ? 'info' : 'success'
-      );
+      const res = await api.signup(payload);
+      if (res.action === 'verification_required') {
+        // Clear the busy flag before switching steps: step 3 reuses `loading`
+        // for its own "Resend the link" button, which would otherwise render
+        // as a disabled "Sending…" from the moment the screen appears.
+        setLoading(false);
+        setStep(3);
+        return;
+      }
+      addToast(successMessage, form.role === 'organizer' ? 'info' : 'success');
       onSignupSuccess();
     } catch (err) {
-      setErrors({ api: err.message || 'We couldn\'t create that account.' });
-    } finally {
+      // The server attributes failures to a field; surface it there as well as
+      // at the top, so the person sees it next to the input they must change.
+      setErrors({
+        api: err.message || 'We could not create that account.',
+        ...(err.data?.field ? { [err.data.field]: err.message } : {})
+      });
+      if (err.data?.field === 'username' || err.data?.field === 'email') setStep(1);
       setLoading(false);
     }
   };
 
+  const baseFields = () => ({
+    name: form.name.trim(),
+    username: form.username.trim(),
+    role: form.role,
+    grade: form.grade,
+    avatar: form.avatar,
+    school: form.role === 'student' ? form.school : (form.school || 'Community organization'),
+    skills: form.skillsInput.split(',').map(s => s.trim()).filter(Boolean)
+  });
+
+  /** Finish a signup that began at a provider — the address is already proven. */
+  const finishProviderSignup = () => submit(
+    { ...baseFields(), email: oauthSignup.email, signupToken: oauthSignup.signupToken },
+    `Welcome, ${form.name.trim().split(' ')[0]}.`
+  );
+
+  /** Start a provider flow, carrying the details already entered. */
+  const startProviderSignup = async (provider) => {
+    setLoading(true);
+    setErrors({});
+    try {
+      // No password crosses this boundary. It used to travel base64'd in the
+      // query string and then sat in the database in plaintext for 15 minutes.
+      const { url } = await api.startOAuth(provider, baseFields());
+      window.location.href = url;
+    } catch (err) {
+      setErrors({ api: err.message || 'We could not start sign-up with that provider.' });
+      setLoading(false);
+    }
+  };
+
+  const submitEmailSignup = (e) => {
+    e.preventDefault();
+    if (emailBlocker) return;
+    submit(
+      { ...baseFields(), email: form.email.trim(), password: form.password },
+      `Welcome, ${form.name.trim().split(' ')[0]}.`
+    );
+  };
+
+  const handleDetailsSubmit = (e) => {
+    e.preventDefault();
+    if (detailsBlocker) return;
+    if (oauthSignup) finishProviderSignup();
+    else setStep(2);
+  };
+
   const isStudent = form.role === 'student';
 
+  const apiError = errors.api && (
+    <div className="alert alert-danger" role="alert" tabIndex={-1} ref={errorRef} style={{ marginBottom: 'var(--s4)' }}>
+      <AlertCircle size={16} aria-hidden="true" />
+      <span>{errors.api}</span>
+    </div>
+  );
+
+  /* ── Step 3: confirm your address ─────────────────────────────────── */
+  if (step === 3) {
+    return (
+      <div className="auth">
+        <main className="auth-form auth-form-narrow auth-centered" aria-labelledby="check-heading">
+          <div className="auth-icon" aria-hidden="true"><Mail size={26} /></div>
+          <h1 id="check-heading" className="auth-title">Confirm your email</h1>
+          <p className="auth-subtitle">
+            We sent a link to <strong>{form.email}</strong>. Open it to finish setting up your
+            account — it expires in 24 hours.
+          </p>
+          <div className="auth-actions stack-sm">
+            <button
+              className="btn btn-secondary btn-block btn-lg"
+              disabled={loading}
+              onClick={async () => {
+                setLoading(true);
+                try {
+                  await api.resendVerification();
+                  addToast('Sent again. Give it a minute to arrive.', 'success');
+                } catch (err) {
+                  addToast(err.message || 'Could not resend that link.', 'error');
+                } finally {
+                  setLoading(false);
+                }
+              }}
+            >
+              {loading ? 'Sending…' : 'Resend the link'}
+            </button>
+            <button className="btn btn-ghost btn-block" onClick={() => navigate('/login')}>
+              Back to sign in
+            </button>
+          </div>
+          <p className="auth-footer">
+            Wrong address? Check your spam folder first, then sign in and update it in Settings.
+          </p>
+        </main>
+      </div>
+    );
+  }
+
+  /* ── Step 2: how will you sign in? ────────────────────────────────── */
+  if (step === 2) {
+    return (
+      <div className="auth">
+        <main className="auth-form auth-form-narrow" aria-labelledby="method-heading">
+          <button className="auth-back" onClick={() => { setStep(1); setErrors({}); }}>
+            <ArrowLeft size={16} aria-hidden="true" /> Edit your details
+          </button>
+
+          <div className="auth-head">
+            <h1 id="method-heading" className="auth-title">How will you sign in?</h1>
+            <p className="auth-subtitle">
+              {method === 'email'
+                ? 'We will send a link to confirm the address is yours.'
+                : 'Pick one. You can add another way to sign in later from Settings.'}
+            </p>
+          </div>
+
+          {apiError}
+
+          {method !== 'email' ? (
+            <>
+              <ProviderButtons
+                onSelect={startProviderSignup}
+                disabled={loading}
+                labelFor={label => `Sign up with ${label}`}
+              />
+              <div className="auth-divider" role="separator">or</div>
+              <button
+                className="btn btn-secondary btn-lg btn-block"
+                onClick={() => setMethod('email')}
+                disabled={loading}
+              >
+                <Mail size={18} aria-hidden="true" />
+                <span>Use an email address and password</span>
+              </button>
+            </>
+          ) : (
+            <form onSubmit={submitEmailSignup} className="stack-md" noValidate>
+              <div className="field">
+                <label htmlFor="su-email">Email address</label>
+                <div className="input-affix">
+                  <Mail size={16} aria-hidden="true" />
+                  <input
+                    id="su-email"
+                    name="email"
+                    type="email"
+                    className="input input-lg"
+                    autoComplete="email"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    value={form.email}
+                    placeholder="you@example.com"
+                    onChange={e => set('email', e.target.value)}
+                    aria-invalid={emailStatus === 'taken' || (form.email.length > 0 && !emailFormatOk)}
+                    aria-describedby="su-email-status"
+                    required
+                    autoFocus
+                  />
+                </div>
+                {/* Polite, so it is announced after the character the user just
+                    typed rather than interrupting them mid-word. */}
+                <span
+                  id="su-email-status"
+                  className="auth-status"
+                  role="status"
+                  aria-live="polite"
+                  data-state={
+                    emailStatus === 'available' ? 'ok'
+                      : emailStatus === 'taken' || (form.email.length > 0 && !emailFormatOk) ? 'error'
+                        : 'pending'
+                  }
+                >
+                  {!form.email ? 'We will send a confirmation link here.'
+                    : !emailFormatOk ? <><X size={13} aria-hidden="true" /> That does not look like an email address</>
+                      : emailStatus === 'checking' ? <><Loader2 size={13} aria-hidden="true" /> Checking…</>
+                        : emailStatus === 'available' ? <><Check size={13} aria-hidden="true" /> That address is free</>
+                          : emailStatus === 'taken' ? <><X size={13} aria-hidden="true" /> Already registered — sign in instead</>
+                            : 'We will send a confirmation link here.'}
+                </span>
+              </div>
+
+              <div className="field">
+                <label htmlFor="su-password">Create a password</label>
+                <div className="input-affix">
+                  <input
+                    id="su-password"
+                    name="new-password"
+                    type={showPassword ? 'text' : 'password'}
+                    className="input input-lg"
+                    /* new-password, not password: this is what tells a manager
+                       to offer to generate and save one rather than autofill
+                       an existing credential. */
+                    autoComplete="new-password"
+                    value={form.password}
+                    placeholder="At least 8 characters"
+                    onChange={e => set('password', e.target.value)}
+                    aria-describedby="su-password-rules"
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="btn-icon-right"
+                    onClick={() => setShowPassword(v => !v)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-pressed={showPassword}
+                  >
+                    {showPassword ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+                  </button>
+                </div>
+                <RuleList rules={PASSWORD_RULES} value={form.password} describedById="su-password-rules" />
+              </div>
+
+              <div className="field">
+                <label htmlFor="su-confirm">Confirm password</label>
+                <input
+                  id="su-confirm"
+                  name="confirm-password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="input input-lg"
+                  autoComplete="new-password"
+                  value={form.confirmPassword}
+                  placeholder="Type it again"
+                  onChange={e => set('confirmPassword', e.target.value)}
+                  aria-invalid={form.confirmPassword.length > 0 && form.password !== form.confirmPassword}
+                  aria-describedby="su-confirm-status"
+                  required
+                />
+                <span id="su-confirm-status" className="auth-status" aria-live="polite"
+                  data-state={!form.confirmPassword ? 'pending' : form.password === form.confirmPassword ? 'ok' : 'error'}>
+                  {!form.confirmPassword ? ''
+                    : form.password === form.confirmPassword
+                      ? <><Check size={13} aria-hidden="true" /> Passwords match</>
+                      : <><X size={13} aria-hidden="true" /> Passwords do not match yet</>}
+                </span>
+              </div>
+
+              <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={loading || !!emailBlocker}>
+                {loading ? 'Creating your account…' : 'Create account'}
+              </button>
+              <span className="auth-hint" role="status" aria-live="polite">
+                {emailBlocker || ''}
+              </span>
+
+              <button type="button" className="auth-link" onClick={() => setMethod(null)} disabled={loading}>
+                Use Google or Microsoft instead
+              </button>
+            </form>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  /* ── Step 1: who are you? ─────────────────────────────────────────── */
   return (
     <div className="auth">
-      <aside className="auth-pitch">
-        <div className="brand">
-          <span className="brand-mark">WV</span>
-          <span className="brand-text">
-            <span className="brand-name">{APP_NAME}</span>
-            <span className="brand-sub">{SCHOOL_NAME}</span>
-          </span>
-        </div>
-        <div>
-          <h1>Join the volunteer network.</h1>
-          <p style={{ marginTop: 'var(--s4)', opacity: 0.82, maxWidth: '38ch' }}>
-            Students track service hours automatically. Organizers run their sign-ups in one place.
-          </p>
-        </div>
-      </aside>
-
-      <main className="auth-form">
-        <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-start', marginBottom: 'var(--s4)' }} onClick={onBackToLogin}>
-          <ArrowLeft size={14} /> Back to sign in
+      <main className="auth-form auth-form-wide" aria-labelledby="signup-heading">
+        <button className="auth-back" onClick={() => navigate('/welcome')}>
+          <ArrowLeft size={16} aria-hidden="true" /> Back
         </button>
 
-        <h1>Create your account</h1>
-        <p className="lead" style={{ marginTop: 4, marginBottom: 'var(--s6)' }}>
-          Takes about a minute.
-        </p>
+        <div className="auth-head">
+          <h1 id="signup-heading" className="auth-title">Create your account</h1>
+          <p className="auth-subtitle">
+            {oauthSignup
+              ? `Signing up with ${providerLabel} as ${oauthSignup.email}. Just a few details and you're in.`
+              : 'A few details first — then you choose how to sign in.'}
+          </p>
+        </div>
 
-        {errors.api && (
-          <div className="alert alert-danger" style={{ marginBottom: 'var(--s4)' }} role="alert">
-            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>{errors.api}</span>
-          </div>
-        )}
+        {apiError}
 
-        <form onSubmit={handleSubmit}>
-          {/* Role first — it changes what else we ask for */}
-          <div className="field">
-            <span className="label">I'm signing up as</span>
+        <form onSubmit={handleDetailsSubmit} className="stack-md" noValidate>
+          {/* A radio group needs a fieldset and legend to be announced as a
+              group; a <span className="label"> is read as loose text, so a
+              screen-reader user hears two unrelated options. */}
+          <fieldset className="field" style={{ border: 'none', padding: 0, margin: 0 }}>
+            <legend className="label">I'm signing up as</legend>
             <div className="stack-sm">
               <label className="check" data-checked={isStudent ? 'true' : 'false'}>
-                <input type="radio" name="role" checked={isStudent} onChange={() => set('role', 'student')} />
+                <input type="radio" name="role" value="student" checked={isStudent} onChange={() => set('role', 'student')} />
                 <span>
                   <span className="check-title">A volunteer</span>
                   <span className="check-desc">Find shifts and track your service hours.</span>
                 </span>
               </label>
               <label className="check" data-checked={!isStudent ? 'true' : 'false'}>
-                <input type="radio" name="role" checked={!isStudent} onChange={() => set('role', 'organizer')} />
+                <input type="radio" name="role" value="organizer" checked={!isStudent} onChange={() => set('role', 'organizer')} />
                 <span>
                   <span className="check-title">An organizer</span>
-                  <span className="check-desc">Post events and manage volunteers. Needs staff approval.</span>
+                  <span className="check-desc">Post events and manage volunteers. A school administrator approves this before you can post.</span>
                 </span>
               </label>
             </div>
-          </div>
+          </fieldset>
 
           <div className="field">
             <label htmlFor="su-name">Full name</label>
             <input
-              id="su-name" className="input" value={form.name} placeholder="Alex Rivera"
-              aria-invalid={!!errors.name} onChange={e => set('name', e.target.value)} required
+              id="su-name"
+              name="name"
+              className="input input-lg"
+              autoComplete="name"
+              autoCapitalize="words"
+              value={form.name}
+              placeholder="Alex Rivera"
+              aria-invalid={!!errors.name}
+              onChange={e => set('name', e.target.value)}
+              required
             />
-            {errors.name && <span className="field-error"><AlertCircle size={12} />{errors.name}</span>}
+            {errors.name && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.name}</span>}
           </div>
 
           <div className="field">
             <label htmlFor="su-username">Username</label>
-            <input
-              id="su-username" className="input" value={form.username} placeholder="alex_r"
-              aria-invalid={!!errors.username} onChange={e => set('username', e.target.value)} required
-            />
-            {errors.username
-              ? <span className="field-error"><AlertCircle size={12} />{errors.username}</span>
-              : <span className="field-hint">This will be your public alias. Avoid using your real name if you prefer privacy.</span>}
-          </div>
-
-          <div className="field">
-            <label htmlFor="su-email">Email address</label>
-            <input
-              id="su-email" type="email" className="input" value={form.email} placeholder="you@example.com"
-              aria-invalid={!!errors.email} onChange={e => set('email', e.target.value)} required
-            />
-            {errors.email && <span className="field-error"><AlertCircle size={12} />{errors.email}</span>}
-          </div>
-
-          <div className="field">
-            <label htmlFor="su-pass">Password</label>
-            <input
-              id="su-pass" type="password" className="input" value={form.password} placeholder="••••••••"
-              autoComplete="new-password"
-              aria-invalid={!!errors.password} onChange={e => set('password', e.target.value)} required
-            />
-            {errors.password
-              ? <span className="field-error"><AlertCircle size={12} />{errors.password}</span>
-              : <span className="field-hint">At least 6 characters.</span>}
+            <div className="input-affix">
+              <input
+                id="su-username"
+                name="username"
+                className="input input-lg"
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck="false"
+                value={form.username}
+                placeholder="alex_r"
+                aria-invalid={usernameStatus === 'taken' || !!errors.username}
+                aria-describedby="su-username-rules su-username-status"
+                onChange={e => set('username', e.target.value)}
+                required
+              />
+            </div>
+            <RuleList rules={USERNAME_RULES} value={form.username} describedById="su-username-rules" />
+            <span
+              id="su-username-status"
+              className="auth-status"
+              role="status"
+              aria-live="polite"
+              data-state={usernameStatus === 'available' ? 'ok' : usernameStatus === 'taken' ? 'error' : 'pending'}
+            >
+              {usernameStatus === 'checking' ? <><Loader2 size={13} aria-hidden="true" /> Checking availability…</>
+                : usernameStatus === 'available' ? <><Check size={13} aria-hidden="true" /> That username is available</>
+                  : usernameStatus === 'taken' ? <><X size={13} aria-hidden="true" /> That username is already taken</>
+                    : usernameStatus === 'unknown' ? 'We could not check that right now — you can still continue.'
+                      : ''}
+            </span>
+            {/* Regression: errors.username was computed and never rendered, so
+                a server-side username rejection was invisible on this field. */}
+            {errors.username && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.username}</span>}
           </div>
 
           <div className="field-row">
             {isStudent && (
-              <div className="field" style={{ marginTop: 0 }}>
+              <div className="field" style={{ flex: 1 }}>
                 <label htmlFor="su-grade">Grade</label>
-                <select id="su-grade" className="select" value={form.grade} onChange={e => set('grade', e.target.value)}>
+                <select id="su-grade" name="grade" className="select input-lg" value={form.grade} onChange={e => set('grade', e.target.value)}>
                   <option value="9">9th grade</option>
                   <option value="10">10th grade</option>
                   <option value="11">11th grade</option>
@@ -189,97 +558,85 @@ export default function Signup({ onSignupSuccess, onBackToLogin, addToast }) {
                 </select>
               </div>
             )}
-            <div className="field" style={{ marginTop: 0 }}>
-              <label htmlFor="su-school">{isStudent ? 'School' : 'Organization'}</label>
+            <div className="field" style={{ flex: 2 }}>
+              <label htmlFor="su-school">{isStudent ? 'School' : 'Organization'} <span className="dim">(optional)</span></label>
               <input
-                id="su-school" className="input" value={form.school}
-                placeholder={isStudent ? 'e.g. Your High School' : 'e.g. Local Public Library'}
+                id="su-school"
+                name="organization"
+                className="input input-lg"
+                autoCapitalize="words"
+                value={form.school}
+                placeholder={isStudent ? 'e.g. South Brunswick High School' : 'e.g. South Brunswick Public Library'}
                 onChange={e => set('school', e.target.value)}
               />
             </div>
           </div>
 
-          <div className="field">
-            <span className="label">Pick an avatar</span>
+          <fieldset className="field" style={{ border: 'none', padding: 0, margin: 0 }}>
+            <legend className="label">Pick an avatar</legend>
             <div className="choicegrid">
               {AVATARS.map(av => (
                 <button
-                  key={av} type="button" className="choice"
-                  aria-pressed={form.avatar === av} aria-label={`Avatar ${av}`}
+                  key={av}
+                  type="button"
+                  className="choice"
+                  aria-pressed={form.avatar === av}
+                  aria-label={`Avatar ${av}`}
                   onClick={() => set('avatar', av)}
                 >
                   {av}
                 </button>
               ))}
             </div>
-          </div>
+          </fieldset>
 
           <div className="field">
-            <label htmlFor="su-skills">Skills</label>
+            <label htmlFor="su-skills">Skills <span className="dim">(optional)</span></label>
             <input
-              id="su-skills" className="input" value={form.skillsInput}
+              id="su-skills"
+              name="skills"
+              className="input input-lg"
+              value={form.skillsInput}
               placeholder="Tutoring, first aid, cooking"
+              aria-describedby="su-skills-hint"
               onChange={e => set('skillsInput', e.target.value)}
             />
-            <span className="field-hint">
-              Separate with commas. We use these to suggest events that fit you.
-            </span>
+            <span id="su-skills-hint" className="field-hint">Separate with commas. Organizers use these when choosing volunteers.</span>
           </div>
 
-          <div className="field">
-            <label htmlFor="su-bio">About you <span className="dim" style={{ fontWeight: 400 }}>(optional)</span></label>
-            <textarea
-              id="su-bio" className="textarea" value={form.bio}
-              placeholder="A sentence organizers will see when you apply."
-              onChange={e => set('bio', e.target.value)}
-            />
-          </div>
-
-          {!isStudent && (
-            <div className="alert alert-info" style={{ marginTop: 'var(--s4)' }}>
-              <span>
-                <span className="alert-title">Organizer accounts are reviewed.</span>{' '}
-                You can sign in right away, but you'll be able to post events once a school administrator approves you.
-              </span>
-            </div>
-          )}
-
-          {/* Renders only when the district has published a privacy notice and
-              its URL is configured (VITE_PRIVACY_URL). Deliberately no fallback
-              text: a consent checkbox pointing at nothing would manufacture the
-              appearance of a reviewed policy where none exists, which is worse
-              than asking for no consent at all. */}
           {PRIVACY_URL && (
-            <div className="field row" style={{ alignItems: 'flex-start', gap: 12, marginTop: 'var(--s5)' }}>
+            <div className="field row">
               <input
                 id="su-privacy"
                 type="checkbox"
                 checked={form.privacyAccepted}
                 onChange={e => set('privacyAccepted', e.target.checked)}
                 aria-invalid={!!errors.privacyAccepted}
-                style={{ marginTop: 4 }}
+                style={{ width: 20, height: 20, marginTop: 4 }}
               />
-              <div className="stack-xs">
-                <label htmlFor="su-privacy" style={{ margin: 0 }}>
+              <div className="stack-xs" style={{ flex: 1 }}>
+                <label htmlFor="su-privacy" style={{ cursor: 'pointer' }}>
                   I have read the{' '}
-                  <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--brand)', textDecoration: 'underline' }}>
-                    privacy notice
-                  </a>
+                  <a className="auth-link" href={PRIVACY_URL} target="_blank" rel="noopener noreferrer">privacy notice</a>
                 </label>
-                <span className="field-hint">
-                  It explains what {APP_NAME} collects, who can see it, and how to have it removed.
-                </span>
-                {errors.privacyAccepted && (
-                  <span className="field-error"><AlertCircle size={12} />{errors.privacyAccepted}</span>
-                )}
+                {errors.privacyAccepted && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.privacyAccepted}</span>}
               </div>
             </div>
           )}
 
-          <button type="submit" className="btn btn-primary btn-lg btn-block" style={{ marginTop: 'var(--s5)' }} disabled={loading}>
-            {loading ? 'Creating account…' : 'Create account'}
-          </button>
+          <div style={{ marginTop: 'var(--s4)' }}>
+            <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={loading || !!detailsBlocker}>
+              {oauthSignup ? (loading ? 'Creating your account…' : 'Create account') : 'Continue'}
+            </button>
+            {/* Always says why, never leaves the user staring at a dead button. */}
+            <span className="auth-hint" role="status" aria-live="polite">{detailsBlocker || ''}</span>
+          </div>
         </form>
+
+        <p className="auth-footer">
+          Already have an account?{' '}
+          <button className="auth-link" onClick={() => navigate('/login')}>Sign in</button>
+        </p>
       </main>
     </div>
   );

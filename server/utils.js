@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { db } from './db.js';
+import { notificationService } from './services/notificationService.js';
 import { sendNotificationEmail } from './email.js';
 import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST, COOKIE_NAME } from './config.js';
 
@@ -16,10 +17,12 @@ export function authenticateToken(req, res, next) {
     // trusting the (up to 7-day-old) token payload, so a deleted user's
     // token stops working and a role/email change takes effect immediately.
     const userRow = db.prepare(
-      'SELECT id, role, email, name, email_verified, token_version FROM users WHERE id = ?'
+      'SELECT id, role, email, name, email_verified, token_version, account_status FROM users WHERE id = ?'
     ).get(decodedUser.id);
 
     if (!userRow) return res.status(401).json({ error: 'Account no longer exists' });
+    if (userRow.account_status === 'deleted') return res.status(401).json({ error: 'Account has been deleted' });
+    if (userRow.account_status === 'suspended') return res.status(403).json({ error: 'Account is suspended' });
 
     if ((decodedUser.tokenVersion ?? 0) !== userRow.token_version) {
       return res.status(401).json({ error: 'Session expired, please sign in again' });
@@ -72,6 +75,7 @@ export function formatUserResponse(row) {
     emailVerified: row.email_verified === 1,
     leaderboardOptIn: row.leaderboard_opt_in === 1,
     emailOptOut: row.email_opt_out === 1,
+    hasPassword: row.password_hash !== '!OAUTH_ONLY!',
     avatar: row.avatar,
     volunteeredHours: totalHours,
     bio: row.bio,
@@ -174,6 +178,7 @@ export function runNotificationSweep() {
   const now = new Date();
   const in48h = new Date(now.getTime() + 48 * 3600 * 1000).toISOString();
   const in24h = new Date(now.getTime() + 24 * 3600 * 1000).toISOString();
+  const in2h = new Date(now.getTime() + 2 * 3600 * 1000).toISOString();
   let created = 0;
 
   try {
@@ -192,14 +197,13 @@ export function runNotificationSweep() {
     `).all(now.toISOString(), in48h);
 
     for (const row of closingSoon) {
-      if (createNotification({
-        userId: row.user_id,
-        kind: 'deadline',
-        title: 'Applications close soon',
-        body: `"${row.title}" stops accepting applications ${countdownPhrase(row.application_deadline)}.`,
-        link: `event:${row.event_id}`,
-        dedupeKey: `deadline:${row.event_id}`
-      })) created++;
+      if (notificationService.dispatch('EVENT_DEADLINE_APPROACHING', {
+        eventId: row.event_id,
+        eventTitle: row.title,
+        countdownPhrase: countdownPhrase(row.application_deadline)
+      }, row.user_id, `deadline:${row.event_id}`)) {
+        created++;
+      }
     }
 
     // Shift starting within 24h for confirmed volunteers
@@ -216,35 +220,40 @@ export function runNotificationSweep() {
     `).all(now.toISOString(), in24h);
 
     for (const row of upcoming) {
-      if (createNotification({
-        userId: row.user_id,
-        kind: 'reminder',
-        title: 'Your shift is tomorrow',
-        body: `${row.title} — ${row.slot_name} at ${row.location}.`,
-        link: `event:${row.event_id}`,
-        dedupeKey: `reminder:${row.slot_id}`
-      })) created++;
+      if (notificationService.dispatch('EVENT_REMINDER_24H', {
+        eventId: row.event_id,
+        eventTitle: row.title,
+        slotName: row.slot_name,
+        location: row.location
+      }, row.user_id, `reminder-24h:${row.slot_id}`)) {
+        created++;
+      }
     }
 
-    // ── Deadline passed, applicants still waiting ──────────────────────────
-    //
-    // Nothing in this system selects volunteers on its own. Auto Select is
-    // manual-trigger-only and there is no scheduler for it, so an organizer who
-    // forgets leaves applicants sitting in `pending` for ever — never accepted,
-    // never rejected, and never told anything. From the student's side that is
-    // indistinguishable from being ignored, which for a volunteer programme is
-    // the most expensive failure available.
-    //
-    // This tells the organizer, once per event. It deliberately does NOT run
-    // the draw: Auto Select is run-and-confirm so a human reviews the result
-    // before it becomes real, and automating that would remove a control that
-    // exists on purpose. Notify, don't decide.
-    //
-    // Only 'open' and 'closed' events qualify — a completed event is finished
-    // and a cancelled one has nothing to staff. Pending counts only ever fall
-    // after a deadline (applications are refused past it), so one notification
-    // per event is the whole story; the dedupe key keeps the 15-minute sweep
-    // from repeating it.
+    // Shift starting within 2h for confirmed volunteers
+    const upcoming2h = db.prepare(`
+      SELECT a.user_id, e.id as event_id, e.title, e.location, s.id as slot_id,
+             s.name as slot_name, s.start_datetime
+      FROM applications a
+      JOIN slots s ON a.slot_id = s.id
+      JOIN events e ON a.event_id = e.id
+      WHERE a.status = 'accepted'
+        AND e.status != 'cancelled'
+        AND s.start_datetime > ?
+        AND s.start_datetime <= ?
+    `).all(now.toISOString(), in2h);
+
+    for (const row of upcoming2h) {
+      if (notificationService.dispatch('EVENT_REMINDER_2H', {
+        eventId: row.event_id,
+        eventTitle: row.title,
+        slotName: row.slot_name,
+        location: row.location
+      }, row.user_id, `reminder-2h:${row.slot_id}`)) {
+        created++;
+      }
+    }
+
     const stalled = db.prepare(`
       SELECT e.id AS event_id, e.title, e.organizer_id, e.auto_approve,
              COUNT(a.id) AS pending_count
@@ -262,16 +271,29 @@ export function runNotificationSweep() {
         ? 'Run Auto Select to choose volunteers.'
         : 'Review them and choose who is accepted.';
 
-      if (createNotification({
-        userId: row.organizer_id,
-        kind: 'deadline',
-        title: 'Applications closed — your decision is needed',
-        body: `"${row.title}" stopped accepting applications and ${applicants} `
-            + `${n === 1 ? 'is' : 'are'} still waiting to hear back. ${nextStep}`,
-        link: `event:${row.event_id}`,
-        dedupeKey: `awaiting-decision:${row.event_id}`
-      })) created++;
+      if (notificationService.dispatch('DECISION_NEEDED', {
+        eventId: row.event_id,
+        eventTitle: row.title,
+        applicantsText: applicants + (n === 1 ? ' is' : ' are'),
+        nextStep
+      }, row.organizer_id, `awaiting-decision:${row.event_id}`)) {
+        created++;
+      }
     }
+    
+    // Phase 1 Audit: Retention Cleanup
+    // Delete NORMAL and LOW priority notifications older than 30 days.
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 3600 * 1000).toISOString();
+    const cleanupResult = db.prepare(`
+      DELETE FROM notifications 
+      WHERE priority IN ('NORMAL', 'LOW') 
+        AND created_at < ?
+    `).run(thirtyDaysAgo);
+    
+    if (cleanupResult.changes > 0) {
+      console.log(`[Notifications] Cleaned up ${cleanupResult.changes} expired notifications.`);
+    }
+
   } catch (err) {
     console.error('Notification sweep failed:', err);
   }
@@ -290,18 +312,17 @@ export function countdownPhrase(iso) {
 }
 
 /** Notify every confirmed volunteer on an event. Returns how many were told. */
-export function notifyConfirmedVolunteers(eventId, { kind, title, body, dedupeKey = null }) {
+export function notifyConfirmedVolunteers(eventId, event, payload, dedupeKey = null) {
   const recipients = db.prepare(`
     SELECT DISTINCT user_id FROM applications
     WHERE event_id = ? AND status = 'accepted'
   `).all(eventId);
   let sent = 0;
+  
   for (const r of recipients) {
-    if (createNotification({
-      userId: r.user_id, kind, title, body,
-      link: `event:${eventId}`,
-      dedupeKey: dedupeKey ? `${dedupeKey}:${r.user_id}` : null
-    })) sent++;
+    if (notificationService.dispatch(event, payload, r.user_id, dedupeKey ? `${dedupeKey}:${r.user_id}` : null)) {
+      sent++;
+    }
   }
   return sent;
 }
@@ -327,22 +348,18 @@ export function handleWaitlistPromotion(slotId, eventId, eventTitle, organizerId
     const slotName = slot ? slot.name : 'Shift';
 
     // Notify promoted student
-    createNotification({
-      userId: nextInLine.user_id,
-      kind: 'promoted',
-      title: 'Promoted from waitlist!',
-      body: `A spot opened up. You have been promoted to accepted for "${eventTitle}" — ${slotName}!`,
-      link: `event:${eventId}`
-    });
+    notificationService.dispatch('WAITLIST_PROMOTED', {
+      eventId,
+      eventTitle
+    }, nextInLine.user_id);
 
     // Notify organizer of promotion
-    createNotification({
-      userId: organizerId,
-      kind: 'application',
-      title: 'Waitlist promotion occurred',
-      body: `${nextInLine.volunteer_name} was automatically promoted from the waitlist for "${eventTitle}" — ${slotName}.`,
+    // We don't have a specific event for this yet, so we use SYSTEM / default info mapping
+    notificationService.dispatch('SYSTEM', {
+      title: 'Waitlist promotion automatic',
+      body: `A spot opened up in "${eventTitle}" and ${nextInLine.volunteer_name} was automatically promoted from the waitlist.`,
       link: `event:${eventId}`
-    });
+    }, organizerId);
 
     // Shift ranks of remaining waitlisted applications for this slot
     const remaining = db.prepare(`

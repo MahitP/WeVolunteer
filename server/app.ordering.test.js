@@ -66,10 +66,12 @@ function bootProdAndProbe() {
         spaCT: spa.headers.get('content-type') || '',
         spaWithOriginStatus: spaWithOrigin.status,
         spaWithOriginCT: spaWithOrigin.headers.get('content-type') || '',
+        spaBody: await spa.text(),
         apiForeignOriginStatus: apiForeignOrigin.status,
         apiAllowedOriginStatus: apiAllowedOrigin.status,
         apiSameOriginPostStatus: apiSameOriginPost.status,
-        apiForeignPostStatus: apiForeignPost.status
+        apiForeignPostStatus: apiForeignPost.status,
+        spaWithOriginBody: await spaWithOrigin.text(),
       }));
       server.close();
     `], {
@@ -87,6 +89,7 @@ function bootProdAndProbe() {
       stdio: 'pipe',
       encoding: 'utf8'
     });
+    console.log("Subprocess output:\n", out);
     const line = out.split('\n').find(l => l.startsWith('RESULT'));
     return JSON.parse(line.slice('RESULT'.length));
   } finally {

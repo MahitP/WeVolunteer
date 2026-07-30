@@ -140,6 +140,16 @@ export default function EventShiftsTab({
                             {slot.applicantCount} applied
                           </span>
                         )}
+                        {(isOwner || isAdmin) && (
+                          <a 
+                            href={`/api/events/${event.id}/slots/${slot.id}/ics`} 
+                            className="btn btn-ghost btn-sm" 
+                            style={{ marginTop: 4 }}
+                            download
+                          >
+                            Add to Calendar
+                          </a>
+                        )}
                       </div>
                       {isStudent ? (
                         mine ? (
@@ -156,6 +166,15 @@ export default function EventShiftsTab({
                                 rejected: 'Not accepted'
                               }[mine.status]}
                             </span>
+                            {mine.status === 'accepted' && (
+                              <a 
+                                href={`/api/events/${event.id}/slots/${slot.id}/ics`} 
+                                className="btn btn-secondary btn-sm" 
+                                download
+                              >
+                                Add to Calendar
+                              </a>
+                            )}
                             {(mine.status === 'accepted' || mine.status === 'pending' || mine.status === 'waitlisted') && (
                               <button className="btn btn-ghost btn-sm"
                                 disabled={submitting}
@@ -184,7 +203,7 @@ export default function EventShiftsTab({
 
       {selectedSlots.length > 0 && (
         <div style={{ marginTop: 'var(--s4)' }} className="row-between">
-          <button className="btn btn-primary" onClick={sendApplication} disabled={submitting}>
+          <button className="btn btn-primary" onClick={() => sendApplication()} disabled={submitting}>
             {submitting ? 'Sending…' : `Send application for ${selectedSlots.length} shift${selectedSlots.length !== 1 ? 's' : ''}`}
           </button>
           <span className="small dim">

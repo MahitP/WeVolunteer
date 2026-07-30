@@ -7,7 +7,7 @@ import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearC
 
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
 import { db, initDatabase } from '../db.js';
-import { validateAccountFields, validatePassword, validateUsername, validateEmail } from '../accountValidation.js';
+import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
 
 const router = express.Router();
@@ -16,7 +16,7 @@ const router = express.Router();
 const OAUTH_ONLY = '!OAUTH_ONLY!';
 
 /**
- * Per-identifier login throttle.
+ * Per-ACCOUNT login throttle.
  *
  * app.js already limits sign-in attempts per source address, which stops one
  * machine grinding through a password list. It does nothing about the opposite
@@ -24,31 +24,41 @@ const OAUTH_ONLY = '!OAUTH_ONLY!';
  * known account. That is the shape that actually takes over accounts, and on a
  * school platform the target list is guessable — first.last@district.org.
  *
- * So failures are also counted against the identifier that was tried. The
- * counter is in-process, which is the right size for a single-process
+ * The counter is in-process, which is the right size for a single-process
  * deployment and degrades to per-instance if that ever changes; it is a
  * hardening layer over the IP limiter, not the only thing standing there.
  *
  * A successful sign-in clears the count, so a person who remembers their
  * password on the sixth try is never locked out by the first five.
+ *
+ * ── Keyed on the resolved account, not on what was typed ──
+ *
+ * This used to key on the identifier string, which meant an account reachable
+ * as both `leo.chen@school.org` and `leochen` had two independent buckets and
+ * therefore twice the allowance — an attacker just alternated spellings. The
+ * limit is a property of the account being attacked, so the key has to be too.
+ *
+ * Attempts against an identifier that matches no account still need a bucket
+ * (there is no id to key on), so those fall back to the normalised string under
+ * a separate prefix. They can never collide with a real account's bucket.
  */
 const LOGIN_FAILURE_LIMIT = Number(process.env.LOGIN_FAILURE_LIMIT) || 10;
 const LOGIN_FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const loginFailures = new Map();
 
-function failureKey(identifier) {
-  return String(identifier).trim().toLowerCase();
+/** Bucket key for a resolved account, or for an identifier that matched none. */
+function throttleKey(userRow, identifier) {
+  return userRow ? `id:${userRow.id}` : `anon:${String(identifier).trim().toLowerCase()}`;
 }
 
-function loginLockState(identifier) {
-  const entry = loginFailures.get(failureKey(identifier));
+function loginLockState(key) {
+  const entry = loginFailures.get(key);
   if (!entry || entry.until <= Date.now()) return { locked: false };
   if (entry.count < LOGIN_FAILURE_LIMIT) return { locked: false };
   return { locked: true, minutes: Math.max(1, Math.ceil((entry.until - Date.now()) / 60000)) };
 }
 
-function recordLoginFailure(identifier) {
-  const key = failureKey(identifier);
+function recordLoginFailure(key) {
   const now = Date.now();
   const entry = loginFailures.get(key);
   if (!entry || entry.until <= now) {
@@ -66,8 +76,9 @@ function recordLoginFailure(identifier) {
   }
 }
 
-function clearLoginFailures(identifier) {
-  loginFailures.delete(failureKey(identifier));
+/** Clears an account's bucket. Takes the user id, not a typed identifier. */
+function clearLoginFailuresForUser(userId) {
+  loginFailures.delete(`id:${userId}`);
 }
 
 /** Test seam: lets a suite exercise the throttle without leaking state between cases. */
@@ -293,9 +304,29 @@ router.post('/api/auth/login', (req, res) => {
     ).get(identifier, identifier);
 
     const looksLikeEmail = identifier.includes('@');
+    const key = throttleKey(userRow, identifier);
+
+    /**
+     * The lock is checked FIRST, before any branch that describes the account.
+     *
+     * It used to sit just above the bcrypt comparison, below the
+     * no_such_account / suspended / oauth_only replies — so a caller who had
+     * already been locked out could still read all three of those oracles at
+     * will, and attempts against identifiers matching no account were never
+     * gated at all. A lock that only covers the password comparison is not a
+     * lock on the endpoint.
+     */
+    const lock = loginLockState(key);
+    if (lock.locked) {
+      return res.status(429).json({
+        error: `Too many failed attempts for this account. Try again in about ${lock.minutes} minute${lock.minutes === 1 ? '' : 's'}, or reset your password.`,
+        code: 'account_throttled',
+        retryAfterMinutes: lock.minutes
+      });
+    }
 
     if (!userRow || userRow.account_status === 'deleted') {
-      recordLoginFailure(identifier);
+      recordLoginFailure(key);
       return res.status(401).json({
         error: GENERIC_LOGIN_ERRORS
           ? GENERIC_MESSAGE
@@ -318,6 +349,10 @@ router.post('/api/auth/login', (req, res) => {
      * sentinel in password_hash. compareSync against that just returns false,
      * so without this branch the user was told their password was wrong — for
      * an account that has never had one, with no hint about what to do.
+     *
+     * Not counted as a failure: it is not a password guess, and counting it
+     * would let anyone lock a provider-only account out of a route it cannot
+     * use anyway.
      */
     if (userRow.password_hash === OAUTH_ONLY) {
       const linked = db.prepare('SELECT provider FROM oauth_accounts WHERE user_id = ?').all(userRow.id);
@@ -331,24 +366,15 @@ router.post('/api/auth/login', (req, res) => {
       });
     }
 
-    const lock = loginLockState(identifier);
-    if (lock.locked) {
-      return res.status(429).json({
-        error: `Too many failed attempts for this account. Try again in about ${lock.minutes} minute${lock.minutes === 1 ? '' : 's'}, or reset your password.`,
-        code: 'account_throttled',
-        retryAfterMinutes: lock.minutes
-      });
-    }
-
     if (!bcrypt.compareSync(password, userRow.password_hash)) {
-      recordLoginFailure(identifier);
+      recordLoginFailure(key);
       return res.status(401).json({
         error: GENERIC_LOGIN_ERRORS ? GENERIC_MESSAGE : 'Incorrect password.',
         code: 'wrong_password'
       });
     }
 
-    clearLoginFailures(identifier);
+    clearLoginFailuresForUser(userRow.id);
 
     const user = formatUserResponse(userRow);
     issueSession(res, user, userRow.token_version);
@@ -495,6 +521,35 @@ router.delete('/api/auth/account', authenticateToken, (req, res) => {
         }
       }
 
+      /**
+       * 1b. Release every commitment the account still holds.
+       *
+       * Deletion previously touched only the user row and its preferences, so a
+       * deleted volunteer stayed `accepted` on tomorrow's shift: they occupied a
+       * spot nobody could fill, they still counted towards the slot's capacity,
+       * and an anonymised name sat on the organizer's roster for an event being
+       * staffed that week. Withdrawing is the same state a person reaches by
+       * pulling out themselves, so nothing downstream has to learn a new one.
+       *
+       * `attendance` is deliberately untouched — that is the verified service
+       * record, and the delete dialog promises the user it is preserved.
+       */
+      const releasedEvents = db.prepare(`
+        SELECT DISTINCT a.event_id, e.organizer_id, e.title
+        FROM applications a
+        JOIN events e ON a.event_id = e.id
+        JOIN slots s ON a.slot_id = s.id
+        WHERE a.user_id = ?
+          AND a.status IN ('pending', 'waitlisted', 'accepted')
+          AND s.start_datetime > datetime('now')
+          AND e.status NOT IN ('completed', 'cancelled')
+      `).all(req.user.id);
+
+      db.prepare(`
+        UPDATE applications SET status = 'withdrawn', waitlist_order = NULL
+        WHERE user_id = ? AND status IN ('pending', 'waitlisted', 'accepted')
+      `).run(req.user.id);
+
       // 2. Delete preferences
       db.prepare('DELETE FROM notification_preferences WHERE user_id = ?').run(req.user.id);
       db.prepare('DELETE FROM user_favorites WHERE user_id = ?').run(req.user.id);
@@ -522,10 +577,37 @@ router.delete('/api/auth/account', authenticateToken, (req, res) => {
       `).run(anonymizedName, deletedEmail, deletedUsername, now, req.user.id);
 
       // 4. Audit Log
+      //
+      // randomUUID, not Date.now(): two deletions in the same millisecond
+      // collided on this PRIMARY KEY, which rolled the transaction back and
+      // failed the whole deletion with a 500 for both people.
       db.prepare(`
         INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
-      `).run(`audit-${Date.now()}`, req.user.id, 'ACCOUNT_DELETED', req.user.id, 'User self-deleted their account', now);
+      `).run(`audit-${crypto.randomUUID()}`, req.user.id, 'ACCOUNT_DELETED', req.user.id, 'User self-deleted their account', now);
+
+      /**
+       * 5. Tell the organizers who were counting on this person.
+       *
+       * Inside the transaction so a rollback cannot leave organizers notified
+       * about a deletion that did not happen. Notifying is what makes the
+       * withdrawal above actionable — a spot silently freeing up on an event
+       * three days out is not much better than a spot silently held.
+       */
+      for (const ev of releasedEvents) {
+        db.prepare(`
+          INSERT INTO notifications (id, user_id, kind, title, body, link, read, created_at)
+          VALUES (?, ?, 'info', ?, ?, ?, 0, ?)
+        `).run(
+          `notif-${crypto.randomUUID()}`,
+          ev.organizer_id,
+          'A volunteer left an upcoming event',
+          `Someone deleted their account and has been withdrawn from "${ev.title}". `
+            + `Check the roster — a spot may now be open.`,
+          `event:${ev.event_id}`,
+          now
+        );
+      }
     });
 
     res.clearCookie(COOKIE_NAME, clearCookieOptions());
@@ -547,19 +629,36 @@ router.delete('/api/auth/account', authenticateToken, (req, res) => {
  */
 router.post('/api/auth/forgot-password', async (req, res) => {
   const { email } = req.body;
+  // Deliberately vague about *where* it was sent as well as about whether it
+  // was: a username lookup must not disclose the address behind it.
   const SAME_ANSWER = {
     success: true,
-    message: 'If that address has an account, a reset link is on its way.'
+    message: 'If that matches an account, a reset link is on its way to its email address.'
   };
 
-  if (!email) return res.status(400).json({ error: 'Email is required' });
+  if (!email) return res.status(400).json({ error: 'Enter your email address or username.' });
 
   try {
-    // COLLATE NOCASE: someone typing Leo.Chen@… who registered leo.chen@…
-    // should still get their mail, not silence.
-    const user = db.prepare(
-      "SELECT id, email FROM users WHERE email = ? COLLATE NOCASE AND account_status = 'active'"
-    ).get(String(email).trim());
+    /**
+     * Matches an email address OR a username.
+     *
+     * The sign-in field above it accepts either, and the "Forgot?" link carries
+     * whatever was typed there straight into this form. So a student who signs
+     * in with their username — which the product actively encourages — typed it
+     * here, was told "a reset link is on its way", and no mail was ever sent.
+     * A recovery flow that silently does nothing is worse than one that is
+     * missing, because the person stops looking for another way in.
+     *
+     * The response is identical either way, so this widens no enumeration
+     * surface. COLLATE NOCASE on both: someone typing Leo.Chen@… who registered
+     * leo.chen@… should get their mail, not silence.
+     */
+    const identifier = String(email).trim();
+    const user = db.prepare(`
+      SELECT id, email FROM users
+      WHERE (email = ? COLLATE NOCASE OR username = ? COLLATE NOCASE)
+        AND account_status = 'active'
+    `).get(identifier, identifier);
 
     if (user) {
       const token = crypto.randomBytes(32).toString('hex');
@@ -646,8 +745,10 @@ router.post('/api/auth/reset-password', (req, res) => {
       db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(row.user_id);
     }
 
-    clearLoginFailures(userRow.email);
-    if (userRow.username) clearLoginFailures(userRow.username);
+    // Someone who has just proved control of their mailbox and chosen a new
+    // password should not then meet a lockout earned by whoever was guessing.
+    // One call now covers both identifiers, because the bucket is per account.
+    clearLoginFailuresForUser(row.user_id);
 
     res.json({ success: true });
   } catch (err) {
@@ -846,6 +947,22 @@ if (DEMO_MODE) {
       db.exec('DROP TABLE IF EXISTS applications');
       db.exec('DROP TABLE IF EXISTS slots');
       db.exec('DROP TABLE IF EXISTS events');
+      /**
+       * The auth-adjacent tables have to go with the users they reference.
+       *
+       * They were left behind, so after a reset a previously-linked Google
+       * account still matched its stale `oauth_accounts` row, found no user
+       * behind it, and was told "That account was deleted. You can create a new
+       * one." — a dead end on the OAuth path, reached by pressing the reset
+       * button the demo puts in front of everyone. Live password-reset and
+       * confirmation tokens pointing at vanished user ids were the same class of
+       * leftover.
+       */
+      db.exec('DROP TABLE IF EXISTS oauth_accounts');
+      db.exec('DROP TABLE IF EXISTS oauth_signup_sessions');
+      db.exec('DROP TABLE IF EXISTS email_verification_tokens');
+      db.exec('DROP TABLE IF EXISTS password_reset_tokens');
+      db.exec('DROP TABLE IF EXISTS email_change_tokens');
       db.exec('DROP TABLE IF EXISTS users');
 
       initDatabase();
@@ -1075,21 +1192,42 @@ router.get('/api/organizers/:id/profile', authenticateToken, (req, res) => {
 
 router.patch('/api/auth/profile', authenticateToken, (req, res) => {
   try {
-    const { name, avatar, bio, school, skills, grade, leaderboardOptIn, emailOptOut } = req.body;
+    const { grade, leaderboardOptIn, emailOptOut } = req.body;
+
+    /**
+     * The text fields go through the same validator signup uses.
+     *
+     * This handler previously called `name.trim()` on an unvalidated value — so
+     * a non-string `name` threw and answered 500 — accepted `"   "` as a
+     * display name, and applied no length or type limit to bio, school or
+     * avatar, all three of which are bounded at signup.
+     */
+    const check = validateProfilePatch(req.body);
+    if (!check.ok) {
+      return res.status(400).json({ error: check.error, field: check.field });
+    }
+
     const updates = [];
     const values = [];
 
-    if (name !== undefined) { updates.push('name = ?'); values.push(name.trim()); }
-    if (avatar !== undefined) { updates.push('avatar = ?'); values.push(avatar); }
-    if (bio !== undefined) { updates.push('bio = ?'); values.push(bio); }
-    if (school !== undefined) { updates.push('school = ?'); values.push(school); }
+    for (const [column, value] of [
+      ['name', check.value.name],
+      ['avatar', check.value.avatar],
+      ['bio', check.value.bio],
+      ['school', check.value.school]
+    ]) {
+      if (value !== undefined) { updates.push(`${column} = ?`); values.push(value); }
+    }
+    if (check.value.skills !== undefined) {
+      updates.push('skills = ?'); values.push(JSON.stringify(check.value.skills));
+    }
+
     if (grade !== undefined) {
       if (!VALID_GRADES.includes(grade)) {
-        return res.status(400).json({ error: `Grade must be one of: ${VALID_GRADES.join(', ')}` });
+        return res.status(400).json({ error: `Grade must be one of: ${VALID_GRADES.join(', ')}`, field: 'grade' });
       }
       updates.push('grade = ?'); values.push(grade);
     }
-    if (skills !== undefined) { updates.push('skills = ?'); values.push(JSON.stringify(skills || [])); }
     if (leaderboardOptIn !== undefined) { updates.push('leaderboard_opt_in = ?'); values.push(leaderboardOptIn ? 1 : 0); }
     if (emailOptOut !== undefined) { updates.push('email_opt_out = ?'); values.push(emailOptOut ? 1 : 0); }
 

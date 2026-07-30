@@ -1,0 +1,133 @@
+<h2>How should context-aware Messages feel?</h2>
+<p class="subtitle">Each option keeps conversations one-to-one, but changes what the list emphasizes first: person, event, or action.</p>
+
+<div class="cards">
+  <div class="card" data-choice="event-first" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A. Event-first inbox</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:38% 62%;gap:12px;min-height:300px">
+          <div class="mock-sidebar" style="padding:10px">
+            <div class="mock-input" style="margin-bottom:10px">Search events or messages</div>
+            <div style="background:#ecfdf3;border:1px solid #bbf7d0;border-radius:10px;padding:10px;margin-bottom:8px">
+              <strong>Community Food Drive</strong>
+              <p style="margin:4px 0 0;font-size:12px">South Brunswick Food Pantry</p>
+              <p style="margin:8px 0 0;font-size:12px">Jacquelyn: Closed-toe shoes...</p>
+            </div>
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin-bottom:8px">
+              <strong>Library Book Sale</strong>
+              <p style="margin:4px 0 0;font-size:12px">SB Public Library</p>
+              <p style="margin:8px 0 0;font-size:12px">Mahit: I can arrive at 8:45.</p>
+            </div>
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px">
+              <strong>Garden Cleanup</strong>
+              <p style="margin:4px 0 0;font-size:12px">Green Team</p>
+              <p style="margin:8px 0 0;font-size:12px">Organizer: Start moved to...</p>
+            </div>
+          </div>
+          <div class="mock-content" style="padding:0;display:flex;flex-direction:column">
+            <div style="border-bottom:1px solid #e5e7eb;padding:12px">
+              <strong>Community Food Drive</strong>
+              <p style="margin:4px 0 0;font-size:12px">Organizer: South Brunswick Food Pantry • Sat Jul 18 • 9:00 AM</p>
+            </div>
+            <div style="flex:1;padding:14px;display:flex;flex-direction:column;gap:10px">
+              <div style="align-self:flex-start;background:#f3f4f6;border-radius:14px;padding:10px;max-width:70%">Thanks for applying. Remember closed-toe shoes.</div>
+              <div style="align-self:flex-end;background:#0f6b45;color:white;border-radius:14px;padding:10px;max-width:70%">Sounds good, thank you!</div>
+            </div>
+            <div style="border-top:1px solid #e5e7eb;padding:10px"><div class="mock-input">Message about Community Food Drive...</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Event-first</h3>
+      <p>The inbox reads like a coordination ledger. Best for making “what is this about?” instant, even months later.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="person-plus-context" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B. Person + context inbox</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:38% 62%;gap:12px;min-height:300px">
+          <div class="mock-sidebar" style="padding:10px">
+            <div class="mock-input" style="margin-bottom:10px">Search people or events</div>
+            <div style="background:#ecfdf3;border:1px solid #bbf7d0;border-radius:10px;padding:10px;margin-bottom:8px">
+              <strong>Jacquelyn Katzenback</strong>
+              <p style="margin:4px 0 0;font-size:12px">Community Food Drive</p>
+              <p style="margin:8px 0 0;font-size:12px">Remember closed-toe shoes...</p>
+            </div>
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin-bottom:8px">
+              <strong>Robert Miller</strong>
+              <p style="margin:4px 0 0;font-size:12px">Library Book Sale</p>
+              <p style="margin:8px 0 0;font-size:12px">Can you arrive at 8:45?</p>
+            </div>
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px">
+              <strong>System Admin</strong>
+              <p style="margin:4px 0 0;font-size:12px">Account help</p>
+              <p style="margin:8px 0 0;font-size:12px">Your transcript was updated.</p>
+            </div>
+          </div>
+          <div class="mock-content" style="padding:0;display:flex;flex-direction:column">
+            <div style="border-bottom:1px solid #e5e7eb;padding:12px">
+              <strong>Jacquelyn Katzenback</strong>
+              <p style="margin:4px 0 0;font-size:12px">Community Food Drive • Organizer • last active recently</p>
+            </div>
+            <div style="flex:1;padding:14px;display:flex;flex-direction:column;gap:10px">
+              <div style="align-self:flex-start;background:#f3f4f6;border-radius:14px;padding:10px;max-width:70%">Thanks for applying. Remember closed-toe shoes.</div>
+              <div style="align-self:flex-end;background:#0f6b45;color:white;border-radius:14px;padding:10px;max-width:70%">Sounds good, thank you!</div>
+            </div>
+            <div style="border-top:1px solid #e5e7eb;padding:10px"><div class="mock-input">Message Jacquelyn...</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. Person + context</h3>
+      <p>Feels closer to Teams or Google Chat. The person is primary, with the event as a visible subtitle.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="action-focused" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C. Action-focused inbox</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:38% 62%;gap:12px;min-height:300px">
+          <div class="mock-sidebar" style="padding:10px">
+            <div class="mock-input" style="margin-bottom:10px">Search messages</div>
+            <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:10px;margin-bottom:8px">
+              <strong>Needs reply</strong>
+              <p style="margin:4px 0 0;font-size:12px">Community Food Drive</p>
+              <p style="margin:8px 0 0;font-size:12px">Can you confirm arrival time?</p>
+            </div>
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin-bottom:8px">
+              <strong>Schedule change</strong>
+              <p style="margin:4px 0 0;font-size:12px">Garden Cleanup</p>
+              <p style="margin:8px 0 0;font-size:12px">Start moved to 9:30 AM.</p>
+            </div>
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px">
+              <strong>All set</strong>
+              <p style="margin:4px 0 0;font-size:12px">Library Book Sale</p>
+              <p style="margin:8px 0 0;font-size:12px">Thank you!</p>
+            </div>
+          </div>
+          <div class="mock-content" style="padding:0;display:flex;flex-direction:column">
+            <div style="border-bottom:1px solid #e5e7eb;padding:12px">
+              <strong>Needs reply: Community Food Drive</strong>
+              <p style="margin:4px 0 0;font-size:12px">Jacquelyn Katzenback • Sat Jul 18 • 9:00 AM</p>
+            </div>
+            <div style="flex:1;padding:14px;display:flex;flex-direction:column;gap:10px">
+              <div style="align-self:flex-start;background:#f3f4f6;border-radius:14px;padding:10px;max-width:70%">Can you confirm you can arrive by 8:45?</div>
+              <div style="align-self:flex-end;background:#0f6b45;color:white;border-radius:14px;padding:10px;max-width:70%">Yes, I can.</div>
+            </div>
+            <div style="border-top:1px solid #e5e7eb;padding:10px"><div class="mock-input">Reply...</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. Action-focused</h3>
+      <p>Most task-oriented, but risks inventing workflow semantics before WeVolunteer has message classification.</p>
+    </div>
+  </div>
+</div>

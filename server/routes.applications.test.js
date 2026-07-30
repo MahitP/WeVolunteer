@@ -78,13 +78,15 @@ describe('applications: bulk organizer actions', () => {
   // Builds a fresh Auto Select event with one slot of the given capacity, has
   // `applicants` seeded students apply, and returns their pending application
   // ids. Auto Select (auto_approve) so a demotion exercises waitlist promotion.
+  let eventOffset = 30; // Increment this so seeded events don't overlap
   const seedEvent = async (maxSpots, applicants) => {
     orgToken = await srv.login('jkatzenback@vikings.org');
-    const future = new Date(Date.now() + 30 * 864e5).toISOString();
-    const futureEnd = new Date(Date.now() + 30 * 864e5 + 108e5).toISOString();
+    eventOffset += 1;
+    const future = new Date(Date.now() + eventOffset * 864e5).toISOString();
+    const futureEnd = new Date(Date.now() + eventOffset * 864e5 + 108e5).toISOString();
     const mk = await srv.call('POST', '/api/events', {
       title: 'Bulk Test', description: 'd', category: 'Other', location: 'Hall',
-      applicationDeadline: new Date(Date.now() + 20 * 864e5).toISOString(), autoApprove: true,
+      applicationDeadline: new Date(Date.now() + (eventOffset - 10) * 864e5).toISOString(), autoApprove: true,
       slots: [{ name: 'Shift', description: 'd', startDatetime: future, endDatetime: futureEnd, maxSpots }]
     }, orgToken);
     const evId = mk.body.id;
@@ -253,5 +255,76 @@ describe('applications: an organizer cannot reactivate a withdrawn application (
     const res = await srv.call('POST', `/api/events/${evId}/apply`, { slotId: slot.id }, studentToken);
     expect(res.status).toBe(201);
     expect(await currentStatus()).toBe('pending');
+  });
+
+  describe('Schedule Conflicts', () => {
+    it('prevents applying for an overlapping shift', async () => {
+      const stToken = await srv.login('leo.chen28@gmail.com');
+      const oToken = await srv.login('jkatzenback@vikings.org');
+
+      // Create first event
+      const res1 = await srv.call('POST', '/api/events', {
+        title: 'Morning Shift', description: 'desc', category: 'Other', location: 'Hall',
+        applicationDeadline: new Date(Date.now() + 2 * 864e5).toISOString(),
+        slots: [{ name: 'Slot A', description: 'desc', startDatetime: new Date(Date.now() + 5 * 864e5).toISOString(), endDatetime: new Date(Date.now() + 5 * 864e5 + 7200e3).toISOString(), maxSpots: 5 }]
+      }, oToken);
+      const ev1 = res1.body.id;
+      const slot1 = (await srv.call('GET', '/api/events', undefined, oToken)).body.find(e => e.id === ev1).slots[0];
+
+      // Apply and get accepted
+      await srv.call('POST', `/api/events/${ev1}/apply`, { slotId: slot1.id }, stToken);
+      const app1 = (await srv.call('GET', '/api/applications', undefined, oToken)).body.find(a => a.eventId === ev1).id;
+      await srv.call('PATCH', `/api/applications/${app1}`, { status: 'accepted' }, oToken);
+
+      // Create overlapping event
+      const res2 = await srv.call('POST', '/api/events', {
+        title: 'Overlapping Shift', description: 'desc', category: 'Other', location: 'Hall',
+        applicationDeadline: new Date(Date.now() + 2 * 864e5).toISOString(),
+        slots: [{ name: 'Slot B', description: 'desc', startDatetime: new Date(Date.now() + 5 * 864e5 + 3600e3).toISOString(), endDatetime: new Date(Date.now() + 5 * 864e5 + 10800e3).toISOString(), maxSpots: 5 }]
+      }, oToken);
+      const ev2 = res2.body.id;
+      const slot2 = (await srv.call('GET', '/api/events', undefined, oToken)).body.find(e => e.id === ev2).slots[0];
+
+      // Attempt to apply
+      const conflictRes = await srv.call('POST', `/api/events/${ev2}/apply`, { slotId: slot2.id }, stToken);
+      expect(conflictRes.status).toBe(409);
+      expect(conflictRes.body.error).toBe('Schedule conflict detected');
+      expect(conflictRes.body.conflict).toBeDefined();
+    });
+
+    it('allows applying for an overlapping shift if overrideConflict is true', async () => {
+      const stToken = await srv.login('leo.chen28@gmail.com');
+      const oToken = await srv.login('jkatzenback@vikings.org');
+
+      // Create first event
+      const res1 = await srv.call('POST', '/api/events', {
+        title: 'Morning Shift 2', description: 'desc', category: 'Other', location: 'Hall',
+        applicationDeadline: new Date(Date.now() + 2 * 864e5).toISOString(),
+        slots: [{ name: 'Slot A2', description: 'desc', startDatetime: new Date(Date.now() + 5 * 864e5).toISOString(), endDatetime: new Date(Date.now() + 5 * 864e5 + 7200e3).toISOString(), maxSpots: 5 }]
+      }, oToken);
+      const ev1 = res1.body.id;
+      const slot1 = (await srv.call('GET', '/api/events', undefined, oToken)).body.find(e => e.id === ev1).slots[0];
+
+      // Apply
+      await srv.call('POST', `/api/events/${ev1}/apply`, { slotId: slot1.id }, stToken);
+
+      // Create overlapping event
+      const res2 = await srv.call('POST', '/api/events', {
+        title: 'Overlapping Shift 2', description: 'desc', category: 'Other', location: 'Hall',
+        applicationDeadline: new Date(Date.now() + 2 * 864e5).toISOString(),
+        slots: [{ name: 'Slot B2', description: 'desc', startDatetime: new Date(Date.now() + 5 * 864e5 + 3600e3).toISOString(), endDatetime: new Date(Date.now() + 5 * 864e5 + 10800e3).toISOString(), maxSpots: 5 }]
+      }, oToken);
+      const ev2 = res2.body.id;
+      const slot2 = (await srv.call('GET', '/api/events', undefined, oToken)).body.find(e => e.id === ev2).slots[0];
+
+      // Override the conflict
+      const overrideRes = await srv.call('POST', `/api/events/${ev2}/apply`, { slotId: slot2.id, overrideConflict: true }, stToken);
+      expect(overrideRes.status).toBe(201);
+      
+      // Verify conflict logged in GET /applications
+      const allApps = (await srv.call('GET', '/api/applications', undefined, oToken)).body;
+      const conflictApp = allApps.find(a => a.eventId === ev2 && a.hasConflict === true);
+      expect(conflictApp).toBeDefined();
+    });
   });
 });
