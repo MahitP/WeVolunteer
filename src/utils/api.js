@@ -310,6 +310,112 @@ export const api = {
   fetchEventsPage: async ({ limit = 50, offset = 0 } = {}) =>
     apiFetch(`/api/events?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`),
 
+  /**
+   * Walks every page of the event list, reporting each page as it arrives.
+   *
+   * This is what the app uses instead of one unbounded request. The win is
+   * time-to-first-paint: the dashboard and browse list can render from page one
+   * while the rest arrives, rather than waiting on a single response that was
+   * measured at 690 KB uncompressed for 503 events.
+   *
+   * It deliberately still ends up holding every event. The client uses the list
+   * as a complete index — the calendar resolves each application to its event,
+   * the organizer dashboard filters for its own events, and opening an event from
+   * a notification looks it up by id — and BrowseEvents filters and sorts on the
+   * client. Server-side pagination cannot compose with client-side filtering:
+   * a search over "the pages loaded so far" silently returns the wrong answer.
+   * Fixing the memory ceiling too needs the filtering to move server-side, which
+   * is a larger change than this one.
+   *
+   * @param {object}   opts
+   * @param {number}   opts.pageSize     rows per request (server clamps at EVENTS_MAX_LIMIT)
+   * @param {function} opts.onPage       (eventsSoFar, pagination) after each page
+   * @param {function} opts.shouldContinue  return false to abandon the walk
+   * @returns {Promise<object[]>} every event, in server order
+   */
+  fetchEventsProgressive: async ({ pageSize = 500, onPage, shouldContinue } = {}) => {
+    /**
+     * First page sequentially, the rest in parallel.
+     *
+     * A purely sequential walk was measured as a REGRESSION, not a win: at 502
+     * events one unbounded request took ~17 ms and three sequential pages took
+     * ~62 ms. The byte saving was irrelevant because compression had already
+     * taken the full list to 6.7 KB — so the walk was paying N round trips for
+     * nothing. On a 200 ms mobile RTT that is 600 ms instead of 200 ms, and at
+     * 10,000 events it would have been fifty sequential trips.
+     *
+     * The first page still arrives after one round trip, which is what makes the
+     * screen usable early. `total` comes back with it, so every remaining offset
+     * is known immediately and they are fetched concurrently — completion costs
+     * two round trips rather than N.
+     *
+     * Concurrency is capped because browsers allow only ~6 connections per host
+     * on HTTP/1.1; requesting fifty at once would queue them anyway and starve
+     * the rest of the app's traffic behind them.
+     */
+    const CONCURRENCY = 5;
+    const MAX_PAGES = 200;
+
+    const get = (offset) => apiFetch(
+      `/api/events?limit=${encodeURIComponent(pageSize)}&offset=${encodeURIComponent(offset)}`
+    );
+
+    if (shouldContinue && !shouldContinue()) return [];
+
+    const first = await get(0);
+
+    // Tolerate the legacy bare-array shape: against an older server this
+    // degrades to a single request rather than throwing.
+    if (Array.isArray(first)) {
+      onPage?.(first, { total: first.length, hasMore: false, nextOffset: null });
+      return first;
+    }
+
+    const pagination = first.pagination || {};
+    const all = [...(first.events || [])];
+    onPage?.(all.slice(), pagination);
+
+    if (pagination.nextOffset == null) return all;
+
+    // Every remaining offset, derived from the total the first page reported.
+    const total = Number(pagination.total) || all.length;
+    const step = Number(pagination.limit) || pageSize;
+    const offsets = [];
+    for (let o = pagination.nextOffset; o < total && offsets.length < MAX_PAGES; o += step) {
+      offsets.push(o);
+    }
+
+    // Results are placed by index, so assembly order does not depend on which
+    // request settles first.
+    const pages = new Array(offsets.length).fill(null);
+    let cursor = 0;
+
+    const worker = async () => {
+      while (cursor < offsets.length) {
+        if (shouldContinue && !shouldContinue()) return;
+        const mine = cursor++;
+        const res = await get(offsets[mine]);
+        pages[mine] = Array.isArray(res) ? res : (res.events || []);
+
+        // Report the longest complete prefix, so the list only ever grows and
+        // never briefly shows a gap where an in-flight page will land.
+        let prefix = all.slice();
+        for (const p of pages) {
+          if (!p) break;
+          prefix = prefix.concat(p);
+        }
+        onPage?.(prefix, pagination);
+      }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, offsets.length) }, worker));
+
+    if (shouldContinue && !shouldContinue()) return all;
+
+    for (const p of pages) if (p) all.push(...p);
+    return all;
+  },
+
   fetchEventDetails: async (eventId) => apiFetch(`/api/events/${eventId}`),
 
   createEvent: async (eventData) => apiFetch('/api/events', {

@@ -149,9 +149,50 @@ export default function App() {
     }
   }, [activeTab]);
 
-  const refreshEvents = async () => {
-    try { setEvents(await api.fetchEvents()); } catch (err) { console.error('Failed to refresh events:', err); }
+  /**
+   * Whether an event load is still filling in, so screens can say so rather
+   * than looking finished while pages are still arriving.
+   */
+  const [eventsLoading, setEventsLoading] = useState(false);
+
+  /**
+   * Discards a superseded load.
+   *
+   * Two refreshes can overlap — a socket event and a manual action, or a
+   * StrictMode double-invoke — and a progressive load applies state after every
+   * page. Without a generation check, an older walk's later pages would land on
+   * top of a newer walk's results and the list would flicker back to stale data.
+   * Each load captures the generation it started in and stops applying the moment
+   * it is no longer current.
+   */
+  const eventsLoadGeneration = useRef(0);
+
+  const loadEvents = async () => {
+    const generation = ++eventsLoadGeneration.current;
+    const isCurrent = () => eventsLoadGeneration.current === generation;
+
+    setEventsLoading(true);
+    try {
+      await api.fetchEventsProgressive({
+        // The server's maximum, deliberately. A deployment whose whole event list
+        // fits in one page makes exactly one request — identical to the behaviour
+        // this replaced — so paging costs nothing until the data is genuinely
+        // large. See EVENTS_MAX_LIMIT in server/routes/eventRoutes.js for the
+        // measurements behind that.
+        pageSize: 500,
+        shouldContinue: isCurrent,
+        // Applied per page, so the first screenful renders without waiting for
+        // the whole table. `slice()` because the accumulator is mutated in place.
+        onPage: (eventsSoFar) => { if (isCurrent()) setEvents(eventsSoFar.slice()); }
+      });
+    } catch (err) {
+      console.error('Failed to refresh events:', err);
+    } finally {
+      if (isCurrent()) setEventsLoading(false);
+    }
   };
+
+  const refreshEvents = loadEvents;
 
   const refreshApplications = async () => {
     try { setApplications(await api.fetchApplications()); } catch (err) { console.error('Failed to refresh applications:', err); }
@@ -202,17 +243,31 @@ export default function App() {
        * degrades to empty state and says so.
        */
       try {
-        const promises = [api.fetchEvents(), api.fetchApplications()];
+        /**
+         * Events load progressively; applications and favourites do not.
+         *
+         * `loadEvents` applies state after each page, so it is started rather
+         * than awaited alongside the others — awaiting it here would put the
+         * whole walk back on the critical path and undo the reason for paging.
+         * The small fixed-size fetches still run in parallel with it.
+         */
+        const eventsDone = loadEvents();
+
+        const promises = [api.fetchApplications()];
         if (user.role === 'student') {
           promises.push(api.fetchFavorites().catch(() => []));
         }
-
-        const [evs, apps, favs] = await Promise.all(promises);
-        setEvents(evs);
+        const [apps, favs] = await Promise.all(promises);
         setApplications(apps);
         if (user.role === 'student' && favs) {
           setFavorites(favs.map(f => f.event_id || f.eventId));
         }
+
+        // Awaited last so the session-check spinner clears on a complete index —
+        // the calendar and dashboards resolve applications against it, and
+        // showing them a half-filled list would render a wrong calendar rather
+        // than an incomplete one.
+        await eventsDone;
       } catch (err) {
         console.error('Failed to load page data:', err);
         addToast('Some of your information could not be loaded. Reload to try again.', 'error');
@@ -680,6 +735,10 @@ export default function App() {
                   onViewDetails={openEventById}
                   favorites={favorites}
                   onToggleFavorite={handleToggleFavorite}
+                  /* Events arrive a page at a time, so the list can be
+                     legitimately incomplete while it renders. Saying so is the
+                     difference between "no results" and "not finished yet". */
+                  isLoadingMore={eventsLoading}
                 />
               } />
               
