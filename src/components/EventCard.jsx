@@ -50,7 +50,11 @@ export default function EventCard({
     text: 'Full'
   } : null;
   const status = myStatus || eventStatus;
-  return <article className={`eventcard ${isOpen ? '' : 'is-closed'}`}>
+  // data-windowed-item lets useWindowedRows measure a real card's height rather
+  // than assuming one — card height varies with content and with the user's
+  // font-size preference.
+  return (
+    <article className={`eventcard ${isOpen ? '' : 'is-closed'}`} data-windowed-item>
       <div className="eventcard-top">
         <DateChip iso={event.startDatetime} />
         {/* min-width:0 (not .truncate) so the title can clamp to two lines
@@ -110,5 +114,6 @@ export default function EventCard({
           {myApps.length ? 'View sign-up' : isOpen ? 'View shifts' : 'View details'}
         </button>
       </div>
-    </article>;
+    </article>
+  );
 }
