@@ -36,7 +36,7 @@ says so. Where something is a recommendation rather than a fact about the code,
 it says that too.
 
 > **Scope note.** This document does not implement anything. The Product Quality
-> Roadmap (`docs/plans/2026-07-25-product-quality-roadmap.md`) is
+> Roadmap (`docs/history/2026-07-25-product-quality-roadmap.md`) is
 > written but **not implemented**; several of its findings appear below as
 > operational risks precisely because they are still open.
 
@@ -2892,7 +2892,7 @@ passed.**
 
 Only risks that genuinely remain at `8604fe3`, after the Phase 1–3 hardening
 work. Items closed by that work are **not** listed. Roadmap references point to
-`docs/plans/2026-07-25-product-quality-roadmap.md`, which is written
+`docs/history/2026-07-25-product-quality-roadmap.md`, which is written
 but **not implemented**.
 
 ### High
