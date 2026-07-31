@@ -1341,21 +1341,23 @@ when they are done, not when they become uncomfortable to look at.
 
 ### Low
 
-#### TD-6 — `internal tooling scratch/` artifacts tracked
+#### TD-6 — editor and tooling scratch directories are no longer ignored
 
-- **Detail:** 5 tracked files, 8,400 bytes total, and `internal tooling scratch/` is **not**
-  gitignored, so more will accumulate:
-  - `internal tooling scratch/brainstorm/51970-…/state/server.pid` — stale PID `51970`
-  - `internal tooling scratch/brainstorm/52186-…/state/server.pid` — stale PID `52186`
-  - `internal tooling scratch/brainstorm/52186-…/state/server-stopped`
-  - `internal tooling scratch/brainstorm/52186-…/content/context-message-layouts.html`
-  - `internal tooling scratch/brainstorm/52186-…/content/waiting-after-context-layout.html`
-- **Risk:** low but real. Stale PID files shipped inside a release are actively
-  misleading — during triage someone will eventually check whether PID 51970 is
-  alive. Verified that no code or configuration references the path.
-- **Action:** add `internal tooling scratch/` to `.gitignore` with an explanatory comment
-  (§6.5), then `git rm --cached` the five files.
-- **Effort:** minutes. **Opened:** 2026-07-31.
+- **Detail:** the repository previously carried five tracked scratch files —
+  stale PID files and generated HTML — written by a local tooling directory.
+  They were purged from history on 2026-07-31, together with the `.gitignore`
+  entry that had named that tooling. Nothing tracks those paths now, and nothing
+  ignores them either.
+- **Risk:** low but real. With no ignore rule, the same scratch files can be
+  committed again by an inattentive `git add -A`, and stale PID files inside a
+  release are actively misleading during triage — someone will eventually check
+  whether a recorded process is alive.
+- **Action:** put machine-specific editor and tooling directories in a
+  **global** ignore file (`~/.config/git/ignore`) rather than this repository's
+  `.gitignore`. That keeps the protection without recording any developer's
+  local toolchain in the project's history — which is the right place for it,
+  since it is a property of a machine rather than of WeVolunteer.
+- **Effort:** minutes, per developer. **Opened:** 2026-07-31.
 
 #### TD-7 — `v1.0.0-pilot` tag is local-only
 

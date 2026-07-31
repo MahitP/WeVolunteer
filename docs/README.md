@@ -1,7 +1,8 @@
 # Documentation
 
-One governance document at the root, plus two directories with different
-purposes and different lifetimes.
+One governance document at the root, plus four directories with different
+purposes and different lifetimes. Only `ENGINEERING_GUIDE.md` and `operations/`
+are maintained; `plans/`, `specs/` and `history/` are deliberately frozen.
 
 ## `ENGINEERING_GUIDE.md` — governance, maintained
 
@@ -24,6 +25,19 @@ be updated when behavior changes.
 | [`pilot-readiness-review.md`](operations/pilot-readiness-review.md) | The pre-launch engineering gate, dated 2026-07-26. A point-in-time audit rather than a maintained document: every finding in it was addressed before 1.0.0, and it is kept because the reasoning behind each severity call is still useful. |
 
 Deployment artifacts referenced by the runbook live in [`../deploy/`](../deploy/).
+
+## `plans/` and `specs/` — point-in-time, not maintained
+
+Implementation plans and design specifications written before the work they
+describe. Like `history/`, these are **not updated** once the work lands: they
+record what was intended, which is often more informative than what was built.
+
+| Directory | Contents |
+|---|---|
+| [`plans/`](plans/) | Task-by-task implementation plans |
+| [`specs/`](specs/) | Design specifications, audits and sprint reports |
+
+If a plan and the code disagree, the code is correct and the plan is history.
 
 ## `history/` — archive, not maintained
 
