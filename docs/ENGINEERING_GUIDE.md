@@ -1332,9 +1332,9 @@ when they are done, not when they become uncomfortable to look at.
 
 #### TD-5 — Consolidation audit worktree still present
 
-- **Detail:** branch `claude/wevolunteer-repo-consolidation-08899f` at `9ae59db`,
-  with a worktree under `.claude/worktrees/`. An ancestor of `main` with no
-  unique commits.
+- **Detail:** the throwaway branch and linked worktree created for the
+  2026-07-31 consolidation audit, pinned at `9ae59db`. An ancestor of `main`
+  with no unique commits.
 - **Action:** remove the worktree and delete the branch once the release has
   settled.
 - **Effort:** minutes. **Opened:** 2026-07-31.
