@@ -3,33 +3,72 @@ import { Routes, Route, useNavigate, useLocation, useSearchParams, Navigate, use
 import { api } from './utils/api';
 import { DEMO_MODE, APP_NAME, SCHOOL_NAME } from './config';
 import DemoBar from './components/DemoBar';
-import Login from './views/Login';
-import Welcome from './views/Welcome';
-import Signup from './views/Signup';
-import BrowseEvents from './views/BrowseEvents';
-import CreateEvent from './views/CreateEvent';
-import VolunteerDashboard from './views/VolunteerDashboard';
-import OrganizerDashboard from './views/OrganizerDashboard';
-import AdminDashboard from './views/AdminDashboard';
-import Notifications from './views/Notifications';
-import CalendarView from './views/CalendarView';
-import VolunteerProfile from './views/VolunteerProfile';
-import OrganizerProfile from './views/OrganizerProfile';
-import EventModal from './components/EventModal';
 import NotificationsBell from './components/NotificationsBell';
-import ProfileEditModal from './components/ProfileEditModal';
-import ResetPassword from './views/ResetPassword';
-import OAuthCallback from './views/OAuthCallback';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
-import CertificateVerification from './views/CertificateVerification';
-import VolunteerPortfolio from './views/VolunteerPortfolio';
-import CheckInView from './views/CheckInView';
 import ThemeToggle from './components/ThemeToggle';
-import Messages from './views/Messages';
 import ProfileMenu from './components/account/ProfileMenu';
-import Settings from './views/Settings';
 import { connectSocket, disconnectSocket } from './services/socket';
+
+/**
+ * Route-level code splitting.
+ *
+ * Every one of these was a static import, which put all 19 views plus the two
+ * heaviest modals into a single entry chunk: 1,270 kB (333 kB gzipped), enough
+ * for Vite to warn on every build. A student on school cellular downloaded the
+ * admin dashboard, the organizer tools, the calendar and the messaging client
+ * before they could see their own shifts.
+ *
+ * This was implemented once before (353a492) and then reverted wholesale by
+ * 70cd700 — a commit titled `docs: auth audit Phase 1 findings and remediation
+ * plan`, whose message says nothing about bundling. It removed the lazy imports
+ * AND their Suspense boundaries together, i.e. a complete, clean revert of an
+ * unrelated commit's work, which is the signature of an accidental commit from a
+ * stale working tree rather than a considered rollback. Nothing in the history
+ * records a problem with the splitting itself.
+ *
+ * Restored here with the same boundary placement. The shell above stays eager on
+ * purpose: the navigation, the notification bell, the theme toggle and the error
+ * boundary must render on the first frame, and LoadingSkeleton is what the
+ * fallbacks are made of, so lazy-loading it would be circular.
+ */
+const Login = React.lazy(() => import('./views/Login'));
+const Welcome = React.lazy(() => import('./views/Welcome'));
+const Signup = React.lazy(() => import('./views/Signup'));
+const BrowseEvents = React.lazy(() => import('./views/BrowseEvents'));
+const CreateEvent = React.lazy(() => import('./views/CreateEvent'));
+const VolunteerDashboard = React.lazy(() => import('./views/VolunteerDashboard'));
+const OrganizerDashboard = React.lazy(() => import('./views/OrganizerDashboard'));
+const AdminDashboard = React.lazy(() => import('./views/AdminDashboard'));
+const Notifications = React.lazy(() => import('./views/Notifications'));
+const CalendarView = React.lazy(() => import('./views/CalendarView'));
+const VolunteerProfile = React.lazy(() => import('./views/VolunteerProfile'));
+const OrganizerProfile = React.lazy(() => import('./views/OrganizerProfile'));
+const ResetPassword = React.lazy(() => import('./views/ResetPassword'));
+const OAuthCallback = React.lazy(() => import('./views/OAuthCallback'));
+const CertificateVerification = React.lazy(() => import('./views/CertificateVerification'));
+const VolunteerPortfolio = React.lazy(() => import('./views/VolunteerPortfolio'));
+const CheckInView = React.lazy(() => import('./views/CheckInView'));
+const Messages = React.lazy(() => import('./views/Messages'));
+const Settings = React.lazy(() => import('./views/Settings'));
+
+// The two heaviest modals. EventModal pulls in the whole organizer surface —
+// applicant review, shifts, attendance, announcements, comments, the location
+// card — and is only opened on demand, so it has no business in the entry chunk.
+const EventModal = React.lazy(() => import('./components/EventModal'));
+const ProfileEditModal = React.lazy(() => import('./components/ProfileEditModal'));
+
+/**
+ * Fallback for a route whose chunk is still arriving.
+ *
+ * The padding is inline with a spacing token rather than a new class, because
+ * the signed-out and public branches render this OUTSIDE `.page` (which supplies
+ * padding in the authenticated shell) and would otherwise show a skeleton flush
+ * against the viewport edge.
+ */
+const RouteFallback = () => (
+  <div style={{ padding: 'var(--s6)' }}><LoadingSkeleton heights={[200, 400]} /></div>
+);
 import {
   LayoutDashboard, Compass, CalendarPlus, ShieldCheck, LogOut, CalendarDays,
   UserCog, CheckCircle2, AlertTriangle, Info, X, ChevronsUpDown, Loader2, Bell, UserRound, MessageSquare, MoreHorizontal, Mail, Settings as SettingsIcon
@@ -531,9 +570,11 @@ export default function App() {
   // Public Routes (like certificate verification) bypass auth checks
   if (currentPath.startsWith('/verify/')) {
     return (
-      <Routes>
-        <Route path="/verify/:code" element={<CertificateVerification />} />
-      </Routes>
+      <React.Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/verify/:code" element={<CertificateVerification />} />
+        </Routes>
+      </React.Suspense>
     );
   }
 
@@ -559,6 +600,7 @@ export default function App() {
   if (AUTH_FLOW_PATHS.includes(currentPath)) {
     return (
       <>
+        <React.Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/oauth/callback" element={
             <OAuthCallback
@@ -588,6 +630,7 @@ export default function App() {
             />
           } />
         </Routes>
+        </React.Suspense>
         <Toasts toasts={toasts} onRemove={removeToast} />
       </>
     );
@@ -596,6 +639,7 @@ export default function App() {
   if (!currentUser) {
     return (
       <>
+        <React.Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/welcome" element={<Welcome />} />
           <Route path="/login" element={
@@ -623,6 +667,7 @@ export default function App() {
             }
           />
         </Routes>
+        </React.Suspense>
         <Toasts toasts={toasts} onRemove={removeToast} />
       </>
     );
@@ -729,6 +774,11 @@ export default function App() {
             title="This page didn't load"
             message="Something went wrong displaying this page. Your data is safe — nothing was changed. Try another tab, or reload."
           >
+          {/* Inside the ErrorBoundary, so a chunk that fails to load is caught
+              by the same boundary as a view that throws while rendering — and
+              covering both arms of the ternary below, since the profile views
+              are lazy too. */}
+          <React.Suspense fallback={<RouteFallback />}>
           {viewingProfile ? (
             viewingProfile.type === 'organizer' ? (
               <OrganizerProfile
@@ -863,6 +913,7 @@ export default function App() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           )}
+          </React.Suspense>
           </ErrorBoundary>
         </main>
       </div>
@@ -981,6 +1032,11 @@ export default function App() {
           onDismiss={() => setSelectedEventState(null)}
           dismissLabel="Close event"
         >
+          {/* `null` rather than a skeleton: the modal animates in over the page,
+              and a skeleton shaped like a panel that is about to be replaced
+              reads as a flicker. The chunk is small and usually already cached
+              by the time anyone opens a second event. */}
+          <React.Suspense fallback={null}>
           <EventModal
             event={selectedEvent}
             currentUser={currentUser}
@@ -994,16 +1050,19 @@ export default function App() {
             isFavorited={favorites.includes(selectedEvent.id)}
             onToggleFavorite={handleToggleFavorite}
           />
+          </React.Suspense>
         </ErrorBoundary>
       )}
       {editingProfile && (
-        <ProfileEditModal
-          user={currentUser}
-          onClose={() => setEditingProfile(false)}
-          onSave={(updated) => { setCurrentUser(updated); refreshEvents(); }}
-          addToast={addToast}
-          onSignOut={() => { setEditingProfile(false); handleLogout(); }}
-        />
+        <React.Suspense fallback={null}>
+          <ProfileEditModal
+            user={currentUser}
+            onClose={() => setEditingProfile(false)}
+            onSave={(updated) => { setCurrentUser(updated); refreshEvents(); }}
+            addToast={addToast}
+            onSignOut={() => { setEditingProfile(false); handleLogout(); }}
+          />
+        </React.Suspense>
       )}
 
       <Toasts toasts={toasts} onRemove={removeToast} />

@@ -47,8 +47,29 @@ SignUp Genius/
 # SQLite WAL sidecars (created at runtime alongside *.db)
 *.db-wal
 *.db-shm
+
+# Generated data-export archives. Written beside the database (see
+# exportWorker.resolveExportDir), so in development that is the repository root.
+# Each zip is one user's complete personal record — profile, messages, attendance,
+# certificates — and must never be committed.
+exports/
+*.zip
 playwright-report/
 test-results/
+
+# Captured test output. `test_output.txt` was tracked and carried 991 lines of
+# vitest stdout including raw ANSI escape codes — a debug artifact that goes
+# stale the moment the suite changes, and reads as authoritative when it isn't.
+# Run `npm test` for current results.
+test_output.txt
+test-output.txt
+*.tap
+
+# Spent one-off codemod. `update_css.cjs` rewrote src/index.css to add the dark
+# theme; that edit is long since applied and committed, nothing references the
+# script, and re-running it against today's index.css would corrupt it. Kept on
+# disk for reference, out of the release.
+update_css.cjs
 
 # Pilot environment credentials
 docs/operations/pilot-credentials.md

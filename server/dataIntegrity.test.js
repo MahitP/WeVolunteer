@@ -7,7 +7,26 @@ import { createHoursLedgerTable, recordHoursChange, verifyLedgerParity } from '.
 import { createCheckinTable, finalizeAttendance } from './attendance.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REAL_DB = path.join(__dirname, 'wevolunteer.db');
+
+/**
+ * The database whose real schema these invariants are checked against.
+ *
+ * This was hardcoded to `server/wevolunteer.db`, which turned out to be neither
+ * real nor meaningful: nothing in the deployment uses that path (the pilot's
+ * `.env` sets `WEV_DB_PATH=../pilot.db`), and the file that existed there was a
+ * test artifact holding 797 leaked "Page Event" fixtures — accumulated because
+ * another suite had accidentally been writing to it. So these invariants were
+ * being verified against garbage, and they silently `describe.skip`ped the moment
+ * the artifact was cleaned up.
+ *
+ * `WEV_REAL_DB` rather than `WEV_DB_PATH`: startTestServer() overwrites
+ * WEV_DB_PATH with a temp path, and process.env is shared across test files in
+ * a worker, so reading it here would resolve to whichever throwaway database
+ * happened to run last.
+ *
+ * Read-only, and never written — the assertions below only inspect schema.
+ */
+const REAL_DB = process.env.WEV_REAL_DB || path.join(__dirname, '..', 'pilot.db');
 
 function makeDb({ foreignKeys = true } = {}) {
   const db = new DatabaseSync(':memory:');

@@ -74,12 +74,23 @@ router.get('/api/privacy/export/download/:id', authenticateToken, (req, res) => 
     WHERE id = ?
   `).get(jobId);
 
-  if (!job) {
-    return res.status(404).send('Export not found');
-  }
-
-  if (job.user_id !== userId) {
-    return res.status(403).send('Unauthorized to access this export');
+  /**
+   * A foreign export is answered exactly like a missing one.
+   *
+   * This used to return 403 'Unauthorized to access this export' for somebody
+   * else's export and 404 for a nonexistent id. No data crossed — the ownership
+   * check held — but the two codes together are an existence oracle, and export ids
+   * are `export-${Date.now()}-${6 chars}`, so the timestamp half is guessable. That
+   * made "did this student request a copy of their personal data around this time"
+   * discoverable by any other authenticated student.
+   *
+   * Collapsing both to 404 matches the convention the messaging routes already
+   * follow and are tested on: an uninvolved student reading another's conversation
+   * gets 404 rather than 403, so existence never leaks. This endpoint was the
+   * outlier. Covered by server/privacyExportIdor.test.js.
+   */
+  if (!job || job.user_id !== userId) {
+    return res.status(404).json({ error: 'Export not found' });
   }
 
   if (job.status !== 'completed' || !job.file_location) {

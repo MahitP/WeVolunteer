@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import { createHoursLedgerTable, backfillHoursLedger, verifyLedgerParity } from './hoursLedger.js';
 import { createCertificatesTable, backfillCertificates } from './certificates.js';
 import { createCheckinTable } from './attendance.js';
+import { createInstanceLockTable } from './instanceLock.js';
 import { DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -562,6 +563,35 @@ export function initDatabase() {
     )
   `);
 
+  /**
+   * Sessions revoked before their token expired.
+   *
+   * Sessions are stateless JWTs, so signing out could not previously invalidate
+   * anything: `POST /api/auth/logout` cleared the cookie and the token stayed
+   * valid for the rest of its seven days. The only revocation available was
+   * `users.token_version`, which is all-or-nothing per account — bumping it on
+   * logout is exactly the "signing out here signed me out on my phone" bug that
+   * was fixed deliberately, so it cannot be reused for this.
+   *
+   * This is the per-session half: each token carries a `jti`, logout records that
+   * one id, and authenticateToken refuses it. Small on purpose — one row per
+   * explicit sign-out, deleted once the token would have expired anyway
+   * (purgeExpiredRevocations, called from the notification sweep).
+   *
+   * No foreign key to users: a revocation must outlive the account being deleted,
+   * or deleting an account would silently un-revoke its outstanding sessions.
+   */
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS revoked_sessions (
+      jti TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      revoked_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    )
+  `);
+  // Supports the purge, which is the only query that is not a primary-key lookup.
+  db.exec('CREATE INDEX IF NOT EXISTS idx_revoked_sessions_expiry ON revoked_sessions(expires_at)');
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS password_reset_tokens (
       token TEXT PRIMARY KEY,
@@ -767,6 +797,10 @@ export function initDatabase() {
   // Check-in marks taken during an event. Separate from `attendance` so that
   // marking someone off on the day never credits hours by itself.
   createCheckinTable(db);
+
+  // Single-instance lock. Created here so it is part of the schema like every
+  // other table, rather than appearing the first time something takes the lock.
+  createInstanceLockTable(db);
 
   initHoursLedger();
   initCertificates();

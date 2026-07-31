@@ -61,9 +61,9 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
       JOIN slots s ON a.slot_id = s.id
       JOIN events e ON a.event_id = e.id
       WHERE a.user_id = ? AND a.status = 'accepted'
-        AND s.start_datetime > datetime('now') AND e.status != 'cancelled'
+        AND s.start_datetime > ? AND e.status != 'cancelled'
       ORDER BY s.start_datetime ASC
-    `).all(req.params.id);
+    `).all(req.params.id, new Date().toISOString());
 
     const pendingCount = db.prepare(`
       SELECT COUNT(*) as c FROM applications

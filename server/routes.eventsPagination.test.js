@@ -1,6 +1,26 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer } from './testServer.js';
-import { EVENTS_MAX_LIMIT } from './routes/eventRoutes.js';
+
+/**
+ * EVENTS_MAX_LIMIT is loaded LAZILY, inside beforeAll, and that is load-bearing.
+ *
+ * It used to be a static import of `./routes/eventRoutes.js`, which transitively
+ * imports `db.js`. Static imports are evaluated before any hook runs, so `db.js`
+ * opened its connection before `startTestServer()` had set `WEV_DB_PATH` — which
+ * means it bound to the DEFAULT path, `server/wevolunteer.db`. The later dynamic
+ * import inside startTestServer returned the already-cached module, so the whole
+ * file ran against that real file instead of a throwaway one.
+ *
+ * The damage was cumulative and silent: every run added 25 permanent events to a
+ * repo-local database. 797 of them had collected by the time this was found, and
+ * the suite finally broke when the count passed the page-walk guard below — a
+ * failure that looked like a pagination bug and was really a leaked fixture.
+ *
+ * Any static import here that reaches db.js reintroduces this. testServer.js now
+ * asserts the resolved path is a temporary one, so it fails loudly rather than
+ * quietly writing to the wrong database.
+ */
+let EVENTS_MAX_LIMIT;
 
 /**
  * Pagination on GET /api/events.
@@ -23,6 +43,9 @@ let srv, organizer;
 
 beforeAll(async () => {
   srv = await startTestServer();
+  // Only now that WEV_DB_PATH points at the throwaway database is it safe to
+  // import anything that pulls in db.js.
+  ({ EVENTS_MAX_LIMIT } = await import('./routes/eventRoutes.js'));
   organizer = await srv.login('jkatzenback@vikings.org');
 
   // Enough events to page through, some sharing a start time so the tiebreak is
@@ -120,16 +143,25 @@ describe('offset soundness — the property that needs the ORDER BY', () => {
    */
   it('walking all pages yields every event exactly once', async () => {
     const total = (await page('?limit=1')).body.pagination.total;
+    const LIMIT = 7;
     const seen = [];
     let offset = 0;
-    let guard = 0;
+    // Derived from `total` rather than a fixed 100. The old constant capped the
+    // walk at 100 * 7 = 700 ids, so once the database held more than that the
+    // assertion failed with an off-by-26 that looked like a pagination fault and
+    // was really the guard cutting the walk short. Sized to the data, plus a
+    // couple of turns of slack, it can only trip on a genuine non-terminating
+    // `nextOffset`.
+    const maxPages = Math.ceil(total / LIMIT) + 2;
+    let pages = 0;
 
-    while (offset !== null && guard++ < 100) {
-      const res = await page(`?limit=7&offset=${offset}`);
+    while (offset !== null && pages++ < maxPages) {
+      const res = await page(`?limit=${LIMIT}&offset=${offset}`);
       seen.push(...res.body.events.map(e => e.id));
       offset = res.body.pagination.nextOffset;
     }
 
+    expect(pages, 'nextOffset never terminated').toBeLessThanOrEqual(maxPages);
     expect(seen).toHaveLength(total);
     expect(new Set(seen).size).toBe(total);   // no duplicates, no omissions
   });

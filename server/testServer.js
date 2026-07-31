@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -16,8 +16,51 @@ export async function startTestServer() {
   process.env.DEMO_MODE = 'true';
   process.env.JWT_SECRET = 'test-secret-not-for-production';
 
-  const { initDatabase } = await import('./db.js');
+  const { initDatabase, db } = await import('./db.js');
   const { app } = await import('./app.js');
+
+  /**
+   * Prove the connection really is the throwaway one.
+   *
+   * `db.js` opens its database at module scope, so whichever import happens
+   * FIRST decides the path — and a static import at the top of a test file is
+   * evaluated before any hook runs. One test file statically imported
+   * `./routes/eventRoutes.js` (for a single exported constant), which reaches
+   * db.js, so the connection was bound to the default `server/wevolunteer.db`
+   * before this function ever set WEV_DB_PATH. The dynamic import above then
+   * returned the cached module, and the entire file ran against that real file.
+   *
+   * Nothing failed. It just leaked 25 events per run into a repo-local database
+   * — 797 had accumulated before anyone noticed, and the suite only broke when
+   * the total crossed a loop guard, which made a leaked fixture look like a
+   * pagination bug.
+   *
+   * PRAGMA database_list reports the path SQLite actually opened, which is the
+   * only trustworthy source here: `process.env.WEV_DB_PATH` was set correctly and
+   * still described nothing.
+   */
+  const openedPath = db.prepare('PRAGMA database_list').all()
+    .find(r => r.name === 'main')?.file || '';
+  // Both sides are resolved through realpath first: on macOS mkdtemp hands back
+  // /var/folders/… while SQLite reports /private/var/folders/… for the same file,
+  // because /var is a symlink. Comparing the raw strings makes every run look
+  // like a failure.
+  const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+  if (!real(openedPath).startsWith(real(dir))) {
+    throw new Error(
+      'startTestServer(): the database connection is not the throwaway one.\n'
+      + `  expected under: ${dir}\n`
+      + `  actually opened: ${openedPath || '(none)'}\n`
+      + '\n'
+      + 'db.js opens its connection at module scope, so something imported it\n'
+      + 'before this function set WEV_DB_PATH — almost certainly a STATIC import\n'
+      + 'at the top of the test file that reaches db.js (directly, or via\n'
+      + 'routes/*, utils.js, services/*, attendance.js, eventQuery.js …).\n'
+      + 'Move that import inside beforeAll, after startTestServer() resolves.\n'
+      + '\n'
+      + 'Left unchecked this writes test fixtures into a real database file.'
+    );
+  }
 
   initDatabase();
 

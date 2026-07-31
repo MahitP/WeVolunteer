@@ -1,16 +1,65 @@
 import { db } from '../db.js';
 import { ZipArchive } from 'archiver';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { notificationService } from '../services/notificationService.js';
 
 let isRunning = false;
 let timeoutId = null;
 
+/**
+ * How long an export may sit in `processing` before it is presumed orphaned.
+ *
+ * Generating a zip of one user's records takes well under a second, so anything
+ * still claimed after this belongs to a process that no longer exists.
+ */
+const STALE_EXPORT_MS = Number(process.env.EXPORT_STALE_MS) || 10 * 60 * 1000;
+
+/**
+ * Where completed export archives live.
+ *
+ * ── Why not os.tmpdir() ──
+ *
+ * It used to be `os.tmpdir()`, and `deploy/wevolunteer.service` sets
+ * `PrivateTmp=true` — a private /tmp on a tmpfs that systemd destroys and
+ * recreates every time the unit restarts. The job row keeps
+ * `status = 'completed'` and a `file_location` for a seven-day expiry window, so
+ * after any restart the database promised an export that no longer existed and the
+ * student got "Export file is missing from server". Even without PrivateTmp, /tmp
+ * is cleared on reboot on most distributions; a seven-day promise cannot be made
+ * from it.
+ *
+ * The default sits beside the database, which is already the one directory the
+ * service unit grants write access to (`ReadWritePaths=/var/lib/wevolunteer`), so
+ * this needs no systemd change to work. `WEV_EXPORT_DIR` overrides it for a
+ * deployment that wants exports on separate storage.
+ *
+ * These archives contain a student's full personal record — profile, messages,
+ * attendance, certificates — so the directory is created 0o700: owner only.
+ */
+export function resolveExportDir() {
+  if (process.env.WEV_EXPORT_DIR) {
+    return path.resolve(process.env.WEV_EXPORT_DIR);
+  }
+  // Mirrors db.js's own resolution so the two cannot disagree about location.
+  const dbPath = process.env.WEV_DB_PATH
+    ? path.resolve(process.env.WEV_DB_PATH)
+    : path.join(import.meta.dirname, '..', 'wevolunteer.db');
+  return path.join(path.dirname(dbPath), 'exports');
+}
+
+function ensureExportDir() {
+  const dir = resolveExportDir();
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return dir;
+}
+
 export function startExportWorker() {
   if (isRunning) return;
   isRunning = true;
+  // A restart recovers the export its own predecessor abandoned, rather than
+  // leaving that student blocked until someone edits the database.
+  reclaimStaleExports();
   poll();
 }
 
@@ -22,38 +71,80 @@ export function stopExportWorker() {
   }
 }
 
+/**
+ * Returns exports stranded in `processing` to `pending`.
+ *
+ * `POST /api/privacy/export` refuses a new request while one is `pending` or
+ * `processing`. Nothing reclaimed a `processing` row, so an export interrupted by
+ * a restart left that user permanently 409-ed — no expiry, no way to clear it from
+ * the UI, and no error anyone would see. On a feature whose whole purpose is
+ * letting a family obtain a copy of their child's record, that is a silent denial.
+ */
+export function reclaimStaleExports() {
+  const cutoff = new Date(Date.now() - STALE_EXPORT_MS).toISOString();
+  try {
+    const result = db.prepare(`
+      UPDATE data_export_jobs SET status = 'pending'
+      WHERE status = 'processing' AND created_at <= ?
+    `).run(cutoff);
+
+    if (result.changes > 0) {
+      console.warn(
+        `[ExportWorker] Reclaimed ${result.changes} export job(s) stranded in `
+        + '"processing" — a previous run was interrupted.'
+      );
+    }
+    return result.changes;
+  } catch (err) {
+    console.error('[ExportWorker] Export reclaim failed:', err);
+    return 0;
+  }
+}
+
+/**
+ * Runs one polling pass. Exported so tests can drive it deterministically instead
+ * of waiting on the five-second timer.
+ */
+export async function processPendingExports() {
+  const job = db.prepare(`
+    SELECT id, user_id FROM data_export_jobs
+    WHERE status = 'pending'
+    ORDER BY created_at ASC LIMIT 1
+  `).get();
+
+  if (job) await processJob(job);
+}
+
 async function poll() {
   if (!isRunning) return;
 
   try {
-    const job = db.prepare(`
-      SELECT id, user_id FROM data_export_jobs 
-      WHERE status = 'pending' 
-      ORDER BY created_at ASC LIMIT 1
-    `).get();
-
-    if (job) {
-      await processJob(job);
-    }
-
-    // Cleanup expired jobs
-    cleanupExpiredJobs();
-
+    reclaimStaleExports();
+    await processPendingExports();
+    cleanupExpiredExports();
   } catch (error) {
     console.error('[ExportWorker] Error polling:', error);
   } finally {
     if (isRunning) {
       // Poll every 5 seconds
       timeoutId = setTimeout(poll, 5000);
+      // Does not by itself keep the process alive; shutdown clears it explicitly.
+      timeoutId.unref?.();
     }
   }
 }
 
-function cleanupExpiredJobs() {
+/**
+ * Deletes expired archives and clears their recorded path.
+ *
+ * Renamed from `cleanupExpiredJobs` and exported so the durability test can assert
+ * it without waiting for a poll. Behaviour is unchanged.
+ */
+export function cleanupExpiredExports() {
   const expiredJobs = db.prepare(`
-    SELECT id, file_location FROM data_export_jobs 
-    WHERE status = 'completed' AND expires_at < datetime('now')
-  `).all();
+    SELECT id, file_location FROM data_export_jobs
+    WHERE status = 'completed' AND expires_at < ?
+  `).all(new Date().toISOString());
 
   const updateStmt = db.prepare(`UPDATE data_export_jobs SET status = 'expired', file_location = NULL WHERE id = ?`);
 
@@ -81,9 +172,11 @@ async function processJob(job) {
   if (updated.changes === 0) return; // Picked up by another worker
 
   console.log(`[ExportWorker] Processing job ${id} for user ${user_id}`);
-  
-  const tmpFilePath = path.join(os.tmpdir(), `wevolunteer-export-${id}.zip`);
-  
+
+  // Durable storage rather than os.tmpdir() — see resolveExportDir() for why the
+  // old location could not keep the seven-day promise the job row makes.
+  const tmpFilePath = path.join(ensureExportDir(), `wevolunteer-export-${id}.zip`);
+
   try {
     await generateZip(user_id, tmpFilePath);
     
