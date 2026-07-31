@@ -1,14 +1,44 @@
-import fs from 'fs';
+/**
+ * Drive the pilot workflows against a DEVELOPMENT database and report anomalies.
+ *
+ * ⚠️  THIS MUTATES DATA. It approves organizers, creates events, applies,
+ *     accepts, marks attendance and credits hours. It is a simulation, not a
+ *     read-only check.
+ *
+ * Usage:
+ *   node bin/simulate-pilot.js              # prompts for confirmation
+ *   node bin/simulate-pilot.js --yes        # no prompt (scripts and tests)
+ *
+ * It carries the same gate as bin/seed-pilot.js, and for the same reason: it also
+ * set `process.env.NODE_ENV = 'development'` itself, so a run against a live
+ * deployment could not be detected by anything downstream. Writing fabricated
+ * attendance and credited hours into real student records is not recoverable by
+ * re-running anything — those rows land in the append-only hours ledger.
+ */
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { resolveDbPath, guardDestructive } from './lib/db-safety.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Bind to pilot DB
-process.env.WEV_DB_PATH = path.resolve(__dirname, '../pilot.db');
-process.env.NODE_ENV = 'development';
-process.env.JWT_SECRET = 'pilot-secret';
+// Bind to the pilot DB by default, but let an explicit WEV_DB_PATH win so this
+// can be pointed at a scratch database like every other tool.
+const dbPath = resolveDbPath(path.resolve(__dirname, '../pilot.db'));
+
+await guardDestructive({
+  tool: 'pilot workflow simulation',
+  dbPath,
+  effect: 'This WRITES to that database — approvals, events, applications, '
+    + 'attendance and credited hours, including append-only ledger rows.'
+});
+
+process.env.WEV_DB_PATH = dbPath;
+
+// NODE_ENV deliberately not set — see bin/seed-pilot.js for the reasoning.
+if (!process.env.JWT_SECRET) {
+  process.env.JWT_SECRET = 'simulation-only-not-a-real-secret-0000000';
+}
 
 const { db } = await import('../server/db.js');
 

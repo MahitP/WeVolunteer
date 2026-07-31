@@ -8,17 +8,17 @@ import {
   sendEmailChangeConfirmation,
   sendEmailChangeNotice
 } from '../email.js';
-import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
+import { VALID_GRADES, JWT_SECRET, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
-import { db, initDatabase } from '../db.js';
+import { db } from '../db.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
 import { OAUTH_ONLY, issueSession, clearLoginFailuresForUser } from './authRoutes.js';
 
 const router = express.Router();
 
-router.delete('/api/auth/account', authenticateToken, (req, res) => {
+router.delete('/api/auth/account', authenticateToken, async (req, res) => {
   const { password, confirmUsername } = req.body;
   try {
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
@@ -28,7 +28,7 @@ router.delete('/api/auth/account', authenticateToken, (req, res) => {
       if (!password) {
         return res.status(400).json({ error: 'Password is required to delete your account' });
       }
-      if (!bcrypt.compareSync(password, userRow.password_hash)) {
+      if (!await bcrypt.compare(password, userRow.password_hash)) {
         return res.status(401).json({ error: 'Incorrect password' });
       }
     } else {
@@ -120,9 +120,9 @@ router.delete('/api/auth/account', authenticateToken, (req, res) => {
         JOIN slots s ON a.slot_id = s.id
         WHERE a.user_id = ?
           AND a.status IN ('pending', 'waitlisted', 'accepted')
-          AND s.start_datetime > datetime('now')
+          AND s.start_datetime > ?
           AND e.status NOT IN ('completed', 'cancelled')
-      `).all(req.user.id);
+      `).all(req.user.id, new Date().toISOString());
 
       db.prepare(`
         UPDATE applications SET status = 'withdrawn', waitlist_order = NULL
@@ -259,7 +259,7 @@ router.post('/api/auth/forgot-password', async (req, res) => {
 });
 
 /** Step 2: exchange the token for a new password. Single use. */
-router.post('/api/auth/reset-password', (req, res) => {
+router.post('/api/auth/reset-password', async (req, res) => {
   const { token, password } = req.body;
 
   if (!token || !password) {
@@ -295,7 +295,7 @@ router.post('/api/auth/reset-password', (req, res) => {
       return res.status(400).json({ error: 'That reset link is not valid. Request a new one.' });
     }
 
-    const passwordHash = bcrypt.hashSync(password, bcrypt.genSaltSync(10));
+    const passwordHash = await bcrypt.hash(password, 10);
 
     inTransaction(() => {
       /**
@@ -344,7 +344,7 @@ router.post('/api/auth/reset-password', (req, res) => {
  * sent nothing and changed nothing; it just claimed both. There was no
  * endpoint behind it at all.
  */
-router.post('/api/auth/change-password', authenticateToken, (req, res) => {
+router.post('/api/auth/change-password', authenticateToken, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (!newPassword) {
     return res.status(400).json({ error: 'Choose a new password.', field: 'newPassword' });
@@ -368,15 +368,15 @@ router.post('/api/auth/change-password', authenticateToken, (req, res) => {
       if (!currentPassword) {
         return res.status(400).json({ error: 'Enter your current password.', field: 'currentPassword' });
       }
-      if (!bcrypt.compareSync(currentPassword, userRow.password_hash)) {
+      if (!await bcrypt.compare(currentPassword, userRow.password_hash)) {
         return res.status(401).json({ error: 'That is not your current password.', field: 'currentPassword' });
       }
-      if (bcrypt.compareSync(newPassword, userRow.password_hash)) {
+      if (await bcrypt.compare(newPassword, userRow.password_hash)) {
         return res.status(400).json({ error: 'That is already your password. Choose a different one.', field: 'newPassword' });
       }
     }
 
-    const passwordHash = bcrypt.hashSync(newPassword, bcrypt.genSaltSync(10));
+    const passwordHash = await bcrypt.hash(newPassword, 10);
 
     inTransaction(() => {
       db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?')
@@ -453,7 +453,7 @@ router.post('/api/auth/change-email', authenticateToken, async (req, res) => {
       if (!password) {
         return res.status(400).json({ error: 'Enter your password to change your email address.', field: 'password' });
       }
-      if (!bcrypt.compareSync(password, userRow.password_hash)) {
+      if (!await bcrypt.compare(password, userRow.password_hash)) {
         return res.status(401).json({ error: 'That is not your password.', field: 'password' });
       }
     }
@@ -741,55 +741,6 @@ router.get('/api/auth/check-email', (req, res) => {
     res.status(503).json({ error: 'Could not check that address right now.', code: 'check_unavailable' });
   }
 });
-
-if (DEMO_MODE) {
-  router.post('/api/auth/reset', (req, res) => {
-    try {
-      console.log('Resetting database tables to seeds...');
-      // Drop children before parents; includes V2 tables so re-seeding never
-      // collides with stale rows (seed ids are fixed strings). auto_select_runs
-      // is in the list because its rows reference those fixed event ids — left
-      // behind, a stale confirmed run attaches itself to a freshly seeded event
-      // and blocks Auto Select from running on it.
-      db.exec('DROP TABLE IF EXISTS hours_ledger');
-      db.exec('DROP TABLE IF EXISTS attendance_checkin');
-      db.exec('DROP TABLE IF EXISTS auto_select_runs');
-      db.exec('DROP TABLE IF EXISTS event_announcements');
-      db.exec('DROP TABLE IF EXISTS user_favorites');
-      db.exec('DROP TABLE IF EXISTS event_comments');
-      db.exec('DROP TABLE IF EXISTS notifications');
-      db.exec('DROP TABLE IF EXISTS attendance');
-      db.exec('DROP TABLE IF EXISTS applications');
-      db.exec('DROP TABLE IF EXISTS slots');
-      db.exec('DROP TABLE IF EXISTS events');
-      /**
-       * The auth-adjacent tables have to go with the users they reference.
-       *
-       * They were left behind, so after a reset a previously-linked Google
-       * account still matched its stale `oauth_accounts` row, found no user
-       * behind it, and was told "That account was deleted. You can create a new
-       * one." — a dead end on the OAuth path, reached by pressing the reset
-       * button the demo puts in front of everyone. Live password-reset and
-       * confirmation tokens pointing at vanished user ids were the same class of
-       * leftover.
-       */
-      db.exec('DROP TABLE IF EXISTS oauth_accounts');
-      db.exec('DROP TABLE IF EXISTS oauth_signup_sessions');
-      db.exec('DROP TABLE IF EXISTS email_verification_tokens');
-      db.exec('DROP TABLE IF EXISTS password_reset_tokens');
-      db.exec('DROP TABLE IF EXISTS email_change_tokens');
-      db.exec('DROP TABLE IF EXISTS users');
-
-      initDatabase();
-      res.json({ success: true });
-    } catch (error) {
-      console.error('Reset database error:', error);
-      res.status(500).json({ error: 'Internal server error resetting database' });
-    }
-  });
-} else {
-  console.log('[Security] DEMO_MODE is off — the database reset endpoint is not registered.');
-}
 
 // ────────────────────────────────────────────────────────────────────
 // V2 ENHANCED FEATURES — Notifications, Comments, Favorites, etc.

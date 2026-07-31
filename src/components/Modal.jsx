@@ -14,12 +14,20 @@ export default function Modal({
   label,
   size = 'md',
   children,
-  className = ''
+  className = '',
+  /**
+   * Extra class for the overlay, not the dialog.
+   *
+   * Exists for a dialog that opens on top of another one and therefore needs its
+   * own stacking level — see `.modal-overlay-stacked`. Everything else can ignore
+   * it, and the default is unchanged.
+   */
+  overlayClassName = ''
 }) {
   const dialogRef = useModal(onClose);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className={`modal-overlay ${overlayClassName}`} onClick={onClose}>
       <div
         ref={dialogRef}
         className={`modal ${size === 'lg' ? 'modal-lg' : ''} ${className}`}

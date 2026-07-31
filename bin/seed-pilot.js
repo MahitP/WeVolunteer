@@ -1,21 +1,71 @@
+/**
+ * Seed the demo/pilot dataset into a DEVELOPMENT database.
+ *
+ * ⚠️  THIS IS DESTRUCTIVE. It deletes the target database file and replaces it
+ *     with 26 accounts that share one password (see
+ *     docs/operations/pilot-credentials.md), one of them an administrator.
+ *
+ * Usage:
+ *   node bin/seed-pilot.js              # prompts for confirmation
+ *   node bin/seed-pilot.js --yes        # no prompt (scripts and tests)
+ *
+ * ── Why the guards below are not optional ──
+ *
+ * This script used to resolve WEV_DB_PATH, then set
+ * `process.env.NODE_ENV = 'development'` itself, then `fs.unlinkSync()` the file
+ * with no confirmation. Setting NODE_ENV was the worst part: it overwrote the one
+ * signal that identifies a real deployment before anything could check it, so
+ * every downstream guard was blind by the time it ran.
+ *
+ * `bin/` is present on the production host — the backup timer invokes
+ * `/srv/wevolunteer/bin/backup.sh` — which made this a one-command wipe:
+ *
+ *     WEV_DB_PATH=/var/lib/wevolunteer/wevolunteer.db node bin/seed-pilot.js
+ *
+ * That would have destroyed the live service-hour records and installed a
+ * known-password admin login in their place. The gate is shared with
+ * bin/simulate-pilot.js and bin/reset-dev-db.mjs via bin/lib/db-safety.mjs, so
+ * the three cannot drift apart the way the old DROP TABLE list did (finding F-1).
+ */
 import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'url';
+import { resolveDbPath, guardDestructive } from './lib/db-safety.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Ensure the pilot uses a dedicated DB file so it doesn't touch local dev data.
-const dbPath = path.resolve(__dirname, '../pilot.db');
+// A dedicated DB file by default, so seeding the pilot never touches local dev
+// data — but an explicit WEV_DB_PATH still wins, so this can seed a scratch
+// database without editing the script. Overriding the variable unconditionally
+// meant the one way to redirect any other tool silently did nothing here.
+const dbPath = resolveDbPath(path.resolve(__dirname, '../pilot.db'));
+
+await guardDestructive({
+  tool: 'pilot data seed',
+  dbPath,
+  effect: 'This DELETES that database and reseeds 26 demo accounts sharing one '
+    + 'published password, including an administrator.'
+});
+
 process.env.WEV_DB_PATH = dbPath;
-process.env.NODE_ENV = 'development';
-process.env.JWT_SECRET = 'pilot-secret';
+
+// NODE_ENV is deliberately NOT set here — see the header. The guard above has
+// already refused a production process, and anything else (unset, development,
+// test) is a non-production posture as far as config.js is concerned.
+//
+// JWT_SECRET only needs to satisfy config.js's presence check; no token minted
+// with it outlives this script, and nothing signed by it is stored. Set only if
+// absent, so a real .env value is left alone rather than silently shadowed.
+if (!process.env.JWT_SECRET) {
+  process.env.JWT_SECRET = 'seed-script-only-not-a-real-secret-000000';
+}
 
 // 1. Reset the pilot DB if it exists
 if (fs.existsSync(dbPath)) {
   fs.unlinkSync(dbPath);
-  console.log(`Deleted existing pilot.db`);
+  console.log(`Deleted existing ${path.basename(dbPath)}`);
 }
 // Also delete WAL files if any
 if (fs.existsSync(dbPath + '-wal')) fs.unlinkSync(dbPath + '-wal');

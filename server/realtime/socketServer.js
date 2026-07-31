@@ -4,6 +4,7 @@ import { setRealtimeServer } from './events.js';
 import cookie from 'cookie';
 import jwt from 'jsonwebtoken';
 import { db } from '../db.js';
+import { isSessionRevoked } from '../utils.js';
 
 const SESSION_CHECK_INTERVAL = Number(process.env.SOCKET_SESSION_CHECK_INTERVAL_MS) || 5 * 60 * 1000;
 
@@ -89,7 +90,19 @@ export function initSocketServer(httpServer) {
         return next(new Error('Authentication error: Session stale'));
       }
 
+      /**
+       * A signed-out session must not hold a live channel either.
+       *
+       * Without this, logging out would stop REST requests but leave the socket
+       * connected, so the account kept receiving notifications and messages in
+       * real time after signing out — the same gap authenticateToken closes.
+       */
+      if (isSessionRevoked(payload.jti)) {
+        return next(new Error('Authentication error: Session signed out'));
+      }
+
       socket.data.user = { id: user.id, role: user.role };
+      socket.data.jti = payload.jti ?? null;
       socket.data.tokenVersion = payload.tokenVersion ?? 0;
       next();
     } catch (err) {
@@ -106,7 +119,11 @@ export function initSocketServer(httpServer) {
     const interval = setInterval(() => {
       try {
         const current = db.prepare('SELECT token_version FROM users WHERE id = ?').get(user.id);
-        if (!current || current.token_version !== socket.data.tokenVersion) {
+        // Signed out mid-connection counts too: the handshake check only runs
+        // once, so without this an already-open socket kept streaming
+        // notifications to a session the user had ended.
+        if (!current || current.token_version !== socket.data.tokenVersion
+            || isSessionRevoked(socket.data.jti)) {
           console.log(`[realtime] disconnected socket=${socket.id} user=${user.id} reason=session_invalidated`);
           socket.emit('session.invalidated');
           socket.disconnect(true);

@@ -19,12 +19,19 @@ export function Seats({
   const safeFilled = Math.min(safeTotal, Math.max(0, Number(filled) || 0));
   const remaining = safeTotal - safeFilled;
   const isFull = remaining <= 0 && safeTotal > 0;
-  const label = safeTotal === 0 ? 'No spots' : isFull ? 'Full' : `${remaining} of ${safeTotal} left`;
+  const label = safeTotal === 0 ? 'No spots' : isFull ? 'Full' : `${remaining} of ${safeTotal} spots left`;
   if (safeTotal > 12) {
     const pct = safeTotal ? safeFilled / safeTotal * 100 : 0;
-    return <div className={`${className} s-95a51c`}>
+    return <div className={`seats-meter ${className}`}>
         <div className="meter-label">
           <span>{safeFilled} signed up</span>
+          {/* The two halves sit at opposite ends of the meter, so no visible
+              separator belongs between them. But they are adjacent in the text
+              layer, where `textContent` concatenates to "0 signed up15 of 15
+              spots left" — which is what a screen reader and any copied text
+              get. This separator is the text-layer equivalent of the visual gap,
+              and it means the reading is correct even where CSS does not apply. */}
+          <span className="sr-only"> · </span>
           <span className={isFull ? 'strong' : ''}>{label}</span>
         </div>
         <div className="meter">
@@ -34,7 +41,7 @@ export function Seats({
         </div>
       </div>;
   }
-  return <div className={`row ${className} s-65ce96`}>
+  return <div className={`row seats-row ${className}`}>
       <span className="seats" role="img" aria-label={`${safeFilled} of ${safeTotal} spots taken`}>
         {Array.from({
         length: safeTotal

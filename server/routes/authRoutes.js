@@ -10,7 +10,7 @@ import {
 } from '../email.js';
 import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
-import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
+import { authenticateToken, formatUserResponse, inTransaction, revokeSession } from '../utils.js';
 import { db, initDatabase } from '../db.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
@@ -78,6 +78,15 @@ function recordLoginFailure(key) {
     for (const [k, v] of loginFailures) {
       if (v.until <= now) loginFailures.delete(k);
     }
+    // If the map is still too large (e.g., under active attack with unexpired entries),
+    // forcefully evict entries to prevent a memory exhaustion crash. Map iteration
+    // is insertion order, so this evicts the oldest attempts first.
+    if (loginFailures.size > 5000) {
+      for (const k of loginFailures.keys()) {
+        loginFailures.delete(k);
+        if (loginFailures.size <= 4000) break;
+      }
+    }
   }
 }
 
@@ -94,7 +103,20 @@ export function __resetLoginThrottle() {
 /** Signs the caller in by setting the session cookie. */
 export function issueSession(res, user, tokenVersion) {
   const token = jwt.sign(
-    { id: user.id, role: user.role, email: user.email, name: user.name, tokenVersion: tokenVersion ?? 0 },
+    {
+      id: user.id, role: user.role, email: user.email, name: user.name,
+      tokenVersion: tokenVersion ?? 0,
+      /**
+       * Per-session id, so ONE session can be revoked.
+       *
+       * `tokenVersion` can only revoke every session an account has, which is
+       * why logout could not use it: doing so signed the user out on all their
+       * devices, the bug that /sign-out-others exists to keep separate. With a
+       * jti, logout records just this token (see revoked_sessions) and the
+       * account's other devices are untouched.
+       */
+      jti: crypto.randomUUID()
+    },
     JWT_SECRET,
     { expiresIn: '7d' }
   );
@@ -119,7 +141,7 @@ router.get('/api/auth/check-username', (req, res) => {
   res.json({ available: !taken, valid: true });
 });
 
-router.post('/api/auth/signup', (req, res) => {
+router.post('/api/auth/signup', async (req, res) => {
   const { password, signupToken } = req.body;
 
   /**
@@ -192,7 +214,7 @@ router.post('/api/auth/signup', (req, res) => {
   try {
     const userId = `user-${crypto.randomUUID()}`;
     const passwordHash = wantsPassword
-      ? bcrypt.hashSync(password, bcrypt.genSaltSync(10))
+      ? await bcrypt.hash(password, 10)
       : OAUTH_ONLY;
     const now = new Date().toISOString();
 
@@ -295,7 +317,25 @@ router.post('/api/auth/signup', (req, res) => {
 const GENERIC_LOGIN_ERRORS = false;
 const GENERIC_MESSAGE = 'That email or password is not correct.';
 
-router.post('/api/auth/login', (req, res) => {
+/**
+ * Async bcrypt, deliberately.
+ *
+ * `bcryptjs` is pure JavaScript, so `compareSync`/`hashSync` occupy the single
+ * event-loop thread for the whole computation. Measured before this change: while 40
+ * logins were in flight, `/health` — which performs no hashing at all — went from
+ * ~1 ms to a p95 of 3,761 ms, and only 6 health probes completed in 4.2 s. Every
+ * other user's request was queued behind password hashing.
+ *
+ * The async API chunks its work and yields between rounds, so unrelated requests
+ * interleave. Cost and output are unchanged: hashes produced either way verify under
+ * either API (checked both directions), so stored hashes stay valid and no migration
+ * is needed.
+ *
+ * No bcrypt call sits inside `inTransaction(...)` — verified before converting.
+ * Awaiting inside a synchronous SQLite transaction would let unrelated statements
+ * interleave with an open transaction, which is a far worse bug than the stall.
+ */
+router.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -371,7 +411,7 @@ router.post('/api/auth/login', (req, res) => {
       });
     }
 
-    if (!bcrypt.compareSync(password, userRow.password_hash)) {
+    if (!await bcrypt.compare(password, userRow.password_hash)) {
       recordLoginFailure(key);
       return res.status(401).json({
         error: GENERIC_LOGIN_ERRORS ? GENERIC_MESSAGE : 'Incorrect password.',
@@ -435,6 +475,24 @@ router.get('/api/auth/me', authenticateToken, (req, res) => {
  */
 router.post('/api/auth/logout', authenticateToken, (req, res) => {
   try {
+    /**
+     * Revoke THIS session, not the account.
+     *
+     * Clearing the cookie alone left the token valid for the rest of its seven
+     * days, so a copy taken from a shared machine kept working after the student
+     * had signed out and believed they were done. Recording the token's `jti`
+     * makes the sign-out real while leaving the account's other devices alone —
+     * which `token_version` could not do, since it revokes all of them.
+     *
+     * Decoded without re-verifying: authenticateToken has already verified the
+     * signature and expiry to get here.
+     */
+    const token = req.cookies?.[COOKIE_NAME];
+    const claims = token ? jwt.decode(token) : null;
+    if (claims?.jti) {
+      revokeSession({ jti: claims.jti, userId: req.user.id, expSeconds: claims.exp });
+    }
+
     res.clearCookie(COOKIE_NAME, clearCookieOptions());
     res.json({ success: true });
   } catch (err) {

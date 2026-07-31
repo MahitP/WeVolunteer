@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useModal } from '../utils/useModal';
 import {
@@ -604,44 +605,13 @@ export default function EventModal({
       )}
       
       {conflictData && (
-        <div className="modal-overlay" onClick={() => setConflictData(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
-            <div className="modal-header">
-              <h3>⚠️ {conflictData.level === 2 ? 'Existing Volunteer Commitment' : 'Schedule Conflict'}</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setConflictData(null)}>×</button>
-            </div>
-            <div className="modal-body stack">
-              {conflictData.level === 2 ? (
-                <p>You are already accepted for another volunteer shift during this time. Continuing may create an attendance conflict. Do you still want to apply?</p>
-              ) : (
-                <p>You already applied to another volunteer opportunity during this time.</p>
-              )}
-              
-              <div className="sheet" style={{ marginTop: 'var(--s2)' }}>
-                <div className="sheet-row">
-                  <div>
-                    <div className="small dim">Existing Commitment</div>
-                    <strong>{conflictData.title}</strong>
-                    <div className="small">{conflictData.slotName}</div>
-                    <div className="small dim">{formatTime(conflictData.start)} - {formatTime(conflictData.end)}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={() => setConflictData(null)}>
-                {conflictData.level === 2 ? 'Cancel' : 'Go Back'}
-              </button>
-              <button 
-                className="btn btn-primary" 
-                onClick={() => handleApply(pendingApplySlot)}
-                disabled={submitting}
-              >
-                {conflictData.level === 2 ? 'Continue Anyway' : 'Apply Anyway'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConflictDialog
+          conflict={conflictData}
+          eventTitle={event.title}
+          submitting={submitting}
+          onCancel={() => setConflictData(null)}
+          onContinue={() => handleApply(pendingApplySlot)}
+        />
       )}
 
       {showRedrawModal && (
@@ -670,6 +640,100 @@ export default function EventModal({
  * The minimum length is deliberate but modest: enough to stop a single
  * character, not so much that it becomes an obstacle to a legitimate re-draw.
  */
+/**
+ * The schedule-conflict dialog.
+ *
+ * Two things were wrong with the previous version, and the visible one was a
+ * symptom of the structural one.
+ *
+ * It was a second hand-rolled `.modal-overlay` rendered INSIDE the event
+ * modal's own overlay. Both carried `z-index: 1000`, and the ancestor overlay
+ * sets `backdrop-filter: blur(8px)` — which makes it a containing block for
+ * `position: fixed` descendants. So the nested overlay stopped being
+ * viewport-positioned and rendered as a translucent panel laid over the event
+ * modal, with its text colliding with the content behind it and headings
+ * wrapping mid-phrase. Portalling to document.body takes it out of that
+ * containing block entirely; `.modal-overlay-stacked` then puts it deliberately
+ * above the dialog that opened it, rather than relying on DOM order.
+ *
+ * Going through the shared `Modal` is what brings Escape, focus containment,
+ * focus restore, scroll lock and `role="dialog" aria-modal` — none of which the
+ * hand-rolled version had, so the conflict warning could not be dismissed from
+ * the keyboard.
+ *
+ * The copy is the other half. A bare "⚠️ Schedule Conflict" with an OK/Cancel
+ * pair reads like a browser alert, which is exactly what a decision about
+ * double-booking a Saturday morning should not read like. The severity is a
+ * status pill in the system's own language, the clash is laid out with the same
+ * eyebrow-and-value structure as the event's own facts block, and the buttons
+ * say what they do instead of "Cancel"/"Continue Anyway".
+ */
+function ConflictDialog({ conflict, eventTitle, submitting, onCancel, onContinue }) {
+  // level 2 = already ACCEPTED elsewhere, which is a firm commitment someone is
+  // expecting them at. level 1 = another pending application, which is not.
+  const isConfirmed = conflict.level === 2;
+
+  return createPortal(
+    <Modal
+      onClose={onCancel}
+      label={isConfirmed ? 'You already have a shift at this time' : 'This overlaps another application'}
+      overlayClassName="modal-overlay-stacked"
+      className="conflict-dialog"
+    >
+      <div className="modal-head">
+        <div>
+          {/* status-pending carries the system's amber-adjacent "needs a decision"
+              tone; status-info is the calmer blue. There is no status-warn. The
+              pill draws its own dot via ::before, so no icon is needed. */}
+          <span className={`status ${isConfirmed ? 'status-pending' : 'status-info'}`}>
+            {isConfirmed ? 'Time clash' : 'Overlapping application'}
+          </span>
+          <h2>
+            {isConfirmed
+              ? 'You already have a shift at this time'
+              : 'This overlaps another application'}
+          </h2>
+          <p className="lead">
+            {isConfirmed
+              ? `You are confirmed for another shift that runs at the same time as ${eventTitle}. `
+                + 'If you take both, you cannot attend both — and the organizer expecting you '
+                + 'will be left short.'
+              : `You have applied to another shift that runs at the same time as ${eventTitle}. `
+                + 'Applying to both is fine, but if both organizers accept you, you will have '
+                + 'to release one.'}
+          </p>
+        </div>
+        <button className="modal-close" onClick={onCancel} aria-label="Close dialog">
+          <X size={18} />
+        </button>
+      </div>
+
+      <div className="modal-body">
+        <div className="inset conflict-detail">
+          <div className="eyebrow">{isConfirmed ? 'Your confirmed shift' : 'Your other application'}</div>
+          <div className="strong conflict-detail-title">{conflict.title}</div>
+          {conflict.slotName && <div className="small muted">{conflict.slotName}</div>}
+          <div className="small tnum conflict-detail-time">
+            {formatDay(conflict.start)} · {formatTime(conflict.start)} – {formatTime(conflict.end)}
+          </div>
+        </div>
+      </div>
+
+      <div className="modal-foot">
+        {/* The safe choice is the plain one and comes first, but it is not the
+            primary action — the person opened this dialog intending to apply. */}
+        <button className="btn btn-ghost" onClick={onCancel} disabled={submitting}>
+          {isConfirmed ? 'Keep my current shift' : 'Leave it for now'}
+        </button>
+        <button className="btn btn-primary" onClick={onContinue} disabled={submitting}>
+          {submitting ? 'Applying…' : 'Apply to this shift too'}
+        </button>
+      </div>
+    </Modal>,
+    document.body
+  );
+}
+
 const MIN_REDRAW_REASON = 10;
 
 function RedrawReasonModal({ runNumber, reason, onChange, submitting, onCancel, onConfirm }) {

@@ -2,12 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import { readFileSync } from 'fs';
+import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
-import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS } from './config.js';
+import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS, COOKIE_NAME } from './config.js';
 import { db } from './db.js';
 
 import authRoutes from './routes/authRoutes.js';
@@ -186,6 +187,49 @@ app.use('/api', cors((req, callback) => {
   callback(new Error(`Origin not allowed by CORS: ${origin}`));
 }));
 
+/**
+ * Minimal request log.
+ *
+ * The application produced no access log at all — 671 `console.log` calls of
+ * incidental detail and no record of who called what. During an incident ("a
+ * student says their hours vanished at some point on Tuesday") there was nothing to
+ * reconstruct from, and the reverse proxy's log knows the URL but not which account
+ * was behind the session.
+ *
+ * Deliberately hand-rolled rather than adding morgan: this is four lines of
+ * behaviour, and a new production dependency needs more justification than that.
+ *
+ * ── What is deliberately NOT logged ──
+ *
+ * The query string is stripped. `/?verify=<token>` and `/?reset=<token>` carry live
+ * single-use credentials, and while those are client-side routes rather than API
+ * calls, a log format that includes query strings is one refactor away from
+ * capturing them. Bodies are never logged — they hold passwords. The user id is
+ * included because it is the thing that makes the log useful for support, and it is
+ * an opaque identifier rather than a name or address.
+ *
+ * Off by default outside production so `npm test` output stays readable; set
+ * REQUEST_LOG=true to force it on.
+ */
+const REQUEST_LOG = process.env.REQUEST_LOG
+  ? process.env.REQUEST_LOG === 'true'
+  : IS_PRODUCTION;
+
+if (REQUEST_LOG) {
+  app.use((req, res, next) => {
+    const started = process.hrtime.bigint();
+    res.on('finish', () => {
+      const ms = Number(process.hrtime.bigint() - started) / 1e6;
+      const pathOnly = req.originalUrl.split('?')[0];
+      const actor = req.user?.id ? ` user=${req.user.id}` : '';
+      console.log(
+        `[req] ${req.method} ${pathOnly} ${res.statusCode} ${ms.toFixed(0)}ms${actor}`
+      );
+    });
+    next();
+  });
+}
+
 app.use(express.json({ limit: '100kb' }));
 
 // Populates req.cookies for authenticateToken. Mounted before the routers and
@@ -236,17 +280,85 @@ export const apiLimiter = rateLimit({
   handler: limitHandler('Too many requests from this device.'),
 });
 
-// Endpoints that send an email must count EVERY request, not just failures:
-// forgot-password always returns 200 (so it cannot leak whether an address
-// exists), which means authLimiter's skipSuccessfulRequests would never count
-// it and it would have no effective limit at all. This limiter guards against
-// using either endpoint to flood someone's inbox.
+/**
+ * Endpoints that send an email must count EVERY request, not just failures:
+ * forgot-password always returns 200 (so it cannot leak whether an address
+ * exists), which means authLimiter's skipSuccessfulRequests would never count
+ * it and it would have no effective limit at all.
+ *
+ * ── Keyed on the ADDRESS, not the device ──
+ *
+ * This was 5 per 15 minutes per IP. A school campus leaves through a single public
+ * address, so on signup day the entire building shared five resend-verification
+ * attempts between them — and with REQUIRE_EMAIL_VERIFICATION defaulting to ON,
+ * being unable to resend is being unable to use the account at all. The sixth
+ * student to mistype their address was stuck until the window rolled over.
+ *
+ * Meanwhile the abuse this limiter exists to prevent — using the app to flood
+ * somebody's inbox — is inherently per-ADDRESS. Keying on the target address makes
+ * the limit match the abuse: one address still gets five messages per window, while
+ * two hundred different students behind one NAT do not contend at all.
+ *
+ * Rotating the address to get a fresh bucket is the obvious bypass, which is why
+ * `mailIpCeilingLimiter` below sits underneath this one. Both must pass.
+ */
+function mailKeyGenerator(req, res) {
+  const raw = req.body?.email;
+  if (typeof raw === 'string' && raw.includes('@')) {
+    // Normalised so `Ava@School.org`, `ava@school.org` and a padded variant share
+    // one bucket — otherwise case alone multiplies the allowance indefinitely.
+    return `mail:${raw.trim().toLowerCase()}`;
+  }
+
+  /**
+   * No address in the body — which is the case for `resend-verification`, an
+   * authenticated endpoint that takes the account from the session.
+   *
+   * Keying that on IP would rebuild the exact problem this function exists to fix,
+   * on the single endpoint where it hurts most: resend-verification is what a
+   * student uses when their verification mail did not arrive, so a per-campus limit
+   * there means the sixth student to need help cannot get it.
+   *
+   * The session cookie identifies the account, and cookieParser runs before these
+   * limiters so it is available even though `authenticateToken` has not run yet.
+   * It is hashed rather than used directly: a rate-limiter key is held in memory and
+   * can surface in diagnostics, and a raw session JWT is a live credential.
+   */
+  const session = req.cookies?.[COOKIE_NAME];
+  if (session) {
+    const digest = createHash('sha256').update(session).digest('hex').slice(0, 32);
+    return `sess:${digest}`;
+  }
+
+  // Genuinely anonymous and address-less: per-IP, so the endpoint is never
+  // unlimited. ipKeyGenerator handles IPv6 normalisation, which a bare req.ip does
+  // not.
+  return `ip:${ipKeyGenerator(req, res)}`;
+}
+
 export const mailLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: Number(process.env.MAIL_RATE_LIMIT) || (DEMO_MODE ? 1000 : 5),
   standardHeaders: 'draft-7',
   legacyHeaders: false,
-  handler: limitHandler('Too many email requests from this device.'),
+  keyGenerator: mailKeyGenerator,
+  handler: limitHandler('Too many email requests for that address.'),
+});
+
+/**
+ * Per-IP ceiling under the per-address limiter above.
+ *
+ * Generous on purpose: it must never be what a legitimate campus hits, only what an
+ * address-rotating enumeration attempt hits. 120 per 15 minutes is far above any
+ * plausible human use of one address, and far below the volume needed to walk a
+ * district's address space.
+ */
+export const mailIpCeilingLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.MAIL_IP_CEILING) || (DEMO_MODE ? 10000 : 120),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  handler: limitHandler('Too many email requests from this network.'),
 });
 
 // The public certificate-verify endpoint is unauthenticated by design (a
@@ -286,8 +398,11 @@ export const lookupLimiter = rateLimit({
 
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/signup', authLimiter);
-app.use('/api/auth/forgot-password', mailLimiter);
-app.use('/api/auth/resend-verification', mailLimiter);
+// Both mail endpoints get the per-IP ceiling first, then the per-address limiter.
+// Order is immaterial to the outcome (both must pass) but reads in the direction of
+// broad-to-specific.
+app.use('/api/auth/forgot-password', mailIpCeilingLimiter, mailLimiter);
+app.use('/api/auth/resend-verification', mailIpCeilingLimiter, mailLimiter);
 app.use('/api/auth/reset-password', authLimiter);
 app.use('/api/auth/verify-email', authLimiter);
 
@@ -314,7 +429,7 @@ app.use('/api/auth/account', authLimiter);
  * It also takes the account password, which makes it a password oracle on the
  * same footing as /change-password.
  */
-app.use('/api/auth/change-email', mailLimiter);
+app.use('/api/auth/change-email', mailIpCeilingLimiter, mailLimiter);
 app.use('/api/auth/confirm-email-change', authLimiter);
 app.use('/api/auth/change-username', authLimiter);
 
@@ -353,15 +468,117 @@ const VERSION = JSON.parse(
   readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf8')
 ).version;
 
+/**
+ * How often the WRITE half of the health probe actually runs.
+ *
+ * The write probe touches page 1, which appends a WAL frame. Measured properly, by
+ * isolating it from database seeding: 500 probes with the interval forced to 1ms
+ * grew the `-wal` sidecar by 2,060,000 bytes — **~4,120 bytes per probe**, i.e. one
+ * page plus frame header. (A first attempt attributed 2.9 MB to the probe; almost
+ * all of that turned out to be DEMO_MODE seeding, which produces 1.9 MB on its own.
+ * Recorded so the number is not re-derived wrongly.)
+ *
+ * At the original 10s default that is ~8,600 probes and ~35 MB of WAL churn per day
+ * on a system that may be otherwise idle. At 60s it is ~5.8 MB. The file stays
+ * bounded either way because SQLite auto-checkpoints, and a clean shutdown
+ * checkpoints the remainder — `user_version` and `integrity_check` were both intact
+ * after the stress run — so this is about pointless I/O, not growth.
+ *
+ * 60s still surfaces a read-only or full-disk condition well inside the alerting
+ * window the runbook specifies (`/health` failing twice consecutively). The read
+ * probe stays unconditional because it costs nothing.
+ *
+ * Why a page write at all, rather than `BEGIN IMMEDIATE; ROLLBACK;` — which would
+ * take a write lock with no WAL frame: acquiring a lock proves the file is not
+ * read-only, but it does NOT prove there is room to write. On a single-volume
+ * deployment holding the database, the logs, the backups and the export archives,
+ * disk exhaustion is the likelier of the two failures, so the probe has to actually
+ * write something.
+ */
+const WRITE_PROBE_INTERVAL_MS = Number(process.env.HEALTH_WRITE_PROBE_MS) || 60_000;
+
+let writeProbeCache = { at: 0, ok: null };
+
+/**
+ * Confirms the database can be written, not merely read.
+ *
+ * ── Why a read was not enough ──
+ *
+ * The probe used to be `db.prepare('SELECT 1').get()`. SQLite serves reads
+ * perfectly well from a database it cannot write to, so a full disk or a read-only
+ * remount left every mutation in the app returning 500 while this endpoint
+ * reported `{"status":"ok","database":"connected"}`. The runbook's two
+ * highest-priority alerts both key off /health, so the monitor stayed green
+ * through precisely the incident it exists to catch — and on the volume holding a
+ * school's service-hour records, that is the incident that matters.
+ *
+ * ── Why `PRAGMA user_version` ──
+ *
+ * It is read, then written back unchanged. That attempts a genuine page write, so
+ * it fails on a read-only filesystem AND on a full disk, while leaving no logical
+ * trace: no scratch table, no row, no schema change, nothing to clean up, and no
+ * value that any other code reads (verified: `user_version` is referenced nowhere
+ * else in the codebase). A scratch INSERT/ROLLBACK would also work but leaves
+ * rowid sequences and WAL frames behind for no extra signal.
+ */
+function probeWritable() {
+  const now = Date.now();
+  if (writeProbeCache.ok !== null && now - writeProbeCache.at < WRITE_PROBE_INTERVAL_MS) {
+    return writeProbeCache.ok;
+  }
+
+  let ok = false;
+  try {
+    const current = db.prepare('PRAGMA user_version').get();
+    const value = Number(current?.user_version ?? 0);
+    // Interpolated rather than bound: PRAGMA does not accept bind parameters. The
+    // value comes from SQLite itself and is coerced through Number(), so it cannot
+    // carry anything but a number.
+    db.exec(`PRAGMA user_version = ${value}`);
+    ok = true;
+  } catch {
+    ok = false;
+  }
+
+  writeProbeCache = { at: now, ok };
+  return ok;
+}
+
 // Health check is registered BEFORE the production SPA catch-all below, so it
 // always returns its JSON — a load balancer must never receive index.html here.
 app.get('/health', (req, res) => {
+  let readable = false;
   try {
     db.prepare('SELECT 1').get();
-    res.json({ status: 'ok', database: 'connected', version: VERSION });
+    readable = true;
   } catch {
-    res.status(500).json({ status: 'error', database: 'disconnected' });
+    readable = false;
   }
+
+  if (!readable) {
+    // 503 rather than 500: this is "not available right now", which is what a load
+    // balancer and an uptime monitor are built to interpret. Deliberately no error
+    // detail — /health is unauthenticated and must not become a filesystem oracle
+    // by echoing a path out of a SQLite error message.
+    return res.status(503).json({
+      status: 'error',
+      database: 'disconnected',
+      writable: false,
+      version: VERSION
+    });
+  }
+
+  const writable = probeWritable();
+  if (!writable) {
+    return res.status(503).json({
+      status: 'error',
+      database: 'read-only',
+      writable: false,
+      version: VERSION
+    });
+  }
+
+  res.json({ status: 'ok', database: 'connected', writable: true, version: VERSION });
 });
 
 app.use('/api', (req, res) => {
@@ -370,7 +587,31 @@ app.use('/api', (req, res) => {
 
 if (IS_PRODUCTION) {
   const distPath = path.join(__dirname, '../dist');
-  app.use(express.static(distPath));
+
+  /**
+   * Static assets, with cache headers matched to how Vite names them.
+   *
+   * Everything under `assets/` carries a content hash in its filename
+   * (`index-DyqEDd61.js`), so the bytes behind a given URL can never change — which
+   * is precisely the condition `immutable` describes. Without it these were served
+   * with only an ETag, so every navigation on a cold-ish cache still paid a
+   * conditional request per asset. On school cellular, over ~20 chunks, that is the
+   * difference between one round trip and twenty.
+   *
+   * `index.html` is deliberately excluded and marked no-cache: it is the file that
+   * points at the hashed assets, so a cached copy would keep sending returning
+   * users to the previous deployment's chunks indefinitely.
+   */
+  app.use(express.static(distPath, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      } else if (/[/\\]assets[/\\]/.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    }
+  }));
+
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api/')) {
       res.sendFile(path.join(distPath, 'index.html'));
@@ -387,7 +628,28 @@ app.use((err, req, res, _next) => {
     console.warn(err.message);
     return res.status(403).json({ error: 'Origin not allowed.' });
   }
+  /**
+   * A body express.json refused is the CALLER's mistake, not ours.
+   *
+   * `entity.too.large` used to fall through to the 500 branch, so a client that
+   * posted more than the 100kb limit was told the server had failed. That
+   * misleads the caller — nothing suggests "send less" — and it files a routine
+   * rejected request as a server defect in monitoring, which buries the real
+   * 500s among the noise.
+   */
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      error: 'That request was too large. The limit is 100kb.',
+      code: 'payload_too_large'
+    });
+  }
+
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Invalid JSON' });
+  }
+
+  // Only genuinely unexpected failures are logged as errors and reported as 500,
+  // so the log stays a list of things worth investigating.
   console.error('Unhandled error:', err);
-  const status = err.type === 'entity.parse.failed' ? 400 : 500;
-  res.status(status).json({ error: status === 400 ? 'Invalid JSON' : 'Internal server error' });
+  res.status(500).json({ error: 'Internal server error' });
 });

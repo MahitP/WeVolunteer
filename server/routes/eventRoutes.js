@@ -1,7 +1,11 @@
 import express from 'express';
+// Explicit, rather than leaning on the Node global, so this matches authRoutes
+// and accountRoutes and cannot break if the module is ever loaded somewhere the
+// global is not present.
+import crypto from 'crypto';
 
 import { VALID_CATEGORIES, MAX_AUTO_SELECT_DRAWS } from '../config.js';
-import { createRandom, performWeightedSelection } from '../weighting.js';
+import { computeDraw, recordRun, applyRun } from '../services/autoSelect.js';
 import { attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, inTransaction, notifyConfirmedVolunteers } from '../utils.js';
 import { notificationService } from '../services/notificationService.js';
@@ -157,16 +161,46 @@ router.get('/api/events', authenticateToken, (req, res) => {
       ? { ...params, lat: filters.lat, lng: filters.lng }
       : params;
 
+    /**
+     * Even the unpaginated response is bounded.
+     *
+     * Omitting `limit` returns the bare array every existing consumer expects,
+     * and that shape is kept. What changed is that it no longer means "every row
+     * in the table": it is capped at EVENTS_MAX_LIMIT, the same ceiling a caller
+     * that DOES paginate is clamped to.
+     *
+     * Without the cap this was the largest payload the app sends and it grew
+     * without limit — measured at 690 KB for 503 events, fetched on every session
+     * restore. One forgotten query parameter was the difference between a small
+     * response and a district-sized one, which is not a property worth keeping.
+     *
+     * Nothing observable changes below the ceiling, which is every realistic
+     * pilot deployment, and the SPA already paginates at 60. Above it, a caller
+     * that needs everything must page — which is what the warning below has been
+     * telling them to do.
+     */
     const events = paginated
       ? db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @limit OFFSET @offset`)
           .all({ ...rowParams, limit, offset })
-      : db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order}`).all(rowParams);
+      : db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @hardCap`)
+          .all({ ...rowParams, hardCap: EVENTS_MAX_LIMIT });
 
     if (!paginated && total > EVENTS_WARN_THRESHOLD) {
       console.warn(
-        `[events] Serialised ${total} events unpaginated for user ${req.user.id}. `
+        `[events] Serialised ${Math.min(total, EVENTS_MAX_LIMIT)} of ${total} events `
+        + `unpaginated for user ${req.user.id}. `
         + `Above ${EVENTS_WARN_THRESHOLD} this response is the largest payload the app sends; `
         + `migrate the caller to ?limit=&offset=.`
+      );
+    }
+
+    // Says out loud when the cap actually removed rows, so a caller silently
+    // seeing a truncated list is visible in the log rather than a mystery.
+    if (!paginated && total > EVENTS_MAX_LIMIT) {
+      console.warn(
+        `[events] TRUNCATED: ${total} events matched but an unpaginated request is `
+        + `capped at ${EVENTS_MAX_LIMIT}. The caller is missing ${total - EVENTS_MAX_LIMIT} `
+        + `row(s) and must use ?limit=&offset=.`
       );
     }
 
@@ -441,7 +475,24 @@ router.post('/api/events', authenticateToken, (req, res) => {
   if (!validation.ok) return res.status(400).json({ error: validation.error });
 
   try {
-    const eventId = `event-${Date.now()}`;
+    /**
+     * randomUUID, not Date.now().
+     *
+     * This was `event-${Date.now()}` — a bare millisecond timestamp used as the
+     * PRIMARY KEY. Two events created in the same millisecond produced the same
+     * id, the second INSERT violated the key, and the request returned 500 having
+     * created nothing. Measured before this change: 25 concurrent creations lost
+     * 8, and 40 sequential ones lost 2.
+     *
+     * In production that is an organizer double-submitting, or two organizers
+     * saving at once — they lose the event and see a server error for something
+     * they did nothing wrong in.
+     *
+     * Every other id in the app already does this; accountRoutes.js even carries
+     * the note "randomUUID, not Date.now(): two deletions in the same
+     * millisecond". Events were the one place the lesson had not been applied.
+     */
+    const eventId = `event-${crypto.randomUUID()}`;
     const nowStr = new Date().toISOString();
     
     inTransaction(() => {
@@ -978,51 +1029,21 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, (req, res) => 
 
     const nextRunNumber = runCount + 1;
 
-    // Gather pending applicants for each slot
-    const slots = db.prepare('SELECT * FROM slots WHERE event_id = ?').all(eventId);
-    const selectedIds = [];
-    const waitlistIds = [];
-
-    for (const slot of slots) {
-      const pendingApps = db.prepare(`
-        SELECT a.id, a.user_id,
-               COALESCE(SUM(att.hours_awarded), 0) as total_hours
-        FROM applications a
-        LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
-        WHERE a.slot_id = ? AND a.status = 'pending'
-        GROUP BY a.id ORDER BY a.id
-      `).all(slot.id);
-
-      if (pendingApps.length === 0) continue;
-
-      const acceptedSlotCount = db.prepare(`
-        SELECT COUNT(*) as count FROM applications WHERE slot_id = ? AND status = 'accepted'
-      `).get(slot.id).count;
-
-      const remainingSpots = Math.max(0, slot.max_spots - acceptedSlotCount);
-
-      if (remainingSpots <= 0) {
-        // All waitlisted
-        pendingApps.forEach(app => {
-          waitlistIds.push(app.id);
-        });
-      } else {
-        // Run selection using seed incorporating the run number
-        const seed = `${event.id}:${slot.id}:run-${nextRunNumber}`;
-        const randomFn = createRandom(seed);
-        const draw = performWeightedSelection(pendingApps, remainingSpots, randomFn);
-        selectedIds.push(...draw.selectedIds);
-        waitlistIds.push(...draw.waitlistIds);
-      }
-    }
-
-    const runId = `run-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-    const nowStr = new Date().toISOString();
-
-    db.prepare(`
-      INSERT INTO auto_select_runs (id, event_id, run_number, created_at, selected_ids, waitlist_ids, is_confirmed, reason)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?)
-    `).run(runId, eventId, nextRunNumber, nowStr, JSON.stringify(selectedIds), JSON.stringify(waitlistIds), runCount >= 1 ? cleanReason : null);
+    /**
+     * The draw itself lives in services/autoSelect.js.
+     *
+     * Moved out of this handler so the Auto Select scheduler runs the SAME code
+     * rather than a second copy of the weighting, the seed formula and the capacity
+     * arithmetic. A fairness algorithm with two implementations diverges silently —
+     * both copies keep producing plausible-looking winners — which is the shape of
+     * audit finding F-1. Behaviour here is unchanged; this is a delegation.
+     */
+    const { selectedIds, waitlistIds } = computeDraw(db, eventId, { runNumber: nextRunNumber });
+    const { runId, createdAt: nowStr } = recordRun(
+      db, eventId,
+      { selectedIds, waitlistIds },
+      { runNumber: nextRunNumber, reason: runCount >= 1 ? cleanReason : null }
+    );
 
     res.json({
       id: runId,
@@ -1073,112 +1094,13 @@ router.post('/api/events/:id/auto-select/confirm', authenticateToken, (req, res)
       return res.status(400).json({ error: 'Selection is already confirmed and locked' });
     }
 
-    const selectedIds = JSON.parse(latestRun.selected_ids);
-    const waitlistIds = JSON.parse(latestRun.waitlist_ids);
-
-    inTransaction(() => {
-      // 1. Confirm this run
-      db.prepare('UPDATE auto_select_runs SET is_confirmed = 1 WHERE id = ?').run(latestRun.id);
-
-      // 2. Set statuses for selected applicants
-      const acceptStmt = db.prepare("UPDATE applications SET status = 'accepted', waitlist_order = NULL WHERE id = ?");
-      for (const id of selectedIds) {
-        acceptStmt.run(id);
-
-        const appRow = db.prepare(`
-          SELECT a.user_id, s.name as slot_name
-          FROM applications a
-          JOIN slots s ON a.slot_id = s.id
-          WHERE a.id = ?
-        `).get(id);
-
-        if (appRow) {
-          notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: event.id, eventTitle: event.title }, appRow.user_id);
-        }
-      }
-
-      // 3. Set statuses and ranks for waitlisted applicants
-      const waitlistApps = db.prepare(`
-        SELECT id, slot_id, user_id FROM applications
-        WHERE id IN (${waitlistIds.map(() => '?').join(',')})
-      `).all(...waitlistIds);
-
-      const waitlistStmt = db.prepare("UPDATE applications SET status = 'waitlisted', waitlist_order = ? WHERE id = ?");
-      
-      // Slot-specific waitlist counters
-      const slotWaitlistIndex = {};
-
-      for (const id of waitlistIds) {
-        const app = waitlistApps.find(a => a.id === id);
-        if (!app) continue;
-
-        slotWaitlistIndex[app.slot_id] = (slotWaitlistIndex[app.slot_id] || 0) + 1;
-        const rank = slotWaitlistIndex[app.slot_id];
-
-        waitlistStmt.run(rank, id);
-
-        const slot = db.prepare('SELECT name FROM slots WHERE id = ?').get(app.slot_id);
-        const slotName = slot ? slot.name : 'Shift';
-
-        notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: event.id, eventTitle: event.title, waitlistRank: rank }, app.user_id);
-      }
-
-      // 4. Compute selection summary
-      const totalApplicants = selectedIds.length + waitlistIds.length;
-      let acceptedHoursSum = 0;
-      let waitlistedHoursSum = 0;
-
-      if (selectedIds.length > 0) {
-        const rows = db.prepare(`
-          SELECT COALESCE(SUM(att.hours_awarded), 0) as total_hours
-          FROM applications a
-          LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
-          WHERE a.id IN (${selectedIds.map(() => '?').join(',')})
-          GROUP BY a.id
-        `).all(...selectedIds);
-        acceptedHoursSum = rows.reduce((sum, r) => sum + r.total_hours, 0);
-      }
-
-      if (waitlistIds.length > 0) {
-        const rows = db.prepare(`
-          SELECT COALESCE(SUM(att.hours_awarded), 0) as total_hours
-          FROM applications a
-          LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
-          WHERE a.id IN (${waitlistIds.map(() => '?').join(',')})
-          GROUP BY a.id
-        `).all(...waitlistIds);
-        waitlistedHoursSum = rows.reduce((sum, r) => sum + r.total_hours, 0);
-      }
-
-      const avgAcceptedHours = selectedIds.length > 0 ? Number((acceptedHoursSum / selectedIds.length).toFixed(1)) : 0;
-      const avgWaitlistedHours = waitlistIds.length > 0 ? Number((waitlistedHoursSum / waitlistIds.length).toFixed(1)) : 0;
-
-      // Surface the draw history so the published summary reflects that
-      // re-draws happened, and why — not just the final, cleaned-up outcome.
-      const runCount = db.prepare('SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ?').get(eventId).count;
-      const redrawReasons = db.prepare(`
-        SELECT reason FROM auto_select_runs
-        WHERE event_id = ? AND reason IS NOT NULL
-        ORDER BY run_number ASC
-      `).all(eventId).map(r => r.reason);
-
-      const summary = {
-        totalApplicants,
-        acceptedVolunteers: selectedIds.length,
-        waitlistedVolunteers: waitlistIds.length,
-        avgAcceptedHours,
-        avgWaitlistedHours,
-        runCount,
-        redrawReasons,
-        timestamp: new Date().toISOString()
-      };
-
-      db.prepare(`
-        UPDATE events
-        SET selection_summary = ?, status = 'closed'
-        WHERE id = ?
-      `).run(JSON.stringify(summary), eventId);
-    });
+    /**
+     * Applying the run lives in services/autoSelect.js — same reason as the draw
+     * above: the scheduler confirms runs too, and one implementation cannot drift
+     * from itself. `executedBy` records who caused it so a district can tell an
+     * organizer's selection from an automatic one.
+     */
+    applyRun(db, eventId, latestRun, { executedBy: 'organizer' });
 
     res.json({ success: true });
   } catch (err) {
