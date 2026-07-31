@@ -1,7 +1,7 @@
 {
   "name": "wevolunteer-app",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Volunteer scheduling and service-hour tracking for schools and community organizations",
   "type": "module",
   "engines": {
