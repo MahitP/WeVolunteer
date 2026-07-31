@@ -1,6 +1,5 @@
 import React from 'react';
 import { api } from '../utils/api';
-import { RotateCcw } from 'lucide-react';
 
 const SEED_USERS = [
   { id: 'user-student-1', name: 'Leo Chen', email: 'leo.chen28@gmail.com', avatar: '🧑‍💻', role: 'Volunteer' },
@@ -30,20 +29,17 @@ export default function DemoBar({ currentUser, refreshAll, addToast }) {
     }
   };
 
-  const handleReset = async () => {
-    const ok = window.confirm(
-      'Reset the demo database?\n\nAll events, sign-ups, and hours you created will be replaced with the original sample data.'
-    );
-    if (!ok) return;
-    try {
-      await api.resetDatabase();
-      await api.login('leo.chen28@gmail.com', 'password123');
-      addToast('Demo data restored. Signed in as Leo Chen.', 'success');
-      refreshAll();
-    } catch (err) {
-      addToast(`Could not reset demo data: ${err.message}`, 'error');
-    }
-  };
+  /**
+   * There is deliberately no "Reset data" button here any more.
+   *
+   * It called `POST /api/auth/reset`, which dropped tables from a
+   * hand-maintained list that had drifted 13 tables out of date. The drop died
+   * partway through on a foreign-key cascade it could no longer resolve, so the
+   * handler never reached the reseed: pressing this button destroyed the demo
+   * instead of restoring it, and the only feedback was an error toast. Resetting
+   * a development database is now `npm run db:reset:dev`, which cannot half-
+   * finish because it recreates the file rather than enumerating tables.
+   */
 
   return (
     <div className="demobar">
@@ -67,10 +63,6 @@ export default function DemoBar({ currentUser, refreshAll, addToast }) {
           ))}
         </select>
       </label>
-
-      <button onClick={handleReset} title="Restore the original sample data" style={{ marginLeft: 'auto' }}>
-        <RotateCcw size={12} /> Reset data
-      </button>
     </div>
   );
 }

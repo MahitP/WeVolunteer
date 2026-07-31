@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../utils/api';
 import { DownloadCloud, Clock, AlertTriangle, FileArchive, CheckCircle, Check, XCircle } from 'lucide-react';
+import Modal, { ModalHead } from '../Modal';
 
 export default function DataExportCard({ addToast }) {
   const [status, setStatus] = useState('loading'); // loading, none, pending, processing, completed, failed, expired
@@ -226,17 +227,30 @@ export default function DataExportCard({ addToast }) {
         </div>
       </div>
 
+      {/*
+        Goes through the shared Modal shell.
+
+        It used to be a hand-rolled `.modal-overlay` with no dialog behaviour at
+        all — no role="dialog", no aria-modal, no Escape, no focus containment,
+        no focus restore, no scroll lock — and its close control was a bare "×"
+        with no accessible name, so a screen reader announced an unlabelled
+        button as the only way out.
+
+        `label` rather than aria-labelledby: the heading inside changes with the
+        export state ("Preparing Export…", "Your export is ready", …), so a fixed
+        accessible name on the dialog itself is the stable choice.
+      */}
       {showModal && (
-        <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth: '560px' }}>
-            <div className="modal-head" style={{ borderBottom: 'none', paddingBottom: 0 }}>
-              <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
-            </div>
-            <div className="modal-body" style={{ paddingTop: 0 }}>
-              {renderModalContent()}
-            </div>
+        <Modal
+          onClose={() => setShowModal(false)}
+          label="Download your data"
+          className="data-export-modal"
+        >
+          <ModalHead title="Download your data" onClose={() => setShowModal(false)} />
+          <div className="modal-body">
+            {renderModalContent()}
           </div>
-        </div>
+        </Modal>
       )}
     </>
   );

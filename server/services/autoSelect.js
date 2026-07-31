@@ -1,0 +1,275 @@
+/**
+ * Auto Select — the draw, and applying it.
+ *
+ * ── Why this module exists ──
+ *
+ * This logic lived inline in two route handlers: `POST /api/events/:id/auto-select/run`
+ * computed a draw and stored it as a draft, and
+ * `POST /api/events/:id/auto-select/confirm` applied the latest draft. The scheduler
+ * needs exactly that behaviour without an HTTP request.
+ *
+ * It is extracted rather than reimplemented, and that is the whole point. The
+ * alternative — a second copy of the weighting, the seed formula and the capacity
+ * arithmetic — is the mistake that produced audit finding F-1, where a
+ * hand-maintained parallel list drifted from the schema until it destroyed the
+ * database. A fairness algorithm with two implementations is the same failure
+ * waiting to happen, except the divergence would be invisible: both copies would
+ * produce plausible-looking winners.
+ *
+ * Everything here is a verbatim move of the route code — same SQL, same
+ * `createRandom(seed)` with the same `${eventId}:${slotId}:run-${runNumber}` seed,
+ * same `performWeightedSelection`, same capacity arithmetic, same notification
+ * dispatches, same summary shape. The routes now delegate here, so the existing
+ * route tests cover the extraction.
+ *
+ * The functions take `db` as their first argument, matching hoursLedger.js and
+ * instanceLock.js, so nothing here depends on module-load order.
+ */
+import { createRandom, performWeightedSelection } from '../weighting.js';
+import { notificationService } from './notificationService.js';
+import { inTransaction } from '../utils.js';
+
+/**
+ * Computes a draw without writing anything.
+ *
+ * Pure with respect to the database: it reads pending applications and capacity and
+ * returns which application ids would be accepted and which waitlisted. Separated
+ * from `recordRun` so a caller can compute a result, and from `applyRun` so a
+ * computed result can be reviewed before it takes effect — which is the manual
+ * two-step flow the organizer sees.
+ */
+export function computeDraw(db, eventId, { runNumber }) {
+  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+  if (!event) throw new Error(`Event not found: ${eventId}`);
+
+  const slots = db.prepare('SELECT * FROM slots WHERE event_id = ?').all(eventId);
+  const selectedIds = [];
+  const waitlistIds = [];
+
+  for (const slot of slots) {
+    const pendingApps = db.prepare(`
+      SELECT a.id, a.user_id,
+             COALESCE(SUM(att.hours_awarded), 0) as total_hours
+      FROM applications a
+      LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
+      WHERE a.slot_id = ? AND a.status = 'pending'
+      GROUP BY a.id ORDER BY a.id
+    `).all(slot.id);
+
+    if (pendingApps.length === 0) continue;
+
+    // Capacity already consumed by hand-accepted volunteers. This is what keeps a
+    // draw from ever exceeding a slot's spots, and from reconsidering anyone who is
+    // already accepted — the query above only looks at `pending`.
+    const acceptedSlotCount = db.prepare(`
+      SELECT COUNT(*) as count FROM applications WHERE slot_id = ? AND status = 'accepted'
+    `).get(slot.id).count;
+
+    const remainingSpots = Math.max(0, slot.max_spots - acceptedSlotCount);
+
+    if (remainingSpots <= 0) {
+      // All waitlisted
+      pendingApps.forEach(app => {
+        waitlistIds.push(app.id);
+      });
+    } else {
+      // Seed incorporating the run number, so a re-draw differs from the first draw
+      // but any given run is reproducible.
+      const seed = `${event.id}:${slot.id}:run-${runNumber}`;
+      const randomFn = createRandom(seed);
+      const draw = performWeightedSelection(pendingApps, remainingSpots, randomFn);
+      selectedIds.push(...draw.selectedIds);
+      waitlistIds.push(...draw.waitlistIds);
+    }
+  }
+
+  return { selectedIds, waitlistIds };
+}
+
+/** Stores a computed draw as an unconfirmed draft and returns the row id. */
+export function recordRun(db, eventId, { selectedIds, waitlistIds }, { runNumber, reason }) {
+  const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const nowStr = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO auto_select_runs (id, event_id, run_number, created_at, selected_ids, waitlist_ids, is_confirmed, reason)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+  `).run(runId, eventId, runNumber, nowStr, JSON.stringify(selectedIds), JSON.stringify(waitlistIds), reason ?? null);
+
+  return { runId, createdAt: nowStr };
+}
+
+/**
+ * Applies a stored draft: accepts, waitlists, notifies, writes the summary.
+ *
+ * Everything happens in one transaction so a promotion can never be visible without
+ * the run that authorised it. Notifications are dispatched inside the transaction
+ * exactly as the original route did — changing that ordering is out of scope for an
+ * extraction, and `notificationService.dispatch` performs its own writes which the
+ * same transaction covers.
+ *
+ * `executedBy` is recorded in the summary so a district can tell an automatic
+ * selection from an organizer's. That is the only addition to the original
+ * behaviour, and it is additive: the field is new, nothing existing changed shape.
+ */
+export function applyRun(db, eventId, run, { executedBy = 'organizer' } = {}) {
+  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+  if (!event) throw new Error(`Event not found: ${eventId}`);
+
+  const selectedIds = JSON.parse(run.selected_ids);
+  const waitlistIds = JSON.parse(run.waitlist_ids);
+
+  inTransaction(() => {
+    // 1. Confirm this run
+    db.prepare('UPDATE auto_select_runs SET is_confirmed = 1 WHERE id = ?').run(run.id);
+
+    // 2. Set statuses for selected applicants
+    const acceptStmt = db.prepare("UPDATE applications SET status = 'accepted', waitlist_order = NULL WHERE id = ?");
+    for (const id of selectedIds) {
+      acceptStmt.run(id);
+
+      const appRow = db.prepare(`
+        SELECT a.user_id, s.name as slot_name
+        FROM applications a
+        JOIN slots s ON a.slot_id = s.id
+        WHERE a.id = ?
+      `).get(id);
+
+      if (appRow) {
+        notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: event.id, eventTitle: event.title }, appRow.user_id);
+      }
+    }
+
+    // 3. Set statuses and ranks for waitlisted applicants
+    const waitlistApps = waitlistIds.length > 0
+      ? db.prepare(`
+          SELECT id, slot_id, user_id FROM applications
+          WHERE id IN (${waitlistIds.map(() => '?').join(',')})
+        `).all(...waitlistIds)
+      : [];
+
+    const waitlistStmt = db.prepare("UPDATE applications SET status = 'waitlisted', waitlist_order = ? WHERE id = ?");
+
+    // Slot-specific waitlist counters
+    const slotWaitlistIndex = {};
+
+    for (const id of waitlistIds) {
+      const app = waitlistApps.find(a => a.id === id);
+      if (!app) continue;
+
+      slotWaitlistIndex[app.slot_id] = (slotWaitlistIndex[app.slot_id] || 0) + 1;
+      const rank = slotWaitlistIndex[app.slot_id];
+
+      waitlistStmt.run(rank, id);
+
+      notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: event.id, eventTitle: event.title, waitlistRank: rank }, app.user_id);
+    }
+
+    // 4. Compute selection summary
+    const totalApplicants = selectedIds.length + waitlistIds.length;
+    let acceptedHoursSum = 0;
+    let waitlistedHoursSum = 0;
+
+    if (selectedIds.length > 0) {
+      const rows = db.prepare(`
+        SELECT COALESCE(SUM(att.hours_awarded), 0) as total_hours
+        FROM applications a
+        LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
+        WHERE a.id IN (${selectedIds.map(() => '?').join(',')})
+        GROUP BY a.id
+      `).all(...selectedIds);
+      acceptedHoursSum = rows.reduce((sum, r) => sum + r.total_hours, 0);
+    }
+
+    if (waitlistIds.length > 0) {
+      const rows = db.prepare(`
+        SELECT COALESCE(SUM(att.hours_awarded), 0) as total_hours
+        FROM applications a
+        LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
+        WHERE a.id IN (${waitlistIds.map(() => '?').join(',')})
+        GROUP BY a.id
+      `).all(...waitlistIds);
+      waitlistedHoursSum = rows.reduce((sum, r) => sum + r.total_hours, 0);
+    }
+
+    const avgAcceptedHours = selectedIds.length > 0 ? Number((acceptedHoursSum / selectedIds.length).toFixed(1)) : 0;
+    const avgWaitlistedHours = waitlistIds.length > 0 ? Number((waitlistedHoursSum / waitlistIds.length).toFixed(1)) : 0;
+
+    // Surface the draw history so the published summary reflects that
+    // re-draws happened, and why — not just the final, cleaned-up outcome.
+    const runCount = db.prepare('SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ?').get(eventId).count;
+    const redrawReasons = db.prepare(`
+      SELECT reason FROM auto_select_runs
+      WHERE event_id = ? AND reason IS NOT NULL
+      ORDER BY run_number ASC
+    `).all(eventId).map(r => r.reason);
+
+    const summary = {
+      totalApplicants,
+      acceptedVolunteers: selectedIds.length,
+      waitlistedVolunteers: waitlistIds.length,
+      avgAcceptedHours,
+      avgWaitlistedHours,
+      runCount,
+      redrawReasons,
+      executedBy,
+      timestamp: new Date().toISOString()
+    };
+
+    db.prepare(`
+      UPDATE events
+      SET selection_summary = ?, status = 'closed'
+      WHERE id = ?
+    `).run(JSON.stringify(summary), eventId);
+  });
+
+  return { selectedIds, waitlistIds };
+}
+
+/** The latest run for an event, confirmed or not. */
+export function latestRun(db, eventId) {
+  return db.prepare(`
+    SELECT * FROM auto_select_runs
+    WHERE event_id = ?
+    ORDER BY run_number DESC LIMIT 1
+  `).get(eventId);
+}
+
+/** Whether a confirmed run exists — the terminal state for an event's selection. */
+export function hasConfirmedRun(db, eventId) {
+  return db.prepare(
+    'SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ? AND is_confirmed = 1'
+  ).get(eventId).count > 0;
+}
+
+/**
+ * Draw and apply in one step, for the scheduler.
+ *
+ * If the organizer already produced a draft and never confirmed it, THAT draft is
+ * applied rather than a fresh draw. It is the result they generated and may already
+ * have reviewed; replacing it would be the scheduler overruling a human decision
+ * with one nobody has seen.
+ *
+ * Refuses if a confirmed run already exists, which is the idempotency guard the
+ * manual route already enforces and the reason this is safe to call repeatedly.
+ */
+export function runAndConfirm(db, eventId, { source = 'scheduler' } = {}) {
+  if (hasConfirmedRun(db, eventId)) {
+    return { executed: false, reason: 'already_confirmed' };
+  }
+
+  const existing = latestRun(db, eventId);
+
+  if (existing) {
+    applyRun(db, eventId, existing, { executedBy: source });
+    return { executed: true, reusedDraft: true, runNumber: existing.run_number };
+  }
+
+  const runNumber = 1;
+  const draw = computeDraw(db, eventId, { runNumber });
+  const { runId } = recordRun(db, eventId, draw, { runNumber, reason: null });
+  const stored = db.prepare('SELECT * FROM auto_select_runs WHERE id = ?').get(runId);
+  applyRun(db, eventId, stored, { executedBy: source });
+
+  return { executed: true, reusedDraft: false, runNumber, ...draw };
+}

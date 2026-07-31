@@ -1,6 +1,9 @@
 import express from 'express';
 
-import { authenticateToken, inTransaction, handleWaitlistPromotion } from '../utils.js';
+import {
+  authenticateToken, inTransaction,
+  assignWaitlistOrder, promoteFromWaitlist, notifyPromotions
+} from '../utils.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 
@@ -297,6 +300,7 @@ router.patch('/api/applications/bulk', authenticateToken, (req, res) => {
     }
 
     const promotions = [];
+    const freedSlots = new Set();
     inTransaction(() => {
       const update = db.prepare('UPDATE applications SET status = ? WHERE id = ?');
       for (const app of apps) {
@@ -317,16 +321,31 @@ router.patch('/api/applications/bulk', authenticateToken, (req, res) => {
         update.run(status, app.id);
         applied.push({ id: app.id, status, userId: app.user_id, eventId: app.event_id, eventTitle: app.event_title });
 
-        if (wasAccepted && status !== 'accepted' && app.auto_approve === 1) {
-          promotions.push({ slotId: app.slot_id, eventId: app.event_id, eventTitle: app.event_title, organizerId: app.organizer_id });
+        if (status === 'waitlisted') {
+          assignWaitlistOrder(app.id, app.slot_id);
         }
+
+        // Slots whose capacity this batch may have freed. Collected rather than
+        // promoted inline so each slot is filled ONCE after every demotion in
+        // the batch has been applied — promoting per-application would refill a
+        // spot from the waitlist and then free another, cascading oddly.
+        //
+        // The `auto_approve === 1` condition that used to be here is gone:
+        // promotion follows capacity, not the selection method.
+        if (wasAccepted && status !== 'accepted') {
+          freedSlots.add(app.slot_id);
+        }
+      }
+
+      // Still inside the transaction, so a promotion cannot be visible without
+      // the demotion that made room for it.
+      for (const slotId of freedSlots) {
+        promotions.push(...promoteFromWaitlist(slotId));
       }
     });
 
-    // After the commit: fill any spots freed by a demotion, then notify.
-    for (const p of promotions) {
-      handleWaitlistPromotion(p.slotId, p.eventId, p.eventTitle, p.organizerId);
-    }
+    // Notifications only after the commit — see promoteFromWaitlist.
+    notifyPromotions(promotions);
     for (const a of applied) {
       if (status === 'accepted') {
         notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: a.eventId, eventTitle: a.eventTitle }, a.userId);
@@ -380,8 +399,18 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
         });
       }
 
-      db.prepare('UPDATE applications SET status = ?, waitlist_order = NULL WHERE id = ?')
-        .run('withdrawn', appId);
+      let promotions = [];
+      inTransaction(() => {
+        db.prepare('UPDATE applications SET status = ?, waitlist_order = NULL WHERE id = ?')
+          .run('withdrawn', appId);
+
+        // Releasing a confirmed spot is the case the waitlist exists for.
+        // Previously gated on auto_approve, which left organizer-managed events
+        // sitting under capacity with someone waiting and nobody informed.
+        if (wasConfirmed) {
+          promotions = promoteFromWaitlist(app.slot_id);
+        }
+      });
 
       if (wasConfirmed) {
         // Notify student releasing spot
@@ -390,11 +419,7 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
         // Notify organizer
         notificationService.dispatch('VOLUNTEER_RELEASED_SPOT', { eventId: app.event_id, eventTitle: app.event_title }, app.organizer_id);
 
-        // Auto Select waitlist promotion check
-        const event = db.prepare('SELECT auto_approve FROM events WHERE id = ?').get(app.event_id);
-        if (event && event.auto_approve === 1) {
-          handleWaitlistPromotion(app.slot_id, app.event_id, app.event_title, app.organizer_id);
-        }
+        notifyPromotions(promotions);
       }
 
       return res.json({
@@ -456,15 +481,27 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
 
     const wasAccepted = app.status === 'accepted';
 
-    db.prepare('UPDATE applications SET status = ? WHERE id = ?').run(status, appId);
+    // The status change and any resulting promotion must land together: a spot
+    // freed but not refilled, or refilled twice, are both worse than neither.
+    let promotions = [];
+    inTransaction(() => {
+      db.prepare('UPDATE applications SET status = ? WHERE id = ?').run(status, appId);
 
-    // If they were accepted and are no longer accepted, trigger waitlist promotion
-    if (wasAccepted && status !== 'accepted') {
-      const event = db.prepare('SELECT auto_approve FROM events WHERE id = ?').get(app.event_id);
-      if (event && event.auto_approve === 1) {
-        handleWaitlistPromotion(app.slot_id, app.event_id, app.event_title, app.organizer_id);
+      // Joining the waitlist means joining the back of the queue.
+      if (status === 'waitlisted') {
+        assignWaitlistOrder(appId, app.slot_id);
       }
-    }
+
+      // A spot only opens if this person was actually holding one. Rejecting a
+      // pending applicant frees nothing, so promoting then would overfill.
+      //
+      // No `auto_approve` check: promotion depends on capacity and queue order,
+      // not on how the organizer chooses people. See promoteFromWaitlist.
+      if (wasAccepted && status !== 'accepted') {
+        promotions = promoteFromWaitlist(app.slot_id);
+      }
+    });
+    notifyPromotions(promotions);
 
     // Notify the volunteer
     if (status === 'accepted') {

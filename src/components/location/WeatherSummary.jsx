@@ -1,5 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import * as LucideIcons from 'lucide-react';
+import {
+  Loader2, Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning
+} from 'lucide-react';
+
+/**
+ * The weather icons this component can actually show, keyed by the name the
+ * server sends.
+ *
+ * This was `import * as LucideIcons from 'lucide-react'` with a
+ * `LucideIcons[weather.icon]` lookup. A namespace import defeats tree-shaking by
+ * construction — the bundler cannot know which of ~1,600 icons a runtime string
+ * will select, so it has to include all of them. That single line was 611 kB of
+ * the bundle (157 kB gzipped), for a nine-icon weather badge.
+ *
+ * It hid inside the 1,270 kB entry chunk until route splitting broke the bundle
+ * apart and left it standing alone as the largest remaining chunk.
+ *
+ * The set is closed and small: server/routes/weatherRoutes.js maps every WMO
+ * code to one of these eight names. An unrecognised name falls back to Cloud,
+ * which is what the old lookup did too — so behaviour is unchanged, including
+ * for a WMO code this table has not seen.
+ */
+const WEATHER_ICONS = {
+  Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning
+};
 import { api } from '../../utils/api';
 import './LocationDisplay.css';
 
@@ -39,7 +63,7 @@ export default function WeatherSummary({ latitude, longitude, datetime }) {
   if (loading) {
     return (
       <div className="weather-summary loading" aria-busy="true">
-        <LucideIcons.Loader2 className="spinner" size={14} />
+        <Loader2 className="spinner" size={14} />
         <span className="weather-desc">Forecast...</span>
       </div>
     );
@@ -50,7 +74,7 @@ export default function WeatherSummary({ latitude, longitude, datetime }) {
     return null;
   }
 
-  const IconComponent = LucideIcons[weather.icon] || LucideIcons.Cloud;
+  const IconComponent = WEATHER_ICONS[weather.icon] || Cloud;
 
   return (
     <div 

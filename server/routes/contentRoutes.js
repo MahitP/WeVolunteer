@@ -392,8 +392,8 @@ router.get('/api/stats/volunteer', authenticateToken, (req, res) => {
     const upcoming = db.prepare(`
       SELECT COUNT(*) as c FROM applications
       WHERE user_id = ? AND status = 'accepted'
-        AND slot_id IN (SELECT id FROM slots WHERE end_datetime > datetime('now'))
-    `).get(req.user.id).c;
+        AND slot_id IN (SELECT id FROM slots WHERE end_datetime > ?)
+    `).get(req.user.id, new Date().toISOString()).c;
 
     res.json({
       monthlyHours: monthlyHours.map(m => ({ month: m.month, hours: Number(m.hours) })),
@@ -506,12 +506,42 @@ router.get('/api/recommendations', authenticateToken, (req, res) => {
       WHERE a.user_id = ? AND a.status = 'accepted'
     `).all(req.user.id).map(r => r.category);
 
-    // Get all open events
+    /**
+     * Events a student could actually still apply to.
+     *
+     * This was `WHERE e.status = 'open'` and nothing more. `status` stays 'open'
+     * for an event's whole life — it only becomes 'completed' when an organizer
+     * finalises attendance, which many never do — so events whose shifts had
+     * ended weeks ago kept being suggested on the Opportunities page. Verified
+     * against a live server: an event with a deadline 5 days past and a shift
+     * that ended 3 days ago was correctly excluded from `?openOnly=true` and
+     * still came back from here.
+     *
+     * "Open" means the same three things it means everywhere else in the app
+     * (see `openOnly` in eventQuery.js): posted open, deadline not passed, and a
+     * free spot. Checking only the first also meant a full event could be
+     * suggested — an invitation to apply for nothing.
+     *
+     * The remaining-shift check is belt-and-braces rather than redundant:
+     * validateEventPayload enforces deadline <= first shift start, so a passed
+     * shift implies a passed deadline for anything created through the API — but
+     * seeded and migrated rows do not go through that validator.
+     */
     const events = db.prepare(`
       SELECT e.*, u.name as organizer_name FROM events e
       JOIN users u ON e.organizer_id = u.id
       WHERE e.status = 'open'
-    `).all();
+        AND e.application_deadline > @now
+        AND EXISTS (
+          SELECT 1 FROM slots s WHERE s.event_id = e.id AND s.end_datetime > @now
+        )
+        AND (
+          SELECT COALESCE(SUM(s.max_spots), 0) FROM slots s WHERE s.event_id = e.id
+        ) > (
+          SELECT COUNT(*) FROM applications a
+          WHERE a.event_id = e.id AND a.status = 'accepted'
+        )
+    `).all({ now: new Date().toISOString() });
 
     // Score each event
     let scored = events

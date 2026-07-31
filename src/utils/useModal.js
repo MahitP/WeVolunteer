@@ -1,6 +1,21 @@
 import { useEffect, useRef } from 'react';
 
 /**
+ * The dialogs currently open, outermost first.
+ *
+ * Escape has to dismiss the TOP dialog and only that one. Every modal listens on
+ * `document`, and `stopPropagation` does not stop other listeners bound to the
+ * same node — that needs `stopImmediatePropagation`, which would hand the event
+ * to whichever modal registered FIRST, i.e. the one underneath. Observed once a
+ * dialog could open on top of another: one Escape closed the schedule-conflict
+ * warning AND the event modal behind it.
+ *
+ * A stack is the smallest thing that expresses "topmost wins" without depending
+ * on listener registration order.
+ */
+const modalStack = [];
+
+/**
  * Standard dialog behaviour, applied identically by every modal in the app.
  *
  * Without this each modal was mouse-only: no Escape, no focus containment, and
@@ -25,6 +40,11 @@ export function useModal(onClose) {
     const previouslyFocused = document.activeElement;
     const node = ref.current;
 
+    // Identity for this dialog's place in the stack.
+    const token = {};
+    modalStack.push(token);
+    const isTopmost = () => modalStack[modalStack.length - 1] === token;
+
     const focusable = () => {
       if (!node) return [];
       return [...node.querySelectorAll(
@@ -40,6 +60,10 @@ export function useModal(onClose) {
     target?.focus?.();
 
     const onKeyDown = (e) => {
+      // A dialog with something open on top of it is inert: neither Escape nor
+      // the Tab cycle belongs to it while it is covered.
+      if (!isTopmost()) return;
+
       if (e.key === 'Escape') {
         e.stopPropagation();
         closeRef.current?.();
@@ -68,7 +92,20 @@ export function useModal(onClose) {
 
     return () => {
       document.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = previousOverflow;
+      const at = modalStack.indexOf(token);
+      if (at !== -1) modalStack.splice(at, 1);
+
+      /**
+       * Only the last dialog to close restores page scrolling.
+       *
+       * Each modal saves `document.body.style.overflow` on mount. A stacked
+       * dialog therefore saves 'hidden' — the value the dialog underneath had
+       * already set — and on unmount would write 'hidden' straight back, leaving
+       * the page unscrollable for as long as the outer modal stayed open. Only
+       * the outermost dialog holds the value worth restoring.
+       */
+      if (modalStack.length === 0) document.body.style.overflow = previousOverflow;
+
       // Give focus back to whatever opened the dialog
       if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
     };

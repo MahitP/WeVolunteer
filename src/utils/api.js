@@ -509,8 +509,11 @@ export const api = {
     body: JSON.stringify({ checkinMap })
   }),
 
-  // ── Admin ───────────────────────────────────────
-  resetDatabase: async () => apiFetch('/api/auth/reset', { method: 'POST' }),
+  // Removed: resetDatabase(). `POST /api/auth/reset` no longer exists — a
+  // reachable endpoint that dropped tables destroyed the database rather than
+  // resetting it (it died partway through a hand-maintained DROP list, before
+  // reseeding). Restoring a development database is now `npm run db:reset:dev`,
+  // which deletes the file and lets initDatabase() rebuild it.
 
   // ── V2: Notifications ──────────────────────────
   fetchNotifications: async (limit) =>

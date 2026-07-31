@@ -180,25 +180,20 @@ export default function OrganizerDashboard({
     });
   };
 
-  /* ── Unverified organizers can't do anything yet ─────────── */
-  if (!currentUser.verified) {
-    return <div className="card empty s-fd1ec5">
-        <span className="empty-icon s-dce988">
-          <ShieldAlert size={20} />
-        </span>
-        <h3>Your organizer account is awaiting approval</h3>
-        <p>
-          A school administrator needs to verify <span className="strong">{currentUser.email}</span> before
-          you can post events. You can browse opportunities in the meantime.
-        </p>
-        <div className="alert alert-info s-2db5ef">
-          <span>
-            <span className="alert-title">Testing the demo?</span>{' '}
-            Switch to the System Admin account in the demo bar above to approve yourself.
-          </span>
-        </div>
-      </div>;
-  }
+  /**
+   * Above the approval gate, and it has to stay there.
+   *
+   * Five hooks run before this point, so when this `useMemo` sat *below* the
+   * `if (!currentUser.verified)` return, an unverified render called 22 hooks and
+   * a verified one called 23. React rejects that outright:
+   * "Rendered more hooks than during the previous render."
+   *
+   * The trigger is routine — an admin approves a pending organizer who has this
+   * page open, App.jsx refreshes `currentUser` over the socket, `verified` flips
+   * 0→1 under a mounted component, and the dashboard white-screens at the moment
+   * it was supposed to appear. Covered by src/hookOrder.test.jsx, which fails
+   * with that exact error if this is moved back down.
+   */
   const greetingMessage = useMemo(() => {
     const name = currentUser.name.split(' ')[0];
     const hour = new Date().getHours();
@@ -255,6 +250,26 @@ export default function OrganizerDashboard({
       
     return pool[Math.floor(Math.random() * pool.length)];
   }, [currentUser.name]);
+
+  /* ── Unverified organizers can't do anything yet ─────────── */
+  if (!currentUser.verified) {
+    return <div className="card empty s-fd1ec5">
+        <span className="empty-icon s-dce988">
+          <ShieldAlert size={20} />
+        </span>
+        <h3>Your organizer account is awaiting approval</h3>
+        <p>
+          A school administrator needs to verify <span className="strong">{currentUser.email}</span> before
+          you can post events. You can browse opportunities in the meantime.
+        </p>
+        <div className="alert alert-info s-2db5ef">
+          <span>
+            <span className="alert-title">Testing the demo?</span>{' '}
+            Switch to the System Admin account in the demo bar above to approve yourself.
+          </span>
+        </div>
+      </div>;
+  }
 
   return <div className="stack-lg">
       <div className="dashboard-greeting" style={{ marginBottom: '-var(--s4)' }}>

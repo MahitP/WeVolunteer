@@ -1,9 +1,33 @@
 # WeVolunteer — Pilot Deployment & Operations Runbook
 
-**Document version:** 1.0
-**Written:** 2026-07-26
+**Document version:** 1.1
+**Written:** 2026-07-26 · **Revised:** 2026-07-31 (release-preparation pass)
 **Audience:** the engineer responsible for deploying and operating WeVolunteer, who has never seen this project before.
-**Status of the code at the time of writing:** `main` @ `8604fe3`, release tag `v1.0.0-pilot` (`7fc79cd`).
+**Status of the code this revision describes:** the `v1.1-security-accessibility-ux` working tree as prepared for release on 2026-07-31.
+
+> ### ⚠ Read this before trusting any earlier copy of this document
+>
+> Version 1.0 was pinned to `main` @ `8604fe3` — **a commit that no longer exists in
+> this repository** (`git cat-file -t 8604fe3` → *"Not a valid object name"*). It had
+> drifted five days and ~47 commits behind the code, and several of its statements
+> were not merely stale but wrong in ways that would have changed an operator's
+> decisions. Corrected in this revision:
+>
+> | v1.0 said | Reality | Why it mattered |
+> |---|---|---|
+> | `API_PORT`: "the bind address is hardcoded to `127.0.0.1`" | The server binds **`0.0.0.0`** by default (`server.js`) | An operator had no reason to firewall the port. On a host with a public IP the app was directly reachable, bypassing nginx, TLS and HSTS. Now configurable via `BIND_ADDRESS`, and §3 covers the firewall requirement. |
+> | `REQUIRE_EMAIL_VERIFICATION` "defaults to `false`" | Defaults to **`true`** (`config.js`) | An operator would not prove SMTP before inviting students, then every signup gates behind an untested email. |
+> | §14 M2: "helmet is configured with `contentSecurityPolicy: false` … set CSP at the reverse proxy" | The app ships a **full CSP** (`app.js`) | Following it adds a second CSP header; the two policies intersect and can break the app. |
+> | §14 H1: "no backup automation in this repository" | `deploy/wevolunteer-backup.{service,timer}` + `bin/backup.sh` ship with it | An operator would rebuild what already exists. |
+> | §14 H6: "Email is not the notification channel; the app is … in-app only" | Notifications **do** send email, via the `notification_jobs` outbox | Wrong expectation set with students and staff. |
+> | §14 H3: "no error boundary anywhere in `src/`" | `src/components/ErrorBoundary.jsx` exists and is used in three places | Understated the client's resilience. |
+> | §14 M1: "`APP_URL` … not checked at startup" | `email.js` exits(1) without it in production | — |
+> | §15: "241 tests pass" | **963** tests pass | — |
+> | §4 documented `MAX_AUTO_SELECT_APPLICANTS` and `SCHOOL_NAME` | Both removed as dead exports (`config.js`) | Suggested knobs that do nothing. |
+>
+> OAuth was **entirely absent** from v1.0 — zero mentions in 2,954 lines — while the
+> code refuses to boot in production if a provider is configured without
+> `OAUTH_REDIRECT_URI`. See the new §4a.
 
 Everything in this document was derived by reading the code at that commit and by
 actually running it — the test suite, a production build, and a real production
@@ -71,9 +95,10 @@ Five things make up a running deployment:
 
 ### What has already been verified
 
-Verified by running it, on 2026-07-26, at commit `8604fe3`:
+Verified by running it, on 2026-07-31, against the release-preparation working tree
+(the 2026-07-26 figures at commit `8604fe3` are superseded):
 
-- **Test suite: 241 tests across 24 files, all passing** (`npm test`, ~3s wall
+- **Test suite: 963 tests across 81 files, all passing** (`npm test`, ~19s wall
   clock). Coverage spans auth and sessions, privacy/PII scoping, rate limiting,
   email verification, the case-insensitive email dedupe migration, attendance
   and check-in, the hours ledger and its parity invariant, certificates,
@@ -452,10 +477,49 @@ Requirements:
   should set it too so it covers everything, including redirects.
 - TLS 1.2 minimum; prefer 1.3.
 
+### Network exposure and the firewall
+
+⚠️ **Corrected 2026-07-31.** Read this before the reverse-proxy section below,
+which used to open with "the app binds loopback". **It does not.** `server.js`
+binds `0.0.0.0` unless told otherwise, so `API_PORT` is open on every interface
+the host has. On a cloud VM with a public IP and a default-open security group,
+that means anyone on the internet can reach the Node process directly on port
+5050 — bypassing nginx, and therefore bypassing TLS, HSTS, and anything you
+configured at the proxy.
+
+Close it with **both** of these, not one:
+
+```bash
+# 1 — bind loopback only. Add to /etc/wevolunteer/wevolunteer.env:
+BIND_ADDRESS=127.0.0.1
+
+# 2 — and firewall the port anyway, so a future config change cannot re-expose it.
+sudo ufw default deny incoming
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+sudo ufw status verbose        # 5050 must NOT appear
+```
+
+Verify from **another machine** — not from the host, where loopback always answers:
+
+```bash
+# Must fail (connection refused or timeout):
+curl -m 5 http://<host-public-ip>:5050/health
+
+# Must succeed:
+curl -sS https://volunteers.sbschools.example.org/health
+```
+
+If the first command returns JSON, the app is publicly exposed. Stop and fix it
+before going further. The boot log will also tell you: in production, binding
+`0.0.0.0` emits `[Security] Listening on 0.0.0.0 in production …`.
+
 ### Reverse proxy
 
-Required, because the app binds loopback. Whatever you use (nginx, Caddy,
-Apache), it must:
+With `BIND_ADDRESS=127.0.0.1` set as above, the app binds loopback and the proxy
+is the only route in. Whatever you use (nginx, Caddy, Apache), it must:
 
 1. Proxy **everything** to `http://127.0.0.1:5050` — API, SPA routes, and
    static assets alike. Express serves all three. Do not try to serve `dist/`
@@ -584,10 +648,60 @@ does not corrupt data, but it does spam the log. Set `RestartSec=5` and a
 | | |
 |---|---|
 | **Required** | No — defaults to `5050`. |
-| **Purpose** | Loopback listen port. |
+| **Purpose** | TCP listen port. |
 | **Example** | `5050` |
-| **Security** | None directly; the bind address is hardcoded to `127.0.0.1`. |
+| **Security** | ⚠️ **Corrected 2026-07-31.** An earlier revision claimed "the bind address is hardcoded to `127.0.0.1`". **It never was** — `server.js` binds `0.0.0.0` by default, so this port is reachable on every interface the host has. See `BIND_ADDRESS` below and the firewall step in §3. |
 | **If missing** | `5050`. A non-numeric value also falls back to `5050` (`Number(...) \|\| 5050`). |
+
+#### `BIND_ADDRESS`
+
+| | |
+|---|---|
+| **Required** | No — defaults to `0.0.0.0`. **Set it to `127.0.0.1` for the single-host topology in §3.** |
+| **Purpose** | The interface the HTTP server binds. |
+| **Example** | `127.0.0.1` |
+| **Security** | The default (`0.0.0.0`) accepts connections on every interface. Behind the nginx setup in §3 that means the app is *also* reachable directly on `API_PORT`, bypassing TLS, HSTS and any rate limiting you added at the proxy. Setting `127.0.0.1` makes the reverse proxy the only route in. The default is left as `0.0.0.0` because container and port-forward deployments depend on it. |
+| **If missing** | `0.0.0.0`, and in production the boot log carries `[Security] Listening on 0.0.0.0 in production …`. That line is your reminder to either set this or confirm a firewall rule. |
+
+#### `INSTANCE_LOCK_STALE_MS` / `INSTANCE_LOCK_HEARTBEAT_MS`
+
+| | |
+|---|---|
+| **Required** | No — default 45000 / 15000. |
+| **Purpose** | The single-instance lock. One instance holds a row in `instance_lock` and refreshes it every `HEARTBEAT_MS`; a second production instance whose holder is still heartbeating **refuses to boot**. |
+| **Security** | This is a data-integrity control, not a convenience. Two instances multiply every rate limit (all limiter state is per-process memory) and can interleave a slot-capacity read with another instance's write. |
+| **If missing** | The defaults, which give three missed heartbeats before a holder is presumed dead. A crashed predecessor does not delay a restart: a dead pid on the same host is reclaimed at once. |
+
+#### `WEV_ALLOW_UNSUPPORTED_NODE`
+
+| | |
+|---|---|
+| **Required** | No. Leave unset. |
+| **Purpose** | Overrides the boot-time Node major check. |
+| **Security** | The data layer is `node:sqlite`, which Node still marks experimental, so its API may change between majors. The check refuses to start on anything but v24.x. Setting this to `true` accepts running the database layer untested. |
+| **If missing** | The check is enforced and fatal, which is what you want. |
+
+#### `HEALTH_WRITE_PROBE_MS`
+
+| | |
+|---|---|
+| **Required** | No — default 60000. |
+| **Purpose** | How often `/health` performs its WRITE probe (a `PRAGMA user_version` round-trip). The read probe runs on every request. |
+| **Security** | None. The write probe is what makes `/health` able to detect a full disk or a read-only remount, which a read-only probe cannot. |
+| **If missing** | 60s. Measured: with the interval forced to 1ms, 200 polls grew the WAL to 2.9 MB — bounded and checkpointed on shutdown, but needless churn. 60s still surfaces an outage inside the alerting window. |
+
+#### `WEV_EXPORT_DIR`
+
+| | |
+|---|---|
+| **Required** | No — defaults to an `exports/` directory beside `WEV_DB_PATH`. |
+| **Purpose** | Where completed data-export archives are written. |
+| **Security** | Each archive is one student's complete personal record. The directory is created `0700`. It must be on backed-up, durable storage — **not** `/tmp`, which `PrivateTmp=true` destroys on every restart while the database still promises the file for seven days. |
+| **If missing** | `<database directory>/exports`, which the service unit can already write (`ReadWritePaths=/var/lib/wevolunteer`). |
+
+#### `BIND_ADDRESS`
+
+Documented above with `API_PORT`. Set it to `127.0.0.1`.
 
 #### `DEMO_MODE`
 
@@ -603,11 +717,12 @@ does not corrupt data, but it does spam the log. Set `RestartSec=5` and a
 
 | | |
 |---|---|
-| **Required** | No — defaults to `false`. |
-| **Purpose** | When `true`, a new account must click a confirmation link before using anything outside a four-path allowlist. |
-| **Example** | `true` |
-| **Security** | Raises the bar on fake accounts. **Only enable after SMTP delivery is proven end-to-end** — without working mail it locks every new user out with no way through. |
-| **If missing** | Off, and boot runs `UPDATE users SET email_verified = 1 WHERE email_verified = 0` — so toggling it off later retroactively verifies everyone at the next restart. |
+| **Required** | No — **defaults to `true`.** |
+| **Purpose** | A new account must click a confirmation link before using anything outside the allowlist in `config.js` (`EMAIL_GATE_ALLOWLIST`). |
+| **Example** | `false` to opt out deliberately |
+| **Security** | ⚠️ **Corrected 2026-07-31.** An earlier revision said this defaulted to `false`. **It defaults to ON** (`config.js`: `process.env.REQUIRE_EMAIL_VERIFICATION !== 'false'`). The default was inverted because nothing in the login path consulted `email_verified` — only the SPA refused to render, and the SPA is not a security boundary, so anyone able to type an address they did not own got a working account on a platform holding minors' records. |
+| **If missing** | **ON.** This makes §8 (prove SMTP end to end) a hard prerequisite rather than a nice-to-have: if mail does not work, no new account can be used. The allowlist deliberately includes the email-*change* routes so a mistyped address is escapable rather than a permanent dead end. |
+| **To opt out** | `REQUIRE_EMAIL_VERIFICATION=false`. Boot then runs `UPDATE users SET email_verified = 1 WHERE email_verified = 0`, so existing accounts are not stranded. |
 
 #### `MAIL_RATE_LIMIT`
 
@@ -668,6 +783,8 @@ setting them on the running server has no effect.
 | `VITE_ENABLE_LEADERBOARD` | No | Set to `false` to hide the leaderboard entirely | `false` | The leaderboard is already opt-in per student and default-off. Setting this to `false` is the belt-and-braces option if the district would rather not have one at all. | Enabled (but empty until students opt in) |
 | `VITE_PRIVACY_URL` | **Set once the district publishes a privacy notice** | URL of the district's privacy notice. When set, signup shows a required acknowledgement checkbox linking to it. | `https://sbschools.example.org/privacy` | This platform holds minors' names, grades, schools and email addresses and shows some of it to organizers. The consent gate is deliberately inert until a real notice exists — a checkbox pointing at nothing would manufacture the appearance of a reviewed policy. | Unset: no checkbox, and Vite tree-shakes the block out of the bundle entirely. **This is a launch-gate item, not a code gap** — see §14 P0-11. |
 
+---
+
 ### Variables that must NEVER carry a development default into production
 
 These are the ones to check twice. The first three are enforced by the code;
@@ -683,6 +800,133 @@ in a way that produces no error message.
 | `APP_URL` | Would send live password-reset tokens to a domain you do not control. | ✅ Refuses to boot |
 | `CORS_ORIGINS` | Defaults to two `localhost` dev ports. The same-origin fallback means the recommended single-host topology works anyway; a split client/API host fails visibly with 403s on every write. | ⚠️ Silent, but no longer able to cause a blank app |
 | `VITE_DEMO_MODE` | Would expose sign-in-as-anyone controls in the shipped bundle. | ⚠️ Structurally safe (`vite build` ignores `.env.development`), but do not add it to a production `.env` |
+
+## 4a. Provider sign-in (OAuth)
+
+**New in revision 1.1.** The previous revision of this runbook did not mention OAuth
+anywhere in 2,954 lines, while the code has had a working Google and Microsoft
+implementation — with a boot-time guard that **refuses to start** if it is
+misconfigured. An operator following the old document had no way to know the feature
+existed, let alone that it could stop the service from starting.
+
+**Email-only is a fully supported deployment.** If the district does not want
+provider sign-in, set none of these variables and skip this section entirely; the
+buttons do not render and `/api/oauth/providers` reports each provider as
+`enabled: false`.
+
+### The failure this section exists to prevent
+
+`OAUTH_REDIRECT_URI` has a built-in default of `http://localhost:5173/oauth/callback`
+— correct for development, catastrophic in production. Verified during the pre-pilot
+review: with real Google credentials set and this variable forgotten, the server
+booted without complaint, reported the provider as enabled so the "Continue with
+Google" button rendered for everyone, and minted authorize URLs pointing at
+`localhost`. Every student pressing that button then got one of two outcomes —
+`redirect_uri_mismatch` (a dead end on an advertised sign-in path), or, if localhost
+was still registered on the OAuth client, **Google handing a live authorization code
+to `http://localhost:5173` on the student's own machine over plain HTTP.**
+
+The code now fails closed on this. Understand that before you configure it:
+
+| Condition | Behaviour |
+|---|---|
+| No client credentials set | Provider disabled, button hidden. No error. |
+| Client credentials set **and** `OAUTH_REDIRECT_URI` points at localhost, in production | **FATAL — the server refuses to boot.** |
+| Client credentials set **and** `OAUTH_REDIRECT_URI` is not a valid URL, in production | **FATAL — refuses to boot.** |
+| Client credentials set **and** `OAUTH_REDIRECT_URI` is `http://` (non-localhost) | Boots, with a loud warning. Both providers reject non-HTTPS redirect URIs, so sign-in fails at the provider. |
+| `OAUTH_ALLOW_MOCK=true` in production | **FATAL — refuses to boot.** |
+
+That last one deserves emphasis. Both providers carry a test transport that takes
+the identity straight from the `code` parameter, skipping the real exchange. It is
+opt-in and impossible to reach in production, and it must stay that way — with it
+enabled, `POST /api/oauth/google/callback` with a body of
+`{"code": "{\"email\":\"admin@district.org\"}"}` is an unauthenticated
+sign-in-as-anyone endpoint. **Never set `OAUTH_ALLOW_MOCK` outside local development.**
+
+### Environment variables
+
+| Variable | Required | Notes |
+|---|---|---|
+| `GOOGLE_CLIENT_ID` | With Google | Ends `.apps.googleusercontent.com` |
+| `GOOGLE_CLIENT_SECRET` | With Google | Treat as a credential; rotate if the host is compromised |
+| `MICROSOFT_CLIENT_ID` | With Microsoft | Application (client) ID from the Entra app registration |
+| `MICROSOFT_CLIENT_SECRET` | With Microsoft | Entra client secrets **expire** — note the date, it will outlive the pilot |
+| `OAUTH_REDIRECT_URI` | **Whenever any provider is configured** | Absolute callback URL of *this* deployment. Must match a URI registered with the provider **exactly** — scheme, host, port, path. Must be `https` outside localhost. |
+| `OAUTH_ALLOW_MOCK` | Never in production | Fatal if combined with `NODE_ENV=production` |
+
+Set the client id and secret **together, or neither**. A provider is considered
+configured only when both are present, so setting just the id silently leaves the
+provider disabled.
+
+Apple has no implementation behind it and is always reported unavailable, whatever
+is set.
+
+### Google setup
+
+1. Google Cloud Console → **APIs & Services → Credentials**.
+2. **Create Credentials → OAuth client ID → Web application.**
+3. Under **Authorised redirect URIs**, add exactly your deployment's callback:
+   ```
+   https://volunteers.sbschools.example.org/oauth/callback
+   ```
+   Nothing else. In particular do **not** leave `http://localhost:5173/oauth/callback`
+   registered on the client the district will use — that registration is what turns a
+   forgotten `OAUTH_REDIRECT_URI` from a dead end into a leaked authorization code.
+   Keep a separate client for development.
+4. Configure the **OAuth consent screen**. For a district on Google Workspace, set
+   the user type to **Internal** so only district accounts can use it.
+5. Copy the client id and secret into `/etc/wevolunteer/wevolunteer.env`.
+
+### Microsoft setup
+
+1. Entra admin centre → **App registrations → New registration**.
+2. Redirect URI: platform **Web**, value exactly as above.
+3. **Certificates & secrets → New client secret.** Record the expiry.
+4. Under **API permissions**, `openid`, `email` and `profile` are sufficient.
+5. Copy the application id and secret into the env file.
+
+Note a real difference between the two: Google asserts `email_verified`, so a
+Google sign-in auto-confirms the address. Microsoft does not assert it, and the
+code honestly does not pretend otherwise — a Microsoft user still receives a
+confirmation mail, which matters because `REQUIRE_EMAIL_VERIFICATION` defaults on.
+
+### Smoke test
+
+Run this after `systemctl start` and before inviting anyone. It is not optional:
+misconfigured OAuth fails on the student's screen, at the provider, where you
+cannot see it.
+
+```bash
+# 1 — the server booted at all. A fatal OAuth misconfiguration exits non-zero,
+#     so check this first and read the journal if it is not running.
+systemctl is-active wevolunteer
+journalctl -u wevolunteer -n 30 --no-pager | grep -i oauth
+
+# 2 — the provider reports itself enabled
+curl -s https://volunteers.sbschools.example.org/api/oauth/providers | jq
+# → google: {"id":"google","enabled":true,...}   apple: {"enabled":false,...}
+
+# 3 — the authorize URL carries YOUR redirect_uri, not localhost.
+#     This is the check that catches the failure described above.
+curl -s "https://volunteers.sbschools.example.org/api/oauth/google/url" | jq -r .url
+# → must contain redirect_uri=https%3A%2F%2Fvolunteers.sbschools.example.org%2Foauth%2Fcallback
+#   If you see localhost here, STOP. Fix OAUTH_REDIRECT_URI and restart.
+
+# 4 — the mock transport is not reachable. Must NOT mint a session.
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  https://volunteers.sbschools.example.org/api/oauth/google/callback \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"{\"email\":\"probe@example.org\",\"sub\":\"1\"}"}'
+# → 400 (missing/invalid state). Anything that returns a session cookie means
+#   OAUTH_ALLOW_MOCK is set — stop the service immediately.
+
+# 5 — finally, in a real browser: press "Continue with Google" and complete a
+#     sign-in with a district account. Confirm you land back on the app signed in.
+```
+
+If step 5 fails with `redirect_uri_mismatch`, the value in `OAUTH_REDIRECT_URI` and
+the value registered with the provider differ. They must match character for
+character, including the trailing path and the absence of a trailing slash.
 
 ---
 
@@ -2138,6 +2382,55 @@ ORDER BY e.application_deadline;
 | Stuck selections | The "pending past deadline" query returns rows | **Daily digest to the programme owner, not to engineering** |
 | Pending organizers | Unapproved > 48 h | Weekly digest to the admin |
 
+### Measured performance at pilot scale (2026-07-31)
+
+Measured against a seeded database of **554 users (500 students, 40 organizers),
+122 events, 368 slots and 2,892 applications** — the pilot's stated shape — on a
+single instance. Latencies are per request, over 20–50 samples each.
+
+| Endpoint | p50 | p95 | max |
+|---|---|---|---|
+| `GET /api/events?limit=60` (what the SPA calls) | 5 ms | 7 ms | 13 ms |
+| `GET /api/events` (unpaged) | 7 ms | 7 ms | 7 ms |
+| `GET /api/auth/me` | 1 ms | 1 ms | 1 ms |
+| `GET /api/applications` | 1 ms | 2 ms | 2 ms |
+| `GET /api/stats/volunteer` | 1 ms | 1 ms | 1 ms |
+| `GET /api/recommendations` | 1 ms | 2 ms | 2 ms |
+| `GET /api/leaderboard` | 1 ms | 1 ms | 1 ms |
+| `GET /api/events/:id` (detail + applicants) | 1 ms | 2 ms | 2 ms |
+| `GET /api/events/:id/roster.csv` | 1 ms | 17 ms | 17 ms |
+| `GET /health` | 0 ms | 1 ms | 1 ms |
+
+Other measurements from the same run:
+
+- **60 concurrent** paged event-list reads completed in **226 ms** total.
+- **80 concurrent** applications to one slot: **66 ms**, all correct, capacity respected.
+- The 15-minute `runNotificationSweep` takes **2–3 ms** at this scale, and three
+  consecutive passes produced **zero** duplicate `(user_id, dedupe_key)` pairs — the
+  dedupe holds.
+- Payloads: paged (60 events) **71 KB**, unpaged (all 122) **139 KB**.
+
+Nothing here is close to a limit. The N+1 work and the SQL-side filtering are
+holding up.
+
+**The one throughput characteristic worth knowing:** password hashing is
+`bcryptjs` at 10 rounds and every call site is **synchronous** (`compareSync` /
+`hashSync`) on a single-threaded event loop. Measured at **~27 ms per login** — 80
+concurrent logins took 2.15 s wall clock, and during that window every other
+request queues behind them.
+
+For 500 students arriving across a morning this is invisible. For a burst — a
+teacher telling one class of 30 to sign in simultaneously — expect a stall of
+roughly 800 ms before everything completes. That is tolerable, and it is
+deliberately **not** being changed in this release: converting seven
+authentication call sites from sync to async is not a small change, and an error in
+that code is an authentication defect rather than a slow page. Recorded here so the
+number is known rather than rediscovered. If login latency ever becomes a real
+complaint, that conversion (plus moving hashing to a worker thread) is the fix, and
+it needs its own focused pass with its own test coverage.
+
+---
+
 ---
 
 ## 12. Incident response
@@ -2604,31 +2897,45 @@ but **not implemented**.
 
 ### High
 
-**H1 — Single point of failure with manual-only backups.**
-One process, one SQLite file, one disk, no replica, and no backup automation in
-this repository. Losing the volume loses everything since the last manual copy.
-Credited service hours are the highest-value data here — a student's college
-application may depend on them. §7 is not optional reading.
-*Mitigation:* automate §7 Method A nightly, verify every backup, keep one copy
-off-host, and rehearse a restore before the pilot opens.
+**H1 — Single disk. Backups are automated but still same-host.**
+*Revised 2026-07-31.* The previous wording — "no backup automation in this
+repository" — is out of date: `bin/backup.sh` plus
+`deploy/wevolunteer-backup.{service,timer}` ship with the project and run nightly at
+03:00, using SQLite's online `.backup` API, integrity-checking each archive before
+keeping it, and pruning only after a successful new one. `bin/verify-restore.sh`
+rehearses a full restore.
 
-**H2 — Deadlines pass with no automatic selection, and nothing tells anyone.**
-There is no scheduler for Auto Select. If an organizer forgets to run and
-confirm the draw, applicants stay `pending` indefinitely and are never notified.
-Students experience this as being ignored. This is the largest workflow hole in
-the product and it is unchanged by the hardening work.
-*Mitigation:* run the "pending past deadline" query (§11) daily and route it to
-the programme owner; put a calendar reminder on every event's deadline at
-creation time.
+What remains true, and is the actual risk: `WEV_BACKUP_DIR` defaults to
+`/var/backups/wevolunteer`, **on the same disk as the database**. A volume failure
+loses the records and all 14 days of archives together. Credited service hours are
+the highest-value data here — a student's college application may depend on them.
+*Mitigation:* **copy archives off-host** (this is the one piece still not automated
+— see the release checklist), and run `bin/verify-restore.sh` before the pilot opens.
 
-**H3 — No error boundary in the client; a render error blanks the whole app.**
-Roadmap P2-3. There is no `componentDidCatch` / `ErrorBoundary` anywhere in
-`src/`. `EventModal.jsx` is over 1,500 lines and handles view, edit, attendance,
-applicant review, and Auto Select. Any throw inside it white-screens the entire
-application with no recovery but a manual reload — on a phone, mid-event, that
-is the organizer losing their check-in tool.
-*Mitigation:* organizers should know that a reload recovers the app. Fixing this
-is the single highest-value roadmap item for pilot reliability.
+**H2 — Deadlines pass with no automatic selection. The organizer IS told, once.**
+*Revised 2026-07-31.* The previous wording — "nothing tells anyone" — is wrong, and
+was repeated from an earlier revision without being checked. `runNotificationSweep`
+(every 15 minutes) dispatches `DECISION_NEEDED` to the organizer for any event whose
+`application_deadline` has passed with applications still `pending`, naming the
+applicant count and the next step. It is mapped, carries a link, and is not
+placeholder copy — verified against `getInAppContent`.
+
+What remains true: there is still no scheduler that RUNS the draw, and the
+notification is deduped on `awaiting-decision:<eventId>`, so the organizer is told
+**once** and then never again. If they miss that one notification, applicants stay
+pending indefinitely.
+*Mitigation:* run the "pending past deadline" query (§11) daily and route it to the
+programme owner — the dedupe is why a daily human check is still required. Put a
+calendar reminder on every event's deadline at creation time.
+
+**H3 — ~~No error boundary in the client~~ RESOLVED.**
+*Revised 2026-07-31.* `src/components/ErrorBoundary.jsx` exists and is mounted in
+three places (`main.jsx`, and twice in `App.jsx` — the inner one deliberately inside
+the lazy-loading boundary so a chunk that fails to load is caught too). A render
+error no longer blanks the application.
+*Residual:* `EventModal.jsx` is still large and handles view, edit, attendance,
+applicant review and Auto Select. A throw inside it is now contained rather than
+fatal, but organizers should still know that a reload recovers the view.
 
 **H4 — Bulk applicant actions report a count the server did not perform.**
 Roadmap P2-1. The client toasts `${appIds.length} volunteer(s) accepted` while
@@ -2638,45 +2945,69 @@ told 40 were confirmed. They will not find out until ten people do not arrive.
 *Mitigation:* until fixed, tell organizers to re-open the applicant list and
 count accepted volunteers after any bulk action. Do not rely on the toast.
 
-**H5 — Rate limiting is in-memory, per-process, and reset by every restart.**
-All four limiters use `express-rate-limit`'s default memory store. A restart
-clears every counter, so a restart loop is also a rate-limit bypass. Running two
-instances would divide the effective limit by the number of instances and break
-it entirely.
-*Mitigation:* **run exactly one instance.** If you ever need more, a shared
-store is a prerequisite, not an optimisation. Consider rate limiting at the
-proxy as a second layer.
+**H5 — Rate limiting is in-memory and reset by every restart. Multi-instance is now BLOCKED.**
+*Revised 2026-07-31.* Still true: the limiters use `express-rate-limit`'s default
+memory store plus an in-process `loginFailures` map, so a restart clears every
+counter and a restart loop is a rate-limit bypass.
 
-**H6 — Email is not the notification channel; the app is.**
-Selection results, waitlist promotions, cancellations, location changes, and
-hours credits are **in-app only**. A student who does not open the app does not
-learn they were selected — or that an event was cancelled and they need not
-travel.
-*Mitigation:* this is a programme design constraint, not a bug to work around.
-Set the expectation explicitly with students and organizers, and have the
-organizer use their existing channel (school email, Remind, etc.) for anything
-time-critical.
+What changed: "run exactly one instance" was documented in three places and enforced
+nowhere — verified by booting two servers against one `WEV_DB_PATH`, both of which
+reported healthy and served traffic with no warning. A second instance in production
+now **refuses to boot** and names the holder (`server/instanceLock.js`). A crashed
+predecessor never blocks a restart: a dead pid on the same host is reclaimed
+immediately, and any holder whose heartbeat is stale is reclaimed after
+`INSTANCE_LOCK_STALE_MS` (45s default).
+
+*Mitigation:* one instance, now enforced. Consider rate limiting at the proxy as a
+second layer, which also survives restarts. If you ever genuinely need two
+instances, a shared limiter store is a prerequisite — and so is auditing every
+capacity check, because they read outside their write transaction.
+
+**H6 — Email notifications exist, but delivery is best-effort.**
+*Revised 2026-07-31.* The previous wording — "in-app only" — is wrong. Notifications
+are dispatched to an outbox (`notification_jobs`) and delivered by email as well as
+in-app, with five attempts and exponential backoff, subject to each user's
+per-category preferences and the global `email_opt_out` flag.
+
+What remains true: **email is not guaranteed.** A student who has opted out, whose
+address bounces, or whose notification exhausts its five attempts (~62 minutes of
+backoff) will not be told by mail. Permanently failed jobs are now logged and
+counted on `/api/admin/system/status`, so this is visible rather than silent, but it
+is still not a delivery guarantee.
+*Mitigation:* for anything genuinely time-critical — a same-day cancellation — have
+the organizer also use their existing channel (school email, Remind). Check the
+admin status panel's `notificationQueue.failed` during the first week.
 
 ### Medium
 
-**M1 — Two production defaults are silently wrong.**
-`APP_URL` defaults to `https://wevolunteer.org` in production, and
-`CORS_ORIGINS` defaults to two `localhost` ports. Neither is checked at startup.
-A deployment that forgets `APP_URL` emails every password-reset token to a
-domain it does not control, and prints the wrong verification URL on every
-certificate. Compare with `JWT_SECRET`, `DEMO_MODE`, and `SMTP_*`, which all
-refuse to boot.
-*Mitigation:* the §5 step 5 checklist. Verify `APP_URL` by reading a real
-password-reset email before launch, not by reading the config.
+**M1 — ~~`APP_URL` unchecked~~ RESOLVED; `CORS_ORIGINS` still defaults to localhost.**
+*Revised 2026-07-31.* `APP_URL` no longer has a dangerous default: `email.js` exits
+non-zero in production if it is unset, so a deployment cannot silently email
+password-reset tokens to a domain it does not control.
 
-**M2 — No Content-Security-Policy on the served HTML.**
-`helmet` is configured with `contentSecurityPolicy: false`. That was correct
-when Express returned only JSON, but in production **Express also serves
-`dist/index.html`**. There is now no CSP on the document.
-*Mitigation:* set CSP at the reverse proxy. The app loads no third-party
-resources, so a strict policy is achievable
-(`default-src 'self'`; the inline styles the app uses will need accommodating —
-test before enforcing).
+What remains: `CORS_ORIGINS` still defaults to two `localhost` ports with no startup
+check. Its blast radius is much smaller than it was — CORS is mounted on `/api` only
+(so a wrong value can never blank the SPA), and same-origin requests always pass (so
+the single-host topology works regardless). A split client/API host would fail
+visibly with 403s on every write.
+*Mitigation:* set it anyway; it is your only control if the client is ever served
+elsewhere. Still verify `APP_URL` by reading a real password-reset email before
+launch, not by reading the config.
+
+**M2 — ~~No Content-Security-Policy~~ RESOLVED. Do NOT add one at the proxy.**
+*Revised 2026-07-31.* This entry was not merely stale, it was actively harmful
+advice. `helmet` is **no longer** configured with `contentSecurityPolicy: false`;
+`app.js` ships a full directive set, including `script-src 'self'` with **no
+`unsafe-inline`** (the theme pre-paint script was moved to an external file in
+`public/` specifically to earn that), plus `frame-ancestors 'none'`,
+`object-src 'none'`, `base-uri 'self'` and `form-action 'self'`.
+
+**Adding a second CSP at the reverse proxy is a mistake.** When two
+`Content-Security-Policy` headers are present the browser enforces the
+intersection of both, so a proxy policy that omits, say, `fonts.gstatic.com` will
+break font loading with no obvious cause.
+*Mitigation:* none needed. Verify the header is present with the §10 smoke test and
+do not duplicate it.
 
 **M3 — No HTTP request logging.**
 No morgan, no access log. During an incident you cannot correlate a 500 with the
@@ -2785,6 +3116,13 @@ unsupervised district-wide rollout.**
 
 The reasoning, plainly:
 
+> **Revision note (2026-07-31).** The assessment below was written for the v1.0
+> code. It has not been rewritten, because its *reasoning* still holds — but the
+> specifics have moved: the test count is now 963, and several §14 risks it cites as
+> open (no backup automation, no error boundary, no CSP, unchecked `APP_URL`) have
+> since been closed. See `docs/operations/release-checklist.md` for the current
+> pre-launch gate and the up-to-date recommendation.
+
 **What justifies "yes":** the things that would be unrecoverable are correct.
 Credited hours cannot be silently destroyed — attendance changes require a
 reason, are recorded in an append-only ledger with an actor, and an event with
@@ -2792,7 +3130,7 @@ attendance cannot be deleted at all. Minors' contact details and future
 whereabouts are scoped server-side and tested. Certificates are unforgeable
 bearer credentials, not derivable hashes. The production posture is enforced by
 the code rather than by documentation: three separate misconfigurations refuse
-to boot, and I verified all three. 241 tests pass, the build is clean, and a
+to boot, and I verified all three. 963 tests pass, the build is clean, and a
 real production boot on an empty database does exactly what it should.
 
 **What justifies the limits:** nothing here has met a real user. Every risk in

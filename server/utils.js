@@ -4,6 +4,50 @@ import { notificationService } from './services/notificationService.js';
 import { sendNotificationEmail } from './email.js';
 import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST, COOKIE_NAME } from './config.js';
 
+/**
+ * Whether this specific session has been signed out.
+ *
+ * Sessions are stateless JWTs, so "signed out" has to be recorded somewhere for
+ * the token to stop working before it expires. `revoked_sessions` holds one row
+ * per explicit logout, keyed on the token's `jti`.
+ *
+ * A token with NO jti predates this mechanism. Those are allowed through: they
+ * cannot be identified individually, they expire within seven days, and refusing
+ * them would sign out every currently signed-in user the moment this deploys.
+ */
+export function isSessionRevoked(jti) {
+  if (!jti) return false;
+  return !!db.prepare('SELECT 1 FROM revoked_sessions WHERE jti = ?').get(jti);
+}
+
+/** Records a session as signed out, until the point its token would expire anyway. */
+export function revokeSession({ jti, userId, expSeconds }) {
+  if (!jti) return false;
+  // `exp` is seconds since the epoch. Without it, fall back to the 7-day token
+  // lifetime so the row still has a definite point at which it can be purged.
+  const expiresAt = expSeconds
+    ? new Date(expSeconds * 1000).toISOString()
+    : new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+  db.prepare(`
+    INSERT INTO revoked_sessions (jti, user_id, revoked_at, expires_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(jti) DO NOTHING
+  `).run(jti, userId, new Date().toISOString(), expiresAt);
+  return true;
+}
+
+/**
+ * Drops revocations whose token has expired.
+ *
+ * Once a token is past its own expiry, `jwt.verify` rejects it regardless, so the
+ * denylist row has no further work to do. Without this the table would grow by
+ * one row per sign-out forever.
+ */
+export function purgeExpiredRevocations(now = new Date()) {
+  return db.prepare('DELETE FROM revoked_sessions WHERE expires_at < ?')
+    .run(now.toISOString()).changes;
+}
+
 // --- AUTHENTICATION MIDDLEWARE ---
 export function authenticateToken(req, res, next) {
   const token = req.cookies && req.cookies[COOKIE_NAME];
@@ -26,6 +70,13 @@ export function authenticateToken(req, res, next) {
 
     if ((decodedUser.tokenVersion ?? 0) !== userRow.token_version) {
       return res.status(401).json({ error: 'Session expired, please sign in again' });
+    }
+
+    // This one session signed out. Checked after token_version so the account-wide
+    // case still reports itself as such, and before req.user is populated so a
+    // revoked token never reaches a handler.
+    if (isSessionRevoked(decodedUser.jti)) {
+      return res.status(401).json({ error: 'You have been signed out. Please sign in again.' });
     }
 
     req.user = {
@@ -167,6 +218,47 @@ export function createNotification({ userId, kind, title, body, link = null, ded
 }
 
 /**
+ * How long a notification is kept, by priority, in days.
+ *
+ * The previous rule deleted NORMAL and LOW after 30 days and kept IMPORTANT and
+ * CRITICAL forever. That was wrong in both directions. Forever is not a
+ * retention policy — the two priorities that are dispatched most (acceptance,
+ * reminders, promotions are all IMPORTANT) grew without bound, so the table with
+ * the highest write rate was the only one that never shrank. Meanwhile 30 days
+ * was aggressive for NORMAL: a volunteer looking back over a season lost the
+ * ordinary history that gives the important entries context.
+ *
+ * Every priority now has a finite, stated window, longest for the entries a
+ * volunteer would be upset to lose. These are notifications, not records: hours,
+ * attendance, certificates and the hours ledger are the durable history and are
+ * never touched by this sweep, so a deleted notification loses a message about
+ * an event, never the event itself.
+ */
+export const NOTIFICATION_RETENTION_DAYS = {
+  LOW: 30,        // deadline nudges — worthless once the deadline has passed
+  NORMAL: 90,     // a season's worth of ordinary traffic
+  IMPORTANT: 365, // acceptances, promotions, reminders, credited hours
+  CRITICAL: 365   // cancellations and conflicts — a full year, then bounded
+};
+
+/**
+ * Deletes notifications past their retention window.
+ *
+ * One statement per priority rather than a single query, so a priority missing
+ * from the table above is left alone rather than silently swept on a default —
+ * an unknown priority is a bug to notice, not data to delete.
+ */
+export function purgeExpiredNotifications(now = new Date()) {
+  let removed = 0;
+  const stmt = db.prepare('DELETE FROM notifications WHERE priority = ? AND created_at < ?');
+  for (const [priority, days] of Object.entries(NOTIFICATION_RETENTION_DAYS)) {
+    const cutoff = new Date(now.getTime() - days * 24 * 3600 * 1000).toISOString();
+    removed += stmt.run(priority, cutoff).changes;
+  }
+  return removed;
+}
+
+/**
  * Time-based notifications, generated by a sweep rather than by a user action.
  *
  * Two kinds, both deliberately conservative so the bell stays worth checking:
@@ -281,17 +373,11 @@ export function runNotificationSweep() {
       }
     }
     
-    // Phase 1 Audit: Retention Cleanup
-    // Delete NORMAL and LOW priority notifications older than 30 days.
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 3600 * 1000).toISOString();
-    const cleanupResult = db.prepare(`
-      DELETE FROM notifications 
-      WHERE priority IN ('NORMAL', 'LOW') 
-        AND created_at < ?
-    `).run(thirtyDaysAgo);
-    
-    if (cleanupResult.changes > 0) {
-      console.log(`[Notifications] Cleaned up ${cleanupResult.changes} expired notifications.`);
+    const removed = purgeExpiredNotifications(now);
+    const revocations = purgeExpiredRevocations(now);
+    if (revocations > 0) console.log(`[Sessions] Purged ${revocations} expired revocation(s).`);
+    if (removed > 0) {
+      console.log(`[Notifications] Cleaned up ${removed} expired notifications.`);
     }
 
   } catch (err) {
@@ -327,53 +413,151 @@ export function notifyConfirmedVolunteers(eventId, event, payload, dedupeKey = n
   return sent;
 }
 
-// Automatically promotes the first student on the waitlist for a slot
-export function handleWaitlistPromotion(slotId, eventId, eventTitle, organizerId) {
-  try {
-    const nextInLine = db.prepare(`
-      SELECT a.*, u.name as volunteer_name
-      FROM applications a
-      JOIN users u ON a.user_id = u.id
-      WHERE a.slot_id = ? AND a.status = 'waitlisted'
-      ORDER BY a.waitlist_order ASC LIMIT 1
-    `).get(slotId);
+/**
+ * Puts an application at the BACK of its slot's waitlist queue.
+ *
+ * `waitlist_order` used to be written only by Auto Select. Every manual path set
+ * it to NULL, which made the queue orderless: `ORDER BY waitlist_order ASC`
+ * over all-NULL rows returns them in whatever order the b-tree happens to
+ * yield, so "first in line" was arbitrary and no honest "you are 3rd" could be
+ * shown. Assigning it on every transition into `waitlisted` is what makes the
+ * queue a queue.
+ *
+ * Called inside the caller's transaction, so the read and the write cannot
+ * interleave with another applicant joining the same slot.
+ */
+export function assignWaitlistOrder(applicationId, slotId) {
+  const row = db.prepare(`
+    SELECT COALESCE(MAX(waitlist_order), 0) AS last
+    FROM applications
+    WHERE slot_id = ? AND status = 'waitlisted' AND id != ?
+  `).get(slotId, applicationId);
+  db.prepare('UPDATE applications SET waitlist_order = ? WHERE id = ?')
+    .run(row.last + 1, applicationId);
+  return row.last + 1;
+}
 
-    if (!nextInLine) return;
+/**
+ * Fills any genuinely free spots in a slot from its waitlist, in queue order.
+ *
+ * ── Why this no longer consults Auto Select ──
+ *
+ * All three callers used to gate this behind `event.auto_approve === 1`. That
+ * flag chooses how volunteers are SELECTED (a weighted draw after the deadline
+ * versus the organizer's judgement); it says nothing about whether a spot that
+ * has just been vacated should be refilled. Tying promotion to it meant that on
+ * an ordinary organizer-managed event — the default — a confirmed volunteer
+ * releasing their place left the shift under capacity with someone waiting on
+ * it, and told neither of them. The waitlist was decorative for most events.
+ *
+ * Promotion is now a function of the three things that actually determine it:
+ * how much capacity is free, who is next in the queue, and whether the event is
+ * still happening. The selection method is irrelevant to all three.
+ *
+ * Capacity is re-counted here rather than inferred from "somebody just left",
+ * so this is safe to call speculatively: if nothing is free it promotes nobody.
+ * It also promotes as many people as there are free spots, which matters for a
+ * bulk demotion that frees several at once.
+ *
+ * Returns the promoted rows so the caller can notify AFTER its transaction
+ * commits — dispatching inside one would leave notification writes to roll back
+ * with it, and a socket emit cannot be un-sent.
+ */
+export function promoteFromWaitlist(slotId) {
+  const slot = db.prepare(`
+    SELECT s.id, s.name, s.max_spots, s.event_id,
+           e.title AS event_title, e.organizer_id, e.status AS event_status
+    FROM slots s JOIN events e ON e.id = s.event_id
+    WHERE s.id = ?
+  `).get(slotId);
+  if (!slot) return [];
 
-    // Promote next in line
-    db.prepare("UPDATE applications SET status = 'accepted', waitlist_order = NULL WHERE id = ?").run(nextInLine.id);
+  // Pulling someone into a called-off event would be worse than leaving them
+  // waiting — they would arrange a ride around a shift that is not happening.
+  if (slot.event_status === 'cancelled' || slot.event_status === 'completed') return [];
 
-    // Get slot details
-    const slot = db.prepare('SELECT name FROM slots WHERE id = ?').get(slotId);
-    const slotName = slot ? slot.name : 'Shift';
+  const accepted = db.prepare(
+    "SELECT COUNT(*) AS c FROM applications WHERE slot_id = ? AND status = 'accepted'"
+  ).get(slotId).c;
 
-    // Notify promoted student
+  const free = slot.max_spots - accepted;
+  if (free <= 0) return [];
+
+  // NULLS LAST so a legacy row written before waitlist_order was assigned sorts
+  // behind properly-queued ones instead of jumping the queue; applied_at then id
+  // as a stable tiebreak so two rows can never swap places between calls.
+  const queue = db.prepare(`
+    SELECT a.id, a.user_id, u.name AS volunteer_name
+    FROM applications a JOIN users u ON u.id = a.user_id
+    WHERE a.slot_id = ? AND a.status = 'waitlisted'
+    ORDER BY a.waitlist_order IS NULL, a.waitlist_order ASC, a.applied_at ASC, a.id ASC
+    LIMIT ?
+  `).all(slotId, free);
+  if (queue.length === 0) return [];
+
+  const promote = db.prepare(
+    "UPDATE applications SET status = 'accepted', waitlist_order = NULL WHERE id = ?"
+  );
+  const renumber = db.prepare('UPDATE applications SET waitlist_order = ? WHERE id = ?');
+
+  for (const row of queue) promote.run(row.id);
+
+  // Close the gap the promotion left, so positions stay 1..n and the person who
+  // was 3rd is told they are now 2nd rather than staying stuck at 3.
+  const remaining = db.prepare(`
+    SELECT id FROM applications
+    WHERE slot_id = ? AND status = 'waitlisted'
+    ORDER BY waitlist_order IS NULL, waitlist_order ASC, applied_at ASC, id ASC
+  `).all(slotId);
+  remaining.forEach((r, i) => renumber.run(i + 1, r.id));
+
+  return queue.map(row => ({
+    applicationId: row.id,
+    userId: row.user_id,
+    volunteerName: row.volunteer_name,
+    slotId,
+    slotName: slot.name,
+    eventId: slot.event_id,
+    eventTitle: slot.event_title,
+    organizerId: slot.organizer_id
+  }));
+}
+
+/**
+ * Notifies both sides about promotions returned by `promoteFromWaitlist`.
+ * Deliberately separate, so it is only ever called after a commit.
+ */
+export function notifyPromotions(promotions) {
+  for (const p of promotions) {
     notificationService.dispatch('WAITLIST_PROMOTED', {
-      eventId,
-      eventTitle
-    }, nextInLine.user_id);
+      eventId: p.eventId,
+      eventTitle: p.eventTitle,
+      slotName: p.slotName
+    }, p.userId);
 
-    // Notify organizer of promotion
-    // We don't have a specific event for this yet, so we use SYSTEM / default info mapping
-    notificationService.dispatch('SYSTEM', {
-      title: 'Waitlist promotion automatic',
-      body: `A spot opened up in "${eventTitle}" and ${nextInLine.volunteer_name} was automatically promoted from the waitlist.`,
-      link: `event:${eventId}`
-    }, organizerId);
+    notificationService.dispatch('WAITLIST_PROMOTION_MADE', {
+      eventId: p.eventId,
+      eventTitle: p.eventTitle,
+      slotName: p.slotName,
+      volunteerName: p.volunteerName
+    }, p.organizerId);
+  }
+  return promotions.length;
+}
 
-    // Shift ranks of remaining waitlisted applications for this slot
-    const remaining = db.prepare(`
-      SELECT id FROM applications
-      WHERE slot_id = ? AND status = 'waitlisted'
-      ORDER BY waitlist_order ASC
-    `).all(slotId);
-
-    const updateRank = db.prepare('UPDATE applications SET waitlist_order = ? WHERE id = ?');
-    remaining.forEach((r, idx) => {
-      updateRank.run(idx + 1, r.id);
-    });
+/**
+ * Backwards-compatible wrapper: promote, then notify.
+ *
+ * Safe only outside a transaction, because it notifies. Callers that already
+ * hold one should use `promoteFromWaitlist` inside it and `notifyPromotions`
+ * after the commit.
+ */
+export function handleWaitlistPromotion(slotId) {
+  try {
+    return notifyPromotions(promoteFromWaitlist(slotId));
   } catch (err) {
     console.error('Waitlist promotion error:', err);
+    return 0;
   }
 }
 

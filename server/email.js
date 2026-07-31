@@ -71,7 +71,173 @@ if (IS_PRODUCTION && !APP_URL) {
   process.exit(1);
 }
 
+/**
+ * Health record for TRANSACTIONAL mail (verification, reset, email change).
+ *
+ * ── Why this exists ──
+ *
+ * These four messages caught their own errors, logged a line, and returned `false`.
+ * Every caller ignores that return value on purpose, because the API answers
+ * `{success:true}` regardless so `forgot-password` cannot leak whether an address
+ * exists. Only NOTIFICATION mail goes through the `notification_jobs` outbox and
+ * gets retries and a status column; these had neither.
+ *
+ * So during an SMTP incident: students never receive a verification link,
+ * `/api/admin/system/status` still reports `smtpConfigured: true` — that check only
+ * looks at whether the env vars are set — and nothing records that mail is failing.
+ * With REQUIRE_EMAIL_VERIFICATION defaulting to ON, silent verification failure
+ * means silent lockout.
+ *
+ * Deliberately in-process and not persisted: it answers "is mail working right
+ * now", which is what an operator asks during an incident. Durable per-message
+ * tracking is the outbox's job, and duplicating it here would be a second source of
+ * truth to keep in step.
+ *
+ * The recipient's local part is never stored — see recordFailure.
+ */
+const mailHealth = {
+  failures: 0,
+  successes: 0,
+  lastSuccessAt: null,
+  lastError: null,
+  attemptsOnLastFailure: 0
+};
+
+/** How many times a transactional message is attempted before giving up. */
+const MAX_MAIL_ATTEMPTS = Number(process.env.MAIL_MAX_ATTEMPTS) || 3;
+
+/** Base delay between attempts. Overridable so tests do not sleep. */
+const RETRY_DELAY_MS = Number(process.env.MAIL_RETRY_DELAY_MS) || 500;
+
+/** Current transactional-mail health, for the admin status endpoint. */
+export function getMailHealth() {
+  return { ...mailHealth, smtpConfigured: Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS) };
+}
+
+/** Test seam: resets the counters between cases. */
+export function resetMailHealthForTests() {
+  mailHealth.failures = 0;
+  mailHealth.successes = 0;
+  mailHealth.lastSuccessAt = null;
+  mailHealth.lastError = null;
+  mailHealth.attemptsOnLastFailure = 0;
+}
+
+/**
+ * Sends a transactional message, retrying a transient failure.
+ *
+ * A single attempt was enough to lose a student's verification link to a momentary
+ * relay hiccup — and because the flag that gates their account defaults on, losing
+ * that one message locks them out until they find the resend button. Three attempts
+ * with a short linear backoff covers the common transient cases (ETIMEDOUT,
+ * ECONNRESET, a relay's brief 4xx) without letting a signup request hang on a relay
+ * that is genuinely down.
+ *
+ * `flow` is recorded rather than a generic "mail failed", because the flows have
+ * different consequences: a failed reset is an annoyance, a failed verification is a
+ * lockout, and a failed email-change notice is a missed security warning.
+ */
+async function sendTransactional(flow, mailOptions) {
+  let lastErr = null;
+
+  for (let attempt = 1; attempt <= MAX_MAIL_ATTEMPTS; attempt++) {
+    try {
+      await transporter.sendMail(mailOptions);
+      mailHealth.successes++;
+      mailHealth.lastSuccessAt = new Date().toISOString();
+      if (attempt > 1) {
+        console.warn(`[Email] ${flow} succeeded on attempt ${attempt}.`);
+      }
+      return true;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < MAX_MAIL_ATTEMPTS) {
+        console.warn(
+          `[Email] ${flow} attempt ${attempt}/${MAX_MAIL_ATTEMPTS} failed `
+          + `(${err.message}); retrying.`
+        );
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS * attempt));
+      }
+    }
+  }
+
+  recordFailure(flow, mailOptions.to, lastErr, MAX_MAIL_ATTEMPTS);
+  return false;
+}
+
+/**
+ * Records a permanent failure.
+ *
+ * Only the recipient's DOMAIN is kept. The domain is what diagnoses a relay or
+ * SPF problem; the local part identifies a specific child, and this record is
+ * exposed on an admin endpoint and written to the journal. Support can still find
+ * the account from the flow and timestamp.
+ */
+function recordFailure(flow, to, err, attempts) {
+  const domain = String(to || '').split('@')[1] || null;
+  mailHealth.failures++;
+  mailHealth.attemptsOnLastFailure = attempts;
+  mailHealth.lastError = {
+    flow,
+    message: err ? String(err.message) : 'unknown',
+    recipientDomain: domain,
+    at: new Date().toISOString()
+  };
+  console.error(
+    `[Email] ${flow} FAILED permanently after ${attempts} attempts `
+    + `(recipient domain: ${domain || 'unknown'}): ${err ? err.message : 'unknown'}`
+  );
+}
+
+/**
+ * Escapes text for interpolation into an HTML email.
+ *
+ * ── Why outbound mail needs this ──
+ *
+ * Notification emails interpolated raw database values — event titles, locations,
+ * organizer names, the recipient's own name — straight into the template. Titles
+ * and locations are free text typed by an organizer.
+ *
+ * Mail clients do not run `<script>`, so this is not XSS in the browser sense. The
+ * realistic payload is a link: an event titled
+ *
+ *     Beach Cleanup <a href="https://evil.example/login">Confirm your account</a>
+ *
+ * produces a phishing anchor inside genuine WeVolunteer mail, sent from the
+ * district's domain, passing its SPF and DKIM, to every student on the shift. That
+ * needs no script execution to work, and on a platform for minors it is the
+ * consequence that matters.
+ *
+ * Escaping at render rather than at rest matches what the app already does on the
+ * web surface, where message bodies are stored raw and escaped by React on output.
+ *
+ * The ampersand is replaced FIRST. Any other order re-encodes the escapes this
+ * function has just written, and the recipient sees `&lt;` as literal text.
+ */
+export function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Renders the shared email chrome.
+ *
+ * `title` and `ctaUrl` are escaped here because they land in `<title>` and in an
+ * `href` attribute respectively — positions where unescaped input breaks out of
+ * its context. `contentHTML` is deliberately NOT escaped: it is markup the
+ * application composes from its own templates, and escaping it would render every
+ * email as its own source. Callers are responsible for escaping the user-supplied
+ * values they interpolate into it, which is what `escapeHtml` above is for.
+ */
 export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = null) => {
+  const safeTitle = escapeHtml(title);
+  const safeCtaUrl = escapeHtml(ctaUrl);
+  const safeCtaText = escapeHtml(ctaText);
   const brandColor = '#0f6b45';
   const paperColor = '#f7f7f5';
   const inkColor = '#14231c';
@@ -84,7 +250,7 @@ export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = n
           <table role="presentation" border="0" cellpadding="0" cellspacing="0">
             <tr>
               <td>
-                <a href="${ctaUrl}" target="_blank" style="display: inline-block; padding: 12px 24px; font-family: 'Public Sans', sans-serif; font-size: 16px; font-weight: 600; color: #ffffff; background-color: ${brandColor}; text-decoration: none; border-radius: 6px;">${ctaText}</a>
+                <a href="${safeCtaUrl}" target="_blank" style="display: inline-block; padding: 12px 24px; font-family: 'Public Sans', sans-serif; font-size: 16px; font-weight: 600; color: #ffffff; background-color: ${brandColor}; text-decoration: none; border-radius: 6px;">${safeCtaText}</a>
               </td>
             </tr>
           </table>
@@ -101,7 +267,7 @@ export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = n
   <meta name="viewport" content="width=device-width">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="x-apple-disable-message-reformatting">
-  <title>${title}</title>
+  <title>${safeTitle}</title>
   <style>
     html, body {
       margin: 0 auto !important;
@@ -271,13 +437,7 @@ export async function sendVerificationEmail(toEmail, token) {
     html: buildHtmlTemplate('Verify your email', contentHTML, 'Verify Email Address', verifyLink)
   };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    return true;
-  } catch (err) {
-    console.error('Error sending verification email:', err);
-    return false;
-  }
+  return sendTransactional('verification', mailOptions);
 }
 
 export async function sendPasswordResetEmail(toEmail, token) {
@@ -298,13 +458,7 @@ export async function sendPasswordResetEmail(toEmail, token) {
     html: buildHtmlTemplate('Password Reset', contentHTML, 'Reset Password', resetLink)
   };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    return true;
-  } catch (err) {
-    console.error('Error sending password reset email:', err);
-    return false;
-  }
+  return sendTransactional('password-reset', mailOptions);
 }
 
 /**
@@ -332,13 +486,7 @@ export async function sendEmailChangeConfirmation(toEmail, token) {
     html: buildHtmlTemplate('Confirm your new email address', contentHTML, 'Confirm this address', confirmLink)
   };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    return true;
-  } catch (err) {
-    console.error('Error sending email-change confirmation:', err);
-    return false;
-  }
+  return sendTransactional('email-change-confirm', mailOptions);
 }
 
 /**
@@ -373,18 +521,12 @@ export async function sendEmailChangeNotice(toEmail, newEmail) {
     html: buildHtmlTemplate('Email change requested', contentHTML)
   };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    return true;
-  } catch (err) {
-    console.error('Error sending email-change notice:', err);
-    return false;
-  }
+  return sendTransactional('email-change-notice', mailOptions);
 }
 
 export async function sendNotificationEmail(toEmail, subject, text, htmlContent) {
   const contentHTML = `
-    <h1>${subject}</h1>
+    <h1>${escapeHtml(subject)}</h1>
     <p>${htmlContent || text.replace(/\n/g, '<br/>')}</p>
   `;
 
@@ -398,13 +540,7 @@ export async function sendNotificationEmail(toEmail, subject, text, htmlContent)
     html: buildHtmlTemplate(subject, contentHTML, 'Log in to your account', loginUrl)
   };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    return true;
-  } catch (err) {
-    console.error('Error sending notification email:', err);
-    return false;
-  }
+  return sendTransactional('notification-direct', mailOptions);
 }
 
 export async function sendMail({ to, subject, text, html }) {

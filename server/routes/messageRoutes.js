@@ -33,6 +33,23 @@ function checkMessageRateLimit(userId) {
   }
   bucket.push(now);
   sendBuckets.set(userId, bucket);
+
+  // Opportunistic sweep to prevent unbounded growth from stale buckets
+  if (sendBuckets.size > 5000) {
+    for (const [k, v] of sendBuckets) {
+      const active = v.filter(ts => now - ts < windowMs);
+      if (active.length === 0) sendBuckets.delete(k);
+      else sendBuckets.set(k, active);
+    }
+    // Force eviction if still too large
+    if (sendBuckets.size > 5000) {
+      for (const k of sendBuckets.keys()) {
+        sendBuckets.delete(k);
+        if (sendBuckets.size <= 4000) break;
+      }
+    }
+  }
+
   return true;
 }
 

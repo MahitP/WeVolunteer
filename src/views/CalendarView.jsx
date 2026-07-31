@@ -247,13 +247,17 @@ export default function CalendarView({
         <div className="row">
           <button className="btn btn-ghost btn-sm" onClick={goToday} aria-current={dayKey(cursor) === dayKey(today) ? 'date' : undefined}>Today</button>
           <div className="row" style={{ background: 'var(--surface-3)', borderRadius: 'var(--r-md)', padding: 2, border: '1px solid var(--rule)' }}>
-            <button 
-              className={`btn btn-sm ${viewMode === 'month' ? 's-d61cc5' : 'btn-ghost'}`} 
+            {/* No class for the active state: the inline style below already
+                sets its background, colour and shadow. The generated class that
+                used to sit here never had a rule written for it and was a no-op,
+                so it is dropped rather than given one. */}
+            <button
+              className={`btn btn-sm ${viewMode === 'month' ? '' : 'btn-ghost'}`}
               onClick={() => setViewMode('month')}
               style={{ margin: 0, borderRadius: 'calc(var(--r-md) - 2px)', background: viewMode === 'month' ? 'var(--surface)' : 'transparent', color: viewMode === 'month' ? 'var(--ink)' : 'var(--ink-2)', boxShadow: viewMode === 'month' ? 'var(--control-shadow)' : 'none' }}
             >Month</button>
             <button 
-              className={`btn btn-sm ${viewMode === 'week' ? 's-d61cc5' : 'btn-ghost'}`} 
+              className={`btn btn-sm ${viewMode === 'week' ? '' : 'btn-ghost'}`}
               onClick={() => setViewMode('week')}
               style={{ margin: 0, borderRadius: 'calc(var(--r-md) - 2px)', background: viewMode === 'week' ? 'var(--surface)' : 'transparent', color: viewMode === 'week' ? 'var(--ink)' : 'var(--ink-2)', boxShadow: viewMode === 'week' ? 'var(--control-shadow)' : 'none' }}
             >Week</button>

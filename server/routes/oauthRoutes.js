@@ -429,7 +429,7 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
 });
 
 /** Joins a provider identity to an existing password account, proven by that password. */
-router.post('/api/oauth/link', (req, res) => {
+router.post('/api/oauth/link', async (req, res) => {
   const { linkToken, password } = req.body;
   if (!linkToken || !password) {
     return res.status(400).json({ error: 'Missing token or password' });
@@ -455,7 +455,7 @@ router.post('/api/oauth/link', (req, res) => {
     if (userRow.password_hash === '!OAUTH_ONLY!') {
       return res.status(409).json({ error: 'That account has no password. Sign in with your existing provider instead.' });
     }
-    if (!bcrypt.compareSync(password, userRow.password_hash)) {
+    if (!await bcrypt.compare(password, userRow.password_hash)) {
       return res.status(401).json({ error: 'Incorrect password.' });
     }
 

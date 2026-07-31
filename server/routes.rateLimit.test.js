@@ -38,11 +38,35 @@ describe('mail endpoints are rate limited', () => {
   });
 
   it('rate-limits resend-verification through the same mail limiter', async () => {
-    // The shared bucket is already over the limit from the previous test, so a
-    // resend request is refused at the limiter before auth — proving the
-    // endpoint is mounted on the mail limiter rather than being unlimited.
-    const res = await srv.call('POST', '/api/auth/resend-verification');
-    expect(res.status).toBe(429);
+    /**
+     * Rewritten when the mail limiter stopped keying on IP.
+     *
+     * This case used to assert 429 on its FIRST resend-verification call, relying on
+     * the bucket being already exhausted by the forgot-password test above — i.e. on
+     * one shared per-IP bucket spanning two endpoints and two different accounts.
+     *
+     * That coupling was the bug, not the feature. A school campus egresses from one
+     * public address, so a per-IP bucket meant the whole building shared five
+     * verification-mail requests per 15 minutes — and with
+     * REQUIRE_EMAIL_VERIFICATION defaulting to ON, a student who cannot resend
+     * cannot use their account. The limiter now keys on the target address, or on
+     * the session for authenticated endpoints like this one.
+     *
+     * So the endpoint still has to be limited — that is what this test is for — but
+     * it now needs its own requests to get there rather than borrowing another
+     * endpoint's count. `skipSuccessfulRequests` is off on this limiter, so the 401s
+     * from `authenticateToken` are still counted.
+     */
+    const statuses = [];
+    for (let i = 0; i < 5; i++) {
+      const res = await srv.call('POST', '/api/auth/resend-verification');
+      statuses.push(res.status);
+    }
+
+    // Unauthenticated, so the early calls are refused by auth (401) — proving the
+    // limiter let them through — and a later one is refused by the limiter itself.
+    expect(statuses[0]).toBe(401);
+    expect(statuses, `never rate-limited: ${statuses.join(',')}`).toContain(429);
   });
 
   /**

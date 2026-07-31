@@ -21,7 +21,24 @@ import {
  * never written.
  */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REAL_DB = path.join(__dirname, 'wevolunteer.db');
+
+/**
+ * The database this rehearsal copies.
+ *
+ * Was hardcoded to `server/wevolunteer.db`. Nothing in the deployment uses that
+ * path — the pilot's `.env` sets `WEV_DB_PATH=../pilot.db` — and the file that
+ * sat there was a test artifact holding 797 leaked fixtures written accidentally
+ * by another suite. A "rehearsal against a copy of the real database" was
+ * therefore rehearsing against accumulated junk, and it skipped entirely once
+ * that junk was removed.
+ *
+ * `WEV_REAL_DB` rather than `WEV_DB_PATH`, because startTestServer() overwrites
+ * WEV_DB_PATH with a throwaway path and process.env is shared between test files
+ * in the same worker.
+ *
+ * Still only ever copied, never written — see the note above.
+ */
+const REAL_DB = process.env.WEV_REAL_DB || path.join(__dirname, '..', 'pilot.db');
 
 /**
  * This deliberately does NOT pin to a hardcoded set of totals.
@@ -201,10 +218,34 @@ describeIfRealDb('migration rehearsal against a copy of the real database', () =
     const { dest, cleanup } = copyRealDb();
     try {
       const db = new DatabaseSync(dest);
+
+      /**
+       * The absent row is CONSTRUCTED on the copy rather than assumed present.
+       *
+       * This used to rely on the comment "the seed contains an absent volunteer
+       * carrying hours_awarded = 3" — true of the old demo database this suite
+       * used to point at, and not true of the real pilot database, which has no
+       * absent-marked attendance at all. So the assertion became
+       * `expect(0).toBeGreaterThan(0)`: a real property, failing for want of a
+       * fixture rather than because anything was broken.
+       *
+       * Marking an existing row absent while leaving its hours in place is
+       * exactly the state the migration has to handle, and building it here makes
+       * the test independent of whichever database it is pointed at.
+       */
+      const victim = db.prepare('SELECT slot_id, user_id FROM attendance LIMIT 1').get();
+      if (!victim) {
+        throw new Error(
+          'The database being rehearsed has no attendance rows, so this property '
+          + 'cannot be exercised. Point WEV_REAL_DB at a database with credited hours.'
+        );
+      }
+      db.prepare('UPDATE attendance SET present = 0, hours_awarded = 3 WHERE slot_id = ? AND user_id = ?')
+        .run(victim.slot_id, victim.user_id);
+
       createHoursLedgerTable(db);
       backfillHoursLedger(db);
 
-      // The seed contains an absent volunteer carrying hours_awarded = 3.
       const absent = db.prepare('SELECT * FROM hours_ledger WHERE present_after = 0').all();
       expect(absent.length).toBeGreaterThan(0);
       for (const row of absent) {

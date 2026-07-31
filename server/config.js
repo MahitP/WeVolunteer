@@ -130,6 +130,83 @@ export const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET || ''
 export const OAUTH_REDIRECT_URI = process.env.OAUTH_REDIRECT_URI || 'http://localhost:5173/oauth/callback';
 
 /**
+ * Where the provider sends the user back — validated in production.
+ *
+ * The default above is right for development and catastrophic in production,
+ * and it applies silently. Verified during the pre-pilot review: with real
+ * Google credentials set and OAUTH_REDIRECT_URI forgotten, the server booted
+ * without complaint, reported `{"id":"google","enabled":true}` so the "Continue
+ * with Google" button rendered for everyone, and minted authorize URLs carrying
+ * `redirect_uri=http://localhost:5173/oauth/callback`.
+ *
+ * Every student pressing that button then gets one of two outcomes. If
+ * localhost is not a registered URI on the OAuth client, Google refuses with
+ * `redirect_uri_mismatch` — a dead end on a sign-in path the app advertises. If
+ * it IS still registered — the common case, because it is what development uses
+ * and the same client tends to get reused — Google hands a live authorization
+ * code to `http://localhost:5173` over plain HTTP on the user's own machine.
+ *
+ * Forgetting it is a likely mistake, not an exotic one: it is not listed in
+ * deploy/wevolunteer.env.example, so an operator following the runbook has no
+ * reason to know it exists.
+ *
+ * Everything else in this file fails CLOSED on this class of mistake — a
+ * placeholder JWT_SECRET and OAUTH_ALLOW_MOCK in production both refuse to boot.
+ * This did not, so it now does.
+ *
+ * Only enforced when a provider is actually configured: an email-only district
+ * is a normal deployment and must not be made to set a variable for a feature it
+ * does not use.
+ */
+const ANY_OAUTH_PROVIDER_CONFIGURED =
+  Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET)
+  || Boolean(MICROSOFT_CLIENT_ID && MICROSOFT_CLIENT_SECRET);
+
+if (IS_PRODUCTION && ANY_OAUTH_PROVIDER_CONFIGURED) {
+  let host = null;
+  try {
+    host = new URL(OAUTH_REDIRECT_URI).hostname;
+  } catch {
+    throw new Error(
+      `FATAL: OAUTH_REDIRECT_URI is not a valid URL: ${OAUTH_REDIRECT_URI}\n`
+      + 'It must be the absolute callback URL of this deployment, e.g.\n'
+      + '  OAUTH_REDIRECT_URI=https://volunteers.example.org/oauth/callback'
+    );
+  }
+
+  // Bracketed IPv6 comes back from URL as "[::1]" on some runtimes and "::1" on
+  // others, so both spellings are checked.
+  const isLoopback = host === 'localhost' || host === '127.0.0.1'
+    || host === '::1' || host === '[::1]';
+
+  if (isLoopback) {
+    throw new Error(
+      'FATAL: an OAuth provider is configured but OAUTH_REDIRECT_URI still points at '
+      + `localhost (${OAUTH_REDIRECT_URI}).\n`
+      + 'This is the development default. In production it sends every user who presses\n'
+      + '"Continue with Google" to their own machine — and if localhost is still a\n'
+      + 'registered redirect URI on the OAuth client, it delivers a live authorization\n'
+      + 'code there over plain HTTP.\n'
+      + 'Set it to this deployment\'s callback URL, e.g.\n'
+      + '  OAUTH_REDIRECT_URI=https://volunteers.example.org/oauth/callback\n'
+      + 'and register exactly that value with the provider. To run email-only instead,\n'
+      + 'unset GOOGLE_CLIENT_ID/SECRET and MICROSOFT_CLIENT_ID/SECRET.'
+    );
+  }
+
+  // Not fatal: the provider is the authority here and will reject it, so a hard
+  // stop would be us guessing. A loud warning is proportionate — unlike the
+  // loopback case, this one fails visibly at the provider rather than silently.
+  if (!OAUTH_REDIRECT_URI.startsWith('https://')) {
+    console.warn(
+      `[config] WARNING: OAUTH_REDIRECT_URI is not https (${OAUTH_REDIRECT_URI}).\n`
+      + '         Google and Microsoft both refuse non-HTTPS redirect URIs outside\n'
+      + '         localhost, so provider sign-in will fail at the provider.'
+    );
+  }
+}
+
+/**
  * Whether a provider can actually be used, so the UI can hide a button that
  * would otherwise fail after the user has already left the site. Unconfigured
  * is a normal state (a district may run email-only), not an error.

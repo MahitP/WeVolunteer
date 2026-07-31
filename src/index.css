@@ -185,6 +185,10 @@
   /* — Component Specific Variables — */
   --topbar-bg: rgba(247, 248, 246, 0.82);
   --modal-overlay: rgba(18, 32, 25, 0.42);
+  /* For a dialog opening on top of another dialog: it is dimming an already
+     dimmed page, so at the base opacity the modal underneath stayed
+     distractingly legible through it. */
+  --modal-overlay-strong: rgba(18, 32, 25, 0.62);
   --popover-bg: rgba(255, 255, 255, 0.96);
   --input-bg: var(--surface);
   --input-border: var(--rule-strong);
@@ -327,6 +331,7 @@
 
   --topbar-bg: rgba(13, 16, 15, 0.76);
   --modal-overlay: rgba(2, 6, 4, 0.68);
+  --modal-overlay-strong: rgba(2, 6, 4, 0.84);
   --popover-bg: rgba(26, 33, 29, 0.96);
   --input-bg: rgba(255, 255, 255, 0.03);
   --input-border: var(--rule-strong);
@@ -944,6 +949,19 @@ time { font-variant-numeric: tabular-nums; }
 
 .stack-xs { display: flex; flex-direction: column; gap: var(--s1); }
 .stack-sm { display: flex; flex-direction: column; gap: var(--s2); }
+/**
+ * The missing step in the scale.
+ *
+ * `.stack-md` is used in ten files — the Settings cards, ConfirmDialog,
+ * OAuthCallback, ResetPassword, both report dialogs — and had no rule anywhere,
+ * so every one of them rendered as a plain block with no column gap at all.
+ * That is a large part of why several dialogs and cards read as "unfinished":
+ * the spacing their authors asked for was never defined.
+ *
+ * s3 rather than s4, so it stays a distinct step between `.stack-sm` and the
+ * unsuffixed `.stack` instead of silently aliasing one of them.
+ */
+.stack-md { display: flex; flex-direction: column; gap: var(--s3); }
 .stack { display: flex; flex-direction: column; gap: var(--s4); }
 .stack-lg { display: flex; flex-direction: column; gap: var(--s6); }
 
@@ -1019,9 +1037,36 @@ time { font-variant-numeric: tabular-nums; }
 .meter-label {
   display: flex;
   justify-content: space-between;
+  /* The two halves ("0 signed up" / "15 of 15 spots left") are pushed apart by
+     space-between, which distributes only the space that exists. In a narrow
+     column there is none, so they used to render touching — "0 signed up15 of
+     15 left". The gap is the floor that keeps them legible at any width, and
+     wrapping lets them stack rather than collide when the column is very tight. */
+  flex-wrap: wrap;
+  gap: 0 var(--s3);
   font-size: 0.75rem;
   color: var(--ink-2);
   margin-bottom: var(--s2);
+}
+
+/**
+ * Capacity meter wrapper (Seats, above 12 spots).
+ *
+ * Restores `style={{ minWidth: 108, flex: 1 }}`, which was dropped when the
+ * inline styles in this component were replaced by a generated class name that
+ * never had a rule written for it. Without a width the flex parent collapsed
+ * this to 0px, so `justify-content: space-between` above had no space to
+ * distribute and the two capacity labels rendered jammed together. Measured on
+ * the live page before the fix: containerWidth 0, gap between spans 0.
+ */
+.seats-meter {
+  min-width: 108px;
+  flex: 1;
+}
+
+/** Restores `style={{ gap: 'var(--s2)' }}` on the discrete-seats row. */
+.seats-row {
+  gap: var(--s2);
 }
 
 /* ==========================================================================
@@ -1971,6 +2016,207 @@ time { font-variant-numeric: tabular-nums; }
   animation: fade var(--t-mid);
 }
 @keyframes fade { from { opacity: 0; } }
+
+/**
+ * A dialog opened on top of another dialog.
+ *
+ * The schedule-conflict warning opens from inside the event modal. It used to be
+ * a nested `.modal-overlay` at the same `z-index: 1000`, inside an ancestor that
+ * sets `backdrop-filter` — and backdrop-filter makes an element a containing
+ * block for `position: fixed` descendants, so the nested overlay stopped being
+ * viewport-positioned and rendered as a translucent panel over the modal
+ * beneath it, text overlapping text.
+ *
+ * The dialog is portalled to document.body now, so it is no longer trapped by
+ * that containing block, and this class states the layering explicitly instead
+ * of depending on which node happens to come later in the DOM. The backdrop is
+ * a little stronger because it is dimming an already-dimmed page: at the base
+ * opacity the modal underneath stayed distractingly legible.
+ */
+.modal-overlay-stacked {
+  z-index: 1100;
+  background: var(--modal-overlay-strong);
+}
+
+/* ==========================================================================
+   Touch-target floors (mobile only)
+   --------------------------------------------------------------------------
+   Measured on a 375x812 viewport across Dashboard, Opportunities, Calendar,
+   Messages, Notifications and Profile: 29 interactive controls rendered below
+   44x44, the Apple HIG / WCAG 2.5.5 (AAA) minimum. Grouped, they were a small
+   number of shared classes rather than 29 separate problems.
+       .chip                x11  41x30  category and notification filters
+       .skip-link           x6   167x42 keyboard skip link (2px short)
+       .segmented > button  x2   155x30 Active / Completed toggle
+       label.check          x2   ~32    the box around a 16x16 checkbox
+
+   Scoped to the mobile breakpoint on purpose: the brief requires desktop layout
+   to stay exactly as it is, and a 44px floor on a dense desktop toolbar would
+   change spacing there for no benefit — a mouse does not need it.
+
+   The floor is applied to the label wrapping a checkbox rather than to the input
+   itself. Growing a native checkbox to 44px would make it a large grey square;
+   growing its label grows the hit area while the control keeps its size.
+   ========================================================================== */
+@media (max-width: 700px) {
+  .chip,
+  .segmented > button {
+    min-height: 44px;
+    /* Chips were 41px wide at their narrowest ("All"), so the horizontal
+       dimension needs the floor too, not just the vertical one. */
+    min-width: 44px;
+  }
+
+  /* The label is the hit area; the box inside keeps its 16px size. */
+  label.check {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .skip-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+/* ==========================================================================
+   Recipient picker — "New message"
+   ========================================================================== */
+
+.recipient-picker { max-width: 32rem; }
+
+.recipient-search { position: relative; }
+.recipient-search-icon {
+  position: absolute;
+  left: var(--s3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-3);
+  pointer-events: none;
+}
+.recipient-search-input { width: 100%; padding-left: 2.25rem; }
+
+.recipient-results {
+  margin-top: var(--s4);
+  max-height: 50vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--rule);
+}
+.recipient-note { padding: var(--s4); text-align: center; }
+.recipient-error { color: var(--danger); }
+
+/**
+ * A result row.
+ *
+ * A real <button>, because these used to be `<div onClick>` — unreachable by Tab
+ * and unactivatable by Enter or Space, which made choosing a recipient
+ * mouse-only. `text-align: left` and the reset below keep it looking like a list
+ * row rather than a form control.
+ */
+.recipient-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  width: 100%;
+  /* 44px floor: this is the primary tap target in the dialog. */
+  min-height: 44px;
+  padding: var(--s3) var(--s4);
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.recipient-row:last-child { border-bottom: none; }
+.recipient-row:hover { background: var(--surface-2); }
+/* Focus must be visible — it is now reachable by keyboard. */
+.recipient-row:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+
+.recipient-avatar {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+}
+.recipient-detail { display: flex; flex-direction: column; min-width: 0; }
+.recipient-name { font-weight: 600; }
+.recipient-username { font-weight: 400; color: var(--ink-3); }
+
+/* ==========================================================================
+   Report dialogs — event/comment, and conversation
+   ========================================================================== */
+
+/**
+ * Both report dialogs previously asked for class names that do not exist:
+ * `.modal-backdrop`, `.modal-content`, `.btn-error`, `.stack-md` in the
+ * event/comment one, and `.modal-footer` (the app's class is `.modal-foot`) in
+ * the conversation one. They therefore rendered with no panel, no backdrop and
+ * no footer layout — which is what "looks visually inconsistent" was describing.
+ */
+.modal-report,
+.report-modal {
+  max-width: 30rem;
+}
+
+/* The hint under the textarea belongs to the field, not the page. */
+.modal-report .field > .small.dim {
+  margin-top: var(--s1);
+}
+
+/* ==========================================================================
+   Schedule-conflict dialog
+   ========================================================================== */
+
+.conflict-dialog {
+  max-width: 30rem;
+}
+
+/* The clash itself: the one thing to read before deciding. */
+.conflict-dialog .conflict-detail {
+  display: grid;
+  gap: 2px;
+  /* Amber is reserved for hours, so a conflict is marked with a neutral-strong
+     rule rather than a colour that would imply credit. */
+  border-left: 3px solid var(--rule-strong);
+}
+.conflict-dialog .conflict-detail-title {
+  font-size: 1rem;
+  line-height: 1.3;
+}
+.conflict-dialog .conflict-detail-time {
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+.conflict-dialog .status {
+  margin-bottom: var(--s2);
+}
+
+/* Stack the two choices on a phone so neither is a cramped half-width target,
+   and put the safe one underneath — nearest the thumb is the one you undo with. */
+@media (max-width: 30rem) {
+  .conflict-dialog .modal-foot {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: var(--s2);
+  }
+  .conflict-dialog .modal-foot .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
 
 .modal {
   background: var(--surface);
@@ -3803,10 +4049,34 @@ time { font-variant-numeric: tabular-nums; }
   -webkit-backdrop-filter: blur(12px);
 }
 
-@media (prefers-color-scheme: dark) {
-  .premium-popover {
-    background: rgba(30, 30, 30, 0.85);
-  }
+/**
+ * The notification dropdown was unreadable in light mode, and this rule was why.
+ *
+ * It used to be:
+ *
+ *   @media (prefers-color-scheme: dark) {
+ *     .premium-popover { background: rgba(30, 30, 30, 0.85); }
+ *   }
+ *
+ * `prefers-color-scheme` reports the OPERATING SYSTEM's preference. This app's
+ * theme is an explicit `[data-theme]` attribute the user sets with the toggle,
+ * and every colour token follows that attribute. The two disagree the moment
+ * someone on a dark-mode laptop chooses light mode in the app: the media query
+ * still matched, so the dropdown kept a near-black translucent background while
+ * `--ink` and friends switched to their light-mode values — dark text on a dark
+ * panel. Measured on the live page with `data-theme="light"`: computed background
+ * rgba(30, 30, 30, 0.85).
+ *
+ * It was also the only `prefers-color-scheme` rule in the stylesheet, so it was
+ * the only place that could drift from the theme system.
+ *
+ * `--popover-bg` is the token the ordinary `.popover` already uses: translucent
+ * in both themes, so the backdrop blur still reads, and correct in each because
+ * it is defined per theme.
+ */
+[data-theme='dark'] .premium-popover,
+[data-theme='light'] .premium-popover {
+  background: var(--popover-bg);
 }
 
 .premium-head {
@@ -3944,7 +4214,17 @@ time { font-variant-numeric: tabular-nums; }
 
 .premium-notif-body {
   font-size: 13px;
-  color: var(--text-muted);
+  /**
+   * --text-secondary, not --text-muted.
+   *
+   * At 13px this is body copy, and on the tinted UNREAD row the muted ink
+   * measured 4.36:1 against its effective background — under the 4.5:1 WCAG AA
+   * threshold for normal text. (On a read row the same colour reached 4.91,
+   * which is why it only failed on the rows people are most likely to read.)
+   * One step up the ink scale measures ~6:1 on both. Size still separates it
+   * from the title above and the timestamp below, so the hierarchy is unchanged.
+   */
+  color: var(--text-secondary);
   line-height: 1.4;
 }
 
@@ -4500,7 +4780,25 @@ input:disabled + .premium-slider {
 }
 
 .auth-head { margin-bottom: var(--s6); }
-.auth-actions { margin-top: var(--s6); width: 100%; }
+/**
+ * Stacked auth buttons — "Create an account" above "I already have an account",
+ * and the same pairing on Login, Signup, ResetPassword and OAuthCallback.
+ *
+ * These groups carry `.stack-sm`, whose var(--s2) gap is meant for text and
+ * form rows. Between two full-width `.btn-lg` buttons 8px reads as a single
+ * seam rather than two separate choices, and on a phone the two tap targets sit
+ * close enough to mis-hit. s3 separates them without implying they belong to
+ * different sections.
+ *
+ * This deliberately overrides the utility's gap: it wins on source order, being
+ * declared after `.stack-sm`, and it is scoped to this one container so no other
+ * `.stack-sm` is affected.
+ */
+.auth-actions {
+  margin-top: var(--s6);
+  width: 100%;
+  gap: var(--s3);
+}
 
 /* Back link. Pulled left so the glyph optically aligns with the heading, and
    padded out to a real touch target rather than a 16px icon. */
@@ -5011,3 +5309,257 @@ input:disabled + .premium-slider {
   grid-column: 1 / -1;
   pointer-events: none;
 }
+
+/* ==========================================================================
+   Recovered layout styles
+   --------------------------------------------------------------------------
+   A previous inline-style migration replaced every `style={{…}}` in these
+   components with a generated, content-hashed class name — and never emitted
+   the corresponding CSS. The declarations were therefore dropped silently:
+   the markup still asked for a class, and the class did nothing.
+
+   That is the cause of the layout regressions found across the app, of which
+   the capacity meter collapsing to 0px wide (see .seats-meter) was one
+   visible symptom out of many.
+
+   Each rule below is the declaration set recovered from the last commit in
+   which that element still carried its inline style, so this restores the
+   original intent rather than inventing new spacing. Because the class names
+   are hashes OF the style object, one rule per name is correct at every site
+   that uses it — 72 classes across 26 component groups.
+
+   The names are kept as-is deliberately: renaming ~130 call sites across 12
+   files would be a large refactor with real regression risk, and the defect
+   here is the missing CSS, not the naming. Each rule records the element it
+   belongs to so it stays readable.
+   ========================================================================== */
+
+/* ── components/ApplicantReview.jsx, components/AttendeeList.jsx, components/EventEditForm.jsx, views/BrowseEvents.jsx ── */
+/* <div class="row-between"> */
+.s-450599 { margin-bottom: var(--s3); }
+
+/* ── components/ApplicantReview.jsx, components/AttendeeList.jsx ── */
+/* <div class="empty"> */
+.s-ffedc8 { padding: var(--s6) var(--s4); }
+
+/* ── components/ApplicantReview.jsx, components/BarChart.jsx, components/EventAttendance.jsx, views/CalendarView.jsx, views/CreateEvent.jsx ── */
+/* <div class="row"> */
+.s-65ce96 { gap: var(--s2); }
+
+/* ── components/ApplicantReview.jsx, views/BrowseEvents.jsx ── */
+/* <label class="row small"> */
+.s-a19c85 { gap: 6px; }
+/* <ArrowUpDown class=""> */
+.s-c4c3e3 { color: var(--ink-3); }
+
+/* ── components/ApplicantReview.jsx ── */
+/* <div class=""> */
+.s-0c206e { flex-shrink: 0; width: 120px; }
+/* <span class="small strong"> */
+.s-1ee043 { color: var(--brand-ink); }
+/* <div class="card row-between"> */
+.s-257e7a { background-color: var(--brand-tint); padding: var(--s2) var(--s4); margin-bottom: var(--s3); border-radius: 8px; }
+/* <div class="small truncate"> */
+.s-40e91a { flex-shrink: 0; width: 100px; }
+/* <div class="small dim tnum"> */
+.s-48fd77 { flex-shrink: 0; width: 70px; }
+/* <div class=""> */
+.s-821378 { flex-shrink: 0; width: 90px; }
+/* <button class="person"> */
+.s-934a84 { flex: 1; min-width: 150px; }
+/* <div class="row"> */
+.s-9814e5 { gap: 4px; flex-shrink: 0; }
+/* <div class="toolbar"> */
+.s-b9c417 { margin-bottom: var(--s3); background: var(--surface); padding: var(--s2) var(--s4); border-radius: 8px; border: 1px solid var(--rule); display: flex; align-items: center; gap: 12px; }
+
+/* ── components/AttendeeList.jsx, components/BarChart.jsx, views/CalendarView.jsx, views/OrganizerDashboard.jsx ── */
+/* <span class="truncate muted"> */
+.s-49cdf8 { flex: 1; }
+
+/* ── components/BarChart.jsx, components/EventAttendance.jsx, components/EventCard.jsx, views/OrganizerDashboard.jsx ── */
+/* <div class="stack-sm"> */
+.s-7b2db8 { flex: 1; min-width: 0px; }
+
+/* ── components/BarChart.jsx ── */
+/* <div class=""> */
+.s-052d03 { text-align: center; min-width: 0px; }
+/* <div class="truncate"> */
+.s-3581ab { font-size: 0.625rem; color: var(--ink-3); }
+/* <div class="row"> */
+.s-473ea3 { gap: var(--s4); align-items: center; flex-wrap: wrap; }
+/* <p class="small dim"> */
+.s-739dac { text-align: center; padding: var(--s5) 0; }
+/* <svg class=""> */
+.s-c99770 { flex-shrink: 0; }
+/* <div class="tnum"> */
+.s-edb0fa { font-size: 0.75rem; font-weight: 600; }
+
+/* ── components/EventAttendance.jsx, components/EventEditForm.jsx, views/CreateEvent.jsx ── */
+/* <div class="alert alert-danger"> */
+.s-22c500 { margin-bottom: var(--s4); }
+
+/* ── components/EventAttendance.jsx, views/CreateEvent.jsx ── */
+/* <Info class=""> */
+.s-d1467f { flex-shrink: 0; margin-top: 1px; }
+
+/* ── components/EventAttendance.jsx ── */
+/* <div class="row-between row-wrap"> */
+.s-6cce54 { margin-bottom: var(--s4); gap: var(--s2); }
+/* <span class=""> */
+.s-734389 { display: block; margin-top: 2px; }
+/* <div class="field"> */
+.s-fc751d { margin-top: var(--s5); }
+
+/* ── components/EventCard.jsx ── */
+/* <ShieldCheck class=""> */
+.s-733461 { color: var(--ok); }
+
+/* ── components/EventEditForm.jsx, views/BrowseEvents.jsx, views/CreateEvent.jsx ── */
+/* <div class="field-row"> */
+.s-535b39 { margin-top: 0px; }
+
+/* ── components/EventEditForm.jsx, views/CreateEvent.jsx ── */
+/* <textarea class="textarea"> */
+.s-635b9f { min-height: 64px; }
+/* <span class="dim"> */
+.s-fe3f5c { font-weight: 400; }
+
+/* ── components/EventEditForm.jsx ── */
+/* <div class="section-head"> */
+.s-473e7f { margin-top: var(--s6); }
+
+/* ── components/common/EmptyState.jsx, views/OrganizerDashboard.jsx ── */
+/* <div class=""> */
+.s-2b52df { margin-top: var(--s4); }
+
+/* ── components/location/LocationThumbnail.jsx, views/BrowseEvents.jsx ── */
+/* <span class=""> */
+.s-775d10 { margin-bottom: var(--s4); gap: var(--s3); }
+
+/* ── views/BrowseEvents.jsx, views/CalendarView.jsx ── */
+/* <span class="small nowrap row"> */
+.s-9d3307 { gap: 4px; }
+
+/* ── views/BrowseEvents.jsx, views/CreateEvent.jsx ── */
+/* <div class="inset row-between row-wrap"> */
+.s-262f5d { margin-top: var(--s4); gap: var(--s3); }
+
+/* ── views/BrowseEvents.jsx, views/OrganizerDashboard.jsx ── */
+/* <div class="eyebrow"> */
+.s-89c83f { color: var(--brand); }
+/* <h2 class=""> */
+.s-956c6f { margin-top: 2px; }
+
+/* ── views/BrowseEvents.jsx ── */
+/* <label class="check"> */
+.s-0923cb { padding: 0.375rem 0.625rem; border: none; }
+/* <div class="grid"> */
+.s-346730 { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--s4); }
+/* <div class="strong"> */
+.s-57eca1 { margin-top: 4px; }
+/* <label class="check"> */
+.s-7e951b { border: none; padding: 0.375rem 0; }
+/* <div class="card card-pad"> */
+.s-88cfef { margin-bottom: var(--s5); }
+/* <button class="btn btn-secondary btn-sm"> */
+.s-dc310e { margin-left: auto; }
+
+/* ── views/CalendarView.jsx, views/OrganizerDashboard.jsx ── */
+/* <button class="list-row"> */
+.s-0a650c { width: 100%; text-align: left; }
+/* <div class="row-between row-wrap"> */
+.s-615dbe { gap: var(--s3); }
+
+/* ── views/CalendarView.jsx ── */
+/* <span class="cal-key tone-${meta.tone}"> */
+.s-47a499 { width: 4px; height: 34px; border-radius: 2px; }
+/* <div class="row row-wrap small dim"> */
+.s-4f3bdc { gap: var(--s3); margin-left: auto; }
+/* <div class="toolbar"> */
+.s-7ba55e { margin-bottom: 0px; }
+/* <span class="row"> */
+.s-a39dc0 { gap: 5px; }
+/* <h2 class=""> */
+.s-badf1b { margin-left: var(--s2); min-width: 9ch; }
+
+/* ── views/CreateEvent.jsx, views/OrganizerDashboard.jsx ── */
+/* <button class="btn btn-ghost btn-sm btn-icon"> */
+.s-973ad1 { color: var(--danger); }
+
+/* ── views/CreateEvent.jsx ── */
+/* <div class=""> */
+.s-031457 { padding: var(--s4) var(--s5) 0; }
+/* <div class="row"> */
+.s-47d731 { justify-content: flex-end; gap: var(--s2); }
+/* <div class="row row-wrap"> */
+.s-631d16 { gap: var(--s2); margin-top: var(--s4); }
+/* <div class="field"> */
+.s-983db5 { flex: 1; margin-top: 0px; }
+/* <div class=""> */
+.s-9e6bc3 { min-width: 0px; }
+/* <span class="tag tag-brand"> */
+.s-b7cc9c { padding: 0.25rem 0.25rem 0.25rem 0.5rem; font-size: 0.75rem; }
+/* <form class=""> */
+.s-da7ecf { max-width: 760px; }
+/* <div class="row"> */
+.s-dffffd { align-items: flex-end; gap: var(--s2); }
+
+/* ── views/OrganizerDashboard.jsx ── */
+/* <p class="small"> */
+.s-00e727 { color: var(--danger); margin-top: 4px; max-width: 62ch; }
+/* <span class="btn btn-ghost btn-sm btn-icon"> */
+.s-17fa6c { color: var(--ink-3); cursor: default; }
+/* <div class="alert alert-info"> */
+.s-2db5ef { margin-top: var(--s4); text-align: left; }
+/* <div class="cell-title truncate"> */
+.s-83eed1 { max-width: 280px; }
+/* <th class=""> */
+.s-8b224a { min-width: 160px; }
+/* <button class="tag tag-warn"> */
+.s-9c7e4f { margin-top: 6px; cursor: pointer; }
+/* <div class="row"> */
+.s-b7a2f0 { gap: 2px; }
+/* <div class="input-affix"> */
+.s-c0dc2c { max-width: 300px; }
+/* <span class="empty-icon"> */
+.s-dce988 { background: var(--warn-tint); color: var(--warn); }
+/* <div class="list"> */
+.s-eabd0a { margin-top: var(--s3); }
+/* <section class="card"> */
+.s-f231de { border-color: var(--brand); border-left-width: 3px; }
+/* <div class="card empty"> */
+.s-fd1ec5 { max-width: 520px; margin: 0 auto; }
+
+/* ── Recovered by hand ──
+      These five had their `style` attribute on a different source line from the
+      className the automated alignment anchored on, so they needed tracing by
+      element instead. ── */
+
+/* <span class="field-error"> — EventEditForm slot-time validation message */
+.s-57a71b { margin-top: 6px; }
+
+/* <select class="select"> — CreateEvent per-shift date picker */
+.s-684a19 { max-width: 200px; }
+
+/* <button> — CreateEvent, the × that removes a chosen date from its tag chip.
+   Without this it fell back to the browser's default button chrome: a grey box
+   with a border sitting inside a brand-coloured tag. */
+.s-1daf8d {
+  display: flex;
+  color: inherit;
+  opacity: 0.7;
+}
+
+/* Applicant selection checkboxes — ApplicantReview.
+   `accent-color` is what makes them brand green rather than the OS default
+   blue, and the explicit box size stops them rendering at ~13px next to 16px
+   text. The per-row one adds flex-shrink so it cannot be squeezed by a long
+   volunteer name. */
+.s-3fcc6c,
+.s-5d6488 {
+  accent-color: var(--brand);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.s-5d6488 { flex-shrink: 0; }

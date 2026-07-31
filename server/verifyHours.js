@@ -7,8 +7,26 @@
  * run it after a migration and before wiring any ledger writes.
  *
  *   node verifyHours.js            # exits 1 on mismatch
+ *   node verifyHours.js other.db   # an explicit path wins over the environment
  *
  * Reads only. Writes nothing.
+ *
+ * ── Which database this opens ──
+ *
+ * WEV_DB_PATH first, exactly as server/db.js resolves it, so this tool and the
+ * running application can never disagree about which file is live.
+ *
+ * It used to be `process.argv[2] || <server/wevolunteer.db>`, with no reference
+ * to WEV_DB_PATH at all — and `npm run verify:hours` is
+ * `node --env-file-if-exists=../.env verifyHours.js`, while the pilot's `.env`
+ * sets `WEV_DB_PATH=../pilot.db`. So the command loaded the env file naming the
+ * real database, ignored it, silently opened a stale `server/wevolunteer.db`
+ * that happened to exist, and reported PASS. A verification tool that answers
+ * confidently about the wrong file is worse than not having one, because it
+ * converts "we have not checked" into "we have checked and it is fine".
+ *
+ * An explicit CLI argument still wins: it is a more specific instruction than an
+ * ambient variable, and it is how an operator checks a backup or a copy.
  */
 import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
@@ -16,7 +34,9 @@ import { fileURLToPath } from 'url';
 import { verifyLedgerParity } from './hoursLedger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = process.argv[2] || path.join(__dirname, 'wevolunteer.db');
+const dbPath = process.argv[2]
+  || process.env.WEV_DB_PATH
+  || path.join(__dirname, 'wevolunteer.db');
 
 const db = new DatabaseSync(dbPath);
 

@@ -1,8 +1,13 @@
 import express from 'express';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 import { authenticateToken, formatUserResponse } from '../utils.js';
 import { db } from '../db.js';
 import { notificationService } from '../services/notificationService.js';
+import { getMailHealth } from '../email.js';
+import { getQueueHealth } from '../workers/notificationWorker.js';
 
 const router = express.Router();
 
@@ -243,10 +248,45 @@ router.patch('/api/admin/reports/:id', authenticateToken, (req, res) => {
   }
   
   try {
-    const info = db.prepare('UPDATE reports SET status = ? WHERE id = ?').run(status, req.params.id);
-    if (info.changes === 0) {
+    /**
+     * Read the report BEFORE updating it, so the audit row can name who filed it
+     * and what it was about. Afterwards that context is still in the row, but
+     * fetching it first also gives the 404 without a wasted write.
+     */
+    const report = db.prepare('SELECT id, reporter_id, target_type, target_id, status FROM reports WHERE id = ?')
+      .get(req.params.id);
+    if (!report) {
       return res.status(404).json({ error: 'Report not found' });
     }
+
+    db.prepare('UPDATE reports SET status = ? WHERE id = ?').run(status, req.params.id);
+
+    /**
+     * Moderation decisions are audited.
+     *
+     * This was the one admin mutation that wrote no audit row — approvals and
+     * denials both did. So an administrator could mark a report resolved or
+     * dismissed and leave no record of who decided, or when. On a platform where
+     * a report may be a student raising a safety concern, "who closed this" is a
+     * question the district will ask and nobody could answer.
+     *
+     * `target_user_id` is the REPORTER, not the reported event: the column is a
+     * foreign key to users, and the reporter is the person the follow-up concerns.
+     * What was reported is recorded in `details`.
+     */
+    db.prepare(`
+      INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      `audit-${crypto.randomUUID()}`,
+      req.user.id,
+      'MODERATE_REPORT',
+      report.reporter_id,
+      `Report ${report.id} (${report.target_type} ${report.target_id}) `
+        + `marked ${status} (was ${report.status})`,
+      new Date().toISOString()
+    );
+
     res.json({ success: true, message: 'Report updated' });
   } catch (err) {
     console.error('Update report error:', err);
@@ -307,15 +347,139 @@ router.get('/api/admin/reports/export', authenticateToken, (req, res) => {
 });
 
 // A6. System Status
+/**
+ * How old the newest backup may be before it is reported stale.
+ *
+ * The timer runs nightly at 03:00 with up to 5 minutes of jitter, so a healthy
+ * system is never more than ~24h behind. 26 hours leaves room for the jitter and a
+ * slow run while still catching a single missed night — the same threshold the
+ * runbook's alerting table uses.
+ */
+const BACKUP_STALE_HOURS = Number(process.env.BACKUP_STALE_HOURS) || 26;
+
+/**
+ * Freshness of the newest backup archive.
+ *
+ * ── Why the app reports this at all ──
+ *
+ * The backup runs as a systemd timer that the application knows nothing about, and
+ * `deploy/README.md` is honest that "systemd will mark the unit failed, but nothing
+ * tells a human". So a failing backup was invisible for as long as nobody thought
+ * to SSH in and look — on the volume holding a school's service-hour records.
+ *
+ * Reading the directory is not a substitute for alerting on the unit, and it does
+ * not claim to be: it cannot distinguish "the timer is disabled" from "the timer ran
+ * and failed", both of which present as a stale file. What it does give is a number
+ * on a screen an administrator already visits, which is the difference between
+ * finding out in a week and finding out tonight.
+ *
+ * The directory path is deliberately NOT returned. Admins here are school staff,
+ * not sysadmins; filesystem layout is not theirs to need and it is useful to anyone
+ * who reaches an admin session.
+ */
+function backupStatus() {
+  const dir = process.env.WEV_BACKUP_DIR || '/var/backups/wevolunteer';
+  try {
+    if (!fs.existsSync(dir)) {
+      // Unconfigured is distinct from "ran and produced nothing", and an operator
+      // needs to be able to tell them apart.
+      return { status: 'unconfigured', lastBackupAt: null, ageHours: null, count: 0 };
+    }
+
+    const archives = fs.readdirSync(dir)
+      .filter(f => f.endsWith('.db.gz'))
+      .map(f => {
+        try {
+          return { mtime: fs.statSync(path.join(dir, f)).mtime };
+        } catch {
+          return null; // pruned between readdir and stat
+        }
+      })
+      .filter(Boolean);
+
+    if (archives.length === 0) {
+      return { status: 'none', lastBackupAt: null, ageHours: null, count: 0 };
+    }
+
+    const newest = archives.reduce((a, b) => (b.mtime > a.mtime ? b : a));
+    const ageHours = (Date.now() - newest.mtime.getTime()) / 3_600_000;
+
+    return {
+      status: ageHours > BACKUP_STALE_HOURS ? 'stale' : 'ok',
+      lastBackupAt: newest.mtime.toISOString(),
+      ageHours: Math.round(ageHours * 10) / 10,
+      count: archives.length,
+      staleAfterHours: BACKUP_STALE_HOURS
+    };
+  } catch (err) {
+    console.error('[Admin] Could not read backup directory:', err);
+    return { status: 'unknown', lastBackupAt: null, ageHours: null, count: 0 };
+  }
+}
+
+/**
+ * Whether the append-only ledger still agrees with `attendance`.
+ *
+ * `attendance` is the source of truth for credited hours and the ledger is the
+ * history; a divergence means one of them is wrong about a student's service
+ * record. Boot logs a mismatch and carries on by design (taking the platform down
+ * over a reporting discrepancy would be worse), and `verifyHours.js` can be run by
+ * hand — but neither of those puts the answer in front of the administrator who
+ * would be asked to defend the numbers.
+ *
+ * Counts users rather than rows so the cost stays flat as the ledger grows.
+ */
+function hoursLedgerStatus() {
+  try {
+    const row = db.prepare(`
+      SELECT COUNT(*) AS mismatches FROM (
+        SELECT a.user_id
+        FROM attendance a
+        WHERE a.present = 1
+        GROUP BY a.user_id
+        HAVING COALESCE(SUM(a.hours_awarded), 0) <> COALESCE((
+          SELECT SUM(l.delta) FROM hours_ledger l WHERE l.user_id = a.user_id
+        ), 0)
+      )
+    `).get();
+
+    return { inParity: row.mismatches === 0, mismatchedUsers: row.mismatches };
+  } catch (err) {
+    console.error('[Admin] Could not check hours ledger parity:', err);
+    return { inParity: null, mismatchedUsers: null, error: true };
+  }
+}
+
+/**
+ * Operational status for the admin dashboard.
+ *
+ * This used to return `{ smtpConfigured }` and nothing else — which reports that
+ * three environment variables are set, not that mail is being delivered. During an
+ * SMTP outage it stayed `true` while every verification link silently failed to
+ * arrive, and with REQUIRE_EMAIL_VERIFICATION defaulting to ON that is a silent
+ * lockout of every new account.
+ *
+ * Each field below answers a question an operator was previously unable to ask
+ * without an SSH session. All of them fail soft: a broken sub-check reports itself
+ * as unknown rather than 500-ing the whole panel, because a status endpoint that
+ * goes down during an incident is worse than one that admits partial ignorance.
+ */
 router.get('/api/admin/system/status', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Access denied' });
   }
-  
+
   const smtpConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-  
+
   res.json({
-    smtpConfigured
+    // Retained: still the right answer to "is SMTP set up at all".
+    smtpConfigured,
+    // New: whether it is actually working. Local parts are never included — see
+    // email.js recordFailure.
+    mail: getMailHealth(),
+    notificationQueue: getQueueHealth(),
+    backup: backupStatus(),
+    hoursLedger: hoursLedgerStatus()
   });
 });
 
