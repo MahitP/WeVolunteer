@@ -1,6 +1,17 @@
 # Documentation
 
-Two directories with different purposes and different lifetimes.
+One governance document at the root, plus two directories with different
+purposes and different lifetimes.
+
+## `ENGINEERING_GUIDE.md` — governance, maintained
+
+| Document | Purpose |
+|---|---|
+| [`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md) | How we work on this repository: repository philosophy, git workflow, PR standards, release process, dependency and security rules, testing and deployment philosophy, the technical debt register, and the scaling roadmap. Established 2026-07-31 at `v1.1.0`. Every rule in it is tied to the incident that produced it. |
+
+Start here if you are new to the project, or if you are about to cut a release,
+add a dependency, or create a branch. Where it overlaps with `operations/`, the
+operations documents win on operational specifics and the guide wins on process.
 
 ## `operations/` — current, maintained
 
