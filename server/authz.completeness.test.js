@@ -37,13 +37,20 @@ describe('authorization hygiene', () => {
      * outright. Both are why this guard now scans widely and knows four
      * spellings, not one:
      *
-     *   1. req.user.role compared with === / !==
-     *   2. req.principal.effectiveRole / .actualRole compared with === / !==
-     *   3. any `.role` property compared against a role-name string literal
+     *   1. req.user.role compared with === / !== / == / !=
+     *   2. req.principal.effectiveRole / .actualRole compared with
+     *      === / !== / == / !=
+     *   3. ANY `.effectiveRole` / `.actualRole` property (unpinned prefix,
+     *      unlike #2) compared the same way — covers an aliased/local
+     *      principal, e.g. `const p = principal || principalFor(actor)` in
+     *      server/messaging.js followed by `p.effectiveRole === 'admin'`,
+     *      which is the single most natural way to reintroduce the exact
+     *      defect that file was just fixed for
+     *   4. any `.role` property compared against a role-name string literal
      *      (covers a renamed/aliased read of the same thing, e.g.
      *      `actor.role === 'admin'`, or a fresh
      *      `db.prepare(...).get(req.user.id)` row's `.role`)
-     *   4. a destructured `role` (`const { role } = req.user`) later compared
+     *   5. a destructured `role` (`const { role } = req.user`) later compared
      *      against one of those literals
      *
      * Role names come from `ROLES` in authz.js, not a hardcoded list, so a
@@ -53,16 +60,28 @@ describe('authorization hygiene', () => {
      * `event.organizer_id !== req.principal.userId` — those compare ids, not
      * role names, and are the correct pattern for "may this actor act on this
      * row" (as opposed to "may this kind of actor act at all").
+     *
+     * Known, deliberately uncovered spellings (not gold-plating this
+     * detector further): `switch (u.role) { case 'admin': ... }` and
+     * `['admin', 'super_admin'].includes(u.role)`. Both are real role-string
+     * patterns this guard cannot see today.
      */
     const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const CMP = '(?:===|!==)';
+    // Loose equality included: oxlint runs without an eqeqeq rule, so
+    // `req.user.role == 'admin'` is legal JS here and just as much a
+    // role-string comparison as `===`.
+    const CMP = '(?:===|!==|==|!=)';
     const roleAlt = ROLES.map(escapeRe).join('|');
     const QUOTE = `(['"\`])`;
     const QUOTED_ROLE = `${QUOTE}(?:${roleAlt})\\1`;
 
     const DIRECT_PATTERNS = [
-      { label: 'req.user.role compared with === / !==', re: new RegExp(`req\\.user\\.role\\s*${CMP}`) },
-      { label: 'req.principal.effectiveRole/.actualRole compared with === / !==', re: new RegExp(`req\\.principal\\.(?:effectiveRole|actualRole)\\s*${CMP}`) },
+      { label: 'req.user.role compared with (in)equality', re: new RegExp(`req\\.user\\.role\\s*${CMP}`) },
+      { label: 'req.principal.effectiveRole/.actualRole compared with (in)equality', re: new RegExp(`req\\.principal\\.(?:effectiveRole|actualRole)\\s*${CMP}`) },
+      // Unpinned prefix, deliberately broader than the row above: catches an
+      // aliased/local principal (`p.effectiveRole`, `principal.actualRole`),
+      // not just one reached through `req.principal` directly.
+      { label: '.effectiveRole/.actualRole property (any prefix) compared with (in)equality', re: new RegExp(`\\.(?:effectiveRole|actualRole)\\s*${CMP}`) },
       { label: '.role property compared against a role-name literal', re: new RegExp(`\\.role\\b\\s*${CMP}\\s*${QUOTED_ROLE}`) },
       { label: 'role-name literal compared against a .role property', re: new RegExp(`${QUOTED_ROLE}\\s*${CMP}\\s*[\\w$]*(?:\\.[\\w$]+)*\\.role\\b`) },
     ];
@@ -72,15 +91,38 @@ describe('authorization hygiene', () => {
      * guard exists to catch explains the OLD pattern in prose
      * (`actor.role === 'student'`, quoted verbatim as the thing that was
      * removed) — and without stripping comments first, the detector matches
-     * its own changelog. Block comments are blanked to spaces (preserving
-     * line numbers and column positions for anything after them on the same
-     * line); a line whose only content is a `//` comment is blanked entirely.
+     * its own changelog.
+     *
+     * A previous version of this function stripped `/\* ... \*\/` with a
+     * multi-line, non-string-aware regex — which is exactly as unsafe as it
+     * sounds. `server/app.js` contains the string literal
+     * `'https://*.tile.openstreetmap.org'`, whose `/*` (the `//` immediately
+     * followed by `*`) opened a "comment" that swallowed 26 real lines,
+     * including the entire CORS origin-checking block, before the next
+     * close-comment marker happened to appear. `server/testServer.js` contains `'routes/*, ...'`,
+     * with the same effect over 19 lines. Both spans were clean today, so
+     * nothing was hidden — but the size of the blind spot depended entirely
+     * on where an unrelated string literal's `/*` happened to close, which
+     * is not a bound anyone could reason about.
+     *
+     * This version never looks inside a line for a comment opener at all: it
+     * blanks a line ONLY if the line, once trimmed, itself BEGINS with `//`,
+     * `/*`, or `*` — the shape of a `//` line comment, a JSDoc block's
+     * opening `/**`, or one of its continuation lines starting with `*`.
+     * That is precisely what motivated stripping in the first place (this
+     * very file's docstrings, and messaging.js's), it can never blank a line
+     * that starts with real code — no matter what string literal a later
+     * line contains — and line numbers stay exact since every line still
+     * occupies one array slot. The trade-off: a trailing `/* ... *\/` after
+     * real code on the same line is not stripped (none exist in this
+     * codebase's style, which favours full-line comments and JSDoc blocks);
+     * handling that would mean detecting whether a `/*` sits inside a quote,
+     * which this does not attempt.
      */
     function stripComments(src) {
-      const noBlockComments = src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
-      return noBlockComments
+      return src
         .split('\n')
-        .map((line) => (/^\s*\/\//.test(line) ? '' : line))
+        .map((line) => (/^\s*(\/\/|\/\*|\*)/.test(line) ? '' : line))
         .join('\n');
     }
 
@@ -93,15 +135,38 @@ describe('authorization hygiene', () => {
 
     /**
      * Scope: every server module that can plausibly make an authorization
-     * decision, not just server/routes/. `server/authz.js` is excluded — its
-     * `req.user.role` appears only inside a comment explaining the historical
-     * pattern this whole effort replaced, and must not be deleted. `*.test.js`
-     * files are excluded — tests legitimately set up role fixtures
-     * (`db.prepare(...).run(role, ...)` etc.), which is not an authorization
-     * decision at all.
+     * decision — a recursive walk of the whole server/ tree, not a
+     * hand-maintained list of directories. A fixed list of directories
+     * (server/, server/routes/, server/services/, server/workers/) was tried
+     * first and missed 9 of 53 non-test server modules, notably
+     * server/realtime/socketServer.js and server/realtime/events.js — a
+     * long-lived socket connection is exactly the kind of place authority
+     * can leak, and there is no principled reason to have excluded it.
+     *
+     * `node_modules` is skipped at any depth. `server/authz.js` is excluded
+     * (top-level only — nothing else is named authz.js) — its
+     * `req.user.role` appears only inside a comment explaining the
+     * historical pattern this whole effort replaced, and must not be
+     * deleted. `*.test.js` files are excluded everywhere — tests
+     * legitimately set up role fixtures (`db.prepare(...).run(role, ...)`
+     * etc.), which is not an authorization decision at all.
      */
-    const SCAN_DIRS = ['./', './routes/', './services/', './workers/'];
-    const EXCLUDED_TOP_LEVEL_FILES = new Set(['authz.js']);
+    function collectServerJsFiles() {
+      const files = [];
+      const walk = (dirUrl, relDir) => {
+        for (const entry of readdirSync(dirUrl, { withFileTypes: true })) {
+          if (entry.name === 'node_modules') continue;
+          if (entry.isDirectory()) {
+            walk(new URL(`${entry.name}/`, dirUrl), `${relDir}${entry.name}/`);
+          } else if (entry.isFile() && entry.name.endsWith('.js') && !entry.name.endsWith('.test.js')) {
+            if (relDir === '' && entry.name === 'authz.js') continue;
+            files.push({ url: new URL(entry.name, dirUrl), key: `./${relDir}${entry.name}` });
+          }
+        }
+      };
+      walk(new URL('./', import.meta.url), '');
+      return files;
+    }
 
     /**
      * Reviewed, non-authorization uses of `.role` compared to a role-name
@@ -126,40 +191,33 @@ describe('authorization hygiene', () => {
     const consumedExceptions = new Set();
 
     const offenders = [];
-    for (const dir of SCAN_DIRS) {
-      const dirUrl = new URL(dir, import.meta.url);
-      for (const file of readdirSync(dirUrl)) {
-        if (!file.endsWith('.js') || file.endsWith('.test.js')) continue;
-        if (dir === './' && EXCLUDED_TOP_LEVEL_FILES.has(file)) continue;
+    for (const { url, key: fileKey } of collectServerJsFiles()) {
+      const src = stripComments(readFileSync(url, 'utf8'));
+      const lines = src.split('\n');
+      const destructured = DESTRUCTURE_RE.test(src);
 
-        const fileKey = `${dir}${file}`;
-        const src = stripComments(readFileSync(new URL(file, dirUrl), 'utf8'));
-        const lines = src.split('\n');
-        const destructured = DESTRUCTURE_RE.test(src);
+      lines.forEach((line, i) => {
+        const lineNo = i + 1;
+        const key = `${fileKey}:${lineNo}`;
+        const hits = [];
+        for (const { label, re } of DIRECT_PATTERNS) if (re.test(line)) hits.push(label);
+        if (destructured) {
+          for (const { label, re } of BARE_ROLE_PATTERNS) if (re.test(line)) hits.push(label);
+        }
+        if (hits.length === 0) return;
 
-        lines.forEach((line, i) => {
-          const lineNo = i + 1;
-          const key = `${fileKey}:${lineNo}`;
-          const hits = [];
-          for (const { label, re } of DIRECT_PATTERNS) if (re.test(line)) hits.push(label);
-          if (destructured) {
-            for (const { label, re } of BARE_ROLE_PATTERNS) if (re.test(line)) hits.push(label);
-          }
-          if (hits.length === 0) return;
-
-          if (REVIEWED_NON_AUTH_EXCEPTIONS.has(key)) {
-            consumedExceptions.add(key);
-            return;
-          }
-          offenders.push(
-            `${key}: ${hits.join(', ')} — "${line.trim()}"\n`
-            + '    Use requireCap()/requireCapAny() (or can() directly) for "may this '
-            + 'kind of actor do X", or compare ids (e.g. resource.ownerId !== '
-            + 'req.principal.userId) for "may this actor act on this row." Import role '
-            + 'names from authz.js\'s ROLES rather than hardcoding them.'
-          );
-        });
-      }
+        if (REVIEWED_NON_AUTH_EXCEPTIONS.has(key)) {
+          consumedExceptions.add(key);
+          return;
+        }
+        offenders.push(
+          `${key}: ${hits.join(', ')} — "${line.trim()}"\n`
+          + '    Use requireCap()/requireCapAny() (or can() directly) for "may this '
+          + 'kind of actor do X", or compare ids (e.g. resource.ownerId !== '
+          + 'req.principal.userId) for "may this actor act on this row." Import role '
+          + 'names from authz.js\'s ROLES rather than hardcoding them.'
+        );
+      });
     }
 
     // A stale exception (no longer matching anything) is worth knowing about:
@@ -252,7 +310,12 @@ describe('authorization hygiene', () => {
      * entry.
      */
     const ROUTE_REGISTRY = {
-      // ── SELF_ONLY (authRoutes.js, accountRoutes.js, userRoutes.js, attendanceRoutes.js, contentRoutes.js, oauthRoutes.js, privacyRoutes.js) ──
+      // ── SELF_ONLY — acts solely on the caller's own account. File
+      // attribution lives in each entry's reason (and/or its file:line),
+      // not in this heading: several files (e.g. userRoutes.js) contribute
+      // routes to more than one category below, so a per-heading file list
+      // drifts the moment that's true and was a source of confusion in
+      // review — read the per-route reason for exactly what protects it. ──
       'GET /api/auth/me': { category: CATEGORY.SELF_ONLY, reason: 'reads only the caller\'s own row (req.user.id)' },
       'POST /api/auth/logout': { category: CATEGORY.SELF_ONLY, reason: 'revokes only the caller\'s current session' },
       'POST /api/auth/sign-out-others': { category: CATEGORY.SELF_ONLY, reason: 'bumps only the caller\'s own token_version' },
@@ -277,7 +340,9 @@ describe('authorization hygiene', () => {
       'GET /api/privacy/export/status': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
       'GET /api/privacy/export/download/:id': { category: CATEGORY.SELF_ONLY, reason: 'job.user_id !== caller -> 404 (always the caller\'s own export job)' },
 
-      // ── INLINE_GATED (userRoutes.js, eventRoutes.js, applicationRoutes.js, contentRoutes.js, messageRoutes.js) ──
+      // ── INLINE_GATED — genuinely gated in the handler body (an inline
+      // can()/ownership/participant check the middleware-stack walk cannot
+      // see). See each entry's reason for the actual check and file:line. ──
       'GET /api/users/:id/profile': { category: CATEGORY.INLINE_GATED, reason: 'canSeeContact = isSelf || can(audit.read) || hostsApplicant gates PII fields (userRoutes.js:39); non-PII stats intentionally open to any authenticated caller' },
       'GET /api/events/:id': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = can(event.moderate) || organizer_id === caller, else 403 (eventRoutes.js:392-394)' },
       'GET /api/applications': { category: CATEGORY.INLINE_GATED, reason: 'deny-by-default cascade can(audit.read) -> can(applicant.review) -> can(application.withdraw) -> [] (applicationRoutes.js:45-60); covered by authz.matrix.test.js' },
@@ -299,7 +364,8 @@ describe('authorization hygiene', () => {
       'POST /api/messages/conversations/:id/report': { category: CATEGORY.INLINE_GATED, reason: 'isConversationParticipant check, else 404 (messageRoutes.js:308)' },
       'GET /api/messages/users/search': { category: CATEGORY.INLINE_GATED, reason: 'can(applicant.review)||can(event.moderate) OR can(application.withdraw), else empty (messageRoutes.js:378-398); covered by authz.matrix.test.js and routes.messages.polish.test.js\'s dedicated scoping tests' },
 
-      // ── OPEN_TO_AUTHENTICATED (eventRoutes.js, contentRoutes.js) ──
+      // ── OPEN_TO_AUTHENTICATED — intentionally open to every authenticated
+      // role; no capability distinction exists or is wanted. ──
       'GET /api/events': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'public browse listing; every role\'s CAPABILITIES entry includes event.view, so no role is ever denied' },
       'GET /api/events/:eventId/slots/:slotId/ics': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may download; title/description/location are no more sensitive than GET /api/events already returns to everyone' },
       'GET /api/events/:id/comments': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may read any event\'s comments; no ownership/capability distinction by design' },
