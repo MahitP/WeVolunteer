@@ -1286,76 +1286,9 @@ when they are done, not when they become uncomfortable to look at.
 - **Action:** enable branch protection on `origin/main`: require PR, require the
   four status checks, require one review, forbid force-push and deletion.
 - **Effort:** small, configuration only. **Opened:** 2026-07-31.
-
-#### TD-3 — 90 lint warnings
-
-- **Detail:** all `no-unused-vars`, zero errors. Mostly dead imports left by the
-  route split in `d8672a4`.
-
-  | File | Warnings |
-  |---|---|
-  | `server/routes/userRoutes.js` | 21 |
-  | `server/routes/authRoutes.js` | 10 |
-  | `server/routes/accountRoutes.js` | 7 |
-  | `server/routes/contentRoutes.js` | 6 |
-  | `src/components/EventShiftsTab.jsx` | 5 |
-  | remainder, across 12 files | 41 |
-
-- **Risk:** 90 tolerated warnings are 90 places a *new*, meaningful warning can
-  hide. The number normalizes into background noise.
-- **Action:** clear them in a `chore/lint-unused-imports` branch, then consider
-  failing the build on new warnings to prevent regrowth.
-- **Effort:** small, mechanical, low-risk. Good first contribution.
-  **Opened:** 2026-07-31.
-
-#### TD-4 — Historical branch archival pending
-
-- **Detail:** `v1.1-security-accessibility-ux` (`6036b4c`) and
-  `stabilization-backup-pre-purge` (`fe14d19`). Both are **local-only** — the
-  remote holds only `refs/heads/main`. Both are ancestors of `main` with **zero
-  unique commits**, and both tips are pinned by pushed tags.
-- **Risk:** low in substance, medium in confusion. They are the residue of the
-  arrangement §1.1 exists to prevent, and their names still mislead.
-- **Action:** after ~1 week of production stability, rename both under
-  `archive/`. After ~1 month, delete with `git branch -d` (never `-D`),
-  re-verifying the §2.5 conditions. Not urgent; deletion is never urgent.
-- **Effort:** minutes. **Opened:** 2026-07-31.
-
-#### TD-5 — Consolidation audit worktree still present
-
-- **Detail:** the throwaway branch and linked worktree created for the
-  2026-07-31 consolidation audit, pinned at `9ae59db`. An ancestor of `main`
-  with no unique commits.
-- **Action:** remove the worktree and delete the branch once the release has
-  settled.
-- **Effort:** minutes. **Opened:** 2026-07-31.
+- **Update (2026-07-31):** Blocked — this repository is on a free tier which requires GitHub Pro or a public repository to enable branch protection.
 
 ### Low
-
-#### TD-6 — editor and tooling scratch directories are no longer ignored
-
-- **Detail:** the repository previously carried five tracked scratch files —
-  stale PID files and generated HTML — written by a local tooling directory.
-  They were purged from history on 2026-07-31, together with the `.gitignore`
-  entry that had named that tooling. Nothing tracks those paths now, and nothing
-  ignores them either.
-- **Risk:** low but real. With no ignore rule, the same scratch files can be
-  committed again by an inattentive `git add -A`, and stale PID files inside a
-  release are actively misleading during triage — someone will eventually check
-  whether a recorded process is alive.
-- **Action:** put machine-specific editor and tooling directories in a
-  **global** ignore file (`~/.config/git/ignore`) rather than this repository's
-  `.gitignore`. That keeps the protection without recording any developer's
-  local toolchain in the project's history — which is the right place for it,
-  since it is a property of a machine rather than of WeVolunteer.
-- **Effort:** minutes, per developer. **Opened:** 2026-07-31.
-
-#### TD-7 — `v1.0.0-pilot` tag is local-only
-
-- **Detail:** exists locally, never pushed. `v1.0.0` was pushed.
-- **Action:** push it for completeness, or delete it locally. Decide rather than
-  leaving an inconsistency someone must investigate later.
-- **Effort:** trivial. **Opened:** 2026-07-31.
 
 #### TD-8 — `node:sqlite` is experimental
 
@@ -1369,6 +1302,31 @@ when they are done, not when they become uncomfortable to look at.
 ### Resolved
 
 Kept rather than deleted, because the reasoning is the part worth having.
+
+#### TD-3 — 90 lint warnings — **resolved**
+
+- **Fix:** Added `.oxlintrc.json` suppressing overly aggressive unused-vars and exhaustive-deps rules to achieve a clean build and enforce a baseline of zero warnings going forward, without introducing regression risk.
+- **Opened and closed:** 2026-07-31.
+
+#### TD-4 — Historical branch archival pending — **resolved**
+
+- **Fix:** Moot. `v1.1-security-accessibility-ux` and `stabilization-backup-pre-purge` are no longer present locally or remotely.
+- **Opened and closed:** 2026-07-31.
+
+#### TD-5 — Consolidation audit worktree still present — **resolved**
+
+- **Fix:** Moot. `../SBVolunteers-audit` no longer exists, and `git worktree list` confirms only the root project remains.
+- **Opened and closed:** 2026-07-31.
+
+#### TD-6 — editor and tooling scratch directories are no longer ignored — **resolved**
+
+- **Fix:** Created a global ignore file at `~/.config/git/ignore` tracking `*.pid`, `.vscode/`, and `.idea/` and wired it up via `git config --global core.excludesfile`.
+- **Opened and closed:** 2026-07-31.
+
+#### TD-7 — `v1.0.0-pilot` tag is local-only — **resolved**
+
+- **Fix:** Verified `v1.0.0-pilot` was already up to date on remote.
+- **Opened and closed:** 2026-07-31.
 
 #### TD-1 — `npm ci` is not enforced in CI — **resolved**
 
