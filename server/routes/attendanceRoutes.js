@@ -13,7 +13,10 @@ router.post('/api/events/:id/checkin', authenticateToken, requireCap('attendance
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (req.principal.effectiveRole === 'organizer' && event.organizer_id !== req.principal.userId) {
+    // event.moderate is the "may act on any event" bypass (same idiom used for
+    // event.edit.own elsewhere) — anyone without it is bound to the event they
+    // host.
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
 
@@ -31,19 +34,14 @@ router.post('/api/events/:id/checkin', authenticateToken, requireCap('attendance
   }
 });
 
-router.get('/api/events/:id/checkin', authenticateToken, (req, res) => {
+router.get('/api/events/:id/checkin', authenticateToken, requireCap('attendance.view'), (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    // Ownership answers "may THIS organizer see THIS event"; attendance.view
-    // answers "may this kind of actor see any event" — an organizer holds
-    // neither cap nor blanket access, only access to what they host.
-    if (req.principal.effectiveRole === 'organizer') {
-      if (event.organizer_id !== req.principal.userId) {
-        return res.status(403).json({ error: 'Access denied: You do not host this event' });
-      }
-    } else if (!can(req.principal, 'attendance.view')) {
-      return res.status(403).json({ error: 'Access denied' });
+    // event.moderate is the "may act on any event" bypass; an organizer
+    // (lacking it) is bound to the event they host.
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+      return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
 
     res.json(getCheckins(db, req.params.id).map(c => ({
@@ -73,9 +71,10 @@ router.post('/api/events/:id/attendance', authenticateToken, requireCap('attenda
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
     // Deliberate correction (v1.2a): admin may confirm attendance on any event,
-    // same as attendance.mark grants them elsewhere — only an organizer is
-    // additionally bound to hosting the event themselves.
-    if (req.principal.effectiveRole === 'organizer' && event.organizer_id !== req.principal.userId) {
+    // same as attendance.mark grants them elsewhere — only an organizer
+    // (lacking event.moderate) is additionally bound to hosting the event
+    // themselves.
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
     if (event.status === 'cancelled') {
@@ -147,21 +146,15 @@ class AttendanceRefused extends Error {
 
 // 10. Edit Event Details and Slots (Organizer only)
 
-router.get('/api/events/:id/roster.csv', authenticateToken, (req, res) => {
-  // Same shape as GET /checkin above: an organizer's access is entirely
-  // ownership-scoped (checked below once the event is loaded), never a
-  // blanket capability, so the gate here only turns away roles that hold
-  // neither attendance.view nor the organizer role itself.
-  if (!can(req.principal, 'attendance.view') && req.principal.effectiveRole !== 'organizer') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
+router.get('/api/events/:id/roster.csv', authenticateToken, requireCap('attendance.view'), (req, res) => {
   const eventId = req.params.id;
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (req.principal.effectiveRole === 'organizer' && event.organizer_id !== req.principal.userId) {
+    // event.moderate is the "may act on any event" bypass; an organizer
+    // (lacking it) is bound to the event they host.
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 

@@ -23,7 +23,7 @@ export const CAPABILITIES = {
   ],
   organizer: [
     'event.view', 'event.create', 'event.edit.own', 'applicant.review',
-    'attendance.mark', 'attendance.scan', 'announcement.post',
+    'attendance.mark', 'attendance.view', 'attendance.scan', 'announcement.post',
     'message.send', 'self.read', 'self.write', 'service.verify.own_event',
     'geocode.use',
   ],
