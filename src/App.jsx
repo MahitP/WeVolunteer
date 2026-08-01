@@ -59,12 +59,14 @@ const RouteFallback = () => (
  * The cascade therefore ends in an EXPLICIT null: "no persona" is a state the
  * shell handles, not a role quietly inheriting somebody else's screen.
  *
- * Persona ids are deliberately not role names — `staff` covers admin AND
- * super_admin, and nothing here may be read back as a role.
+ * A persona is not a role and must never be read back as one: `staff` covers
+ * admin AND super_admin, and `host` is spelled that way rather than 'organizer'
+ * precisely so `persona === 'host'` cannot be mistaken — by a reader or by the
+ * role-string guard in server/authz.completeness.test.js — for a role check.
  */
 const PERSONAS = [
   { id: 'staff', cap: 'event.moderate' },       // admin, super_admin
-  { id: 'organizer', cap: 'event.create' },     // organizer
+  { id: 'host', cap: 'event.create' },          // organizer
   { id: 'volunteer', cap: 'event.apply' },      // student
   { id: 'partner', cap: 'analytics.public' },   // partner
 ];
@@ -77,7 +79,7 @@ const personaFor = (user) => PERSONAS.find(p => can(user, p.cap))?.id ?? null;
  */
 const DASHBOARD_NAV = {
   staff: { label: 'Review queue', icon: ShieldCheck },
-  organizer: { label: 'Dashboard', icon: LayoutDashboard },
+  host: { label: 'Dashboard', icon: LayoutDashboard },
   volunteer: { label: 'Dashboard', icon: LayoutDashboard },
 };
 
@@ -102,7 +104,7 @@ const DASHBOARD_NAV = {
 const SELF_PROFILE = [
   { cap: 'admin.create', view: 'none' },        // super_admin
   { cap: 'event.moderate', view: 'denied' },    // admin — no profile view has ever existed
-  { cap: 'event.create', view: 'organizer' },   // organizer
+  { cap: 'event.create', view: 'host' },        // organizer
   { cap: 'portfolio.write', view: 'volunteer' } // student
 ];
 
@@ -142,9 +144,9 @@ export function navItemsFor(user) {
 /**
  * Page titles, keyed by persona rather than by role.
  *
- * The `volunteer`/`organizer`/`staff` blocks are the former `student`/
- * `organizer`/`admin` blocks verbatim — only the key changed, so what those
- * three roles read is byte-identical. `staff` is what super_admin sees too.
+ * The `volunteer`/`host`/`staff` blocks are the former `student`/`organizer`/
+ * `admin` blocks verbatim — only the key changed, so what those three roles
+ * read is byte-identical. `staff` is what super_admin sees too.
  *
  * A tab with no entry falls back to `{ title: APP_NAME, sub: '' }`, unchanged.
  * That default is the defensible one: it names the app rather than describing
@@ -161,7 +163,7 @@ const PAGE_META = {
     notifications: { title: 'Notifications', sub: 'Replies, reminders, and event updates' },
     profile: { title: 'My profile', sub: 'Your service record, milestones, and certificates' }
   },
-  organizer: {
+  host: {
     dashboard: { title: 'Dashboard', sub: 'Track your volunteers, hours, and pending reviews' },
     browse: { title: 'Recruit', sub: 'All events visible to volunteers on the network' },
     calendar: { title: 'Calendar', sub: 'Events you host and when applications close' },
@@ -684,7 +686,7 @@ function AppShell({ toasts, addToast, removeToast }) {
                     refreshApplications={refreshApplications}
                     onViewDetails={openEventById}
                   />
-                ) : persona === 'organizer' ? (
+                ) : persona === 'host' ? (
                   <OrganizerDashboard
                     currentUser={currentUser}
                     events={events}
@@ -739,7 +741,7 @@ function AppShell({ toasts, addToast, removeToast }) {
                     onViewEvent={openEventById}
                     addToast={addToast}
                   />
-                ) : selfProfile === 'organizer' ? (
+                ) : selfProfile === 'host' ? (
                   <OrganizerProfile
                     userId={currentUser.id}
                     onViewEvent={openEventById}
