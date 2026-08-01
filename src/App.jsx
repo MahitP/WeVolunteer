@@ -11,6 +11,8 @@ import ProfileMenu from './components/account/ProfileMenu';
 import Toasts from './components/common/Toasts';
 import VerifyEmailWall from './components/account/VerifyEmailWall';
 import { Can } from './components/common/Can.jsx';
+import EmptyState from './components/common/EmptyState';
+import { can } from './authz.js';
 import { SessionProvider, useSession } from './session/SessionProvider.jsx';
 import {
   APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES, withProps,
@@ -41,21 +43,117 @@ const RouteFallback = () => (
   <div style={{ padding: 'var(--s6)' }}><LoadingSkeleton heights={[200, 400]} /></div>
 );
 
-/* Navigation is defined once and filtered by role, so every role gets the
-   same shell instead of a different one. */
-const NAV = [
-  { id: 'dashboard', path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['student', 'organizer'] },
-  { id: 'dashboard', path: '/', label: 'Review queue', icon: ShieldCheck, roles: ['admin'] },
-  { id: 'browse', path: '/events', label: 'Opportunities', icon: Compass, roles: ['student', 'organizer', 'admin'] },
-  { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, roles: ['student', 'organizer'] },
-  { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, roles: ['student', 'organizer'] },
-  { id: 'create', path: '/events/new', label: 'New event', icon: CalendarPlus, roles: ['organizer'], requiresVerified: true },
-  { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, roles: ['student', 'organizer', 'admin'] },
-  { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, roles: ['student', 'organizer'] }
+/**
+ * Who the shell is talking to, derived from capabilities rather than a role name.
+ *
+ * ── ORDER IS LOAD-BEARING: most-privileged-first ──
+ *
+ * `can()` answers TRUE for every capability when the role is super_admin (the
+ * '*' wildcard), so the first matching row wins for the platform owner. Testing
+ * `event.apply` before `event.moderate` would silently put super_admin on the
+ * volunteer dashboard — the client-side twin of the GET /api/applications
+ * cascade bug that shipped as a Critical earlier on this branch. The rule, and
+ * why a trailing bare `else` is just as wrong, is documented at length in
+ * server/authz.js's header.
+ *
+ * The cascade therefore ends in an EXPLICIT null: "no persona" is a state the
+ * shell handles, not a role quietly inheriting somebody else's screen.
+ *
+ * Persona ids are deliberately not role names — `staff` covers admin AND
+ * super_admin, and nothing here may be read back as a role.
+ */
+const PERSONAS = [
+  { id: 'staff', cap: 'event.moderate' },       // admin, super_admin
+  { id: 'organizer', cap: 'event.create' },     // organizer
+  { id: 'volunteer', cap: 'event.apply' },      // student
+  { id: 'partner', cap: 'analytics.public' },   // partner
 ];
 
+const personaFor = (user) => PERSONAS.find(p => can(user, p.cap))?.id ?? null;
+
+/**
+ * The `/` nav entry, per persona. A persona absent from this map gets no `/`
+ * entry, because it has no dashboard to send anyone to.
+ */
+const DASHBOARD_NAV = {
+  staff: { label: 'Review queue', icon: ShieldCheck },
+  organizer: { label: 'Dashboard', icon: LayoutDashboard },
+  volunteer: { label: 'Dashboard', icon: LayoutDashboard },
+};
+
+/**
+ * Which profile view `/profile` renders for the signed-in user — and, through
+ * SELF_PROFILE_CAPS below, whether the navigation offers it at all. Same
+ * most-privileged-first rule as PERSONAS, same explicit final branch.
+ *
+ * `admin.create` is a SUPER_ONLY capability, so it identifies the platform owner
+ * and nobody else: `can()` refuses to satisfy a SUPER_ONLY capability from a
+ * per-user grant, so no amount of granting turns an admin into a match. It is
+ * tested first because super_admin's wildcard matches every row beneath it too.
+ *
+ * super_admin resolves to 'none' rather than to the organizer view because BOTH
+ * profile endpoints filter by role in SQL — GET /api/users/:id/profile requires
+ * role = 'student', GET /api/organizers/:id/profile requires role IN
+ * ('organizer','admin') — so either view would render a 404 error state for the
+ * platform owner. An honest "this account has no service record" page is a
+ * working page; a 404 dressed as a profile is not. Widening those queries is a
+ * server change, which this task may not make.
+ */
+const SELF_PROFILE = [
+  { cap: 'admin.create', view: 'none' },        // super_admin
+  { cap: 'event.moderate', view: 'denied' },    // admin — no profile view has ever existed
+  { cap: 'event.create', view: 'organizer' },   // organizer
+  { cap: 'portfolio.write', view: 'volunteer' } // student
+];
+
+const selfProfileFor = (user) => SELF_PROFILE.find(p => can(user, p.cap))?.view ?? 'denied';
+
+/** Derived, not repeated, so the nav entry and the route can never disagree. */
+const SELF_PROFILE_CAPS = SELF_PROFILE.filter(p => p.view !== 'denied').map(p => p.cap);
+
+/* Navigation is defined once and filtered by capability, so every role gets the
+   same shell instead of a different one — and a role added tomorrow gets the
+   entries its capabilities justify rather than an empty rail.
+
+   The `/` entry is not in this table: its label and icon differ per persona and
+   come from DASHBOARD_NAV above.
+
+   `requiredCapAny` (hold any one of) mirrors server/authz.js's requireCapAny,
+   and is what an entry uses when two unrelated capabilities each justify it.
+   `requiresVerified` is unchanged — no capability expresses "approved yet". */
+const NAV = [
+  { id: 'browse', path: '/events', label: 'Opportunities', icon: Compass, requiredCap: 'event.view' },
+  { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, requiredCapAny: ['event.apply', 'event.create'] },
+  { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, requiredCap: 'message.send' },
+  { id: 'create', path: '/events/new', label: 'New event', icon: CalendarPlus, requiredCap: 'event.create', requiresVerified: true },
+  { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, requiredCap: 'self.read' },
+  { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS }
+];
+
+/** Every nav entry the user may see, `/` first, in the order the shell renders. */
+export function navItemsFor(user) {
+  const dashboard = DASHBOARD_NAV[personaFor(user)];
+  return [
+    ...(dashboard ? [{ id: 'dashboard', path: '/', ...dashboard }] : []),
+    ...NAV.filter(n => (n.requiredCapAny ?? [n.requiredCap]).some(cap => can(user, cap)))
+  ].filter(n => !n.requiresVerified || user.verified);
+}
+
+/**
+ * Page titles, keyed by persona rather than by role.
+ *
+ * The `volunteer`/`organizer`/`staff` blocks are the former `student`/
+ * `organizer`/`admin` blocks verbatim — only the key changed, so what those
+ * three roles read is byte-identical. `staff` is what super_admin sees too.
+ *
+ * A tab with no entry falls back to `{ title: APP_NAME, sub: '' }`, unchanged.
+ * That default is the defensible one: it names the app rather than describing
+ * some other persona's screen. Filling in the remaining super_admin tabs would
+ * mean adding keys to the shared `staff` block, which would also change what an
+ * admin reads on /calendar and /settings — and admin behaviour must not change.
+ */
 const PAGE_META = {
-  student: {
+  volunteer: {
     dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
     browse: { title: 'Opportunities', sub: 'Find a shift and apply — organizers confirm who attends' },
     calendar: { title: 'Calendar', sub: 'Your shifts and the deadlines that matter' },
@@ -71,14 +169,34 @@ const PAGE_META = {
     notifications: { title: 'Notifications', sub: 'Application updates and community alerts' },
     profile: { title: 'My profile', sub: 'Your public track record and organizer status' }
   },
-  admin: {
+  staff: {
     dashboard: { title: 'Review queue', sub: 'Approve organizers and moderate events' },
     browse: { title: 'All events', sub: 'Everything posted across the district' },
     notifications: { title: 'Notifications', sub: 'Platform activity' }
+  },
+  partner: {
+    dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
+    browse: { title: 'All events', sub: 'Everything posted across the district' }
   }
 };
 
-const ROLE_LABEL = { admin: 'Administrator', organizer: 'Organizer', student: 'Volunteer' };
+/**
+ * How a role is named to the person holding it.
+ *
+ * A lookup keyed by role, which is the correct way to *label* a role — unlike
+ * comparing one, which is what the rest of this file no longer does. Every entry
+ * in ROLES has a label, so the `||` below is unreachable defence rather than the
+ * silent default that rendered the platform owner as "Volunteer";
+ * App.shellByRole.test.jsx pins that completeness so a sixth role cannot ship
+ * without one.
+ */
+const ROLE_LABEL = {
+  admin: 'Administrator',
+  organizer: 'Organizer',
+  student: 'Volunteer',
+  super_admin: 'Platform administrator',
+  partner: 'Partner'
+};
 
 /**
  * Paths that arrive as a link from an email or an OAuth provider, and so must
@@ -397,16 +515,24 @@ function AppShell({ toasts, addToast, removeToast }) {
   }
 
   /* ── Application shell ─────────────────────────────────────── */
-  const navItems = NAV
-    .filter(n => n.roles.includes(currentUser.role))
-    .filter(n => !n.requiresVerified || currentUser.verified);
+  /* Resolved once, most-privileged-first (see PERSONAS / SELF_PROFILE), and
+     read everywhere below. Plain functions, not hooks — the hook declaration
+     order in this component is unchanged and nothing here may alter it. */
+  const persona = personaFor(currentUser);
+  const selfProfile = selfProfileFor(currentUser);
+
+  const navItems = navItemsFor(currentUser);
 
   const primaryNavItems = navItems.slice(0, 4);
   const secondaryNavItems = navItems.slice(4);
 
-  const meta = PAGE_META[currentUser.role]?.[activeTab] || { title: APP_NAME, sub: '' };
+  const meta = PAGE_META[persona]?.[activeTab] || { title: APP_NAME, sub: '' };
 
-  const pendingForMe = currentUser.role === 'organizer'
+  /* Reviewing applicants is what makes this count meaningful, and the filter
+     below already scopes it to events this user actually hosts — so a wildcard
+     principal that holds `applicant.review` without hosting anything counts 0
+     rather than the whole district's queue. */
+  const pendingForMe = can(currentUser, 'applicant.review')
     ? applications.filter(a => a.status === 'pending' &&
         events.some(e => e.id === a.eventId && e.organizerId === currentUser.id)).length
     : 0;
@@ -534,10 +660,20 @@ function AppShell({ toasts, addToast, removeToast }) {
           ) : (
             <Routes>
               {/* `/` stays here rather than in the table: it is a different
-                  dashboard per role, not one view behind a capability. */}
+                  dashboard per persona, not one view behind a capability.
+
+                  Branching on `persona` rather than on `can()` directly is what
+                  makes these arms genuinely mutually exclusive — the cascade
+                  that produced it already ran most-privileged-first, so a
+                  wildcard principal cannot match two of them. The last arm is
+                  explicit: `partner` (and any future capability-poor role)
+                  gets a page that says so, NOT OrganizerDashboard, whose
+                  fetchOrganizerStats returns zeros for super_admin and a
+                  swallowed 403 for partner — a dashboard of zeros reads as
+                  data, which is worse than an empty state. */}
               <Route path="/" element={
-                currentUser.role === 'admin' ? <AdminDashboard addToast={addToast} /> :
-                currentUser.role === 'student' ? (
+                persona === 'staff' ? <AdminDashboard addToast={addToast} /> :
+                persona === 'volunteer' ? (
                   <VolunteerDashboard
                     currentUser={currentUser}
                     events={events}
@@ -548,7 +684,7 @@ function AppShell({ toasts, addToast, removeToast }) {
                     refreshApplications={refreshApplications}
                     onViewDetails={openEventById}
                   />
-                ) : (
+                ) : persona === 'organizer' ? (
                   <OrganizerDashboard
                     currentUser={currentUser}
                     events={events}
@@ -559,6 +695,11 @@ function AppShell({ toasts, addToast, removeToast }) {
                     setActiveTab={setActiveTab}
                     onViewDetails={openEventById}
                     onViewVolunteerProfile={viewVolunteer}
+                  />
+                ) : (
+                  <EmptyState
+                    title="No dashboard for this account"
+                    message="This account type does not have a dashboard yet. Browse opportunities from the navigation, or change your account settings."
                   />
                 )
               } />
@@ -584,10 +725,13 @@ function AppShell({ toasts, addToast, removeToast }) {
                 />
               ))}
 
-              {/* Also a different component per role, so it stays out of the
-                  table alongside `/`. */}
+              {/* Also a different component per persona, so it stays out of the
+                  table alongside `/`. `selfProfile` comes from the SELF_PROFILE
+                  cascade, which already ran most-privileged-first — so these
+                  arms are mutually exclusive and the last one is an explicit
+                  deny, not a fall-through. */}
               <Route path="/profile" element={
-                currentUser.role === 'student' ? (
+                selfProfile === 'volunteer' ? (
                   <VolunteerProfile
                     userId={currentUser.id}
                     currentUser={currentUser}
@@ -595,10 +739,15 @@ function AppShell({ toasts, addToast, removeToast }) {
                     onViewEvent={openEventById}
                     addToast={addToast}
                   />
-                ) : currentUser.role === 'organizer' ? (
+                ) : selfProfile === 'organizer' ? (
                   <OrganizerProfile
                     userId={currentUser.id}
                     onViewEvent={openEventById}
+                  />
+                ) : selfProfile === 'none' ? (
+                  <EmptyState
+                    title="No service record for this account"
+                    message="Profiles show a volunteer's service record or an organizer's hosting record. This account has neither — your account details live in Settings."
                   />
                 ) : denied
               } />
@@ -646,7 +795,7 @@ function AppShell({ toasts, addToast, removeToast }) {
                 <span className="avatar lg">{currentUser.avatar || '👤'}</span>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   <span className="mobile-more-title truncate">{currentUser.name}</span>
-                  <span style={{ fontSize: '0.875rem', color: 'var(--ink-2)' }}>{ROLE_LABEL[currentUser.role] || 'Volunteer'}</span>
+                  <span style={{ fontSize: '0.875rem', color: 'var(--ink-2)' }}>{ROLE_LABEL[currentUser.role] || 'Member'}</span>
                 </div>
               </div>
               <button className="btn btn-ghost btn-icon" style={{ marginTop: '-4px', marginRight: '-4px' }} onClick={() => setShowMobileMore(false)}>
@@ -668,7 +817,12 @@ function AppShell({ toasts, addToast, removeToast }) {
                   <span>{label}</span>
                 </button>
               ))}
-              {currentUser.role !== 'student' && (
+              {/* Only for someone whose own profile page has no edit button of
+                  its own — the volunteer profile carries one, so offering a
+                  second here would be a duplicate affordance. Derived from the
+                  same SELF_PROFILE cascade that decides the route, so the two
+                  cannot drift apart. */}
+              {selfProfile !== 'volunteer' && (
                 <button
                   className="mobile-more-btn"
                   onClick={() => {
