@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Email opt-out** — Added a toggle in the user profile to disable email notifications.
 
 ### Changed
+- **Attendance confirmation now allows admins** — `POST /api/events/:id/attendance` previously allowed only the hosting organizer to finalize attendance and credit hours, denying admins entirely. Converting the route to the `attendance.mark` capability (part of the ongoing authorization-spine work) corrects this inconsistency: admins may now confirm attendance on any event, matching the access they already had on the related check-in and roster-export routes.
+- **Check-in viewing now denies partners** — `GET /api/events/:id/checkin` previously blocked only students by name, so a `partner` account could view an event's check-in roster. Converting the route to the `attendance.view` capability corrects this: it now denies both students and partners, matching the capability table's intent for that role.
 - **Cookie authentication** — Migrated from `localStorage` JWTs in the `Authorization` header to `HttpOnly`, `SameSite=Lax` cookies, reducing XSS exposure.
 - **Password minimum length** — Raised from 6 to 8 characters.
 - **EventModal refactor** — Extracted `EventApplicantsTab`, `EventAttendance`, `EventEditForm`, `EventShiftsTab`, and `EventAnnouncements` into standalone components.
