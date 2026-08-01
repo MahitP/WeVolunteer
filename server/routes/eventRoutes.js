@@ -829,10 +829,6 @@ router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.modera
 
 // A5. Toggle Event Status (Organizer only)
 router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own']), async (req, res) => {
-  if (!can(req.principal, 'event.edit.own') && !can(req.principal, 'event.moderate')) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
   const eventId = req.params.id;
   const { status } = req.body;
 
@@ -959,9 +955,6 @@ router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(
 // A27. Execute Draft Auto Select Draw (Organizer only)
 router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
   const eventId = req.params.id;
-  if (!can(req.principal, 'applicant.review') && !can(req.principal, 'event.moderate')) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
@@ -1043,9 +1036,6 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(
 // A28. Confirm and Lock Auto Select Results (Organizer only)
 router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
   const eventId = req.params.id;
-  if (!can(req.principal, 'applicant.review') && !can(req.principal, 'event.moderate')) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);

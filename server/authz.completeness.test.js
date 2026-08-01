@@ -367,6 +367,7 @@ describe('authorization hygiene', () => {
       // ── OPEN_TO_AUTHENTICATED — intentionally open to every authenticated
       // role; no capability distinction exists or is wanted. ──
       'GET /api/events': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'public browse listing; every role\'s CAPABILITIES entry includes event.view, so no role is ever denied' },
+      'GET /api/organizers/:id/profile': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'an organizer\'s public-facing hosting record (events hosted, volunteers helped, hours awarded) — no PII beyond what the profile already publishes, and no role has ever been denied it; previously carried requireCap(\'event.view\'), a capability all five roles hold, which read as a gate while discriminating against nobody' },
       'GET /api/events/:eventId/slots/:slotId/ics': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may download; title/description/location are no more sensitive than GET /api/events already returns to everyone' },
       'GET /api/events/:id/comments': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may read any event\'s comments; no ownership/capability distinction by design' },
       'POST /api/events/:id/comments': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may post a comment on any event; no ownership/capability distinction by design' },
