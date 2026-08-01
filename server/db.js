@@ -8,6 +8,7 @@ import { createCertificatesTable, backfillCertificates } from './certificates.js
 import { createCheckinTable } from './attendance.js';
 import { createInstanceLockTable } from './instanceLock.js';
 import { DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from './config.js';
+import { runMigrations } from './migrations/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -810,6 +811,10 @@ export function initDatabase() {
   addColumnIfMissing('certificates', 'organization_snapshot', 'TEXT');
   addColumnIfMissing('certificates', 'hours_snapshot', 'REAL');
   addColumnIfMissing('certificates', 'completed_at_snapshot', 'TEXT');
+
+  // Versioned migrations run last: they may rebuild tables the bootstrap above
+  // just created, and they assume the pre-v1.2 schema is fully in place.
+  runMigrations(db);
 }
 
 /**
