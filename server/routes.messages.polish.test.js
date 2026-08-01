@@ -151,3 +151,112 @@ describe('messages/users/search result scoping (Task 7d)', () => {
     expect(res.body.users).toEqual([]);
   });
 });
+
+/**
+ * POST /api/messages/conversations/resolve, all five roles (messaging.js fix,
+ * v1.2a follow-up).
+ *
+ * Before this fix, server/messaging.js's eligibleRelationship() gated this
+ * route with raw `actor.role === 'student' / 'organizer' / 'admin'` checks and
+ * an unconditional `else { 403 }` — so super_admin and partner both fell into
+ * that else and were denied outright, the exact "add a role, silently deny it
+ * everywhere" defect the rest of the v1.2a spine exists to eliminate. This
+ * describe block is the regression test for the capability-based rewrite:
+ * student/organizer/admin keep their existing behaviour, super_admin gains
+ * admin-equivalent access, and partner stays denied.
+ */
+describe('messages/conversations/resolve capability walkthrough (v1.2a messaging.js fix)', () => {
+  let studentToken, orgToken, adminToken, partnerToken, superAdminToken;
+  let studentId, hostedEventId, unhostedEventId;
+
+  beforeAll(async () => {
+    studentToken = await srv.login('leo.chen28@gmail.com');
+    orgToken = await srv.login('jkatzenback@vikings.org');
+    adminToken = await srv.login('admin@example.gov');
+
+    const partnerSigned = await srv.signupConfirmed({
+      name: 'Resolve Partner', username: 'resolve_partner_7e', email: 'resolve-partner-7e@test.local',
+      password: 'Password123', grade: 'Adult', role: 'student'
+    });
+    const superAdminSigned = await srv.signupConfirmed({
+      name: 'Resolve SuperAdmin', username: 'resolve_super_7e', email: 'resolve-superadmin-7e@test.local',
+      password: 'Password123', grade: 'Adult', role: 'student'
+    });
+    const { db } = await import('./db.js');
+    db.prepare("UPDATE users SET role = 'partner' WHERE email = ?").run('resolve-partner-7e@test.local');
+    db.prepare("UPDATE users SET role = 'super_admin', verified = 1 WHERE email = ?").run('resolve-superadmin-7e@test.local');
+    partnerToken = partnerSigned.cookie;
+    superAdminToken = superAdminSigned.cookie;
+
+    studentId = db.prepare("SELECT id FROM users WHERE email = 'leo.chen28@gmail.com'").get().id;
+    const adminId = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get().id;
+
+    // An event the organizer fixture actually hosts, with a real application
+    // from the student — exercises the organizer's ownership check and the
+    // "an application must exist" rule for everyone except staff.
+    const future = new Date(Date.now() + 25 * 864e5).toISOString();
+    const mk = await srv.call('POST', '/api/events', {
+      title: 'Resolve Walkthrough Event', description: 'd', category: 'Other', location: 'Hall',
+      applicationDeadline: new Date(Date.now() + 20 * 864e5).toISOString(),
+      slots: [{ name: 'Shift', description: 'd', startDatetime: future, endDatetime: new Date(Date.now() + 25 * 864e5 + 108e5).toISOString(), maxSpots: 5 }]
+    }, orgToken);
+    hostedEventId = mk.body.id;
+    const slot = (await srv.call('GET', '/api/events', undefined, orgToken)).body.find(e => e.id === hostedEventId).slots[0];
+    await srv.call('POST', `/api/events/${hostedEventId}/apply`, { slotId: slot.id }, studentToken);
+
+    // A second event, hosted by someone else entirely (admin, who has no
+    // event.create capability, so inserted directly — same pattern as the
+    // admin-search-7d fixture above), with NO application from the student.
+    // Only staff (admin/super_admin) should be able to reach a conversation
+    // here at all: the organizer branch's ownership check must refuse it, and
+    // the "must have applied" rule must refuse anyone but staff.
+    unhostedEventId = 'event-resolve-unhosted-7e';
+    const deadline = new Date(Date.now() + 30 * 864e5).toISOString();
+    const futureStart = new Date(Date.now() + 35 * 864e5).toISOString();
+    const futureEnd = new Date(Date.now() + 35 * 864e5 + 108e5).toISOString();
+    db.prepare(`
+      INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, created_at)
+      VALUES (?, 'Unhosted-by-organizer event', 'd', 'Other', 'Hall', ?, ?, 'open', ?)
+    `).run(unhostedEventId, deadline, adminId, new Date().toISOString());
+    db.prepare(`
+      INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
+      VALUES ('slot-resolve-unhosted-7e', ?, 'Shift', 'd', ?, ?, 5)
+    `).run(unhostedEventId, futureStart, futureEnd);
+  });
+
+  it('student: opens a conversation about themselves once they have applied', async () => {
+    const res = await srv.call('POST', '/api/messages/conversations/resolve', { eventId: hostedEventId, studentId }, studentToken);
+    expect(res.status).toBe(200);
+    expect(res.body.conversation.studentId).toBe(studentId);
+  });
+
+  it('organizer: opens a conversation with an applicant on the event they host', async () => {
+    const res = await srv.call('POST', '/api/messages/conversations/resolve', { eventId: hostedEventId, studentId }, orgToken);
+    expect(res.status).toBe(200);
+    expect(res.body.conversation.studentId).toBe(studentId);
+  });
+
+  it('organizer: refused on an event they do not host (ownership check preserved)', async () => {
+    const res = await srv.call('POST', '/api/messages/conversations/resolve', { eventId: unhostedEventId, studentId }, orgToken);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/do not host this event/);
+  });
+
+  it('admin: opens a conversation on an event they do not host, with no application on file (moderate bypass preserved)', async () => {
+    const res = await srv.call('POST', '/api/messages/conversations/resolve', { eventId: unhostedEventId, studentId }, adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.conversation.studentId).toBe(studentId);
+  });
+
+  it('super_admin: gains admin-equivalent access instead of being denied (the actual regression fix)', async () => {
+    const res = await srv.call('POST', '/api/messages/conversations/resolve', { eventId: unhostedEventId, studentId }, superAdminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.conversation.studentId).toBe(studentId);
+  });
+
+  it('partner: stays explicitly denied', async () => {
+    const res = await srv.call('POST', '/api/messages/conversations/resolve', { eventId: hostedEventId, studentId }, partnerToken);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/Access denied/);
+  });
+});

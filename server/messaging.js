@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { db } from './db.js';
 import { inTransaction } from './utils.js';
+import { can, principalFor } from './authz.js';
 
 export const MESSAGE_MAX_LENGTH = 4000;
 export const MESSAGE_PAGE_LIMIT = 50;
@@ -38,7 +39,15 @@ export function otherParticipant(conversationId, userId) {
   `).get(conversationId, userId);
 }
 
-export function eligibleRelationship({ eventId, actor, studentId = null }) {
+/**
+ * `principal` is optional so a caller who only has an `actor` (e.g. a direct
+ * unit-test call, or some future caller that never built a full request
+ * principal) still works — it falls back to a principal built from `actor`'s
+ * base role alone, with no per-user grants. Route handlers should pass the
+ * real `req.principal` so per-user capability grants (Task 4) are honoured,
+ * not just the base role's.
+ */
+export function eligibleRelationship({ eventId, actor, studentId = null, principal = null }) {
   const event = db.prepare(`
     SELECT e.*, u.name AS organizer_name, u.avatar AS organizer_avatar, u.school AS organizer_school
     FROM events e
@@ -50,20 +59,42 @@ export function eligibleRelationship({ eventId, actor, studentId = null }) {
   let resolvedStudentId = studentId;
   let resolvedOrganizerId = event.organizer_id;
 
-  if (actor.role === 'student') {
-    resolvedStudentId = actor.id;
-  } else if (actor.role === 'organizer') {
+  const p = principal || principalFor(actor);
+
+  /**
+   * Previously `actor.role === 'student' / 'organizer' / 'admin'`, checked in
+   * that order with an unconditional `else { 403 }` — so `super_admin` and
+   * `partner` both fell into the `else` and were denied outright. That is the
+   * exact "add a role, silently deny it everywhere" defect Tasks 7a-7e exist
+   * to eliminate from server/routes/, just not yet converted here.
+   *
+   * Order matters: super_admin's '*' wildcard in authz.js satisfies every
+   * can() check, so whichever arm is tested first is the one super_admin
+   * lands in. Checked broadest-privilege first (Task 7b's lesson) so
+   * super_admin gets admin's treatment, not a narrower one it would also
+   * technically satisfy.
+   */
+  if (can(p, 'event.moderate')) {
+    // admin, and super_admin via the wildcard: may open a conversation about
+    // any student in any event, no ownership check.
+    if (!resolvedStudentId) {
+      return { ok: false, status: 400, error: 'studentId is required for admin messaging in an event context' };
+    }
+  } else if (can(p, 'applicant.review')) {
+    // organizer: only for the event they host.
     if (event.organizer_id !== actor.id) {
       return { ok: false, status: 403, error: 'Access denied: You do not host this event' };
     }
     if (!resolvedStudentId) {
       return { ok: false, status: 400, error: 'studentId is required for organizer messaging' };
     }
-  } else if (actor.role === 'admin') {
-    if (!resolvedStudentId) {
-      return { ok: false, status: 400, error: 'studentId is required for admin messaging in an event context' };
-    }
+  } else if (can(p, 'event.apply')) {
+    // student: always about themselves.
+    resolvedStudentId = actor.id;
   } else {
+    // partner (and anything else without a matching capability): no
+    // business in student conversations. Explicit deny, never an unscoped
+    // fall-through.
     return { ok: false, status: 403, error: 'Access denied' };
   }
 
@@ -78,7 +109,9 @@ export function eligibleRelationship({ eventId, actor, studentId = null }) {
     ORDER BY a.applied_at ASC
   `).all(eventId, resolvedStudentId);
 
-  if (actor.role !== 'admin' && relationship.length === 0) {
+  // Staff (admin, and super_admin via the wildcard) may open a conversation
+  // ahead of any application existing; everyone else needs a real one.
+  if (!can(p, 'event.moderate') && relationship.length === 0) {
     return { ok: false, status: 403, error: 'Messaging unlocks after an application exists for this event' };
   }
 
@@ -92,8 +125,8 @@ export function eligibleRelationship({ eventId, actor, studentId = null }) {
   };
 }
 
-export function resolveConversation({ eventId, actor, studentId = null }) {
-  const rel = eligibleRelationship({ eventId, actor, studentId });
+export function resolveConversation({ eventId, actor, studentId = null, principal = null }) {
+  const rel = eligibleRelationship({ eventId, actor, studentId, principal });
   if (!rel.ok) return rel;
 
   let conversation = db.prepare(`
