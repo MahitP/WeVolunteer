@@ -1,7 +1,14 @@
-import { describe, it, expect } from 'vitest';
-import { can, principalFor, CAPABILITIES, ROLES, ALL_CAPABILITIES, SUPER_ONLY } from './authz.js';
+import { describe, it, expect, vi } from 'vitest';
+import { can, principalFor, requireCapAny, CAPABILITIES, ROLES, ALL_CAPABILITIES, SUPER_ONLY } from './authz.js';
 
 const p = (role, extra = {}) => principalFor({ id: 'u1', role, ...extra });
+
+const mockRes = () => {
+  const res = {};
+  res.status = vi.fn().mockReturnValue(res);
+  res.json = vi.fn().mockReturnValue(res);
+  return res;
+};
 
 describe('can()', () => {
   it('grants a capability the role holds', () => {
@@ -88,6 +95,71 @@ describe('principalFor()', () => {
       actorId: null, aal: 1, impersonating: false
     });
     expect(pr.grants).toEqual([]);
+  });
+});
+
+describe('requireCapAny()', () => {
+  it('returns a middleware function named capabilityGate', () => {
+    const mw = requireCapAny(['event.moderate', 'event.edit.own']);
+    expect(mw.name).toBe('capabilityGate');
+  });
+
+  it('passes when the principal holds one of the listed capabilities', () => {
+    const mw = requireCapAny(['event.moderate', 'event.edit.own']);
+    const req = { principal: p('organizer') }; // holds event.edit.own, not event.moderate
+    const res = mockRes();
+    const next = vi.fn();
+    mw(req, res, next);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('passes when the principal holds several of the listed capabilities', () => {
+    const mw = requireCapAny(['event.edit.own', 'applicant.review']);
+    const req = { principal: p('organizer') }; // holds both
+    const res = mockRes();
+    const next = vi.fn();
+    mw(req, res, next);
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it('403s when the principal holds none of the listed capabilities', () => {
+    const mw = requireCapAny(['event.moderate', 'event.edit.own']);
+    const req = { principal: p('student') };
+    const res = mockRes();
+    const next = vi.fn();
+    mw(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Access denied' });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('401s when there is no principal', () => {
+    const mw = requireCapAny(['event.moderate', 'event.edit.own']);
+    const req = {};
+    const res = mockRes();
+    const next = vi.fn();
+    mw(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Access token required' });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('passes super_admin via the wildcard even though it holds neither listed capability by name', () => {
+    const mw = requireCapAny(['event.moderate', 'event.edit.own']);
+    const req = { principal: p('super_admin') };
+    const res = mockRes();
+    const next = vi.fn();
+    mw(req, res, next);
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws at module load time (not per request) on an unknown capability', () => {
+    expect(() => requireCapAny(['event.moderate', 'not.a.real.capability'])).toThrow();
+  });
+
+  it('throws on an empty array', () => {
+    expect(() => requireCapAny([])).toThrow();
   });
 });
 

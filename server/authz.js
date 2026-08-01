@@ -139,3 +139,39 @@ export function requireCap(capability) {
     return next();
   };
 }
+
+/**
+ * Like `requireCap`, but passes if the principal holds ANY of the listed
+ * capabilities.
+ *
+ * Exists for routes an admin and an organizer both legitimately reach through
+ * two different capabilities (e.g. `event.moderate` for admin's platform-wide
+ * reach, `applicant.review` for the organizer who owns the event). A single
+ * `requireCap` would 403 whichever side's capability was not named, at the
+ * middleware layer, before any per-row ownership check could run.
+ *
+ * The returned middleware is deliberately also named `capabilityGate` — the
+ * same name `requireCap` uses — so a single detector (Task 8's completeness
+ * test) recognises both as coverage without special-casing either.
+ */
+export function requireCapAny(capabilities) {
+  if (!Array.isArray(capabilities) || capabilities.length === 0) {
+    // A gate with nothing to check admits everyone, which is never intended —
+    // fail the boot rather than silently no-op the route's authorization.
+    throw new Error('requireCapAny: capabilities must be a non-empty array');
+  }
+  for (const capability of capabilities) {
+    if (!ALL_CAPABILITIES.includes(capability)) {
+      // Thrown at module load, not per request, so a typo fails the boot and
+      // the test suite rather than quietly 403ing in production.
+      throw new Error(`requireCapAny: unknown capability '${capability}'`);
+    }
+  }
+  return function capabilityGate(req, res, next) {
+    if (!req.principal) return res.status(401).json({ error: 'Access token required' });
+    if (!capabilities.some((capability) => can(req.principal, capability))) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    return next();
+  };
+}
