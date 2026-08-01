@@ -192,16 +192,38 @@ const EXPECTED = [
   ['POST', '/api/events/event-fake-000/apply',
     { student: 'allow', organizer: 403, admin: 403, super_admin: 'allow', partner: 403 }],
 
+  // Real seeded application (app-sb-10, pending, on event-softball which the
+  // organizer fixture hosts) AND a real body. Both are required: with no body
+  // this 400s on the applicationIds check before the per-row ownership check
+  // ever runs, and with a fake id it 404s — either way the row would record
+  // 'allow' for a role that a real request might deny, which is precisely the
+  // masking that hid the admin lockout on the sibling route below.
+  //
+  // admin is 'allow' as of the v1.2a ownership-bypass fix: it holds
+  // `event.moderate`, not `applicant.review`, so before that fix it was denied
+  // outright. See CHANGELOG.md — deliberate behaviour change.
   ['PATCH', '/api/applications/bulk',
-    // admin genuinely lacks `applicant.review` in the target capability table
-    // (organizer-only) — 403 here is correct today AND after conversion.
-    { student: 403, organizer: 'allow', admin: 403, super_admin: 'allow', partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 },
+    { body: { applicationIds: ['app-sb-10'], status: 'waitlisted' } }],
 
-  // Fake application id: the student branch 403s on the missing `status`
-  // field before any db read; the organizer branch 400s on the same before
-  // any db read. Neither needs a real row to reach its gate.
-  ['PATCH', '/api/applications/app-fake-000',
-    { student: 403, organizer: 'allow', admin: 403, super_admin: 'allow', partner: 403 }],
+  // Real seeded application id + body, for the same reason.
+  //
+  // This row used to read `PATCH /api/applications/app-fake-000` with no body
+  // and record super_admin: 'allow' — and it PASSED, because the missing
+  // `status` field 400s at the top of the management branch before the db read
+  // and before the ownership check. The fake id and absent body together hid a
+  // real lockout: super_admin satisfied `applicant.review` through the wildcard,
+  // entered the organizer branch, and was then denied on any application whose
+  // event it did not host. admin, holding neither `applicant.review` nor
+  // `application.withdraw`, fell through to the final explicit 403. Neither
+  // admin-tier role could accept, waitlist or reject an application anywhere.
+  //
+  // Now exercised against a real row: `student` 403s (may only withdraw its
+  // own), `partner` 403s at the middleware gate, and both admin tiers reach
+  // the handler through `event.moderate`.
+  ['PATCH', '/api/applications/app-sb-10',
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 },
+    { body: { status: 'waitlisted' } }],
 
   // ── eventRoutes.js (Task 7c) ──
 

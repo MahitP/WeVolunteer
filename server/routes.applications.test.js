@@ -404,3 +404,127 @@ describe('applications: GET /api/applications payload scoping by capability', ()
     expect(partnerRes.body).toEqual([]);
   });
 });
+
+/**
+ * Admin-tier oversight of application status (v1.2a).
+ *
+ * Both admin-tier roles were locked out of PATCH /api/applications/:id, and the
+ * authorization matrix recorded super_admin as allowed and PASSED — because the
+ * row used a fake application id with no `status`, so the request 400'd at
+ * validation before the db read and before the ownership check ever ran.
+ *
+ *   - super_admin satisfied `applicant.review` through the '*' wildcard, entered
+ *     the organizer branch, and was then denied by
+ *     `app.organizer_id !== req.principal.userId` on every event it did not host
+ *     — i.e. on every event, since the platform owner hosts nothing.
+ *   - admin held neither `applicant.review` nor `application.withdraw`, so it
+ *     fell through the whole cascade to the final explicit 403.
+ *
+ * The events here are hosted by the organizer fixture, and neither admin
+ * account hosts anything, so "an application they do not host" is exactly what
+ * is being exercised. A status-code-only assertion would not be enough: the
+ * point is that the change actually lands, so each case reads the row back.
+ */
+describe('applications: admin-tier oversight of PATCH /api/applications/:id', () => {
+  let orgToken, studentToken, adminToken, superToken, partnerToken;
+  let appId, studentId;
+
+  beforeAll(async () => {
+    orgToken = await srv.login('jkatzenback@vikings.org');
+    studentToken = await srv.login('leo.chen28@gmail.com');
+    adminToken = await srv.login('admin@example.gov');
+
+    const { db } = await import('./db.js');
+    studentId = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen28@gmail.com').id;
+
+    const superSigned = await srv.signupConfirmed({
+      name: 'Oversight Super', username: 'oversight_super', email: 'oversight-super@test.local',
+      password: 'Password123', grade: 'Adult', role: 'student'
+    });
+    db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('super_admin', superSigned.user.id);
+    superToken = superSigned.cookie;
+
+    const partnerSigned = await srv.signupConfirmed({
+      name: 'Oversight Partner', username: 'oversight_partner', email: 'oversight-partner@test.local',
+      password: 'Password123', grade: 'Adult', role: 'student'
+    });
+    db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('partner', partnerSigned.user.id);
+    partnerToken = partnerSigned.cookie;
+
+    // An event hosted by the organizer fixture, with one pending application.
+    const start = new Date(Date.now() + 90 * 864e5).toISOString();
+    const end = new Date(Date.now() + 90 * 864e5 + 108e5).toISOString();
+    const mk = await srv.call('POST', '/api/events', {
+      title: 'Oversight Test', description: 'd', category: 'Other', location: 'Hall',
+      applicationDeadline: new Date(Date.now() + 80 * 864e5).toISOString(),
+      slots: [{ name: 'Shift', description: 'd', startDatetime: start, endDatetime: end, maxSpots: 3 }]
+    }, orgToken);
+    const slot = (await srv.call('GET', '/api/events', undefined, studentToken)).body
+      .find(e => e.id === mk.body.id).slots[0];
+    await srv.call('POST', `/api/events/${mk.body.id}/apply`, { slotId: slot.id }, studentToken);
+
+    appId = db.prepare('SELECT id FROM applications WHERE user_id = ? AND slot_id = ?')
+      .get(studentId, slot.id).id;
+  });
+
+  const statusOf = async () => {
+    const { db } = await import('./db.js');
+    return db.prepare('SELECT status FROM applications WHERE id = ?').get(appId).status;
+  };
+
+  it('lets an admin waitlist an application on an event it does not host', async () => {
+    const res = await srv.call('PATCH', `/api/applications/${appId}`, { status: 'waitlisted' }, adminToken);
+    expect(res.status).toBe(200);
+    expect(await statusOf()).toBe('waitlisted');
+  });
+
+  it('lets a super_admin accept the same application', async () => {
+    const res = await srv.call('PATCH', `/api/applications/${appId}`, { status: 'accepted' }, superToken);
+    expect(res.status).toBe(200);
+    expect(await statusOf()).toBe('accepted');
+  });
+
+  it('still lets the hosting organizer manage it', async () => {
+    // Rejected, not waitlisted: the row is 'accepted' at this point, and
+    // accepted -> waitlisted frees a spot, which promoteFromWaitlist then
+    // refills with the only queued application — this same row, straight back
+    // to 'accepted'. That is existing, correct behaviour; it just makes
+    // 'waitlisted' the wrong assertion to hang an authorization test on.
+    const res = await srv.call('PATCH', `/api/applications/${appId}`, { status: 'rejected' }, orgToken);
+    expect(res.status).toBe(200);
+    expect(await statusOf()).toBe('rejected');
+  });
+
+  it('denies a student setting a management status, and a partner entirely', async () => {
+    const before = await statusOf();
+
+    // The student owns this application, but `application.withdraw` only ever
+    // permits withdrawal — never accept/waitlist/reject on their own row.
+    const studentRes = await srv.call('PATCH', `/api/applications/${appId}`, { status: 'accepted' }, studentToken);
+    expect(studentRes.status).toBe(403);
+
+    // partner holds none of the three capabilities the route's gate names, so
+    // it is refused at the middleware, before the handler runs.
+    const partnerRes = await srv.call('PATCH', `/api/applications/${appId}`, { status: 'accepted' }, partnerToken);
+    expect(partnerRes.status).toBe(403);
+
+    expect(await statusOf(), 'a denied request must not change the row').toBe(before);
+  });
+
+  it('lets an admin act through the bulk route on an event it does not host', async () => {
+    const res = await srv.call('PATCH', '/api/applications/bulk',
+      { applicationIds: [appId], status: 'waitlisted' }, adminToken);
+    expect(res.status).toBe(200);
+    expect(await statusOf()).toBe('waitlisted');
+  });
+
+  it('denies a student and a partner on the bulk route', async () => {
+    const before = await statusOf();
+    for (const token of [studentToken, partnerToken]) {
+      const res = await srv.call('PATCH', '/api/applications/bulk',
+        { applicationIds: [appId], status: 'accepted' }, token);
+      expect(res.status).toBe(403);
+    }
+    expect(await statusOf()).toBe(before);
+  });
+});

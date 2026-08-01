@@ -4,7 +4,7 @@ import {
   authenticateToken, inTransaction,
   assignWaitlistOrder, promoteFromWaitlist, notifyPromotions
 } from '../utils.js';
-import { can, requireCap } from '../authz.js';
+import { can, requireCap, requireCapAny } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 
@@ -253,7 +253,7 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
   }
 });
 
-// 8a. Bulk update application status (Organizer only).
+// 8a. Bulk update application status (hosting organizer, or admin-tier oversight).
 //
 // Registered BEFORE /api/applications/:id, because that route's :id parameter
 // would otherwise capture the literal "bulk". Mirrors the single-application
@@ -261,7 +261,7 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
 // capacity rules — so the two cannot diverge. All writes happen in one
 // transaction; notifications and waitlist promotion run only after it commits,
 // because createNotification performs its own writes.
-router.patch('/api/applications/bulk', authenticateToken, requireCap('applicant.review'), (req, res) => {
+router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applicant.review', 'event.moderate']), (req, res) => {
   const { applicationIds, status } = req.body;
 
   if (!Array.isArray(applicationIds) || applicationIds.length === 0) {
@@ -284,7 +284,7 @@ router.patch('/api/applications/bulk', authenticateToken, requireCap('applicant.
         WHERE a.id = ?
       `).get(id);
       if (!app) return res.status(404).json({ error: `Application not found: ${id}` });
-      if (app.organizer_id !== req.principal.userId) {
+      if (!can(req.principal, 'event.moderate') && app.organizer_id !== req.principal.userId) {
         return res.status(403).json({ error: 'Access denied: You do not host this event' });
       }
       // A withdrawn application is the volunteer's own choice to leave; an
@@ -384,16 +384,32 @@ router.patch('/api/applications/bulk', authenticateToken, requireCap('applicant.
   }
 });
 
-// 8. Update Application Status (Organizer: accept/waitlist/reject · Student: withdraw own)
-router.patch('/api/applications/:id', authenticateToken, (req, res) => {
+// 8. Update Application Status
+// (Hosting organizer or admin-tier oversight: accept/waitlist/reject ·
+//  Student: withdraw own)
+//
+// The gate names all THREE capabilities this route serves, not just the two
+// management ones. Students reach this same route to withdraw their own
+// application (the `application.withdraw` branch far below), so a gate of
+// ['applicant.review', 'event.moderate'] alone would 403 every student at the
+// middleware and break withdrawal outright. What the gate still excludes is
+// `partner`, which holds none of the three — the same 403 it already received
+// from the explicit deny at the end of the cascade, now delivered before the
+// handler runs. Its other purpose is visibility: a `capabilityGate` on the
+// stack is what puts this route in front of Guard 2's scanner instead of
+// leaving it to a hand-written ROUTE_REGISTRY entry.
+router.patch('/api/applications/:id', authenticateToken,
+  requireCapAny(['applicant.review', 'event.moderate', 'application.withdraw']), (req, res) => {
   const appId = req.params.id;
   const { status } = req.body; // 'accepted', 'waitlisted', 'rejected'
 
-  // applicant.review (organizer management) is checked before
-  // application.withdraw (student self-service) so a wildcard principal
-  // (super_admin) resolves to the broader capability rather than being
-  // caught by the narrower one and failing its ownership check below.
-  if (can(req.principal, 'applicant.review')) {
+  // Ordered most-privileged-first, per the cascade rule in authz.js:
+  // applicant.review (organizer management) and event.moderate (admin-tier
+  // oversight) are checked before application.withdraw (student self-service),
+  // so a wildcard principal (super_admin) resolves to the broader branch
+  // rather than being caught by the narrower one and failing its ownership
+  // check below. The cascade ends in an explicit 403, never a bare else.
+  if (can(req.principal, 'applicant.review') || can(req.principal, 'event.moderate')) {
     if (!['accepted', 'waitlisted', 'rejected'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status update. Must be accepted, waitlisted, or rejected.' });
     }
@@ -407,7 +423,7 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
       `).get(appId);
 
       if (!app) return res.status(404).json({ error: 'Application not found' });
-      if (app.organizer_id !== req.principal.userId) {
+      if (!can(req.principal, 'event.moderate') && app.organizer_id !== req.principal.userId) {
         return res.status(403).json({ error: 'Access denied: You do not host this event' });
       }
 
