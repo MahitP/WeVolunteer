@@ -27,4 +27,4 @@ function up(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_usercaps_user ON user_capabilities(user_id)');
 }
 
-export default { version: 2, name: 'user_capabilities', up };
+export default { version: 2, name: 'user_capabilities', up, fileUrl: import.meta.url };
