@@ -1275,16 +1275,7 @@ when they are done, not when they become uncomfortable to look at.
 
 ### Critical
 
-#### TD-1 — `npm ci` is not enforced in CI
-
-- **Risk:** the exact defect described in §5.4 recurs, undetected. `main` becomes
-  undeployable while every other check reports green.
-- **Why critical:** this already happened once and stayed hidden for four days.
-  Nothing currently prevents a repeat.
-- **Action:** add `npm ci` as the **first** required check in CI, ahead of test,
-  build, and lint. Also add a check that fails if any `package-lock.json` exists
-  outside the repository root (§5.3).
-- **Effort:** small. **Opened:** 2026-07-31.
+*(No open critical items)*
 
 ### Medium
 
@@ -1378,6 +1369,19 @@ when they are done, not when they become uncomfortable to look at.
 ### Resolved
 
 Kept rather than deleted, because the reasoning is the part worth having.
+
+#### TD-1 — `npm ci` is not enforced in CI — **resolved**
+
+- **Risk:** the exact defect described in §5.4 recurs, undetected. `main` becomes
+  undeployable while every other check reports green.
+- **Why critical:** this already happened once and stayed hidden for four days.
+  Nothing currently prevents a repeat.
+- **Action:** add `npm ci` as the **first** required check in CI, ahead of test,
+  build, and lint. Also add a check that fails if any `package-lock.json` exists
+  outside the repository root (§5.3).
+- **Fix:** Added `.github/workflows/ci.yml` triggering on push and pull_request to main, running `npm ci`, test, build, and lint, plus enforcing a single root package-lock.json.
+- **Effort:** small. **Opened and closed:** 2026-07-31.
+
 
 #### TD-9 — flaky route assertion in `src/App.authRoutes.test.jsx` — **resolved**
 
