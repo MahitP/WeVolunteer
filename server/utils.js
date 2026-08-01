@@ -50,6 +50,36 @@ export function purgeExpiredRevocations(now = new Date()) {
     .run(now.toISOString()).changes;
 }
 
+/**
+ * Builds the request principal with `grants` attached as a lazy, memoizing
+ * getter rather than an eagerly-fetched array.
+ *
+ * Only one route consults capabilities today (more arrive in Task 7), so
+ * running `grantsFor` on every authenticated request — most of which never
+ * read `principal.grants` at all — would spend a SQL query on work nobody
+ * asked for. The getter defers that query until the first read and caches
+ * the result, so a request that never touches capabilities never touches
+ * the database for them; a request that reads it more than once (or that
+ * `can()` reads internally) pays for exactly one query.
+ *
+ * `fetchGrants` is injectable purely so a test can spy on call counts
+ * without going through `db.js` — production code never passes it and gets
+ * the real `grantsFor` bound to the live connection.
+ */
+export function buildPrincipal(userRow, fetchGrants = (id) => grantsFor(db, id)) {
+  const principal = principalFor(userRow);
+  let cached = null;
+  Object.defineProperty(principal, 'grants', {
+    get() {
+      if (cached === null) cached = fetchGrants(userRow.id);
+      return cached;
+    },
+    enumerable: true,
+    configurable: true
+  });
+  return principal;
+}
+
 // --- AUTHENTICATION MIDDLEWARE ---
 export function authenticateToken(req, res, next) {
   const token = req.cookies && req.cookies[COOKIE_NAME];
@@ -91,7 +121,7 @@ export function authenticateToken(req, res, next) {
 
     // The capability principal. req.user is left exactly as it was, so every
     // existing handler and test keeps working while call sites migrate.
-    req.principal = principalFor(userRow, { grants: grantsFor(db, userRow.id) });
+    req.principal = buildPrincipal(userRow);
 
     if (
       REQUIRE_EMAIL_VERIFICATION &&
