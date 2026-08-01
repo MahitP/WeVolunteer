@@ -132,6 +132,22 @@ const NAV = [
   { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS }
 ];
 
+/**
+ * An entry with no capability declared would be hidden from everyone, silently
+ * — `can(user, undefined)` is false for every role, wildcard included. That is
+ * a forgotten annotation, not a decision, so it fails at module load rather
+ * than at render, the same way requireCap() and withProps() do.
+ */
+for (const entry of NAV) {
+  if (!entry.requiredCap && !entry.requiredCapAny?.length) {
+    throw new Error(
+      `NAV entry '${entry.id}' declares neither requiredCap nor a non-empty `
+      + 'requiredCapAny. Every entry needs one — a nav item with no condition '
+      + 'is one whose condition was forgotten, and it would render for nobody.'
+    );
+  }
+}
+
 /** Every nav entry the user may see, `/` first, in the order the shell renders. */
 export function navItemsFor(user) {
   const dashboard = DASHBOARD_NAV[personaFor(user)];
