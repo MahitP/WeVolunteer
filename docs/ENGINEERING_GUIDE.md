@@ -1179,19 +1179,78 @@ Production boot **fails closed** without these. The failure is deliberate
 
 ### 8.3 Database and migrations
 
-Schema evolves through **additive** `ALTER TABLE ... ADD COLUMN` guards executed
-at initialization — 16 of them at 1.1.0 — each idempotent, so a restart against
-an existing database is a no-op. There is no migration-file framework.
+Schema evolves along two paths, and which one applies depends on the change.
 
-**Rule: migrations are additive.** No column drops, no type changes, no
-destructive rewrites in an automatic startup path. A failed additive migration
-leaves a working database; a failed destructive one may not.
+**Path 1 — additive guards (the default).** `ALTER TABLE ... ADD COLUMN` guards
+executed at initialization, each idempotent, so a restart against an existing
+database is a no-op. This remains the right mechanism for almost everything.
 
-Non-additive changes need an explicit, separately-run, tested, documented,
-backed-up migration — and they are a strong signal of a major release (§4.2).
+**Path 2 — the versioned migration registry**, added in v1.2a and living in
+`server/migrations/`. Everything structural from v1.2 onward goes here, because
+the changes that motivated it are table REBUILDS — SQLite cannot alter a `CHECK`
+constraint — and those need ordering, a record of what already ran, and a
+rollback story that an idempotent guard cannot provide.
 
-`server/migrate_usernames.js` is a standalone one-off with test coverage. That
-is the pattern for anything that cannot be an idempotent additive guard.
+How the registry works:
+
+- Each migration is a numbered module (`001_authz_roles.js`,
+  `002_user_capabilities.js`) exporting `{ version, name, up, fileUrl }`.
+  `server/migrations/index.js` holds the ordered list and runs it from
+  `initDatabase()`.
+- Applied migrations are recorded in the **`schema_migrations`** table
+  (`version`, `name`, `applied_at`, `checksum`), so each runs exactly once.
+- Each migration runs in **its own transaction**, with the `schema_migrations`
+  row written inside the same transaction as the DDL it describes — a failure
+  leaves the database exactly as it was. A migration that must manage its own
+  transaction sets **`ownTransaction: true`**; the table rebuilds do, because
+  `PRAGMA foreign_keys` is a silent no-op inside an open transaction and must
+  therefore be set before `BEGIN`.
+- A **checksum** over the migration's canonicalised module source (comments
+  stripped, whitespace collapsed) is stored on apply and re-verified on every
+  boot, so an already-applied migration cannot be quietly edited. See §8.5 for
+  what to do when that check fails.
+
+**Rule: migrations are additive — with one sanctioned exception.** No column
+drops, no type changes, no destructive rewrites in an automatic startup path,
+*except* a table rebuild in the registry that carries the full guard set below.
+A failed additive migration leaves a working database; a failed destructive one
+may not.
+
+**The sanctioned destructive rebuild.** `001_authz_roles.js` performs a
+`DROP TABLE users` rebuild automatically from `initDatabase()`. That is a real
+exception to the rule above, and it is permitted only because every one of these
+guards is present — `001_authz_roles.js` is the reference implementation, and a
+future rebuild is expected to copy its structure:
+
+1. **Back up first.** Take and verify a backup before deploying a release that
+   introduces a rebuild (`bin/verify-restore.sh`).
+2. **Pragma-took-effect assertion.** After `PRAGMA foreign_keys = OFF`, read the
+   pragma back and abort if it is not actually `0`. Setting it inside an open
+   transaction silently does nothing, and with foreign keys live a
+   `DROP TABLE users` cascade-deletes most of the database. Nothing else catches
+   this: the copied rows survive, `foreign_key_check` finds no violation because
+   a cascade deletes children rather than orphaning them, and nothing throws.
+3. **Explicit column list, never `SELECT *`.** Column *order* differs between
+   databases, because it depends on the order historical `addColumnIfMissing()`
+   calls happened to run. On the pilot database `email_verified` sits before
+   `account_status`/`deleted_at`; on a fresh seed it sits after. A `SELECT *`
+   copy writes each value into whatever column shares its position, silently.
+4. **Unknown/missing-column guard.** Compare `PRAGMA table_info` against the
+   migration's expected column list and throw on either a column the migration
+   does not know about (the copy would drop it) or one it expects and cannot
+   find (the table is not in the state the migration assumes).
+5. **Schema-derived child-row count comparison.** Snapshot the row count of
+   every table holding a foreign key to the rebuilt table — derived from
+   `sqlite_master`/`PRAGMA foreign_key_list`, not hardcoded, so newly added
+   tables are covered automatically — and compare after the rename. A loss
+   throws, and the surrounding transaction rolls it back, which turns the
+   catastrophic path into a recoverable one.
+6. **Row-count equality** on the copy itself, and a final
+   **`PRAGMA foreign_key_check`** before commit.
+
+Anything that cannot meet that bar is not an automatic startup migration.
+`server/migrate_usernames.js` is a standalone one-off with test coverage; that
+remains the pattern for a change too risky to run unattended.
 
 ### 8.4 Health checks
 
@@ -1226,7 +1285,60 @@ Each field earns its place:
    code-only rollback usually sufficient. Verify restores with
    `bin/verify-restore.sh`; a backup that has never been restored is a
    hypothesis, not a backup.
-5. **Verify** per §4.1 Step 7.
+5. **Expect `schema_migrations` to survive the rollback.** Rolling the code back
+   does not roll the table back: it still holds rows for migrations the older
+   code does not know about, and — if the rollback crosses a table rebuild —
+   the schema those migrations produced is still in place. Older code ignores
+   unknown rows, which is why this is usually harmless. It stops being harmless
+   when you roll *forward* again: see the checksum procedure below.
+6. **Verify** per §4.1 Step 7.
+
+#### Migration checksum failures
+
+The registry re-verifies every applied migration's checksum on boot and refuses
+to start on a mismatch. There are three distinct causes and they need different
+answers — the wrong one either re-runs a migration against a database it has
+already changed, or masks a real discrepancy.
+
+First, establish the one fact everything turns on: **is the migration's schema
+change actually present in this database?** Inspect the schema by hand
+(`.schema users`, `PRAGMA table_info(...)`) rather than trusting the row.
+
+- **Change NOT present.** The row is lying about work that never happened.
+  Delete it and restart so the migration runs for real:
+
+  ```sql
+  DELETE FROM schema_migrations WHERE version = <n>;
+  ```
+
+- **Change IS present, and the checksum scheme changed.** This is the expected,
+  legitimate case after a release that alters how checksums are computed — v1.2a
+  rebased them from the `up` function's source onto the canonicalised source of
+  the whole migration file, which invalidates every previously recorded checksum
+  at once. Do **not** delete the row. Backfill it:
+
+  ```sql
+  UPDATE schema_migrations SET checksum = '<current>' WHERE version = <n>;
+  ```
+
+  Get `<current>` from `node bin/migration-checksums.mjs`, which prints the
+  checksum and the ready-made `UPDATE` for every registered migration. It opens
+  no database and executes no SQL — it prints statements for you to review and
+  apply.
+
+- **Change IS present, and the stored checksum is NULL.** Same remedy: a NULL
+  means the row predates the checksum column (added by `ALTER TABLE` for exactly
+  this reason), not that anything is wrong. Backfill it with the `UPDATE` above.
+  This is the one case the pre-v1.2a error message left an operator stranded on:
+  it said "do NOT delete the row — investigate", with no next action.
+
+- **Change IS present, and neither of the above explains it.** Now it is a real
+  discrepancy: someone edited an applied migration. Do not backfill, because
+  that would bless whatever the code now says over what actually ran. Work out
+  what the deployed database really contains, and write a NEW migration to
+  reconcile it. Editing history is what the checksum exists to prevent.
+
+Always take a backup before running any of these statements.
 
 **Consider rolling back rather than fixing forward** when the fix is not
 understood, when data integrity is at risk, or when diagnosis will take longer
