@@ -128,22 +128,22 @@ const EXPECTED = [
   // Real fixture id (user-org-pending: organizer, unverified) so the approve/
   // deny logic actually runs for the roles allowed to reach it.
   ['POST', '/api/admin/organizers/user-org-pending/approve',
-    { student: 403, organizer: 403, admin: 'allow', super_admin: BUG('allow', '7a'), partner: 403 }],
+    { student: 403, organizer: 403, admin: 'allow', super_admin: 'allow', partner: 403 }],
   ['POST', '/api/admin/organizers/user-org-pending/deny',
-    { student: 403, organizer: 403, admin: 'allow', super_admin: BUG('allow', '7a'), partner: 403 }],
+    { student: 403, organizer: 403, admin: 'allow', super_admin: 'allow', partner: 403 }],
 
   ['GET', '/api/admin/stats',
-    { student: 403, organizer: 403, admin: 'allow', super_admin: BUG('allow', '7a'), partner: 403 }],
+    { student: 403, organizer: 403, admin: 'allow', super_admin: 'allow', partner: 403 }],
   ['GET', '/api/admin/reports',
-    { student: 403, organizer: 403, admin: 'allow', super_admin: BUG('allow', '7a'), partner: 403 }],
+    { student: 403, organizer: 403, admin: 'allow', super_admin: 'allow', partner: 403 }],
   // Fake report id: role gate runs before the body-shape check, which runs
   // before any db lookup, so no real report is needed to reach either gate.
   ['PATCH', '/api/admin/reports/rep-fake-000',
-    { student: 403, organizer: 403, admin: 'allow', super_admin: BUG('allow', '7a'), partner: 403 }],
+    { student: 403, organizer: 403, admin: 'allow', super_admin: 'allow', partner: 403 }],
   ['GET', '/api/admin/reports/export',
-    { student: 403, organizer: 403, admin: 'allow', super_admin: BUG('allow', '7a'), partner: 403 }],
+    { student: 403, organizer: 403, admin: 'allow', super_admin: 'allow', partner: 403 }],
   ['GET', '/api/admin/system/status',
-    { student: 403, organizer: 403, admin: 'allow', super_admin: BUG('allow', '7a'), partner: 403 }],
+    { student: 403, organizer: 403, admin: 'allow', super_admin: 'allow', partner: 403 }],
 
   // ── attendanceRoutes.js (Task 7b) ──
 
