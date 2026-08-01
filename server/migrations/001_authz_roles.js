@@ -26,6 +26,35 @@ export const EXPECTED_USER_COLUMNS = [
   'account_status', 'deleted_at', 'email_verified', 'username_changed_at',
 ];
 
+/**
+ * Row counts for every table holding a foreign key to `users`.
+ *
+ * Derived from the schema rather than hardcoded: 15+ tables reference users(id)
+ * and more get added over time, so a literal list would silently stop covering
+ * the newest ones — the exact tables a stale guard would fail to protect. Tables
+ * absent from a given database (a partially-built test fixture) simply do not
+ * appear in the result. On the pilot schema this covers 19 tables.
+ *
+ * Only DIRECT references are collected, and that is sufficient: a table like
+ * `slots` cascades from `events` rather than from `users`, so it cannot be
+ * emptied without `events` — which is in this set — being emptied first.
+ */
+function countCascadingChildren(db) {
+  const counts = {};
+  const tables = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+  ).all().map(r => r.name);
+
+  for (const table of tables) {
+    if (table === 'users' || table === 'users_new') continue;
+    // Table names come from sqlite_master, never from user input.
+    const references = db.prepare(`PRAGMA foreign_key_list(${table})`).all()
+      .some(fk => fk.table === 'users');
+    if (references) counts[table] = db.prepare(`SELECT COUNT(*) c FROM ${table}`).get().c;
+  }
+  return counts;
+}
+
 function up(db) {
   // Already rebuilt? The CHECK text is the cheapest reliable probe.
   const existing = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
@@ -55,6 +84,29 @@ function up(db) {
 
   db.exec('PRAGMA foreign_keys = OFF');       // MUST be outside the transaction
   try {
+    /**
+     * Verify the pragma actually took. This is the one failure in this file that
+     * nothing else can catch:
+     *
+     *   - the row-count check below counts `users`, and users rows are COPIED —
+     *     they survive a cascade untouched;
+     *   - `PRAGMA foreign_key_check` finds nothing, because a cascade DELETES the
+     *     children rather than orphaning them, so no violation remains to report;
+     *   - the ROLLBACK below never fires, because nothing threw.
+     *
+     * So without this check the migration would commit an emptied database and
+     * report success. Setting the pragma inside an open transaction is a silent
+     * no-op, which is exactly how that would happen. Today the registry does not
+     * wrap `ownTransaction` migrations — but that is a property of a different
+     * file, and this one should not depend on it silently.
+     */
+    if (db.prepare('PRAGMA foreign_keys').get().foreign_keys !== 0) {
+      throw new Error(
+        'PRAGMA foreign_keys = OFF did not take effect — a transaction is already open. '
+        + 'Aborting: DROP TABLE users would cascade-delete the database.'
+      );
+    }
+
     db.exec('BEGIN');
     try {
       db.exec(`
@@ -83,6 +135,14 @@ function up(db) {
         )
       `);
 
+      // Second layer of defence for the same failure. The pragma check above
+      // proves foreign keys are off *now*; this proves no child row actually
+      // vanished, whatever the cause. Snapshot before anything is mutated, and
+      // compare after the rename so a loss throws and the ROLLBACK below undoes
+      // it — the catastrophic path becomes recoverable rather than merely
+      // detectable.
+      const childCounts = countCascadingChildren(db);
+
       const before = db.prepare('SELECT COUNT(*) c FROM users').get().c;
       db.exec(`INSERT INTO users_new (${cols}) SELECT ${cols} FROM users`);
       const after = db.prepare('SELECT COUNT(*) c FROM users_new').get().c;
@@ -90,6 +150,16 @@ function up(db) {
 
       db.exec('DROP TABLE users');
       db.exec('ALTER TABLE users_new RENAME TO users');
+
+      for (const [table, expected] of Object.entries(childCounts)) {
+        const actual = db.prepare(`SELECT COUNT(*) c FROM ${table}`).get().c;
+        if (actual !== expected) {
+          throw new Error(
+            `${table} lost rows during the users rebuild: ${expected} -> ${actual}. `
+            + 'Foreign keys were enforced during DROP TABLE users and cascade-deleted them.'
+          );
+        }
+      }
 
       // DROP TABLE took the indexes with it. Recreate all three, matching db.js.
       db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL');
