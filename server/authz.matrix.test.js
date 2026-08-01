@@ -214,49 +214,49 @@ const EXPECTED = [
   // Real event-softball id (owned by the organizer fixture) so `isStaff`
   // actually discriminates instead of always 404ing.
   ['GET', '/api/events/event-softball',
-    { student: 403, organizer: 'allow', admin: 'allow', super_admin: BUG('allow', '7c'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
 
   ['POST', '/api/events',
     // admin has no `event.create` in the target table either — 403 is
     // permanent, not a bug.
-    { student: 403, organizer: 'allow', admin: 403, super_admin: BUG('allow', '7c'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 403, super_admin: 'allow', partner: 403 }],
 
   ['PUT', '/api/events/event-fake-000',
-    { student: 403, organizer: 'allow', admin: 403, super_admin: BUG('allow', '7c'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 403, super_admin: 'allow', partner: 403 }],
 
   ['POST', '/api/events/event-fake-000/auto-approve',
-    { student: 403, organizer: 'allow', admin: 403, super_admin: BUG('allow', '7c'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 403, super_admin: 'allow', partner: 403 }],
 
   ['PATCH', '/api/events/event-fake-000',
-    { student: 403, organizer: 'allow', admin: 403, super_admin: BUG('allow', '7c'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 403, super_admin: 'allow', partner: 403 }],
 
   // Body supplies a valid `status` so the check inside this handler that
   // already allows organizer-or-admin (unlike most of its siblings, which are
   // organizer-only) is genuinely exercised rather than short-circuited.
   ['PATCH', '/api/events/event-fake-000/status',
-    { student: 403, organizer: 'allow', admin: 'allow', super_admin: BUG('allow', '7c'), partner: 403 },
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 },
     { body: { status: 'closed' } }],
 
   ['POST', '/api/events/event-fake-000/duplicate',
-    { student: 403, organizer: 'allow', admin: 403, super_admin: BUG('allow', '7c'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 403, super_admin: 'allow', partner: 403 }],
 
   // Real event-softball id: no top-level role gate at all in this handler —
   // existence is checked first, then `role !== 'admin' && !owner`, so a fake
   // id would 404 every role identically and prove nothing.
   ['GET', '/api/events/event-softball/auto-select/runs',
-    { student: 403, organizer: 'allow', admin: 'allow', super_admin: BUG('allow', '7c'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
 
   ['POST', '/api/events/event-fake-000/auto-select/run',
-    { student: 403, organizer: 'allow', admin: 'allow', super_admin: BUG('allow', '7c'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
 
   ['POST', '/api/events/event-fake-000/auto-select/confirm',
-    { student: 403, organizer: 'allow', admin: 'allow', super_admin: BUG('allow', '7c'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
 
   // Real event-softball id AND a body: this handler validates `subject`/
   // `message` BEFORE checking ownership, so an empty body would 400 every
   // role identically and the row would test nothing about authorization.
   ['POST', '/api/events/event-softball/broadcast',
-    { student: 403, organizer: 'allow', admin: 'allow', super_admin: BUG('allow', '7c'), partner: 403 },
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 },
     { body: { subject: 'Update', message: 'Heads up about the event.' } }],
 
   // No role or ownership check of any kind today (confirmed by reading the
@@ -354,7 +354,7 @@ const EXPECTED = [
   // announcements, which the two content-delete rows above (cmt-1, ann-1)
   // depend on still existing.
   ['DELETE', '/api/events/event-softball',
-    { student: 403, partner: 403, super_admin: BUG('allow', '7c'), organizer: 'allow', admin: 'allow' }]
+    { student: 403, partner: 403, super_admin: 'allow', organizer: 'allow', admin: 'allow' }]
 ];
 
 describe('authorization matrix', () => {
