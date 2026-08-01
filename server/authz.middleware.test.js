@@ -40,12 +40,48 @@ describe('requireCap', () => {
     db.prepare("UPDATE users SET role = 'admin' WHERE email = 'admin@example.gov'").run();
   });
 
-  it('attaches a principal carrying unexpired grants', async () => {
+  /**
+   * A per-user grant must change a real authorization outcome over HTTP.
+   *
+   * This replaces a test titled "attaches a principal carrying unexpired
+   * grants" that granted a capability and then asserted GET /api/auth/me
+   * returned 200 — which is true with or without the grant, and true with the
+   * whole grants feature deleted. It named coverage it did not provide, which
+   * is worse than no test: it made the feature look verified end to end when
+   * nothing exercised it past the database row.
+   *
+   * `report.resolve` is admin-only among the role tables, is not super-only
+   * (so it is grantable at all), and gates GET /api/admin/reports through
+   * requireCap. A student holds it by no other route, so a flip here can only
+   * be the grant.
+   */
+  it('flips a route 403 -> 200 for a granted capability, and back on revoke', async () => {
     const db = (await import('./db.js')).db;
-    const { grantCapability } = await import('./userCapabilities.js');
-    grantCapability({ db, userId: 'user-student-1', capability: 'service.verify.external', grantedBy: 'user-admin' });
-    // /api/auth/me is authenticated and cheap; it proves the middleware ran.
-    const res = await srv.call('GET', '/api/auth/me', undefined, student);
-    expect(res.status).toBe(200);
+    const { grantCapability, revokeCapability } = await import('./userCapabilities.js');
+
+    const before = await srv.call('GET', '/api/admin/reports', undefined, student);
+    expect(before.status, 'a student must not reach an admin report route unaided').toBe(403);
+
+    grantCapability({ db, userId: 'user-student-1', capability: 'report.resolve', grantedBy: 'user-admin' });
+    const granted = await srv.call('GET', '/api/admin/reports', undefined, student);
+    expect(granted.status, 'the grant must be what admits them').toBe(200);
+
+    revokeCapability({ db, userId: 'user-student-1', capability: 'report.resolve' });
+    const revoked = await srv.call('GET', '/api/admin/reports', undefined, student);
+    expect(revoked.status, 'and revoking it must shut the door again').toBe(403);
+  });
+
+  it('does not let an expired grant admit anyone', async () => {
+    const db = (await import('./db.js')).db;
+    const { grantCapability, revokeCapability } = await import('./userCapabilities.js');
+
+    grantCapability({
+      db, userId: 'user-student-1', capability: 'report.resolve', grantedBy: 'user-admin',
+      expiresAt: new Date(Date.now() - 1000).toISOString()
+    });
+    const res = await srv.call('GET', '/api/admin/reports', undefined, student);
+    expect(res.status).toBe(403);
+
+    revokeCapability({ db, userId: 'user-student-1', capability: 'report.resolve' });
   });
 });
