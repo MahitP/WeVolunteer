@@ -65,4 +65,92 @@ describe('migration registry', () => {
       { version: 9001, name: 'b', up: () => {} },
     ])).toThrow(/duplicate migration version/i);
   });
+
+  it('records a checksum when applying a migration', async () => {
+    const { runMigrations } = await import('./migrations/index.js');
+    const fake = [{ version: 9001, name: 'test_only', up: (d) => d.exec('CREATE TABLE t9001 (x TEXT)') }];
+
+    runMigrations(db, fake);
+
+    const row = db.prepare('SELECT checksum FROM schema_migrations WHERE version = 9001').get();
+    expect(row.checksum).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('skips silently when the checksum still matches', async () => {
+    const { runMigrations } = await import('./migrations/index.js');
+    const fake = [{ version: 9001, name: 'test_only', up: (d) => d.exec('CREATE TABLE t9001 (x TEXT)') }];
+
+    runMigrations(db, fake);
+    let second;
+    expect(() => { second = runMigrations(db, fake); }).not.toThrow();
+    expect(second.applied).toEqual([]);
+  });
+
+  it('throws when a recorded migration\'s source has changed', async () => {
+    const { runMigrations } = await import('./migrations/index.js');
+    const original = [{ version: 9001, name: 'test_only', up: (d) => d.exec('CREATE TABLE t9001 (x TEXT)') }];
+    const changed = [{ version: 9001, name: 'test_only', up: (d) => d.exec('CREATE TABLE t9001 (x TEXT, y TEXT)') }];
+
+    runMigrations(db, original);
+
+    expect(() => runMigrations(db, changed)).toThrow(/9001/);
+    expect(() => runMigrations(db, changed)).toThrow(/test_only/);
+  });
+
+  it('throws when a recorded migration has a NULL checksum', async () => {
+    const { runMigrations } = await import('./migrations/index.js');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version    INTEGER PRIMARY KEY,
+        name       TEXT NOT NULL,
+        applied_at TEXT NOT NULL,
+        checksum   TEXT
+      )
+    `);
+    db.prepare(
+      'INSERT INTO schema_migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)'
+    ).run(9001, 'test_only', new Date().toISOString(), null);
+
+    const fake = [{ version: 9001, name: 'test_only', up: (d) => d.exec('CREATE TABLE t9001 (x TEXT)') }];
+
+    expect(() => runMigrations(db, fake)).toThrow(/9001/);
+  });
+
+  it('adds the checksum column to a pre-existing three-column table', async () => {
+    const { runMigrations } = await import('./migrations/index.js');
+    db.exec(`
+      CREATE TABLE schema_migrations (
+        version    INTEGER PRIMARY KEY,
+        name       TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      )
+    `);
+    db.prepare(
+      'INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)'
+    ).run(1, 'legacy_row', new Date().toISOString());
+
+    // No migration in this list matches version 1, so the legacy row is never
+    // verified and this run cannot throw — it only proves the ALTER TABLE path.
+    runMigrations(db, [{ version: 9001, name: 'test_only', up: (d) => d.exec('CREATE TABLE t9001 (x TEXT)') }]);
+
+    const columns = db.prepare('PRAGMA table_info(schema_migrations)').all().map(c => c.name);
+    expect(columns).toContain('checksum');
+  });
+
+  it('produces an actionable error message naming the migration and the remedy', async () => {
+    const { runMigrations } = await import('./migrations/index.js');
+    const original = [{ version: 9001, name: 'test_only', up: (d) => d.exec('CREATE TABLE t9001 (x TEXT)') }];
+    const changed = [{ version: 9001, name: 'test_only', up: (d) => d.exec('CREATE TABLE t9001 (x TEXT, y TEXT)') }];
+
+    runMigrations(db, original);
+
+    try {
+      runMigrations(db, changed);
+      throw new Error('expected runMigrations to throw');
+    } catch (err) {
+      expect(err.message).toMatch(/test_only/);
+      expect(err.message).toMatch(/schema_migrations/);
+      expect(err.message).toMatch(/delete/i);
+    }
+  });
 });
