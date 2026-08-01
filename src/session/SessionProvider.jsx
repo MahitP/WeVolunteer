@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
+import { can } from '../authz.js';
 import { connectSocket, disconnectSocket } from '../services/socket';
 
 const SessionContext = createContext(null);
@@ -62,14 +63,17 @@ export function SessionProvider({ addToast, children }) {
   /**
    * @param {string} [role] the signed-in user's role, when the caller already
    *   knows it. refreshAll has it in hand before `currentUser` state has settled,
-   *   and reading the stale state there would send `mine=true` for an admin on
-   *   the first load.
+   *   and reading the stale state there would send `mine=true` for a moderator
+   *   on the first load.
    */
   const loadEvents = async (role) => {
     const generation = ++eventsLoadGeneration.current;
     const isCurrent = () => eventsLoadGeneration.current === generation;
 
     setEventsLoading(true);
+    /* The caller may hand us a role before `currentUser` state has settled;
+       spread the known user so any per-user grants it carries still count. */
+    const actor = { ...(currentUser || {}), role: role ?? currentUser?.role };
     try {
       await api.fetchEventsProgressive({
         // The server's maximum, deliberately. A deployment whose whole event list
@@ -85,11 +89,14 @@ export function SessionProvider({ addToast, children }) {
          * exists so the calendar can resolve each application to its event and
          * the dashboards can filter for their own — none of which needs the
          * district's entire history. Bounded by the user's own activity, it is
-         * one small request instead of the whole table. Admins are excluded
-         * because the review queue legitimately moderates everything, and it
-         * already makes its own separate call.
+         * one small request instead of the whole table. Anyone who can moderate
+         * events is excluded, because the review queue legitimately moderates
+         * everything and it already makes its own separate call — that is
+         * `event.moderate`, which admin and super_admin hold and nobody else
+         * does. It was `role === 'admin'`, which handed the platform owner the
+         * narrow index its review queue cannot work from.
          */
-        params: (role ?? currentUser?.role) === 'admin' ? {} : { mine: 'true' },
+        params: can(actor, 'event.moderate') ? {} : { mine: 'true' },
         shouldContinue: isCurrent,
         // Applied per page, so the first screenful renders without waiting for
         // the whole table. `slice()` because the accumulator is mutated in place.
@@ -161,13 +168,19 @@ export function SessionProvider({ addToast, children }) {
          */
         const eventsDone = loadEvents(user.role);
 
+        /* Favouriting is a volunteer's shortlist of events to apply to, so
+           `event.apply` is the capability that makes the list mean anything.
+           Held by student (unchanged) and, through the wildcard, super_admin;
+           GET /api/favorites is scoped to the caller's own rows for every
+           role, so fetching it can never widen what anyone sees. */
+        const canFavorite = can(user, 'event.apply');
         const promises = [api.fetchApplications()];
-        if (user.role === 'student') {
+        if (canFavorite) {
           promises.push(api.fetchFavorites().catch(() => []));
         }
         const [apps, favs] = await Promise.all(promises);
         setApplications(apps);
-        if (user.role === 'student' && favs) {
+        if (canFavorite && favs) {
           setFavorites(favs.map(f => f.event_id || f.eventId));
         }
 
