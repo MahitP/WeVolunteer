@@ -1375,6 +1375,34 @@ when they are done, not when they become uncomfortable to look at.
 - **Action:** re-evaluate before any Node major upgrade. Related to §10.1.
 - **Effort:** unknown; assessment only for now. **Opened:** 2026-07-31.
 
+### Resolved
+
+Kept rather than deleted, because the reasoning is the part worth having.
+
+#### TD-9 — flaky route assertion in `src/App.authRoutes.test.jsx` — **resolved**
+
+- **Symptom.** `npm test` failed roughly **one run in four**, always in
+  *"C1 — /oauth/callback resolves for an authenticated user"*, always by timing
+  out inside a `findByText` rather than by rendering the wrong thing. Observed
+  failure counts varied between runs (6 tests, then 2, then 1), which is the
+  signature of contention rather than a logic defect. It passed **6/6 in
+  isolation**, so it only ever failed as part of the full suite.
+- **Root cause.** The test timed out because `/oauth/callback` waited for the entire session bootstrap to complete before rendering anything. Every route in `App.jsx` is `React.lazy`, and for a signed-in user the route wait also included `getMe` and progressive fetch of applications, favorites, and events. Testing Library's default `findBy*` budget is 1000ms. Measured cost of the bootstrap path under load was 380–514ms, and scheduling spikes easily caused it to exceed 1000ms.
+- **Why it hid.** The sibling assertion one line below uses the *same* query and never failed, because the signed-out path resolves `getMe` to `null` immediately (7ms) and so never waits on the bootstrap chain.
+- **Fix.** Add deterministic synchronization by making `/oauth/callback` independent of the session bootstrap. Moved `AUTH_FLOW_PATHS` check to be above `if (isCheckingSession)` in `App.jsx`. Since those routes only handle the callback logic and redirect or toast, they do not need `currentUser` or any other session state to render their UI ("Completing sign-in…"). Moving this eliminates the wait budget issue entirely, and testing confirms it renders instantly.
+- **Sequencing note.** Fixed *before* TD-1 deliberately. Wiring `npm ci` into CI
+  while the suite failed one run in four would have made CI untrustworthy from
+  its first day, and a CI that cries wolf gets ignored — which costs more than
+  having no CI at all.
+- **Opened and closed:** 2026-07-31.
+
+#### TD-10 — `server/datetimeComparison.test.js` UTC rollover bug — **resolved**
+
+- **Symptom.** `npm test` failed on the `demonstrates that lexicographic comparison misclassifies same-day timestamps` test if run between 00:00 and 04:00 UTC (20:00 - 00:00 EDT).
+- **Root cause.** The test used `isoFromNow(-4 * HOUR)` to generate a past timestamp and compared it against SQLite's `datetime('now')`. The test was meant to demonstrate how `T` (0x54) and space (0x20) break comparisons, but it depended on the timestamps being on the *same calendar day*. During those 4 hours of the day, `datetime('now')` and the past timestamp land on different UTC days, which sidestepped the quirk the test was trying to verify.
+- **Fix.** Replaced the clock-dependent inputs (`datetime('now')` and `isoFromNow`) with hardcoded, explicit same-day strings (`2026-07-31T16:00:00.000Z` vs `2026-07-31 20:00:00`) for the lexicographic demonstration. This makes the test deterministic regardless of the wall clock time.
+- **Opened and closed:** 2026-07-31.
+
 ### Register maintenance
 
 Review at every release. When closing an item, note the commit that closed it.
