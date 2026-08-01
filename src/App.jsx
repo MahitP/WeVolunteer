@@ -558,45 +558,6 @@ export default function App() {
   };
   const viewOrganizer = (id) => id && setViewingProfileState({ type: 'organizer', id });
 
-  /* ── Session check ─────────────────────────────────────────── */
-  if (isCheckingSession) {
-    return (
-      <div style={{ maxWidth: 800, margin: '0 auto', paddingTop: 'var(--s8)' }}>
-        <LoadingSkeleton heights={[40, 120, 300, 100]} />
-      </div>
-    );
-  }
-
-  // Public Routes (like certificate verification) bypass auth checks
-  if (currentPath.startsWith('/verify/')) {
-    return (
-      <React.Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/verify/:code" element={<CertificateVerification />} />
-        </Routes>
-      </React.Suspense>
-    );
-  }
-
-  /**
-   * Screens reached by a link from outside the app, handled BEFORE the session
-   * branches below.
-   *
-   * Both of these used to live only in the signed-out route table, which meant
-   * the authenticated shell's `*` catch-all swallowed them:
-   *
-   *   • /oauth/callback — pressing "Connect" in Settings sent the user to
-   *     Google and brought them back to a path that redirected to the
-   *     dashboard. The authorization code was never exchanged, so nothing was
-   *     linked, and nothing said so. The server's entire `auto_linked` branch
-   *     was unreachable in practice.
-   *   • /reset-password — a user already signed in on their phone who tapped
-   *     the reset link in their email landed on the dashboard instead.
-   *
-   * Neither is a "signed-out screen". The sender of the link cannot know
-   * whether a session exists, so the route has to resolve in all three states
-   * (no session, unconfirmed session, confirmed session).
-   */
   if (AUTH_FLOW_PATHS.includes(currentPath)) {
     return (
       <>
@@ -635,6 +596,28 @@ export default function App() {
       </>
     );
   }
+
+  /* ── Session check ─────────────────────────────────────────── */
+  if (isCheckingSession) {
+    return (
+      <div style={{ maxWidth: 800, margin: '0 auto', paddingTop: 'var(--s8)' }}>
+        <LoadingSkeleton heights={[40, 120, 300, 100]} />
+      </div>
+    );
+  }
+
+  // Public Routes (like certificate verification) bypass auth checks
+  if (currentPath.startsWith('/verify/')) {
+    return (
+      <React.Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/verify/:code" element={<CertificateVerification />} />
+        </Routes>
+      </React.Suspense>
+    );
+  }
+
+
 
   if (!currentUser) {
     return (

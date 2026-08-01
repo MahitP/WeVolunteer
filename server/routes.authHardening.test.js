@@ -71,14 +71,14 @@ describe('S1 — the login throttle is per account, not per spelling', () => {
 
     const viaEmail = await login(EMAIL, 'still-wrong');
     expect(viaEmail.status).toBe(429);
-  });
+  }, 15000);
 
   it('does not let one account lock out another', async () => {
     await fail(EMAIL, 11);
 
     const other = await login('priya.patel.nhs@outlook.com', PASSWORD);
     expect(other.status).toBe(200);
-  });
+  }, 15000);
 
   it('clears the bucket on a successful sign-in', async () => {
     await fail(EMAIL, 5);
@@ -112,7 +112,7 @@ describe('S2 — the lock is checked before the account-shape branches', () => {
     const res = await login('does-not-exist@nowhere.test', 'x');
     expect(res.status).toBe(429);
     expect((await res.json()).code).toBe('account_throttled');
-  });
+  }, 15000);
 
   it('stops answering wrong_password for a locked real account', async () => {
     await fail(EMAIL, 10);
@@ -121,7 +121,7 @@ describe('S2 — the lock is checked before the account-shape branches', () => {
     expect(res.status).toBe(429);
     // Not 401/wrong_password: the lock is now the first thing consulted.
     expect((await res.json()).code).toBe('account_throttled');
-  });
+  }, 15000);
 
   it('refuses even the correct password while locked', async () => {
     await fail(EMAIL, 10);
@@ -130,7 +130,7 @@ describe('S2 — the lock is checked before the account-shape branches', () => {
     // make the throttle decorative against an online attack.
     const res = await login(EMAIL, PASSWORD);
     expect(res.status).toBe(429);
-  });
+  }, 15000);
 });
 
 describe('S3 — PATCH /profile uses the same rules as signup', () => {

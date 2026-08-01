@@ -65,9 +65,14 @@ describe('the raw comparison semantics', () => {
     // rediscover why binding an ISO string matters.
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(':memory:');
-    const endedEarlierToday = isoFromNow(-4 * HOUR);
+    
+    // Explicit same-day strings demonstrate the separator bug without UTC rollover flakes
+    const sqliteNow = '2026-07-31 20:00:00';
+    const isoEarlier = '2026-07-31T16:00:00.000Z';
 
-    const wrong = db.prepare("SELECT ? > datetime('now') AS isFuture").get(endedEarlierToday).isFuture;
+    const wrong = db.prepare("SELECT ? > ? AS isFuture").get(isoEarlier, sqliteNow).isFuture;
+    
+    const endedEarlierToday = isoFromNow(-4 * HOUR);
     const right = db.prepare("SELECT julianday(?) > julianday('now') AS isFuture").get(endedEarlierToday).isFuture;
     const bound = db.prepare('SELECT ? > ? AS isFuture').get(endedEarlierToday, new Date().toISOString()).isFuture;
 
