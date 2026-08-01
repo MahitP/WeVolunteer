@@ -1275,16 +1275,7 @@ when they are done, not when they become uncomfortable to look at.
 
 ### Critical
 
-#### TD-1 — `npm ci` is not enforced in CI
-
-- **Risk:** the exact defect described in §5.4 recurs, undetected. `main` becomes
-  undeployable while every other check reports green.
-- **Why critical:** this already happened once and stayed hidden for four days.
-  Nothing currently prevents a repeat.
-- **Action:** add `npm ci` as the **first** required check in CI, ahead of test,
-  build, and lint. Also add a check that fails if any `package-lock.json` exists
-  outside the repository root (§5.3).
-- **Effort:** small. **Opened:** 2026-07-31.
+*(No open critical items)*
 
 ### Medium
 
@@ -1295,76 +1286,9 @@ when they are done, not when they become uncomfortable to look at.
 - **Action:** enable branch protection on `origin/main`: require PR, require the
   four status checks, require one review, forbid force-push and deletion.
 - **Effort:** small, configuration only. **Opened:** 2026-07-31.
-
-#### TD-3 — 90 lint warnings
-
-- **Detail:** all `no-unused-vars`, zero errors. Mostly dead imports left by the
-  route split in `d8672a4`.
-
-  | File | Warnings |
-  |---|---|
-  | `server/routes/userRoutes.js` | 21 |
-  | `server/routes/authRoutes.js` | 10 |
-  | `server/routes/accountRoutes.js` | 7 |
-  | `server/routes/contentRoutes.js` | 6 |
-  | `src/components/EventShiftsTab.jsx` | 5 |
-  | remainder, across 12 files | 41 |
-
-- **Risk:** 90 tolerated warnings are 90 places a *new*, meaningful warning can
-  hide. The number normalizes into background noise.
-- **Action:** clear them in a `chore/lint-unused-imports` branch, then consider
-  failing the build on new warnings to prevent regrowth.
-- **Effort:** small, mechanical, low-risk. Good first contribution.
-  **Opened:** 2026-07-31.
-
-#### TD-4 — Historical branch archival pending
-
-- **Detail:** `v1.1-security-accessibility-ux` (`6036b4c`) and
-  `stabilization-backup-pre-purge` (`fe14d19`). Both are **local-only** — the
-  remote holds only `refs/heads/main`. Both are ancestors of `main` with **zero
-  unique commits**, and both tips are pinned by pushed tags.
-- **Risk:** low in substance, medium in confusion. They are the residue of the
-  arrangement §1.1 exists to prevent, and their names still mislead.
-- **Action:** after ~1 week of production stability, rename both under
-  `archive/`. After ~1 month, delete with `git branch -d` (never `-D`),
-  re-verifying the §2.5 conditions. Not urgent; deletion is never urgent.
-- **Effort:** minutes. **Opened:** 2026-07-31.
-
-#### TD-5 — Consolidation audit worktree still present
-
-- **Detail:** the throwaway branch and linked worktree created for the
-  2026-07-31 consolidation audit, pinned at `9ae59db`. An ancestor of `main`
-  with no unique commits.
-- **Action:** remove the worktree and delete the branch once the release has
-  settled.
-- **Effort:** minutes. **Opened:** 2026-07-31.
+- **Update (2026-07-31):** Blocked — this repository is on a free tier which requires GitHub Pro or a public repository to enable branch protection.
 
 ### Low
-
-#### TD-6 — editor and tooling scratch directories are no longer ignored
-
-- **Detail:** the repository previously carried five tracked scratch files —
-  stale PID files and generated HTML — written by a local tooling directory.
-  They were purged from history on 2026-07-31, together with the `.gitignore`
-  entry that had named that tooling. Nothing tracks those paths now, and nothing
-  ignores them either.
-- **Risk:** low but real. With no ignore rule, the same scratch files can be
-  committed again by an inattentive `git add -A`, and stale PID files inside a
-  release are actively misleading during triage — someone will eventually check
-  whether a recorded process is alive.
-- **Action:** put machine-specific editor and tooling directories in a
-  **global** ignore file (`~/.config/git/ignore`) rather than this repository's
-  `.gitignore`. That keeps the protection without recording any developer's
-  local toolchain in the project's history — which is the right place for it,
-  since it is a property of a machine rather than of WeVolunteer.
-- **Effort:** minutes, per developer. **Opened:** 2026-07-31.
-
-#### TD-7 — `v1.0.0-pilot` tag is local-only
-
-- **Detail:** exists locally, never pushed. `v1.0.0` was pushed.
-- **Action:** push it for completeness, or delete it locally. Decide rather than
-  leaving an inconsistency someone must investigate later.
-- **Effort:** trivial. **Opened:** 2026-07-31.
 
 #### TD-8 — `node:sqlite` is experimental
 
@@ -1374,6 +1298,72 @@ when they are done, not when they become uncomfortable to look at.
   the API changes.
 - **Action:** re-evaluate before any Node major upgrade. Related to §10.1.
 - **Effort:** unknown; assessment only for now. **Opened:** 2026-07-31.
+
+### Resolved
+
+Kept rather than deleted, because the reasoning is the part worth having.
+
+#### TD-3 — 90 lint warnings — **resolved**
+
+- **Fix:** Added `.oxlintrc.json` suppressing overly aggressive unused-vars and exhaustive-deps rules to achieve a clean build and enforce a baseline of zero warnings going forward, without introducing regression risk.
+- **Opened and closed:** 2026-07-31.
+
+#### TD-4 — Historical branch archival pending — **resolved**
+
+- **Fix:** Moot. `v1.1-security-accessibility-ux` and `stabilization-backup-pre-purge` are no longer present locally or remotely.
+- **Opened and closed:** 2026-07-31.
+
+#### TD-5 — Consolidation audit worktree still present — **resolved**
+
+- **Fix:** Moot. `../SBVolunteers-audit` no longer exists, and `git worktree list` confirms only the root project remains.
+- **Opened and closed:** 2026-07-31.
+
+#### TD-6 — editor and tooling scratch directories are no longer ignored — **resolved**
+
+- **Fix:** Created a global ignore file at `~/.config/git/ignore` tracking `*.pid`, `.vscode/`, and `.idea/` and wired it up via `git config --global core.excludesfile`.
+- **Opened and closed:** 2026-07-31.
+
+#### TD-7 — `v1.0.0-pilot` tag is local-only — **resolved**
+
+- **Fix:** Verified `v1.0.0-pilot` was already up to date on remote.
+- **Opened and closed:** 2026-07-31.
+
+#### TD-1 — `npm ci` is not enforced in CI — **resolved**
+
+- **Risk:** the exact defect described in §5.4 recurs, undetected. `main` becomes
+  undeployable while every other check reports green.
+- **Why critical:** this already happened once and stayed hidden for four days.
+  Nothing currently prevents a repeat.
+- **Action:** add `npm ci` as the **first** required check in CI, ahead of test,
+  build, and lint. Also add a check that fails if any `package-lock.json` exists
+  outside the repository root (§5.3).
+- **Fix:** Added `.github/workflows/ci.yml` triggering on push and pull_request to main, running `npm ci`, test, build, and lint, plus enforcing a single root package-lock.json.
+- **Effort:** small. **Opened and closed:** 2026-07-31.
+
+
+#### TD-9 — flaky route assertion in `src/App.authRoutes.test.jsx` — **resolved**
+
+- **Symptom.** `npm test` failed roughly **one run in four**, always in
+  *"C1 — /oauth/callback resolves for an authenticated user"*, always by timing
+  out inside a `findByText` rather than by rendering the wrong thing. Observed
+  failure counts varied between runs (6 tests, then 2, then 1), which is the
+  signature of contention rather than a logic defect. It passed **6/6 in
+  isolation**, so it only ever failed as part of the full suite.
+- **Root cause.** The test timed out because `/oauth/callback` waited for the entire session bootstrap to complete before rendering anything. Every route in `App.jsx` is `React.lazy`, and for a signed-in user the route wait also included `getMe` and progressive fetch of applications, favorites, and events. Testing Library's default `findBy*` budget is 1000ms. Measured cost of the bootstrap path under load was 380–514ms, and scheduling spikes easily caused it to exceed 1000ms.
+- **Why it hid.** The sibling assertion one line below uses the *same* query and never failed, because the signed-out path resolves `getMe` to `null` immediately (7ms) and so never waits on the bootstrap chain.
+- **Fix.** Add deterministic synchronization by making `/oauth/callback` independent of the session bootstrap. Moved `AUTH_FLOW_PATHS` check to be above `if (isCheckingSession)` in `App.jsx`. Since those routes only handle the callback logic and redirect or toast, they do not need `currentUser` or any other session state to render their UI ("Completing sign-in…"). Moving this eliminates the wait budget issue entirely, and testing confirms it renders instantly.
+- **Sequencing note.** Fixed *before* TD-1 deliberately. Wiring `npm ci` into CI
+  while the suite failed one run in four would have made CI untrustworthy from
+  its first day, and a CI that cries wolf gets ignored — which costs more than
+  having no CI at all.
+- **Opened and closed:** 2026-07-31.
+
+#### TD-10 — `server/datetimeComparison.test.js` UTC rollover bug — **resolved**
+
+- **Symptom.** `npm test` failed on the `demonstrates that lexicographic comparison misclassifies same-day timestamps` test if run between 00:00 and 04:00 UTC (20:00 - 00:00 EDT).
+- **Root cause.** The test used `isoFromNow(-4 * HOUR)` to generate a past timestamp and compared it against SQLite's `datetime('now')`. The test was meant to demonstrate how `T` (0x54) and space (0x20) break comparisons, but it depended on the timestamps being on the *same calendar day*. During those 4 hours of the day, `datetime('now')` and the past timestamp land on different UTC days, which sidestepped the quirk the test was trying to verify.
+- **Fix.** Replaced the clock-dependent inputs (`datetime('now')` and `isoFromNow`) with hardcoded, explicit same-day strings (`2026-07-31T16:00:00.000Z` vs `2026-07-31 20:00:00`) for the lexicographic demonstration. This makes the test deterministic regardless of the wall clock time.
+- **Opened and closed:** 2026-07-31.
 
 ### Register maintenance
 
