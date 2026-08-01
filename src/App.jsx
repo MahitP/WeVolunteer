@@ -192,7 +192,7 @@ const PAGE_META = {
  * App.shellByRole.test.jsx pins that completeness so a sixth role cannot ship
  * without one.
  */
-const ROLE_LABEL = {
+export const ROLE_LABEL = {
   admin: 'Administrator',
   organizer: 'Organizer',
   student: 'Volunteer',
