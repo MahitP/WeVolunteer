@@ -75,7 +75,7 @@ router.post('/api/messages/conversations/resolve', authenticateToken, (req, res)
     const { eventId, studentId } = req.body;
     if (!eventId) return res.status(400).json({ error: 'eventId is required' });
 
-    const result = resolveConversation({ eventId, studentId, actor: req.user });
+    const result = resolveConversation({ eventId, studentId, actor: req.user, principal: req.principal });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
 
     res.status(200).json({ conversation: result.conversation });
