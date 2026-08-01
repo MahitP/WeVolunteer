@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticateToken } from '../utils.js';
+import { requireCap } from '../authz.js';
 import { DEMO_MODE } from '../config.js';
 import rateLimit from 'express-rate-limit';
 
@@ -67,12 +68,7 @@ function formatAddress(addr) {
  * Never called by students. Central rate limiting, caching, and
  * response normalization.
  */
-router.get('/api/geocode', geocodeLimiter, authenticateToken, async (req, res) => {
-  // Role gate: only organizers and admins need geocoding
-  if (req.user.role === 'student') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
+router.get('/api/geocode', geocodeLimiter, authenticateToken, requireCap('geocode.use'), async (req, res) => {
   const raw = req.query.q;
   if (!raw || typeof raw !== 'string') {
     return res.status(400).json({ error: 'Query parameter q is required' });

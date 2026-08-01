@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticateToken, inTransaction } from '../utils.js';
+import { can } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
@@ -356,17 +357,25 @@ router.get('/api/messages/users/search', authenticateToken, (req, res) => {
     const like = `%${q}%`;
     let rows = [];
 
-    if (req.user.role === 'student') {
-      rows = db.prepare(`
-        SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role, e.id AS eventId, e.title AS eventTitle
-        FROM users u
-        JOIN events e ON e.organizer_id = u.id
-        JOIN applications a ON a.event_id = e.id
-        WHERE a.user_id = ?
-          AND (u.name LIKE ? OR u.username LIKE ?)
-        LIMIT 20
-      `).all(req.user.id, like, like);
-    } else if (req.user.role === 'organizer' || req.user.role === 'admin') {
+    // Result scoping, not a gate: every authenticated role reaches this route,
+    // and the capability only chooses which query runs.
+    //
+    // Ordered most-privileged-first, and deliberately: `can()` treats a
+    // super_admin principal as satisfying EVERY capability (the '*' wildcard
+    // in authz.js), so a wildcard principal always matches whichever branch is
+    // tested first. The staff-style query was reached by BOTH `organizer` and
+    // `admin` before this conversion (the original condition compared the
+    // account's role against both names directly), so the capability check
+    // has to cover both too: `applicant.review` is
+    // organizer-only in the capability table, so `event.moderate` (admin, and
+    // super_admin via the wildcard) is included alongside it — using
+    // `applicant.review` alone would have silently narrowed admin out of a
+    // query it could reach today, the exact shape of the Task 7b defect this
+    // project is guarding against. `application.withdraw` (student
+    // self-service) is checked second. Neither branch matching (partner
+    // today) falls through to the empty `rows = []` above — never an
+    // unscoped `else` that would search every user on the platform.
+    if (can(req.principal, 'applicant.review') || can(req.principal, 'event.moderate')) {
       rows = db.prepare(`
         SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role, e.id AS eventId, e.title AS eventTitle
         FROM users u
@@ -375,7 +384,17 @@ router.get('/api/messages/users/search', authenticateToken, (req, res) => {
         WHERE e.organizer_id = ?
           AND (u.name LIKE ? OR u.username LIKE ?)
         LIMIT 20
-      `).all(req.user.id, like, like);
+      `).all(req.principal.userId, like, like);
+    } else if (can(req.principal, 'application.withdraw')) {
+      rows = db.prepare(`
+        SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role, e.id AS eventId, e.title AS eventTitle
+        FROM users u
+        JOIN events e ON e.organizer_id = u.id
+        JOIN applications a ON a.event_id = e.id
+        WHERE a.user_id = ?
+          AND (u.name LIKE ? OR u.username LIKE ?)
+        LIMIT 20
+      `).all(req.principal.userId, like, like);
     }
 
     res.json({ users: rows });

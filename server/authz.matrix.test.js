@@ -275,36 +275,38 @@ const EXPECTED = [
   // masked as a 404 (also 'allow'), silently erasing the super_admin bug this
   // file exists to catch. Denied roles first avoids that entirely.
   ['DELETE', '/api/comments/cmt-1',
-    { student: 403, partner: 403, super_admin: BUG('allow', '7d'), organizer: 'allow', admin: 'allow' }],
+    { student: 403, partner: 403, super_admin: 'allow', organizer: 'allow', admin: 'allow' }],
 
   // Real event-softball id + body: ownership check happens after the
   // body-presence check, so a real body is required to reach it.
   ['POST', '/api/events/event-softball/announcements',
-    { student: 403, organizer: 'allow', admin: 'allow', super_admin: BUG('allow', '7d'), partner: 403 },
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 },
     { body: { body: 'Reminder: arrive 15 minutes early.' } }],
 
   // Real ann-1 (authored by the organizer fixture) + body. PATCH does not
   // delete the row, so no reordering hazard here.
   ['PATCH', '/api/announcements/ann-1',
-    { student: 403, organizer: 'allow', admin: 'allow', super_admin: BUG('allow', '7d'), partner: 403 },
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 },
     { body: { body: 'Updated: arrive 20 minutes early.' } }],
 
   // Same reordering hazard and same fix as the comment delete above.
   ['DELETE', '/api/announcements/ann-1',
-    { student: 403, partner: 403, super_admin: BUG('allow', '7d'), organizer: 'allow', admin: 'allow' }],
+    { student: 403, partner: 403, super_admin: 'allow', organizer: 'allow', admin: 'allow' }],
 
   ['GET', '/api/stats/volunteer',
     // organizer is genuinely unreachable today (role !== 'student' blocks it
     // too) — 403 is correct now and, per capability-mapping.md's own
     // instruction to "check before assuming", stays correct after conversion.
-    { student: 'allow', organizer: 403, admin: 403, super_admin: BUG('allow', '7d'), partner: 403 }],
+    { student: 'allow', organizer: 403, admin: 403, super_admin: 'allow', partner: 403 }],
 
   ['GET', '/api/stats/organizer',
-    // admin is denied today; capability-mapping.md's new `analytics.own_events`
-    // capability deliberately grants it to admin too post-conversion — a
-    // considered widening (like attendanceRoutes.js:62), not a bug, so it is
-    // recorded as-is rather than wrapped in BUG().
-    { student: 403, organizer: 'allow', admin: 403, super_admin: BUG('allow', '7d'), partner: 403 }],
+    // admin was denied before Task 7d; capability-mapping.md's new
+    // `analytics.own_events` capability deliberately grants it to admin too —
+    // a considered widening (like attendanceRoutes.js:62's attendance.mark
+    // correction), not a bug. Recorded as its POST-conversion value directly,
+    // per this file's own docstring on editing non-BUG() cells for a
+    // deliberate behaviour change; see CHANGELOG.md.
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
 
   // ── messageRoutes.js (Task 7d) ──
   //
