@@ -310,6 +310,20 @@ const EXPECTED = [
     // recorded as-is rather than wrapped in BUG().
     { student: 403, organizer: 'allow', admin: 403, super_admin: BUG('allow', '7d'), partner: 403 }],
 
+  // ── messageRoutes.js (Task 7d) ──
+  //
+  // Result scoping, not a gate: `student` gets one query, `organizer`/`admin`
+  // get another, and anything else (super_admin, partner) falls through both
+  // branches to the default `rows = []` — still a 200, never a 403. Confirmed
+  // by reading the handler (server/routes/messageRoutes.js:352-386): there is
+  // no `else` branch and no denial of any kind. Recorded as all-'allow',
+  // which is still a real baseline — Task 7d converts these role branches to
+  // `can(p, 'applicant.review')`-style checks, and if that conversion ever
+  // turns this into an actual gate for some role, this row is what would
+  // catch it as a diff.
+  ['GET', '/api/messages/users/search?q=le',
+    { student: 'allow', organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 'allow' }],
+
   // ── userRoutes.js (Task 7d) ──
 
   // No role check at all — canSeeContact only toggles which FIELDS are
