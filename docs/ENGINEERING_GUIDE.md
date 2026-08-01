@@ -1400,7 +1400,75 @@ when they are done, not when they become uncomfortable to look at.
 - **Effort:** small, configuration only. **Opened:** 2026-07-31.
 - **Update (2026-07-31):** Blocked — this repository is on a free tier which requires GitHub Pro or a public repository to enable branch protection.
 
+#### TD-11 — the vitest fork pool crashes intermittently
+
+- **Symptom:** `Worker exited unexpectedly` / `[vitest-pool]` failures on roughly
+  one `npm test` run in three, dropping one file's results. Always green on
+  retry, never with an assertion failure.
+- **Why it is not a code defect:** reproduced on an unmodified baseline via
+  `git stash` during the v1.2a work, on four separate occasions by three
+  different authors.
+- **Risk:** this is the TD-9 pattern again at the infrastructure layer. An
+  intermittently red suite erodes trust in exactly the guards §6 now depends on,
+  and it will make CI untrustworthy from the day branch protection lands (TD-2).
+- **Action:** try `pool: 'threads'` or `--no-file-parallelism` in
+  `vitest.config.js` and measure over ~20 runs before and after.
+- **Effort:** small to diagnose, unknown to fix. **Opened:** 2026-08-01.
+
+#### TD-12 — Guard 1 cannot see aliased or parenthesised role reads
+
+- **Detail:** `server/authz.completeness.test.js`'s server-side patterns miss two
+  spellings that the client-side scan (pattern 5) does catch. Confirmed by
+  experiment during the v1.2a review: `const r = req.user.role; … r === 'admin'`
+  and `(role ?? req.principal?.effectiveRole) === 'admin'` both evade all seven
+  server patterns.
+- **Risk:** `server/` is clean of both spellings today, so nothing is hidden. But
+  three role checks evaded a guard on this branch by being spelled differently,
+  and this is the fourth known spelling.
+- **Action:** port the client scan's broad pattern to the server scan; expect it
+  to need its own reviewed-exception list, which is presumably why it was not
+  there originally.
+- **Effort:** small. **Opened:** 2026-08-01.
+
+#### TD-13 — `rebuildApplicationsForWithdrawn` does not meet §8.3's own bar
+
+- **Detail:** §8.3 now states that a destructive rewrite in the automatic startup
+  path must meet six guards. The `applications` rebuild in `server/db.js` meets
+  three: it gained an explicit column list and an unknown/missing-column guard in
+  v1.2a, but has no backup-first mandate and no pragma-took-effect assertion, and
+  its `PRAGMA foreign_keys` handling is deferred.
+- **Risk:** low in practice — the block is unreachable on any database created
+  since `'withdrawn'` entered the `CREATE TABLE`, so it only ever runs against a
+  pre-`withdrawn` database. But the guide currently asserts an invariant the
+  codebase does not hold.
+- **Action:** either bring it up to the six guards, or move it into the migration
+  registry where `001_authz_roles.js` already implements them; then correct §8.3.
+- **Effort:** medium. **Opened:** 2026-08-01.
+
 ### Low
+
+#### TD-14 — migration checksum canonicaliser mis-parses a regex after a keyword
+
+- **Detail:** `canonicalSource`'s `REGEX_MAY_FOLLOW` set omits keyword contexts,
+  so a regex literal following `return` is read as division and the rest of the
+  line is silently dropped from the hash. Only triggers for a regex containing
+  `//` or `/*` outside assignment position.
+- **Risk:** nil today — neither migration file contains a regex literal, and both
+  canonicalise end to end. It becomes real if a future migration adds one.
+- **Action:** add keyword contexts to `REGEX_MAY_FOLLOW`, or add a comment
+  banning regex literals in migration modules.
+- **Effort:** small. **Opened:** 2026-08-01.
+
+#### TD-15 — `UNCONVERTED_UX` is an unratcheted escape hatch
+
+- **Detail:** the client role-string scan declares 12 known UX-only role branches
+  (`EventModal`, `EventCard`, `Messages`, and others). Nothing stops a future
+  author adding a thirteenth entry instead of a `can()` call and staying green.
+- **Risk:** the debt can grow silently. Four of the twelve want a `favorite.*`
+  capability that does not exist yet.
+- **Action:** assert a ceiling on the category's size so it can only shrink; add
+  the missing capability when the favourites work is next touched.
+- **Effort:** small. **Opened:** 2026-08-01.
 
 #### TD-8 — `node:sqlite` is experimental
 
