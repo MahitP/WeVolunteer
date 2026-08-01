@@ -1306,9 +1306,20 @@ Then proceed to the full workflow smoke test in §10.
 
 ### Migrations
 
-There is no migration tool, no versions table, and no up/down scripts.
-**`initDatabase()` in `server/db.js` is the migration system, and it runs on
-every boot.** Understand the order, because it matters:
+There are no up/down scripts, and no third-party migration tool. Schema changes
+arrive through two mechanisms, both driven by **`initDatabase()` in
+`server/db.js`, which runs on every boot**:
+
+- the idempotent `CREATE TABLE IF NOT EXISTS` / `addColumnIfMissing()` guards
+  that predate v1.2a, and
+- the **versioned migration registry** (`server/migrations/`, added v1.2a),
+  which records what it has run in the **`schema_migrations`** table and
+  verifies a checksum for each applied migration on every boot. A checksum
+  mismatch is a refusal to start — see ENGINEERING_GUIDE §8.5, "Migration
+  checksum failures", for the three causes and their different remedies, and
+  `node bin/migration-checksums.mjs` for the backfill values.
+
+Understand the order, because it matters:
 
 1. `CREATE TABLE IF NOT EXISTS` for the core and V2 tables.
 2. `addColumnIfMissing()` for columns added after the first release —
@@ -1332,6 +1343,13 @@ every boot.** Understand the order, because it matters:
    WHERE email_verified = 0`.
 9. Check-in table, hours ledger (create + backfill + parity), certificates
    (create + backfill).
+10. **The migration registry** (`runMigrations`), last, after every guard above.
+    It applies any migration not yet in `schema_migrations`, lowest version
+    first, each in its own transaction. v1.2a's `001_authz_roles` performs a
+    `DROP TABLE users` rebuild here to widen the role CHECK constraint; it is
+    guarded per ENGINEERING_GUIDE §8.3 (pragma-took-effect assertion, explicit
+    column list, child-row count comparison, `foreign_key_check`) and is a
+    no-op once applied. **Back up before the first boot on v1.2a.**
 
 All of it is idempotent. Restarting repeatedly is safe.
 
