@@ -8,14 +8,11 @@ import { db } from '../db.js';
 import { notificationService } from '../services/notificationService.js';
 import { getMailHealth } from '../email.js';
 import { getQueueHealth } from '../workers/notificationWorker.js';
+import { requireCap } from '../authz.js';
 
 const router = express.Router();
 
-router.get('/api/admin/organizers/pending', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied: Administrators only' });
-  }
-
+router.get('/api/admin/organizers/pending', authenticateToken, requireCap('organizer.approve'), (req, res) => {
   try {
     const rows = db.prepare("SELECT * FROM users WHERE role = 'organizer' AND verified = 0").all();
     const formatted = rows.map(r => formatUserResponse(r));

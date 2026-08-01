@@ -3,6 +3,8 @@ import { db } from './db.js';
 import { notificationService } from './services/notificationService.js';
 import { sendNotificationEmail } from './email.js';
 import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST, COOKIE_NAME } from './config.js';
+import { principalFor } from './authz.js';
+import { grantsFor } from './userCapabilities.js';
 
 /**
  * Whether this specific session has been signed out.
@@ -86,6 +88,10 @@ export function authenticateToken(req, res, next) {
       name: userRow.name,
       email_verified: userRow.email_verified
     };
+
+    // The capability principal. req.user is left exactly as it was, so every
+    // existing handler and test keeps working while call sites migrate.
+    req.principal = principalFor(userRow, { grants: grantsFor(db, userRow.id) });
 
     if (
       REQUIRE_EMAIL_VERIFICATION &&

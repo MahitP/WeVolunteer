@@ -98,3 +98,24 @@ export function can(principal, capability) {
   if (SUPER_ONLY_SET.has(capability)) return false;
   return Array.isArray(principal.grants) && principal.grants.includes(capability);
 }
+
+/**
+ * The only authorization primitive route files may use.
+ *
+ * Must be mounted AFTER authenticateToken, which is what populates
+ * req.principal. A missing principal is a 401 (not authenticated), never a 403,
+ * because the two mean different things to a client: one says "sign in", the
+ * other says "you cannot do this".
+ */
+export function requireCap(capability) {
+  if (!ALL_CAPABILITIES.includes(capability)) {
+    // Thrown at module load, not per request, so a typo fails the boot and the
+    // test suite rather than quietly 403ing in production.
+    throw new Error(`requireCap: unknown capability '${capability}'`);
+  }
+  return function capabilityGate(req, res, next) {
+    if (!req.principal) return res.status(401).json({ error: 'Access token required' });
+    if (!can(req.principal, capability)) return res.status(403).json({ error: 'Access denied' });
+    return next();
+  };
+}
