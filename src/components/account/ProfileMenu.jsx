@@ -2,7 +2,24 @@ import React, { useState, useRef, useEffect } from 'react';
 import { UserCog, Settings, Bell, LogOut, ChevronsUpDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-const ROLE_LABEL = { admin: 'Administrator', organizer: 'Organizer', student: 'Student' };
+/**
+ * How a role is named in the sidebar chip.
+ *
+ * A lookup keyed by role — the correct way to *label* a role, as opposed to
+ * comparing one. Deliberately still separate from App.jsx's ROLE_LABEL: the two
+ * disagree on `student` ('Student' here, 'Volunteer' in the mobile sheet) and
+ * merging them would change what a student reads in one of the two places.
+ *
+ * Every role in ROLES has an entry, so the `||` below is defence rather than
+ * the silent default that rendered the platform owner as "Volunteer".
+ */
+const ROLE_LABEL = {
+  admin: 'Administrator',
+  organizer: 'Organizer',
+  student: 'Student',
+  super_admin: 'Platform administrator',
+  partner: 'Partner'
+};
 
 export default function ProfileMenu({ user, onEditProfile, onSignOut }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -30,7 +47,7 @@ export default function ProfileMenu({ user, onEditProfile, onSignOut }) {
 
   const displayRole = user.role === 'organizer' && !user.verified
     ? 'Pending approval'
-    : ROLE_LABEL[user.role] || 'Volunteer';
+    : ROLE_LABEL[user.role] || 'Member';
 
   return (
     <div className="usermenu" ref={menuRef}>
