@@ -2,6 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 
 import { authenticateToken } from '../utils.js';
+import { can, requireCap } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
@@ -130,7 +131,8 @@ router.delete('/api/comments/:id', authenticateToken, (req, res) => {
   try {
     const cmt = db.prepare('SELECT * FROM event_comments WHERE id = ?').get(req.params.id);
     if (!cmt) return res.status(404).json({ error: 'Comment not found' });
-    if (cmt.user_id !== req.user.id && req.user.role !== 'admin') {
+    // Own comment, or moderation reach — never an unscoped `else`.
+    if (cmt.user_id !== req.principal.userId && !can(req.principal, 'event.moderate')) {
       return res.status(403).json({ error: 'Access denied' });
     }
     db.prepare('DELETE FROM event_comments WHERE id = ?').run(req.params.id);
@@ -151,8 +153,7 @@ router.get('/api/events/:id/attendees', authenticateToken, (req, res) => {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const isStaff = req.user.role === 'admin' ||
-      (req.user.role === 'organizer' && event.organizer_id === req.user.id);
+    const isStaff = can(req.principal, 'event.moderate') || event.organizer_id === req.principal.userId;
 
     if (!isStaff) {
       const mine = db.prepare(`
@@ -197,8 +198,7 @@ router.get('/api/events/:id/announcements', authenticateToken, (req, res) => {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const isStaff = req.user.role === 'admin' ||
-      (req.user.role === 'organizer' && event.organizer_id === req.user.id);
+    const isStaff = can(req.principal, 'event.moderate') || event.organizer_id === req.principal.userId;
 
     if (!isStaff) {
       const mine = db.prepare(`
@@ -239,7 +239,13 @@ router.post('/api/events/:id/announcements', authenticateToken, (req, res) => {
 
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (event.organizer_id !== req.user.id && req.user.role !== 'admin') {
+    // `announcement.post` is the kind-of-actor check (organizer, and
+    // super_admin via the wildcard); `event.moderate` is admin's bypass of the
+    // ownership comparison, same pattern as eventRoutes.js's broadcast route.
+    if (!can(req.principal, 'announcement.post') && !can(req.principal, 'event.moderate')) {
+      return res.status(403).json({ error: 'Only the event organizer can post announcements' });
+    }
+    if (event.organizer_id !== req.principal.userId && !can(req.principal, 'event.moderate')) {
       return res.status(403).json({ error: 'Only the event organizer can post announcements' });
     }
 
@@ -286,7 +292,10 @@ router.patch('/api/announcements/:id', authenticateToken, (req, res) => {
 
     const ann = db.prepare('SELECT * FROM event_announcements WHERE id = ?').get(req.params.id);
     if (!ann) return res.status(404).json({ error: 'Announcement not found' });
-    if (ann.author_id !== req.user.id && req.user.role !== 'admin') {
+    if (!can(req.principal, 'announcement.post') && !can(req.principal, 'event.moderate')) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    if (ann.author_id !== req.principal.userId && !can(req.principal, 'event.moderate')) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -304,7 +313,10 @@ router.delete('/api/announcements/:id', authenticateToken, (req, res) => {
   try {
     const ann = db.prepare('SELECT * FROM event_announcements WHERE id = ?').get(req.params.id);
     if (!ann) return res.status(404).json({ error: 'Announcement not found' });
-    if (ann.author_id !== req.user.id && req.user.role !== 'admin') {
+    if (!can(req.principal, 'announcement.post') && !can(req.principal, 'event.moderate')) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    if (ann.author_id !== req.principal.userId && !can(req.principal, 'event.moderate')) {
       return res.status(403).json({ error: 'Access denied' });
     }
     db.prepare('DELETE FROM event_announcements WHERE id = ?').run(req.params.id);
@@ -355,10 +367,7 @@ router.post('/api/favorites/:eventId', authenticateToken, (req, res) => {
 
 // 19. Profile update (self only)
 
-router.get('/api/stats/volunteer', authenticateToken, (req, res) => {
-  if (req.user.role !== 'student') {
-    return res.status(403).json({ error: 'Volunteer stats only available for students' });
-  }
+router.get('/api/stats/volunteer', authenticateToken, requireCap('stats.self'), (req, res) => {
   try {
     // Hours by month for last 6 months
     const monthlyHours = db.prepare(`
@@ -408,10 +417,7 @@ router.get('/api/stats/volunteer', authenticateToken, (req, res) => {
 });
 
 // 21. Statistics endpoint for an organizer
-router.get('/api/stats/organizer', authenticateToken, (req, res) => {
-  if (req.user.role !== 'organizer') {
-    return res.status(403).json({ error: 'Organizer stats only available for organizers' });
-  }
+router.get('/api/stats/organizer', authenticateToken, requireCap('analytics.own_events'), (req, res) => {
   try {
     const eventCount = db.prepare(`
       SELECT COUNT(*) as c FROM events WHERE organizer_id = ?
@@ -487,7 +493,10 @@ router.get('/api/leaderboard', authenticateToken, (req, res) => {
 
 // 23. Skill-based recommendations
 router.get('/api/recommendations', authenticateToken, (req, res) => {
-  if (req.user.role !== 'student') return res.json([]);
+  // Not a gate: recommendations are a student-only feature, but a non-student
+  // caller gets an empty list, never a 403 — that is intentional, existing
+  // behaviour (capability-mapping.md's Task 7d note), not an oversight to fix.
+  if (!can(req.principal, 'event.apply')) return res.json([]);
   try {
     // Get user's skills
     const userRow = db.prepare('SELECT skills FROM users WHERE id = ?').get(req.user.id);

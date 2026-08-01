@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Routes, Route, useNavigate, useLocation, useSearchParams, Navigate, useParams } from 'react-router-dom';
+import { Routes, Route, useNavigate, useLocation, useSearchParams, Navigate } from 'react-router-dom';
 import { api } from './utils/api';
 import { DEMO_MODE, APP_NAME, SCHOOL_NAME } from './config';
 import DemoBar from './components/DemoBar';
@@ -8,53 +8,26 @@ import ErrorBoundary from './components/ErrorBoundary';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
-import { connectSocket, disconnectSocket } from './services/socket';
-
-/**
- * Route-level code splitting.
- *
- * Every one of these was a static import, which put all 19 views plus the two
- * heaviest modals into a single entry chunk: 1,270 kB (333 kB gzipped), enough
- * for Vite to warn on every build. A student on school cellular downloaded the
- * admin dashboard, the organizer tools, the calendar and the messaging client
- * before they could see their own shifts.
- *
- * This was implemented once before (353a492) and then reverted wholesale by
- * 70cd700 — a commit titled `docs: auth audit Phase 1 findings and remediation
- * plan`, whose message says nothing about bundling. It removed the lazy imports
- * AND their Suspense boundaries together, i.e. a complete, clean revert of an
- * unrelated commit's work, which is the signature of an accidental commit from a
- * stale working tree rather than a considered rollback. Nothing in the history
- * records a problem with the splitting itself.
- *
- * Restored here with the same boundary placement. The shell above stays eager on
- * purpose: the navigation, the notification bell, the theme toggle and the error
- * boundary must render on the first frame, and LoadingSkeleton is what the
- * fallbacks are made of, so lazy-loading it would be circular.
- */
-const Login = React.lazy(() => import('./views/Login'));
-const Welcome = React.lazy(() => import('./views/Welcome'));
-const Signup = React.lazy(() => import('./views/Signup'));
-const BrowseEvents = React.lazy(() => import('./views/BrowseEvents'));
-const CreateEvent = React.lazy(() => import('./views/CreateEvent'));
-const VolunteerDashboard = React.lazy(() => import('./views/VolunteerDashboard'));
-const OrganizerDashboard = React.lazy(() => import('./views/OrganizerDashboard'));
-const AdminDashboard = React.lazy(() => import('./views/AdminDashboard'));
-const Notifications = React.lazy(() => import('./views/Notifications'));
-const CalendarView = React.lazy(() => import('./views/CalendarView'));
-const VolunteerProfile = React.lazy(() => import('./views/VolunteerProfile'));
-const OrganizerProfile = React.lazy(() => import('./views/OrganizerProfile'));
-const ResetPassword = React.lazy(() => import('./views/ResetPassword'));
-const OAuthCallback = React.lazy(() => import('./views/OAuthCallback'));
-const CertificateVerification = React.lazy(() => import('./views/CertificateVerification'));
-const VolunteerPortfolio = React.lazy(() => import('./views/VolunteerPortfolio'));
-const CheckInView = React.lazy(() => import('./views/CheckInView'));
-const Messages = React.lazy(() => import('./views/Messages'));
-const Settings = React.lazy(() => import('./views/Settings'));
+import Toasts from './components/common/Toasts';
+import VerifyEmailWall from './components/account/VerifyEmailWall';
+import { Can } from './components/common/Can.jsx';
+import EmptyState from './components/common/EmptyState';
+import { can } from './authz.js';
+import { SessionProvider, useSession } from './session/SessionProvider.jsx';
+import {
+  APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES, withProps,
+  AdminDashboard, VolunteerDashboard, OrganizerDashboard,
+  VolunteerProfile, OrganizerProfile, OAuthCallback, ResetPassword
+} from './routes/index.jsx';
+import {
+  LayoutDashboard, Compass, CalendarPlus, ShieldCheck, LogOut, CalendarDays,
+  UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon
+} from 'lucide-react';
 
 // The two heaviest modals. EventModal pulls in the whole organizer surface —
 // applicant review, shifts, attendance, announcements, comments, the location
 // card — and is only opened on demand, so it has no business in the entry chunk.
+// The routed views are split the same way, in src/routes/index.jsx.
 const EventModal = React.lazy(() => import('./components/EventModal'));
 const ProfileEditModal = React.lazy(() => import('./components/ProfileEditModal'));
 
@@ -69,26 +42,136 @@ const ProfileEditModal = React.lazy(() => import('./components/ProfileEditModal'
 const RouteFallback = () => (
   <div style={{ padding: 'var(--s6)' }}><LoadingSkeleton heights={[200, 400]} /></div>
 );
-import {
-  LayoutDashboard, Compass, CalendarPlus, ShieldCheck, LogOut, CalendarDays,
-  UserCog, CheckCircle2, AlertTriangle, Info, X, ChevronsUpDown, Loader2, Bell, UserRound, MessageSquare, MoreHorizontal, Mail, Settings as SettingsIcon
-} from 'lucide-react';
 
-/* Navigation is defined once and filtered by role, so every role gets the
-   same shell instead of a different one. */
-const NAV = [
-  { id: 'dashboard', path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['student', 'organizer'] },
-  { id: 'dashboard', path: '/', label: 'Review queue', icon: ShieldCheck, roles: ['admin'] },
-  { id: 'browse', path: '/events', label: 'Opportunities', icon: Compass, roles: ['student', 'organizer', 'admin'] },
-  { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, roles: ['student', 'organizer'] },
-  { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, roles: ['student', 'organizer'] },
-  { id: 'create', path: '/events/new', label: 'New event', icon: CalendarPlus, roles: ['organizer'], requiresVerified: true },
-  { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, roles: ['student', 'organizer', 'admin'] },
-  { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, roles: ['student', 'organizer'] }
+/**
+ * Who the shell is talking to, derived from capabilities rather than a role name.
+ *
+ * ── ORDER IS LOAD-BEARING: most-privileged-first ──
+ *
+ * `can()` answers TRUE for every capability when the role is super_admin (the
+ * '*' wildcard), so the first matching row wins for the platform owner. Testing
+ * `event.apply` before `event.moderate` would silently put super_admin on the
+ * volunteer dashboard — the client-side twin of the GET /api/applications
+ * cascade bug that shipped as a Critical earlier on this branch. The rule, and
+ * why a trailing bare `else` is just as wrong, is documented at length in
+ * server/authz.js's header.
+ *
+ * The cascade therefore ends in an EXPLICIT null: "no persona" is a state the
+ * shell handles, not a role quietly inheriting somebody else's screen.
+ *
+ * A persona is not a role and must never be read back as one: `staff` covers
+ * admin AND super_admin, and `host` is spelled that way rather than 'organizer'
+ * precisely so `persona === 'host'` cannot be mistaken — by a reader or by the
+ * role-string guard in server/authz.completeness.test.js — for a role check.
+ */
+const PERSONAS = [
+  { id: 'staff', cap: 'event.moderate' },       // admin, super_admin
+  { id: 'host', cap: 'event.create' },          // organizer
+  { id: 'volunteer', cap: 'event.apply' },      // student
+  { id: 'partner', cap: 'analytics.public' },   // partner
 ];
 
+const personaFor = (user) => PERSONAS.find(p => can(user, p.cap))?.id ?? null;
+
+/**
+ * The `/` nav entry, per persona. A persona absent from this map gets no `/`
+ * entry, because it has no dashboard to send anyone to.
+ */
+const DASHBOARD_NAV = {
+  staff: { label: 'Review queue', icon: ShieldCheck },
+  host: { label: 'Dashboard', icon: LayoutDashboard },
+  volunteer: { label: 'Dashboard', icon: LayoutDashboard },
+};
+
+/**
+ * Which profile view `/profile` renders for the signed-in user — and, through
+ * SELF_PROFILE_CAPS below, whether the navigation offers it at all. Same
+ * most-privileged-first rule as PERSONAS, same explicit final branch.
+ *
+ * `admin.create` is a SUPER_ONLY capability, so it identifies the platform owner
+ * and nobody else: `can()` refuses to satisfy a SUPER_ONLY capability from a
+ * per-user grant, so no amount of granting turns an admin into a match. It is
+ * tested first because super_admin's wildcard matches every row beneath it too.
+ *
+ * super_admin resolves to 'none' rather than to the organizer view because BOTH
+ * profile endpoints filter by role in SQL — GET /api/users/:id/profile requires
+ * role = 'student', GET /api/organizers/:id/profile requires role IN
+ * ('organizer','admin') — so either view would render a 404 error state for the
+ * platform owner. An honest "this account has no service record" page is a
+ * working page; a 404 dressed as a profile is not. Widening those queries is a
+ * server change, which this task may not make.
+ */
+const SELF_PROFILE = [
+  { cap: 'admin.create', view: 'none' },        // super_admin
+  { cap: 'event.moderate', view: 'denied' },    // admin — no profile view has ever existed
+  { cap: 'event.create', view: 'host' },        // organizer
+  { cap: 'portfolio.write', view: 'volunteer' } // student
+];
+
+const selfProfileFor = (user) => SELF_PROFILE.find(p => can(user, p.cap))?.view ?? 'denied';
+
+/** Derived, not repeated, so the nav entry and the route can never disagree. */
+const SELF_PROFILE_CAPS = SELF_PROFILE.filter(p => p.view !== 'denied').map(p => p.cap);
+
+/* Navigation is defined once and filtered by capability, so every role gets the
+   same shell instead of a different one — and a role added tomorrow gets the
+   entries its capabilities justify rather than an empty rail.
+
+   The `/` entry is not in this table: its label and icon differ per persona and
+   come from DASHBOARD_NAV above.
+
+   `requiredCapAny` (hold any one of) mirrors server/authz.js's requireCapAny,
+   and is what an entry uses when two unrelated capabilities each justify it.
+   `requiresVerified` is unchanged — no capability expresses "approved yet". */
+const NAV = [
+  { id: 'browse', path: '/events', label: 'Opportunities', icon: Compass, requiredCap: 'event.view' },
+  { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, requiredCapAny: ['event.apply', 'event.create'] },
+  { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, requiredCap: 'message.send' },
+  { id: 'create', path: '/events/new', label: 'New event', icon: CalendarPlus, requiredCap: 'event.create', requiresVerified: true },
+  { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, requiredCap: 'self.read' },
+  { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS }
+];
+
+/**
+ * An entry with no capability declared would be hidden from everyone, silently
+ * — `can(user, undefined)` is false for every role, wildcard included. That is
+ * a forgotten annotation, not a decision, so it fails at module load rather
+ * than at render, the same way requireCap() and withProps() do.
+ */
+for (const entry of NAV) {
+  if (!entry.requiredCap && !entry.requiredCapAny?.length) {
+    throw new Error(
+      `NAV entry '${entry.id}' declares neither requiredCap nor a non-empty `
+      + 'requiredCapAny. Every entry needs one — a nav item with no condition '
+      + 'is one whose condition was forgotten, and it would render for nobody.'
+    );
+  }
+}
+
+/** Every nav entry the user may see, `/` first, in the order the shell renders. */
+export function navItemsFor(user) {
+  const dashboard = DASHBOARD_NAV[personaFor(user)];
+  return [
+    ...(dashboard ? [{ id: 'dashboard', path: '/', ...dashboard }] : []),
+    ...NAV.filter(n => (n.requiredCapAny ?? [n.requiredCap]).some(cap => can(user, cap)))
+  ].filter(n => !n.requiresVerified || user.verified);
+}
+
+/**
+ * Page titles, keyed by persona rather than by role.
+ *
+ * The `volunteer`/`host`/`staff` blocks are the former `student`/`organizer`/
+ * `admin` blocks verbatim — only the key changed, so what those three roles
+ * read is byte-identical. `staff` is what super_admin sees too.
+ *
+ * A tab with no entry falls back to `{ title: APP_NAME, sub: '' }`, unchanged.
+ * That default is the defensible one: it names the app rather than describing
+ * some other persona's screen. Filling in the remaining super_admin tabs would
+ * mean adding keys to the shared `staff` block, which would also change what an
+ * admin reads on /calendar and /settings — and admin behaviour must not change.
+ */
 const PAGE_META = {
-  student: {
+  volunteer: {
     dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
     browse: { title: 'Opportunities', sub: 'Find a shift and apply — organizers confirm who attends' },
     calendar: { title: 'Calendar', sub: 'Your shifts and the deadlines that matter' },
@@ -96,7 +179,7 @@ const PAGE_META = {
     notifications: { title: 'Notifications', sub: 'Replies, reminders, and event updates' },
     profile: { title: 'My profile', sub: 'Your service record, milestones, and certificates' }
   },
-  organizer: {
+  host: {
     dashboard: { title: 'Dashboard', sub: 'Track your volunteers, hours, and pending reviews' },
     browse: { title: 'Recruit', sub: 'All events visible to volunteers on the network' },
     calendar: { title: 'Calendar', sub: 'Events you host and when applications close' },
@@ -104,33 +187,76 @@ const PAGE_META = {
     notifications: { title: 'Notifications', sub: 'Application updates and community alerts' },
     profile: { title: 'My profile', sub: 'Your public track record and organizer status' }
   },
-  admin: {
+  staff: {
     dashboard: { title: 'Review queue', sub: 'Approve organizers and moderate events' },
     browse: { title: 'All events', sub: 'Everything posted across the district' },
     notifications: { title: 'Notifications', sub: 'Platform activity' }
+  },
+  partner: {
+    dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
+    browse: { title: 'All events', sub: 'Everything posted across the district' }
   }
 };
 
-const ROLE_LABEL = { admin: 'Administrator', organizer: 'Organizer', student: 'Volunteer' };
+/**
+ * How a role is named to the person holding it.
+ *
+ * A lookup keyed by role, which is the correct way to *label* a role — unlike
+ * comparing one, which is what the rest of this file no longer does. Every entry
+ * in ROLES has a label, so the `||` below is unreachable defence rather than the
+ * silent default that rendered the platform owner as "Volunteer";
+ * App.shellByRole.test.jsx pins that completeness so a sixth role cannot ship
+ * without one.
+ */
+export const ROLE_LABEL = {
+  admin: 'Administrator',
+  organizer: 'Organizer',
+  student: 'Volunteer',
+  super_admin: 'Platform administrator',
+  partner: 'Partner'
+};
 
 /**
  * Paths that arrive as a link from an email or an OAuth provider, and so must
  * resolve whether or not a session exists. Handled ahead of the session
- * branches in App — see the comment at the check itself.
+ * branches in AppShell — see the comment at the check itself.
  */
 const AUTH_FLOW_PATHS = ['/oauth/callback', '/reset-password'];
 
+/**
+ * The toast queue, and the session everything else reads.
+ *
+ * `addToast` is passed into SessionProvider because the bootstrap has to be able
+ * to report a partial load, and the queue itself is presentation that belongs
+ * with the component rendering it.
+ */
 export default function App() {
+  const [toasts, setToasts] = useState([]);
+
+  const addToast = (message, type = 'info') => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
+  };
+  const removeToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
+
+  return (
+    <SessionProvider addToast={addToast}>
+      <AppShell toasts={toasts} addToast={addToast} removeToast={removeToast} />
+    </SessionProvider>
+  );
+}
+
+function AppShell({ toasts, addToast, removeToast }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [isCheckingSession, setIsCheckingSession] = useState(true);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [events, setEvents] = useState([]);
-  const [applications, setApplications] = useState([]);
-  const [favorites, setFavorites] = useState([]);
-  
+  const {
+    currentUser, setCurrentUser, isCheckingSession, refresh: refreshAll, signOut,
+    events, applications, favorites, refreshEvents, refreshApplications, toggleFavorite
+  } = useSession();
+
   // Global intercept for password reset links
   useEffect(() => {
     if (searchParams.has('reset') && location.pathname !== '/reset-password') {
@@ -155,7 +281,6 @@ export default function App() {
   const [notifKey, setNotifKey] = useState(0);
   const [editingProfile, setEditingProfile] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [toasts, setToasts] = useState([]);
   const userMenuRef = useRef(null);
 
   /**
@@ -212,255 +337,6 @@ export default function App() {
     }
   }, [activeTab]);
 
-  /**
-   * Whether an event load is still filling in, so screens can say so rather
-   * than looking finished while pages are still arriving.
-   */
-  const [eventsLoading, setEventsLoading] = useState(false);
-
-  /**
-   * Discards a superseded load.
-   *
-   * Two refreshes can overlap — a socket event and a manual action, or a
-   * StrictMode double-invoke — and a progressive load applies state after every
-   * page. Without a generation check, an older walk's later pages would land on
-   * top of a newer walk's results and the list would flicker back to stale data.
-   * Each load captures the generation it started in and stops applying the moment
-   * it is no longer current.
-   */
-  const eventsLoadGeneration = useRef(0);
-
-  /**
-   * @param {string} [role] the signed-in user's role, when the caller already
-   *   knows it. refreshAll has it in hand before `currentUser` state has settled,
-   *   and reading the stale state there would send `mine=true` for an admin on
-   *   the first load.
-   */
-  const loadEvents = async (role) => {
-    const generation = ++eventsLoadGeneration.current;
-    const isCurrent = () => eventsLoadGeneration.current === generation;
-
-    setEventsLoading(true);
-    try {
-      await api.fetchEventsProgressive({
-        // The server's maximum, deliberately. A deployment whose whole event list
-        // fits in one page makes exactly one request — identical to the behaviour
-        // this replaced — so paging costs nothing until the data is genuinely
-        // large. See EVENTS_MAX_LIMIT in server/routes/eventRoutes.js for the
-        // measurements behind that.
-        pageSize: 500,
-        /**
-         * Only events this user is involved in.
-         *
-         * This is the change that makes the whole exercise worthwhile. The index
-         * exists so the calendar can resolve each application to its event and
-         * the dashboards can filter for their own — none of which needs the
-         * district's entire history. Bounded by the user's own activity, it is
-         * one small request instead of the whole table. Admins are excluded
-         * because the review queue legitimately moderates everything, and it
-         * already makes its own separate call.
-         */
-        params: (role ?? currentUser?.role) === 'admin' ? {} : { mine: 'true' },
-        shouldContinue: isCurrent,
-        // Applied per page, so the first screenful renders without waiting for
-        // the whole table. `slice()` because the accumulator is mutated in place.
-        onPage: (eventsSoFar) => { if (isCurrent()) setEvents(eventsSoFar.slice()); }
-      });
-    } catch (err) {
-      console.error('Failed to refresh events:', err);
-    } finally {
-      if (isCurrent()) setEventsLoading(false);
-    }
-  };
-
-  const refreshEvents = loadEvents;
-
-  const refreshApplications = async () => {
-    try { setApplications(await api.fetchApplications()); } catch (err) { console.error('Failed to refresh applications:', err); }
-  };
-
-
-
-  const refreshAll = async () => {
-    setIsCheckingSession(true);
-    try {
-      const user = await api.getMe();
-      if (!user) {
-        setCurrentUser(null);
-        disconnectSocket();
-        return;
-      }
-      setCurrentUser(user);
-
-      /**
-       * Stop here for an account that has not confirmed its address.
-       *
-       * authenticateToken confines an unconfirmed session to a small allowlist,
-       * so every call below answers 403 — and the catch at the bottom of this
-       * function reads that as a dead session and signs the user out. The
-       * result would be an endless bounce back to the sign-in screen for
-       * exactly the people who need to reach the "resend confirmation" button.
-       *
-       * The verification wall renders from `currentUser` alone and needs none
-       * of this data.
-       */
-      if (user.emailVerified === false) {
-        setIsCheckingSession(false);
-        return;
-      }
-
-      connectSocket();
-
-      /**
-       * A failure loading page data is not a failure of the session.
-       *
-       * These fetches used to sit under the same catch as `getMe`, which set
-       * `currentUser` to null — so a single 500 from /api/events, or a dropped
-       * connection mid-refresh, silently signed the user out and dumped them on
-       * the sign-in screen. The session was fine; only the data was missing.
-       *
-       * `getMe` above is the authority on whether the session is alive, and it
-       * already returns null (rather than throwing) for a 401. Everything below
-       * degrades to empty state and says so.
-       */
-      try {
-        /**
-         * Events load progressively; applications and favourites do not.
-         *
-         * `loadEvents` applies state after each page, so it is started rather
-         * than awaited alongside the others — awaiting it here would put the
-         * whole walk back on the critical path and undo the reason for paging.
-         * The small fixed-size fetches still run in parallel with it.
-         */
-        const eventsDone = loadEvents(user.role);
-
-        const promises = [api.fetchApplications()];
-        if (user.role === 'student') {
-          promises.push(api.fetchFavorites().catch(() => []));
-        }
-        const [apps, favs] = await Promise.all(promises);
-        setApplications(apps);
-        if (user.role === 'student' && favs) {
-          setFavorites(favs.map(f => f.event_id || f.eventId));
-        }
-
-        // Awaited last so the session-check spinner clears on a complete index —
-        // the calendar and dashboards resolve applications against it, and
-        // showing them a half-filled list would render a wrong calendar rather
-        // than an incomplete one.
-        await eventsDone;
-      } catch (err) {
-        console.error('Failed to load page data:', err);
-        addToast('Some of your information could not be loaded. Reload to try again.', 'error');
-      }
-
-      try {
-        const notifs = await api.fetchNotifications(10);
-        if (notifs.unreadCount > 0 && !sessionStorage.getItem('notif_toast_shown')) {
-          if (notifs.unreadCount === 1 && notifs.notifications.length > 0) {
-            addToast(notifs.notifications[0].body, 'info');
-          } else {
-            addToast(`You have ${notifs.unreadCount} new notifications. Check your notifications center.`, 'info');
-          }
-          sessionStorage.setItem('notif_toast_shown', 'true');
-        }
-      } catch (err) {
-        console.error('Failed to fetch notifications for toast', err);
-      }
-    } catch (err) {
-      console.error('Session check failed:', err);
-      setCurrentUser(null);
-    } finally {
-      setIsCheckingSession(false);
-    }
-  };
-
-  const verifyToken = searchParams.get('verify');
-  const emailChangeToken = searchParams.get('emailchange');
-
-  /**
-   * Confirming a new email address, from the link sent to that address.
-   *
-   * Single-presentation for the same three reasons the `verify` handler below
-   * documents: StrictMode double-invokes effects, stripping the parameter
-   * re-triggers the effect that reads it, and the token is single use — so
-   * without the ref a successful confirmation is immediately painted over with
-   * "that link is not valid".
-   */
-  const emailChangeAttempted = useRef(false);
-
-  useEffect(() => {
-    if (!emailChangeToken || emailChangeAttempted.current) return;
-    emailChangeAttempted.current = true;
-
-    (async () => {
-      try {
-        await api.confirmEmailChange(emailChangeToken);
-        addToast('Email address confirmed. This is now the address on your account.', 'success');
-      } catch (err) {
-        addToast(err.message || 'That link did not work. Request the change again from Settings.', 'error');
-      } finally {
-        const newParams = new URLSearchParams(searchParams);
-        newParams.delete('emailchange');
-        setSearchParams(newParams, { replace: true });
-        // Confirming bumps token_version and issues a fresh cookie, so the
-        // in-memory user is stale either way — re-read it rather than guess.
-        await refreshAll();
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [emailChangeToken]);
-
-  /**
-   * A confirmation token is single use, so it must be presented exactly once.
-   *
-   * Three things previously conspired to present it twice: StrictMode
-   * double-invokes effects in development; `setSearchParams` inside the effect
-   * changed `verifyToken`, which is the effect's own dependency, re-running
-   * it; and each run raced the other. The second attempt always failed, so a
-   * successful confirmation was immediately overwritten with the toast "That
-   * confirmation link is not valid."
-   */
-  const verifyAttempted = useRef(false);
-
-  useEffect(() => {
-    const init = async () => {
-      if (verifyToken && !verifyAttempted.current) {
-        verifyAttempted.current = true;
-        try {
-          await api.verifyEmail(verifyToken);
-          addToast('Email confirmed. Welcome to WeVolunteer.', 'success');
-        } catch (err) {
-          addToast(err.message || 'That confirmation link did not work. Request a new one.', 'error');
-        } finally {
-          // Strip the token only after it has been spent, so a reload during
-          // the request does not silently drop it.
-          const newParams = new URLSearchParams(searchParams);
-          newParams.delete('verify');
-          setSearchParams(newParams, { replace: true });
-        }
-      }
-      await refreshAll();
-    };
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [verifyToken]);
-
-  const handleToggleFavorite = async (eventId) => {
-    try {
-      const res = await api.toggleFavorite(eventId);
-      if (res.favorited) {
-        setFavorites(prev => [...prev, eventId]);
-        addToast('Added to favorites.', 'success');
-      } else {
-        setFavorites(prev => prev.filter(id => id !== eventId));
-        addToast('Removed from favorites.', 'info');
-      }
-    } catch {
-      addToast('Could not toggle favorite.', 'error');
-    }
-  };
-
   useEffect(() => {
     if (!userMenuOpen) return;
     const onClick = (e) => {
@@ -475,33 +351,17 @@ export default function App() {
     };
   }, [userMenuOpen]);
 
-
-  const addToast = (message, type = 'info') => {
-    const id = Date.now() + Math.random();
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
-  };
-  const removeToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
-
   const handleCreateEvent = async (eventData) => {
     await api.createEvent(eventData);
     refreshEvents();
     navigate('/');
   };
 
+  // Session teardown lives in SessionProvider.signOut; the menu this closes is
+  // shell state, so it stays here.
   const handleLogout = async () => {
-    await api.logout();
-    setCurrentUser(null);
-    disconnectSocket();
-    setEvents([]);
-    setApplications([]);
-    setFavorites([]);
     setUserMenuOpen(false);
-    // Otherwise the next person to sign in in this tab — a second student on a
-    // shared computer — has their unread-notification greeting suppressed by
-    // the previous user's flag.
-    sessionStorage.removeItem('notif_toast_shown');
-    navigate('/login');
+    await signOut();
   };
 
   const handleLoginSuccess = () => {
@@ -611,33 +471,35 @@ export default function App() {
     return (
       <React.Suspense fallback={<RouteFallback />}>
         <Routes>
-          <Route path="/verify/:code" element={<CertificateVerification />} />
+          {PUBLIC_ROUTES.map(route => (
+            <Route key={route.path} path={route.path} element={route.element} />
+          ))}
         </Routes>
       </React.Suspense>
     );
   }
 
-
-
   if (!currentUser) {
+    const signedOutProps = {
+      '/welcome': {},
+      '/login': {
+        onLoginSuccess: (mode) => (mode === 'signup' ? navigate('/signup') : handleLoginSuccess()),
+        addToast
+      },
+      '/signup': {
+        onSignupSuccess: handleLoginSuccess,
+        onBackToLogin: () => navigate('/login'),
+        addToast
+      }
+    };
+
     return (
       <>
         <React.Suspense fallback={<RouteFallback />}>
         <Routes>
-          <Route path="/welcome" element={<Welcome />} />
-          <Route path="/login" element={
-            <Login
-              onLoginSuccess={(mode) => (mode === 'signup' ? navigate('/signup') : handleLoginSuccess())}
-              addToast={addToast}
-            />
-          } />
-          <Route path="/signup" element={
-            <Signup
-              onSignupSuccess={handleLoginSuccess}
-              onBackToLogin={() => navigate('/login')}
-              addToast={addToast}
-            />
-          } />
+          {SIGNED_OUT_ROUTES.map(route => (
+            <Route key={route.path} path={route.path} element={withProps(route, signedOutProps)} />
+          ))}
           {/* /reset-password and /oauth/callback are handled above, before the
               session branches, because both are reached by a link from outside
               the app and must work in every session state. */}
@@ -671,19 +533,53 @@ export default function App() {
   }
 
   /* ── Application shell ─────────────────────────────────────── */
-  const navItems = NAV
-    .filter(n => n.roles.includes(currentUser.role))
-    .filter(n => !n.requiresVerified || currentUser.verified);
+  /* Resolved once, most-privileged-first (see PERSONAS / SELF_PROFILE), and
+     read everywhere below. Plain functions, not hooks — the hook declaration
+     order in this component is unchanged and nothing here may alter it. */
+  const persona = personaFor(currentUser);
+  const selfProfile = selfProfileFor(currentUser);
+
+  const navItems = navItemsFor(currentUser);
 
   const primaryNavItems = navItems.slice(0, 4);
   const secondaryNavItems = navItems.slice(4);
 
-  const meta = PAGE_META[currentUser.role]?.[activeTab] || { title: APP_NAME, sub: '' };
+  const meta = PAGE_META[persona]?.[activeTab] || { title: APP_NAME, sub: '' };
 
-  const pendingForMe = currentUser.role === 'organizer'
+  /* Reviewing applicants is what makes this count meaningful, and the filter
+     below already scopes it to events this user actually hosts — so a wildcard
+     principal that holds `applicant.review` without hosting anything counts 0
+     rather than the whole district's queue. */
+  const pendingForMe = can(currentUser, 'applicant.review')
     ? applications.filter(a => a.status === 'pending' &&
         events.some(e => e.id === a.eventId && e.organizerId === currentUser.id)).length
     : 0;
+
+  /** What each routed view in APP_ROUTES needs from the shell. */
+  const appRouteProps = {
+    '/events': {
+      currentUser,
+      applications,
+      onViewDetails: openEventById,
+      favorites,
+      onToggleFavorite: toggleFavorite,
+      /* Browse fetches its own server-filtered pages, so it no longer
+         takes the index. Anything it renders is recorded so the event
+         modal can resolve an event the index does not hold. */
+      onEventsSeen: rememberEvents
+    },
+    '/events/new': { onSubmitEvent: handleCreateEvent, addToast, setActiveTab },
+    '/events/:id/edit': {},
+    '/checkin/:eventId': { currentUser },
+    '/calendar': { currentUser, events, applications, onViewEvent: openEventById },
+    '/notifications': { onViewEvent: openEventById, onCountChange: () => setNotifKey(k => k + 1) },
+    '/messages': {},
+    '/portfolio': { currentUser },
+    '/settings': { currentUser, addToast, onProfileChange: refreshAll }
+  };
+
+  /** Where a route the user cannot reach sends them. Unchanged from the ternaries. */
+  const denied = <Navigate to="/" replace />;
 
   return (
     <div className="app">
@@ -717,10 +613,10 @@ export default function App() {
         </nav>
 
         <div className="sidebar-foot">
-          <ProfileMenu 
-            user={currentUser} 
-            onEditProfile={() => setEditingProfile(true)} 
-            onSignOut={handleLogout} 
+          <ProfileMenu
+            user={currentUser}
+            onEditProfile={() => setEditingProfile(true)}
+            onSignOut={handleLogout}
           />
         </div>
       </aside>
@@ -781,9 +677,21 @@ export default function App() {
             )
           ) : (
             <Routes>
+              {/* `/` stays here rather than in the table: it is a different
+                  dashboard per persona, not one view behind a capability.
+
+                  Branching on `persona` rather than on `can()` directly is what
+                  makes these arms genuinely mutually exclusive — the cascade
+                  that produced it already ran most-privileged-first, so a
+                  wildcard principal cannot match two of them. The last arm is
+                  explicit: `partner` (and any future capability-poor role)
+                  gets a page that says so, NOT OrganizerDashboard, whose
+                  fetchOrganizerStats returns zeros for super_admin and a
+                  swallowed 403 for partner — a dashboard of zeros reads as
+                  data, which is worse than an empty state. */}
               <Route path="/" element={
-                currentUser.role === 'admin' ? <AdminDashboard addToast={addToast} /> :
-                currentUser.role === 'student' ? (
+                persona === 'staff' ? <AdminDashboard addToast={addToast} /> :
+                persona === 'volunteer' ? (
                   <VolunteerDashboard
                     currentUser={currentUser}
                     events={events}
@@ -794,7 +702,7 @@ export default function App() {
                     refreshApplications={refreshApplications}
                     onViewDetails={openEventById}
                   />
-                ) : (
+                ) : persona === 'host' ? (
                   <OrganizerDashboard
                     currentUser={currentUser}
                     events={events}
@@ -806,68 +714,42 @@ export default function App() {
                     onViewDetails={openEventById}
                     onViewVolunteerProfile={viewVolunteer}
                   />
+                ) : (
+                  <EmptyState
+                    title="No dashboard for this account"
+                    message="This account type does not have a dashboard yet. Browse opportunities from the navigation, or change your account settings."
+                  />
                 )
               } />
-              
-              <Route path="/events" element={
-                <BrowseEvents
-                  currentUser={currentUser}
-                  applications={applications}
-                  onViewDetails={openEventById}
-                  favorites={favorites}
-                  onToggleFavorite={handleToggleFavorite}
-                  /* Browse fetches its own server-filtered pages, so it no longer
-                     takes the index. Anything it renders is recorded so the event
-                     modal can resolve an event the index does not hold. */
-                  onEventsSeen={rememberEvents}
-                />
-              } />
-              
-              <Route path="/events/new" element={
-                currentUser.role === 'organizer' && currentUser.verified ? (
-                  <CreateEvent onSubmitEvent={handleCreateEvent} addToast={addToast} setActiveTab={setActiveTab} />
-                ) : <Navigate to="/" replace />
-              } />
-              
-              {/* /events/:id/edit used to render a blank CreateEvent whose submit
-                  handler called api.createEvent — so an organizer who reached it
-                  (bookmark, browser autocomplete, back button, or guessing the URL
-                  from /events/new) saw an empty form that PUBLISHED A SECOND EVENT
-                  instead of editing the one they asked for. Nothing in the app ever
-                  linked here; editing lives in EventModal. Redirect to the real
-                  event so the URL does the thing its path promises. */}
-              <Route path="/events/:id/edit" element={<RedirectToEvent />} />
 
-              <Route path="/checkin/:eventId" element={
-                currentUser.role === 'organizer' ? (
-                  <CheckInView currentUser={currentUser} />
-                ) : <Navigate to="/" replace />
-              } />
-              
-              <Route path="/calendar" element={
-                <CalendarView
-                  currentUser={currentUser}
-                  events={events}
-                  applications={applications}
-                  onViewEvent={openEventById}
+              {/* The route table. `requiredCap` is what the role ternaries that
+                  used to sit here became; `requiresVerified` is the second
+                  condition /events/new carried, which no capability expresses. */}
+              {APP_ROUTES.map((route) => (
+                <Route
+                  key={route.path}
+                  path={route.path}
+                  element={
+                    route.requiresVerified && !currentUser.verified
+                      ? denied
+                      : route.requiredCap
+                        ? (
+                          <Can user={currentUser} cap={route.requiredCap} fallback={denied}>
+                            {withProps(route, appRouteProps)}
+                          </Can>
+                        )
+                        : withProps(route, appRouteProps)
+                  }
                 />
-              } />
-              
-              <Route path="/notifications" element={
-                <Notifications
-                  onViewEvent={openEventById}
-                  onCountChange={() => setNotifKey(k => k + 1)}
-                />
-              } />
-              
-              <Route path="/messages" element={
-                (currentUser.role === 'student' || currentUser.role === 'organizer') ? (
-                  <Messages />
-                ) : <Navigate to="/" replace />
-              } />
+              ))}
 
+              {/* Also a different component per persona, so it stays out of the
+                  table alongside `/`. `selfProfile` comes from the SELF_PROFILE
+                  cascade, which already ran most-privileged-first — so these
+                  arms are mutually exclusive and the last one is an explicit
+                  deny, not a fall-through. */}
               <Route path="/profile" element={
-                currentUser.role === 'student' ? (
+                selfProfile === 'volunteer' ? (
                   <VolunteerProfile
                     userId={currentUser.id}
                     currentUser={currentUser}
@@ -875,24 +757,19 @@ export default function App() {
                     onViewEvent={openEventById}
                     addToast={addToast}
                   />
-                ) : currentUser.role === 'organizer' ? (
+                ) : selfProfile === 'host' ? (
                   <OrganizerProfile
                     userId={currentUser.id}
                     onViewEvent={openEventById}
                   />
-                ) : <Navigate to="/" replace />
-              } />
-              
-              <Route path="/portfolio" element={
-                currentUser.role === 'student' ? (
-                  <VolunteerPortfolio currentUser={currentUser} />
-                ) : <Navigate to="/" replace />
+                ) : selfProfile === 'none' ? (
+                  <EmptyState
+                    title="No service record for this account"
+                    message="Profiles show a volunteer's service record or an organizer's hosting record. This account has neither — your account details live in Settings."
+                  />
+                ) : denied
               } />
 
-              <Route path="/settings" element={
-                <Settings currentUser={currentUser} addToast={addToast} onProfileChange={refreshAll} />
-              } />
-              
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           )}
@@ -936,7 +813,7 @@ export default function App() {
                 <span className="avatar lg">{currentUser.avatar || '👤'}</span>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   <span className="mobile-more-title truncate">{currentUser.name}</span>
-                  <span style={{ fontSize: '0.875rem', color: 'var(--ink-2)' }}>{ROLE_LABEL[currentUser.role] || 'Volunteer'}</span>
+                  <span style={{ fontSize: '0.875rem', color: 'var(--ink-2)' }}>{ROLE_LABEL[currentUser.role] || 'Member'}</span>
                 </div>
               </div>
               <button className="btn btn-ghost btn-icon" style={{ marginTop: '-4px', marginRight: '-4px' }} onClick={() => setShowMobileMore(false)}>
@@ -958,7 +835,12 @@ export default function App() {
                   <span>{label}</span>
                 </button>
               ))}
-              {currentUser.role !== 'student' && (
+              {/* Only for someone whose own profile page has no edit button of
+                  its own — the volunteer profile carries one, so offering a
+                  second here would be a duplicate affordance. Derived from the
+                  same SELF_PROFILE cascade that decides the route, so the two
+                  cannot drift apart. */}
+              {selfProfile !== 'volunteer' && (
                 <button
                   className="mobile-more-btn"
                   onClick={() => {
@@ -970,7 +852,7 @@ export default function App() {
                   <span>Edit Profile</span>
                 </button>
               )}
-              
+
               <button
                 className="mobile-more-btn"
                 onClick={() => {
@@ -981,9 +863,9 @@ export default function App() {
                 <SettingsIcon size={20} />
                 <span>Settings</span>
               </button>
-              
+
               <div className="menu-sep" style={{ margin: 'var(--s2) 0' }} />
-              
+
               <button
                 className="mobile-more-btn danger"
                 style={{ color: 'var(--danger)' }}
@@ -1031,7 +913,7 @@ export default function App() {
             onViewVolunteerProfile={(p) => { setSelectedEventState(null); viewVolunteer(p); }}
             onViewOrganizer={(id) => { setSelectedEventState(null); viewOrganizer(id); }}
             isFavorited={favorites.includes(selectedEvent.id)}
-            onToggleFavorite={handleToggleFavorite}
+            onToggleFavorite={toggleFavorite}
           />
           </React.Suspense>
         </ErrorBoundary>
@@ -1049,238 +931,6 @@ export default function App() {
       )}
 
       <Toasts toasts={toasts} onRemove={removeToast} />
-    </div>
-  );
-}
-
-/**
- * Sends /events/:id/edit to the event itself, which is where editing actually
- * happens (EventModal's edit mode). Kept as a redirect rather than deleted so
- * an organizer who bookmarked the URL lands somewhere useful instead of on a
- * 404 or, as before, on a form that quietly created a duplicate event.
- */
-function RedirectToEvent() {
-  const { id } = useParams();
-  return <Navigate to={id ? `/events?event=${encodeURIComponent(id)}` : '/events'} replace />;
-}
-
-const TOAST_ICON = { success: CheckCircle2, error: AlertTriangle, info: Info };
-
-function Toasts({ toasts, onRemove }) {
-  return (
-    <div className="toasts" role="status" aria-live="polite">
-      {toasts.map(toast => {
-        const Icon = TOAST_ICON[toast.type] || Info;
-        return (
-          <div key={toast.id} className={`toast ${toast.type}`}>
-            <Icon size={16} />
-            <span className="toast-msg">{toast.message}</span>
-            <button onClick={() => onRemove(toast.id)} aria-label="Dismiss">
-              <X size={14} />
-            </button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/**
- * The wall an account sees until it confirms its email address.
- *
- * Replaces an inline block that mutated the DOM directly inside its own click
- * handler — `btn.disabled = true; btn.textContent = 'Sending...'` — which
- * React then overwrote on the next render, so the button could flip back to
- * its idle label mid-request. It also offered exactly two ways out (resend,
- * sign out) and no acknowledgement that the most likely reason for being
- * stuck here is a mistyped address, which neither of them fixes.
- */
-function VerifyEmailWall({ user, addToast, onSignOut, onVerified }) {
-  const [sending, setSending] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [sentAt, setSentAt] = useState(null);
-
-  /**
-   * Correcting the address, from behind the wall.
-   *
-   * This is the case the wall exists for and the one it used to handle worst.
-   * The old copy said: if the address is wrong, "sign out and create your
-   * account again with the right address" — which cannot work, because the
-   * abandoned account still holds that email AND that username, so the second
-   * attempt can reuse neither and the first is unusable forever.
-   *
-   * /api/auth/change-email is on the email-gate allowlist precisely so this
-   * screen can reach it.
-   */
-  const [fixing, setFixing] = useState(false);
-  const [newEmail, setNewEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [fixError, setFixError] = useState('');
-  const [pending, setPending] = useState(null);
-  const needsPassword = user.hasPassword !== false;
-
-  const submitFix = async (e) => {
-    e.preventDefault();
-    setFixError('');
-    setSending(true);
-    try {
-      const res = await api.changeEmail(newEmail.trim(), password);
-      setPending(res.pending);
-      setFixing(false);
-      setNewEmail('');
-      setPassword('');
-      addToast(`Confirmation link sent to ${res.pending}.`, 'success');
-    } catch (err) {
-      setFixError(err.message || 'Could not change that address.');
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const resend = async () => {
-    setSending(true);
-    try {
-      await api.resendVerification();
-      setSentAt(Date.now());
-      addToast('Sent. Give it a minute to arrive.', 'success');
-    } catch (err) {
-      addToast(err.message || 'Could not resend that link.', 'error');
-    } finally {
-      setSending(false);
-    }
-  };
-
-  /* Confirming happens in whichever tab the email opened, which may not be
-     this one. Rather than making the user guess, let them re-check here. */
-  const recheck = async () => {
-    setChecking(true);
-    try {
-      const me = await api.getMe();
-      if (me?.emailVerified) await onVerified();
-      else addToast('Not confirmed yet. Open the link in the email first.', 'info');
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  return (
-    <div className="auth">
-      <main className="auth-form auth-form-narrow auth-centered" aria-labelledby="verify-heading">
-        <div className="auth-icon" aria-hidden="true"><Mail size={26} /></div>
-
-        <h1 id="verify-heading" className="auth-title">Confirm your email</h1>
-        <p className="auth-subtitle">
-          We sent a link to <strong>{pending || user.email}</strong>. Open it to finish setting up
-          your account. The link expires 24 hours after it is sent.
-        </p>
-
-        {pending && (
-          <div className="alert alert-info" role="status">
-            <Mail size={16} aria-hidden="true" />
-            <span>
-              Your account address is still <strong>{user.email}</strong> until you open the
-              link we just sent to <strong>{pending}</strong>.
-            </span>
-          </div>
-        )}
-
-        {!fixing ? (
-          <>
-            <div className="auth-actions stack-sm">
-              <button className="btn btn-primary btn-block btn-lg" onClick={recheck} disabled={checking}>
-                {checking ? 'Checking…' : "I've confirmed — continue"}
-              </button>
-              <button className="btn btn-secondary btn-block" onClick={resend} disabled={sending}>
-                {sending ? 'Sending…' : sentAt ? 'Send it again' : 'Resend the link'}
-              </button>
-              <button className="btn btn-ghost btn-block" onClick={() => setFixing(true)}>
-                That address is wrong — change it
-              </button>
-              <button className="btn btn-ghost btn-block" onClick={onSignOut}>
-                Sign out
-              </button>
-            </div>
-
-            <p className="auth-footer">
-              Nothing arriving? Check your spam folder first — confirmation mail often
-              lands there. If <strong>{user.email}</strong> has a typo in it, change it
-              above rather than starting again: this account is holding that address and
-              your username.
-            </p>
-          </>
-        ) : (
-          <form onSubmit={submitFix} className="stack-md auth-form-inner" noValidate>
-            <p className="auth-subtitle">
-              Enter the right address and we will send the link there instead. Nothing
-              changes until you open it.
-            </p>
-
-            {fixError && (
-              <div className="alert alert-danger" role="alert">
-                <AlertTriangle size={16} aria-hidden="true" />
-                <span>{fixError}</span>
-              </div>
-            )}
-
-            <div className="field">
-              <label htmlFor="fix-email">Your email address</label>
-              <div className="input-affix">
-                <Mail size={16} aria-hidden="true" />
-                <input
-                  id="fix-email"
-                  type="email"
-                  className="input input-lg"
-                  autoComplete="email"
-                  inputMode="email"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck="false"
-                  placeholder="you@example.com"
-                  value={newEmail}
-                  onChange={e => setNewEmail(e.target.value)}
-                  disabled={sending}
-                  autoFocus
-                  required
-                />
-              </div>
-            </div>
-
-            {needsPassword && (
-              <div className="field">
-                <label htmlFor="fix-password">Your password</label>
-                <input
-                  id="fix-password"
-                  type="password"
-                  className="input input-lg"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  disabled={sending}
-                  required
-                />
-              </div>
-            )}
-
-            <div className="auth-actions stack-sm">
-              <button
-                type="submit"
-                className="btn btn-primary btn-block btn-lg"
-                disabled={sending || !newEmail.trim() || (needsPassword && !password)}
-              >
-                {sending ? 'Sending…' : 'Send the link here instead'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-block"
-                onClick={() => { setFixing(false); setFixError(''); }}
-                disabled={sending}
-              >
-                Never mind
-              </button>
-            </div>
-          </form>
-        )}
-      </main>
     </div>
   );
 }

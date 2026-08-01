@@ -8,6 +8,7 @@ import { createCertificatesTable, backfillCertificates } from './certificates.js
 import { createCheckinTable } from './attendance.js';
 import { createInstanceLockTable } from './instanceLock.js';
 import { DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from './config.js';
+import { runMigrations } from './migrations/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -206,6 +207,122 @@ function dedupeCaseInsensitiveUsernames(db) {
         console.log(`[Username dedupe] ${member.username} -> ${renamed} (id ${member.id})`);
       }
     }
+    db.exec('COMMIT');
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
+    throw err;
+  }
+}
+
+/**
+ * Columns `rebuildApplicationsForWithdrawn` knows how to copy.
+ *
+ * Order here is irrelevant — the copy names every column explicitly on both
+ * sides — but membership is not: a column on the real table and absent from
+ * this list would be dropped by the rebuild.
+ */
+const EXPECTED_APPLICATION_COLUMNS = [
+  'id', 'user_id', 'event_id', 'slot_id', 'status', 'applied_at', 'waitlist_order',
+];
+
+/**
+ * Rebuilds `applications` so its status CHECK admits 'withdrawn'.
+ *
+ * SQLite cannot alter a CHECK constraint, so the table is copied. This used to
+ * copy with `INSERT INTO applications_new SELECT * FROM applications`, which is
+ * positional: it depends on the two tables' column ORDER matching exactly.
+ *
+ * That is not a theoretical hazard on this codebase. Migration
+ * 001_authz_roles.js documents the same pattern failing for real on `users` —
+ * column order there depends on the order historical addColumnIfMissing() calls
+ * happened to run, and on the pilot database `email_verified` sits before
+ * `account_status`/`deleted_at` while a freshly seeded database has it after.
+ * `applications` acquires `waitlist_order` the same way (addColumnIfMissing, in
+ * initDatabase above), so it has the same exposure: a SELECT * copy would
+ * silently write each value into whatever column happened to share its
+ * position. Nothing would throw; the data would simply be wrong.
+ *
+ * So: an explicit column list on both sides, and — following 001 — a
+ * PRAGMA table_info guard that refuses to run at all if the real table has a
+ * column this function does not know about (the copy would DROP it) or is
+ * missing one it expects (the copy would fail, or worse, succeed against a
+ * half-built table). Failing loudly beats losing a column quietly.
+ *
+ * Known, deliberately-unaddressed hazard: `application_conflicts` holds
+ * `FOREIGN KEY(application_id) REFERENCES applications(id) ON DELETE CASCADE`,
+ * and node:sqlite enables foreign keys by default, so `DROP TABLE applications`
+ * below can cascade-delete that table's rows. 001 solves the equivalent problem
+ * with `PRAGMA foreign_keys = OFF`, which only works OUTSIDE a transaction and
+ * would therefore mean restructuring this block's transaction handling. Instead
+ * the child row count is snapshotted and compared after the rename, so a
+ * cascade throws and the ROLLBACK below undoes it — detectable and recoverable
+ * rather than silent. Reworking the pragma handling belongs with moving this
+ * whole block into the migration registry, which is tracked separately.
+ */
+export function rebuildApplicationsForWithdrawn(db) {
+  const actual = db.prepare('PRAGMA table_info(applications)').all().map(c => c.name);
+  const unknown = actual.filter(c => !EXPECTED_APPLICATION_COLUMNS.includes(c));
+  const missing = EXPECTED_APPLICATION_COLUMNS.filter(c => !actual.includes(c));
+  if (unknown.length) {
+    throw new Error(
+      `applications has unexpected columns [${unknown.join(', ')}]. Add them to `
+      + 'EXPECTED_APPLICATION_COLUMNS and to the CREATE TABLE in '
+      + 'rebuildApplicationsForWithdrawn(), then re-run. Copying without them '
+      + 'would delete that data.'
+    );
+  }
+  if (missing.length) {
+    throw new Error(
+      `applications is missing expected columns [${missing.join(', ')}]. `
+      + 'The addColumnIfMissing() pass must run before this rebuild.'
+    );
+  }
+
+  const cols = EXPECTED_APPLICATION_COLUMNS.join(', ');
+  const conflictsExist = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='application_conflicts'"
+  ).get();
+  const conflictsBefore = conflictsExist
+    ? db.prepare('SELECT COUNT(*) c FROM application_conflicts').get().c
+    : null;
+
+  db.exec('BEGIN TRANSACTION');
+  try {
+    db.exec(`
+      CREATE TABLE applications_new (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        slot_id TEXT NOT NULL,
+        status TEXT CHECK(status IN ('pending', 'accepted', 'waitlisted', 'rejected', 'withdrawn')) DEFAULT 'pending',
+        applied_at TEXT NOT NULL,
+        waitlist_order INTEGER,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+        FOREIGN KEY(slot_id) REFERENCES slots(id) ON DELETE CASCADE,
+        UNIQUE(user_id, slot_id)
+      )
+    `);
+
+    const before = db.prepare('SELECT COUNT(*) c FROM applications').get().c;
+    db.exec(`INSERT INTO applications_new (${cols}) SELECT ${cols} FROM applications`);
+    const after = db.prepare('SELECT COUNT(*) c FROM applications_new').get().c;
+    if (before !== after) throw new Error(`Row count changed during copy: ${before} -> ${after}`);
+
+    db.exec('DROP TABLE applications');
+    db.exec('ALTER TABLE applications_new RENAME TO applications');
+
+    if (conflictsBefore !== null) {
+      const conflictsAfter = db.prepare('SELECT COUNT(*) c FROM application_conflicts').get().c;
+      if (conflictsAfter !== conflictsBefore) {
+        throw new Error(
+          `application_conflicts lost rows during the applications rebuild: `
+          + `${conflictsBefore} -> ${conflictsAfter}. Foreign keys were enforced during `
+          + 'DROP TABLE applications and cascade-deleted them.'
+        );
+      }
+    }
+
     db.exec('COMMIT');
   } catch (err) {
     try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
@@ -661,26 +778,7 @@ export function initDatabase() {
   const appSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='applications'").get();
   if (appSchema && !appSchema.sql.includes("'withdrawn'")) {
     console.log("Migrating 'applications' table to support 'withdrawn' status...");
-    db.exec(`
-      BEGIN TRANSACTION;
-      CREATE TABLE applications_new (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        event_id TEXT NOT NULL,
-        slot_id TEXT NOT NULL,
-        status TEXT CHECK(status IN ('pending', 'accepted', 'waitlisted', 'rejected', 'withdrawn')) DEFAULT 'pending',
-        applied_at TEXT NOT NULL,
-        waitlist_order INTEGER,
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-        FOREIGN KEY(slot_id) REFERENCES slots(id) ON DELETE CASCADE,
-        UNIQUE(user_id, slot_id)
-      );
-      INSERT INTO applications_new SELECT * FROM applications;
-      DROP TABLE applications;
-      ALTER TABLE applications_new RENAME TO applications;
-      COMMIT;
-    `);
+    rebuildApplicationsForWithdrawn(db);
   }
 
   // Pre-pilot social/profile prep
@@ -810,6 +908,10 @@ export function initDatabase() {
   addColumnIfMissing('certificates', 'organization_snapshot', 'TEXT');
   addColumnIfMissing('certificates', 'hours_snapshot', 'REAL');
   addColumnIfMissing('certificates', 'completed_at_snapshot', 'TEXT');
+
+  // Versioned migrations run last: they may rebuild tables the bootstrap above
+  // just created, and they assume the pre-v1.2 schema is fully in place.
+  runMigrations(db);
 }
 
 /**

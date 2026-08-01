@@ -8,14 +8,11 @@ import { db } from '../db.js';
 import { notificationService } from '../services/notificationService.js';
 import { getMailHealth } from '../email.js';
 import { getQueueHealth } from '../workers/notificationWorker.js';
+import { requireCap } from '../authz.js';
 
 const router = express.Router();
 
-router.get('/api/admin/organizers/pending', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied: Administrators only' });
-  }
-
+router.get('/api/admin/organizers/pending', authenticateToken, requireCap('organizer.approve'), (req, res) => {
   try {
     const rows = db.prepare("SELECT * FROM users WHERE role = 'organizer' AND verified = 0").all();
     const formatted = rows.map(r => formatUserResponse(r));
@@ -27,11 +24,7 @@ router.get('/api/admin/organizers/pending', authenticateToken, (req, res) => {
 });
 
 // A2. Verify Organizer account
-router.post('/api/admin/organizers/:id/approve', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied: Administrators only' });
-  }
-
+router.post('/api/admin/organizers/:id/approve', authenticateToken, requireCap('organizer.approve'), (req, res) => {
   const orgId = req.params.id;
 
   try {
@@ -59,11 +52,7 @@ router.post('/api/admin/organizers/:id/approve', authenticateToken, (req, res) =
 });
 
 // A3. Deny Organizer account
-router.post('/api/admin/organizers/:id/deny', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied: Administrators only' });
-  }
-
+router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('organizer.approve'), (req, res) => {
   const orgId = req.params.id;
 
   try {
@@ -106,8 +95,7 @@ router.post('/api/admin/organizers/:id/deny', authenticateToken, (req, res) => {
 
 // A4. Remove Event Listing
 
-router.get('/api/admin/stats', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school'), (req, res) => {
   try {
     const totals = {
       users: db.prepare('SELECT COUNT(*) as c FROM users').get().c,
@@ -203,11 +191,7 @@ router.get('/api/admin/stats', authenticateToken, (req, res) => {
 // A26. Fetch Auto Select Runs (Organizer & Admin only)
 
 // A3. Get All Reports
-router.get('/api/admin/reports', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-  
+router.get('/api/admin/reports', authenticateToken, requireCap('report.resolve'), (req, res) => {
   try {
     const reports = db.prepare(`
       SELECT r.*, u.name as reporter_name, u.email as reporter_email
@@ -237,11 +221,7 @@ router.get('/api/admin/reports', authenticateToken, (req, res) => {
 });
 
 // A4. Update Report Status
-router.patch('/api/admin/reports/:id', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-  
+router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.resolve'), (req, res) => {
   const { status } = req.body;
   if (!['open', 'resolved', 'dismissed'].includes(status)) {
     return res.status(400).json({ error: 'Invalid status' });
@@ -295,11 +275,7 @@ router.patch('/api/admin/reports/:id', authenticateToken, (req, res) => {
 });
 
 // A5. Export Data to CSV
-router.get('/api/admin/reports/export', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-  
+router.get('/api/admin/reports/export', authenticateToken, requireCap('report.resolve'), (req, res) => {
   try {
     const students = db.prepare(`
       SELECT 
@@ -464,11 +440,7 @@ function hoursLedgerStatus() {
  * as unknown rather than 500-ing the whole panel, because a status endpoint that
  * goes down during an incident is worse than one that admits partial ignorance.
  */
-router.get('/api/admin/system/status', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
+router.get('/api/admin/system/status', authenticateToken, requireCap('audit.read'), (req, res) => {
   const smtpConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 
   res.json({

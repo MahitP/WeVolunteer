@@ -8,6 +8,7 @@ import { VALID_CATEGORIES, MAX_AUTO_SELECT_DRAWS } from '../config.js';
 import { computeDraw, recordRun, applyRun } from '../services/autoSelect.js';
 import { attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, inTransaction, notifyConfirmedVolunteers } from '../utils.js';
+import { can, requireCap, requireCapAny } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 import { validateEventPayload } from '../validation.js';
@@ -277,8 +278,8 @@ router.get('/api/events', authenticateToken, (req, res) => {
         ? Number(formattedSlots.reduce((sum, s) => sum + s.hours, 0).toFixed(2))
         : 0;
 
-      const canSeeInstructions = req.user.role === 'admin' ||
-        event.organizer_id === req.user.id ||
+      const canSeeInstructions = can(req.principal, 'event.moderate') ||
+        event.organizer_id === req.principal.userId ||
         acceptedEventIds.has(event.id);
 
       return {
@@ -388,8 +389,8 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
 
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const isStaff = req.user.role === 'admin' ||
-      (req.user.role === 'organizer' && event.organizer_id === req.user.id);
+    const isStaff = can(req.principal, 'event.moderate') ||
+      event.organizer_id === req.principal.userId;
     if (!isStaff) return res.status(403).json({ error: 'Access denied: You do not host this event' });
 
     const slots = db.prepare('SELECT * FROM slots WHERE event_id = ?').all(event.id);
@@ -445,11 +446,7 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
   }
 });
 
-router.post('/api/events', authenticateToken, (req, res) => {
-  if (req.user.role !== 'organizer') {
-    return res.status(403).json({ error: 'Access denied: Only organizers can list events' });
-  }
-
+router.post('/api/events', authenticateToken, requireCap('event.create'), (req, res) => {
   // Check if organizer is verified by Admin
   const organizer = db.prepare('SELECT verified FROM users WHERE id = ?').get(req.user.id);
   if (!organizer || organizer.verified !== 1) {
@@ -560,11 +557,7 @@ router.post('/api/events', authenticateToken, (req, res) => {
 
 // 6. Fetch All Applications (Enriched with Student profile, Slot, and Event details)
 
-router.put('/api/events/:id', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'organizer') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
+router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), async (req, res) => {
   const eventId = req.params.id;
   const {
     title, description, category, location, applicationDeadline, slots,
@@ -585,7 +578,7 @@ router.put('/api/events/:id', authenticateToken, async (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (event.organizer_id !== req.user.id) {
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
 
@@ -685,17 +678,13 @@ router.put('/api/events/:id', authenticateToken, async (req, res) => {
 });
 
 // 11. Run Equalizer Hour Sorting (Organizer only)
-router.post('/api/events/:id/auto-approve', authenticateToken, (req, res) => {
-  if (req.user.role !== 'organizer') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
+router.post('/api/events/:id/auto-approve', authenticateToken, requireCap('event.edit.own'), (req, res) => {
   const eventId = req.params.id;
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (event.organizer_id !== req.user.id) {
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -745,18 +734,14 @@ router.post('/api/events/:id/auto-approve', authenticateToken, (req, res) => {
 });
 
 // 12. Update Event Settings (Organizer only)
-router.patch('/api/events/:id', authenticateToken, (req, res) => {
-  if (req.user.role !== 'organizer') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
+router.patch('/api/events/:id', authenticateToken, requireCap('event.edit.own'), (req, res) => {
   const eventId = req.params.id;
   const { autoApprove, attendeeVisibility } = req.body;
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (event.organizer_id !== req.user.id) {
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
     if (event.status === 'completed') {
@@ -790,7 +775,7 @@ router.patch('/api/events/:id', authenticateToken, (req, res) => {
 
 // A1. Fetch Pending Organizer accounts
 
-router.delete('/api/events/:id', authenticateToken, (req, res) => {
+router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own']), (req, res) => {
   const eventId = req.params.id;
 
   try {
@@ -798,7 +783,7 @@ router.delete('/api/events/:id', authenticateToken, (req, res) => {
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     // Allow Admin OR the organizer who hosted it to delete it
-    if (req.user.role !== 'admin' && event.organizer_id !== req.user.id) {
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -843,11 +828,7 @@ router.delete('/api/events/:id', authenticateToken, (req, res) => {
 });
 
 // A5. Toggle Event Status (Organizer only)
-router.patch('/api/events/:id/status', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'organizer' && req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
+router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own']), async (req, res) => {
   const eventId = req.params.id;
   const { status } = req.body;
 
@@ -858,7 +839,7 @@ router.patch('/api/events/:id/status', authenticateToken, async (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (req.user.role === 'organizer' && event.organizer_id !== req.user.id) {
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
     if (event.status === 'completed') {
@@ -886,14 +867,11 @@ router.patch('/api/events/:id/status', authenticateToken, async (req, res) => {
 
 // A6. Export Accepted Roster as CSV (Organizer only)
 
-router.post('/api/events/:id/duplicate', authenticateToken, (req, res) => {
-  if (req.user.role !== 'organizer') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
+router.post('/api/events/:id/duplicate', authenticateToken, requireCap('event.create'), (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (event.organizer_id !== req.user.id) {
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -941,13 +919,13 @@ router.post('/api/events/:id/duplicate', authenticateToken, (req, res) => {
 
 // 25. Quick stats (admin) — used to enrich the admin panel
 
-router.get('/api/events/:id/auto-select/runs', authenticateToken, (req, res) => {
+router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
   const eventId = req.params.id;
   try {
     const event = db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (req.user.role !== 'admin' && event.organizer_id !== req.user.id) {
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -975,17 +953,14 @@ router.get('/api/events/:id/auto-select/runs', authenticateToken, (req, res) => 
 });
 
 // A27. Execute Draft Auto Select Draw (Organizer only)
-router.post('/api/events/:id/auto-select/run', authenticateToken, (req, res) => {
+router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
   const eventId = req.params.id;
-  if (req.user.role !== 'organizer' && req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (req.user.role !== 'admin' && event.organizer_id !== req.user.id) {
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1059,17 +1034,14 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, (req, res) => 
 });
 
 // A28. Confirm and Lock Auto Select Results (Organizer only)
-router.post('/api/events/:id/auto-select/confirm', authenticateToken, (req, res) => {
+router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
   const eventId = req.params.id;
-  if (req.user.role !== 'organizer' && req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (req.user.role !== 'admin' && event.organizer_id !== req.user.id) {
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
     if (event.status === 'completed') {
@@ -1110,7 +1082,7 @@ router.post('/api/events/:id/auto-select/confirm', authenticateToken, (req, res)
 });
 
 // Broadcast email to confirmed roster
-router.post('/api/events/:id/broadcast', authenticateToken, async (req, res) => {
+router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['event.moderate', 'announcement.post']), async (req, res) => {
   const { id: eventId } = req.params;
   const { subject, message } = req.body;
 
@@ -1122,7 +1094,7 @@ router.post('/api/events/:id/broadcast', authenticateToken, async (req, res) => 
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
     
-    if (req.user.role !== 'admin' && event.organizer_id !== req.user.id) {
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
