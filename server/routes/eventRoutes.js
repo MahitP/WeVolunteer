@@ -8,7 +8,7 @@ import { VALID_CATEGORIES, MAX_AUTO_SELECT_DRAWS } from '../config.js';
 import { computeDraw, recordRun, applyRun } from '../services/autoSelect.js';
 import { attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, inTransaction, notifyConfirmedVolunteers } from '../utils.js';
-import { can, requireCap } from '../authz.js';
+import { can, requireCap, requireCapAny } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 import { validateEventPayload } from '../validation.js';
@@ -775,7 +775,7 @@ router.patch('/api/events/:id', authenticateToken, requireCap('event.edit.own'),
 
 // A1. Fetch Pending Organizer accounts
 
-router.delete('/api/events/:id', authenticateToken, (req, res) => {
+router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own']), (req, res) => {
   const eventId = req.params.id;
 
   try {
@@ -828,7 +828,7 @@ router.delete('/api/events/:id', authenticateToken, (req, res) => {
 });
 
 // A5. Toggle Event Status (Organizer only)
-router.patch('/api/events/:id/status', authenticateToken, async (req, res) => {
+router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own']), async (req, res) => {
   if (!can(req.principal, 'event.edit.own') && !can(req.principal, 'event.moderate')) {
     return res.status(403).json({ error: 'Access denied' });
   }
@@ -923,7 +923,7 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCap('event.cr
 
 // 25. Quick stats (admin) — used to enrich the admin panel
 
-router.get('/api/events/:id/auto-select/runs', authenticateToken, (req, res) => {
+router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
   const eventId = req.params.id;
   try {
     const event = db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(eventId);
@@ -957,7 +957,7 @@ router.get('/api/events/:id/auto-select/runs', authenticateToken, (req, res) => 
 });
 
 // A27. Execute Draft Auto Select Draw (Organizer only)
-router.post('/api/events/:id/auto-select/run', authenticateToken, (req, res) => {
+router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
   const eventId = req.params.id;
   if (!can(req.principal, 'applicant.review') && !can(req.principal, 'event.moderate')) {
     return res.status(403).json({ error: 'Access denied' });
@@ -1041,7 +1041,7 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, (req, res) => 
 });
 
 // A28. Confirm and Lock Auto Select Results (Organizer only)
-router.post('/api/events/:id/auto-select/confirm', authenticateToken, (req, res) => {
+router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
   const eventId = req.params.id;
   if (!can(req.principal, 'applicant.review') && !can(req.principal, 'event.moderate')) {
     return res.status(403).json({ error: 'Access denied' });
@@ -1092,7 +1092,7 @@ router.post('/api/events/:id/auto-select/confirm', authenticateToken, (req, res)
 });
 
 // Broadcast email to confirmed roster
-router.post('/api/events/:id/broadcast', authenticateToken, async (req, res) => {
+router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['event.moderate', 'announcement.post']), async (req, res) => {
   const { id: eventId } = req.params;
   const { subject, message } = req.body;
 
