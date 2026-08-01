@@ -13,7 +13,7 @@ import VerifyEmailWall from './components/account/VerifyEmailWall';
 import { Can } from './components/common/Can.jsx';
 import { SessionProvider, useSession } from './session/SessionProvider.jsx';
 import {
-  APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES,
+  APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES, withProps,
   AdminDashboard, VolunteerDashboard, OrganizerDashboard,
   VolunteerProfile, OrganizerProfile, OAuthCallback, ResetPassword
 } from './routes/index.jsx';
@@ -281,16 +281,6 @@ function AppShell({ toasts, addToast, removeToast }) {
     if (id) setViewingProfileState({ type: 'volunteer', id });
   };
   const viewOrganizer = (id) => id && setViewingProfileState({ type: 'organizer', id });
-
-  /**
-   * A route's element with the shell props that route needs.
-   *
-   * The table in src/routes/index.jsx declares elements without props, because
-   * the props close over this component's state and handlers. Cloning here keeps
-   * the table readable as data instead of turning it into a second copy of the
-   * shell.
-   */
-  const withProps = (route, propsByPath) => React.cloneElement(route.element, propsByPath[route.path]);
 
   if (AUTH_FLOW_PATHS.includes(currentPath)) {
     return (
