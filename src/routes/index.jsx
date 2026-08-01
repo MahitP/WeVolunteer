@@ -129,3 +129,33 @@ export const PUBLIC_ROUTES = [
 
 /** Every declared route, for the table-wide invariants in routes.test.jsx. */
 export const ROUTES = [...APP_ROUTES, ...SIGNED_OUT_ROUTES, ...PUBLIC_ROUTES];
+
+/**
+ * A route's element, cloned with the shell props that route needs.
+ *
+ * The tables above declare elements without props because the props close over
+ * App.jsx's state and handlers; App.jsx supplies a per-path map. The hazard is
+ * that `React.cloneElement(el, undefined)` is perfectly legal and clones with
+ * NO props at all — so a path present in a table but missing from the map
+ * mounts a view with every prop silently absent. It renders wrong; nothing
+ * throws, nothing warns. App.routeTable.test.jsx pins the paths that exist
+ * today, which means it stops protecting anything the moment a tenth route is
+ * added and its prop entry forgotten.
+ *
+ * So "missing" must be distinguishable from "deliberately empty": a route that
+ * genuinely takes no shell props declares `{}` (as '/events/:id/edit' already
+ * does), and an omission throws here. Own-property, not truthiness — `{}` is
+ * truthy but so is nothing, and a declared-empty entry must pass.
+ *
+ * Lives beside the tables rather than inside App.jsx because it is pure, and
+ * because that is what makes the guard directly testable.
+ */
+export function withProps(route, propsByPath) {
+  if (!Object.hasOwn(propsByPath, route.path)) {
+    throw new Error(
+      `No props declared for route '${route.path}'. Add an entry to the route's `
+      + 'prop map in App.jsx — use {} if the view genuinely takes no shell props.'
+    );
+  }
+  return React.cloneElement(route.element, propsByPath[route.path]);
+}
