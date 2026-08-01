@@ -181,4 +181,9 @@ function up(db) {
   }
 }
 
-export default { version: 1, name: 'authz_roles', ownTransaction: true, up };
+// `fileUrl` is what the registry's checksum hashes: the whole module file,
+// canonicalised, rather than just `String(up)`. Without it the checksum would
+// not cover EXPECTED_USER_COLUMNS or countCascadingChildren() above — the two
+// parts of this migration most likely to change, and the two whose silent
+// change is most dangerous.
+export default { version: 1, name: 'authz_roles', ownTransaction: true, up, fileUrl: import.meta.url };
