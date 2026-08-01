@@ -2,21 +2,21 @@ import express from 'express';
 
 import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion } from '../attendance.js';
 import { authenticateToken, inTransaction } from '../utils.js';
+import { can, requireCap } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
 import { getOrCreateCertificateCode } from '../certificates.js';
 import { db } from '../db.js';
 
 const router = express.Router();
 
-router.post('/api/events/:id/checkin', authenticateToken, (req, res) => {
-  if (req.user.role !== 'organizer' && req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
+router.post('/api/events/:id/checkin', authenticateToken, requireCap('attendance.mark'), (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (req.user.role === 'organizer' && event.organizer_id !== req.user.id) {
+    // event.moderate is the "may act on any event" bypass (same idiom used for
+    // event.edit.own elsewhere) — anyone without it is bound to the event they
+    // host.
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
 
@@ -34,14 +34,15 @@ router.post('/api/events/:id/checkin', authenticateToken, (req, res) => {
   }
 });
 
-router.get('/api/events/:id/checkin', authenticateToken, (req, res) => {
+router.get('/api/events/:id/checkin', authenticateToken, requireCap('attendance.view'), (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (req.user.role === 'organizer' && event.organizer_id !== req.user.id) {
+    // event.moderate is the "may act on any event" bypass; an organizer
+    // (lacking it) is bound to the event they host.
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
-    if (req.user.role === 'student') return res.status(403).json({ error: 'Access denied' });
 
     res.json(getCheckins(db, req.params.id).map(c => ({
       slotId: c.slot_id, userId: c.user_id, present: c.present === 1, markedAt: c.marked_at
@@ -58,11 +59,7 @@ router.get('/api/events/:id/checkin', authenticateToken, (req, res) => {
 // records named in the request — never the rest — so a partial or stale submission
 // can no longer mark anyone absent, and a credit can only be removed by an
 // explicit instruction that carries a reason.
-router.post('/api/events/:id/attendance', authenticateToken, (req, res) => {
-  if (req.user.role !== 'organizer') {
-    return res.status(403).json({ error: 'Access denied: Only organizers can confirm attendance' });
-  }
-
+router.post('/api/events/:id/attendance', authenticateToken, requireCap('attendance.mark'), (req, res) => {
   const eventId = req.params.id;
   const { attendanceMap, reason } = req.body;
 
@@ -73,7 +70,11 @@ router.post('/api/events/:id/attendance', authenticateToken, (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (event.organizer_id !== req.user.id) {
+    // Deliberate correction (v1.2a): admin may confirm attendance on any event,
+    // same as attendance.mark grants them elsewhere — only an organizer
+    // (lacking event.moderate) is additionally bound to hosting the event
+    // themselves.
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
     if (event.status === 'cancelled') {
@@ -145,17 +146,15 @@ class AttendanceRefused extends Error {
 
 // 10. Edit Event Details and Slots (Organizer only)
 
-router.get('/api/events/:id/roster.csv', authenticateToken, (req, res) => {
-  if (req.user.role !== 'organizer' && req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
+router.get('/api/events/:id/roster.csv', authenticateToken, requireCap('attendance.view'), (req, res) => {
   const eventId = req.params.id;
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (req.user.role === 'organizer' && event.organizer_id !== req.user.id) {
+    // event.moderate is the "may act on any event" bypass; an organizer
+    // (lacking it) is bound to the event they host.
+    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 

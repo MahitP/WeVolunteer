@@ -49,19 +49,25 @@ router.delete('/api/auth/account', authenticateToken, async (req, res) => {
       }
     }
 
-    // Organizer ownership check
-    if (req.user.role === 'organizer') {
-      const activeEventsCount = db.prepare(`
-        SELECT COUNT(*) as count FROM events 
-        WHERE organizer_id = ? AND status NOT IN ('completed', 'cancelled')
-      `).get(req.user.id).count;
+    // Active-events check: business logic about what deletion does, not an
+    // authorization gate — "may this account be deleted while it still hosts
+    // events" is a question about this row, not about a kind of actor. Only
+    // an organizer's id can ever appear as `organizer_id`, so the query below
+    // is already scoped by ownership and always finds zero rows for a
+    // student, admin, super_admin, or partner deleting their own account;
+    // the earlier check gating this on the account's role was a redundant
+    // optimisation, not a second gate, and dropping it changes nothing
+    // observable.
+    const activeEventsCount = db.prepare(`
+      SELECT COUNT(*) as count FROM events
+      WHERE organizer_id = ? AND status NOT IN ('completed', 'cancelled')
+    `).get(req.principal.userId).count;
 
-      if (activeEventsCount > 0) {
-        return res.status(409).json({ 
-          error: 'You currently manage active volunteer opportunities. Transfer ownership or close these events before deleting your account.',
-          code: 'has_active_events'
-        });
-      }
+    if (activeEventsCount > 0) {
+      return res.status(409).json({
+        error: 'You currently manage active volunteer opportunities. Transfer ownership or close these events before deleting your account.',
+        code: 'has_active_events'
+      });
     }
 
     const now = new Date().toISOString();

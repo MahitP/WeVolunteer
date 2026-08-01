@@ -11,6 +11,7 @@ import {
 import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
+import { can } from '../authz.js';
 import { db, initDatabase } from '../db.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
@@ -22,17 +23,20 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
     const row = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Volunteer not found' });
 
-    const isSelf = req.params.id === req.user.id;
+    const isSelf = req.params.id === req.principal.userId;
 
     // Organizers only see contact/PII fields for students who have applied
     // to an event they host — not for every student on the platform.
-    const hostsApplicant = req.user.role === 'organizer' && !!db.prepare(`
+    // `applicant.review` is the "kind of actor" check (organizer, and
+    // super_admin via the wildcard); the subquery is the ownership check —
+    // an actual applicant of an event this principal actually hosts.
+    const hostsApplicant = can(req.principal, 'applicant.review') && !!db.prepare(`
       SELECT 1 FROM applications a
       JOIN events e ON a.event_id = e.id
       WHERE a.user_id = ? AND e.organizer_id = ?
       LIMIT 1
-    `).get(req.params.id, req.user.id);
-    const canSeeContact = isSelf || req.user.role === 'admin' || hostsApplicant;
+    `).get(req.params.id, req.principal.userId);
+    const canSeeContact = isSelf || can(req.principal, 'audit.read') || hostsApplicant;
 
     const totals = db.prepare(`
       SELECT COALESCE(SUM(hours_awarded), 0) as hours,
@@ -161,6 +165,20 @@ function buildMilestones(hours, events) {
 // from the record itself, so the same service always produces the same code
 // and a school office can check a printed copy against the platform.
 
+/**
+ * Intentionally open to every authenticated role — declared as such in
+ * authz.completeness.test.js's ROUTE_REGISTRY, not gated by a capability.
+ *
+ * This used to carry `requireCap('event.view')`, which every one of the five
+ * roles holds. A gate no role can fail is indistinguishable from no gate, but
+ * it is worse than no gate: it looks like a decision was made, and it removed
+ * this route from Guard 2's reviewed registry — the one place where "why is
+ * this open?" is actually written down and re-read. `GET /api/events` is the
+ * identical case (every role holds event.view) and is handled the other way,
+ * so the two now match. Whichever way a future reader looks, they find one
+ * mechanism, and the reasoning lives with the route rather than in a
+ * capability that only pretends to discriminate.
+ */
 router.get('/api/organizers/:id/profile', authenticateToken, (req, res) => {
   try {
     const row = db.prepare("SELECT * FROM users WHERE id = ? AND role IN ('organizer','admin')").get(req.params.id);
