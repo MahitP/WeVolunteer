@@ -164,9 +164,37 @@ describe('requireCapAny()', () => {
 });
 
 describe('module hygiene', () => {
-  it('does not import a database module', async () => {
+  /**
+   * authz.js must import NOTHING relative — not just not db.js.
+   *
+   * The previous version of this test grepped for `from './db.js'` alone, which
+   * is the one spelling of the problem that is easiest to avoid by accident. It
+   * would have passed on `from './utils.js'` (which imports db.js), on
+   * `from './config.js'`, and on a dynamic `import('./db.js')` — each of which
+   * reintroduces exactly what the ban exists to prevent.
+   *
+   * Two things depend on this module staying free-standing: it is unit-testable
+   * with no fixtures, and `src/authz.js` mirrors it, which pulls it into the
+   * Vite graph — so one relative import here drags a server-side dependency
+   * chain (and, for db.js, node:sqlite) into the client bundle or breaks the
+   * build outright. Node builtins and real packages are fine; a relative path
+   * is what reaches into this codebase.
+   */
+  it('imports nothing relative — not db.js, not utils.js, not anything local', async () => {
     const { readFileSync } = await import('fs');
     const src = readFileSync(new URL('./authz.js', import.meta.url), 'utf8');
-    expect(src).not.toMatch(/from\s+['"]\.\/db\.js['"]/);
+
+    // Strip comments first: this file's own docstring names './db.js' etc. as
+    // prose, and a substring match would read that as an import.
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+    // Covers `import x from './y'`, `import './y'`, `export ... from './y'`,
+    // and dynamic `import('./y')` — anything whose specifier starts with . or ..
+    const relative = [...code.matchAll(/(?:from|import)\s*\(?\s*['"](\.{1,2}\/[^'"]*)['"]/g)]
+      .map(m => m[1]);
+
+    expect(relative, 'authz.js must stay free-standing — see this test\'s docstring').toEqual([]);
   });
 });

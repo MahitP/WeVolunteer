@@ -10,8 +10,33 @@
  * Route files now ask for a named capability and never look at a role string.
  * `authz.completeness.test.js` enforces that.
  *
- * This module is pure: it imports nothing from db.js, so it is unit-testable
- * with no fixtures and cannot decay into a data-access layer.
+ * ── The cascade rule (read this before writing an if/else-if over can()) ──
+ *
+ * `super_admin` holds the '*' wildcard, so `can()` returns TRUE for every
+ * capability it is asked about. A chain of `else if (can(...))` branches is
+ * therefore NOT a set of mutually exclusive cases: a wildcard principal matches
+ * whichever branch happens to be tested first. Two rules follow, and both are
+ * load-bearing:
+ *
+ *   1. Order branches MOST-PRIVILEGED-FIRST. Testing the narrow capability
+ *      first (say `application.withdraw`, held by students) captures the
+ *      wildcard in the narrow branch, and super_admin silently gets a student's
+ *      scoped view of the data — a content bug no status-code assertion can
+ *      see, because the response is still a 200.
+ *
+ *   2. End the cascade in an EXPLICIT deny/empty branch, never a bare `else`.
+ *      "No recognised capability" must default to seeing and doing nothing. A
+ *      trailing `else` that grants unscoped access hands every future role
+ *      full reach on the day it is added — which is the exact class of bug
+ *      this module exists to eliminate, just inverted.
+ *
+ * Worked examples: applicationRoutes.js's GET /api/applications scoping and
+ * messageRoutes.js's user-search scoping.
+ *
+ * This module is pure: it imports nothing at all — no db.js, no utils.js, no
+ * config.js — so it is unit-testable with no fixtures, cannot decay into a
+ * data-access layer, and stays cheap for `src/authz.js` to mirror into the
+ * client bundle. `authz.test.js`'s module-hygiene test enforces that.
  */
 
 export const ROLES = ['student', 'organizer', 'admin', 'super_admin', 'partner'];
