@@ -24,16 +24,39 @@ router.get('/api/applications', authenticateToken, (req, res) => {
     `;
     
     // Result scoping, not a gate — every authenticated role reaches this route;
-    // the capability only chooses which rows come back. application.withdraw
-    // (a student capability) scopes to the caller's own rows; applicant.review
-    // (an organizer capability) scopes to the events they host. Anyone holding
-    // neither (admin, partner) sees everything unscoped, same as before.
-    if (can(req.principal, 'application.withdraw')) {
-      rows = db.prepare(`${BASE_QUERY} WHERE a.user_id = ?`).all(req.principal.userId);
-    } else if (can(req.principal, 'applicant.review')) {
-      rows = db.prepare(`${BASE_QUERY} WHERE e.organizer_id = ?`).all(req.principal.userId);
-    } else {
+    // the capability only chooses which rows come back.
+    //
+    // Ordered most-privileged-first, and deliberately: `can()` treats a
+    // super_admin principal as satisfying EVERY capability (the '*' wildcard
+    // in authz.js), so a wildcard principal always matches whichever branch
+    // is tested first. Testing `application.withdraw`
+    // (student) before the broader checks let super_admin fall into the
+    // "own rows" branch and see an all-but-empty result — a real content bug
+    // a status-code-only test could never catch. Broadest access is checked
+    // first here so the wildcard resolves to the same (correct) branch an
+    // admin would.
+    //
+    // `audit.read` is admin-only among named roles (organizer/student/partner
+    // do not hold it) and reads as "platform-wide oversight", which is what
+    // seeing every application unscoped actually is — so it, not an `else`,
+    // is the unscoped branch's gate. The cascade ends in an explicit empty
+    // result, not a bare unscoped `else`: "no recognised capability" must
+    // default to seeing nothing, never to seeing everything.
+    if (can(req.principal, 'audit.read')) {
+      // admin, and super_admin via the wildcard: every application.
       rows = db.prepare(BASE_QUERY).all();
+    } else if (can(req.principal, 'applicant.review')) {
+      // organizer: applications to the events they host.
+      rows = db.prepare(`${BASE_QUERY} WHERE e.organizer_id = ?`).all(req.principal.userId);
+    } else if (can(req.principal, 'application.withdraw')) {
+      // student: their own applications only.
+      rows = db.prepare(`${BASE_QUERY} WHERE a.user_id = ?`).all(req.principal.userId);
+    } else {
+      // No recognised capability (e.g. partner, deliberate correction v1.2a):
+      // deny by default rather than falling through to unscoped access. Partner
+      // previously fell into the unscoped branch and could read every
+      // application in the system — a data leak, not behaviour worth keeping.
+      rows = [];
     }
 
     // Batch the volunteer history lookups once instead of three queries per

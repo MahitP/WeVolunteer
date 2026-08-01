@@ -328,3 +328,79 @@ describe('applications: an organizer cannot reactivate a withdrawn application (
     });
   });
 });
+
+// Payload-level coverage for GET /api/applications' capability-scoping
+// cascade. The matrix test only ever asserts a status code, which is exactly
+// what let a real content bug through: an earlier ordering of this cascade
+// tested the narrowest capability first, so super_admin's '*' wildcard
+// matched it and the platform owner saw only "their own" (near-empty)
+// applications instead of everything, same as admin. A status-code check
+// can't see that — only comparing response bodies can.
+describe('applications: GET /api/applications payload scoping by capability', () => {
+  it('unscopes admin and super_admin equally, scopes a student to their own rows, and denies partner entirely', async () => {
+    const adminToken = await srv.login('admin@example.gov');
+    const studentToken = await srv.login('leo.chen28@gmail.com');
+    const orgToken = await srv.login('jkatzenback@vikings.org');
+
+    const { db } = await import('./db.js');
+    const student = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen28@gmail.com');
+
+    // Give the student at least one application to see, independent of
+    // whatever earlier describes in this file already created.
+    const start = new Date(Date.now() + 60 * 864e5).toISOString();
+    const end = new Date(Date.now() + 60 * 864e5 + 108e5).toISOString();
+    const mk = await srv.call('POST', '/api/events', {
+      title: 'Payload Scoping Test', description: 'd', category: 'Other', location: 'Hall',
+      applicationDeadline: new Date(Date.now() + 50 * 864e5).toISOString(),
+      slots: [{ name: 'Shift', description: 'd', startDatetime: start, endDatetime: end, maxSpots: 3 }]
+    }, orgToken);
+    const eventId = mk.body.id;
+    const slot = (await srv.call('GET', '/api/events', undefined, studentToken)).body
+      .find(e => e.id === eventId).slots[0];
+    await srv.call('POST', `/api/events/${eventId}/apply`, { slotId: slot.id }, studentToken);
+
+    // super_admin and partner have no seeded fixture: promote throwaway
+    // accounts, the same way authz.matrix.test.js does.
+    const superSigned = await srv.signupConfirmed({
+      name: 'Payload Super', username: 'payload_super_admin', email: 'payload-super@test.local',
+      password: 'Password123', grade: 'Adult', role: 'student'
+    });
+    db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('super_admin', superSigned.user.id);
+    const superToken = superSigned.cookie;
+
+    const partnerSigned = await srv.signupConfirmed({
+      name: 'Payload Partner', username: 'payload_partner', email: 'payload-partner@test.local',
+      password: 'Password123', grade: 'Adult', role: 'student'
+    });
+    db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('partner', partnerSigned.user.id);
+    const partnerToken = partnerSigned.cookie;
+
+    const adminRes = await srv.call('GET', '/api/applications', undefined, adminToken);
+    const superRes = await srv.call('GET', '/api/applications', undefined, superToken);
+    const studentRes = await srv.call('GET', '/api/applications', undefined, studentToken);
+    const partnerRes = await srv.call('GET', '/api/applications', undefined, partnerToken);
+
+    expect(adminRes.status).toBe(200);
+    expect(superRes.status).toBe(200);
+    expect(studentRes.status).toBe(200);
+    expect(partnerRes.status).toBe(200);
+
+    // admin and super_admin both see the whole, unscoped table — the
+    // wildcard must resolve to the SAME (broadest) branch as admin, not the
+    // narrower "own rows" branch a naive most-narrow-first cascade gives it.
+    expect(adminRes.body.length).toBeGreaterThan(0);
+    expect(superRes.body.length).toBe(adminRes.body.length);
+
+    // The student sees only their own applications — never the whole table.
+    expect(studentRes.body.length).toBeGreaterThan(0);
+    for (const app of studentRes.body) {
+      expect(app.userId).toBe(student.id);
+    }
+    expect(studentRes.body.length).toBeLessThan(adminRes.body.length);
+
+    // partner is denied entirely — an explicit empty result, not the
+    // every-application data leak it used to fall into (deliberate
+    // correction, v1.2a).
+    expect(partnerRes.body).toEqual([]);
+  });
+});
