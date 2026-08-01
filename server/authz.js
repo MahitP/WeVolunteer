@@ -20,12 +20,19 @@ export const CAPABILITIES = {
   student: [
     'event.view', 'event.apply', 'application.withdraw',
     'self.read', 'self.write', 'portfolio.write', 'message.send', 'qr.present',
+    // A student reading their own volunteer statistics (Task 7d). Organizers
+    // cannot reach GET /api/stats/volunteer today (the handler denies anyone
+    // whose role is not 'student'), so this stays a student-only capability
+    // rather than being widened to organizer as well.
+    'stats.self',
   ],
   organizer: [
     'event.view', 'event.create', 'event.edit.own', 'applicant.review',
     'attendance.mark', 'attendance.view', 'attendance.scan', 'announcement.post',
     'message.send', 'self.read', 'self.write', 'service.verify.own_event',
     'geocode.use',
+    // An organizer reading statistics for the events they run (Task 7d).
+    'analytics.own_events',
   ],
   admin: [
     'event.view', 'event.moderate', 'organizer.approve', 'user.suspend',
@@ -33,9 +40,22 @@ export const CAPABILITIES = {
     'service.verify.external', 'capability.grant',
     'attendance.mark', 'attendance.view',
     'self.read', 'self.write', 'geocode.use',
+    // Deliberate widening (Task 7d, same pattern as attendanceRoutes.js's
+    // attendance.mark correction in Task 7b): GET /api/stats/organizer denies
+    // admin today (`role !== 'organizer'`), which is an inconsistency with the
+    // rest of admin's platform-wide oversight capabilities — an admin can see
+    // every application and every event, but not one organizer's own stats
+    // page. `analytics.own_events` closes that gap.
+    'analytics.own_events',
   ],
   super_admin: ['*'],
-  partner: ['analytics.public'],
+  // `event.view` and `geocode.use`: neither route these gate (GET
+  // /api/organizers/:id/profile, GET /api/geocode) has ever had a partner-
+  // specific restriction — today's role checks only ever named 'student' or
+  // 'admin'/'organizer', so partner already passes both. Granting the
+  // capabilities keeps that unchanged now that the routes ask `can()` instead
+  // of comparing role strings.
+  partner: ['analytics.public', 'event.view', 'geocode.use'],
 };
 
 /**
