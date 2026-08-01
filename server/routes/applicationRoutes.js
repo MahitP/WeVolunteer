@@ -4,6 +4,7 @@ import {
   authenticateToken, inTransaction,
   assignWaitlistOrder, promoteFromWaitlist, notifyPromotions
 } from '../utils.js';
+import { can, requireCap } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 
@@ -22,10 +23,15 @@ router.get('/api/applications', authenticateToken, (req, res) => {
       JOIN slots s ON a.slot_id = s.id
     `;
     
-    if (req.user.role === 'student') {
-      rows = db.prepare(`${BASE_QUERY} WHERE a.user_id = ?`).all(req.user.id);
-    } else if (req.user.role === 'organizer') {
-      rows = db.prepare(`${BASE_QUERY} WHERE e.organizer_id = ?`).all(req.user.id);
+    // Result scoping, not a gate — every authenticated role reaches this route;
+    // the capability only chooses which rows come back. application.withdraw
+    // (a student capability) scopes to the caller's own rows; applicant.review
+    // (an organizer capability) scopes to the events they host. Anyone holding
+    // neither (admin, partner) sees everything unscoped, same as before.
+    if (can(req.principal, 'application.withdraw')) {
+      rows = db.prepare(`${BASE_QUERY} WHERE a.user_id = ?`).all(req.principal.userId);
+    } else if (can(req.principal, 'applicant.review')) {
+      rows = db.prepare(`${BASE_QUERY} WHERE e.organizer_id = ?`).all(req.principal.userId);
     } else {
       rows = db.prepare(BASE_QUERY).all();
     }
@@ -120,11 +126,7 @@ router.get('/api/applications', authenticateToken, (req, res) => {
 });
 
 // 7. Apply to an Event Slot (Student only)
-router.post('/api/events/:id/apply', authenticateToken, (req, res) => {
-  if (req.user.role !== 'student') {
-    return res.status(403).json({ error: 'Access denied: Only students can apply for events' });
-  }
-
+router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'), (req, res) => {
   const eventId = req.params.id;
   const { slotId } = req.body;
 
@@ -236,11 +238,7 @@ router.post('/api/events/:id/apply', authenticateToken, (req, res) => {
 // capacity rules — so the two cannot diverge. All writes happen in one
 // transaction; notifications and waitlist promotion run only after it commits,
 // because createNotification performs its own writes.
-router.patch('/api/applications/bulk', authenticateToken, (req, res) => {
-  if (req.user.role !== 'organizer') {
-    return res.status(403).json({ error: 'Access denied: Only organizers can manage application status' });
-  }
-
+router.patch('/api/applications/bulk', authenticateToken, requireCap('applicant.review'), (req, res) => {
   const { applicationIds, status } = req.body;
 
   if (!Array.isArray(applicationIds) || applicationIds.length === 0) {
@@ -263,7 +261,7 @@ router.patch('/api/applications/bulk', authenticateToken, (req, res) => {
         WHERE a.id = ?
       `).get(id);
       if (!app) return res.status(404).json({ error: `Application not found: ${id}` });
-      if (app.organizer_id !== req.user.id) {
+      if (app.organizer_id !== req.principal.userId) {
         return res.status(403).json({ error: 'Access denied: You do not host this event' });
       }
       // A withdrawn application is the volunteer's own choice to leave; an
@@ -368,8 +366,101 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
   const appId = req.params.id;
   const { status } = req.body; // 'accepted', 'waitlisted', 'rejected'
 
+  // applicant.review (organizer management) is checked before
+  // application.withdraw (student self-service) so a wildcard principal
+  // (super_admin) resolves to the broader capability rather than being
+  // caught by the narrower one and failing its ownership check below.
+  if (can(req.principal, 'applicant.review')) {
+    if (!['accepted', 'waitlisted', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status update. Must be accepted, waitlisted, or rejected.' });
+    }
+
+    try {
+      const app = db.prepare(`
+        SELECT a.*, e.organizer_id, e.title as event_title
+        FROM applications a
+        JOIN events e ON a.event_id = e.id
+        WHERE a.id = ?
+      `).get(appId);
+
+      if (!app) return res.status(404).json({ error: 'Application not found' });
+      if (app.organizer_id !== req.principal.userId) {
+        return res.status(403).json({ error: 'Access denied: You do not host this event' });
+      }
+
+      // A withdrawal is the volunteer's own decision to leave. The organizer must
+      // not be able to silently pull them back in — re-committing someone who
+      // stepped down, without their knowledge, to a shift they may no longer be
+      // able to attend. Re-entry only happens if the student re-applies.
+      if (app.status === 'withdrawn') {
+        return res.status(409).json({
+          error: 'This volunteer withdrew their own application. Only they can re-apply.',
+          code: 'withdrawn'
+        });
+      }
+
+      // Check spots capacity at the slot level if accepting
+      if (status === 'accepted') {
+        const slot = db.prepare('SELECT max_spots FROM slots WHERE id = ?').get(app.slot_id);
+        const slotMaxSpots = slot ? slot.max_spots : 0;
+        const slotAccepted = db.prepare(`
+          SELECT COUNT(*) as count FROM applications
+          WHERE slot_id = ? AND status = 'accepted'
+        `).get(app.slot_id).count;
+
+        if (slotAccepted >= slotMaxSpots) {
+          return res.status(400).json({ error: `Cannot accept: This slot is full (${slotMaxSpots} spots).` });
+        }
+      }
+
+      const wasAccepted = app.status === 'accepted';
+
+      // The status change and any resulting promotion must land together: a spot
+      // freed but not refilled, or refilled twice, are both worse than neither.
+      let promotions = [];
+      inTransaction(() => {
+        db.prepare('UPDATE applications SET status = ? WHERE id = ?').run(status, appId);
+
+        // Joining the waitlist means joining the back of the queue.
+        if (status === 'waitlisted') {
+          assignWaitlistOrder(appId, app.slot_id);
+        }
+
+        // A spot only opens if this person was actually holding one. Rejecting a
+        // pending applicant frees nothing, so promoting then would overfill.
+        //
+        // No `auto_approve` check: promotion depends on capacity and queue order,
+        // not on how the organizer chooses people. See promoteFromWaitlist.
+        if (wasAccepted && status !== 'accepted') {
+          promotions = promoteFromWaitlist(app.slot_id);
+        }
+      });
+      notifyPromotions(promotions);
+
+      // Notify the volunteer
+      if (status === 'accepted') {
+        notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
+      } else if (status === 'waitlisted') {
+        notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
+      } else if (status === 'rejected') {
+        notificationService.dispatch('APPLICATION_REJECTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
+      }
+
+      return res.json({
+        success: true,
+        application: {
+          id: appId,
+          status
+        }
+      });
+    } catch (error) {
+      console.error('Update app status error:', error);
+      return res.status(500).json({ error: 'Internal server error updating application' });
+    }
+  }
+
   // Students can only withdraw their own applications
-  if (req.user.role === 'student') {
+  if (can(req.principal, 'application.withdraw')) {
     // 'rejected' is still accepted so an older client build keeps working.
     // Both mean the same act; only 'withdrawn' is stored, because a student
     // leaving is not the same event as an organizer turning them down.
@@ -385,7 +476,7 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
         WHERE a.id = ?
       `).get(appId);
       if (!app) return res.status(404).json({ error: 'Application not found' });
-      if (app.user_id !== req.user.id) {
+      if (app.user_id !== req.principal.userId) {
         return res.status(403).json({ error: 'Access denied: This is not your application.' });
       }
 
@@ -433,96 +524,7 @@ router.patch('/api/applications/:id', authenticateToken, (req, res) => {
     }
   }
 
-  if (req.user.role !== 'organizer') {
-    return res.status(403).json({ error: 'Access denied: Only organizers can manage application status' });
-  }
-
-  if (!['accepted', 'waitlisted', 'rejected'].includes(status)) {
-    return res.status(400).json({ error: 'Invalid status update. Must be accepted, waitlisted, or rejected.' });
-  }
-
-  try {
-    const app = db.prepare(`
-      SELECT a.*, e.organizer_id, e.title as event_title
-      FROM applications a
-      JOIN events e ON a.event_id = e.id
-      WHERE a.id = ?
-    `).get(appId);
-
-    if (!app) return res.status(404).json({ error: 'Application not found' });
-    if (app.organizer_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied: You do not host this event' });
-    }
-
-    // A withdrawal is the volunteer's own decision to leave. The organizer must
-    // not be able to silently pull them back in — re-committing someone who
-    // stepped down, without their knowledge, to a shift they may no longer be
-    // able to attend. Re-entry only happens if the student re-applies.
-    if (app.status === 'withdrawn') {
-      return res.status(409).json({
-        error: 'This volunteer withdrew their own application. Only they can re-apply.',
-        code: 'withdrawn'
-      });
-    }
-
-    // Check spots capacity at the slot level if accepting
-    if (status === 'accepted') {
-      const slot = db.prepare('SELECT max_spots FROM slots WHERE id = ?').get(app.slot_id);
-      const slotMaxSpots = slot ? slot.max_spots : 0;
-      const slotAccepted = db.prepare(`
-        SELECT COUNT(*) as count FROM applications
-        WHERE slot_id = ? AND status = 'accepted'
-      `).get(app.slot_id).count;
-
-      if (slotAccepted >= slotMaxSpots) {
-        return res.status(400).json({ error: `Cannot accept: This slot is full (${slotMaxSpots} spots).` });
-      }
-    }
-
-    const wasAccepted = app.status === 'accepted';
-
-    // The status change and any resulting promotion must land together: a spot
-    // freed but not refilled, or refilled twice, are both worse than neither.
-    let promotions = [];
-    inTransaction(() => {
-      db.prepare('UPDATE applications SET status = ? WHERE id = ?').run(status, appId);
-
-      // Joining the waitlist means joining the back of the queue.
-      if (status === 'waitlisted') {
-        assignWaitlistOrder(appId, app.slot_id);
-      }
-
-      // A spot only opens if this person was actually holding one. Rejecting a
-      // pending applicant frees nothing, so promoting then would overfill.
-      //
-      // No `auto_approve` check: promotion depends on capacity and queue order,
-      // not on how the organizer chooses people. See promoteFromWaitlist.
-      if (wasAccepted && status !== 'accepted') {
-        promotions = promoteFromWaitlist(app.slot_id);
-      }
-    });
-    notifyPromotions(promotions);
-
-    // Notify the volunteer
-    if (status === 'accepted') {
-      notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
-    } else if (status === 'waitlisted') {
-      notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
-    } else if (status === 'rejected') {
-      notificationService.dispatch('APPLICATION_REJECTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
-    }
-
-    res.json({
-      success: true,
-      application: {
-        id: appId,
-        status
-      }
-    });
-  } catch (error) {
-    console.error('Update app status error:', error);
-    res.status(500).json({ error: 'Internal server error updating application' });
-  }
+  return res.status(403).json({ error: 'Access denied: Only organizers can manage application status' });
 });
 
 // 9a. Check-in (Organizer only)

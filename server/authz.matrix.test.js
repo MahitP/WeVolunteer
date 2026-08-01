@@ -150,28 +150,24 @@ const EXPECTED = [
   // Fake event id: `role !== organizer && role !== admin` is checked before any
   // db lookup, so the role gate is fully exercised without touching a fixture.
   ['POST', '/api/events/event-fake-000/checkin',
-    { student: 403, organizer: 'allow', admin: 'allow', super_admin: BUG('allow', '7b'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
 
-  // Real event-softball id: this handler checks existence FIRST, then
-  // ownership, then blocks only `student` explicitly — so today super_admin
-  // AND partner both pass. This is not a guess; it is the exact "a partner
-  // would pass" inconsistency the route inventory already documents, and it is
-  // pre-existing behaviour, not the silent-denial bug pattern — recorded as
-  // reality, not wrapped in BUG(). Task 7b's `attendance.view` conversion is
-  // expected to CHANGE this (deny partner), which is the deliberate correction
-  // task-7-brief.md calls out.
+  // Real event-softball id: converted to `attendance.view` (Task 7b), which
+  // corrects the pre-existing "a partner would pass" inconsistency — student
+  // and partner are now both denied; organizer (via ownership) and admin
+  // (via the capability) are unaffected.
   ['GET', '/api/events/event-softball/checkin',
-    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 'allow' }],
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
 
   // Fake event id: role gate (`role !== organizer`) runs before the body
-  // check and before any db lookup. Admin is genuinely denied today — the
-  // "one deliberate behaviour change" task-7-brief.md names explicitly, not a
-  // bug — Task 7b will widen `attendance.mark` to admin as a conscious choice.
+  // check and before any db lookup. Task 7b's deliberate correction widens
+  // `attendance.mark` to admin as a conscious choice — admin now reaches the
+  // handler and 400s on the missing body, same as organizer.
   ['POST', '/api/events/event-fake-000/attendance',
-    { student: 403, organizer: 'allow', admin: 403, super_admin: BUG('allow', '7b'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
 
   ['GET', '/api/events/event-fake-000/roster.csv',
-    { student: 403, organizer: 'allow', admin: 'allow', super_admin: BUG('allow', '7b'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
 
   // Self-scoped, no role check of any kind today — every authenticated role
   // gets its own (possibly empty) certificate list.
@@ -194,18 +190,18 @@ const EXPECTED = [
     { student: 'allow', organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 'allow' }],
 
   ['POST', '/api/events/event-fake-000/apply',
-    { student: 'allow', organizer: 403, admin: 403, super_admin: BUG('allow', '7b'), partner: 403 }],
+    { student: 'allow', organizer: 403, admin: 403, super_admin: 'allow', partner: 403 }],
 
   ['PATCH', '/api/applications/bulk',
     // admin genuinely lacks `applicant.review` in the target capability table
     // (organizer-only) — 403 here is correct today AND after conversion.
-    { student: 403, organizer: 'allow', admin: 403, super_admin: BUG('allow', '7b'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 403, super_admin: 'allow', partner: 403 }],
 
   // Fake application id: the student branch 403s on the missing `status`
   // field before any db read; the organizer branch 400s on the same before
   // any db read. Neither needs a real row to reach its gate.
   ['PATCH', '/api/applications/app-fake-000',
-    { student: 403, organizer: 'allow', admin: 403, super_admin: BUG('allow', '7b'), partner: 403 }],
+    { student: 403, organizer: 'allow', admin: 403, super_admin: 'allow', partner: 403 }],
 
   // ── eventRoutes.js (Task 7c) ──
 
