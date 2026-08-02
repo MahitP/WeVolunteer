@@ -5,8 +5,8 @@ import { ROLES } from './authz.js';
 import { SENSITIVE_ACTIONS } from './sensitiveActions.js';
 
 /**
- * Four regression guards for the authorization spine (v1.2a Tasks 7a-7e/17,
- * v1.2b Task 5):
+ * Five regression guards for the authorization spine (v1.2a Tasks 7a-7e/17,
+ * v1.2b Tasks 5-6):
  *
  *   1. No server module that makes authorization decisions may compare a role
  *      string directly, in ANY spelling.
@@ -16,6 +16,9 @@ import { SENSITIVE_ACTIONS } from './sensitiveActions.js';
  *      role string without a reviewed, categorised declaration.
  *   4. Every `requireAAL2(...)` argument in server/ is a registered sensitive
  *      action, spelled as a literal.
+ *   5. Every `requireAAL2` gate is paired with a `spendChallenge` for the same
+ *      action, and every registered action has a gate. The gate is an early
+ *      refusal; the spend is what makes a grant single-use.
  *
  * No guard touches production code. Every declaration is a decision verified by
  * reading the code, not a bulk-pasted allowlist — see task-8-report.md and
@@ -71,6 +74,52 @@ function stripComments(src) {
     .split('\n')
     .map((line) => (/^\s*(\/\/|\/\*|\*)/.test(line) ? '' : line))
     .join('\n');
+}
+
+/**
+ * Call sites of `requireAAL2` in one source file.
+ *
+ * Kept as a function taking a string, not a path, so the self-tests can drive it
+ * with a synthetic module containing the exact bug. Reading a regex and
+ * believing it is how three role checks got past Guard 1 on this branch.
+ *
+ * Hoisted to module scope — with `collectServerJsFiles` below — because Guards 4
+ * and 5 both scan for the same call sites and ask different questions about
+ * them. Two copies of this regex would let the two guards disagree about what a
+ * gate is, which is the same failure the shared Guard 1/3 primitives above exist
+ * to prevent.
+ */
+function findRequireAAL2CallSites(src) {
+  const found = [];
+  stripComments(src).split('\n').forEach((line, i) => {
+    // The declaration is not a call site. `export function requireAAL2(action)`
+    // is the one place the identifier legitimately appears with a
+    // non-literal argument.
+    if (/\bfunction\s+requireAAL2\s*\(/.test(line)) return;
+    for (const m of line.matchAll(/\brequireAAL2\s*\(([^)]*)\)/g)) {
+      const raw = m[1].trim();
+      const quoted = raw.match(/^(['"`])(.*)\1$/);
+      found.push({ line: i + 1, raw, action: quoted ? quoted[2] : null, isLiteral: Boolean(quoted) });
+    }
+  });
+  return found;
+}
+
+/** Every non-test module under server/, at any depth. */
+function collectServerJsFiles() {
+  const files = [];
+  const walk = (dirUrl, relDir) => {
+    for (const entry of readdirSync(dirUrl, { withFileTypes: true })) {
+      if (entry.name === 'node_modules') continue;
+      if (entry.isDirectory()) {
+        walk(new URL(`${entry.name}/`, dirUrl), `${relDir}${entry.name}/`);
+      } else if (entry.isFile() && entry.name.endsWith('.js') && !entry.name.endsWith('.test.js')) {
+        files.push({ url: new URL(entry.name, dirUrl), key: `server/${relDir}${entry.name}` });
+      }
+    }
+  };
+  walk(new URL('./', import.meta.url), '');
+  return files;
 }
 
 let srv;
@@ -195,10 +244,12 @@ describe('authorization hygiene', () => {
     const REVIEWED_NON_AUTH_EXCEPTIONS = new Set([
       './routes/authRoutes.js:223',
       // Moved from :379 in v1.2b Task 5 when `resolveProvider` gained an
-      // export and the docstring above it explaining why. The line itself is
-      // unchanged; re-read and re-confirmed as the same new-signup `verified`
-      // decision described above.
-      './routes/oauthRoutes.js:386',
+      // export and the docstring above it explaining why, and again to :405 in
+      // Task 6 (the local `issueSession` became an import with a docstring
+      // explaining that too). The line itself is unchanged in every case;
+      // re-read and re-confirmed as the same new-signup `verified` decision
+      // described above.
+      './routes/oauthRoutes.js:405',
     ]);
     const consumedExceptions = new Set();
 
@@ -525,6 +576,16 @@ describe('authorization hygiene', () => {
       'POST /api/favorites/:eventId': { category: CATEGORY.SELF_ONLY, reason: 'insert/delete scoped to caller\'s own id' },
       'GET /api/oauth/accounts': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
       'POST /api/oauth/disconnect': { category: CATEGORY.SELF_ONLY, reason: 'delete scoped to caller\'s own id' },
+      /**
+       * Newly authenticated in v1.2b Task 6 — it was an UNauthenticated route
+       * whose only tie to an account was a 15-minute link token naming a
+       * `userId`, proved by that account's password. The password is gone, so the
+       * session is what ties the two together: the handler refuses with 403
+       * unless `decoded.userId === req.user.id`, and the insert is written
+       * against `req.user.id`. Without that comparison the grant of one account
+       * would attach a provider identity to another's.
+       */
+      'POST /api/oauth/link': { category: CATEGORY.SELF_ONLY, reason: 'link token must name the caller (403 otherwise, oauthRoutes.js); the oauth_accounts insert is scoped to req.user.id, and the route is behind requireAAL2(\'oauth.link\') with the provider bound' },
       'POST /api/privacy/export': { category: CATEGORY.SELF_ONLY, reason: 'insert scoped to caller\'s own id' },
       'GET /api/privacy/export/status': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
       'GET /api/privacy/export/download/:id': { category: CATEGORY.SELF_ONLY, reason: 'job.user_id !== caller -> 404 (always the caller\'s own export job)' },
@@ -643,55 +704,16 @@ describe('authorization hygiene', () => {
      */
 
     /**
-     * Call sites of `requireAAL2` in one source file.
+     * The detector (hoisted to module scope, shared with Guard 5), proved
+     * against injected bugs.
      *
-     * Kept as a function taking a string, not a path, so the self-test below
-     * can drive it with a synthetic module containing the exact bug. Reading
-     * a regex and believing it is how three role checks got past Guard 1 on
-     * this branch.
-     */
-    function findRequireAAL2CallSites(src) {
-      const found = [];
-      stripComments(src).split('\n').forEach((line, i) => {
-        // The declaration is not a call site. `export function requireAAL2(action)`
-        // is the one place the identifier legitimately appears with a
-        // non-literal argument.
-        if (/\bfunction\s+requireAAL2\s*\(/.test(line)) return;
-        for (const m of line.matchAll(/\brequireAAL2\s*\(([^)]*)\)/g)) {
-          const raw = m[1].trim();
-          const quoted = raw.match(/^(['"`])(.*)\1$/);
-          found.push({ line: i + 1, raw, action: quoted ? quoted[2] : null, isLiteral: Boolean(quoted) });
-        }
-      });
-      return found;
-    }
-
-    /** Every non-test module under server/, at any depth. */
-    function collectServerJsFiles() {
-      const files = [];
-      const walk = (dirUrl, relDir) => {
-        for (const entry of readdirSync(dirUrl, { withFileTypes: true })) {
-          if (entry.name === 'node_modules') continue;
-          if (entry.isDirectory()) {
-            walk(new URL(`${entry.name}/`, dirUrl), `${relDir}${entry.name}/`);
-          } else if (entry.isFile() && entry.name.endsWith('.js') && !entry.name.endsWith('.test.js')) {
-            files.push({ url: new URL(entry.name, dirUrl), key: `server/${relDir}${entry.name}` });
-          }
-        }
-      };
-      walk(new URL('./', import.meta.url), '');
-      return files;
-    }
-
-    /**
-     * The detector, proved against injected bugs.
-     *
-     * This runs first and deliberately does not touch the repository. As of
-     * Task 5 there are ZERO `requireAAL2` call sites in server/ — the gates
-     * arrive with Task 6 — so the scan below would pass over an empty set and
-     * report success while checking nothing. A guard that cannot be shown to
-     * fire is not a guard; these fixtures are what makes the next test
-     * meaningful before its subject exists.
+     * This runs first and deliberately does not touch the repository. When it
+     * was written there were ZERO `requireAAL2` call sites in server/ — the
+     * gates arrived with Task 6 — so the scan below would have passed over an
+     * empty set and reported success while checking nothing. A guard that cannot
+     * be shown to fire is not a guard; these fixtures are what made the next
+     * test meaningful before its subject existed, and what keep it honest now
+     * that the subject could be deleted.
      */
     it('fires on a misspelled action, a non-literal argument, and nothing else', () => {
       const good = findRequireAAL2CallSites(
@@ -744,6 +766,116 @@ describe('authorization hygiene', () => {
       }
 
       expect(offenders, 'requireAAL2 gate(s) naming an action the registry does not know').toEqual([]);
+    });
+  });
+
+  // ── Guard 5 ──────────────────────────────────────────────────────────────
+  describe('every requireAAL2 gate is paired with a spendChallenge for the same action', () => {
+    /**
+     * Why this guard exists.
+     *
+     * `requireAAL2` is an early refusal, NOT the check. It asks `peekChallenge`
+     * whether the presented grant is live and reads `principal.aalAction`; it
+     * changes nothing. The property that makes step-up worth having — a grant is
+     * spendable ONCE, for THESE arguments — comes from `consumeChallenge` running
+     * inside the handler's transaction. A route that gates and never spends
+     * leaves the grant live for its remaining five minutes: the same challenge id
+     * re-presented performs the action again, and again, which is precisely the
+     * replay the single-use rule exists to stop.
+     *
+     * That omission is invisible. Every functional test of such a route passes —
+     * the happy path works, the gate refuses an unverified caller, the action
+     * happens. Only a test that deliberately replays the same id notices, and a
+     * test nobody wrote is a test nobody misses. So the pairing is checked
+     * statically, per file and per action, in the same place the gate's argument
+     * is checked.
+     *
+     * Per-file rather than per-handler is a deliberate limit, named here so it is
+     * not mistaken for completeness: this proves that a file gating on
+     * `email.change` also spends `email.change` somewhere in itself. Two routes
+     * in one file gating the same action, one of which spends, would satisfy it.
+     * No such case exists (each of the five actions has exactly one performing
+     * endpoint) and a per-handler walk would need a real parser; the honest scope
+     * is "the gate and the spend live together", which is what catches the
+     * mistake this is about — adding a gate and forgetting the spend entirely.
+     */
+
+    /** `spendChallenge(db, req, '<action>', …)` call sites in one source file. */
+    function findSpendCallSites(src) {
+      const found = [];
+      stripComments(src).split('\n').forEach((line, i) => {
+        for (const m of line.matchAll(/\bspendChallenge\s*\(\s*db\s*,\s*req\s*,\s*(['"`])([^'"`]*)\1/g)) {
+          found.push({ line: i + 1, action: m[2] });
+        }
+      });
+      return found;
+    }
+
+    /**
+     * The detector, proved against the bug rather than read.
+     *
+     * Three role checks got past Guard 1 on this branch by being spelled
+     * differently, which is the argument for driving every detector in this file
+     * with fixtures containing the exact defect.
+     */
+    it('recognises a spend, ignores comments, and does not match a different shape', () => {
+      expect(findSpendCallSites("      spendChallenge(db, req, 'account.delete', {});")[0].action)
+        .toBe('account.delete');
+      // Whitespace and quote style must not matter.
+      expect(findSpendCallSites('spendChallenge( db , req , "email.change" , { newEmail } )')[0].action)
+        .toBe('email.change');
+      expect(findSpendCallSites('spendChallenge(db, req, `oauth.link`, { provider })')[0].action)
+        .toBe('oauth.link');
+      // Prose about spending is not spending.
+      expect(findSpendCallSites(" * calls spendChallenge(db, req, 'data.export', {}) below")).toEqual([]);
+      // A call that does not pass the request cannot carry the three bindings,
+      // so it must not be counted as one.
+      expect(findSpendCallSites("spendChallenge(db, { id: 'x' }, 'data.export', {})")).toEqual([]);
+    });
+
+    it('finds no gated action left unspent anywhere in server/', () => {
+      const files = collectServerJsFiles();
+      expect(files.length, 'the server/ walk found no modules to scan').toBeGreaterThan(0);
+
+      const offenders = [];
+      const gatedActions = new Set();
+      for (const { url, key } of files) {
+        const src = readFileSync(url, 'utf8');
+        const gates = findRequireAAL2CallSites(src);
+        if (gates.length === 0) continue;
+
+        const spent = new Set(findSpendCallSites(src).map(s => s.action));
+        for (const gate of gates) {
+          if (!gate.isLiteral) continue; // Guard 4's complaint, not this one's.
+          gatedActions.add(gate.action);
+          if (!spent.has(gate.action)) {
+            offenders.push(
+              `${key}:${gate.line}: requireAAL2('${gate.action}') with no `
+              + `spendChallenge(db, req, '${gate.action}', …) in the same file. `
+              + 'The gate is an early refusal, not the check — without the spend the grant '
+              + 'stays live for its full five minutes and the action can be replayed with '
+              + 'the same challenge id. Spend it inside the handler\'s own transaction.'
+            );
+          }
+        }
+      }
+
+      expect(offenders, 'requireAAL2 gate(s) that never spend the grant they check').toEqual([]);
+
+      /**
+       * And every registered action is gated somewhere.
+       *
+       * The registry is the enumeration of what step-up protects, so an entry
+       * with no gate is an action the table claims to cover and nothing enforces
+       * — the silent-omission failure `sensitiveActions.js` exists to prevent,
+       * reappearing one row at a time. It also stops this whole guard from
+       * passing over an empty set, which is how a scan reports success while
+       * checking nothing.
+       */
+      expect(
+        [...Object.keys(SENSITIVE_ACTIONS)].filter(a => !gatedActions.has(a)),
+        'registered sensitive action(s) with no requireAAL2 gate on any route'
+      ).toEqual([]);
     });
   });
 });

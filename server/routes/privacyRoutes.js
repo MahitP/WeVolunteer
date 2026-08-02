@@ -1,23 +1,61 @@
 import express from 'express';
 import { db } from '../db.js';
-import { authenticateToken } from '../utils.js';
+import { authenticateToken, inTransaction } from '../utils.js';
+import { DEMO_MODE } from '../config.js';
+import { requireAAL2 } from '../authz.js';
+import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import rateLimit from 'express-rate-limit';
 import fs from 'fs';
 
 const router = express.Router();
 
+/**
+ * Three archive builds per address per fifteen minutes.
+ *
+ * The DEMO_MODE ceiling matches every other limiter in this application (see
+ * app.js): the seeded demo shares one address, and so does the whole test suite,
+ * so a production-tight limit there throttles the fixtures rather than an
+ * attacker. This limiter was the one outlier without that escape, which stopped
+ * mattering only because there were two export tests; step-up gave the endpoint
+ * enough of them to hit it.
+ */
 const exportLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 3, // limit each IP to 3 export requests per windowMs
+  limit: Number(process.env.EXPORT_RATE_LIMIT) || (DEMO_MODE ? 1000 : 3),
   message: { error: 'Too many export requests from this IP, please try again after 15 minutes' }
 });
 
-router.post('/api/privacy/export', authenticateToken, exportLimiter, (req, res) => {
+/**
+ * Queues a full copy of everything this account holds.
+ *
+ * ── Why this gained a gate it never had (v1.2b Task 6) ──
+ *
+ * This was the one endpoint in the enumeration with no step-up at all: an
+ * authenticated request and a rate limit, and a complete personal-data archive
+ * lands in a downloadable file. That is bulk PII egress about a minor, and it is
+ * precisely what somebody holding a borrowed or stolen session would take —
+ * quietly, in one request, without changing anything the account holder would
+ * later notice. Deletion, password and email all demanded a credential; the one
+ * action that copies everything out demanded nothing.
+ *
+ * `requireAAL2` sits BEFORE `exportLimiter` deliberately. The limiter allows
+ * three requests per fifteen minutes, and a client that has not yet verified
+ * gets a 403 telling it to — so counting those refusals would mean two honest
+ * export attempts exhaust the window. The gate itself costs no query beyond the
+ * one `authenticateToken` has already done.
+ */
+router.post('/api/privacy/export', authenticateToken, requireAAL2('data.export'), exportLimiter, (req, res) => {
   const userId = req.user.id;
 
-  // Check if they already have a pending or processing job
+  /**
+   * Checked BEFORE the grant is spent.
+   *
+   * "You already have an export running" is a refusal of the request, so it must
+   * not cost the user the verification they just performed — they would have to
+   * do it again for an export that never started.
+   */
   const existingJob = db.prepare(`
-    SELECT id, status FROM data_export_jobs 
+    SELECT id, status FROM data_export_jobs
     WHERE user_id = ? AND status IN ('pending', 'processing')
   `).get(userId);
 
@@ -26,22 +64,29 @@ router.post('/api/privacy/export', authenticateToken, exportLimiter, (req, res) 
   }
 
   const jobId = `export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  
-  try {
-    db.prepare(`
-      INSERT INTO data_export_jobs (id, user_id, status, created_at)
-      VALUES (?, ?, 'pending', ?)
-    `).run(jobId, userId, new Date().toISOString());
 
-    // Audit log
-    const auditId = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    db.prepare(`
-      INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
-      VALUES (?, ?, 'DATA_EXPORT_REQUESTED', ?, 'User requested a data export', ?)
-    `).run(auditId, userId, userId, new Date().toISOString()); // Note: Using admin_audit_logs for system logs for now, or we could skip it since WeVolunteer just has admin_audit_logs
+  try {
+    inTransaction(() => {
+      // Spent with the job it authorises: no export queued without a spent
+      // grant, and no spent grant without a queued export.
+      spendChallenge(db, req, 'data.export', {});
+
+      db.prepare(`
+        INSERT INTO data_export_jobs (id, user_id, status, created_at)
+        VALUES (?, ?, 'pending', ?)
+      `).run(jobId, userId, new Date().toISOString());
+
+      // Audit log
+      const auditId = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      db.prepare(`
+        INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
+        VALUES (?, ?, 'DATA_EXPORT_REQUESTED', ?, 'User requested a data export', ?)
+      `).run(auditId, userId, userId, new Date().toISOString()); // Note: Using admin_audit_logs for system logs for now, or we could skip it since WeVolunteer just has admin_audit_logs
+    });
 
     res.status(202).json({ message: 'Export request queued', jobId });
   } catch (error) {
+    if (error instanceof ChallengeNotSpent) return refuseReauth(res, error.result);
     console.error('Failed to queue export:', error);
     res.status(500).json({ error: 'Failed to request export' });
   }

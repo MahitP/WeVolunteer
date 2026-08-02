@@ -4,8 +4,15 @@ import { startTestServer } from './testServer.js';
 
 // One server for the whole file (Tasks 5 and 6 append more describes below).
 let srv;
-beforeAll(async () => { srv = await startTestServer(); });
-afterAll(async () => { await srv.close(); });
+beforeAll(async () => {
+  // The provider-only export path below has no password to verify with.
+  process.env.OAUTH_ALLOW_MOCK = 'true';
+  srv = await startTestServer();
+});
+afterAll(async () => {
+  await srv.close();
+  delete process.env.OAUTH_ALLOW_MOCK;
+});
 
 describe('privacy: student profile PII scoping (grade/school/bio/email)', () => {
   let leoToken, hostingOrgToken, unrelatedOrgToken, adminToken;
@@ -326,8 +333,42 @@ describe('privacy: event announcements gated to accepted volunteers and staff', 
   });
 });
 
+/**
+ * Requesting a full personal-data archive (v1.2b Task 6).
+ *
+ * ── Why this endpoint gained a gate it never had ──
+ *
+ * It was the one sensitive endpoint in the v1.2b enumeration with no step-up at
+ * all: an authenticated request and a rate limit, and a complete copy of
+ * everything the account holds lands in a downloadable file. That is bulk PII
+ * egress about a minor, and it is exactly what somebody holding a borrowed or
+ * stolen session would take — quietly, in one request, without changing anything
+ * the account holder would later notice. Deletion, password and email all
+ * demanded a credential; the one action that copies everything out demanded
+ * nothing.
+ */
 describe('privacy: data export', () => {
   let studentToken, studentId;
+
+  const requestExport = (token, challengeId) =>
+    srv.call('POST', '/api/privacy/export', undefined, token, challengeId ? srv.reauthHeader(challengeId) : {});
+
+  /** Lets the next request through the "already in progress" check. */
+  const finishRunningJobs = (userId) => {
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
+    db.prepare(`
+      UPDATE data_export_jobs SET status = 'completed', completed_at = ?
+      WHERE user_id = ? AND status IN ('pending', 'processing')
+    `).run(new Date().toISOString(), userId);
+    db.close();
+  };
+
+  const challengeRow = (id) => {
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
+    const row = db.prepare('SELECT * FROM reauth_challenges WHERE id = ?').get(id);
+    db.close();
+    return row;
+  };
 
   beforeAll(async () => {
     const signupRes = await srv.call('POST', '/api/auth/signup', {
@@ -340,27 +381,123 @@ describe('privacy: data export', () => {
     studentToken = await srv.confirmEmail(studentId);
   });
 
+  it('refuses a request presenting no verification at all', async () => {
+    const res = await requestExport(studentToken);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('reauth_required');
+    expect(res.body.action).toBe('data.export');
+
+    // And queued nothing — the refusal is before any work.
+    const statusRes = await srv.call('GET', '/api/privacy/export/status', undefined, studentToken);
+    expect(statusRes.body.status).toBe('none');
+  });
+
+  it('refuses a grant obtained for a different action', async () => {
+    // A live, correctly granted, correctly session-bound challenge — for
+    // something else. One verification must not unlock every sensitive action.
+    const forPassword = await srv.stepUp(studentToken, 'password.change', { password: 'Password123' });
+
+    const res = await requestExport(studentToken, forPassword);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('reauth_required');
+    expect(res.body.action).toBe('data.export');
+  });
+
   it('allows a user to request a data export and creates a pending job', async () => {
-    const res = await srv.call('POST', '/api/privacy/export', undefined, studentToken);
+    const challengeId = await srv.stepUp(studentToken, 'data.export', { password: 'Password123' });
+
+    const res = await requestExport(studentToken, challengeId);
     expect(res.status).toBe(202);
     expect(res.body.jobId).toBeTruthy();
 
     const statusRes = await srv.call('GET', '/api/privacy/export/status', undefined, studentToken);
     expect(statusRes.status).toBe(200);
     expect(statusRes.body.status).toBe('pending');
+
+    // The grant was spent with the job, not merely checked on the way in.
+    expect(challengeRow(challengeId).consumed_at).not.toBeNull();
   });
 
-  it('rejects concurrent export requests', async () => {
-    const res = await srv.call('POST', '/api/privacy/export', undefined, studentToken);
+  it('rejects concurrent export requests without spending the grant', async () => {
+    /**
+     * Why the consume is in the handler and not the middleware.
+     *
+     * "You already have an export running" is a refusal of the request, so it
+     * must not cost the user the verification they just performed — otherwise
+     * they re-verify for an export that never started. The 409 is deliberately
+     * checked before the grant is spent.
+     */
+    const challengeId = await srv.stepUp(studentToken, 'data.export', { password: 'Password123' });
+
+    const res = await requestExport(studentToken, challengeId);
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/already in progress/i);
+    expect(challengeRow(challengeId).consumed_at).toBeNull();
+
+    // Unspent, so the same verification still works once the first one finishes.
+    finishRunningJobs(studentId);
+    expect((await requestExport(studentToken, challengeId)).status).toBe(202);
+  });
+
+  it('spends the grant exactly once', async () => {
+    finishRunningJobs(studentId);
+    const challengeId = await srv.stepUp(studentToken, 'data.export', { password: 'Password123' });
+
+    expect((await requestExport(studentToken, challengeId)).status).toBe(202);
+
+    // A grant that survived its own use would be an unlimited supply of archives
+    // for the rest of its five minutes.
+    finishRunningJobs(studentId);
+    const replay = await requestExport(studentToken, challengeId);
+    expect(replay.status).toBe(403);
+    expect(replay.body.code).toBe('reauth_required');
   });
 
   it('400s if download is requested before it is completed', async () => {
+    finishRunningJobs(studentId);
+    const challengeId = await srv.stepUp(studentToken, 'data.export', { password: 'Password123' });
+    expect((await requestExport(studentToken, challengeId)).status).toBe(202);
+
     const statusRes = await srv.call('GET', '/api/privacy/export/status', undefined, studentToken);
     const jobId = statusRes.body.id;
 
     const res = await srv.call('GET', `/api/privacy/export/download/${jobId}`, undefined, studentToken);
     expect(res.status).toBe(400);
+  });
+
+  /**
+   * A provider-only account can exercise its own data-access right.
+   *
+   * The new gate must not become the reason somebody cannot get a copy of their
+   * own records: an account with no password satisfies it by re-authenticating at
+   * its provider, exactly as it does for deletion and the rest.
+   */
+  it('lets a provider-only account export via OAuth re-consent', async () => {
+    const username = `exportprov_${Math.random().toString(36).slice(2, 7)}`;
+    const email = `${username}@example.org`;
+    const sub = `sub-${username}`;
+
+    const urlRes = await srv.call('POST', '/api/oauth/google/url', {
+      signupData: { name: 'Export Provider', username, role: 'student', grade: '10', skills: [] }
+    });
+    expect(urlRes.status).toBe(200);
+    const state = new URL(urlRes.body.url).searchParams.get('state');
+    const nonceCookie = (urlRes.headers.get('set-cookie') || '').match(/(wev_oauth_state_[a-f0-9]{8}=[^;]+)/)?.[1];
+
+    const cbRes = await fetch(`${srv.base}/api/oauth/google/callback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: nonceCookie },
+      body: JSON.stringify({
+        code: JSON.stringify({ email, sub, name: 'Export Provider', emailVerified: true }),
+        state
+      })
+    });
+    expect(cbRes.status).toBe(200);
+    const cookie = (cbRes.headers.get('set-cookie') || '').match(/wev_session=([^;]+)/)?.[1];
+    expect(cookie).toBeTruthy();
+
+    const challengeId = await srv.stepUpOAuth(cookie, 'data.export', { sub });
+    const res = await requestExport(cookie, challengeId);
+    expect(res.status).toBe(202);
   });
 });

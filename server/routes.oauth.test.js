@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
+import jwt from 'jsonwebtoken';
 
 /**
  * OAuth sign-in, sign-up, linking and unlinking.
@@ -9,9 +10,21 @@ import { DatabaseSync } from 'node:sqlite';
  * That is exactly the shape the first test here guards: the transport used to
  * switch itself on whenever GOOGLE_CLIENT_ID was unset, which made a forgotten
  * environment variable into an unauthenticated sign-in-as-anyone endpoint.
+ *
+ * ── What v1.2b Task 6 changed about linking ──
+ *
+ * `POST /api/oauth/link` took an account password alongside an unauthenticated
+ * 15-minute link token, which made it a pure password oracle. It is now an
+ * authenticated route behind `requireAAL2('oauth.link')` with the provider bound
+ * in, and the grant is spent inside the insert's transaction. Two consequences
+ * are tested below: the caller must be signed in as the account the token names,
+ * and an account with no password is no longer refused outright.
  */
 describe('oauth', () => {
   let srv;
+  // What testServer.js sets, so a test can mint the same link token the callback
+  // mints. Kept as a constant rather than read from config.js, which reaches db.js.
+  const JWT_SECRET = 'test-secret-not-for-production';
 
   beforeAll(async () => {
     process.env.OAUTH_ALLOW_MOCK = 'true';
@@ -279,24 +292,193 @@ describe('oauth', () => {
 
   // ── Linking ───────────────────────────────────────────────────────
 
-  it('demands the account password before joining a provider to an existing account', async () => {
-    const { state, nonceCookie } = await begin('google');
-    const res = await callback('google', {
-      code: identity({ email: 'leo.chen28@gmail.com', sub: 'sub-leo-google' }),
-      state, nonceCookie
-    });
+  /**
+   * A link token for whoever already holds the address the provider returned.
+   *
+   * This is what somebody sees who presses "Continue with Google" while signed
+   * out, on an address that already has a WeVolunteer account.
+   */
+  const linkTokenFor = async (email, sub, provider = 'google') => {
+    const { state, nonceCookie } = await begin(provider);
+    const res = await callback(provider, { code: identity({ email, sub }), state, nonceCookie });
     expect(res.status).toBe(200);
     expect(res.body.action).toBe('link_required');
     expect(res.body.linkToken).toBeTruthy();
     // Critically, no session was minted just for proving control of the address.
     expect(res.cookie).toBeNull();
+    return res.body.linkToken;
+  };
 
-    const wrong = await srv.call('POST', '/api/oauth/link', { linkToken: res.body.linkToken, password: 'NotThePassword1' });
-    expect(wrong.status).toBe(401);
+  const link = (linkToken, cookie, challengeId) =>
+    srv.call('POST', '/api/oauth/link', { linkToken }, cookie, challengeId ? srv.reauthHeader(challengeId) : {});
 
-    const right = await srv.call('POST', '/api/oauth/link', { linkToken: res.body.linkToken, password: 'password123' });
-    expect(right.status).toBe(200);
-    expect(right.cookie).toBeTruthy();
+  it('joins a provider to an existing account once identity is re-verified', async () => {
+    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-leo-google');
+
+    // The person signs in the ordinary way, then verifies.
+    const cookie = await srv.login('leo.chen28@gmail.com');
+    const challengeId = await srv.stepUp(cookie, 'oauth.link', { params: { provider: 'google' } });
+
+    const res = await link(linkToken, cookie, challengeId);
+    expect(res.status).toBe(200);
+
+    const accounts = await srv.call('GET', '/api/oauth/accounts', undefined, cookie);
+    expect(accounts.body.some(a => a.provider === 'google')).toBe(true);
+
+    /**
+     * No new session is issued, and that is deliberate.
+     *
+     * It used to be, because the caller had just proved a password while signed
+     * out. Re-issuing now would replace a jti-bearing session with the jti-less
+     * one this file's `issueSession` used to mint — and a session with no jti can
+     * have no challenge bound to it, so linking a provider would silently cost
+     * the user the ability to verify anything else.
+     */
+    expect(res.cookie).toBeNull();
+    const stillWorks = await srv.stepUp(cookie, 'oauth.link', { params: { provider: 'google' } });
+    expect(stillWorks).toBeTruthy();
+  });
+
+  it('refuses a link presenting no verification at all', async () => {
+    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-leo-noverify');
+    const cookie = await srv.login('leo.chen28@gmail.com');
+
+    const res = await link(linkToken, cookie);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('reauth_required');
+    expect(res.body.action).toBe('oauth.link');
+  });
+
+  it('refuses a link with no session at all', async () => {
+    // It was an UNauthenticated endpoint: the token plus a password was the whole
+    // proof. The session is now half of that proof, so there has to be one.
+    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-leo-nosession');
+    const res = await srv.call('POST', '/api/oauth/link', { linkToken });
+    expect(res.status).toBe(401);
+  });
+
+  it('refuses a grant obtained for a different action', async () => {
+    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-leo-crossaction');
+    const cookie = await srv.login('leo.chen28@gmail.com');
+    const forExport = await srv.stepUp(cookie, 'data.export');
+
+    const res = await link(linkToken, cookie, forExport);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('reauth_required');
+    expect(res.body.action).toBe('oauth.link');
+  });
+
+  /**
+   * The params binding. A verification obtained to connect Google must not
+   * connect Microsoft — a different provider, a different `sub` namespace, and a
+   * different row on the account. `requireAAL2` cannot catch this: it compares
+   * the action only. `consumeChallenge` does, inside the handler's transaction,
+   * against the provider actually about to be written.
+   */
+  it('refuses a grant bound to a different provider than the token names', async () => {
+    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-leo-boundprov');
+    const cookie = await srv.login('leo.chen28@gmail.com');
+    const forMicrosoft = await srv.stepUp(cookie, 'oauth.link', { params: { provider: 'microsoft' } });
+
+    const res = await link(linkToken, cookie, forMicrosoft);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('params_mismatch');
+  });
+
+  it('spends the grant exactly once', async () => {
+    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-leo-single');
+    const cookie = await srv.login('leo.chen28@gmail.com');
+    const challengeId = await srv.stepUp(cookie, 'oauth.link', { params: { provider: 'google' } });
+
+    expect((await link(linkToken, cookie, challengeId)).status).toBe(200);
+
+    // A grant that survived its own use would be a second free provider link for
+    // the rest of its five minutes.
+    const replay = await link(linkToken, cookie, challengeId);
+    expect(replay.status).toBe(403);
+    expect(replay.body.code).toBe('reauth_required');
+  });
+
+  /**
+   * The check that replaced the password, and the reason it is not optional.
+   *
+   * The token names the account to link, and used to be tied to the person
+   * presenting it only by that account's password. Without a comparison against
+   * the session, somebody who controls a provider account bearing a victim's
+   * address could sign in as THEMSELVES, verify with their own credential, and
+   * spend that grant to attach their provider identity to the victim's account —
+   * after which "Continue with Google" signs them in as the victim.
+   */
+  it('refuses a link token that names a different account than the caller', async () => {
+    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-attacker-google');
+
+    // Signed in as somebody else entirely, verified perfectly well as themselves.
+    const attacker = await srv.login('emiller2027@gmail.com');
+    const challengeId = await srv.stepUp(attacker, 'oauth.link', { params: { provider: 'google' } });
+
+    const res = await link(linkToken, attacker, challengeId);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('link_token_other_account');
+
+    // Nothing was written against either account.
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
+    const row = db.prepare('SELECT 1 FROM oauth_accounts WHERE provider_user_id = ?').get('sub-attacker-google');
+    db.close();
+    expect(row).toBeUndefined();
+  });
+
+  /**
+   * The 409 this endpoint used to answer an account with no password.
+   *
+   * "That account has no password. Sign in with your existing provider instead."
+   * — which was the only honest answer while a password was the only proof it
+   * accepted, and which meant losing access to a single Google account was
+   * losing the WeVolunteer account. Re-consent makes the question answerable, so
+   * the refusal is gone.
+   *
+   * The link token is minted here rather than obtained from the callback,
+   * because the callback has its OWN, separate 409 for this case
+   * (`link_requires_other_provider`) which Task 6 left in place — see
+   * task-6-report.md. The payload is exactly what the callback signs.
+   */
+  it('no longer refuses an account that has no password', async () => {
+    const email = `secondprov-${Math.random().toString(36).slice(2, 9)}@example.org`;
+    const username = `secondprov_${Math.random().toString(36).slice(2, 7)}`;
+    const googleSub = `sub-${username}`;
+
+    const { state, nonceCookie } = await begin('google', {
+      signupData: { name: 'Two Providers', username, role: 'student', grade: '10', skills: [] }
+    });
+    const created = await callback('google', { code: identity({ email, sub: googleSub }), state, nonceCookie });
+    expect(created.status).toBe(200);
+    const cookie = created.cookie;
+    expect(cookie).toBeTruthy();
+
+    const linkToken = jwt.sign(
+      {
+        action: 'link', userId: created.body.user.id, provider: 'microsoft',
+        providerUserId: `ms-${username}`, providerEmail: email
+      },
+      JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    // Its only credential is the provider it already has, which is exactly what
+    // it re-consents with.
+    const challengeId = await srv.stepUpOAuth(cookie, 'oauth.link', {
+      params: { provider: 'microsoft' }, provider: 'google', sub: googleSub
+    });
+
+    const res = await link(linkToken, cookie, challengeId);
+    expect(res.status).toBe(200);
+
+    const accounts = await srv.call('GET', '/api/oauth/accounts', undefined, cookie);
+    expect(accounts.body.map(a => a.provider).sort()).toEqual(['google', 'microsoft']);
+
+    // And with two ways in, the last-credential guard releases the first one —
+    // untouched by this work, and the thing that made the 409 above defensible.
+    const disconnected = await srv.call('POST', '/api/oauth/disconnect', { provider: 'google' }, cookie);
+    expect(disconnected.status).toBe(200);
   });
 
   /**

@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import { db } from './db.js';
 import { notificationService } from './services/notificationService.js';
 import { sendNotificationEmail } from './email.js';
-import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST, COOKIE_NAME } from './config.js';
+import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, isEmailGateAllowed, COOKIE_NAME } from './config.js';
 import { principalFor } from './authz.js';
 import { grantsFor } from './userCapabilities.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
@@ -194,18 +194,45 @@ export function authenticateToken(req, res, next) {
      * for the verification to be got wrong.
      *
      * Explicitly `null`, never absent, for tokens minted before per-session
-     * revocation existed (and for the sessions oauthRoutes.js's `issueSession`
-     * still creates today, which carry no jti). Those are admitted here — see
-     * `isSessionRevoked` — so the routes that cannot work without a jti have to
-     * recognise the case and say so, rather than throwing.
+     * revocation existed. Those are admitted here — see `isSessionRevoked` — so
+     * the routes that cannot work without a jti have to recognise the case and
+     * say so, rather than throwing. Every code path that mints a session now
+     * goes through `authRoutes.js`'s `issueSession`, which always sets one;
+     * oauthRoutes.js had its own jti-less copy until v1.2b Task 6.
      */
     req.sessionJti = decodedUser.jti ?? null;
+
+    /**
+     * The challenge id this request presented, for the handlers that SPEND it.
+     *
+     * `requireAAL2` is an early refusal, not the check: the handler performing a
+     * sensitive action has to call `consumeChallenge` inside its own
+     * transaction, against the action and the params it is actually about to
+     * perform — and to do that it needs the id.
+     *
+     * Read here, once, from the same `REAUTH_CHALLENGE_HEADER_KEY` lookup that
+     * resolves assurance below, and never re-read in a route file. Two spellings
+     * of the header name is one typo away from a handler that gates on a grant
+     * and then consumes nothing: the request succeeds, the grant stays
+     * spendable, and single use — the property that makes a replayed grant not a
+     * second free sensitive action — is silently gone with every test still
+     * green. Same reasoning as `sensitiveActions.js`'s header on why the wire
+     * name has exactly one definition.
+     *
+     * `null` rather than absent for a request that presented nothing, matching
+     * `req.sessionJti` above, so a handler can compare without first asking
+     * whether this middleware ran. A duplicated header arrives comma-joined (a
+     * string that matches no challenge id) and an array-valued one is discarded
+     * by the typeof — both resolve to AAL1, which is the safe direction.
+     */
+    const presentedChallengeId = req.headers[REAUTH_CHALLENGE_HEADER_KEY];
+    req.reauthChallengeId = typeof presentedChallengeId === 'string' ? presentedChallengeId : null;
 
     // Assurance. Additive to the principal and nothing else — a request that
     // presents no challenge id leaves it at the AAL1 principalFor() already
     // built, having touched the database not at all.
     const aalAction = resolveAssurance({
-      challengeId: req.headers[REAUTH_CHALLENGE_HEADER_KEY],
+      challengeId: req.reauthChallengeId,
       userId: userRow.id,
       sessionJti: decodedUser.jti
     });
@@ -217,7 +244,7 @@ export function authenticateToken(req, res, next) {
     if (
       REQUIRE_EMAIL_VERIFICATION &&
       userRow.email_verified !== 1 &&
-      !EMAIL_GATE_ALLOWLIST.includes(req.path)
+      !isEmailGateAllowed(req.path)
     ) {
       return res.status(403).json({
         error: 'Please verify your email address to continue.',

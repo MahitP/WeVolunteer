@@ -445,15 +445,23 @@ app.use('/api/auth/reset-password', authLimiter);
 app.use('/api/auth/verify-email', authLimiter);
 
 /**
- * Endpoints that check a password but are not /login.
+ * Sensitive account actions that are not /login.
  *
- * Each of these was reachable 600 times per window under apiLimiter alone,
- * which made every one of them a better brute-force target than the login form
- * it sat beside:
- *   • /api/oauth/link       — takes an account password with an unauthenticated
- *                             15-minute token, so it is a pure password oracle.
- *   • /api/auth/change-password — takes the current password.
- *   • DELETE /api/auth/account  — takes the password, and succeeds destructively.
+ * Each was reachable 600 times per window under apiLimiter alone, which made
+ * every one of them a better brute-force target than the login form it sat
+ * beside:
+ *   • /api/oauth/link       — took an account password with an unauthenticated
+ *                             15-minute token, so it was a pure password oracle.
+ *   • /api/auth/change-password — took the current password.
+ *   • DELETE /api/auth/account  — took the password, and succeeds destructively.
+ *
+ * None of the three takes a password any more (v1.2b Task 6): each is behind
+ * `requireAAL2`, and the only password comparison in the step-up flow is
+ * `/api/auth/reauth/password`, which carries its own much tighter limiter below.
+ * These mounts stay regardless — the endpoints are still destructive or
+ * identity-changing, which is reason enough not to serve them at general API
+ * volume, and DELETE /api/auth/account is also on the email-gate allowlist, so
+ * it is reachable by accounts that can reach almost nothing else.
  */
 app.use('/api/auth/change-password', authLimiter);
 app.use('/api/auth/account', authLimiter);
@@ -464,8 +472,10 @@ app.use('/api/auth/account', authLimiter);
  * mail limiter, not just the auth one. Without it, a live session could be used
  * to flood an arbitrary address with confirmation mail from this domain.
  *
- * It also takes the account password, which makes it a password oracle on the
- * same footing as /change-password.
+ * It took the account password until v1.2b Task 6, which made it a password
+ * oracle on the same footing as /change-password. It is now behind
+ * `requireAAL2('email.change')` instead, and the mail-flooding reason above is
+ * the one that keeps these limiters here.
  */
 app.use('/api/auth/change-email', mailIpCeilingLimiter, mailLimiter);
 app.use('/api/auth/confirm-email-change', authLimiter);
