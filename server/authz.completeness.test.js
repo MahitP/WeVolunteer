@@ -244,12 +244,14 @@ describe('authorization hygiene', () => {
     const REVIEWED_NON_AUTH_EXCEPTIONS = new Set([
       './routes/authRoutes.js:223',
       // Moved from :379 in v1.2b Task 5 when `resolveProvider` gained an
-      // export and the docstring above it explaining why, and again to :405 in
-      // Task 6 (the local `issueSession` became an import with a docstring
-      // explaining that too). The line itself is unchanged in every case;
-      // re-read and re-confirmed as the same new-signup `verified` decision
-      // described above.
-      './routes/oauthRoutes.js:405',
+      // export and the docstring above it explaining why; to :405 in Task 6
+      // (the local `issueSession` became an import with a docstring explaining
+      // that too); and to :521 in Task 6b, which added the step-up gate to the
+      // auto-link branch above it. The line itself is unchanged in every case;
+      // re-read and re-confirmed each time as the same new-signup `verified`
+      // decision described above. That it keeps moving is the guard working as
+      // designed — a pinned line is what forces the re-read.
+      './routes/oauthRoutes.js:521',
     ]);
     const consumedExceptions = new Set();
 
