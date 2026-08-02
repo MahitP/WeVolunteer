@@ -405,6 +405,76 @@ export async function consumeChallenge({ db, challengeId, userId, action, params
 }
 
 /**
+ * Reads a challenge's spendability WITHOUT spending it.
+ *
+ * ── Why this exists ──
+ *
+ * `authenticateToken` has to decide a request's assurance level before the
+ * handler runs, and the only honest source for that is this table. It could
+ * not use `consumeChallenge`: a middleware that consumes on the way in burns
+ * the grant even when the handler then rejects the request for an unrelated
+ * reason — a failed validation, a 409, a rolled-back transaction — leaving the
+ * user to re-verify for a request that never happened. Assurance is a question
+ * asked on the way in; consumption is a decision made in the handler's
+ * transaction, next to the work it authorises.
+ *
+ * It also could not query `reauth_challenges` directly from utils.js. Every
+ * statement against this table lives in this module, so the bindings are
+ * enforced in one place and a second reader cannot quietly implement four of
+ * the five.
+ *
+ * ── Why it cannot mutate ──
+ *
+ * One SELECT, and comparisons in JS. There is no UPDATE, no INSERT and no
+ * DELETE on this path, and the projection it returns is frozen, so a caller
+ * cannot write through it into a later decision either. The read-then-compare
+ * race that makes `consumeChallenge` a single conditional UPDATE is not a
+ * hazard here for the same reason: this answers a question and changes
+ * nothing, so two callers racing simply both get an answer. Whether the grant
+ * was still spendable at the moment it MATTERED is settled by the UPDATE
+ * inside `consumeChallenge`, which re-states every predicate below.
+ *
+ * ── What it does not return ──
+ *
+ * Not `params_hash`. Assurance is resolved per action, and the params binding
+ * is checked when the grant is spent, against the request the handler is
+ * actually about to perform. Exposing the hash here would invite a middleware
+ * to approximate that check against a body it has not finished parsing.
+ *
+ * Scoped by user like every other lookup in this module, so another user's
+ * challenge id is indistinguishable from one that does not exist.
+ */
+export function peekChallenge({ db, challengeId, userId }) {
+  // Not an error worth throwing over: an absent or malformed challenge id is
+  // what an ordinary request looks like, and this is called from a middleware
+  // that must not blow up on one.
+  if (!challengeId || !userId) return fail(E.NOT_FOUND);
+
+  const nowIso = new Date().toISOString();
+  const row = load(db, challengeId, userId);
+
+  // Same order and same predicates as consumeChallenge's diagnosis, minus the
+  // per-request bindings (action, params, session) that only the caller knows.
+  if (!row) return fail(E.NOT_FOUND);
+  if (row.consumed_at) return fail(E.CONSUMED);
+  if (row.expires_at <= nowIso) return fail(E.EXPIRED);
+  if (row.attempts >= MAX_ATTEMPTS) return fail(E.LOCKED);
+  if (!row.granted_at) return fail(E.NOT_GRANTED);
+
+  return {
+    ok: true,
+    challenge: Object.freeze({
+      id: row.id,
+      userId: row.user_id,
+      action: row.action,
+      sessionJti: row.session_jti,
+      grantedAt: row.granted_at,
+      expiresAt: row.expires_at
+    })
+  };
+}
+
+/**
  * Deletes challenges whose retention window has closed.
  *
  * Driven by the maintenance sweep in utils.js. Nothing here is recoverable and

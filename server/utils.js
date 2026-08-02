@@ -5,7 +5,7 @@ import { sendNotificationEmail } from './email.js';
 import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST, COOKIE_NAME } from './config.js';
 import { principalFor } from './authz.js';
 import { grantsFor } from './userCapabilities.js';
-import { sweepExpiredChallenges } from './reauth.js';
+import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
 
 /**
  * Whether this specific session has been signed out.
@@ -81,6 +81,78 @@ export function buildPrincipal(userRow, fetchGrants = (id) => grantsFor(db, id))
   return principal;
 }
 
+/**
+ * Where a request declares the re-verification it is spending.
+ *
+ * A header, not a body field, for three reasons:
+ *
+ *   1. Two of the five sensitive actions are reached by methods that carry no
+ *      body worth relying on (account deletion is a DELETE), and a mechanism
+ *      that works for three of five is a mechanism someone will forget on the
+ *      other two.
+ *   2. `authenticateToken` would otherwise depend on the body parser having
+ *      already run. It does today, but that is an ordering fact in app.js, and
+ *      the middleware that decides assurance should not be the thing that
+ *      breaks when the ordering is edited.
+ *   3. The challenge id is transport metadata about the request, not an
+ *      argument to it. Keeping it out of the body keeps it out of the object
+ *      whose fields `paramsHash` binds, so it can never be mistaken for one.
+ *
+ * Node lower-cases incoming header names, so the wire form is only ever used
+ * by clients and documentation. A duplicated header arrives comma-joined,
+ * which matches no challenge id and resolves to AAL1 — the safe direction.
+ */
+export const REAUTH_CHALLENGE_HEADER = 'X-Reauth-Challenge';
+const REAUTH_CHALLENGE_HEADER_KEY = REAUTH_CHALLENGE_HEADER.toLowerCase();
+
+/**
+ * The action this request has proved a fresh identity for, or null.
+ *
+ * ── Cost ──
+ *
+ * This runs on every authenticated request in the application, so the first
+ * thing it does is establish that there is nothing to look up. A request with
+ * no challenge id issues NO query — same reasoning as `buildPrincipal`'s lazy
+ * grants getter, and the same reason: an unconditional per-request query here
+ * is a tax on the whole API paid by the handful of requests that need it.
+ * `authz.aal.test.js` counts the statements rather than trusting the reading.
+ *
+ * ── The jti case ──
+ *
+ * Every challenge is bound to a session jti when it is opened — `openChallenge`
+ * refuses to create one otherwise, because a grant bound to no session is
+ * spendable by anyone holding the id. Tokens issued before jti existed are
+ * still admitted by `authenticateToken`, and they simply cannot match a bound
+ * grant. That is resolved here as AAL1, before the query and without an
+ * exception; the separate question of what to tell someone on such a token who
+ * tries to START a step-up belongs to the challenge-creation route.
+ *
+ * ── Not consuming ──
+ *
+ * `peekChallenge`, never `consumeChallenge`. Spending the grant here would
+ * burn it on a request the handler may still reject for unrelated reasons.
+ *
+ * `peek` is injectable purely so a test can count calls without going through
+ * db.js; production code never passes it.
+ */
+export function resolveAssurance(
+  { challengeId, userId, sessionJti },
+  peek = (args) => peekChallenge({ db, ...args })
+) {
+  if (!challengeId || typeof challengeId !== 'string') return null;
+  if (!userId || !sessionJti) return null;
+
+  const result = peek({ challengeId, userId });
+  if (!result || !result.ok) return null;
+
+  // The session binding. `peekChallenge` scopes its read to the user; this is
+  // the check that stops a grant obtained in one browser being spent from
+  // another, which is the whole scenario step-up exists for.
+  if (result.challenge.sessionJti !== sessionJti) return null;
+
+  return result.challenge.action;
+}
+
 // --- AUTHENTICATION MIDDLEWARE ---
 export function authenticateToken(req, res, next) {
   const token = req.cookies && req.cookies[COOKIE_NAME];
@@ -123,6 +195,19 @@ export function authenticateToken(req, res, next) {
     // The capability principal. req.user is left exactly as it was, so every
     // existing handler and test keeps working while call sites migrate.
     req.principal = buildPrincipal(userRow);
+
+    // Assurance. Additive to the principal and nothing else — a request that
+    // presents no challenge id leaves it at the AAL1 principalFor() already
+    // built, having touched the database not at all.
+    const aalAction = resolveAssurance({
+      challengeId: req.headers[REAUTH_CHALLENGE_HEADER_KEY],
+      userId: userRow.id,
+      sessionJti: decodedUser.jti
+    });
+    if (aalAction !== null) {
+      req.principal.aal = 2;
+      req.principal.aalAction = aalAction;
+    }
 
     if (
       REQUIRE_EMAIL_VERIFICATION &&
