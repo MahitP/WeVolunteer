@@ -78,4 +78,12 @@ describe('canonicalParams (collision + ordering regressions)', () => {
     // value hashed identically.
     expect(canonicalParams(['a'], { a: 5 })).not.toBe(canonicalParams(['a'], { a: '5' }));
   });
+
+  it('distinguishes an explicit JSON null from a bound key being absent', () => {
+    // { newEmail: null } is valid, parseable JSON, so this is reachable from
+    // a real request body. The [key, value]-pair encoding used `null` as the
+    // absent-key sentinel, so a present key whose *value* is literal `null`
+    // hashed identically to that key being missing entirely.
+    expect(canonicalParams(['newEmail'], {})).not.toBe(canonicalParams(['newEmail'], { newEmail: null }));
+  });
 });
