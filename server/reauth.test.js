@@ -387,6 +387,43 @@ describe('five failed attempts lock the challenge', () => {
     expect(row(ch.id).granted_at).toBe(null);
   });
 
+  /**
+   * The bypass this test exists for.
+   *
+   * `notGrantable` does not refuse an already-granted challenge — that is what
+   * makes a double-submitted verify form work — so the password path stays open
+   * between a grant and its consumption. `recordFailedAttempt` used to be
+   * guarded on `granted_at IS NULL`, which meant every guess in that window
+   * updated no row: `attempts` stayed where it was, the caller was told four
+   * tries remained, and the fifth guess was as free as the first. A grant lives
+   * five minutes, and it is reached by verifying with a provider and then
+   * guessing — no race, no unusual state.
+   *
+   * Verifying by OAuth first is what makes the point sharp: the guesser has
+   * demonstrably not proved the password, and the account has one.
+   */
+  it('bounds guessing on a challenge that is already granted but not yet spent', async () => {
+    const userId = makeUser({ providers: [['google', 'granted-sub']] });
+    const ch = open({ userId, action: 'email.change', params: { newEmail: 'a@x.com' } });
+
+    const grant = await reauth.grantByOAuth({
+      db, challengeId: ch.id, userId, provider: 'google', subject: 'granted-sub'
+    });
+    expect(grant.ok, 'fixture setup: the OAuth grant failed').toBe(true);
+    expect(row(ch.id).granted_at).not.toBe(null);
+    expect(row(ch.id).consumed_at).toBe(null);
+
+    for (let i = 1; i <= 4; i++) {
+      const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: `Wrong${i}` });
+      expect(res.error, `attempt ${i} in the granted window`).toBe('invalid_password');
+      expect(res.attemptsRemaining, `attempt ${i} reported a budget that never moves`).toBe(5 - i);
+    }
+
+    const fifth = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: 'Wrong5' });
+    expect(fifth.error).toBe('locked');
+    expect(row(ch.id).attempts, 'the counter was frozen by the granted_at guard').toBe(5);
+  });
+
   it('a locked challenge cannot be consumed', async () => {
     const userId = makeUser();
     const ch = open({ userId });
@@ -400,6 +437,119 @@ describe('five failed attempts lock the challenge', () => {
 
     expect(res.ok).toBe(false);
     expect(row(ch.id).consumed_at).toBe(null);
+  });
+});
+
+/**
+ * RULE: the per-challenge counter is not a bound on guessing; the account is.
+ *
+ * MAX_ATTEMPTS measures one challenge, and a challenge costs one request to
+ * replace. Without an account-level ceiling a holder of a stolen session guesses
+ * for ever at one extra round trip per five attempts — the per-challenge limit
+ * looks like a brute-force defence and is not one.
+ *
+ * `app.js`'s reauthLimiter bounds the same thing per IP. These tests are about
+ * the half it does not cover, which is why they drive the module directly.
+ */
+describe('the account-level guessing ceiling', () => {
+  it('stops guessing across fresh challenges, not just within one', async () => {
+    const userId = makeUser();
+
+    // Three full challenges: fifteen wrong answers, each one legitimately
+    // counted, each new challenge starting its own counter at zero.
+    for (let c = 0; c < 3; c++) {
+      const ch = open({ userId, sessionJti: `jti-acct-${c}` });
+      for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
+        await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: `Wrong-${c}-${i}` });
+      }
+      expect(row(ch.id).attempts, `challenge ${c} did not reach its own limit`).toBe(reauth.MAX_ATTEMPTS);
+    }
+
+    // A brand-new challenge, therefore un-locked by every per-challenge rule.
+    const fresh = open({ userId, sessionJti: 'jti-acct-fresh' });
+    const res = await reauth.grantByPassword({ db, challengeId: fresh.id, userId, password: 'Wrong-again' });
+
+    expect(res).toEqual({ ok: false, error: 'account_locked' });
+    expect(row(fresh.id).attempts, 'a refused-by-account guess still charged the challenge').toBe(0);
+  });
+
+  it('refuses the correct password too — a ceiling the right guess opens is not one', async () => {
+    const userId = makeUser();
+    for (let c = 0; c < 3; c++) {
+      const ch = open({ userId, sessionJti: `jti-right-${c}` });
+      for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
+        await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: `Wrong-${c}-${i}` });
+      }
+    }
+
+    const fresh = open({ userId, sessionJti: 'jti-right-fresh' });
+    const res = await reauth.grantByPassword({ db, challengeId: fresh.id, userId, password: PASSWORD });
+
+    expect(res).toEqual({ ok: false, error: 'account_locked' });
+    expect(row(fresh.id).granted_at).toBe(null);
+  });
+
+  it('is scoped to the account — one user cannot spend another user\'s budget', async () => {
+    const noisy = makeUser();
+    const quiet = makeUser();
+
+    for (let c = 0; c < 3; c++) {
+      const ch = open({ userId: noisy, sessionJti: `jti-noisy-${c}` });
+      for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
+        await reauth.grantByPassword({ db, challengeId: ch.id, userId: noisy, password: `Wrong-${c}-${i}` });
+      }
+    }
+
+    const ch = open({ userId: quiet, sessionJti: 'jti-quiet' });
+    const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId: quiet, password: PASSWORD });
+
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('counts only the window, so an old spree does not lock an account for ever', async () => {
+    const userId = makeUser();
+    const stale = open({ userId, sessionJti: 'jti-stale' });
+    for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
+      await reauth.grantByPassword({ db, challengeId: stale.id, userId, password: `Wrong${i}` });
+    }
+
+    // Age the spree past the window. Written directly because the alternative
+    // is a fifteen-minute test.
+    const old = new Date(Date.now() - reauth.ACCOUNT_ATTEMPT_WINDOW_MS - 1000).toISOString();
+    db.prepare('UPDATE reauth_challenges SET created_at = ? WHERE id = ?').run(old, stale.id);
+
+    // Two more sprees inside the window: ten attempts, still under the ceiling
+    // of fifteen — but twenty if the aged one were still being counted.
+    for (let c = 0; c < 2; c++) {
+      const ch = open({ userId, sessionJti: `jti-recent-${c}` });
+      for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
+        await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: `Wrong-${c}-${i}` });
+      }
+    }
+
+    const fresh = open({ userId, sessionJti: 'jti-window-fresh' });
+    const res = await reauth.grantByPassword({ db, challengeId: fresh.id, userId, password: PASSWORD });
+
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('applies to the OAuth path on the same budget', async () => {
+    const userId = makeUser({ providers: [['google', 'oauth-ceiling-sub']] });
+    for (let c = 0; c < 3; c++) {
+      const ch = open({ userId, sessionJti: `jti-oauth-${c}` });
+      for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
+        await reauth.grantByOAuth({
+          db, challengeId: ch.id, userId, provider: 'google', subject: `wrong-${c}-${i}`
+        });
+      }
+    }
+
+    const fresh = open({ userId, sessionJti: 'jti-oauth-fresh' });
+    const res = await reauth.grantByOAuth({
+      db, challengeId: fresh.id, userId, provider: 'google', subject: 'oauth-ceiling-sub'
+    });
+
+    expect(res).toEqual({ ok: false, error: 'account_locked' });
   });
 });
 
@@ -500,6 +650,88 @@ describe('a grant is spendable exactly once', () => {
     const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: PASSWORD });
 
     expect(res).toEqual({ ok: false, error: 'consumed' });
+  });
+
+  /**
+   * `peekChallenge` and `consumeChallenge` must not disagree about whether a
+   * grant is alive.
+   *
+   * `requireAAL2` asks `peekChallenge`, which refuses a locked row; the UPDATE
+   * in `consumeChallenge` did not check `attempts` at all. That could not be
+   * reached before the T3 fix round — the counter froze the instant a challenge
+   * was granted, so no granted row ever held five attempts — and became
+   * reachable the moment guessing in the granted window started counting.
+   */
+  it('cannot be consumed after guessing locked it, even though it was granted', async () => {
+    const userId = makeUser();
+    const ch = await granted({ userId });
+
+    for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
+      await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: `Wrong${i}` });
+    }
+    expect(row(ch.id).attempts).toBe(reauth.MAX_ATTEMPTS);
+    expect(row(ch.id).granted_at, 'the grant itself should survive — only its spendability dies').not.toBe(null);
+
+    const res = await reauth.consumeChallenge({
+      db, challengeId: ch.id, userId, action: 'account.delete', params: {}, sessionJti: 'jti-a'
+    });
+
+    expect(res).toEqual({ ok: false, error: 'locked' });
+    expect(row(ch.id).consumed_at).toBe(null);
+
+    // And the middleware agrees, which is the point.
+    expect(reauth.peekChallenge({ db, challengeId: ch.id, userId })).toEqual({ ok: false, error: 'locked' });
+  });
+});
+
+/**
+ * RULE: commitGrant re-states its preconditions because bcrypt yields.
+ *
+ * `grantByPassword` reads the row, then awaits a ~100 ms bcrypt comparison,
+ * then writes. Everything it decided from that first read is stale by the time
+ * the write happens, which is why `commitGrant`'s WHERE clause repeats the
+ * lock, expiry and consumption gates rather than trusting `notGrantable`.
+ *
+ * Those repeated predicates survived mutation testing untested — deleting
+ * `attempts < ?` from commitGrant broke nothing, because the earlier gate
+ * always fired first in every test. It fires first only when the row does not
+ * change mid-call. This test changes it mid-call.
+ *
+ * It is deterministic, not timing-dependent: `bcryptjs` is pure JavaScript and
+ * its async API yields to the event loop, so `grantByPassword` is guaranteed to
+ * be suspended at that await when the synchronous UPDATE below runs.
+ */
+describe('the grant is re-checked after bcrypt, not before it', () => {
+  it('refuses a correct password whose challenge was locked during the comparison', async () => {
+    const userId = makeUser();
+    const ch = open({ userId, sessionJti: 'jti-race' });
+
+    const pending = reauth.grantByPassword({ db, challengeId: ch.id, userId, password: PASSWORD });
+
+    // Synchronous, therefore before bcrypt resolves: the parallel guessers that
+    // a real attacker would have running against the same challenge.
+    db.prepare('UPDATE reauth_challenges SET attempts = ? WHERE id = ?')
+      .run(reauth.MAX_ATTEMPTS, ch.id);
+
+    const res = await pending;
+
+    // notGrantable() saw attempts = 0 and let this through. Only the duplicated
+    // `attempts < ?` in commitGrant's WHERE clause can refuse it.
+    expect(res).toEqual({ ok: false, error: 'locked' });
+    expect(row(ch.id).granted_at).toBe(null);
+  });
+
+  it('refuses a correct password whose challenge expired during the comparison', async () => {
+    const userId = makeUser();
+    const ch = open({ userId, sessionJti: 'jti-race-expiry' });
+
+    const pending = reauth.grantByPassword({ db, challengeId: ch.id, userId, password: PASSWORD });
+    setExpiry(ch.id, new Date(Date.now() - 1000).toISOString());
+
+    const res = await pending;
+
+    expect(res).toEqual({ ok: false, error: 'expired' });
+    expect(row(ch.id).granted_at).toBe(null);
   });
 });
 

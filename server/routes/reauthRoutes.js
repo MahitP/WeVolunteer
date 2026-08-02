@@ -70,6 +70,12 @@ const REFUSALS = Object.freeze({
   [E.EXPIRED]: { status: 410, error: 'That verification timed out. Please start again.' },
   [E.CONSUMED]: { status: 409, error: 'That verification has already been used. Please start again.' },
   [E.LOCKED]: { status: 429, error: 'Too many failed attempts. Please start again.' },
+  // Deliberately does NOT say "start again" — starting again is the thing that
+  // no longer helps, and that is the whole point of the account-level ceiling.
+  [E.ACCOUNT_LOCKED]: {
+    status: 429,
+    error: 'Too many failed verification attempts. Please wait a few minutes and try again.'
+  },
   [E.NOT_GRANTED]: { status: 409, error: 'That verification has not been completed yet.' },
   [E.INVALID_PASSWORD]: { status: 401, error: 'That password is not correct.' },
   [E.PASSWORD_UNAVAILABLE]: {

@@ -49,6 +49,44 @@ export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 export const MAX_ATTEMPTS = 5;
 
 /**
+ * Guesses allowed against one ACCOUNT before every challenge it holds is dead.
+ *
+ * MAX_ATTEMPTS on its own bounds nothing an attacker cares about. Opening a
+ * fresh challenge costs one request and starts a new counter at zero, so a
+ * holder of a stolen session guesses indefinitely at one extra round trip per
+ * attempt — the per-challenge limit measures a challenge, not a password.
+ *
+ * `app.js`'s `reauthLimiter` closes the same hole per IP; this closes it per
+ * account, which is the half an attacker with more than one address still has.
+ * Both are needed and neither subsumes the other.
+ *
+ * Three challenges' worth, over a window three times a challenge's own life.
+ * Someone who mistypes a password, gives up, reopens the modal and mistypes
+ * again has two more full challenges before this fires; a guesser has fifteen
+ * tries per quarter hour, which is not a search.
+ *
+ * Tripping it is not a denial-of-service worth worrying about: opening a
+ * challenge requires an authenticated session, so anyone who can reach this
+ * already holds the thing step-up exists to contain.
+ */
+export const MAX_ACCOUNT_ATTEMPTS = 15;
+
+/**
+ * The window the account-level count is taken over.
+ *
+ * Attempts carry no timestamp of their own — `attempts` is a counter on the
+ * challenge — so the window is applied to `created_at` and every attempt on a
+ * counted challenge is attributed to it. A challenge lives five minutes, so
+ * that attribution is never off by more than a challenge's lifetime, and it
+ * errs in the safe direction: an old challenge's guesses keep counting for
+ * slightly longer than they strictly happened.
+ *
+ * Shorter than CHALLENGE_RETENTION_MS on purpose — the sweep must not be what
+ * decides when someone is allowed to guess again.
+ */
+export const ACCOUNT_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+
+/**
  * How long an expired row is kept before the sweep removes it.
  *
  * Not zero, deliberately. A row deleted the instant it expires can no longer
@@ -79,6 +117,7 @@ export const REAUTH_ERRORS = Object.freeze({
   EXPIRED: 'expired',
   CONSUMED: 'consumed',
   LOCKED: 'locked',
+  ACCOUNT_LOCKED: 'account_locked',
   NOT_GRANTED: 'not_granted',
   INVALID_PASSWORD: 'invalid_password',
   PASSWORD_UNAVAILABLE: 'password_unavailable',
@@ -101,11 +140,19 @@ const fail = (error, extra) => ({ ok: false, error, ...extra });
  * else is indistinguishable from one that does not exist — the id is not a
  * secret worth confirming.
  *
- * This scoping is a second line: the two statements that actually WRITE
- * (commitGrant and the consume UPDATE) each carry their own `user_id = ?`, and
- * mutation testing confirms those are the load-bearing ones. Removing it here
- * changes only which error a stranger sees, but keep it — a diagnosis built
- * from someone else's row is one refactor away from being trusted.
+ * This scoping is a second line: all THREE statements that WRITE — commitGrant,
+ * the consume UPDATE, and `recordFailedAttempt` — carry their own
+ * `user_id = ?`, and mutation testing confirms those are the load-bearing ones.
+ * Removing it here changes only which error a stranger sees, but keep it — a
+ * diagnosis built from someone else's row is one refactor away from being
+ * trusted.
+ *
+ * `recordFailedAttempt` was the exception until the T3 fix round, and the
+ * comment here asserted it was not: it counted two writers when there were
+ * three. It is reached only with a row this function already scoped, so nothing
+ * was exploitable through it — but a predicate that is missing and a comment
+ * that says it is present is worse than either alone, because the next reader
+ * checks the comment.
  */
 function load(db, challengeId, userId) {
   return db.prepare('SELECT * FROM reauth_challenges WHERE id = ? AND user_id = ?')
@@ -133,27 +180,65 @@ function notGrantable(row, nowIso) {
  *
  * A single `attempts = attempts + 1` statement rather than a read, an add and a
  * write, so two guesses arriving together cannot both read `4` and both be
- * allowed. Guarded on the challenge still being open, so a guess against an
- * already-spent challenge cannot drive the counter anywhere.
+ * allowed.
+ *
+ * ── Why the guard is `consumed_at IS NULL` and nothing else ──
+ *
+ * It used to be `consumed_at IS NULL AND granted_at IS NULL`, and the extra
+ * predicate was a brute-force bypass in a state the app reaches on its own.
+ * `notGrantable` does NOT refuse an already-granted challenge — deliberately,
+ * so a double-submitted verify form still has to produce the password — so
+ * between a grant and its consumption the password path stays open. With
+ * `granted_at IS NULL` in the WHERE clause every guess in that window updated
+ * nothing, `attempts` stayed pinned at whatever it was, and the caller was told
+ * four tries remained, for ever. A grant lives up to five minutes; that is an
+ * unmetered password oracle for anyone holding the session, and it is reached
+ * by the ordinary sequence of verifying with a provider and then guessing.
+ *
+ * Consumed is different and still excluded: a spent challenge authorises
+ * nothing, so guesses against it are not guesses at anything.
+ *
+ * `user_id = ?` is the caller's, not `row.user_id`. The row was already loaded
+ * scoped, so this cannot currently refuse anything — it is here so that the
+ * statement names the account it is charging, in the file where every other
+ * write already does.
  */
-function recordFailedAttempt(db, row, error) {
+function recordFailedAttempt(db, { row, userId, error }) {
   const updated = db.prepare(`
     UPDATE reauth_challenges
        SET attempts = attempts + 1
-     WHERE id = ? AND consumed_at IS NULL AND granted_at IS NULL
+     WHERE id = ? AND user_id = ? AND consumed_at IS NULL
      RETURNING attempts
-  `).get(row.id);
+  `).get(row.id, userId);
 
   /**
-   * The counter only moves while the challenge is still open, so a wrong guess
-   * that arrives just after the row was granted or consumed increments nothing.
-   * Fall back to the count we read rather than to MAX_ATTEMPTS: there is
-   * nothing left to brute-force on a spent challenge, and reporting a lock that
-   * does not exist would send the user to account recovery for no reason.
+   * Fall back to the count we read rather than to MAX_ATTEMPTS: the only way
+   * the update misses now is a challenge consumed between the two statements,
+   * where there is nothing left to brute-force, and reporting a lock that does
+   * not exist would send the user to account recovery for no reason.
    */
   const attempts = updated ? updated.attempts : row.attempts;
   if (attempts >= MAX_ATTEMPTS) return fail(E.LOCKED, { attemptsRemaining: 0 });
   return fail(error, { attemptsRemaining: MAX_ATTEMPTS - attempts });
+}
+
+/**
+ * Whether this account has spent its guessing budget across ALL its challenges.
+ *
+ * Summed over rows rather than tracked on the user, because the number is only
+ * ever needed at this instant and a column would be a second thing to keep
+ * true. `attempts` is already the count of wrong answers, and the sweep's
+ * retention window is longer than this one, so every row that should be counted
+ * is still present to count.
+ */
+function accountAttemptsExhausted(db, userId, nowIso) {
+  const since = new Date(new Date(nowIso).getTime() - ACCOUNT_ATTEMPT_WINDOW_MS).toISOString();
+  const { spent } = db.prepare(`
+    SELECT COALESCE(SUM(attempts), 0) AS spent
+      FROM reauth_challenges
+     WHERE user_id = ? AND created_at > ?
+  `).get(userId, since);
+  return spent >= MAX_ACCOUNT_ATTEMPTS;
 }
 
 /**
@@ -268,6 +353,10 @@ export async function grantByPassword({ db, challengeId, userId, password }) {
   if (blocked) return fail(blocked);
   if (!methodAllowed(row, 'password')) return fail(E.METHOD_NOT_ALLOWED);
 
+  // Before bcrypt, so an exhausted account costs no CPU, and before the
+  // sentinel check would tell an attacker anything about the account's shape.
+  if (accountAttemptsExhausted(db, userId, nowIso)) return fail(E.ACCOUNT_LOCKED);
+
   const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(userId);
   if (!user) return fail(E.NOT_FOUND);
 
@@ -288,11 +377,11 @@ export async function grantByPassword({ db, challengeId, userId, password }) {
   // bcryptjs throws on a non-string, and an empty password is a guess like any
   // other — both are wrong answers, not crashes.
   if (typeof password !== 'string' || password.length === 0) {
-    return recordFailedAttempt(db, row, E.INVALID_PASSWORD);
+    return recordFailedAttempt(db, { row, userId, error: E.INVALID_PASSWORD });
   }
 
   const matches = await bcrypt.compare(password, user.password_hash);
-  if (!matches) return recordFailedAttempt(db, row, E.INVALID_PASSWORD);
+  if (!matches) return recordFailedAttempt(db, { row, userId, error: E.INVALID_PASSWORD });
 
   return commitGrant(db, { challengeId, userId, method: 'password', nowIso });
 }
@@ -320,6 +409,10 @@ export async function grantByOAuth({ db, challengeId, userId, provider, subject 
   if (blocked) return fail(blocked);
   if (!methodAllowed(row, 'oauth')) return fail(E.METHOD_NOT_ALLOWED);
 
+  // Same budget as the password path. A sub mismatch costs an attempt, so it is
+  // a guessable answer and belongs under the same account-level ceiling.
+  if (accountAttemptsExhausted(db, userId, nowIso)) return fail(E.ACCOUNT_LOCKED);
+
   const link = db.prepare(
     'SELECT provider_user_id FROM oauth_accounts WHERE user_id = ? AND provider = ?'
   ).get(userId, provider);
@@ -331,7 +424,7 @@ export async function grantByOAuth({ db, challengeId, userId, provider, subject 
   // A mismatch IS a wrong answer — it is the guessable half of this path, so it
   // costs an attempt exactly like a wrong password does.
   if (!subject || String(subject) !== String(link.provider_user_id)) {
-    return recordFailedAttempt(db, row, E.PROVIDER_MISMATCH);
+    return recordFailedAttempt(db, { row, userId, error: E.PROVIDER_MISMATCH });
   }
 
   return commitGrant(db, { challengeId, userId, method: 'oauth', nowIso });
@@ -369,6 +462,14 @@ export async function consumeChallenge({ db, challengeId, userId, action, params
   const expectedHash = paramsHash(action, params);
 
   /**
+   * `attempts < ?` is here because `peekChallenge` already refuses a locked row
+   * and the two must not disagree about whether a grant is spendable. Before
+   * the T3 fix round it could not be reached: the counter froze the moment a
+   * challenge was granted, so no granted row ever held five attempts. Now that
+   * guessing in the granted window is counted, a grant can be locked after it
+   * was earned — and `requireAAL2`, which asks `peekChallenge`, would refuse the
+   * request while this statement still spent the grant behind it.
+   *
    * `action` is checked here as well as through `params_hash`, which folds the
    * action name into its digest — so this predicate can never be the only thing
    * that refuses a request, and mutation testing shows it survives deletion.
@@ -387,7 +488,9 @@ export async function consumeChallenge({ db, challengeId, userId, action, params
        AND granted_at IS NOT NULL
        AND consumed_at IS NULL
        AND expires_at > ?
-  `).run(nowIso, challengeId, userId, action, expectedHash, sessionJti ?? null, nowIso).changes === 1;
+       AND attempts < ?
+  `).run(nowIso, challengeId, userId, action, expectedHash, sessionJti ?? null, nowIso, MAX_ATTEMPTS)
+    .changes === 1;
 
   if (spent) return { ok: true };
 
