@@ -41,15 +41,27 @@ export function isSensitiveAction(action) {
  *    a value containing '&' or '=' can't forge a field boundary. The
  *    previous `k=v&k=v` join could not tell `{a:'X&b=Y', b:'Z'}` apart from
  *    `{a:'X', b:'Y&b=Z'}` — both joined to the same string.
- *  - A bound key absent from params encodes as `null`; a bound key present
- *    with an empty string encodes as `""` — distinct tokens, where the old
- *    `String(x ?? '')` conflated "not sent" with "sent empty".
- *  - Values keep their native JSON type instead of being coerced with
- *    String(). A bound field arrives from a parsed JSON request body, so it
- *    is always a string, number, boolean, or absent — never a JS-only type
- *    like `undefined` that JSON can't represent — so keeping the type is
- *    free and means the numeric `5` and the string `'5'` hash differently
- *    instead of colliding the way `String(5) === String('5')` would.
+ *  - Absence is tagged by array *shape*, not by a value that a real value
+ *    could also be: an absent key encodes as the 2-element `['absent', k]`;
+ *    a present key encodes as the 3-element `['present', k, value]`. No
+ *    legal JSON value can widen a 2-element array into a 3-element one, so
+ *    a bound key explicitly sent as `null` (`{"newEmail": null}` is valid,
+ *    parseable JSON) can never collide with that key being missing
+ *    entirely. An earlier version of this function used bare `null` as the
+ *    absent-key sentinel — that collided with both "sent empty string" and,
+ *    worse, with a key genuinely present with value `null`; the tagged
+ *    shape closes both.
+ *  - Values otherwise keep their native JSON type instead of being coerced
+ *    with String(). A bound field arrives from a parsed JSON request body,
+ *    so it is always a string, number, boolean, null, or absent — never a
+ *    JS-only type like bare `undefined` that JSON can't represent — so
+ *    keeping the type is free and means the numeric `5` and the string `'5'`
+ *    hash differently instead of colliding the way `String(5) === String('5')`
+ *    would. Caveat: JSON.stringify still maps NaN/Infinity to `null` in
+ *    array position, so a *present* NaN value would still collide with a
+ *    present literal-null value. Not reachable from a JSON-parsed request
+ *    body (JSON has no NaN/Infinity literal) — worth naming for a future
+ *    programmatic caller, not worth validating against here.
  *  - `.sort()` on boundKeys makes the *order the bindsParams array lists
  *    its keys in* irrelevant. (Key order within the request body's own
  *    object literal was never relevant — JS property lookup is by name —
@@ -61,7 +73,7 @@ export function canonicalParams(boundKeys, params) {
     boundKeys
       .slice()
       .sort()
-      .map(k => [k, Object.prototype.hasOwnProperty.call(source, k) ? source[k] : null]),
+      .map(k => (Object.prototype.hasOwnProperty.call(source, k) ? ['present', k, source[k]] : ['absent', k])),
   );
 }
 
