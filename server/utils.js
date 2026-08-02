@@ -5,6 +5,7 @@ import { sendNotificationEmail } from './email.js';
 import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST, COOKIE_NAME } from './config.js';
 import { principalFor } from './authz.js';
 import { grantsFor } from './userCapabilities.js';
+import { sweepExpiredChallenges } from './reauth.js';
 
 /**
  * Whether this specific session has been signed out.
@@ -412,6 +413,12 @@ export function runNotificationSweep() {
     const removed = purgeExpiredNotifications(now);
     const revocations = purgeExpiredRevocations(now);
     if (revocations > 0) console.log(`[Sessions] Purged ${revocations} expired revocation(s).`);
+
+    // Step-up challenges: one row per sensitive action a user starts, including
+    // every abandoned one, each carrying an ip_hash. Worthless once expired.
+    const challenges = sweepExpiredChallenges(db, now);
+    if (challenges > 0) console.log(`[Reauth] Purged ${challenges} spent step-up challenge(s).`);
+
     if (removed > 0) {
       console.log(`[Notifications] Cleaned up ${removed} expired notifications.`);
     }
