@@ -482,25 +482,169 @@ describe('oauth', () => {
   });
 
   /**
-   * Regression. The signed-in user was read from an `Authorization: Bearer`
-   * header this app stopped using when sessions moved into a cookie, so
-   * connecting a provider from Settings never recognised the session and
-   * always fell through to the password prompt.
+   * ── The `auto_linked` door (v1.2b Task 6b) ──
+   *
+   * `POST /api/oauth/link` is the mismatched-address flow. When the provider's
+   * address MATCHES the account's — the ordinary Settings case, and the one
+   * users actually reach — the link is made here, in the callback, instead.
+   * Both write the same `oauth_accounts` row, and that row is a new way to sign
+   * in: the callback's returning-user branch logs in anyone presenting the
+   * identity from then on. So both need the same proof, or the rule this
+   * release states is only true of the door nobody uses.
+   *
+   * The challenge cannot be presented as a header here, because the callback
+   * arrives mid-redirect from the provider. It is opened before the redirect
+   * and carried across it in the signed state — which is why these tests pass
+   * `challengeId` to `begin()` rather than to `callback()`.
+   *
+   * Regression preserved from before this gate: the signed-in user was once
+   * read from an `Authorization: Bearer` header this app stopped using when
+   * sessions moved into a cookie, so connecting a provider from Settings never
+   * recognised the session and always fell through to the password prompt.
    */
-  it('links without a password when the request carries that user\'s own session', async () => {
-    const sessionCookie = await srv.login('priya.patel.nhs@outlook.com');
-    expect(sessionCookie).toBeTruthy();
+  /**
+   * A password account nobody else in this file touches.
+   *
+   * These tests share one database and run in order, and the FIRST auto-link
+   * succeeds — after which `oauth_accounts` holds a row for that identity and
+   * every later callback takes the returning-user branch and answers `login`
+   * instead of ever reaching the gate. Reusing one seeded account made four of
+   * these tests assert against a code path they were no longer exercising, and
+   * pass. A fresh account per test is what keeps each one about its own claim.
+   */
+  let autoLinkSeq = 0;
+  const AUTO_LINK_PASSWORD = 'AutoLink123';
+  const linkableAccount = async () => {
+    const tag = `autolink${++autoLinkSeq}${Math.random().toString(36).slice(2, 7)}`;
+    const email = `${tag}@example.org`;
+    const { cookie } = await srv.signupConfirmed({
+      email, password: AUTO_LINK_PASSWORD, name: 'Auto Link',
+      username: tag, role: 'student', grade: '10', skills: []
+    });
+    expect(cookie, 'fixture setup: signup did not return a session').toBeTruthy();
+    return { email, cookie, sub: `ms-${tag}` };
+  };
 
-    const { state, nonceCookie } = await begin('microsoft', {}, sessionCookie);
+  it('links without a password when the session carries a verified oauth.link grant', async () => {
+    const { email, cookie, sub } = await linkableAccount();
+
+    const challengeId = await srv.stepUp(cookie, 'oauth.link', { params: { provider: 'microsoft' }, password: AUTO_LINK_PASSWORD });
+    const { state, nonceCookie } = await begin('microsoft', { challengeId }, cookie);
     const res = await callback('microsoft', {
-      code: JSON.stringify({ email: 'priya.patel.nhs@outlook.com', sub: 'ms-priya', name: 'Priya' }),
-      state, nonceCookie, sessionCookie
+      code: identity({ email, sub }), state, nonceCookie, sessionCookie: cookie
     });
     expect(res.status).toBe(200);
     expect(res.body.action).toBe('auto_linked');
 
-    const accounts = await srv.call('GET', '/api/oauth/accounts', undefined, sessionCookie);
+    const accounts = await srv.call('GET', '/api/oauth/accounts', undefined, cookie);
     expect(accounts.body.some(a => a.provider === 'microsoft')).toBe(true);
+  });
+
+  it('refuses to auto-link on a live session alone, naming the action to verify', async () => {
+    const { email, cookie, sub } = await linkableAccount();
+
+    // No challengeId. This is exactly what the flow did before Task 6b, and it
+    // succeeded: holding the cookie was the whole proof for adding a credential.
+    const { state, nonceCookie } = await begin('microsoft', {}, cookie);
+    const res = await callback('microsoft', {
+      code: identity({ email, sub }), state, nonceCookie, sessionCookie: cookie
+    });
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('reauth_required');
+    expect(res.body.action, 'the client cannot open the right challenge without this').toBe('oauth.link');
+
+    const accounts = await srv.call('GET', '/api/oauth/accounts', undefined, cookie);
+    expect(accounts.body.some(a => a.provider === 'microsoft'), 'refused, but linked anyway').toBe(false);
+  });
+
+  it('refuses a grant for a different action', async () => {
+    const { email, cookie, sub } = await linkableAccount();
+
+    // A perfectly valid grant — for deleting the account. Verifying to do one
+    // thing must not authorise another; that is the action binding.
+    const challengeId = await srv.stepUp(cookie, 'account.delete', { password: AUTO_LINK_PASSWORD });
+    const { state, nonceCookie } = await begin('microsoft', { challengeId }, cookie);
+    const res = await callback('microsoft', {
+      code: identity({ email, sub }), state, nonceCookie, sessionCookie: cookie
+    });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('action_mismatch');
+
+    const accounts = await srv.call('GET', '/api/oauth/accounts', undefined, cookie);
+    expect(accounts.body.some(a => a.provider === 'microsoft')).toBe(false);
+  });
+
+  it('refuses a grant bound to a different provider', async () => {
+    const { email, cookie, sub } = await linkableAccount();
+
+    // Verified to connect Google; the callback is Microsoft. The handler spends
+    // the provider it is ABOUT TO WRITE, not the one the client claimed, so
+    // these cannot come apart.
+    const challengeId = await srv.stepUp(cookie, 'oauth.link', { params: { provider: 'google' }, password: AUTO_LINK_PASSWORD });
+    const { state, nonceCookie } = await begin('microsoft', { challengeId }, cookie);
+    const res = await callback('microsoft', {
+      code: identity({ email, sub }), state, nonceCookie, sessionCookie: cookie
+    });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('params_mismatch');
+
+    const accounts = await srv.call('GET', '/api/oauth/accounts', undefined, cookie);
+    expect(accounts.body.some(a => a.provider === 'microsoft')).toBe(false);
+  });
+
+  it('spends the grant, so the same verification cannot link twice', async () => {
+    const { email, cookie, sub } = await linkableAccount();
+    const challengeId = await srv.stepUp(cookie, 'oauth.link', { params: { provider: 'microsoft' }, password: AUTO_LINK_PASSWORD });
+
+    const first = await begin('microsoft', { challengeId }, cookie);
+    const linked = await callback('microsoft', {
+      code: identity({ email, sub }),
+      state: first.state, nonceCookie: first.nonceCookie, sessionCookie: cookie
+    });
+    expect(linked.status).toBe(200);
+
+    /**
+     * A second whole flow reusing the SAME grant, and a DIFFERENT provider
+     * identity — so the returning-user branch does not catch it and the
+     * request genuinely reaches the gate again. The state is single-use via
+     * `oauth_states`, so this needs a fresh one, which is exactly the point:
+     * the state being spent is not what stops the replay. The challenge is.
+     */
+    const second = await begin('microsoft', { challengeId }, cookie);
+    const replay = await callback('microsoft', {
+      code: identity({ email, sub: `${sub}-second` }),
+      state: second.state, nonceCookie: second.nonceCookie, sessionCookie: cookie
+    });
+
+    expect(replay.status).toBe(409);
+    expect(replay.body.code).toBe('consumed');
+  });
+
+  /**
+   * The regression that matters most. Login and signup do not add a credential
+   * to an existing account — login requires the identity to be linked already,
+   * signup creates the account the identity will own — so neither may have
+   * acquired a verification requirement from this change.
+   */
+  it('leaves plain sign-in through a linked provider needing no verification', async () => {
+    const { email, cookie, sub } = await linkableAccount();
+    const challengeId = await srv.stepUp(cookie, 'oauth.link', { params: { provider: 'microsoft' }, password: AUTO_LINK_PASSWORD });
+    const linkFlow = await begin('microsoft', { challengeId }, cookie);
+    expect((await callback('microsoft', {
+      code: identity({ email, sub }),
+      state: linkFlow.state, nonceCookie: linkFlow.nonceCookie, sessionCookie: cookie
+    })).status).toBe(200);
+
+    // Now sign in with it, from no session at all and no challenge.
+    const { state, nonceCookie } = await begin('microsoft');
+    const res = await callback('microsoft', { code: identity({ email, sub }), state, nonceCookie });
+
+    expect(res.status).toBe(200);
+    expect(res.body.action).toBe('login');
+    expect(res.cookie, 'sign-in did not issue a session').toBeTruthy();
   });
 
   it('will not disconnect the only way a provider-only account can sign in', async () => {

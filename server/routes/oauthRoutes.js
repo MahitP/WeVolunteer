@@ -6,6 +6,10 @@ import { JWT_SECRET, COOKIE_NAME, cookieOptions, OAUTH_PROVIDERS_ENABLED } from 
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
 import { requireAAL2 } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
+// Directly, not through `spendChallenge`: that helper reads its three bindings
+// off an authenticated `req`, and the OAuth callback has none — it is reached
+// mid-redirect with the bindings carried in the signed state instead.
+import { consumeChallenge } from '../reauth.js';
 import { validateAccountFields } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail } from '../services/verification.js';
 import { issueSession } from './authRoutes.js';
@@ -84,6 +88,29 @@ function currentUserFromRequest(req) {
   }
 }
 
+/**
+ * This request's session id, for binding a challenge that will be spent later.
+ *
+ * Separate from `currentUserFromRequest` above rather than folded into it: that
+ * function answers "who is this", is called on paths that have no interest in
+ * the session's identity, and returns a deliberately minimal `{ id }`. Widening
+ * it would put a claim into every caller's hands for the sake of one.
+ *
+ * Returns null on a token minted before per-session revocation existed.
+ * `openChallenge` refuses to bind a grant to a null jti, so such a session
+ * simply cannot start an auto-link — which is the correct answer, not a bug:
+ * the remedy is signing in again, and every token authRoutes.js mints has one.
+ */
+function currentSessionJti(req) {
+  const token = req.cookies && req.cookies[COOKIE_NAME];
+  if (!token) return null;
+  try {
+    return jwt.verify(token, JWT_SECRET).jti ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function purgeExpiredSignupSessions() {
   try {
     const now = new Date().toISOString();
@@ -152,6 +179,43 @@ router.post('/api/oauth/:provider/url', (req, res) => {
 
   const user = currentUserFromRequest(req);
   if (user) statePayload.userId = user.id;
+
+  /**
+   * The step-up grant for an auto-link, carried through the signed state.
+   *
+   * ── Why the challenge has to travel this way ──
+   *
+   * The callback below adds a provider to an existing account in its
+   * `auto_linked` branch, and that row is a NEW WAY TO SIGN IN: from then on
+   * the callback's first branch logs in anyone presenting that provider
+   * identity, for as long as the link exists. `POST /api/oauth/link` — the
+   * other door to the same state change — is gated on `requireAAL2`, but that
+   * endpoint only serves the mismatched-address flow. The Settings button, for
+   * the ordinary case where the provider's address matches the account's,
+   * comes through here instead. Gating one and not the other would leave the
+   * release's own rule — adding a credential requires proving identity — true
+   * only of the door users do not use.
+   *
+   * `requireAAL2` cannot be middleware on the callback: that route also serves
+   * login and signup, neither of which has an account to have verified. And a
+   * callback cannot be interrupted to ask for a verification — the user is
+   * mid-redirect at the provider. So the proof has to be obtained BEFORE the
+   * redirect and carried across it, which is what this does.
+   *
+   * `jti` rides along because `consumeChallenge` re-checks the session binding
+   * and the callback is unauthenticated — there is no `req.sessionJti` there.
+   * Taking it from the state is sound precisely because the state is signed by
+   * us and single-use (`oauth_states`), and because the callback additionally
+   * requires the nonce cookie set on this browser.
+   *
+   * Silently ignored for an unauthenticated caller. There is no account to
+   * link to, so a challenge id is meaningless rather than hostile, and
+   * `openChallenge` could not have issued one without a session anyway.
+   */
+  if (user && typeof req.body?.challengeId === 'string' && req.body.challengeId) {
+    statePayload.challengeId = req.body.challengeId;
+    statePayload.jti = currentSessionJti(req);
+  }
 
   if (req.body && req.body.signupData) {
     const sd = req.body.signupData;
@@ -315,18 +379,70 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
         return res.status(403).json({ error: 'Account is suspended' });
       }
 
-      // Already signed in as that very account: linking needs no extra proof.
+      /**
+       * Signed in as that very account — but a live session is not enough.
+       *
+       * This branch writes an `oauth_accounts` row, and that row is a new way
+       * to sign in: the returning-user branch at the top of this handler logs
+       * in anyone presenting the identity from now on, long after the session
+       * that added it has gone. Until v1.2b it was reached on the strength of
+       * `decodedState.userId` alone — which is to say, on the strength of
+       * holding the cookie. `POST /api/oauth/link` makes the identical state
+       * change and is gated on `requireAAL2('oauth.link')`; this is the same
+       * door for the case where the provider's address matches the account's,
+       * and it is the one the Settings button actually walks through.
+       *
+       * The grant is spent, not merely checked, in the same transaction as the
+       * upsert. Checking without spending would leave it reusable, and a
+       * five-minute reusable grant for "attach a provider" is a grant to attach
+       * several.
+       *
+       * `session_jti` is verified by `consumeChallenge` against the value the
+       * state carries, which `/url` took from the live cookie when the flow
+       * started. So the grant must have been opened by the same sign-in that
+       * began this redirect, and the nonce cookie above proves it is the same
+       * browser coming back.
+       */
       if (decodedState.userId && decodedState.userId === existingUser.id) {
+        if (!decodedState.challengeId) {
+          return res.status(403).json({
+            error: 'Identity verification required',
+            code: 'reauth_required',
+            action: 'oauth.link',
+            provider: providerName
+          });
+        }
+
         const now = new Date().toISOString();
-        db.prepare(`
-          INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at, last_used_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(user_id, provider) DO UPDATE SET
-            provider_user_id = excluded.provider_user_id,
-            provider_email = excluded.provider_email,
-            updated_at = excluded.updated_at,
-            last_used_at = excluded.last_used_at
-        `).run(`oauth-${crypto.randomUUID()}`, existingUser.id, providerName, providerUserId, providerEmail, now, now, now);
+        try {
+          inTransaction(() => {
+            const spent = consumeChallenge({
+              db,
+              challengeId: decodedState.challengeId,
+              userId: existingUser.id,
+              action: 'oauth.link',
+              // Exactly the keys the registry binds for this action, and the
+              // provider the row is actually about to name — never the one the
+              // client claimed when it opened the challenge.
+              params: { provider: providerName },
+              sessionJti: decodedState.jti ?? null
+            });
+            if (!spent.ok) throw new ChallengeNotSpent(spent);
+
+            db.prepare(`
+              INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at, last_used_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(user_id, provider) DO UPDATE SET
+                provider_user_id = excluded.provider_user_id,
+                provider_email = excluded.provider_email,
+                updated_at = excluded.updated_at,
+                last_used_at = excluded.last_used_at
+            `).run(`oauth-${crypto.randomUUID()}`, existingUser.id, providerName, providerUserId, providerEmail, now, now, now);
+          });
+        } catch (err) {
+          if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
+          throw err;
+        }
 
         return res.json({ action: 'auto_linked', provider: providerName });
       }
