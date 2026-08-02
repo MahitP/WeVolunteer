@@ -448,11 +448,24 @@ export async function grantByOAuth({ db, challengeId, userId, provider, subject 
  * exception would roll back the caller's own work rather than simply denying
  * it — so even an unregistered action comes back as a mismatch.
  *
- * `async` despite awaiting nothing, so that every entry point in this module
- * has the same shape at the call site and adding an await here later is not a
- * breaking change for the routes.
+ * ── Why this entry point alone is synchronous ──
+ *
+ * The two grant functions are `async` because bcrypt genuinely is. This one is
+ * called from INSIDE a route handler's `inTransaction(...)` block, and
+ * `bcryptAsync.test.js` fails the build on any `await` between `inTransaction(`
+ * and its closing brace — because an await inside a synchronous SQLite
+ * transaction lets unrelated statements interleave with an open transaction.
+ * That guard is right, so spending a grant has to be possible without one.
+ * There is nothing here to await: one UPDATE and some comparisons, all
+ * synchronous under `node:sqlite`.
+ *
+ * It was `async` until Task 6, on the reasoning that a uniform shape would let
+ * an await be added later without breaking callers. The opposite turned out to
+ * be true — the only correct call site is one where an await is forbidden — and
+ * `await consumeChallenge(...)` still reads fine either way, because awaiting a
+ * plain value is a no-op. Every existing caller was left untouched.
  */
-export async function consumeChallenge({ db, challengeId, userId, action, params = {}, sessionJti }) {
+export function consumeChallenge({ db, challengeId, userId, action, params = {}, sessionJti }) {
   const nowIso = new Date().toISOString();
 
   // A stored challenge can only ever hold a registered action, so an

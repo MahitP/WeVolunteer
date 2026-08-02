@@ -68,9 +68,10 @@ function makeUser({ passwordHash, providers = [] } = {}) {
  * A signed session for a fixture user.
  *
  * `jti: null` mints the shape `authenticateToken` still admits but
- * `openChallenge` cannot bind to — tokens predating per-session revocation, and
- * (today) every session issued by oauthRoutes.js's own `issueSession`, which
- * does not set one. That case has to be a clean 401, never a 500.
+ * `openChallenge` cannot bind to — tokens predating per-session revocation,
+ * which stay valid for up to seven days after a deploy. (Provider sign-ins were
+ * a second, permanent source of them until Task 6 gave oauthRoutes.js the shared
+ * `issueSession`.) That case has to be a clean 401, never a 500.
  */
 function sessionFor(userId, { jti = crypto.randomUUID() } = {}) {
   const u = db.prepare('SELECT id, role, email, name, token_version FROM users WHERE id = ?').get(userId);
@@ -247,11 +248,10 @@ describe('POST /api/auth/reauth/challenge', () => {
     /**
      * `openChallenge` THROWS on a missing jti, deliberately: a grant bound to no
      * session is spendable by anyone holding the id. `authenticateToken` still
-     * admits jti-less tokens (they predate per-session revocation, and
-     * oauthRoutes.js's issueSession does not mint one today), so this route is
-     * the only place the two facts meet. An unhandled throw here is a 500 that
-     * tells the user nothing and files a routine, recoverable situation as a
-     * server defect.
+     * admits jti-less tokens (they predate per-session revocation and stay valid
+     * for up to seven days after a deploy), so this route is the only place the
+     * two facts meet. An unhandled throw here is a 500 that tells the user
+     * nothing and files a routine, recoverable situation as a server defect.
      */
     expect(res.status).not.toBe(500);
     expect(res.status).toBe(401);

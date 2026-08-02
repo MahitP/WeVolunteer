@@ -1,12 +1,14 @@
 import express from 'express';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
 import { db } from '../db.js';
 import { JWT_SECRET, COOKIE_NAME, cookieOptions, OAUTH_PROVIDERS_ENABLED } from '../config.js';
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
+import { requireAAL2 } from '../authz.js';
+import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import { validateAccountFields } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail } from '../services/verification.js';
+import { issueSession } from './authRoutes.js';
 
 import googleProvider from '../oauth/providers/google.js';
 import microsoftProvider from '../oauth/providers/microsoft.js';
@@ -92,14 +94,31 @@ function purgeExpiredSignupSessions() {
   }
 }
 
-function issueSession(res, user, tokenVersion) {
-  const token = jwt.sign(
-    { id: user.id, role: user.role, email: user.email, name: user.name, tokenVersion: tokenVersion ?? 0 },
-    JWT_SECRET,
-    { expiresIn: '7d' }
-  );
-  res.cookie(COOKIE_NAME, token, cookieOptions());
-}
+/**
+ * Sessions are minted by `authRoutes.js`, not here.
+ *
+ * ── Why this file no longer has its own (v1.2b Task 6) ──
+ *
+ * It had a near-copy that differed in exactly one claim: no `jti`. Everything
+ * that identifies ONE session rather than an account keys on that claim, so a
+ * provider sign-in silently produced a second-class session:
+ *
+ *   - `POST /api/auth/logout` revokes by jti, so signing out of one device did
+ *     nothing for a provider-signed-in user.
+ *   - `openChallenge` REFUSES to bind a grant to a jti-less session, because a
+ *     grant nobody's session owns is spendable by anyone holding its id. With
+ *     v1.2b that is decisive: every one of the five sensitive actions now needs
+ *     a grant, so a provider-signed-in user would have been answered
+ *     `session_not_bindable` on all five — locked out of deleting their own
+ *     account, setting a first password, linking a second provider and
+ *     exporting their data. Those are the exact capabilities this release exists
+ *     to give provider-only accounts, and the copy here would have quietly
+ *     withheld them from every account that reached the app through a provider.
+ *
+ * Duplicating session minting is what allowed the two to drift for as long as
+ * nothing depended on the difference. One definition now, imported like
+ * `OAUTH_ONLY` beside it.
+ */
 
 /** Which buttons the client should render. Public: it reveals only deployment config. */
 router.get('/api/oauth/providers', (req, res) => {
@@ -435,11 +454,37 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
   }
 });
 
-/** Joins a provider identity to an existing password account, proven by that password. */
-router.post('/api/oauth/link', async (req, res) => {
-  const { linkToken, password } = req.body;
-  if (!linkToken || !password) {
-    return res.status(400).json({ error: 'Missing token or password' });
+/**
+ * Joins a provider identity to the caller's own account, behind a fresh proof of
+ * identity.
+ *
+ * ── What replaced what ──
+ *
+ * This route took an account password alongside an unauthenticated 15-minute
+ * link token, which made it a pure password oracle: 600 guesses per window
+ * against any account whose address somebody could produce at a provider. It is
+ * now an authenticated route gated on `requireAAL2('oauth.link')` with the
+ * provider bound in, so the proof is a challenge satisfied by a password or by
+ * re-consent at a provider the account has ALREADY linked.
+ *
+ * Two consequences, both intended:
+ *
+ *  1. **A provider-only account can now link a second provider.** It used to be
+ *     refused outright with a 409 — "that account has no password" — because the
+ *     only proof this endpoint accepted was one it could not produce. Losing
+ *     access to a single Google account was therefore losing the account.
+ *     `disconnect`'s last-credential guard is untouched and still refuses to
+ *     remove the final way in.
+ *  2. **The caller must be signed in as the account being linked.** The token
+ *     names a `userId`, and that used to be the ONLY thing tying the request to
+ *     an account — the password was the proof it named the right one. Now the
+ *     session is, so the token's `userId` must match it (see below). A person who
+ *     reaches `link_required` while signed out signs in first, then verifies.
+ */
+router.post('/api/oauth/link', authenticateToken, requireAAL2('oauth.link'), (req, res) => {
+  const { linkToken } = req.body ?? {};
+  if (!linkToken) {
+    return res.status(400).json({ error: 'Missing token' });
   }
 
   let decoded;
@@ -452,35 +497,69 @@ router.post('/api/oauth/link', async (req, res) => {
     return res.status(400).json({ error: 'Invalid token' });
   }
 
+  /**
+   * The token must name the caller, and this check is load-bearing.
+   *
+   * `link_required` is issued for whichever account already holds the address
+   * the provider returned — which is not necessarily the caller's. Without this
+   * comparison, someone who controls a provider account bearing a victim's email
+   * address could sign in as THEMSELVES, verify with their own credential, and
+   * spend that grant to attach their provider identity to the victim's account —
+   * after which "Continue with Google" signs them in as the victim. The password
+   * this route used to demand was what tied the token's `userId` to the person
+   * presenting it; the session is what ties it now, so the two have to agree.
+   */
+  if (decoded.userId !== req.user.id) {
+    return res.status(403).json({
+      error: 'That connection request is for a different account. Sign in to that account first.',
+      code: 'link_token_other_account'
+    });
+  }
+
   try {
-    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(decoded.userId);
+    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!userRow || userRow.account_status !== 'active') {
       return res.status(404).json({ error: 'User not found' });
     }
-    // An OAuth-only row stores the sentinel, which is not a bcrypt hash;
-    // compareSync would just return false and read as "wrong password".
-    if (userRow.password_hash === '!OAUTH_ONLY!') {
-      return res.status(409).json({ error: 'That account has no password. Sign in with your existing provider instead.' });
-    }
-    if (!await bcrypt.compare(password, userRow.password_hash)) {
-      return res.status(401).json({ error: 'Incorrect password.' });
-    }
 
     const now = new Date().toISOString();
-    db.prepare(`
-      INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at, last_used_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(user_id, provider) DO UPDATE SET
-        provider_user_id = excluded.provider_user_id,
-        provider_email = excluded.provider_email,
-        updated_at = excluded.updated_at,
-        last_used_at = excluded.last_used_at
-    `).run(`oauth-${crypto.randomUUID()}`, userRow.id, decoded.provider, decoded.providerUserId, decoded.providerEmail, now, now, now);
+    inTransaction(() => {
+      /**
+       * `provider` comes from the signed token, not the request body.
+       *
+       * It is the provider actually about to be written, and the grant is bound
+       * to it — so a verification obtained to connect Google cannot be spent
+       * connecting Microsoft. Taking it from the body would bind the check to a
+       * value the caller could choose independently of the write, which is a
+       * binding in name only.
+       */
+      spendChallenge(db, req, 'oauth.link', { provider: decoded.provider });
 
+      db.prepare(`
+        INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at, last_used_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, provider) DO UPDATE SET
+          provider_user_id = excluded.provider_user_id,
+          provider_email = excluded.provider_email,
+          updated_at = excluded.updated_at,
+          last_used_at = excluded.last_used_at
+      `).run(`oauth-${crypto.randomUUID()}`, userRow.id, decoded.provider, decoded.providerUserId, decoded.providerEmail, now, now, now);
+    });
+
+    /**
+     * No new session is issued.
+     *
+     * It used to be, because the caller had just proved a password while signed
+     * OUT and needed one. The caller is now already signed in, and re-issuing
+     * would actively hurt: `issueSession` here mints a token with no `jti`, and a
+     * session with no jti can have no challenge bound to it — so linking a
+     * provider would silently cost the user the ability to verify anything else
+     * until they signed in again.
+     */
     const user = formatUserResponse(userRow);
-    issueSession(res, user, userRow.token_version);
     res.json({ success: true, user, emailVerified: userRow.email_verified === 1 });
   } catch (err) {
+    if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
     console.error('Link Error:', err);
     res.status(500).json({ error: 'Could not connect that account.' });
   }

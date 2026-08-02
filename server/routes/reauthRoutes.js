@@ -9,6 +9,7 @@ import {
   openChallenge, grantByPassword, grantByOAuth, peekChallenge,
   REAUTH_ERRORS, CHALLENGE_TTL_MS
 } from '../reauth.js';
+import { refuseReauth } from '../reauthResponses.js';
 import { resolveProvider } from './oauthRoutes.js';
 
 /**
@@ -44,73 +45,19 @@ import { resolveProvider } from './oauthRoutes.js';
  *
  * ── Error vocabulary ──
  *
- * `reauth.js` returns a closed set of machine-readable refusals; this file maps
- * each to one status and one sentence, in ONE table, so no route can invent a
- * different answer for the same condition. `password_unavailable` in
- * particular must never read as "wrong password": the sentinel is not a bcrypt
- * hash, so a naive comparison returns false and tells someone with no password
- * that their password is wrong.
+ * `reauth.js` returns a closed set of machine-readable refusals, and
+ * `reauthResponses.js` maps each to one status and one sentence, in ONE table,
+ * so no route can invent a different answer for the same condition. That table
+ * lived here until Task 6 gave the five endpoints that SPEND a grant the same
+ * refusals to answer — it moved next door rather than being copied, and this
+ * file imports it like they do. `password_unavailable` in particular must never
+ * read as "wrong password": the sentinel is not a bcrypt hash, so a naive
+ * comparison returns false and tells someone with no password that their
+ * password is wrong.
  */
 
 const router = express.Router();
 const E = REAUTH_ERRORS;
-
-/**
- * How a lifecycle refusal reaches the client.
- *
- * `locked` is 429 rather than 403 because it is a rate limit by another name —
- * five guesses spent on one challenge — and 429 is what the client already
- * knows how to explain. `expired` is 410 rather than 404 because "your
- * verification timed out, start again" and "no such thing" need different words
- * in the UI, and the challenge row is deliberately kept for an hour past expiry
- * (see CHALLENGE_RETENTION_MS) precisely so that distinction can be made.
- */
-const REFUSALS = Object.freeze({
-  [E.NOT_FOUND]: { status: 404, error: 'That verification request no longer exists. Please start again.' },
-  [E.EXPIRED]: { status: 410, error: 'That verification timed out. Please start again.' },
-  [E.CONSUMED]: { status: 409, error: 'That verification has already been used. Please start again.' },
-  [E.LOCKED]: { status: 429, error: 'Too many failed attempts. Please start again.' },
-  // Deliberately does NOT say "start again" — starting again is the thing that
-  // no longer helps, and that is the whole point of the account-level ceiling.
-  [E.ACCOUNT_LOCKED]: {
-    status: 429,
-    error: 'Too many failed verification attempts. Please wait a few minutes and try again.'
-  },
-  [E.NOT_GRANTED]: { status: 409, error: 'That verification has not been completed yet.' },
-  [E.INVALID_PASSWORD]: { status: 401, error: 'That password is not correct.' },
-  [E.PASSWORD_UNAVAILABLE]: {
-    status: 409,
-    error: 'This account has no password. Verify with your sign-in provider instead.'
-  },
-  [E.PROVIDER_NOT_LINKED]: {
-    status: 409,
-    error: 'That provider is not connected to your account. Use one you have connected.'
-  },
-  [E.PROVIDER_MISMATCH]: {
-    status: 401,
-    error: 'That is a different account at your provider. Sign in with the one connected here.'
-  },
-  [E.METHOD_NOT_ALLOWED]: { status: 400, error: 'That verification method cannot be used for this action.' },
-  [E.ACTION_MISMATCH]: { status: 409, error: 'That verification was for a different action.' },
-  [E.PARAMS_MISMATCH]: { status: 409, error: 'That verification was for different details.' },
-  [E.SESSION_MISMATCH]: { status: 409, error: 'That verification belongs to a different sign-in.' }
-});
-
-function refuse(res, result) {
-  const mapped = REFUSALS[result.error];
-  if (!mapped) {
-    // An unmapped refusal is a bug in this table, not in the caller's request.
-    // Answering 500 says so, rather than inventing a 400 that sends the user
-    // round a loop no message explains.
-    console.error('reauth: unmapped refusal', result.error);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-  return res.status(mapped.status).json({
-    error: mapped.error,
-    code: result.error,
-    ...(result.attemptsRemaining === undefined ? {} : { attemptsRemaining: result.attemptsRemaining })
-  });
-}
 
 /**
  * The refusal for a session that cannot have a challenge bound to it.
@@ -118,10 +65,13 @@ function refuse(res, result) {
  * `openChallenge` THROWS on a missing jti — correctly, because a grant bound to
  * no session is spendable by anyone holding the id, which is not a step-up at
  * all. But `authenticateToken` still admits jti-less tokens: they predate
- * per-session revocation, and `oauthRoutes.js`'s `issueSession` does not mint
- * one today, so this is a live case rather than a legacy one. Letting the throw
- * escape would answer 500 — filing an ordinary, recoverable situation as a
- * server defect and telling the user nothing they can act on.
+ * per-session revocation and stay valid for up to seven days after a deploy, so
+ * this is reachable rather than theoretical. (Provider sign-ins were a second,
+ * permanent source of them until Task 6 gave `oauthRoutes.js` the shared
+ * `issueSession`; without that fix every provider-signed-in user would have met
+ * this refusal on all five sensitive actions.) Letting the throw escape would
+ * answer 500 — filing an ordinary, recoverable situation as a server defect and
+ * telling the user nothing they can act on.
  *
  * 401 with its own code, because the remedy is a new session and nothing else:
  * the client signs the user out and back in, and every token minted by
@@ -236,7 +186,7 @@ router.post('/api/auth/reauth/password', authenticateToken, async (req, res) => 
   // — splitting that judgement across two files is how an attempt ends up
   // uncounted.
   const result = await grantByPassword({ db, challengeId, userId: req.user.id, password });
-  if (!result.ok) return refuse(res, result);
+  if (!result.ok) return refuseReauth(res, result);
 
   return res.json({ granted: true, method: 'password' });
 });
@@ -291,7 +241,7 @@ router.get('/api/auth/reauth/oauth/:provider', authenticateToken, (req, res) => 
    * come back to an error.
    */
   const peeked = peekChallenge({ db, challengeId, userId: req.user.id });
-  if (!peeked.ok && peeked.error !== E.NOT_GRANTED) return refuse(res, peeked);
+  if (!peeked.ok && peeked.error !== E.NOT_GRANTED) return refuseReauth(res, peeked);
 
   const state = jwt.sign(
     {
@@ -403,7 +353,7 @@ router.post('/api/auth/reauth/oauth/:provider/callback', authenticateToken, asyn
     provider: providerName,
     subject: claims.sub
   });
-  if (!result.ok) return refuse(res, result);
+  if (!result.ok) return refuseReauth(res, result);
 
   return res.json({ granted: true, method: 'oauth' });
 });
