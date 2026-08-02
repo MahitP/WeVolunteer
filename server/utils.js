@@ -6,6 +6,7 @@ import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST, COOKIE_NA
 import { principalFor } from './authz.js';
 import { grantsFor } from './userCapabilities.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
+import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
 
 /**
  * Whether this specific session has been signed out.
@@ -82,27 +83,14 @@ export function buildPrincipal(userRow, fetchGrants = (id) => grantsFor(db, id))
 }
 
 /**
- * Where a request declares the re-verification it is spending.
+ * The lower-cased lookup key for the challenge header.
  *
- * A header, not a body field, for three reasons:
- *
- *   1. Two of the five sensitive actions are reached by methods that carry no
- *      body worth relying on (account deletion is a DELETE), and a mechanism
- *      that works for three of five is a mechanism someone will forget on the
- *      other two.
- *   2. `authenticateToken` would otherwise depend on the body parser having
- *      already run. It does today, but that is an ordering fact in app.js, and
- *      the middleware that decides assurance should not be the thing that
- *      breaks when the ordering is edited.
- *   3. The challenge id is transport metadata about the request, not an
- *      argument to it. Keeping it out of the body keeps it out of the object
- *      whose fields `paramsHash` binds, so it can never be mistaken for one.
- *
- * Node lower-cases incoming header names, so the wire form is only ever used
- * by clients and documentation. A duplicated header arrives comma-joined,
- * which matches no challenge id and resolves to AAL1 — the safe direction.
+ * The wire name itself is defined once, in `sensitiveActions.js`, so the client
+ * can import the same constant instead of retyping it — see the reasoning in
+ * that file's header, and the guard in `sensitiveActions.test.js` that fails
+ * the build on a second definition. Node lower-cases incoming header names, so
+ * `req.headers` must be indexed with this form and never with the wire form.
  */
-export const REAUTH_CHALLENGE_HEADER = 'X-Reauth-Challenge';
 const REAUTH_CHALLENGE_HEADER_KEY = REAUTH_CHALLENGE_HEADER.toLowerCase();
 
 /**
@@ -195,6 +183,23 @@ export function authenticateToken(req, res, next) {
     // The capability principal. req.user is left exactly as it was, so every
     // existing handler and test keeps working while call sites migrate.
     req.principal = buildPrincipal(userRow);
+
+    /**
+     * This session's identifier, for the routes that BIND something to it.
+     *
+     * `openChallenge` refuses to create a grant without one, and
+     * `consumeChallenge` re-checks it, so the step-up routes need the value —
+     * and re-verifying the cookie in each of them to recover a claim this
+     * middleware has already verified is both wasted work and a second place
+     * for the verification to be got wrong.
+     *
+     * Explicitly `null`, never absent, for tokens minted before per-session
+     * revocation existed (and for the sessions oauthRoutes.js's `issueSession`
+     * still creates today, which carry no jti). Those are admitted here — see
+     * `isSessionRevoked` — so the routes that cannot work without a jti have to
+     * recognise the case and say so, rather than throwing.
+     */
+    req.sessionJti = decodedUser.jti ?? null;
 
     // Assurance. Additive to the principal and nothing else — a request that
     // presents no challenge id leaves it at the AAL1 principalFor() already

@@ -24,6 +24,7 @@ import weatherRoutes from './routes/weatherRoutes.js';
 import messageRoutes from './routes/messageRoutes.js';
 import privacyRoutes from './routes/privacyRoutes.js';
 import oauthRoutes from './routes/oauthRoutes.js';
+import reauthRoutes from './routes/reauthRoutes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -388,6 +389,43 @@ export const verifyLimiter = rateLimit({
  * 600 that the blanket apiLimiter allowed. `skipSuccessfulRequests` is
  * deliberately off: a successful lookup is exactly what harvesting looks like.
  */
+/**
+ * The step-up password path.
+ *
+ * `reauth.js` locks a single challenge after five wrong guesses, and on its own
+ * that bounds nothing: opening a fresh challenge costs one request and resets
+ * the counter, so an attacker holding a stolen session can guess indefinitely
+ * at one extra round trip per attempt. The per-challenge limit is about one
+ * challenge; this is about the endpoint, and only the pair of them bounds
+ * guessing.
+ *
+ * Tighter than authLimiter's 10 because the population is different. /login is
+ * used by everyone, several times a day, and is where a mistyped password
+ * normally happens; re-verification is used a handful of times a year by any
+ * one person, immediately after they have already signed in — so five failures
+ * in fifteen minutes is far outside honest use and well inside what a guesser
+ * needs.
+ *
+ * `skipSuccessfulRequests` so that a user working through several sensitive
+ * settings in one sitting never spends the budget by succeeding. The guessing
+ * allowance is unchanged by that: an attacker's attempts are, by definition,
+ * the ones that fail.
+ *
+ * Per-IP, matching the login limiter it sits beside. The campus-NAT problem
+ * documented on mailLimiter above applies in principle, but the endpoint it
+ * would strand somebody on is one they reach only after signing in
+ * successfully, and diverging from /login's keying on the app's other password
+ * oracle would need a better reason than symmetry.
+ */
+export const reauthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.REAUTH_RATE_LIMIT) || (DEMO_MODE ? 1000 : 5),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  handler: limitHandler('Too many failed verification attempts from this device.'),
+});
+
 export const lookupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: DEMO_MODE ? 5000 : 60,
@@ -433,6 +471,23 @@ app.use('/api/auth/change-email', mailIpCeilingLimiter, mailLimiter);
 app.use('/api/auth/confirm-email-change', authLimiter);
 app.use('/api/auth/change-username', authLimiter);
 
+/**
+ * Step-up re-verification.
+ *
+ * The prefix carries authLimiter for the same reason /api/oauth does: opening a
+ * challenge writes a row and the OAuth callback grants one, so neither belongs
+ * at general API volume. authLimiter skips successful requests, so a user
+ * verifying normally never counts against it.
+ *
+ * The password path additionally carries its own, much tighter limiter — it is
+ * a password oracle on the same footing as /api/auth/change-password, and the
+ * per-challenge attempt counter does not bound an attacker willing to open a
+ * new challenge per guess. Both must pass; the specific one is mounted second
+ * so the broad refusal is the one a flood sees first.
+ */
+app.use('/api/auth/reauth', authLimiter);
+app.use('/api/auth/reauth/password', reauthLimiter);
+
 // Mounted on the prefix rather than per-route, so /link is counted once. The
 // callback mints sessions and /url writes a pending-signup row, so neither
 // belongs at general API volume either. authLimiter skips successful requests,
@@ -449,6 +504,7 @@ app.use(authRoutes);
 app.use(accountRoutes);
 app.use(userRoutes);
 app.use(oauthRoutes);
+app.use(reauthRoutes);
 app.use(eventRoutes);
 app.use(applicationRoutes);
 app.use(attendanceRoutes);

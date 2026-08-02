@@ -29,8 +29,15 @@ const providers = {
  * are genuinely different situations, and the UI says something different
  * about each. Collapsing them into one 400 "Unsupported provider" is why
  * pressing "Continue with Apple" used to fail silently.
+ *
+ * Exported for `reauthRoutes.js`, which needs the same four-way answer for the
+ * step-up re-consent flow. Shared rather than copied: a second provider table
+ * would be a second place to register a provider, and the failure mode of
+ * forgetting one is a button that 404s only in the flow nobody tested. Route
+ * modules already import from each other this way (accountRoutes.js takes
+ * `OAUTH_ONLY` and `issueSession` from authRoutes.js).
  */
-function resolveProvider(name) {
+export function resolveProvider(name) {
   const key = String(name || '').toLowerCase();
   const provider = providers[key];
   if (!provider) {

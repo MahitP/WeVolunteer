@@ -27,6 +27,43 @@ export function isSensitiveAction(action) {
 }
 
 /**
+ * Where a request declares the re-verification it is spending.
+ *
+ * ── Why a header rather than a body field ──
+ *
+ *   1. Two of the five sensitive actions are reached by methods that carry no
+ *      body worth relying on (account deletion is a DELETE), and a mechanism
+ *      that works for three of five is a mechanism someone will forget on the
+ *      other two.
+ *   2. `authenticateToken` would otherwise depend on the body parser having
+ *      already run. It does today, but that is an ordering fact in app.js, and
+ *      the middleware that decides assurance should not be the thing that
+ *      breaks when the ordering is edited.
+ *   3. The challenge id is transport metadata about the request, not an
+ *      argument to it. Keeping it out of the body keeps it out of the object
+ *      whose fields `paramsHash` binds, so it can never be mistaken for one.
+ *
+ * Node lower-cases incoming header names, so the wire form is only ever used
+ * by clients and documentation. A duplicated header arrives comma-joined,
+ * which matches no challenge id and resolves to AAL1 — the safe direction.
+ *
+ * ── Why it lives HERE and not in utils.js, where it started ──
+ *
+ * `utils.js` reaches `db.js` at module scope, so nothing in the client bundle
+ * can import from it — the browser half of this feature would have had to
+ * retype the wire name. Two spellings of a header is one typo away from a
+ * client that presents its grant to a server that never looks for it: the
+ * request silently resolves to AAL1 and the sensitive action answers
+ * `reauth_required`, sending the UI back to the verification modal it has just
+ * come from, for ever. This module imports only `node:crypto`, is already the
+ * shared vocabulary of step-up (the action names and their labels), and is what
+ * `src/authz.js`'s mirror pattern makes reachable from the client. One
+ * definition, both sides; `sensitiveActions.test.js` fails the build on a
+ * second one.
+ */
+export const REAUTH_CHALLENGE_HEADER = 'X-Reauth-Challenge';
+
+/**
  * Canonical, collision-free encoding of one action's bound params.
  *
  * Exported on its own (not inlined in paramsHash) because no current
