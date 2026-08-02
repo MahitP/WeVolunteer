@@ -2,9 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 
 import { ROLES } from './authz.js';
+import { SENSITIVE_ACTIONS } from './sensitiveActions.js';
 
 /**
- * Three regression guards for the authorization spine (v1.2a, Tasks 7a-7e, 17):
+ * Four regression guards for the authorization spine (v1.2a Tasks 7a-7e/17,
+ * v1.2b Task 5):
  *
  *   1. No server module that makes authorization decisions may compare a role
  *      string directly, in ANY spelling.
@@ -12,6 +14,8 @@ import { ROLES } from './authz.js';
  *      reviewed, categorised, one-line-justified reason it doesn't need one.
  *   3. The same rule as (1), for the client: no module under src/ may compare a
  *      role string without a reviewed, categorised declaration.
+ *   4. Every `requireAAL2(...)` argument in server/ is a registered sensitive
+ *      action, spelled as a literal.
  *
  * No guard touches production code. Every declaration is a decision verified by
  * reading the code, not a bulk-pasted allowlist — see task-8-report.md and
@@ -190,7 +194,11 @@ describe('authorization hygiene', () => {
      */
     const REVIEWED_NON_AUTH_EXCEPTIONS = new Set([
       './routes/authRoutes.js:223',
-      './routes/oauthRoutes.js:379',
+      // Moved from :379 in v1.2b Task 5 when `resolveProvider` gained an
+      // export and the docstring above it explaining why. The line itself is
+      // unchanged; re-read and re-confirmed as the same new-signup `verified`
+      // decision described above.
+      './routes/oauthRoutes.js:386',
     ]);
     const consumedExceptions = new Set();
 
@@ -521,6 +529,30 @@ describe('authorization hygiene', () => {
       'GET /api/privacy/export/status': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
       'GET /api/privacy/export/download/:id': { category: CATEGORY.SELF_ONLY, reason: 'job.user_id !== caller -> 404 (always the caller\'s own export job)' },
 
+      /**
+       * ── The four step-up endpoints (v1.2b Task 5) ──
+       *
+       * Read against their handlers one at a time, not declared as a block.
+       * Every one of them takes its user from `req.user.id` and never from the
+       * request, and every reauth.js entry point they call is scoped by
+       * `user_id` inside the module (see `load()` there), so another user's
+       * challenge id is indistinguishable from one that does not exist.
+       *
+       * None of them can carry a capabilityGate, and that is not an omission:
+       * these are the routes that MINT assurance. A capability answers "may
+       * this kind of actor ever do X"; the action being verified for is a
+       * parameter here, and its capability gate belongs on the endpoint that
+       * performs the action (Task 6), before its own `requireAAL2`. Gating
+       * these on a capability would mean either inventing one every role holds
+       * — a gate that discriminates against nobody, which
+       * GET /api/organizers/:id/profile below records as the wrong answer — or
+       * denying some role the ability to re-prove its own identity.
+       */
+      'POST /api/auth/reauth/challenge': { category: CATEGORY.SELF_ONLY, reason: 'opens a challenge for req.user.id only; openChallenge binds user_id, and the caller cannot name another account' },
+      'POST /api/auth/reauth/password': { category: CATEGORY.SELF_ONLY, reason: 'grantByPassword is scoped to (challengeId, req.user.id) and re-checks the caller\'s own password_hash; a stranger\'s challenge id reads as not_found' },
+      'GET /api/auth/reauth/oauth/:provider': { category: CATEGORY.SELF_ONLY, reason: 'peeks the caller\'s own challenge (scoped by user_id) and signs a state bound to req.user.id and this session; writes nothing' },
+      'POST /api/auth/reauth/oauth/:provider/callback': { category: CATEGORY.SELF_ONLY, reason: 'requires a state minted for req.user.id and this session\'s jti, then grantByOAuth matches the provider sub against the caller\'s own oauth_accounts row' },
+
       // ── INLINE_GATED — genuinely gated in the handler body (an inline
       // can()/ownership/participant check the middleware-stack walk cannot
       // see). See each entry's reason for the actual check and file:line. ──
@@ -580,5 +612,138 @@ describe('authorization hygiene', () => {
     // known values with a non-empty reason (checked above, per-route).
     const staleRegistryEntries = Object.keys(ROUTE_REGISTRY).filter((r) => !ungated.includes(r));
     expect(staleRegistryEntries, 'ROUTE_REGISTRY entries for routes that are no longer ungated — remove them').toEqual([]);
+  });
+
+  // ── Guard 4 ──────────────────────────────────────────────────────────────
+  describe('every requireAAL2 argument is a registered sensitive action', () => {
+    /**
+     * Why this guard exists at all.
+     *
+     * `requireAAL2` cannot validate its own argument. Doing so would mean
+     * importing `sensitiveActions.js` into `authz.js`, which would cost that
+     * module the zero-imports property `authz.test.js` asserts and which is
+     * what lets `src/authz.js` mirror the capability table into the client
+     * bundle. So the check moved out here, and the plan (Task 4, Step 3) says
+     * so explicitly: "validate `action` against the registry at the CALL SITE
+     * in route files rather than importing sensitiveActions.js here".
+     *
+     * The failure it catches is silent and permanent. `requireAAL2` compares
+     * its action against `principal.aalAction`, which `authenticateToken`
+     * resolves from a stored challenge — and a challenge can only ever hold a
+     * registered action, because `openChallenge` refuses anything else. So a
+     * misspelled gate (`requireAAL2('acount.delete')`) can never match any
+     * grant: the route 403s with `reauth_required` for every caller, for ever,
+     * and the client loops round the verification modal it was just told to
+     * open. No unit test of the route sees it unless that test drives a real
+     * grant through, and no type system here would catch it.
+     *
+     * Non-literal arguments are refused for the same reason. `requireAAL2(x)`
+     * is unverifiable from source, and the whole value of this guard is that
+     * the answer is knowable at build time rather than at 403 time.
+     */
+
+    /**
+     * Call sites of `requireAAL2` in one source file.
+     *
+     * Kept as a function taking a string, not a path, so the self-test below
+     * can drive it with a synthetic module containing the exact bug. Reading
+     * a regex and believing it is how three role checks got past Guard 1 on
+     * this branch.
+     */
+    function findRequireAAL2CallSites(src) {
+      const found = [];
+      stripComments(src).split('\n').forEach((line, i) => {
+        // The declaration is not a call site. `export function requireAAL2(action)`
+        // is the one place the identifier legitimately appears with a
+        // non-literal argument.
+        if (/\bfunction\s+requireAAL2\s*\(/.test(line)) return;
+        for (const m of line.matchAll(/\brequireAAL2\s*\(([^)]*)\)/g)) {
+          const raw = m[1].trim();
+          const quoted = raw.match(/^(['"`])(.*)\1$/);
+          found.push({ line: i + 1, raw, action: quoted ? quoted[2] : null, isLiteral: Boolean(quoted) });
+        }
+      });
+      return found;
+    }
+
+    /** Every non-test module under server/, at any depth. */
+    function collectServerJsFiles() {
+      const files = [];
+      const walk = (dirUrl, relDir) => {
+        for (const entry of readdirSync(dirUrl, { withFileTypes: true })) {
+          if (entry.name === 'node_modules') continue;
+          if (entry.isDirectory()) {
+            walk(new URL(`${entry.name}/`, dirUrl), `${relDir}${entry.name}/`);
+          } else if (entry.isFile() && entry.name.endsWith('.js') && !entry.name.endsWith('.test.js')) {
+            files.push({ url: new URL(entry.name, dirUrl), key: `server/${relDir}${entry.name}` });
+          }
+        }
+      };
+      walk(new URL('./', import.meta.url), '');
+      return files;
+    }
+
+    /**
+     * The detector, proved against injected bugs.
+     *
+     * This runs first and deliberately does not touch the repository. As of
+     * Task 5 there are ZERO `requireAAL2` call sites in server/ — the gates
+     * arrive with Task 6 — so the scan below would pass over an empty set and
+     * report success while checking nothing. A guard that cannot be shown to
+     * fire is not a guard; these fixtures are what makes the next test
+     * meaningful before its subject exists.
+     */
+    it('fires on a misspelled action, a non-literal argument, and nothing else', () => {
+      const good = findRequireAAL2CallSites(
+        "router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delete'), handler);"
+      );
+      expect(good).toHaveLength(1);
+      expect(good[0].action).toBe('account.delete');
+      expect(good[0].isLiteral).toBe(true);
+      expect(Object.prototype.hasOwnProperty.call(SENSITIVE_ACTIONS, good[0].action)).toBe(true);
+
+      // One character off. This is the bug.
+      const typo = findRequireAAL2CallSites("router.post('/x', requireAAL2('acount.delete'), h);");
+      expect(typo[0].isLiteral).toBe(true);
+      expect(Object.prototype.hasOwnProperty.call(SENSITIVE_ACTIONS, typo[0].action)).toBe(false);
+
+      // Unverifiable from source.
+      const variable = findRequireAAL2CallSites('router.post("/x", requireAAL2(action), h);');
+      expect(variable[0].isLiteral).toBe(false);
+      expect(variable[0].raw).toBe('action');
+
+      // The declaration in authz.js is not a call site…
+      expect(findRequireAAL2CallSites('export function requireAAL2(action) {')).toEqual([]);
+      // …and neither is a comment mentioning one.
+      expect(findRequireAAL2CallSites(" * gated by requireAAL2('made.up.action')")).toEqual([]);
+      // Double quotes and backticks count exactly the same as single ones.
+      expect(findRequireAAL2CallSites('requireAAL2("email.change")')[0].action).toBe('email.change');
+      expect(findRequireAAL2CallSites('requireAAL2(`email.change`)')[0].action).toBe('email.change');
+    });
+
+    it('finds no unregistered or non-literal action anywhere in server/', () => {
+      const files = collectServerJsFiles();
+      expect(files.length, 'the server/ walk found no modules to scan').toBeGreaterThan(0);
+
+      const offenders = [];
+      for (const { url, key } of files) {
+        for (const site of findRequireAAL2CallSites(readFileSync(url, 'utf8'))) {
+          if (!site.isLiteral) {
+            offenders.push(
+              `${key}:${site.line}: requireAAL2(${site.raw}) — the action must be a string literal, `
+              + 'so that it can be checked against SENSITIVE_ACTIONS here rather than 403ing for ever in production.'
+            );
+          } else if (!Object.prototype.hasOwnProperty.call(SENSITIVE_ACTIONS, site.action)) {
+            offenders.push(
+              `${key}:${site.line}: requireAAL2('${site.action}') is not a key of SENSITIVE_ACTIONS. `
+              + `Known actions: ${Object.keys(SENSITIVE_ACTIONS).sort().join(', ')}. `
+              + 'An unregistered action can never match a stored grant, so this route would 403 every caller for ever.'
+            );
+          }
+        }
+      }
+
+      expect(offenders, 'requireAAL2 gate(s) naming an action the registry does not know').toEqual([]);
+    });
   });
 });

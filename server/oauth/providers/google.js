@@ -7,24 +7,46 @@ export default {
   id: 'google',
   label: 'Google',
 
-  getAuthUrl(state) {
+  /**
+   * `forceReauth` is what makes step-up (v1.2b) a proof of identity.
+   *
+   * Ordinary sign-in and re-verification ask Google for two different things,
+   * and the difference is the entire feature:
+   *
+   *   • Sign-in (`forceReauth: false`) — `select_account`, not `consent`.
+   *     `consent` forces the full scope-approval screen on every single
+   *     sign-in, so a returning student re-authorised the app each time they
+   *     came back, which reads as "this site keeps asking for permission
+   *     again" — the exact signal people are taught to treat as suspicious.
+   *     `select_account` still lets someone switch between a school and a
+   *     personal Google account, which is the one thing the prompt is
+   *     genuinely useful for here, and matches what the Microsoft provider
+   *     already asks for.
+   *
+   *   • Re-verification (`forceReauth: true`) — `prompt=login` AND
+   *     `max_age=0`. Either prompt on its own can be answered from the session
+   *     Google already holds, and an assertion reissued from an existing
+   *     session says only "this browser signed in at some point", which is
+   *     precisely what a stolen session already demonstrates. `prompt=login`
+   *     asks for re-authentication; `max_age=0` states that no cached
+   *     authentication of any age is acceptable, which is what makes it a
+   *     requirement rather than a request. Without both, step-up silently
+   *     degrades to a redirect that always succeeds — and it degrades
+   *     INVISIBLY, because the flow still completes.
+   *
+   * The parameters are passed through `generateAuthUrl`, which query-string-
+   * encodes every option it is given, so `max_age` reaches Google despite not
+   * being one of the library's named fields. `routes.reauth.test.js` asserts
+   * on the generated URL rather than on this call, because that is the only
+   * form of the check that survives a library upgrade dropping an option.
+   */
+  getAuthUrl(state, { forceReauth = false } = {}) {
     return client.generateAuthUrl({
       access_type: 'offline',
       scope: ['https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile'],
       state,
-      /**
-       * `select_account`, not `consent`.
-       *
-       * `consent` forces the full scope-approval screen on every single
-       * sign-in, so a returning student re-authorised the app each time they
-       * came back — which reads as "this site keeps asking for permission
-       * again", the exact signal people are taught to treat as suspicious.
-       * `select_account` still lets someone switch between a school and a
-       * personal Google account, which is the one thing the prompt is
-       * genuinely useful for here, and matches what the Microsoft provider
-       * already asks for.
-       */
-      prompt: 'select_account'
+      prompt: forceReauth ? 'login' : 'select_account',
+      ...(forceReauth ? { max_age: 0 } : {})
     });
   },
 

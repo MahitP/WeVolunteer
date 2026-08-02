@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { SENSITIVE_ACTIONS, isSensitiveAction, paramsHash, canonicalParams } from './sensitiveActions.js';
+import { readFileSync, readdirSync } from 'fs';
+import {
+  SENSITIVE_ACTIONS, isSensitiveAction, paramsHash, canonicalParams, REAUTH_CHALLENGE_HEADER
+} from './sensitiveActions.js';
 
 describe('sensitive action registry', () => {
   it('lists exactly the actions requiring step-up', () => {
@@ -85,5 +88,43 @@ describe('canonicalParams (collision + ordering regressions)', () => {
     // absent-key sentinel, so a present key whose *value* is literal `null`
     // hashed identically to that key being missing entirely.
     expect(canonicalParams(['newEmail'], {})).not.toBe(canonicalParams(['newEmail'], { newEmail: null }));
+  });
+});
+
+/**
+ * The challenge header's one home.
+ *
+ * It started in `server/utils.js`, which reaches `db.js` at module scope — so
+ * the client could not import it and would have had to retype the wire name.
+ * Two spellings of a header is one typo away from a client that presents its
+ * grant to a server that never looks for it: every request silently resolves to
+ * AAL1 and every sensitive action 403s with `reauth_required` in a loop the
+ * user cannot break. This module is pure and already the shared vocabulary for
+ * step-up, so the constant lives here and utils.js imports it.
+ */
+describe('the reauth challenge header', () => {
+  it('is the wire name the client and the server both use', () => {
+    expect(REAUTH_CHALLENGE_HEADER).toBe('X-Reauth-Challenge');
+  });
+
+  it('is defined in exactly one place across server/', () => {
+    const files = [];
+    const walk = (dirUrl, rel) => {
+      for (const entry of readdirSync(dirUrl, { withFileTypes: true })) {
+        if (entry.name === 'node_modules') continue;
+        if (entry.isDirectory()) {
+          walk(new URL(`${entry.name}/`, dirUrl), `${rel}${entry.name}/`);
+        } else if (entry.isFile() && entry.name.endsWith('.js') && !entry.name.endsWith('.test.js')) {
+          files.push({ url: new URL(entry.name, dirUrl), key: `server/${rel}${entry.name}` });
+        }
+      }
+    };
+    walk(new URL('./', import.meta.url), '');
+    expect(files.length, 'the server/ walk found no modules to scan').toBeGreaterThan(0);
+
+    // The literal, not the identifier: a second `export const … = 'X-Reauth-Challenge'`
+    // is the drift this guards, and importing the constant leaves no literal behind.
+    const definers = files.filter(f => readFileSync(f.url, 'utf8').includes("'X-Reauth-Challenge'"));
+    expect(definers.map(f => f.key)).toEqual(['server/sensitiveActions.js']);
   });
 });
