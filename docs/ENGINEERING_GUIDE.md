@@ -992,7 +992,107 @@ Re-assess whenever the advisory is updated or the routing architecture changes.
 If WeVolunteer ever adopts server components, **this assessment is void** and
 must be redone before shipping.
 
-### 6.8 Current verified security posture
+### 6.8 Step-up re-authentication (AAL2)
+
+Added in v1.2b. Five actions cannot be performed on the strength of a session
+alone; the account holder must re-prove who they are within the last five
+minutes. **The rules below are not style preferences. Each one closes a hole
+that was open in this codebase.**
+
+#### The registry is the only list
+
+`server/sensitiveActions.js` enumerates every action that requires step-up,
+which methods can satisfy it, and which of its parameters the grant binds. It
+imports nothing but `node:crypto`, so the client imports the same module and
+the two cannot drift.
+
+*Why one list.* Before this, four endpoints each ran their own
+`bcrypt.compare` and a fifth ran nothing. Individually every one of them was
+correct; collectively they were unreviewable, because **the endpoint that
+forgot its check looked exactly like the endpoint that never needed one.**
+That is how `POST /api/privacy/export` — a complete copy of everything an
+account holds, for a population that is mostly minors — went years with no
+gate at all. Nobody removed it. It was never added, and nothing could show
+that.
+
+#### Never re-introduce an inline credential check
+
+Sign-in (`server/routes/authRoutes.js`) is the only place in the application
+that compares a password to decide who someone is. `server/reauth.js` is the
+only other place that compares one at all, and it does so on behalf of the
+registry.
+
+If you find yourself adding `bcrypt.compare` to a route handler, the answer is
+a registry entry and a `requireAAL2` gate. An inline check is also, always, a
+password oracle on an endpoint that was not designed to be one — the audit
+found `POST /api/oauth/link` allowing 600 attempts per window against any
+address, which made it a better brute-force target than the login form.
+
+#### A gate is not the check
+
+`requireAAL2('<action>')` is an **early refusal**. It reads
+`principal.aalAction`, changes nothing, and exists so an unverified caller is
+turned away before the handler does any work.
+
+The property that makes step-up worth having comes from `consumeChallenge`
+running **inside the handler's own transaction**, against the action and the
+arguments the handler is actually about to perform. Use `spendChallenge` from
+`server/reauthResponses.js`, which reads the three bindings off the request so
+no route can pick up two of the three.
+
+A route that gates and never spends leaves the grant live for its remaining
+five minutes: the same challenge id re-presented performs the action again,
+and again. **That omission is invisible** — every functional test of such a
+route passes. Guard 5 in `server/authz.completeness.test.js` fails the build
+on it.
+
+#### Four bindings, and each one closes a real hole
+
+| Binding | Without it |
+|---|---|
+| **action** | Verifying to change your email deletes your account |
+| **params** | Verifying to move your address to `a@x.com` moves it to the attacker's — the binding most step-up implementations omit, and the one an attacker with a stolen session actually reaches for |
+| **session** | A grant obtained in the victim's browser is spent from the attacker's |
+| **single use** | A replayed grant is a second free sensitive action |
+
+Params must be **exactly** the keys the registry declares — no more, since
+`paramsHash` ignores the rest, and no fewer, since a missing key hashes as
+absent and will not match a grant that had it. Bind the value the handler is
+about to write, never the one the client claimed when it opened the challenge.
+
+#### Guessing is bounded twice, and both are needed
+
+`MAX_ATTEMPTS` (5) bounds one challenge. On its own it bounds nothing an
+attacker cares about: **opening a fresh challenge costs one request and starts
+a new counter at zero.** `MAX_ACCOUNT_ATTEMPTS` (15 per 15 minutes, summed
+across the account's challenges) is what makes it a limit on guessing rather
+than a limit on a row, and `reauthLimiter` in `app.js` closes the same hole
+per IP. Neither subsumes the other.
+
+#### Provider re-consent must actually re-authenticate
+
+An account with no password proves itself by re-consenting at its identity
+provider. That substitution is only real if the provider genuinely
+re-authenticates: `google.js` sends `prompt=login` **and** `max_age=0`, and
+`microsoft.js` sends `prompt=login`. Without them the provider answers from
+the session it already holds, which proves nothing a stolen session did not
+already prove — **and it fails silently, because the flow still completes.**
+
+`grantByOAuth` then compares the returned `sub` against the
+`provider_user_id` on *this* user's linked row. That comparison, not the
+successful round trip, is the security of the path: a completed OAuth flow
+attests who is at the keyboard and nothing more.
+
+#### Adding a credential requires proving identity — through every door
+
+If two code paths make the same state change, gate both. `POST /api/oauth/link`
+and the OAuth callback's `auto_linked` branch both write an `oauth_accounts`
+row, and that row is a new way to sign in. Gating only the first would have
+left the rule true of the door users do not walk through. A callback arriving
+mid-redirect cannot be interrupted to ask for a verification, so the grant is
+opened before the redirect and carried across it in the signed state.
+
+### 6.9 Current verified security posture
 
 Confirmed at `v1.1.0`:
 
@@ -1010,8 +1110,20 @@ Confirmed at `v1.1.0`:
 | Password minimum length | 8 characters |
 | Login throttling | Active |
 | Account enumeration | Hardened |
-| Privacy export | IDOR-tested |
+| Privacy export | IDOR-tested; step-up gated as of v1.2b |
 | Secret scanning | Pre-commit hook installed |
+
+Added on the v1.2 branch, pending release:
+
+| Control | Verified behaviour |
+|---|---|
+| Authorization | Capability-based; no role-string comparison anywhere in `server/` or `src/`, enforced by five build-failing guards |
+| Sensitive actions | Five actions behind `requireAAL2`; grants bound to action, params and session; single-use; five-minute lifetime |
+| Step-up brute force | Bounded per challenge (5), per account (15 / 15 min) and per IP (`reauthLimiter`) |
+| Provider re-consent | `prompt=login` + `max_age=0` (Google), `prompt=login` (Microsoft); returned `sub` compared to the account's linked row |
+| Adding a sign-in credential | Requires step-up through both the `/api/oauth/link` and `auto_linked` callback paths |
+| Session identity | Every session carries a `jti`; provider sign-ins are per-device revocable |
+| Schema changes | Versioned migration registry with source checksums re-verified on every boot |
 
 ---
 
