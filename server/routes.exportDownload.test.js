@@ -167,6 +167,49 @@ describe('export download: the gate', () => {
   });
 });
 
+/**
+ * The account shape that has caused this exact bug four times on this branch.
+ *
+ * ENGINEERING_GUIDE and the roadmap both record it: "coverage of a branch is
+ * not coverage of the states that reach it." The account-deletion hole survived
+ * because every deletion test used a password-holding account, so the
+ * provider-only path — which asked for nothing at all — was never exercised.
+ * Every other test in this file verifies with a password, so the one account
+ * that CANNOT do that gets its own.
+ */
+describe('export download: the provider-only account', () => {
+  it('collects its archive by re-consenting at its provider', async () => {
+    const acct = account();
+    const { cookie, user } = await srv.signupConfirmed(acct);
+
+    // Queue the export while the account still has a password, then take the
+    // password away — the archive outlives the credential that produced it.
+    const { jobId } = await completedExport(cookie);
+
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO oauth_accounts
+        (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at, last_used_at)
+      VALUES (?, ?, 'google', 'sub-dl-provider-only', ?, ?, ?, ?)
+    `).run(`oauth-dl-${user.id}`, user.id, acct.email, now, now, now);
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run('!OAUTH_ONLY!', user.id);
+
+    // The challenge must not offer a password prompt it cannot answer.
+    const opened = await srv.call('POST', '/api/auth/reauth/challenge',
+      { action: 'data.download', params: { jobId } }, cookie);
+    expect(opened.status).toBe(201);
+    expect(opened.body.methods).toEqual(['oauth']);
+
+    const challengeId = await srv.stepUpOAuth(cookie, 'data.download', {
+      params: { jobId }, provider: 'google', sub: 'sub-dl-provider-only'
+    });
+    const res = await srv.call(
+      'GET', `/api/privacy/export/download/${jobId}`, undefined, cookie, srv.reauthHeader(challengeId)
+    );
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('export download: a refused request must not cost the verification', () => {
   it('keeps the grant spendable when the archive has expired', async () => {
     const { cookie } = await srv.signupConfirmed(account());
