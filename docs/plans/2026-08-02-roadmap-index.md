@@ -12,7 +12,7 @@ first, then the plan for the release you are working on.
 |---|---|---|
 | **v1.2a** | Capability authorization kernel, versioned migration registry | **Merged to `main`** as `bd00c6d` |
 | **v1.2b** | Step-up re-authentication (AAL2) | **Merged to `main`** as `4c01995` (a `--no-ff` merge commit; the forty-one commits underneath it are the audit trail and are meant to be read) |
-| **v1.2c** | Error monitoring | Planned — `2026-08-02-v1.2c-error-monitoring.md` |
+| **v1.2c** | Error monitoring | Planned — `2026-08-02-v1.2c-error-monitoring.md`. **Plan audited and amended 2026-08-03**; approved with changes, not yet started |
 | **v1.3** | Email delivery tracking + PWA | Planned — `2026-08-02-v1.3-trust-and-reach.md` |
 | **v1.4** | Taxonomy, dashboards, maps/weather | Planned — `2026-08-02-v1.4-meaning.md` |
 | **v2.0** | Service portfolio, QR attendance, super admin | Planned — `2026-08-02-v2.0-platform.md` |
@@ -249,6 +249,13 @@ v1.2b (done) ──▶ v1.2c errors ──▶ v1.3 email+PWA ──▶ v1.4 mean
 - **v1.2b before v2.0's W8 and W10** — already satisfied. External-hours
   verification writes to a student record, and impersonation without step-up is
   a backdoor.
+- **Inside v1.2c: the retention sweep before the unauthenticated intake.** The
+  plan originally had the sweep last and the public write path fifth, while also
+  calling the release shippable before the sweep landed. The audit moved the
+  sweep to Task 4. The generalisation is worth carrying into every later
+  release: **nothing that accepts writes from the public internet ships before
+  the thing that expires them.** v1.3's PWA outbox and v2.0's QR attendance both
+  have this shape.
 
 ---
 
