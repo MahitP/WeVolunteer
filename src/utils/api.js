@@ -175,9 +175,10 @@ export const api = {
    * Settings previously had a "Change Password" button whose whole
    * implementation was a success toast — no endpoint, no request, no change.
    */
-  changePassword: async (currentPassword, newPassword) => apiFetch('/api/auth/change-password', {
+  changePassword: async (newPassword, headers = {}) => apiFetch('/api/auth/change-password', {
     method: 'POST',
-    body: JSON.stringify({ currentPassword, newPassword })
+    headers,
+    body: JSON.stringify({ newPassword })
   }),
 
   /** Invalidate every other session. Also previously a toast and nothing else. */
@@ -190,9 +191,21 @@ export const api = {
    * link sent to it is opened. That matters for the caller's copy: it must say
    * "check your new inbox", never "your email has been changed".
    */
-  changeEmail: async (newEmail, password) => apiFetch('/api/auth/change-email', {
+  /**
+   * `newEmail` is sent verbatim, and must be the same string that was bound
+   * into the challenge.
+   *
+   * The server binds the RAW body value into `params_hash` — not a trimmed or
+   * lower-cased one — and re-derives the hash from this request when the grant
+   * is spent. Normalising in only one of the two places produces
+   * `params_mismatch` on a verification the user completed correctly, which
+   * reads as the feature being broken. `EmailCard` holds one normalised value
+   * and passes it to both calls for exactly this reason.
+   */
+  changeEmail: async (newEmail, headers = {}) => apiFetch('/api/auth/change-email', {
     method: 'POST',
-    body: JSON.stringify({ newEmail, password })
+    headers,
+    body: JSON.stringify({ newEmail })
   }),
   confirmEmailChange: async (token) => apiFetch('/api/auth/confirm-email-change', {
     method: 'POST',
@@ -206,9 +219,19 @@ export const api = {
     body: JSON.stringify({ username })
   }),
 
-  deleteAccount: async ({ password, confirmUsername }) => apiFetch('/api/auth/account', {
+  /**
+   * No body at all.
+   *
+   * It carried `password` and, for a provider-only account, `confirmUsername` —
+   * a username being something the code itself conceded is not a credential.
+   * Step-up replaced both. The typed confirmation phrase in
+   * `DeleteAccountModal` stays a deliberateness check in the interface and is
+   * deliberately not sent: a value the server does not check must not look as
+   * though it does.
+   */
+  deleteAccount: async (headers = {}) => apiFetch('/api/auth/account', {
     method: 'DELETE',
-    body: JSON.stringify({ password, confirmUsername })
+    headers
   }),
 
   // ── OAuth ───────────────────────────────────────
@@ -224,9 +247,23 @@ export const api = {
    * — including the plaintext password — base64'd into the query string, which
    * put a live credential into every access log along the path.
    */
-  startOAuth: async (provider, signupData) => apiFetch(`/api/oauth/${provider}/url`, {
+  /**
+   * `challengeId` is the step-up grant for connecting a provider to an account
+   * that already exists, and it has to be supplied HERE rather than later.
+   *
+   * The link is written by the callback's `auto_linked` branch, which arrives
+   * mid-redirect from the provider and cannot be interrupted to ask for a
+   * verification. So the challenge is opened first, folded into the signed
+   * state by this endpoint, and spent when the callback returns. Omitted for
+   * sign-in and sign-up, neither of which adds a credential to an existing
+   * account.
+   */
+  startOAuth: async (provider, signupData, challengeId) => apiFetch(`/api/oauth/${provider}/url`, {
     method: 'POST',
-    body: JSON.stringify(signupData ? { signupData } : {})
+    body: JSON.stringify({
+      ...(signupData ? { signupData } : {}),
+      ...(challengeId ? { challengeId } : {})
+    })
   }),
 
   completeOAuth: async (provider, code, state) => apiFetch(`/api/oauth/${provider}/callback`, {
@@ -234,9 +271,10 @@ export const api = {
     body: JSON.stringify({ code, state })
   }),
 
-  linkOAuthAccount: async (linkToken, password) => apiFetch('/api/oauth/link', {
+  linkOAuthAccount: async (linkToken, headers = {}) => apiFetch('/api/oauth/link', {
     method: 'POST',
-    body: JSON.stringify({ linkToken, password })
+    headers,
+    body: JSON.stringify({ linkToken })
   }),
 
   fetchConnectedAccounts: async () => apiFetch('/api/oauth/accounts'),
@@ -616,6 +654,35 @@ export const api = {
   confirmAutoSelect: async (eventId) => apiFetch(`/api/events/${eventId}/auto-select/confirm`, { method: 'POST' }),
   
   // ── Privacy & Data ─────────────────────────────
-  requestExport: async () => apiFetch('/api/privacy/export', { method: 'POST' }),
-  getExportStatus: async () => apiFetch('/api/privacy/export/status')
+  requestExport: async (headers = {}) => apiFetch('/api/privacy/export', { method: 'POST', headers }),
+  getExportStatus: async () => apiFetch('/api/privacy/export/status'),
+
+  // ── Step-up re-authentication ──────────────────
+  /**
+   * The four calls that MINT assurance. None of them performs a sensitive
+   * action; each one only establishes that the person at the keyboard is the
+   * account holder, for one action, for five minutes, once.
+   *
+   * `startReauthOAuth` is a NAVIGATION, not a fetch: the endpoint answers 302 to
+   * the provider, and following that with `fetch` would land the provider's
+   * sign-in page in a response body instead of in front of the user.
+   */
+  openReauthChallenge: async (action, params = {}) => apiFetch('/api/auth/reauth/challenge', {
+    method: 'POST',
+    body: JSON.stringify({ action, params })
+  }),
+
+  grantReauthByPassword: async (challengeId, password) => apiFetch('/api/auth/reauth/password', {
+    method: 'POST',
+    body: JSON.stringify({ challengeId, password })
+  }),
+
+  reauthOAuthUrl: (provider, challengeId) =>
+    `/api/auth/reauth/oauth/${encodeURIComponent(provider)}?challengeId=${encodeURIComponent(challengeId)}`,
+
+  completeReauthOAuth: async (provider, code, state) =>
+    apiFetch(`/api/auth/reauth/oauth/${provider}/callback`, {
+      method: 'POST',
+      body: JSON.stringify({ code, state })
+    })
 };

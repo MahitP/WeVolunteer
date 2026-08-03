@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { api } from '../../utils/api';
 import { AlertCircle, Check, X, Eye, EyeOff } from 'lucide-react';
+import { useStepUp } from '../auth/useStepUp';
+import { STEP_UP } from '../../utils/stepUp';
 
 /**
  * Change, or first set, the account password.
@@ -9,6 +11,19 @@ import { AlertCircle, Check, X, Eye, EyeOff } from 'lucide-react';
  * `onClick={() => addToast('Password change email sent.', 'info')}`. No
  * request was made, no email was sent, and nothing changed — the user was
  * simply told otherwise. There was no endpoint behind it either.
+ *
+ * ── Why there is no "current password" field any more (v1.2b) ──
+ *
+ * The endpoint used to prove identity with `currentPassword` and its own
+ * `bcrypt.compare`. It is now behind `requireAAL2('password.change')`, so the
+ * proof is the verification dialog — which a provider-only account can also
+ * answer, by re-consenting at its provider. That is the whole reason such an
+ * account can now set a first password: the old check needed a credential it
+ * did not have, so it was simply exempted from proving anything at all.
+ *
+ * The "choose a different password from the one you have" rule survives
+ * server-side as policy, in `accountValidation.js`. It is not an identity check
+ * and never was.
  */
 const RULES = [
   { id: 'length', label: 'At least 8 characters', test: p => p.length >= 8 },
@@ -23,23 +38,21 @@ export default function PasswordCard({ currentUser, addToast }) {
   const hasPassword = currentUser?.hasPassword !== false;
 
   const [open, setOpen] = useState(false);
-  const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const { run, modal } = useStepUp();
 
   const failed = RULES.find(r => !r.test(next));
-  const blocker = hasPassword && !current
-    ? 'Enter your current password.'
-    : !next ? 'Choose a new password.'
-      : failed ? `New password needs: ${failed.label.toLowerCase()}.`
-        : next !== confirm ? 'The two new passwords do not match.'
-          : null;
+  const blocker = !next ? 'Choose a new password.'
+    : failed ? `New password needs: ${failed.label.toLowerCase()}.`
+      : next !== confirm ? 'The two new passwords do not match.'
+        : null;
 
   const reset = () => {
-    setCurrent(''); setNext(''); setConfirm(''); setError(''); setOpen(false);
+    setNext(''); setConfirm(''); setError(''); setOpen(false);
   };
 
   const submit = async (e) => {
@@ -48,7 +61,19 @@ export default function PasswordCard({ currentUser, addToast }) {
     setSaving(true);
     setError('');
     try {
-      const res = await api.changePassword(current, next);
+      // `password.change` binds no params — the new password is deliberately not
+      // one of them, because the registry's bound keys travel to the client when
+      // a challenge is opened and a password has no business being there.
+      const res = await run(
+        STEP_UP.PASSWORD_CHANGE,
+        {},
+        headers => api.changePassword(next, headers)
+      );
+
+      // Dismissed the dialog. Leave the form as it was, with what they typed
+      // still in it, and say nothing — they chose this.
+      if (!res) return;
+
       addToast(
         res.addedPassword
           ? 'Password set. You can now sign in with your email address as well.'
@@ -90,23 +115,6 @@ export default function PasswordCard({ currentUser, addToast }) {
           {/* Identity for the password manager, so it offers and saves the
               right credential rather than every entry in the vault. */}
           <input type="text" name="username" autoComplete="username" value={currentUser?.email || ''} readOnly hidden />
-
-          {hasPassword && (
-            <div className="field">
-              <label htmlFor="pw-current">Current password</label>
-              <input
-                id="pw-current"
-                type="password"
-                className="input input-lg"
-                autoComplete="current-password"
-                value={current}
-                onChange={e => setCurrent(e.target.value)}
-                disabled={saving}
-                autoFocus
-                required
-              />
-            </div>
-          )}
 
           <div className="field">
             <label htmlFor="pw-new">New password</label>
@@ -176,6 +184,7 @@ export default function PasswordCard({ currentUser, addToast }) {
           <span className="auth-hint" role="status" aria-live="polite">{blocker || ''}</span>
         </form>
       )}
+      {modal}
     </section>
   );
 }
