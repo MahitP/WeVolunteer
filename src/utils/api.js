@@ -279,8 +279,11 @@ export const api = {
 
   fetchConnectedAccounts: async () => apiFetch('/api/oauth/accounts'),
 
-  disconnectOAuth: async (provider) => apiFetch('/api/oauth/disconnect', {
+  // `headers` carries the step-up grant: removing a provider is a credential
+  // change and is gated on `oauth.unlink`, exactly as connecting one is.
+  disconnectOAuth: async (provider, headers = {}) => apiFetch('/api/oauth/disconnect', {
     method: 'POST',
+    headers,
     body: JSON.stringify({ provider })
   }),
 
@@ -656,6 +659,45 @@ export const api = {
   // ── Privacy & Data ─────────────────────────────
   requestExport: async (headers = {}) => apiFetch('/api/privacy/export', { method: 'POST', headers }),
   getExportStatus: async () => apiFetch('/api/privacy/export/status'),
+
+  /**
+   * Fetches the archive as a blob rather than navigating to it.
+   *
+   * ── Why this is not `window.location.href` any more (v1.2b audit, F-1) ──
+   *
+   * It used to be, and that is precisely why the endpoint could not be gated: a
+   * top-level browser navigation cannot carry the `X-Reauth-Challenge` header,
+   * so the one request that actually emits the personal-data archive was the
+   * one request unable to present a verification. Fetching it here lets the
+   * download prove identity like every other sensitive action, at the cost of
+   * buffering the zip in memory — acceptable for a personal export, and the
+   * alternative was leaving the disclosure ungated.
+   *
+   * Refusals are re-thrown as `ApiError` with the parsed body, matching
+   * `apiFetch` exactly, so `needsStepUp()` can recognise a `reauth_required`
+   * and drive the verification modal from it.
+   */
+  downloadExport: async (jobId, headers = {}) => {
+    const response = await fetch(`/api/privacy/export/download/${encodeURIComponent(jobId)}`, {
+      credentials: 'include',
+      headers
+    });
+
+    if (!response.ok) {
+      // The error paths answer JSON (`reauth_required`) or plain text ("Export
+      // has expired"); read whichever arrived without letting a parse failure
+      // become the reported problem.
+      let data = null;
+      const body = await response.text().catch(() => '');
+      try { data = JSON.parse(body); } catch { /* plain-text refusal */ }
+      throw new ApiError(data?.error || body || messageForStatus(response.status), {
+        status: response.status,
+        data
+      });
+    }
+
+    return response.blob();
+  },
 
   // ── Step-up re-authentication ──────────────────
   /**

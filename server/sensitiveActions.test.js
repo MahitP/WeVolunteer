@@ -5,9 +5,18 @@ import {
 } from './sensitiveActions.js';
 
 describe('sensitive action registry', () => {
+  /**
+   * Spelled out rather than derived, so adding an action is a deliberate act a
+   * reviewer sees. `data.download` and `oauth.unlink` joined the list in the
+   * v1.2b audit round: the first because gating the export REQUEST protected an
+   * archive that did not exist yet while leaving the finished one behind a bare
+   * session for seven days, the second because `oauth.link` was gated and the
+   * operation that removes the same credential was not.
+   */
   it('lists exactly the actions requiring step-up', () => {
     expect(Object.keys(SENSITIVE_ACTIONS).sort()).toEqual([
-      'account.delete', 'data.export', 'email.change', 'oauth.link', 'password.change',
+      'account.delete', 'data.download', 'data.export', 'email.change',
+      'oauth.link', 'oauth.unlink', 'password.change',
     ]);
   });
 
@@ -38,6 +47,40 @@ describe('sensitive action registry', () => {
 
   it('hashes actions with no bound params to a stable constant', () => {
     expect(paramsHash('account.delete', {})).toBe(paramsHash('account.delete', { ignored: 'x' }));
+  });
+
+  /**
+   * The action name is folded into the digest, so two actions that bind NO
+   * params still hash differently.
+   *
+   * ── Why this needs its own test (v1.2b audit, F-4) ──
+   *
+   * Every other assertion here compares hashes WITHIN one action, so none of
+   * them can observe the `${action}|` prefix at all: deleting it from
+   * `paramsHash` left the whole suite green. The property survived only because
+   * `consumeChallenge` also carries a redundant `AND action = ?` predicate,
+   * which masks the loss.
+   *
+   * That redundancy is deliberate, but `reauth.js` states the dependency the
+   * other way round — "the two are only equivalent for as long as paramsHash
+   * keeps hashing `${action}|...`, and nothing in that module promises the
+   * binding it is providing here." This is that promise. Without it, a later
+   * simplification that removed EITHER half would be silent, and three of the
+   * five registered actions bind nothing, so their grants would become
+   * interchangeable: a verification collected to export your data would hash
+   * identically to one collected to delete your account.
+   */
+  it('separates two actions that bind no params at all', () => {
+    const zeroParam = Object.keys(SENSITIVE_ACTIONS)
+      .filter(a => SENSITIVE_ACTIONS[a].bindsParams.length === 0);
+    expect(zeroParam.length).toBeGreaterThan(1);
+
+    const hashes = zeroParam.map(a => paramsHash(a, {}));
+    expect(new Set(hashes).size).toBe(zeroParam.length);
+
+    // Named explicitly as well, so the intent survives a registry change that
+    // happens to leave only one zero-param action behind.
+    expect(paramsHash('account.delete', {})).not.toBe(paramsHash('data.export', {}));
   });
 
   it('refuses to hash an unknown action', () => {

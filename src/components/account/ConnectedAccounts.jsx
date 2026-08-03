@@ -13,7 +13,10 @@ export default function ConnectedAccounts({ addToast, currentUser }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(null);
   const [confirming, setConfirming] = useState(null); // { id, label } | null
-  const { verifyFirst, modal: verifyModal } = useStepUp();
+  // `verifyFirst` for connecting (the grant is carried across the provider
+  // redirect), `run` for disconnecting (an ordinary request that presents the
+  // header and retries once verified).
+  const { run, verifyFirst, modal: verifyModal } = useStepUp();
 
   const load = useCallback(async () => {
     try {
@@ -85,10 +88,31 @@ export default function ConnectedAccounts({ addToast, currentUser }) {
     }
   };
 
+  /**
+   * ── Why removing a provider verifies (v1.2b audit, F-2) ──
+   *
+   * Connecting one has required verification since Task 6; disconnecting is the
+   * same credential change in the opposite direction and asked for nothing. The
+   * server's last-credential guard stops someone stranding themselves, but it
+   * does not stop a borrowed session stripping a provider off an account that
+   * still has a password — which costs the account holder the sign-in route
+   * they actually use, and one of the two ways they could satisfy any later
+   * verification.
+   *
+   * The grant binds `provider`, matching the connect flow, so verifying to
+   * remove one provider cannot remove another.
+   */
   const handleDisconnect = async ({ id, label }) => {
     setBusy(id);
     try {
-      await api.disconnectOAuth(id);
+      const res = await run(
+        STEP_UP.OAUTH_UNLINK,
+        { provider: id },
+        headers => api.disconnectOAuth(id, headers)
+      );
+      // `run` resolves null when the person closes the verification dialog.
+      if (!res) return;
+
       addToast(`${label} disconnected.`, 'success');
       setConfirming(null);
       await load();

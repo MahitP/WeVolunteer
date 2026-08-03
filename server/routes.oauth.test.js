@@ -477,7 +477,16 @@ describe('oauth', () => {
 
     // And with two ways in, the last-credential guard releases the first one —
     // untouched by this work, and the thing that made the 409 above defensible.
-    const disconnected = await srv.call('POST', '/api/oauth/disconnect', { provider: 'google' }, cookie);
+    //
+    // Removing a provider is itself gated on `oauth.unlink` since the v1.2b
+    // audit (F-2), so this re-consents again: still the account's only kind of
+    // credential, and the grant binds the provider being removed.
+    const unlinkChallenge = await srv.stepUpOAuth(cookie, 'oauth.unlink', {
+      params: { provider: 'google' }, provider: 'google', sub: googleSub
+    });
+    const disconnected = await srv.call(
+      'POST', '/api/oauth/disconnect', { provider: 'google' }, cookie, srv.reauthHeader(unlinkChallenge)
+    );
     expect(disconnected.status).toBe(200);
   });
 
@@ -658,7 +667,16 @@ describe('oauth', () => {
     const created = await callback('google', { code: identity({ email, sub: `sub-${username}` }), state, nonceCookie });
     expect(created.cookie).toBeTruthy();
 
-    const res = await srv.call('POST', '/api/oauth/disconnect', { provider: 'google' }, created.cookie);
+    // A real grant, so the request reaches the lockout guard rather than
+    // stopping at `requireAAL2('oauth.unlink')` — otherwise this would assert
+    // the gate and quietly stop testing the guard it is named for.
+    const unlinkChallenge = await srv.stepUpOAuth(created.cookie, 'oauth.unlink', {
+      params: { provider: 'google' }, provider: 'google', sub: `sub-${username}`
+    });
+    const res = await srv.call(
+      'POST', '/api/oauth/disconnect', { provider: 'google' }, created.cookie,
+      srv.reauthHeader(unlinkChallenge)
+    );
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('last_sign_in_method');
 

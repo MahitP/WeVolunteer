@@ -39,7 +39,9 @@ export const STEP_UP = Object.freeze({
   PASSWORD_CHANGE: 'password.change',
   EMAIL_CHANGE: 'email.change',
   OAUTH_LINK: 'oauth.link',
-  DATA_EXPORT: 'data.export'
+  OAUTH_UNLINK: 'oauth.unlink',
+  DATA_EXPORT: 'data.export',
+  DATA_DOWNLOAD: 'data.download'
 });
 
 // Fails at module load, not at 403 time. A name that has drifted out of the

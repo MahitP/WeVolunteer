@@ -19,7 +19,35 @@ export const SENSITIVE_ACTIONS = {
   'password.change':  { label: 'change your password',           methods: ['password', 'oauth'], bindsParams: [] },
   'email.change':     { label: 'change your email address',      methods: ['password', 'oauth'], bindsParams: ['newEmail'] },
   'oauth.link':       { label: 'connect a sign-in provider',     methods: ['password', 'oauth'], bindsParams: ['provider'] },
+  /**
+   * Removing a credential is a credential change, exactly as adding one is.
+   *
+   * `oauth.link` was gated from the start and this was not, which left the
+   * rule the guide states — adding a sign-in credential requires proving
+   * identity — true of only one direction. The v1.2b plan did examine
+   * `disconnect`, but judged it against LOCKOUT ("never leave an account with
+   * no way back in") rather than assurance; that guard stops a user stranding
+   * themselves and does nothing about a borrowed session stripping a provider
+   * off an account that still has a password. Binds `provider` so a grant
+   * removes ONE named credential, mirroring `oauth.link`.
+   */
+  'oauth.unlink':     { label: 'disconnect a sign-in provider',  methods: ['password', 'oauth'], bindsParams: ['provider'] },
   'data.export':      { label: 'export all of your data',        methods: ['password', 'oauth'], bindsParams: [] },
+  /**
+   * Retrieving the archive, which is where the data actually leaves.
+   *
+   * `data.export` gates the REQUEST; this gates the DISCLOSURE. Gating only
+   * the former protected an archive that did not exist yet and left the
+   * finished one — seven days of it — behind nothing but a session.
+   *
+   * Separate from `data.export` rather than reused, for three reasons: a grant
+   * must prove identity for ONE action, and queuing a new export is not the
+   * same act as pulling an existing one down; `jobId` can be bound here, so a
+   * verification authorises exactly one archive; and the user is shown "download
+   * your data archive" instead of "export all of your data" at the moment they
+   * are doing the former.
+   */
+  'data.download':    { label: 'download your data archive',     methods: ['password', 'oauth'], bindsParams: ['jobId'] },
 };
 
 export function isSensitiveAction(action) {

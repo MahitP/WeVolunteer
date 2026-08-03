@@ -75,9 +75,48 @@ export default function DataExportCard({ addToast }) {
     }
   };
 
-  const handleDownload = () => {
+  /**
+   * ── Why downloading verifies too (v1.2b audit, F-1) ──
+   *
+   * Requesting the export was gated and collecting it was not, which protected
+   * the archive only while it did not exist. Once the worker finished, the
+   * finished copy sat behind nothing but a session for seven days, and
+   * `/status` hands its id to any authenticated caller — so the quiet,
+   * single-request copy of everything the account holds was still available to
+   * a borrowed session. The verification belongs where the data leaves.
+   *
+   * This was `window.location.href = ...` until now. A top-level navigation
+   * cannot send the `X-Reauth-Challenge` header, so the archive is fetched as a
+   * blob instead and saved from memory — see `api.downloadExport`.
+   *
+   * The grant binds `jobId`, so verifying to collect this archive authorises
+   * collecting this archive and nothing else.
+   */
+  const handleDownload = async () => {
     if (!job || job.status !== 'completed') return;
-    window.location.href = `/api/privacy/export/download/${job.id}`;
+    try {
+      const blob = await run(
+        STEP_UP.DATA_DOWNLOAD,
+        { jobId: job.id },
+        headers => api.downloadExport(job.id, headers)
+      );
+      // `run` resolves null when the person closes the verification dialog.
+      if (!blob) return;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'wevolunteer-data-export.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      addToast(err.message || 'Could not download your export.', 'error');
+      // An archive that expired or was swept while the page was open is no
+      // longer downloadable, and the card should stop offering it.
+      await fetchStatus();
+    }
   };
 
   const renderModalContent = () => {
