@@ -1872,12 +1872,31 @@ production for three releases.
 None of these block the start of v1.2 — items 1–9 above proceed regardless — but
 each changes work later in the plan.
 
-- **Q1 — "Account deletion is broken": what's the repro?** I found a working
-  soft-delete path with passing tests (`accountRoutes.js:154`,
-  `routes.deletion.test.js`). Either there's a bug my read missed, or the
-  complaint is really about UX/confirmation, which W1 addresses. I'd rather fix
-  the actual defect than harden something that works. *Assumption if unanswered:*
-  the concern is verification UX, covered by W1.
+- **Q1 — "Account deletion is broken": what's the repro?** ✅ **CLOSED — the
+  complaint was right, and about a case the passing tests did not cover.**
+
+  The soft-delete path worked for an account with a password. For a
+  **provider-only** account it asked for nothing at all: `password_hash` held
+  the `'!OAUTH_ONLY!'` sentinel, the password branch was skipped, and a single
+  request against a live session irreversibly anonymised the account. Every
+  deletion test used a password account, so the suite was green.
+
+  Fixed in two stages. First, before this plan, with a server-checked
+  confirmation: the account had to type its own username. That was a stopgap
+  and the code said so where it did it — *"Typing the account's own username is
+  not a credential."* It is public within the app and appears on every comment
+  the person has posted.
+
+  Then in **v1.2b (W1)** the stopgap was removed entirely. Deletion is now
+  behind `requireAAL2('account.delete')`, satisfied by the account password
+  **or** by re-authenticating at a linked provider — which is the credential a
+  provider-only account always had and the code could not previously check. A
+  typed confirmation phrase remains in the interface, where a deliberateness
+  check belongs, but the server no longer accepts it as proof.
+
+  *The general lesson, recorded because it recurred three more times on this
+  branch:* the tests were green because they all exercised the same account
+  shape. Coverage of a branch is not coverage of the states that reach it.
 - **Q2 — What happens to a graduated or deleted student's hours?** Options:
   (a) hard-delete everything, (b) anonymize attendance so organizers' event
   history and aggregate impact stats survive, (c) retain for N years per district

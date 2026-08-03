@@ -11,43 +11,39 @@ import {
 import { VALID_GRADES, JWT_SECRET, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
+import { requireAAL2 } from '../authz.js';
+import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import { db } from '../db.js';
-import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
+import {
+  validateAccountFields, validatePassword, validateUsername, validateEmail,
+  validateProfilePatch, isCurrentPassword
+} from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
 import { OAUTH_ONLY, issueSession, clearLoginFailuresForUser } from './authRoutes.js';
 
 const router = express.Router();
 
-router.delete('/api/auth/account', authenticateToken, async (req, res) => {
-  const { password, confirmUsername } = req.body;
+/**
+ * Deletes the caller's own account, behind a fresh proof of identity.
+ *
+ * ── What replaced what ──
+ *
+ * A password account proved its password inline here; a provider-only account,
+ * having none, was asked to type its own username — and the code conceded the
+ * point in the same breath: "Typing the account's own username is not a
+ * credential." A username is public within the app and appears on every comment
+ * the person has posted. Both are gone. `requireAAL2('account.delete')` now
+ * demands a challenge satisfied by a password OR by provider re-consent, so the
+ * provider-only account is proving something for the first time.
+ *
+ * A typed confirmation phrase remains the right thing in the UI — deletion is
+ * irreversible and a deliberateness check is worth having — but it is no longer
+ * a server-side credential, because it never was one.
+ */
+router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delete'), (req, res) => {
   try {
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!userRow) return res.status(404).json({ error: 'User not found' });
-
-    if (userRow.password_hash !== OAUTH_ONLY) {
-      if (!password) {
-        return res.status(400).json({ error: 'Password is required to delete your account' });
-      }
-      if (!await bcrypt.compare(password, userRow.password_hash)) {
-        return res.status(401).json({ error: 'Incorrect password' });
-      }
-    } else {
-      /**
-       * A provider-only account has no password to re-prove with, and the
-       * previous code therefore asked for nothing at all: a single request
-       * against a live session irreversibly anonymised the account. Typing the
-       * account's own username is not a credential, but it is a server-checked
-       * deliberate act, which is what this confirmation is for. Compare
-       * case-insensitively — the intent is confirmation, not a spelling test.
-       */
-      if (String(confirmUsername || '').trim().toLowerCase() !== String(userRow.username || '').toLowerCase()) {
-        return res.status(400).json({
-          error: 'Type your username exactly to confirm deletion.',
-          code: 'confirm_username_required',
-          field: 'confirmUsername'
-        });
-      }
-    }
 
     // Active-events check: business logic about what deletion does, not an
     // authorization gate — "may this account be deleted while it still hosts
@@ -73,6 +69,21 @@ router.delete('/api/auth/account', authenticateToken, async (req, res) => {
     const now = new Date().toISOString();
 
     inTransaction(() => {
+      /**
+       * 0. Spend the grant, first, inside the same transaction as the deletion.
+       *
+       * `requireAAL2` above is an early refusal, not the check: it asks whether
+       * the presented challenge is a live grant for this action, and answers
+       * before any work is done. This is what makes the grant single-use, and it
+       * is here rather than in the middleware so that a request refused later —
+       * the active-events 409 above, or a rollback below — does not burn a
+       * verification the user then has to repeat for something that never
+       * happened. Being inside the transaction makes it atomic in both
+       * directions: no deletion without a spent grant, no spent grant without a
+       * deletion.
+       */
+      spendChallenge(db, req, 'account.delete', {});
+
       // 1. Snapshot Certificates
       const certificates = db.prepare('SELECT * FROM certificates WHERE user_id = ?').all(req.user.id);
       for (const cert of certificates) {
@@ -198,6 +209,10 @@ router.delete('/api/auth/account', authenticateToken, async (req, res) => {
     res.clearCookie(COOKIE_NAME, clearCookieOptions());
     res.json({ success: true });
   } catch (err) {
+    // A grant that could not be spent is never a server fault — it is stale,
+    // replayed, or bound to something other than this request — and the
+    // transaction has already rolled back, so nothing was deleted.
+    if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
     console.error('Account deletion error:', err);
     res.status(500).json({ error: 'Failed to delete account' });
   }
@@ -343,15 +358,29 @@ router.post('/api/auth/reset-password', async (req, res) => {
 });
 
 /**
- * Change the password from inside Settings, proving the current one.
+ * Change the password from inside Settings, behind a fresh proof of identity.
  *
  * The Settings screen had a "Change Password" button whose entire
  * implementation was `addToast('Password change email sent.', 'info')`. It
  * sent nothing and changed nothing; it just claimed both. There was no
  * endpoint behind it at all.
+ *
+ * ── What `requireAAL2` changed here ──
+ *
+ * The `currentPassword` field is gone, and with it the branch that skipped the
+ * check entirely for an account with no password to give. A provider-only
+ * account can now set a FIRST password by re-consenting with its provider —
+ * which it could not do before, because the only proof this endpoint accepted
+ * was one it had no way to produce, and the workaround was to exempt it from
+ * proving anything at all.
+ *
+ * The "choose a different password from the one you have" rule stays. It is
+ * password policy, not authorization, and it is now asked of every account
+ * including the one setting its first password (where it can never fire) — see
+ * `isCurrentPassword` in accountValidation.js.
  */
-router.post('/api/auth/change-password', authenticateToken, async (req, res) => {
-  const { currentPassword, newPassword } = req.body;
+router.post('/api/auth/change-password', authenticateToken, requireAAL2('password.change'), async (req, res) => {
+  const { newPassword } = req.body ?? {};
   if (!newPassword) {
     return res.status(400).json({ error: 'Choose a new password.', field: 'newPassword' });
   }
@@ -365,26 +394,28 @@ router.post('/api/auth/change-password', authenticateToken, async (req, res) => 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!userRow) return res.status(404).json({ error: 'User not found' });
 
+    // Reported back to the client so the UI can say "password added" rather than
+    // "password changed"; the two are a different sentence to the person reading
+    // them, and for a provider-only account this is a new capability, not an
+    // edit.
     const isOauthOnly = userRow.password_hash === OAUTH_ONLY;
 
-    // Someone who has only ever signed in through a provider is adding a first
-    // password, not replacing one — there is nothing for them to prove here
-    // beyond the session they already hold.
-    if (!isOauthOnly) {
-      if (!currentPassword) {
-        return res.status(400).json({ error: 'Enter your current password.', field: 'currentPassword' });
-      }
-      if (!await bcrypt.compare(currentPassword, userRow.password_hash)) {
-        return res.status(401).json({ error: 'That is not your current password.', field: 'currentPassword' });
-      }
-      if (await bcrypt.compare(newPassword, userRow.password_hash)) {
-        return res.status(400).json({ error: 'That is already your password. Choose a different one.', field: 'newPassword' });
-      }
+    if (await isCurrentPassword(newPassword, userRow.password_hash)) {
+      return res.status(400).json({ error: 'That is already your password. Choose a different one.', field: 'newPassword' });
     }
 
+    // Hashed BEFORE the transaction opens. `bcrypt.hash` is the one genuinely
+    // async step in this handler, and an await inside a synchronous SQLite
+    // transaction lets unrelated statements interleave with an open one — see
+    // bcryptAsync.test.js, which fails the build on that shape.
     const passwordHash = await bcrypt.hash(newPassword, 10);
 
     inTransaction(() => {
+      // The grant is spent with the write it authorises, not before it: a
+      // rollback here must leave the user's verification unspent. See the
+      // longer note on DELETE /api/auth/account above.
+      spendChallenge(db, req, 'password.change', {});
+
       db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?')
         .run(passwordHash, req.user.id);
       db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(req.user.id);
@@ -398,6 +429,7 @@ router.post('/api/auth/change-password', authenticateToken, async (req, res) => 
 
     res.json({ success: true, addedPassword: isOauthOnly });
   } catch (err) {
+    if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
     console.error('Change password error:', err);
     res.status(500).json({ error: 'Could not change your password.' });
   }
@@ -419,9 +451,21 @@ const EMAIL_CHANGE_TTL_MS = 24 * 60 * 60 * 1000;
  * The new address is only written to `users` once it has been proven reachable
  * (step 2). Until then the account keeps the address it has, so a typo here is
  * recoverable by simply asking again.
+ *
+ * ── Two different problems, both still solved ──
+ *
+ * `requireAAL2('email.change')` asks "is the person doing this the account
+ * holder"; the `email_change_tokens` link below asks "is the new address one
+ * this person can read". Neither substitutes for the other, and the second is
+ * deliberately untouched by the step-up work.
+ *
+ * The grant binds `newEmail`, so verifying in order to move the address to
+ * a@x.com does not also authorise moving it to the attacker's — the binding most
+ * step-up implementations forget, and the one somebody holding a stolen session
+ * would actually reach for.
  */
-router.post('/api/auth/change-email', authenticateToken, async (req, res) => {
-  const { newEmail, password } = req.body;
+router.post('/api/auth/change-email', authenticateToken, requireAAL2('email.change'), async (req, res) => {
+  const { newEmail } = req.body ?? {};
 
   const check = validateEmail(newEmail);
   if (!check.ok) {
@@ -450,28 +494,35 @@ router.post('/api/auth/change-email', authenticateToken, async (req, res) => {
       });
     }
 
-    /**
-     * A password account re-proves the password; a provider-only account cannot,
-     * so its live session is the proof — the same rule change-password already
-     * applies, for the same reason.
-     */
-    if (userRow.password_hash !== OAUTH_ONLY) {
-      if (!password) {
-        return res.status(400).json({ error: 'Enter your password to change your email address.', field: 'password' });
-      }
-      if (!await bcrypt.compare(password, userRow.password_hash)) {
-        return res.status(401).json({ error: 'That is not your password.', field: 'password' });
-      }
-    }
-
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + EMAIL_CHANGE_TTL_MS).toISOString();
 
-    // One live request per user: asking again supersedes the previous link
-    // rather than leaving two addresses able to claim the account.
-    db.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(req.user.id);
-    db.prepare('INSERT INTO email_change_tokens (token, user_id, new_email, expires_at) VALUES (?, ?, ?, ?)')
-      .run(token, req.user.id, target, expiresAt);
+    inTransaction(() => {
+      /**
+       * Bound to `newEmail` exactly as the request presented it, NOT to the
+       * normalised `target`.
+       *
+       * The grant's hash was computed by `POST /api/auth/reauth/challenge` over
+       * the params the client sent it, which is the raw string; deriving the
+       * expectation here from a value this handler has since lower-cased would
+       * refuse an honest client whose address contained a capital letter — a
+       * `params_mismatch` on every attempt, sending the UI back to the
+       * verification modal it has just come from, for ever. The client's
+       * contract is therefore: send the same string to both endpoints. It costs
+       * nothing in strength — normalisation only ever merges two raw values into
+       * one target, so binding the raw value is if anything the tighter of the
+       * two — and it removes the only way this binding can break by accident.
+       */
+      spendChallenge(db, req, 'email.change', { newEmail });
+
+      // One live request per user: asking again supersedes the previous link
+      // rather than leaving two addresses able to claim the account. Inside the
+      // transaction with the insert that replaces it, so a rollback cannot
+      // discard the pending change the user already had.
+      db.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(req.user.id);
+      db.prepare('INSERT INTO email_change_tokens (token, user_id, new_email, expires_at) VALUES (?, ?, ?, ?)')
+        .run(token, req.user.id, target, expiresAt);
+    });
 
     await sendEmailChangeConfirmation(target, token);
 
@@ -486,6 +537,7 @@ router.post('/api/auth/change-email', authenticateToken, async (req, res) => {
 
     res.json({ success: true, pending: target });
   } catch (err) {
+    if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
     console.error('Change email error:', err);
     res.status(500).json({ error: 'Could not start that email change.' });
   }

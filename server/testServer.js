@@ -1,6 +1,12 @@
 import { mkdtempSync, rmSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
+// Safe to import statically, unlike almost everything else in server/: this
+// module imports `node:crypto` and nothing else, so it cannot reach db.js and
+// cannot bind its connection before startTestServer() sets WEV_DB_PATH. The
+// header name has exactly one definition and tests read it from there rather
+// than retyping the wire form — see sensitiveActions.js's header.
+import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
 
 /**
  * Boots the real Express app in-process against a throwaway SQLite file.
@@ -68,12 +74,20 @@ export async function startTestServer() {
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
 
-  const call = async (method, p, body, token) => {
+  /**
+   * One HTTP call against the real app.
+   *
+   * `headers` (added for v1.2b) is how a test presents the step-up challenge
+   * header. It is a fifth positional parameter rather than an options object so
+   * that the ~1,500 existing four-argument call sites are untouched.
+   */
+  const call = async (method, p, body, token, headers = {}) => {
     const res = await fetch(base + p, {
       method,
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Cookie: `wev_session=${token}` } : {})
+        ...(token ? { Cookie: `wev_session=${token}` } : {}),
+        ...headers
       },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
@@ -126,6 +140,96 @@ export async function startTestServer() {
     return { cookie, user: res.body.user };
   };
 
+  /**
+   * Drives a real step-up challenge to a granted state and returns its id.
+   *
+   * Goes through both HTTP endpoints — open, then satisfy with the password —
+   * rather than writing a `reauth_challenges` row directly, for the same reason
+   * `confirmEmail` above posts a token instead of setting `email_verified`: a
+   * fixture that fakes the state it needs stops exercising the flow that
+   * produces it, and the flow is the thing most likely to break.
+   *
+   * `params` must be the same object the endpoint under test will bind, because
+   * that is the whole point of the params binding. Deliberately does NOT default
+   * it from anywhere — a helper that guessed would hide exactly the mismatch the
+   * binding exists to catch.
+   *
+   * Returns only the id: presenting it is the caller's job, via the
+   * `X-Reauth-Challenge` header, so a test that forgets to present it fails
+   * rather than passing on a grant nobody spent. Throws on any refusal, so a
+   * broken fixture reads as a broken fixture and not as the assertion failing.
+   */
+  const stepUp = async (token, action, { params = {}, password = 'password123' } = {}) => {
+    const opened = await call('POST', '/api/auth/reauth/challenge', { action, params }, token);
+    if (opened.status !== 201) {
+      throw new Error(`stepUp('${action}'): challenge failed ${opened.status} ${JSON.stringify(opened.body)}`);
+    }
+    const granted = await call(
+      'POST', '/api/auth/reauth/password',
+      { challengeId: opened.body.challengeId, password },
+      token
+    );
+    if (granted.status !== 200) {
+      throw new Error(`stepUp('${action}'): grant failed ${granted.status} ${JSON.stringify(granted.body)}`);
+    }
+    return opened.body.challengeId;
+  };
+
+  /**
+   * The same, satisfied by provider re-consent instead of a password.
+   *
+   * This is the path a provider-only account has to take, and the only one it
+   * can: it holds no password, so `openChallenge` never offers it the password
+   * prompt. Every step goes through the real endpoints — redirect, state,
+   * callback — because the `sub` comparison inside `grantByOAuth` is the entire
+   * security of this route and a fixture that wrote `granted_at` directly would
+   * exercise none of it.
+   *
+   * `sub` must be the `provider_user_id` on the account's own `oauth_accounts`
+   * row; a different one is a wrong answer that costs an attempt, by design.
+   * Requires `OAUTH_ALLOW_MOCK=true`, set by the caller before startTestServer().
+   */
+  const stepUpOAuth = async (token, action, { params = {}, provider = 'google', sub } = {}) => {
+    const opened = await call('POST', '/api/auth/reauth/challenge', { action, params }, token);
+    if (opened.status !== 201) {
+      throw new Error(`stepUpOAuth('${action}'): challenge failed ${opened.status} ${JSON.stringify(opened.body)}`);
+    }
+    const challengeId = opened.body.challengeId;
+
+    // redirect: 'manual' — following it would leave for the real provider.
+    const redirected = await fetch(
+      `${base}/api/auth/reauth/oauth/${provider}?challengeId=${encodeURIComponent(challengeId)}`,
+      { redirect: 'manual', headers: { Cookie: `wev_session=${token}` } }
+    );
+    if (redirected.status !== 302) {
+      throw new Error(`stepUpOAuth('${action}'): expected a 302 to ${provider}, got ${redirected.status}`);
+    }
+    const state = new URL(redirected.headers.get('location')).searchParams.get('state');
+
+    const granted = await call(
+      'POST', `/api/auth/reauth/oauth/${provider}/callback`,
+      // The mock transport reads the provider's claims straight out of `code`.
+      { code: JSON.stringify({ sub, email: 'reconsent@example.org', name: 'Re-consent' }), state },
+      token
+    );
+    if (granted.status !== 200) {
+      throw new Error(`stepUpOAuth('${action}'): grant failed ${granted.status} ${JSON.stringify(granted.body)}`);
+    }
+    return challengeId;
+  };
+
+  /** The header a granted challenge is presented in. One spelling, from the source. */
+  const reauthHeader = (challengeId) => ({ [REAUTH_CHALLENGE_HEADER]: challengeId });
+
+  /**
+   * Opens a challenge, grants it, and returns the header that spends it.
+   *
+   * The two-step form (`stepUp` then `reauthHeader`) stays available for the
+   * tests that need the id itself — the single-use test spends the same one
+   * twice, and the cross-action tests deliberately mismatch what they present.
+   */
+  const verified = async (token, action, opts) => reauthHeader(await stepUp(token, action, opts));
+
   const close = () => new Promise(resolve => {
     server.close(() => { rmSync(dir, { recursive: true, force: true }); resolve(); });
   });
@@ -137,6 +241,10 @@ export async function startTestServer() {
     login,
     signup,
     confirmEmail,
-    signupConfirmed
+    signupConfirmed,
+    stepUp,
+    stepUpOAuth,
+    reauthHeader,
+    verified
   };
 }

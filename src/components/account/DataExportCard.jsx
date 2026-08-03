@@ -2,12 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../../utils/api';
 import { DownloadCloud, Clock, AlertTriangle, FileArchive, CheckCircle, Check, XCircle } from 'lucide-react';
 import Modal, { ModalHead } from '../Modal';
+import { useStepUp } from '../auth/useStepUp';
+import { STEP_UP } from '../../utils/stepUp';
 
 export default function DataExportCard({ addToast }) {
   const [status, setStatus] = useState('loading'); // loading, none, pending, processing, completed, failed, expired
   const [job, setJob] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { run, modal: verifyModal } = useStepUp();
 
   useEffect(() => {
     fetchStatus();
@@ -37,10 +40,32 @@ export default function DataExportCard({ addToast }) {
     }
   };
 
+  /**
+   * ── Why this asks for verification at all (v1.2b) ──
+   *
+   * An export is a complete copy of everything the account holds, and this was
+   * the one sensitive action with no proof of identity behind it: an
+   * authenticated request and a rate limit, nothing more. Deleting the account,
+   * changing the password and changing the email address each demanded a
+   * credential; the action that copies every record out — for a population that
+   * is mostly minors — demanded none, which made it the quietest thing a
+   * borrowed session could do.
+   *
+   * The request is attempted before the dialog appears, deliberately. The server
+   * answers "an export is already in progress" before it consumes the grant, and
+   * checks assurance before the rate limiter, so a user is never asked to verify
+   * for an export that was never going to start.
+   */
   const handleRequestExport = async () => {
     setIsSubmitting(true);
     try {
-      await api.requestExport();
+      const res = await run(
+        STEP_UP.DATA_EXPORT,
+        {},
+        headers => api.requestExport(headers)
+      );
+      if (!res) return;
+
       addToast('Data export requested. This may take a few minutes.', 'success');
       await fetchStatus();
     } catch (err) {
@@ -50,9 +75,48 @@ export default function DataExportCard({ addToast }) {
     }
   };
 
-  const handleDownload = () => {
+  /**
+   * ── Why downloading verifies too (v1.2b audit, F-1) ──
+   *
+   * Requesting the export was gated and collecting it was not, which protected
+   * the archive only while it did not exist. Once the worker finished, the
+   * finished copy sat behind nothing but a session for seven days, and
+   * `/status` hands its id to any authenticated caller — so the quiet,
+   * single-request copy of everything the account holds was still available to
+   * a borrowed session. The verification belongs where the data leaves.
+   *
+   * This was `window.location.href = ...` until now. A top-level navigation
+   * cannot send the `X-Reauth-Challenge` header, so the archive is fetched as a
+   * blob instead and saved from memory — see `api.downloadExport`.
+   *
+   * The grant binds `jobId`, so verifying to collect this archive authorises
+   * collecting this archive and nothing else.
+   */
+  const handleDownload = async () => {
     if (!job || job.status !== 'completed') return;
-    window.location.href = `/api/privacy/export/download/${job.id}`;
+    try {
+      const blob = await run(
+        STEP_UP.DATA_DOWNLOAD,
+        { jobId: job.id },
+        headers => api.downloadExport(job.id, headers)
+      );
+      // `run` resolves null when the person closes the verification dialog.
+      if (!blob) return;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'wevolunteer-data-export.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      addToast(err.message || 'Could not download your export.', 'error');
+      // An archive that expired or was swept while the page was open is no
+      // longer downloadable, and the card should stop offering it.
+      await fetchStatus();
+    }
   };
 
   const renderModalContent = () => {
@@ -252,6 +316,7 @@ export default function DataExportCard({ addToast }) {
           </div>
         </Modal>
       )}
+      {verifyModal}
     </>
   );
 }

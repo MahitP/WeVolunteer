@@ -48,9 +48,49 @@ describe('can()', () => {
     expect(can(p('organizer'), 'service.verify.external')).toBe(false);  // without the grant
   });
 
-  it('never lets a grant confer a super-only capability', () => {
-    const sneaky = { ...p('admin'), grants: ['impersonation.start'] };
-    expect(can(sneaky, 'impersonation.start')).toBe(false);
+  /**
+   * Every super-only capability, not just one of them.
+   *
+   * This is the property that stops `capability.grant` being a path to root, and
+   * it rests on a single ordering inside `can()`: the `SUPER_ONLY` check returns
+   * false BEFORE `principal.grants` is consulted. Move those two lines and any
+   * admin who can be granted a capability can be granted the platform.
+   *
+   * Driving it from the exported `SUPER_ONLY` array rather than naming one
+   * capability means a sixth entry added later is covered the moment it is
+   * added. The previous version tested `impersonation.start` alone, so
+   * `error.read`, `error.write`, `analytics.platform` and `admin.create` were
+   * relying on the same code path with nothing asserting it — and a seventh
+   * entry would have relied on it too.
+   *
+   * Checked for every role that is not already the owner: a grant is a way to
+   * extend a role, so the question "can this role be extended to super-only"
+   * has to be answered for each of them.
+   */
+  it('never lets a grant confer a super-only capability, for any capability or role', () => {
+    expect(SUPER_ONLY.length, 'nothing to assert — the set is empty').toBeGreaterThan(0);
+
+    for (const cap of SUPER_ONLY) {
+      for (const role of ROLES.filter(r => r !== 'super_admin')) {
+        const sneaky = { ...p(role), grants: [cap] };
+        expect(
+          can(sneaky, cap),
+          `a per-user grant of '${cap}' escalated a ${role} — capability.grant is a path to root`
+        ).toBe(false);
+      }
+    }
+  });
+
+  /**
+   * The same ordering, from the other side: a grant for a capability that does
+   * not exist must not resolve true either. `CAPABILITY_SET` is checked first,
+   * so a typo in a `user_capabilities` row is denied rather than being treated
+   * as an unrecognised-but-granted permission.
+   */
+  it('denies a grant naming a capability that does not exist', () => {
+    const typo = { ...p('organizer'), grants: ['event.mdoerate', ''] };
+    expect(can(typo, 'event.mdoerate')).toBe(false);
+    expect(can(typo, '')).toBe(false);
   });
 
   it('uses effectiveRole, not actualRole, when impersonating', () => {

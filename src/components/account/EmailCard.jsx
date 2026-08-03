@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../../utils/api';
 import { AlertCircle, Mail, Check, Clock } from 'lucide-react';
+import { useStepUp } from '../auth/useStepUp';
+import { STEP_UP } from '../../utils/stepUp';
 
 /**
  * Change the account's email address.
@@ -20,11 +22,11 @@ export default function EmailCard({ currentUser, addToast, onProfileChange }) {
 
   const [open, setOpen] = useState(false);
   const [newEmail, setNewEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [pending, setPending] = useState(null);
   const [loadingPending, setLoadingPending] = useState(true);
+  const { run, modal } = useStepUp();
 
   const loadPending = useCallback(async () => {
     try {
@@ -48,12 +50,10 @@ export default function EmailCard({ currentUser, addToast, onProfileChange }) {
       ? 'That does not look like an email address.'
       : newEmail.trim().toLowerCase() === String(currentUser?.email || '').toLowerCase()
         ? 'That is already your email address.'
-        : hasPassword && !password
-          ? 'Enter your password to confirm.'
-          : null;
+        : null;
 
   const reset = () => {
-    setNewEmail(''); setPassword(''); setError(''); setOpen(false);
+    setNewEmail(''); setError(''); setOpen(false);
   };
 
   const submit = async (e) => {
@@ -62,7 +62,28 @@ export default function EmailCard({ currentUser, addToast, onProfileChange }) {
     setSaving(true);
     setError('');
     try {
-      const res = await api.changeEmail(newEmail.trim(), password);
+      /**
+       * ONE value, used for both the binding and the request.
+       *
+       * `email.change` binds `newEmail`, and the server folds the RAW body value
+       * into the challenge's `params_hash`, then re-derives it from the actual
+       * request when the grant is spent. Trimming in one call and not the other
+       * — or normalising here but sending the untrimmed field — produces
+       * `params_mismatch` on a verification the user completed correctly. That
+       * failure is indistinguishable, from the outside, from step-up being
+       * broken: the dialog succeeds and the action still refuses.
+       *
+       * Hence the local. Do not inline `newEmail.trim()` into either call.
+       */
+      const target = newEmail.trim();
+
+      const res = await run(
+        STEP_UP.EMAIL_CHANGE,
+        { newEmail: target },
+        headers => api.changeEmail(target, headers)
+      );
+      if (!res) return;
+
       setPending(res.pending);
       addToast(`Confirmation link sent to ${res.pending}. Your account keeps its current address until you open it.`, 'success');
       reset();
@@ -156,22 +177,6 @@ export default function EmailCard({ currentUser, addToast, onProfileChange }) {
             </span>
           </div>
 
-          {hasPassword && (
-            <div className="field">
-              <label htmlFor="email-password">Your password</label>
-              <input
-                id="email-password"
-                type="password"
-                className="input input-lg"
-                autoComplete="current-password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                disabled={saving}
-                required
-              />
-            </div>
-          )}
-
           <div className="row settings-actions">
             <button type="submit" className="btn btn-primary" disabled={saving || !!blocker}>
               {saving ? 'Sending…' : 'Send confirmation link'}
@@ -183,6 +188,7 @@ export default function EmailCard({ currentUser, addToast, onProfileChange }) {
           <span className="auth-hint" role="status" aria-live="polite">{blocker || ''}</span>
         </form>
       )}
+      {modal}
     </section>
   );
 }

@@ -8,18 +8,36 @@ import React from 'react';
  * is a small set of distinguishable hues rather than a rainbow ramp.
  */
 const PALETTE = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)'];
+/**
+ * `caption` and `unit` say what the chart is ACTUALLY of.
+ *
+ * They exist because the accessible table's caption was hardcoded to "Hours by
+ * period" and its value column to "Hours" — so AdminDashboard's
+ * volunteers-per-month chart announced itself to a screen reader as hours, and
+ * so did any future chart of anything else. The visual half is
+ * `aria-hidden`, so that caption is the ONLY description a screen-reader user
+ * gets: wrong there means wrong everywhere for them.
+ *
+ * `emptyText` for the same reason — "No hours recorded yet" is a lie on a chart
+ * of sign-ups. Defaults preserve the existing hours-shaped behaviour, so every
+ * current caller keeps its wording without being touched.
+ */
 export function BarChart({
   data = [],
   valueKey = 'value',
   labelKey = 'label',
   height = 120,
-  highlightLast = false
+  highlightLast = false,
+  caption = 'Hours by period',
+  unit = 'Hours',
+  periodLabel = 'Period',
+  emptyText = 'No hours recorded yet'
 }) {
   if (!data || data.length === 0) {
-    return <p className="small dim s-739dac">No hours recorded yet</p>;
+    return <p className="small dim s-739dac">{emptyText}</p>;
   }
   const max = Math.max(1, ...data.map(d => Number(d[valueKey]) || 0));
-  return <div>
+  return <div role="img" aria-label={caption}>
       {/* The bars are shape only — the numeric labels beneath them are laid out
           in a separate grid, so a screen reader reads a column of values with
           no way to tell which label belongs to which. This table carries the
@@ -27,9 +45,9 @@ export function BarChart({
           the chart itself is unchanged. aria-hidden on the visual half stops
           the figures being announced twice. */}
       <table className="sr-only">
-        <caption>Hours by period</caption>
+        <caption>{caption}</caption>
         <thead>
-          <tr><th scope="col">Period</th><th scope="col">Hours</th></tr>
+          <tr><th scope="col">{periodLabel}</th><th scope="col">{unit}</th></tr>
         </thead>
         <tbody>
           {data.map((d, i) => <tr key={i}>

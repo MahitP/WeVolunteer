@@ -285,6 +285,43 @@ export const EMAIL_GATE_ALLOWLIST = [
 ];
 
 /**
+ * Allowlisted path PREFIXES, for routes whose path carries a parameter.
+ *
+ * ── Why this exists (v1.2b Task 6) ──
+ *
+ * `/api/auth/change-email` and `DELETE /api/auth/account` are on the list above
+ * because an account whose address has a typo in it can reach nothing else, and
+ * correcting or abandoning it has to stay possible. Task 6 put both of those
+ * endpoints behind `requireAAL2`, which means they can no longer be reached
+ * without first opening and satisfying a challenge — so leaving the step-up
+ * routes outside the gate would have re-closed the only two doors the gate is
+ * deliberately escapable through, for exactly the account that needs them.
+ *
+ * A prefix rather than four exact entries because `GET /api/auth/reauth/oauth/
+ * :provider` has a parameter in its path and `EMAIL_GATE_ALLOWLIST.includes()`
+ * is an exact match. That route is not optional: a Microsoft-provider account
+ * arrives with `email_verified = 0` (Graph attests nothing) and has no password,
+ * so provider re-consent is its ONLY way to satisfy a challenge.
+ *
+ * Widening this to the whole `/api/auth/reauth/` subtree is deliberate and
+ * bounded. Every route under it mints assurance for the caller's own account and
+ * performs no sensitive action itself; the actions a grant unlocks are gated
+ * individually, and the three that are not on the allowlist above
+ * (change-password, oauth/link, privacy/export) stay behind the gate exactly as
+ * before. So an unconfirmed account gains the ability to prove who it is, and
+ * nothing else.
+ */
+export const EMAIL_GATE_ALLOWLIST_PREFIXES = [
+  '/api/auth/reauth/'
+];
+
+/** Whether an unconfirmed account may reach this path. */
+export function isEmailGateAllowed(path) {
+  return EMAIL_GATE_ALLOWLIST.includes(path)
+    || EMAIL_GATE_ALLOWLIST_PREFIXES.some(prefix => path.startsWith(prefix));
+}
+
+/**
  * Session cookie.
  *
  * Replaces the v1.0 scheme of a JWT in localStorage sent as an Authorization

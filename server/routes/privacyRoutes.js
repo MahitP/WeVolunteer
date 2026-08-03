@@ -1,23 +1,61 @@
 import express from 'express';
 import { db } from '../db.js';
-import { authenticateToken } from '../utils.js';
+import { authenticateToken, inTransaction } from '../utils.js';
+import { DEMO_MODE } from '../config.js';
+import { requireAAL2 } from '../authz.js';
+import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import rateLimit from 'express-rate-limit';
 import fs from 'fs';
 
 const router = express.Router();
 
+/**
+ * Three archive builds per address per fifteen minutes.
+ *
+ * The DEMO_MODE ceiling matches every other limiter in this application (see
+ * app.js): the seeded demo shares one address, and so does the whole test suite,
+ * so a production-tight limit there throttles the fixtures rather than an
+ * attacker. This limiter was the one outlier without that escape, which stopped
+ * mattering only because there were two export tests; step-up gave the endpoint
+ * enough of them to hit it.
+ */
 const exportLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 3, // limit each IP to 3 export requests per windowMs
+  limit: Number(process.env.EXPORT_RATE_LIMIT) || (DEMO_MODE ? 1000 : 3),
   message: { error: 'Too many export requests from this IP, please try again after 15 minutes' }
 });
 
-router.post('/api/privacy/export', authenticateToken, exportLimiter, (req, res) => {
+/**
+ * Queues a full copy of everything this account holds.
+ *
+ * ── Why this gained a gate it never had (v1.2b Task 6) ──
+ *
+ * This was the one endpoint in the enumeration with no step-up at all: an
+ * authenticated request and a rate limit, and a complete personal-data archive
+ * lands in a downloadable file. That is bulk PII egress about a minor, and it is
+ * precisely what somebody holding a borrowed or stolen session would take —
+ * quietly, in one request, without changing anything the account holder would
+ * later notice. Deletion, password and email all demanded a credential; the one
+ * action that copies everything out demanded nothing.
+ *
+ * `requireAAL2` sits BEFORE `exportLimiter` deliberately. The limiter allows
+ * three requests per fifteen minutes, and a client that has not yet verified
+ * gets a 403 telling it to — so counting those refusals would mean two honest
+ * export attempts exhaust the window. The gate itself costs no query beyond the
+ * one `authenticateToken` has already done.
+ */
+router.post('/api/privacy/export', authenticateToken, requireAAL2('data.export'), exportLimiter, (req, res) => {
   const userId = req.user.id;
 
-  // Check if they already have a pending or processing job
+  /**
+   * Checked BEFORE the grant is spent.
+   *
+   * "You already have an export running" is a refusal of the request, so it must
+   * not cost the user the verification they just performed — they would have to
+   * do it again for an export that never started.
+   */
   const existingJob = db.prepare(`
-    SELECT id, status FROM data_export_jobs 
+    SELECT id, status FROM data_export_jobs
     WHERE user_id = ? AND status IN ('pending', 'processing')
   `).get(userId);
 
@@ -26,22 +64,29 @@ router.post('/api/privacy/export', authenticateToken, exportLimiter, (req, res) 
   }
 
   const jobId = `export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  
-  try {
-    db.prepare(`
-      INSERT INTO data_export_jobs (id, user_id, status, created_at)
-      VALUES (?, ?, 'pending', ?)
-    `).run(jobId, userId, new Date().toISOString());
 
-    // Audit log
-    const auditId = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    db.prepare(`
-      INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
-      VALUES (?, ?, 'DATA_EXPORT_REQUESTED', ?, 'User requested a data export', ?)
-    `).run(auditId, userId, userId, new Date().toISOString()); // Note: Using admin_audit_logs for system logs for now, or we could skip it since WeVolunteer just has admin_audit_logs
+  try {
+    inTransaction(() => {
+      // Spent with the job it authorises: no export queued without a spent
+      // grant, and no spent grant without a queued export.
+      spendChallenge(db, req, 'data.export', {});
+
+      db.prepare(`
+        INSERT INTO data_export_jobs (id, user_id, status, created_at)
+        VALUES (?, ?, 'pending', ?)
+      `).run(jobId, userId, new Date().toISOString());
+
+      // Audit log
+      const auditId = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      db.prepare(`
+        INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
+        VALUES (?, ?, 'DATA_EXPORT_REQUESTED', ?, 'User requested a data export', ?)
+      `).run(auditId, userId, userId, new Date().toISOString()); // Note: Using admin_audit_logs for system logs for now, or we could skip it since WeVolunteer just has admin_audit_logs
+    });
 
     res.status(202).json({ message: 'Export request queued', jobId });
   } catch (error) {
+    if (error instanceof ChallengeNotSpent) return refuseReauth(res, error.result);
     console.error('Failed to queue export:', error);
     res.status(500).json({ error: 'Failed to request export' });
   }
@@ -64,7 +109,33 @@ router.get('/api/privacy/export/status', authenticateToken, (req, res) => {
   res.json(job);
 });
 
-router.get('/api/privacy/export/download/:id', authenticateToken, (req, res) => {
+/**
+ * Hands over the archive, behind a fresh proof of identity for THIS archive.
+ *
+ * ── Why the gate had to be here too (v1.2b audit, F-1) ──
+ *
+ * `POST /api/privacy/export` above was gated and this was not, which protected
+ * the request and not the disclosure. An archive lives seven days
+ * (`exportWorker.js`), and `GET /api/privacy/export/status` hands its id to any
+ * authenticated caller — so for a week after any legitimate export, the
+ * complete personal-data archive of a mostly-minor population was retrievable
+ * by anyone holding a borrowed session, having proved nothing. The gate raised
+ * the bar only while no archive existed, which is the window in which there was
+ * nothing to take.
+ *
+ * `data.download` rather than `data.export`, and it binds `jobId`: a grant
+ * authorises pulling down ONE archive, not "anything export-shaped". See the
+ * registry entry for the full reasoning.
+ *
+ * ── Ordering ──
+ *
+ * Every refusal below — foreign or missing job, not ready, expired, file gone —
+ * is answered BEFORE the grant is spent, for the same reason the
+ * "already in progress" check precedes the spend on the request endpoint: a
+ * request that delivers nothing must not cost the user a verification they then
+ * have to repeat. The spend is the last thing before the bytes move.
+ */
+router.get('/api/privacy/export/download/:id', authenticateToken, requireAAL2('data.download'), (req, res) => {
   const userId = req.user.id;
   const jobId = req.params.id;
 
@@ -104,6 +175,49 @@ router.get('/api/privacy/export/download/:id', authenticateToken, (req, res) => 
   if (!fs.existsSync(job.file_location)) {
     return res.status(404).send('Export file is missing from server');
   }
+
+  /**
+   * Spent last, and bound to the id in the path — the archive actually about to
+   * be sent, never a value the caller could vary independently of the write.
+   *
+   * Once this commits, the grant is gone whether or not the transfer below
+   * completes. That is the honest trade: `res.download` streams outside any
+   * transaction, so there is no way to make "the bytes arrived" atomic with
+   * "the grant was spent", and of the two failure directions the safe one is a
+   * user re-verifying after a broken download rather than a spendable grant
+   * left behind by one that succeeded.
+   */
+  try {
+    inTransaction(() => {
+      spendChallenge(db, req, 'data.download', { jobId });
+    });
+  } catch (err) {
+    if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
+    console.error('Failed to spend the download verification:', err);
+    return res.status(500).json({ error: 'Failed to download export' });
+  }
+
+  /**
+   * The archive must not be written to any cache.
+   *
+   * `res.download` delegates to the `send` library, which defaults to
+   * `Cache-Control: public, max-age=0` — observed on the wire, not assumed. On a
+   * zip containing one (usually minor) person's complete record, `public` is the
+   * wrong word: it invites shared caches to store it, and it lets the browser
+   * write the body to its on-disk HTTP cache, where it outlives the tab. That is
+   * the same threat `src/utils/stepUp.js` reasons about when it keeps grants in
+   * `sessionStorage` rather than `localStorage` — the shared school Chromebook
+   * somebody walks away from.
+   *
+   * Set here rather than passed as an option because `send` only supplies its
+   * own value when the header is absent, so an explicit one wins; the regression
+   * test asserts the emitted header rather than this call, since that is the
+   * only form of the check that survives a library upgrade changing the rule.
+   *
+   * This does not weaken the step-up gate — a cached copy would have bypassed it
+   * entirely, which is why it belongs with that fix rather than after it.
+   */
+  res.set('Cache-Control', 'no-store');
 
   res.download(job.file_location, 'wevolunteer-data-export.zip', (err) => {
     if (err) {

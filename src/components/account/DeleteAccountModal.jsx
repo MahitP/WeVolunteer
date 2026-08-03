@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { api } from '../../utils/api';
 import { AlertTriangle } from 'lucide-react';
 import Modal from '../Modal';
+import { useStepUp } from '../auth/useStepUp';
+import { STEP_UP } from '../../utils/stepUp';
 
 /**
  * Confirm and perform account deletion.
@@ -19,32 +21,33 @@ import Modal from '../Modal';
  */
 export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, username }) {
   const [deleteText, setDeleteText] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmUsername, setConfirmUsername] = useState('');
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { run, modal: verifyModal } = useStepUp();
 
   /**
-   * A provider-only account has no password to re-prove with, and the server
-   * previously asked such an account for nothing at all — one request against
-   * a live session irreversibly anonymised it. Typing the account's own
-   * username is not a credential, but it is a deliberate act the server can
-   * actually check, unlike the "DELETE" box, which is client-side only.
+   * ── What the "DELETE" box is, and what it is not (v1.2b) ──
+   *
+   * It is a deliberateness check and nothing else. It is not sent to the server
+   * and the server does not look for it, which is exactly why it belongs here
+   * and only here: a value the server ignores must not be presented as though it
+   * were the thing standing between the user and an irreversible action.
+   *
+   * It replaces two things that WERE sent. A password, which a provider-only
+   * account does not have — so such an account was asked for nothing at all, and
+   * one request against a live session irreversibly anonymised it. And then, as
+   * a stopgap, the account's own username, which the code conceded was not a
+   * credential: it is public within the app and appears on every comment the
+   * person has posted.
+   *
+   * The real proof is now `requireAAL2('account.delete')`, answered by the
+   * password OR by re-consenting at a linked provider — the credential a
+   * provider-only account always had and the old check could not read.
    */
-  const needsUsername = !hasPassword;
-
   const handleDelete = async (e) => {
     e.preventDefault();
     if (deleteText !== 'DELETE') {
       setError('Type DELETE to confirm.');
-      return;
-    }
-    if (hasPassword && !password) {
-      setError('Enter your password to confirm.');
-      return;
-    }
-    if (needsUsername && confirmUsername.trim().toLowerCase() !== String(username || '').toLowerCase()) {
-      setError(`Type your username (${username}) exactly to confirm.`);
       return;
     }
 
@@ -52,11 +55,21 @@ export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, us
     setError(null);
 
     try {
-      const result = await api.deleteAccount({
-        password: hasPassword ? password : undefined,
-        confirmUsername: needsUsername ? confirmUsername.trim() : undefined
-      });
+      const result = await run(
+        STEP_UP.ACCOUNT_DELETE,
+        {},
+        headers => api.deleteAccount(headers)
+      );
+
+      // Dismissed the verification. The dialog stays open on the confirmation
+      // they already typed, so they can decide again rather than starting over.
+      if (!result) {
+        setIsSubmitting(false);
+        return;
+      }
+
       if (result.success) onSuccess();
+      else setIsSubmitting(false);
     } catch (err) {
       setError(err.message || 'Failed to delete account');
       setIsSubmitting(false);
@@ -150,45 +163,11 @@ export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, us
                 />
               </div>
 
-              {hasPassword && (
-                <div className="stack-sm">
-                  <label className="strong small" htmlFor="delete-password">Enter your password</label>
-                  <input
-                    id="delete-password"
-                    type="password"
-                    className="input"
-                    autoComplete="current-password"
-                    placeholder="Current password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={isSubmitting}
-                  />
-                </div>
-              )}
-
-              {needsUsername && (
-                <div className="stack-sm">
-                  <label className="strong small" htmlFor="delete-username">
-                    Type your username <code>{username}</code> to confirm
-                  </label>
-                  <input
-                    id="delete-username"
-                    type="text"
-                    className="input"
-                    autoComplete="off"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck="false"
-                    placeholder={username}
-                    value={confirmUsername}
-                    onChange={(e) => setConfirmUsername(e.target.value)}
-                    disabled={isSubmitting}
-                  />
-                  <span className="dim small">
-                    Your account signs in with a connected provider, so there is no password to check.
-                  </span>
-                </div>
-              )}
+              <span className="dim small">
+                {hasPassword
+                  ? 'You will be asked to verify your identity before anything is deleted.'
+                  : 'You will be asked to re-confirm with your sign-in provider before anything is deleted.'}
+              </span>
             </form>
 
             <div className="row delete-actions">
@@ -198,18 +177,14 @@ export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, us
               <button 
                 form="delete-form"
                 className="btn btn-danger-solid btn-lg" 
-                disabled={
-                  isSubmitting
-                  || deleteText !== 'DELETE'
-                  || (hasPassword && !password)
-                  || (needsUsername && confirmUsername.trim().toLowerCase() !== String(username || '').toLowerCase())
-                }
+                disabled={isSubmitting || deleteText !== 'DELETE'}
               >
                 {isSubmitting ? 'Deleting…' : 'Delete My Account'}
               </button>
             </div>
           </div>
       </div>
+      {verifyModal}
     </Modal>
   );
 }
