@@ -1610,6 +1610,35 @@ when they are done, not when they become uncomfortable to look at.
   the missing capability when the favourites work is next touched.
 - **Effort:** small. **Opened:** 2026-08-01.
 
+#### TD-19 — geocoding is rate-limited per IP, but Nominatim's policy is per application
+
+- **Detail:** `geocodeLimiter` in `server/routes/geocodeRoutes.js` is
+  `rateLimit({ windowMs: 60_000, limit: 30 })` with **no `keyGenerator`**, so
+  `express-rate-limit` defaults to per-IP. The
+  [Nominatim usage policy](https://operations.osmfoundation.org/policies/nominatim/)
+  is an **absolute maximum of 1 request per second for the whole application**,
+  not per client. Thirty per minute each, across a class of students on different
+  networks, exceeds that by a wide margin.
+- **What is already right**, so the fix stays small: the identifying
+  `User-Agent` the policy requires is set, with a contact address
+  (`geocodeRoutes.js:121`); and there is an in-memory cache — 1-hour TTL, 500
+  entries, oldest evicted — so repeat lookups of the same address cost nothing
+  upstream. `instanceLock.js` enforces one process per database, so a
+  process-local cache is not the sharing problem it would otherwise be.
+- **Risk:** a burst of *distinct* addresses from distinct IPs still exceeds 1/s.
+  The consequence is not a 500 — it is OSM blocking this application's
+  User-Agent, which takes address lookup out for every school at once and is
+  awkward to get reversed. Bounded in practice by the cache and by how rarely
+  organizers create events, which is why this is Medium and not Critical.
+- **Action:** a **server-wide** throttle in front of the upstream call, not a
+  second per-IP limiter — a small queue that serialises to ≤1/s, or a
+  fail-fast 429 when a token bucket is empty. Which of those depends on what the
+  UI should do while waiting, so it is a design decision, not a one-liner. The
+  cache is already the first line and should stay. Planned as v1.4 Task 12; this
+  entry exists because the breach is live in shipped code and the plan is not
+  where anyone would look for that.
+- **Effort:** small. **Opened:** 2026-08-03.
+
 #### TD-17 — every gated action costs two requests
 
 - **Detail:** `withStepUp` in `src/utils/stepUp.js` attempts the request, catches
