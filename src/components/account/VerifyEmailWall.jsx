@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { AlertTriangle, Mail } from 'lucide-react';
 import { api } from '../../utils/api';
+import { useStepUp } from '../auth/useStepUp';
+import { STEP_UP } from '../../utils/stepUp';
 
 /**
  * The wall an account sees until it confirms its email address.
@@ -33,21 +35,50 @@ export default function VerifyEmailWall({ user, addToast, onSignOut, onVerified 
    */
   const [fixing, setFixing] = useState(false);
   const [newEmail, setNewEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [fixError, setFixError] = useState('');
   const [pending, setPending] = useState(null);
-  const needsPassword = user.hasPassword !== false;
+  const { run, modal: verifyModal } = useStepUp();
 
+  /**
+   * ── Why there is no password field here any more (v1.2b) ──
+   *
+   * The endpoint proved identity with an inline `bcrypt.compare` on a `password`
+   * field. Task 6 replaced that with `requireAAL2('email.change')`, so this form
+   * was passing a password into the argument that is now the headers object —
+   * meaning the one screen a user with a mistyped address must use to escape
+   * could not work at all.
+   *
+   * That the whole email-gate allowlist exists to keep this screen reachable is
+   * what makes it the worst place for the bug to have landed: the allowlist was
+   * rescuing a user the client was then locking out anyway.
+   *
+   * `/api/auth/reauth/` is allowlisted too (the `EMAIL_GATE_ALLOWLIST_PREFIXES`
+   * entry added in Task 6), so the verification itself is reachable from behind
+   * the wall — including for a Microsoft account, which arrives with
+   * `email_verified = 0` and no password and can only satisfy a challenge by
+   * re-consenting at its provider.
+   */
   const submitFix = async (e) => {
     e.preventDefault();
     setFixError('');
     setSending(true);
     try {
-      const res = await api.changeEmail(newEmail.trim(), password);
+      // One value for both the binding and the request — see the long note in
+      // EmailCard. The server folds the raw body value into `params_hash`, so
+      // normalising in one call and not the other is a `params_mismatch` on a
+      // verification the user completed correctly.
+      const target = newEmail.trim();
+
+      const res = await run(
+        STEP_UP.EMAIL_CHANGE,
+        { newEmail: target },
+        headers => api.changeEmail(target, headers)
+      );
+      if (!res) return;
+
       setPending(res.pending);
       setFixing(false);
       setNewEmail('');
-      setPassword('');
       addToast(`Confirmation link sent to ${res.pending}.`, 'success');
     } catch (err) {
       setFixError(err.message || 'Could not change that address.');
@@ -164,27 +195,11 @@ export default function VerifyEmailWall({ user, addToast, onSignOut, onVerified 
               </div>
             </div>
 
-            {needsPassword && (
-              <div className="field">
-                <label htmlFor="fix-password">Your password</label>
-                <input
-                  id="fix-password"
-                  type="password"
-                  className="input input-lg"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  disabled={sending}
-                  required
-                />
-              </div>
-            )}
-
             <div className="auth-actions stack-sm">
               <button
                 type="submit"
                 className="btn btn-primary btn-block btn-lg"
-                disabled={sending || !newEmail.trim() || (needsPassword && !password)}
+                disabled={sending || !newEmail.trim()}
               >
                 {sending ? 'Sending…' : 'Send the link here instead'}
               </button>
@@ -200,6 +215,7 @@ export default function VerifyEmailWall({ user, addToast, onSignOut, onVerified 
           </form>
         )}
       </main>
+      {verifyModal}
     </div>
   );
 }

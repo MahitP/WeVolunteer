@@ -992,7 +992,150 @@ Re-assess whenever the advisory is updated or the routing architecture changes.
 If WeVolunteer ever adopts server components, **this assessment is void** and
 must be redone before shipping.
 
-### 6.8 Current verified security posture
+### 6.8 Step-up re-authentication (AAL2)
+
+Added in v1.2b. Seven actions cannot be performed on the strength of a session
+alone; the account holder must re-prove who they are within the last five
+minutes. **The rules below are not style preferences. Each one closes a hole
+that was open in this codebase.**
+
+> **Gate the operation that does the thing, not the one that announces it.**
+> The branch's own audit found two actions missing from this list, and both were
+> the same mistake in different clothes. `POST /api/privacy/export` was gated
+> and `GET /api/privacy/export/download/:id` was not — so the REQUEST was
+> protected and the DISCLOSURE was not, and a completed archive sat behind a
+> bare session for the seven days it is retained. `POST /api/oauth/link` was
+> gated and `POST /api/oauth/disconnect` was not, so "adding a credential
+> requires step-up" held in one direction only.
+>
+> Ask, for each gated action: *where does the effect actually land, and is there
+> a second endpoint that reaches it?* Rule 3 below already says to gate both
+> paths when two of them make the same state change; these two were missed
+> because the second path did not look like the same change — one only reads,
+> and one only removes.
+
+#### The registry is the only list
+
+`server/sensitiveActions.js` enumerates every action that requires step-up,
+which methods can satisfy it, and which of its parameters the grant binds. It
+imports nothing but `node:crypto`, so the client imports the same module and
+the two cannot drift.
+
+*Why one list.* Before this, four endpoints each ran their own
+`bcrypt.compare` and a fifth ran nothing. Individually every one of them was
+correct; collectively they were unreviewable, because **the endpoint that
+forgot its check looked exactly like the endpoint that never needed one.**
+That is how `POST /api/privacy/export` — a complete copy of everything an
+account holds, for a population that is mostly minors — went years with no
+gate at all. Nobody removed it. It was never added, and nothing could show
+that.
+
+#### Never re-introduce an inline credential check
+
+Sign-in (`server/routes/authRoutes.js`) is the only place in the application
+that compares a password to decide who someone is. `server/reauth.js` is the
+only other place that compares one at all, and it does so on behalf of the
+registry.
+
+If you find yourself adding `bcrypt.compare` to a route handler, the answer is
+a registry entry and a `requireAAL2` gate. An inline check is also, always, a
+password oracle on an endpoint that was not designed to be one — the audit
+found `POST /api/oauth/link` allowing 600 attempts per window against any
+address, which made it a better brute-force target than the login form.
+
+#### A gate is not the check
+
+`requireAAL2('<action>')` is an **early refusal**. It reads
+`principal.aalAction`, changes nothing, and exists so an unverified caller is
+turned away before the handler does any work.
+
+The property that makes step-up worth having comes from `consumeChallenge`
+running **inside the handler's own transaction**, against the action and the
+arguments the handler is actually about to perform. Use `spendChallenge` from
+`server/reauthResponses.js`, which reads the three bindings off the request so
+no route can pick up two of the three.
+
+A route that gates and never spends leaves the grant live for its remaining
+five minutes: the same challenge id re-presented performs the action again,
+and again. **That omission is invisible** — every functional test of such a
+route passes. Guard 5 in `server/authz.completeness.test.js` fails the build
+on it.
+
+#### Four bindings, and each one closes a real hole
+
+| Binding | Without it |
+|---|---|
+| **action** | Verifying to change your email deletes your account |
+| **params** | Verifying to move your address to `a@x.com` moves it to the attacker's — the binding most step-up implementations omit, and the one an attacker with a stolen session actually reaches for |
+| **session** | A grant obtained in the victim's browser is spent from the attacker's |
+| **single use** | A replayed grant is a second free sensitive action |
+
+Params must be **exactly** the keys the registry declares — no more, since
+`paramsHash` ignores the rest, and no fewer, since a missing key hashes as
+absent and will not match a grant that had it. Bind the value the handler is
+about to write, never the one the client claimed when it opened the challenge.
+
+#### Guessing is bounded twice, and both are needed
+
+`MAX_ATTEMPTS` (5) bounds one challenge. On its own it bounds nothing an
+attacker cares about: **opening a fresh challenge costs one request and starts
+a new counter at zero.** `MAX_ACCOUNT_ATTEMPTS` (15 per 15 minutes, summed
+across the account's challenges) is what makes it a limit on guessing rather
+than a limit on a row, and `reauthLimiter` in `app.js` closes the same hole
+per IP. Neither subsumes the other.
+
+#### Provider re-consent must actually re-authenticate
+
+An account with no password proves itself by re-consenting at its identity
+provider. That substitution is only real if the provider genuinely
+re-authenticates: `google.js` sends `prompt=login` **and** `max_age=0`, and
+`microsoft.js` sends `prompt=login`. Without them the provider answers from
+the session it already holds, which proves nothing a stolen session did not
+already prove — **and it fails silently, because the flow still completes.**
+
+`grantByOAuth` then compares the returned `sub` against the
+`provider_user_id` on *this* user's linked row. That comparison, not the
+successful round trip, is the security of the path: a completed OAuth flow
+attests who is at the keyboard and nothing more.
+
+#### The client half: one spelling, one string, one storage
+
+`src/utils/stepUp.js` imports `REAUTH_CHALLENGE_HEADER` and `SENSITIVE_ACTIONS`
+**from `server/sensitiveActions.js`**, the same mirror pattern `src/authz.js`
+uses for the capability table, and for the same reason.
+
+*Why it matters more here than it looks.* A retyped header name is the worst
+available bug in the feature: the client presents its grant under a spelling the
+server never reads, every request silently resolves to AAL1, and every gated
+action answers `reauth_required` — which sends the UI back to the verification
+dialog it has just come from, for ever, with no error anywhere. A retyped
+**action** name is the same class: unregistered actions are refused at
+`/challenge`, and a wrong-but-valid action opens a grant that can never be spent.
+`STEP_UP` is validated against the registry at module load so a drifted name is a
+build-time failure rather than a 403 in production.
+
+**A challenge id must never touch `localStorage`.** The provider re-consent leg
+leaves the site, so the record has to survive a navigation — `sessionStorage`,
+scoped to the tab and cleared when it closes, matches the five-minute life of the
+thing it holds. In `localStorage` a verification id would still be sitting on a
+shared school Chromebook after the student walked away. `signOut` clears both
+records for the same reason it clears `notif_toast_shown`.
+
+**The client must not hold a second opinion about what credentials an account
+has.** `VerifyIdentityModal` renders only the methods the challenge returned.
+Deciding locally is how a provider-only account gets asked five times for a
+password it does not have and is then locked out of its own challenge.
+
+#### Adding a credential requires proving identity — through every door
+
+If two code paths make the same state change, gate both. `POST /api/oauth/link`
+and the OAuth callback's `auto_linked` branch both write an `oauth_accounts`
+row, and that row is a new way to sign in. Gating only the first would have
+left the rule true of the door users do not walk through. A callback arriving
+mid-redirect cannot be interrupted to ask for a verification, so the grant is
+opened before the redirect and carried across it in the signed state.
+
+### 6.9 Current verified security posture
 
 Confirmed at `v1.1.0`:
 
@@ -1010,8 +1153,22 @@ Confirmed at `v1.1.0`:
 | Password minimum length | 8 characters |
 | Login throttling | Active |
 | Account enumeration | Hardened |
-| Privacy export | IDOR-tested |
+| Privacy export | IDOR-tested; step-up gated as of v1.2b on **both** the request (`data.export`) and the download (`data.download`, bound to the job id) |
 | Secret scanning | Pre-commit hook installed |
+
+Added on the v1.2 branch, pending release:
+
+| Control | Verified behaviour |
+|---|---|
+| Authorization | Capability-based; no role-string comparison anywhere in `server/` or `src/`, enforced by five build-failing guards |
+| Sensitive actions | Seven actions behind `requireAAL2`; grants bound to action, params and session; single-use; five-minute lifetime |
+| Step-up brute force | Bounded per challenge (5), per account (15 / 15 min) and per IP (`reauthLimiter`) |
+| Provider re-consent | `prompt=login` + `max_age=0` (Google), `prompt=login` (Microsoft); returned `sub` compared to the account's linked row |
+| Adding a sign-in credential | Requires step-up through both the `/api/oauth/link` and `auto_linked` callback paths |
+| Removing a sign-in credential | `POST /api/oauth/disconnect` requires step-up (`oauth.unlink`, provider bound); the last-credential guard is checked **before** the grant is spent |
+| Exported archive caching | `Cache-Control: no-store` on the download, asserted on the emitted header — `res.download` otherwise defaults to `public, max-age=0`, and a cached copy is served without reaching the step-up gate at all |
+| Session identity | Every session carries a `jti`; provider sign-ins are per-device revocable |
+| Schema changes | Versioned migration registry with source checksums re-verified on every boot |
 
 ---
 
@@ -1470,6 +1627,64 @@ when they are done, not when they become uncomfortable to look at.
   the missing capability when the favourites work is next touched.
 - **Effort:** small. **Opened:** 2026-08-01.
 
+#### TD-19 — geocoding is rate-limited per IP, but Nominatim's policy is per application
+
+- **Detail:** `geocodeLimiter` in `server/routes/geocodeRoutes.js` is
+  `rateLimit({ windowMs: 60_000, limit: 30 })` with **no `keyGenerator`**, so
+  `express-rate-limit` defaults to per-IP. The
+  [Nominatim usage policy](https://operations.osmfoundation.org/policies/nominatim/)
+  is an **absolute maximum of 1 request per second for the whole application**,
+  not per client. Thirty per minute each, across a class of students on different
+  networks, exceeds that by a wide margin.
+- **What is already right**, so the fix stays small: the identifying
+  `User-Agent` the policy requires is set, with a contact address
+  (`geocodeRoutes.js:121`); and there is an in-memory cache — 1-hour TTL, 500
+  entries, oldest evicted — so repeat lookups of the same address cost nothing
+  upstream. `instanceLock.js` enforces one process per database, so a
+  process-local cache is not the sharing problem it would otherwise be.
+- **Risk:** a burst of *distinct* addresses from distinct IPs still exceeds 1/s.
+  The consequence is not a 500 — it is OSM blocking this application's
+  User-Agent, which takes address lookup out for every school at once and is
+  awkward to get reversed. Bounded in practice by the cache and by how rarely
+  organizers create events, which is why this is Medium and not Critical.
+- **Action:** a **server-wide** throttle in front of the upstream call, not a
+  second per-IP limiter — a small queue that serialises to ≤1/s, or a
+  fail-fast 429 when a token bucket is empty. Which of those depends on what the
+  UI should do while waiting, so it is a design decision, not a one-liner. The
+  cache is already the first line and should stay. Planned as v1.4 Task 12; this
+  entry exists because the breach is live in shipped code and the plan is not
+  where anyone would look for that.
+- **Effort:** small. **Opened:** 2026-08-03.
+
+#### TD-17 — every gated action costs two requests
+
+- **Detail:** `withStepUp` in `src/utils/stepUp.js` attempts the request, catches
+  `reauth_required`, verifies, and retries. So each of the five gated actions
+  makes one request that is certain to 403 before the one that succeeds.
+- **Risk:** low, and the tradeoff was deliberate — trying first is what lets an
+  export already in progress, or a password that fails policy, be reported
+  without first making someone prove who they are for an action that was never
+  going to proceed. The cost is that the wasted 403 counts against `authLimiter`
+  (10 per 15 minutes, failures counted), so `/api/auth/change-password` and
+  `DELETE /api/auth/account` each effectively allow ten attempts per window
+  rather than twenty. Also, for `change-password`, the new password crosses the
+  wire twice.
+- **Action:** none. **The alternative was weighed and is worse, which is why this
+  is a decision rather than an outstanding item.** Verifying up-front for every
+  gated action — what `verifyFirst` does for `oauth.link`, because that one has no
+  request to retry — means that when the action then fails for a non-auth reason
+  (an export already running, a password that fails policy, a taken email
+  address), the grant is already spent. Grants are single-use, so the user must
+  verify a second time just to retry. Trying first spends nothing on a request
+  that was never going to proceed.
+
+  Recorded so that a doubled request count in a log is not mistaken for a bug,
+  and so nobody "optimises" it away without meeting the same tradeoff. The
+  server's gate ordering was written for this: `POST /api/privacy/export` checks
+  assurance **before** its rate limiter precisely so the refused first attempt
+  does not spend the three-per-fifteen-minutes allowance.
+- **Effort:** n/a — accepted by design. **Opened:** 2026-08-03.
+
 #### TD-8 — `node:sqlite` is experimental
 
 - **Detail:** emits an experimental warning on every boot; the `<25` Node upper
@@ -1482,6 +1697,45 @@ when they are done, not when they become uncomfortable to look at.
 ### Resolved
 
 Kept rather than deleted, because the reasoning is the part worth having.
+
+#### TD-16 — Guard 5 could not see the `auto_linked` grant spend — **resolved**
+
+- **Was:** Guard 5 pairs a `requireAAL2('X')` gate with a
+  `spendChallenge(db, req, 'X', …)` in the same file, and that shape needs an
+  authenticated `req`. Task 6b's auto-link spend is a direct
+  `consumeChallenge({ … })`, because the OAuth callback is unauthenticated and
+  its bindings arrive in the signed state — so the guard could not see it, and
+  `oauthRoutes.js` passed only because `/api/oauth/link` separately contained a
+  conforming spend. Deleting the auto-link spend would have left the grant
+  replayable with the suite green.
+- **Fix:** **Guard 6** in `server/authz.completeness.test.js` — direct
+  `consumeChallenge` call sites are enumerated in `DECLARED_DIRECT_CONSUMERS`
+  with a reason and a note on what covers them functionally. Enumerated rather
+  than banned: banning would contort the one legitimate case, and allowing
+  silently was the debt. Stale declarations fail too, exactly as
+  `ROUTE_REGISTRY`'s do. Verified by deleting the auto-link spend — which now
+  fails the build.
+- **Opened and closed:** 2026-08-03.
+
+#### TD-18 — `POST /api/oauth/link` had no client caller — **resolved**
+
+- **Was:** Task 6 made the endpoint authenticated and step-up gated. Its only
+  caller was the signed-out Login screen, which therefore could not succeed. An
+  endpoint with no caller is either dead code or a missing flow, and leaving it
+  ambiguous is how someone later "fixes" it by loosening the gate.
+- **Fix:** the two-step flow, rather than removal. Removal was the first
+  recommendation and was wrong on two counts: this endpoint holds the **only**
+  `requireAAL2('oauth.link')` gate in the codebase, so deleting it would leave
+  that action with no middleware gate anywhere and break Guard 5's
+  "every registered action is gated" assertion; and keeping the token is the
+  better experience — redeeming it costs one verification, whereas sending the
+  user to Settings costs the same verification plus a second round trip through
+  the provider to reach `auto_linked` and the identical end state.
+  `src/views/Login.jsx` now signs in, spends a grant, links, and only then calls
+  `onLoginSuccess()` — in that order, because that call unmounts the component and
+  takes the dialog and the token with it. Asserted as a sequence in
+  `src/views/Login.linkAccount.test.jsx`.
+- **Opened and closed:** 2026-08-03.
 
 #### TD-3 — 90 lint warnings — **resolved**
 

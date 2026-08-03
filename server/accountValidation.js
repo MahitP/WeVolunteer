@@ -14,8 +14,13 @@
  *
  * Pure: no database access. Uniqueness (email/username already taken) is a
  * property of the data, not of the payload, and stays with the routes.
+ *
+ * `isCurrentPassword` below is the one function here that needs bcrypt. It is
+ * still a rule about a payload rather than a lookup — see its own docstring for
+ * why a hash comparison belongs in this module and not in a route.
  */
 
+import bcrypt from 'bcryptjs';
 import { VALID_GRADES } from './config.js';
 
 /** Roles a person may give themselves. Admin is seeded or promoted, never self-assigned. */
@@ -59,6 +64,49 @@ export function validatePassword(password) {
     };
   }
   return { ok: true };
+}
+
+/**
+ * Whether a candidate password is the one the account already stores.
+ *
+ * ── Why a password rule and not an authorization check ──
+ *
+ * "Choose a different password from the one you have" is policy, in the same
+ * family as the length and character rules above: it constrains what the new
+ * value may be, and it answers the same way whoever is asking. It is NOT the
+ * gate that decides whether the caller may change the password at all — that is
+ * `requireAAL2('password.change')` plus the grant the handler spends, and
+ * conflating the two is exactly what v1.2b removed. `POST
+ * /api/auth/change-password` used to prove the current password inline and then
+ * reuse that same comparison for this rule, so removing the credential check
+ * looked like it should remove the policy too. It should not.
+ *
+ * ── Why it lives here rather than in the route ──
+ *
+ * So that no route module contains a `bcrypt.compare` at all. `authRoutes.js`'s
+ * login is the only place in this application that compares a password to decide
+ * who someone is, and a one-line grep over `server/routes/` is the cheapest way
+ * to keep it that way; a policy rule that happens to need a hash comparison
+ * would defeat that grep while looking, line for line, exactly like the inline
+ * credential checks the refactor deleted.
+ *
+ * ── The sentinel ──
+ *
+ * A provider-only account stores `'!OAUTH_ONLY!'`, which is not a bcrypt hash:
+ * `bcrypt.compare` against it resolves FALSE rather than throwing, which would
+ * read here as "not your current password" — the right answer by luck, since
+ * such an account is setting a first password and has no current one to clash
+ * with. Asserted rather than left to luck, by refusing any hash that is not
+ * bcrypt's `$2…` format. Named by shape, not by the sentinel's value, so this
+ * module needs no import from the routes and stays correct if the sentinel is
+ * ever spelled differently.
+ *
+ * Pure in the sense that matters for this module: no database, no request.
+ */
+export async function isCurrentPassword(candidate, storedHash) {
+  if (typeof candidate !== 'string' || candidate.length === 0) return false;
+  if (typeof storedHash !== 'string' || !storedHash.startsWith('$2')) return false;
+  return bcrypt.compare(candidate, storedHash);
 }
 
 export function validateUsername(username) {

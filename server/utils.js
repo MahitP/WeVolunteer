@@ -2,9 +2,11 @@ import jwt from 'jsonwebtoken';
 import { db } from './db.js';
 import { notificationService } from './services/notificationService.js';
 import { sendNotificationEmail } from './email.js';
-import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, EMAIL_GATE_ALLOWLIST, COOKIE_NAME } from './config.js';
+import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, isEmailGateAllowed, COOKIE_NAME } from './config.js';
 import { principalFor } from './authz.js';
 import { grantsFor } from './userCapabilities.js';
+import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
+import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
 
 /**
  * Whether this specific session has been signed out.
@@ -80,6 +82,65 @@ export function buildPrincipal(userRow, fetchGrants = (id) => grantsFor(db, id))
   return principal;
 }
 
+/**
+ * The lower-cased lookup key for the challenge header.
+ *
+ * The wire name itself is defined once, in `sensitiveActions.js`, so the client
+ * can import the same constant instead of retyping it — see the reasoning in
+ * that file's header, and the guard in `sensitiveActions.test.js` that fails
+ * the build on a second definition. Node lower-cases incoming header names, so
+ * `req.headers` must be indexed with this form and never with the wire form.
+ */
+const REAUTH_CHALLENGE_HEADER_KEY = REAUTH_CHALLENGE_HEADER.toLowerCase();
+
+/**
+ * The action this request has proved a fresh identity for, or null.
+ *
+ * ── Cost ──
+ *
+ * This runs on every authenticated request in the application, so the first
+ * thing it does is establish that there is nothing to look up. A request with
+ * no challenge id issues NO query — same reasoning as `buildPrincipal`'s lazy
+ * grants getter, and the same reason: an unconditional per-request query here
+ * is a tax on the whole API paid by the handful of requests that need it.
+ * `authz.aal.test.js` counts the statements rather than trusting the reading.
+ *
+ * ── The jti case ──
+ *
+ * Every challenge is bound to a session jti when it is opened — `openChallenge`
+ * refuses to create one otherwise, because a grant bound to no session is
+ * spendable by anyone holding the id. Tokens issued before jti existed are
+ * still admitted by `authenticateToken`, and they simply cannot match a bound
+ * grant. That is resolved here as AAL1, before the query and without an
+ * exception; the separate question of what to tell someone on such a token who
+ * tries to START a step-up belongs to the challenge-creation route.
+ *
+ * ── Not consuming ──
+ *
+ * `peekChallenge`, never `consumeChallenge`. Spending the grant here would
+ * burn it on a request the handler may still reject for unrelated reasons.
+ *
+ * `peek` is injectable purely so a test can count calls without going through
+ * db.js; production code never passes it.
+ */
+export function resolveAssurance(
+  { challengeId, userId, sessionJti },
+  peek = (args) => peekChallenge({ db, ...args })
+) {
+  if (!challengeId || typeof challengeId !== 'string') return null;
+  if (!userId || !sessionJti) return null;
+
+  const result = peek({ challengeId, userId });
+  if (!result || !result.ok) return null;
+
+  // The session binding. `peekChallenge` scopes its read to the user; this is
+  // the check that stops a grant obtained in one browser being spent from
+  // another, which is the whole scenario step-up exists for.
+  if (result.challenge.sessionJti !== sessionJti) return null;
+
+  return result.challenge.action;
+}
+
 // --- AUTHENTICATION MIDDLEWARE ---
 export function authenticateToken(req, res, next) {
   const token = req.cookies && req.cookies[COOKIE_NAME];
@@ -123,10 +184,67 @@ export function authenticateToken(req, res, next) {
     // existing handler and test keeps working while call sites migrate.
     req.principal = buildPrincipal(userRow);
 
+    /**
+     * This session's identifier, for the routes that BIND something to it.
+     *
+     * `openChallenge` refuses to create a grant without one, and
+     * `consumeChallenge` re-checks it, so the step-up routes need the value —
+     * and re-verifying the cookie in each of them to recover a claim this
+     * middleware has already verified is both wasted work and a second place
+     * for the verification to be got wrong.
+     *
+     * Explicitly `null`, never absent, for tokens minted before per-session
+     * revocation existed. Those are admitted here — see `isSessionRevoked` — so
+     * the routes that cannot work without a jti have to recognise the case and
+     * say so, rather than throwing. Every code path that mints a session now
+     * goes through `authRoutes.js`'s `issueSession`, which always sets one;
+     * oauthRoutes.js had its own jti-less copy until v1.2b Task 6.
+     */
+    req.sessionJti = decodedUser.jti ?? null;
+
+    /**
+     * The challenge id this request presented, for the handlers that SPEND it.
+     *
+     * `requireAAL2` is an early refusal, not the check: the handler performing a
+     * sensitive action has to call `consumeChallenge` inside its own
+     * transaction, against the action and the params it is actually about to
+     * perform — and to do that it needs the id.
+     *
+     * Read here, once, from the same `REAUTH_CHALLENGE_HEADER_KEY` lookup that
+     * resolves assurance below, and never re-read in a route file. Two spellings
+     * of the header name is one typo away from a handler that gates on a grant
+     * and then consumes nothing: the request succeeds, the grant stays
+     * spendable, and single use — the property that makes a replayed grant not a
+     * second free sensitive action — is silently gone with every test still
+     * green. Same reasoning as `sensitiveActions.js`'s header on why the wire
+     * name has exactly one definition.
+     *
+     * `null` rather than absent for a request that presented nothing, matching
+     * `req.sessionJti` above, so a handler can compare without first asking
+     * whether this middleware ran. A duplicated header arrives comma-joined (a
+     * string that matches no challenge id) and an array-valued one is discarded
+     * by the typeof — both resolve to AAL1, which is the safe direction.
+     */
+    const presentedChallengeId = req.headers[REAUTH_CHALLENGE_HEADER_KEY];
+    req.reauthChallengeId = typeof presentedChallengeId === 'string' ? presentedChallengeId : null;
+
+    // Assurance. Additive to the principal and nothing else — a request that
+    // presents no challenge id leaves it at the AAL1 principalFor() already
+    // built, having touched the database not at all.
+    const aalAction = resolveAssurance({
+      challengeId: req.reauthChallengeId,
+      userId: userRow.id,
+      sessionJti: decodedUser.jti
+    });
+    if (aalAction !== null) {
+      req.principal.aal = 2;
+      req.principal.aalAction = aalAction;
+    }
+
     if (
       REQUIRE_EMAIL_VERIFICATION &&
       userRow.email_verified !== 1 &&
-      !EMAIL_GATE_ALLOWLIST.includes(req.path)
+      !isEmailGateAllowed(req.path)
     ) {
       return res.status(403).json({
         error: 'Please verify your email address to continue.',
@@ -412,6 +530,12 @@ export function runNotificationSweep() {
     const removed = purgeExpiredNotifications(now);
     const revocations = purgeExpiredRevocations(now);
     if (revocations > 0) console.log(`[Sessions] Purged ${revocations} expired revocation(s).`);
+
+    // Step-up challenges: one row per sensitive action a user starts, including
+    // every abandoned one, each carrying an ip_hash. Worthless once expired.
+    const challenges = sweepExpiredChallenges(db, now);
+    if (challenges > 0) console.log(`[Reauth] Purged ${challenges} spent step-up challenge(s).`);
+
     if (removed > 0) {
       console.log(`[Notifications] Cleaned up ${removed} expired notifications.`);
     }

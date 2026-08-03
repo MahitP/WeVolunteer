@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { AlertCircle, ShieldCheck } from 'lucide-react';
+import { takePendingReauth, saveReadyGrant, clearReadyGrant } from '../utils/stepUp';
 
 /**
  * Reads the provider out of the signed `state` the server issued.
@@ -93,6 +94,51 @@ export default function OAuthCallback({ onLoginSuccess, onLinked, addToast }) {
     }
 
     submitted.current = true;
+
+    /**
+     * ── Step-up re-consent lands here too (v1.2b) ──
+     *
+     * A provider's redirect URI is fixed per deployment, so "prove who you are
+     * again" comes back to the same address as an ordinary sign-in. The two must
+     * not be confused: posting a re-verification's code to `/api/oauth/callback`
+     * would be answered as a sign-in attempt, and the grant the user just earned
+     * would never be created.
+     *
+     * `sessionStorage` is what tells them apart, and it is authoritative rather
+     * than a hint: only this tab, having just started a re-verification, can have
+     * written that record. The state itself also carries `purpose: 'reauth'`, and
+     * the server checks it — so a record that has somehow gone stale cannot make
+     * a sign-in state be redeemed as a verification, or the reverse.
+     *
+     * On success the user goes back where they started with the grant recorded,
+     * and presses the button again. Resuming the original action automatically
+     * would mean reconstructing intent — which form, which field values — from
+     * across a full page navigation, and getting that wrong on `account.delete`
+     * is unrecoverable. One deliberate press is the right price.
+     */
+    const pending = takePendingReauth();
+    if (pending?.challengeId) {
+      (async () => {
+        const back = pending.returnTo || '/settings';
+        try {
+          await api.completeReauthOAuth(pending.provider || provider, code, state);
+          saveReadyGrant({
+            action: pending.action,
+            challengeId: pending.challengeId,
+            expiresAt: pending.expiresAt
+          });
+          addToast('Identity verified. Confirm the action to continue.', 'success');
+          navigate(back, { replace: true });
+        } catch (err) {
+          // Deliberately does not strand the user on this screen: the thing they
+          // were doing is elsewhere, and the message belongs next to it.
+          clearReadyGrant();
+          addToast(err?.data?.error || err?.message || 'That verification could not be completed.', 'error');
+          navigate(back, { replace: true });
+        }
+      })();
+      return;
+    }
 
     (async () => {
       try {

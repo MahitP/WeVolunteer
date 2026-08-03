@@ -3,6 +3,8 @@ import { api } from '../../utils/api';
 import { AlertCircle, Link as LinkIcon, Unlink, Check } from 'lucide-react';
 import ProviderMark from '../auth/ProviderMark';
 import ConfirmDialog from '../common/ConfirmDialog';
+import { useStepUp } from '../auth/useStepUp';
+import { STEP_UP } from '../../utils/stepUp';
 
 export default function ConnectedAccounts({ addToast, currentUser }) {
   const [providers, setProviders] = useState([]);
@@ -11,6 +13,10 @@ export default function ConnectedAccounts({ addToast, currentUser }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(null);
   const [confirming, setConfirming] = useState(null); // { id, label } | null
+  // `verifyFirst` for connecting (the grant is carried across the provider
+  // redirect), `run` for disconnecting (an ordinary request that presents the
+  // header and retries once verified).
+  const { run, verifyFirst, modal: verifyModal } = useStepUp();
 
   const load = useCallback(async () => {
     try {
@@ -38,20 +44,43 @@ export default function ConnectedAccounts({ addToast, currentUser }) {
 
   useEffect(() => { load(); }, [load]);
 
+  /**
+   * ── Verify FIRST, then redirect (v1.2b Task 6b) ──
+   *
+   * This is the one gated action that cannot be attempted-then-retried, and the
+   * reason is structural: the link is written by the OAuth callback's
+   * `auto_linked` branch, which arrives mid-redirect back from the provider.
+   * There is no request here to receive a `reauth_required` and repeat, and no
+   * moment during a callback at which the user can be asked for anything.
+   *
+   * So the challenge is opened and satisfied before leaving the page, and its id
+   * is handed to `/api/oauth/:provider/url`, which folds it into the signed
+   * state. The callback spends it in the same transaction as the insert.
+   *
+   * Verifying before the redirect also happens to be the better order for the
+   * user: being sent to Google and only then told to prove who you are would
+   * mean two round trips through a provider for one action.
+   *
+   * The server reads the signed-in user from the session cookie when it builds
+   * the state. That path existed before but could never fire: the server looked
+   * for the user in an Authorization header the client had stopped sending, so
+   * connecting your own Google account to your own signed-in account demanded
+   * your password — or, if the Google address differed from your account
+   * address, dropped you into the signup form while you were already signed in.
+   */
   const handleConnect = async (provider) => {
     setBusy(provider);
     try {
-      /*
-       * The server now reads the signed-in user from the session cookie when
-       * it builds the OAuth state, so coming back from the provider links the
-       * account silently. That path existed before but could never fire: the
-       * server looked for the user in an Authorization header the client had
-       * stopped sending, so connecting your own Google account to your own
-       * signed-in account demanded your password — or, if the Google address
-       * differed from your account address, dropped you into the signup form
-       * while you were already signed in.
-       */
-      const { url } = await api.startOAuth(provider);
+      const challengeId = await verifyFirst(STEP_UP.OAUTH_LINK, { provider });
+
+      // Dismissed the verification. Nothing has been started, so there is
+      // nothing to undo and nothing to apologise for.
+      if (!challengeId) {
+        setBusy(null);
+        return;
+      }
+
+      const { url } = await api.startOAuth(provider, undefined, challengeId);
       window.location.href = url;
     } catch (err) {
       addToast(err.message || `Could not start connecting ${provider}.`, 'error');
@@ -59,10 +88,31 @@ export default function ConnectedAccounts({ addToast, currentUser }) {
     }
   };
 
+  /**
+   * ── Why removing a provider verifies (v1.2b audit, F-2) ──
+   *
+   * Connecting one has required verification since Task 6; disconnecting is the
+   * same credential change in the opposite direction and asked for nothing. The
+   * server's last-credential guard stops someone stranding themselves, but it
+   * does not stop a borrowed session stripping a provider off an account that
+   * still has a password — which costs the account holder the sign-in route
+   * they actually use, and one of the two ways they could satisfy any later
+   * verification.
+   *
+   * The grant binds `provider`, matching the connect flow, so verifying to
+   * remove one provider cannot remove another.
+   */
   const handleDisconnect = async ({ id, label }) => {
     setBusy(id);
     try {
-      await api.disconnectOAuth(id);
+      const res = await run(
+        STEP_UP.OAUTH_UNLINK,
+        { provider: id },
+        headers => api.disconnectOAuth(id, headers)
+      );
+      // `run` resolves null when the person closes the verification dialog.
+      if (!res) return;
+
       addToast(`${label} disconnected.`, 'success');
       setConfirming(null);
       await load();
@@ -188,6 +238,7 @@ export default function ConnectedAccounts({ addToast, currentUser }) {
           </p>
         </ConfirmDialog>
       )}
+      {verifyModal}
     </section>
   );
 }

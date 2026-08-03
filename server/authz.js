@@ -112,8 +112,18 @@ const SUPER_ONLY_SET = new Set(SUPER_ONLY);
  *
  * `effectiveRole` is separate from `actualRole` so impersonation (v2.0) is a
  * change of the effective role only — never a second role on the account.
+ *
+ * `aal` and `aalAction` travel together and are meaningless apart. AAL2 is
+ * never a general property of a session — it is always "this request proved
+ * identity, for THIS action" — so the field naming the action defaults to null
+ * and is always present, rather than appearing only on re-verified requests.
+ * An always-present field is one `requireAAL2` can compare without first
+ * asking whether assurance resolution ran at all.
  */
-export function principalFor(userRow, { grants = [], aal = 1, actorId = null, effectiveRole = null } = {}) {
+export function principalFor(
+  userRow,
+  { grants = [], aal = 1, aalAction = null, actorId = null, effectiveRole = null } = {}
+) {
   if (!userRow) return null;
   return {
     userId: userRow.id,
@@ -122,6 +132,7 @@ export function principalFor(userRow, { grants = [], aal = 1, actorId = null, ef
     actorId,
     grants,
     aal,
+    aalAction,
     impersonating: Boolean(actorId),
   };
 }
@@ -196,6 +207,56 @@ export function requireCapAny(capabilities) {
     if (!req.principal) return res.status(401).json({ error: 'Access token required' });
     if (!capabilities.some((capability) => can(req.principal, capability))) {
       return res.status(403).json({ error: 'Access denied' });
+    }
+    return next();
+  };
+}
+
+/**
+ * Requires a fresh proof of identity for this action.
+ *
+ * Mounted after authenticateToken and after any requireCap — capability first
+ * ("may this kind of actor ever do this"), then assurance ("prove it is still
+ * you"). Reversing them tells an unauthorised caller that re-verifying might
+ * help, which it never would.
+ *
+ * ── Why `code: 'reauth_required'` and not a bare 403 ──
+ *
+ * A bare 403 says "you may never do this". This one says "prove yourself and
+ * try again", and those are different instructions for the client: one is a
+ * dead end, the other is a prompt. Conflating them means the UI either offers
+ * re-verification for genuinely forbidden actions or offers nothing for
+ * recoverable ones.
+ *
+ * ── Why the action is compared, not merely the level ──
+ *
+ * Assurance is never a property of a session, only of a request: a grant
+ * proves identity for ONE action. Checking `aal >= 2` alone would let a
+ * verification obtained to change an email address delete the account instead.
+ * `aalAction` is what `authenticateToken` resolved this request's grant to be
+ * for, and it must be this route's action.
+ *
+ * This gate is not the authority on params, and does not pretend to be —
+ * `consumeChallenge`, inside the handler's transaction, re-checks the action,
+ * the params, the session and single use before the work is allowed to land.
+ * This is the cheap early refusal that keeps the handler from starting.
+ *
+ * `action` is validated against the sensitive-action registry at the CALL SITE
+ * in route files, not here: importing sensitiveActions.js would cost this
+ * module its zero-imports property, which authz.test.js asserts and which is
+ * what lets src/authz.js mirror the table into the client bundle.
+ *
+ * Pure: reads a value already resolved onto the principal and performs no I/O.
+ */
+export function requireAAL2(action) {
+  // Thrown at module load, not per request. A gate built with no action would
+  // compare `undefined` against `principal.aalAction` and refuse every caller
+  // forever — a route that is 403 for everyone, discovered in production.
+  if (!action) throw new Error('requireAAL2: an action is required');
+  return function assuranceGate(req, res, next) {
+    if (!req.principal) return res.status(401).json({ error: 'Access token required' });
+    if (req.principal.aal < 2 || req.principal.aalAction !== action) {
+      return res.status(403).json({ error: 'Identity verification required', code: 'reauth_required', action });
     }
     return next();
   };

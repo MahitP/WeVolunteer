@@ -4,7 +4,24 @@ export default {
   id: 'microsoft',
   label: 'Microsoft',
 
-  getAuthUrl(state) {
+  /**
+   * `forceReauth` forces a genuine re-authentication for step-up (v1.2b).
+   *
+   * `prompt=login` is the Microsoft identity platform's documented instruction
+   * to re-authenticate rather than answer from an existing session. Without it
+   * a re-verification redirect returns immediately with a fresh assertion built
+   * on an old sign-in, which proves nothing beyond what the stolen session
+   * already proved.
+   *
+   * `max_age` is deliberately NOT sent here, unlike google.js. Google is the
+   * provider where the two are worth pairing; Microsoft honours `prompt=login`
+   * directly, and adding an OIDC parameter that has not been verified against a
+   * real tenant would be a guess dressed up as a hardening measure. If this
+   * flow is ever exercised against a live Azure tenant, `max_age=0` is the
+   * first thing to try adding, and `routes.reauth.test.js` is where the
+   * assertion goes.
+   */
+  getAuthUrl(state, { forceReauth = false } = {}) {
     const params = new URLSearchParams({
       client_id: MICROSOFT_CLIENT_ID,
       response_type: 'code',
@@ -17,7 +34,7 @@ export default {
       response_mode: 'query',
       scope: 'openid profile email User.Read',
       state,
-      prompt: 'select_account'
+      prompt: forceReauth ? 'login' : 'select_account'
     });
     return `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params.toString()}`;
   },

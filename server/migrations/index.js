@@ -11,8 +11,9 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import authzRoles from './001_authz_roles.js';
 import userCapabilities from './002_user_capabilities.js';
+import reauthChallenges from './003_reauth_challenges.js';
 
-export const MIGRATIONS = [authzRoles, userCapabilities];
+export const MIGRATIONS = [authzRoles, userCapabilities, reauthChallenges];
 
 const label = (m) => `${m.version}_${m.name}`;
 

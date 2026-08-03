@@ -2,29 +2,86 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 
 /**
- * Changing the email address and the username (audit findings U2, U3).
+ * Changing the email address, the password, and the username (audit findings
+ * U2, U3, plus v1.2b Task 6).
  *
- * Neither was possible before. That mattered most on the verification wall,
- * which told anyone who mistyped their address to "sign out and create your
+ * None of the three was possible before. That mattered most on the verification
+ * wall, which told anyone who mistyped their address to "sign out and create your
  * account again with the right address" — advice that cannot work, because the
  * abandoned account keeps both the mistyped email and the username, so the
  * second attempt can reuse neither.
+ *
+ * ── What step-up changed here ──
+ *
+ * `change-email` and `change-password` each proved a password inline, and each
+ * exempted a provider-only account from proving anything (it had no password to
+ * offer). Both are now behind `requireAAL2`, satisfied by a password OR by
+ * provider re-consent, and the grant is spent inside the handler's transaction.
+ * The tests below therefore drive a real challenge rather than sending a
+ * password field.
+ *
+ * `change-username` is deliberately NOT behind step-up: it is reversible, it
+ * authenticates nothing, and it has a 30-day cooldown. Its tests are unchanged,
+ * which is the point — the registry is a closed set, not a policy applied to
+ * everything that looks sensitive.
  */
 
 let srv;
 beforeAll(async () => {
   process.env.REQUIRE_EMAIL_VERIFICATION = 'true';
+  // The provider-only paths below have no password to verify with.
+  process.env.OAUTH_ALLOW_MOCK = 'true';
   const { startTestServer } = await import('./testServer.js');
   srv = await startTestServer();
 });
 afterAll(async () => {
   await srv?.close?.();
   delete process.env.REQUIRE_EMAIL_VERIFICATION;
+  delete process.env.OAUTH_ALLOW_MOCK;
 });
 
 const rnd = () => Math.random().toString(36).slice(2, 9);
 
 const openDb = () => new DatabaseSync(process.env.WEV_DB_PATH);
+
+/**
+ * Changes the email address, presenting a grant bound to that same address.
+ *
+ * The bound value is the raw string the request body carries, because that is
+ * what `POST /api/auth/reauth/challenge` hashed — see the note on the handler.
+ * `bindTo` exists so a test can deliberately bind something else.
+ */
+async function changeEmail(cookie, newEmail, { password = 'Password123', bindTo = newEmail } = {}) {
+  const challengeId = await srv.stepUp(cookie, 'email.change', { params: { newEmail: bindTo }, password });
+  const res = await srv.call('POST', '/api/auth/change-email', { newEmail }, cookie, srv.reauthHeader(challengeId));
+  return { ...res, challengeId };
+}
+
+/** A provider-only account, created the way the OAuth signup flow creates one. */
+async function makeProviderOnlyUser(over = {}) {
+  const email = over.email ?? `prov-${rnd()}@example.org`;
+  const username = over.username ?? `prov_${rnd()}`;
+  const sub = `sub-${username}`;
+
+  const urlRes = await srv.call('POST', '/api/oauth/google/url', {
+    signupData: { name: 'Provider Person', username, role: 'student', grade: '10', skills: [] }
+  });
+  const state = new URL(urlRes.body.url).searchParams.get('state');
+  const nonceCookie = (urlRes.headers.get('set-cookie') || '').match(/(wev_oauth_state_[a-f0-9]{8}=[^;]+)/)?.[1];
+
+  const cbRes = await fetch(`${srv.base}/api/oauth/google/callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: nonceCookie },
+    body: JSON.stringify({
+      code: JSON.stringify({ email, sub, name: 'Provider Person', emailVerified: true }),
+      state
+    })
+  });
+  if (cbRes.status !== 200) throw new Error(`provider signup failed: ${cbRes.status}`);
+  const cookie = (cbRes.headers.get('set-cookie') || '').match(/wev_session=([^;]+)/)?.[1];
+  const user = (await cbRes.json()).user;
+  return { cookie, user, sub, email };
+}
 
 /** The live email-change token for a user, read straight from the database. */
 function changeTokenFor(userId) {
@@ -51,7 +108,7 @@ describe('U2 — changing the email address', () => {
     const { cookie, user } = await makeUser();
     const target = `moved-${rnd()}@example.org`;
 
-    const res = await srv.call('POST', '/api/auth/change-email', { newEmail: target, password: 'Password123' }, cookie);
+    const res = await changeEmail(cookie, target);
     expect(res.status).toBe(200);
     expect(res.body.pending).toBe(target);
 
@@ -66,7 +123,7 @@ describe('U2 — changing the email address', () => {
     const { cookie, user } = await makeUser();
     const target = `moved-${rnd()}@example.org`;
 
-    await srv.call('POST', '/api/auth/change-email', { newEmail: target, password: 'Password123' }, cookie);
+    await changeEmail(cookie, target);
     const { token } = changeTokenFor(user.id);
 
     const res = await srv.call('POST', '/api/auth/confirm-email-change', { token });
@@ -81,7 +138,7 @@ describe('U2 — changing the email address', () => {
 
   it('burns the token — a confirmation link works exactly once', async () => {
     const { cookie, user } = await makeUser();
-    await srv.call('POST', '/api/auth/change-email', { newEmail: `once-${rnd()}@example.org`, password: 'Password123' }, cookie);
+    await changeEmail(cookie, `once-${rnd()}@example.org`);
     const { token } = changeTokenFor(user.id);
 
     expect((await srv.call('POST', '/api/auth/confirm-email-change', { token })).status).toBe(200);
@@ -92,7 +149,7 @@ describe('U2 — changing the email address', () => {
     const { cookie, user } = await makeUser();
     const other = await srv.login(user.email, 'Password123');
 
-    await srv.call('POST', '/api/auth/change-email', { newEmail: `sess-${rnd()}@example.org`, password: 'Password123' }, cookie);
+    await changeEmail(cookie, `sess-${rnd()}@example.org`);
     const { token } = changeTokenFor(user.id);
     await srv.call('POST', '/api/auth/confirm-email-change', { token });
 
@@ -104,33 +161,129 @@ describe('U2 — changing the email address', () => {
     expect(stale.status).toBe(401);
   });
 
-  it('requires the current password when the account has one', async () => {
+  it('refuses a request presenting no verification at all', async () => {
     const { cookie } = await makeUser();
 
-    const noPassword = await srv.call('POST', '/api/auth/change-email', { newEmail: `np-${rnd()}@example.org` }, cookie);
-    expect(noPassword.status).toBe(400);
-    expect(noPassword.body.field).toBe('password');
+    const res = await srv.call('POST', '/api/auth/change-email', { newEmail: `np-${rnd()}@example.org` }, cookie);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('reauth_required');
+    expect(res.body.action).toBe('email.change');
+  });
 
-    const wrongPassword = await srv.call('POST', '/api/auth/change-email',
-      { newEmail: `wp-${rnd()}@example.org`, password: 'NotMyPassword1' }, cookie);
-    expect(wrongPassword.status).toBe(401);
+  it('refuses a grant obtained for a different action', async () => {
+    const { cookie } = await makeUser();
+    const target = `crossaction-${rnd()}@example.org`;
+
+    // A live, correctly granted, correctly session-bound challenge — for
+    // something else. This is the binding that stops "verify to change your
+    // email" deleting your account, read in the other direction.
+    const forDelete = await srv.stepUp(cookie, 'account.delete', { password: 'Password123' });
+
+    const res = await srv.call('POST', '/api/auth/change-email',
+      { newEmail: target }, cookie, srv.reauthHeader(forDelete));
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('reauth_required');
+    expect(res.body.action).toBe('email.change');
+  });
+
+  /**
+   * The params binding — the one most step-up implementations forget, and the one
+   * somebody holding a stolen session would actually reach for.
+   *
+   * Verifying in order to move the address to a@x.com must not authorise moving
+   * it to the attacker's. `requireAAL2` cannot catch this: it resolves assurance
+   * before the body is the handler's concern, and it only compares the ACTION.
+   * The refusal has to come from `consumeChallenge`, inside the handler's
+   * transaction, hashing the params of the request actually being performed.
+   */
+  it('refuses a grant bound to a different address than the request carries', async () => {
+    const { cookie, user } = await makeUser();
+    const verifiedFor = `intended-${rnd()}@example.org`;
+    const attacker = `attacker-${rnd()}@example.org`;
+
+    const res = await changeEmail(cookie, attacker, { bindTo: verifiedFor });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('params_mismatch');
+
+    // Nothing pending: the substituted address was never written anywhere.
+    expect(changeTokenFor(user.id)).toBeUndefined();
+  });
+
+  it('spends the grant exactly once', async () => {
+    const { cookie } = await makeUser();
+    const target = `single-${rnd()}@example.org`;
+
+    const challengeId = await srv.stepUp(cookie, 'email.change', { params: { newEmail: target }, password: 'Password123' });
+
+    const first = await srv.call('POST', '/api/auth/change-email',
+      { newEmail: target }, cookie, srv.reauthHeader(challengeId));
+    expect(first.status).toBe(200);
+
+    /**
+     * The same request again, with the same challenge id.
+     *
+     * A grant that survived its own use would be a second free sensitive action
+     * for the rest of its five minutes — here, a second address able to claim
+     * the account. Once consumed, `peekChallenge` no longer reports it as live,
+     * so assurance resolves to AAL1 and the gate answers `reauth_required`.
+     */
+    const replay = await srv.call('POST', '/api/auth/change-email',
+      { newEmail: target }, cookie, srv.reauthHeader(challengeId));
+    expect(replay.status).toBe(403);
+    expect(replay.body.code).toBe('reauth_required');
+  });
+
+  /**
+   * The user-visible win. A provider-only account had no password to prove, so
+   * this endpoint exempted it from proving anything at all — a live session was
+   * enough to start moving the account's recovery channel elsewhere. It now
+   * re-authenticates at its provider instead.
+   */
+  it('lets a provider-only account change its address via OAuth re-consent', async () => {
+    const { cookie, user, sub } = await makeProviderOnlyUser();
+    const target = `provmoved-${rnd()}@example.org`;
+
+    const opened = await srv.call('POST', '/api/auth/reauth/challenge',
+      { action: 'email.change', params: { newEmail: target } }, cookie);
+    expect(opened.status).toBe(201);
+    // No password prompt is offered, because there is no password to answer it.
+    expect(opened.body.methods).toEqual(['oauth']);
+
+    const challengeId = await srv.stepUpOAuth(cookie, 'email.change', {
+      params: { newEmail: target }, sub
+    });
+    const res = await srv.call('POST', '/api/auth/change-email',
+      { newEmail: target }, cookie, srv.reauthHeader(challengeId));
+    expect(res.status).toBe(200);
+    expect(res.body.pending).toBe(target);
+
+    const { token } = changeTokenFor(user.id);
+    const confirmed = await srv.call('POST', '/api/auth/confirm-email-change', { token });
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.user.email).toBe(target);
   });
 
   it('refuses an address another account already uses', async () => {
     const { cookie } = await makeUser();
     const other = await makeUser();
 
-    const res = await srv.call('POST', '/api/auth/change-email',
-      { newEmail: other.user.email, password: 'Password123' }, cookie);
+    const res = await changeEmail(cookie, other.user.email);
     expect(res.status).toBe(409);
     expect(res.body.field).toBe('newEmail');
+
+    // Refused before the grant was spent, so the user can try a different
+    // address without verifying again.
+    const db = openDb();
+    const row = db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(res.challengeId);
+    db.close();
+    expect(row.consumed_at).toBeNull();
   });
 
   it('refuses an address claimed while the request was open', async () => {
     const { cookie, user } = await makeUser();
     const target = `race-${rnd()}@example.org`;
 
-    await srv.call('POST', '/api/auth/change-email', { newEmail: target, password: 'Password123' }, cookie);
+    await changeEmail(cookie, target);
     const { token } = changeTokenFor(user.id);
 
     // Somebody else registers that address during the 24-hour window.
@@ -143,21 +296,19 @@ describe('U2 — changing the email address', () => {
   it('rejects a malformed address and its own current one', async () => {
     const { cookie, user } = await makeUser();
 
-    expect((await srv.call('POST', '/api/auth/change-email',
-      { newEmail: 'not-an-address', password: 'Password123' }, cookie)).status).toBe(400);
+    expect((await changeEmail(cookie, 'not-an-address')).status).toBe(400);
 
-    const same = await srv.call('POST', '/api/auth/change-email',
-      { newEmail: user.email.toUpperCase(), password: 'Password123' }, cookie);
+    const same = await changeEmail(cookie, user.email.toUpperCase());
     expect(same.status).toBe(400);
   });
 
   it('supersedes a previous request rather than leaving two live links', async () => {
     const { cookie, user } = await makeUser();
 
-    await srv.call('POST', '/api/auth/change-email', { newEmail: `first-${rnd()}@example.org`, password: 'Password123' }, cookie);
+    await changeEmail(cookie, `first-${rnd()}@example.org`);
     const first = changeTokenFor(user.id);
 
-    await srv.call('POST', '/api/auth/change-email', { newEmail: `second-${rnd()}@example.org`, password: 'Password123' }, cookie);
+    await changeEmail(cookie, `second-${rnd()}@example.org`);
     const second = changeTokenFor(user.id);
 
     expect(second.token).not.toBe(first.token);
@@ -170,7 +321,7 @@ describe('U2 — changing the email address', () => {
     const { cookie } = await makeUser();
     const target = `cancel-${rnd()}@example.org`;
 
-    await srv.call('POST', '/api/auth/change-email', { newEmail: target, password: 'Password123' }, cookie);
+    await changeEmail(cookie, target);
 
     const before = await srv.call('GET', '/api/auth/pending-email-change', undefined, cookie);
     expect(before.body.pending).toBe(target);
@@ -204,10 +355,18 @@ describe('U2 — changing the email address', () => {
     expect(gated.status).toBe(403);
     expect(gated.body.code).toBe('email_unverified');
 
-    // But correcting the address is not.
+    /**
+     * But correcting the address is not — and NEITHER is proving who you are.
+     *
+     * v1.2b Task 6 put this endpoint behind `requireAAL2`, which means it can no
+     * longer be reached without first opening and satisfying a challenge. If the
+     * step-up routes were outside the gate, this test would 403 on the challenge
+     * and the only door the gate is deliberately escapable through would have
+     * quietly closed for exactly the account it exists for. See
+     * `EMAIL_GATE_ALLOWLIST_PREFIXES` in config.js.
+     */
     const target = `fixed-${rnd()}@example.org`;
-    const fix = await srv.call('POST', '/api/auth/change-email',
-      { newEmail: target, password: 'Password123' }, cookie);
+    const fix = await changeEmail(cookie, target);
     expect(fix.status).toBe(200);
 
     const { token } = changeTokenFor(signup.body.user.id);
@@ -218,6 +377,142 @@ describe('U2 — changing the email address', () => {
     // And the account is now free of the gate.
     const ungated = await srv.call('GET', '/api/events', undefined, confirmed.cookie);
     expect(ungated.status).toBe(200);
+  });
+});
+
+/**
+ * `POST /api/auth/change-password` had no test coverage at all before v1.2b Task
+ * 6 — it is added here because this is where identity changes are tested and
+ * because the repo requires tests for any auth change.
+ */
+describe('changing the password', () => {
+  const changePassword = async (cookie, newPassword, { password = 'Password123' } = {}) => {
+    const challengeId = await srv.stepUp(cookie, 'password.change', { password });
+    return srv.call('POST', '/api/auth/change-password', { newPassword }, cookie, srv.reauthHeader(challengeId));
+  };
+
+  it('changes the password, and the new one can sign in', async () => {
+    const { cookie, user } = await makeUser();
+
+    const res = await changePassword(cookie, 'BrandNewPass1');
+    expect(res.status).toBe(200);
+    expect(res.body.addedPassword).toBe(false);
+
+    expect((await srv.call('POST', '/api/auth/login', { email: user.email, password: 'BrandNewPass1' })).status).toBe(200);
+    // And the old one no longer does.
+    expect((await srv.call('POST', '/api/auth/login', { email: user.email, password: 'Password123' })).status).toBe(401);
+  });
+
+  it('signs every OTHER session out, but not the one doing it', async () => {
+    const { cookie, user } = await makeUser();
+    const other = await srv.login(user.email, 'Password123');
+
+    const res = await changePassword(cookie, 'BrandNewPass1');
+    expect(res.status).toBe(200);
+
+    // token_version invalidated everything; the caller is handed a fresh session
+    // so that changing a password does not eject the person doing it.
+    expect((await srv.call('GET', '/api/auth/me', undefined, res.cookie)).status).toBe(200);
+    expect((await srv.call('GET', '/api/auth/me', undefined, other)).status).toBe(401);
+  });
+
+  it('refuses a request presenting no verification at all', async () => {
+    const { cookie } = await makeUser();
+
+    const res = await srv.call('POST', '/api/auth/change-password', { newPassword: 'BrandNewPass1' }, cookie);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('reauth_required');
+    expect(res.body.action).toBe('password.change');
+  });
+
+  it('refuses a grant obtained for a different action', async () => {
+    const { cookie } = await makeUser();
+    const forDelete = await srv.stepUp(cookie, 'account.delete', { password: 'Password123' });
+
+    const res = await srv.call('POST', '/api/auth/change-password',
+      { newPassword: 'BrandNewPass1' }, cookie, srv.reauthHeader(forDelete));
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('reauth_required');
+    expect(res.body.action).toBe('password.change');
+  });
+
+  it('spends the grant exactly once', async () => {
+    const { cookie } = await makeUser();
+    const challengeId = await srv.stepUp(cookie, 'password.change', { password: 'Password123' });
+
+    const first = await srv.call('POST', '/api/auth/change-password',
+      { newPassword: 'BrandNewPass1' }, cookie, srv.reauthHeader(challengeId));
+    expect(first.status).toBe(200);
+
+    // The reissued session is the only live one, so the replay uses it — proving
+    // the refusal is about the spent grant and not about a stale cookie.
+    const replay = await srv.call('POST', '/api/auth/change-password',
+      { newPassword: 'AnotherPass2' }, cookie, srv.reauthHeader(challengeId));
+    expect(replay.status).not.toBe(200);
+
+    const db = openDb();
+    const row = db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
+    db.close();
+    expect(row.consumed_at).not.toBeNull();
+  });
+
+  /**
+   * Password POLICY survives the refactor, which is the easy thing to get wrong.
+   *
+   * The rule "choose a different password from the one you have" was implemented
+   * with the same `bcrypt.compare` that proved the current password, so deleting
+   * the credential check looks like it should delete the rule. It should not:
+   * one is authorization, the other is policy, and the second still applies.
+   */
+  it('still refuses re-setting the password it already has', async () => {
+    const { cookie } = await makeUser();
+
+    const res = await changePassword(cookie, 'Password123');
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('newPassword');
+    expect(res.body.error).toMatch(/already your password/i);
+  });
+
+  it('still applies the signup password rules', async () => {
+    const { cookie } = await makeUser();
+
+    const weak = await changePassword(cookie, 'aaaaaaaa');
+    expect(weak.status).toBe(400);
+    expect(weak.body.field).toBe('newPassword');
+
+    const missing = await srv.call('POST', '/api/auth/change-password', {}, cookie);
+    // The gate is checked before the body, so a request with neither is refused
+    // for the reason the client can act on first.
+    expect(missing.status).toBe(403);
+  });
+
+  /**
+   * The capability a provider-only account gains.
+   *
+   * It could not set a first password before: the endpoint's only proof was the
+   * current password, which it did not have, and the workaround was to exempt it
+   * from proving anything at all. Re-consent is a real credential check, so the
+   * exemption is gone and the capability is real.
+   */
+  it('lets a provider-only account set a FIRST password via OAuth re-consent', async () => {
+    const { cookie, email, sub } = await makeProviderOnlyUser();
+
+    const opened = await srv.call('POST', '/api/auth/reauth/challenge',
+      { action: 'password.change', params: {} }, cookie);
+    expect(opened.status).toBe(201);
+    expect(opened.body.methods).toEqual(['oauth']);
+
+    const challengeId = await srv.stepUpOAuth(cookie, 'password.change', { sub });
+    const res = await srv.call('POST', '/api/auth/change-password',
+      { newPassword: 'FirstPassword1' }, cookie, srv.reauthHeader(challengeId));
+    expect(res.status).toBe(200);
+    // Reported distinctly, because "password added" and "password changed" are a
+    // different sentence to the person reading them.
+    expect(res.body.addedPassword).toBe(true);
+
+    // And the account can now sign in without its provider at all — which is
+    // what makes `disconnect`'s last-credential guard releasable.
+    expect((await srv.call('POST', '/api/auth/login', { email, password: 'FirstPassword1' })).status).toBe(200);
   });
 });
 
