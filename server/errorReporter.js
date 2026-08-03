@@ -423,6 +423,99 @@ export function recordError(db, event = {}) {
   }
 }
 
+/* ── Retention ─────────────────────────────────────────────────────────── */
+
+/** Evidence is kept a month. Long enough to investigate, short enough to forget. */
+export const EVENT_RETENTION_DAYS = 30;
+
+/** A problem someone has already dealt with. */
+export const CLOSED_GROUP_RETENTION_DAYS = 30;
+
+/** A problem nobody has dealt with. Kept far longer, because it is still true. */
+export const OPEN_GROUP_RETENTION_DAYS = 180;
+
+/**
+ * A client group seen exactly once.
+ *
+ * This is the rule that drains a flood. Every fingerprint an attacker forges is
+ * single-occurrence by construction — they send a distinct message and never
+ * repeat it — so 500 forged groups would otherwise sit in the table for the full
+ * 180 days, having been created in a few seconds.
+ *
+ * The cost is stated rather than hidden: a GENUINE client bug seen exactly once
+ * is also deleted after a week. That is the trade the plan made deliberately —
+ * "a real client bug recurs; a forged one does not" — and it is the right way
+ * round, because the alternative is letting a minute of hostile traffic decide
+ * six months of table contents.
+ */
+export const SINGLE_CLIENT_GROUP_RETENTION_DAYS = 7;
+
+/**
+ * Deletes error data whose retention window has closed. Never throws.
+ *
+ * ── Where this runs ──
+ *
+ * From `runNotificationSweep` in `utils.js`, beside `sweepExpiredChallenges`.
+ * No new interval, no new worker, no new process, and nothing added to
+ * `shutdown.js` — the existing 15-minute timer is already registered there, and
+ * a second one would be a second thing to drain.
+ *
+ * ── Why it cannot throw ──
+ *
+ * `runNotificationSweep` wraps its ENTIRE body in one try/catch, so an
+ * exception here would abandon every sweep task registered after it, not just
+ * this one. Catching internally keeps the failure local: this sweep does
+ * nothing that run, the others still happen, and the next tick tries again.
+ *
+ * ── What it will not do ──
+ *
+ * Only DELETE. It creates no row, so it cannot resurrect the `client-overflow`
+ * counter or anything else; and it updates no `status`, so it cannot reopen a
+ * group somebody closed. Groups are the source of truth: none is deleted for
+ * having no retained events, and no group's fate is decided by evidence that
+ * may already have expired.
+ */
+export function sweepErrors(db, now = new Date()) {
+  const empty = { groups: 0, events: 0 };
+  try {
+    if (!db || typeof db.prepare !== 'function') return { ...empty, failed: true };
+
+    const cutoff = (days) => new Date(now.getTime() - days * 86_400_000).toISOString();
+
+    // Groups first: each delete cascades to its own evidence, so the event pass
+    // below is left with only the rows whose group is still alive.
+    const closed = db.prepare(`
+      DELETE FROM error_groups
+       WHERE status IN ('resolved', 'ignored') AND last_seen_at < ?
+    `).run(cutoff(CLOSED_GROUP_RETENTION_DAYS)).changes;
+
+    // `<= 1` rather than `= 1`: a group written by a partially-failed record
+    // could hold 0, and leaving it forever would be the one row this rule exists
+    // to remove.
+    const singles = db.prepare(`
+      DELETE FROM error_groups
+       WHERE source = 'client' AND occurrences <= 1 AND last_seen_at < ?
+    `).run(cutoff(SINGLE_CLIENT_GROUP_RETENTION_DAYS)).changes;
+
+    const stale = db.prepare(`
+      DELETE FROM error_groups
+       WHERE status = 'open' AND last_seen_at < ?
+    `).run(cutoff(OPEN_GROUP_RETENTION_DAYS)).changes;
+
+    // Evidence older than its window, for groups that survived above. The
+    // group keeps its counter: "this happened 4,000 times" outlives the
+    // stacks, which is the whole reason the two tables are separate.
+    const events = db.prepare(
+      'DELETE FROM error_events WHERE occurred_at < ?'
+    ).run(cutoff(EVENT_RETENTION_DAYS)).changes;
+
+    return { groups: closed + singles + stale, events };
+  } catch (err) {
+    try { console.error('[errorReporter] retention sweep failed:', err?.message ?? err); } catch { /* nothing left to try */ }
+    return { ...empty, failed: true };
+  }
+}
+
 /** The reserved counter row. Best-effort by the same rule as everything here. */
 function recordOverflow(db, now) {
   try {
