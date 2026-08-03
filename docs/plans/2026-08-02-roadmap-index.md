@@ -25,12 +25,12 @@ an instruction set** — see §4 below on why you must not trust it uncritically
 
 ```
 export PATH="/usr/local/bin:$PATH"   # see §3 — this line is not optional
-npm test        # 1692 tests, 115 files, 0 failures
+npm test        # 1706 tests, 117 files, 0 failures
 npm run lint    # clean
 npm run build   # clean
 ```
 
-If your numbers are lower than 1692, you are either on a stale checkout or on
+If your numbers are lower than 1706, you are either on a stale checkout or on
 the wrong Node.
 
 ---
