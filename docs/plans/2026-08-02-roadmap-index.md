@@ -11,7 +11,7 @@ first, then the plan for the release you are working on.
 | Release | Contents | State |
 |---|---|---|
 | **v1.2a** | Capability authorization kernel, versioned migration registry | **Merged to `main`** as `bd00c6d` |
-| **v1.2b** | Step-up re-authentication (AAL2) | **Complete on `feat/v1.2b-step-up-auth`, unmerged, unpushed** |
+| **v1.2b** | Step-up re-authentication (AAL2) | **Merged to `main`** as `4c01995` (a `--no-ff` merge commit; the forty-one commits underneath it are the audit trail and are meant to be read) |
 | **v1.2c** | Error monitoring | Planned — `2026-08-02-v1.2c-error-monitoring.md` |
 | **v1.3** | Email delivery tracking + PWA | Planned — `2026-08-02-v1.3-trust-and-reach.md` |
 | **v1.4** | Taxonomy, dashboards, maps/weather | Planned — `2026-08-02-v1.4-meaning.md` |

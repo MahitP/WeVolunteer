@@ -19,6 +19,17 @@ import { SENSITIVE_ACTIONS } from './sensitiveActions.js';
  *   5. Every `requireAAL2` gate is paired with a `spendChallenge` for the same
  *      action, and every registered action has a gate. The gate is an early
  *      refusal; the spend is what makes a grant single-use.
+ *   6. Every direct `consumeChallenge` call is declared. Guard 5 only recognises
+ *      the `spendChallenge(db, req, …)` shape, which the OAuth callback cannot
+ *      use — it is reached mid-redirect with no session on the request — so its
+ *      spend was invisible to Guard 5 (TD-16). Direct calls are enumerated
+ *      rather than banned, so adding one is the moment it has to be justified.
+ *
+ * This header listed five for a while after the sixth was added, which is the
+ * defect the branch's own audit kept finding in other files: the code was right
+ * and the prose describing it was not. A guard that exists but is undocumented
+ * is the inverse of a comment claiming a check that is missing, and it fails the
+ * same way — the next reader trusts the list.
  *
  * No guard touches production code. Every declaration is a decision verified by
  * reading the code, not a bulk-pasted allowlist — see task-8-report.md and
