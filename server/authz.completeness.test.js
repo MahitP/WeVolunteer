@@ -580,7 +580,7 @@ describe('authorization hygiene', () => {
       'GET /api/favorites': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
       'POST /api/favorites/:eventId': { category: CATEGORY.SELF_ONLY, reason: 'insert/delete scoped to caller\'s own id' },
       'GET /api/oauth/accounts': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
-      'POST /api/oauth/disconnect': { category: CATEGORY.SELF_ONLY, reason: 'delete scoped to caller\'s own id' },
+      'POST /api/oauth/disconnect': { category: CATEGORY.SELF_ONLY, reason: 'delete scoped to caller\'s own id; behind requireAAL2(\'oauth.unlink\') with the provider bound, mirroring /api/oauth/link — removing a credential is a credential change (v1.2b audit F-2). The last-credential guard is checked BEFORE the grant is spent' },
       /**
        * Newly authenticated in v1.2b Task 6 — it was an UNauthenticated route
        * whose only tie to an account was a 15-minute link token naming a
@@ -593,7 +593,7 @@ describe('authorization hygiene', () => {
       'POST /api/oauth/link': { category: CATEGORY.SELF_ONLY, reason: 'link token must name the caller (403 otherwise, oauthRoutes.js); the oauth_accounts insert is scoped to req.user.id, and the route is behind requireAAL2(\'oauth.link\') with the provider bound' },
       'POST /api/privacy/export': { category: CATEGORY.SELF_ONLY, reason: 'insert scoped to caller\'s own id' },
       'GET /api/privacy/export/status': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
-      'GET /api/privacy/export/download/:id': { category: CATEGORY.SELF_ONLY, reason: 'job.user_id !== caller -> 404 (always the caller\'s own export job)' },
+      'GET /api/privacy/export/download/:id': { category: CATEGORY.SELF_ONLY, reason: 'job.user_id !== caller -> 404 (always the caller\'s own export job); behind requireAAL2(\'data.download\') with the jobId bound — this is where the archive actually leaves, and gating only the request left a completed one behind a bare session for seven days (v1.2b audit F-1)' },
 
       /**
        * ── The four step-up endpoints (v1.2b Task 5) ──

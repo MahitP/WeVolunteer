@@ -28,6 +28,19 @@
  * The response for a genuinely expired export is left as 410 — that is the owner's
  * own export, so there is nothing to hide from them, and the distinct code is what
  * lets the UI say "this expired, request another" instead of "not found".
+ *
+ * ── Why every probe below now carries a grant (v1.2b audit, F-1) ──
+ *
+ * The route gained `requireAAL2('data.download')`, which answers 403 before the
+ * handler runs. Without a grant every case here would be 403 — indistinguishable,
+ * so the assertions would still pass while testing the GATE rather than the
+ * ownership branch this file exists for. Each probe therefore presents a real,
+ * unspent grant bound to the id it is probing, so control reaches the 404 and the
+ * property is exercised for real.
+ *
+ * Opening a challenge is itself not an oracle: `POST /api/auth/reauth/challenge`
+ * binds whatever `jobId` it is handed without looking it up, so it answers
+ * identically for a real id, a foreign one and one that was never issued.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer } from './testServer.js';
@@ -59,9 +72,17 @@ async function completedExport(userId, id) {
 describe('export download does not leak existence', () => {
   it('returns the same status for a foreign export and a nonexistent one', async () => {
     const id = await completedExport(ownerId, 'export-idor-probe-1');
+    const absent = 'export-definitely-absent';
 
-    const foreign = await srv.call('GET', `/api/privacy/export/download/${id}`, undefined, other);
-    const missing = await srv.call('GET', '/api/privacy/export/download/export-definitely-absent', undefined, other);
+    // A grant per probe: they are single-use and bound to their own jobId.
+    const foreign = await srv.call(
+      'GET', `/api/privacy/export/download/${id}`, undefined, other,
+      await srv.verified(other, 'data.download', { params: { jobId: id } })
+    );
+    const missing = await srv.call(
+      'GET', `/api/privacy/export/download/${absent}`, undefined, other,
+      await srv.verified(other, 'data.download', { params: { jobId: absent } })
+    );
 
     expect(
       foreign.status,
@@ -73,7 +94,10 @@ describe('export download does not leak existence', () => {
   it('does not hint at ownership in the body either', async () => {
     const id = await completedExport(ownerId, 'export-idor-probe-2');
 
-    const res = await srv.call('GET', `/api/privacy/export/download/${id}`, undefined, other);
+    const res = await srv.call(
+      'GET', `/api/privacy/export/download/${id}`, undefined, other,
+      await srv.verified(other, 'data.download', { params: { jobId: id } })
+    );
     const body = JSON.stringify(res.body ?? '') + String(res.text ?? '');
 
     // "Unauthorized" tells the caller the row is real. The message must not.
@@ -85,7 +109,10 @@ describe('export download does not leak existence', () => {
     // The ownership check must not have been widened into a blanket refusal.
     const id = await completedExport(ownerId, 'export-idor-probe-3');
 
-    const res = await srv.call('GET', `/api/privacy/export/download/${id}`, undefined, owner);
+    const res = await srv.call(
+      'GET', `/api/privacy/export/download/${id}`, undefined, owner,
+      await srv.verified(owner, 'data.download', { params: { jobId: id } })
+    );
 
     // file_location is NULL on this fixture, so the owner reaches the
     // not-ready branch rather than a download — but crucially NOT a 404.

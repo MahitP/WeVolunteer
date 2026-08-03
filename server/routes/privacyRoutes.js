@@ -109,7 +109,33 @@ router.get('/api/privacy/export/status', authenticateToken, (req, res) => {
   res.json(job);
 });
 
-router.get('/api/privacy/export/download/:id', authenticateToken, (req, res) => {
+/**
+ * Hands over the archive, behind a fresh proof of identity for THIS archive.
+ *
+ * ── Why the gate had to be here too (v1.2b audit, F-1) ──
+ *
+ * `POST /api/privacy/export` above was gated and this was not, which protected
+ * the request and not the disclosure. An archive lives seven days
+ * (`exportWorker.js`), and `GET /api/privacy/export/status` hands its id to any
+ * authenticated caller — so for a week after any legitimate export, the
+ * complete personal-data archive of a mostly-minor population was retrievable
+ * by anyone holding a borrowed session, having proved nothing. The gate raised
+ * the bar only while no archive existed, which is the window in which there was
+ * nothing to take.
+ *
+ * `data.download` rather than `data.export`, and it binds `jobId`: a grant
+ * authorises pulling down ONE archive, not "anything export-shaped". See the
+ * registry entry for the full reasoning.
+ *
+ * ── Ordering ──
+ *
+ * Every refusal below — foreign or missing job, not ready, expired, file gone —
+ * is answered BEFORE the grant is spent, for the same reason the
+ * "already in progress" check precedes the spend on the request endpoint: a
+ * request that delivers nothing must not cost the user a verification they then
+ * have to repeat. The spend is the last thing before the bytes move.
+ */
+router.get('/api/privacy/export/download/:id', authenticateToken, requireAAL2('data.download'), (req, res) => {
   const userId = req.user.id;
   const jobId = req.params.id;
 
@@ -148,6 +174,27 @@ router.get('/api/privacy/export/download/:id', authenticateToken, (req, res) => 
 
   if (!fs.existsSync(job.file_location)) {
     return res.status(404).send('Export file is missing from server');
+  }
+
+  /**
+   * Spent last, and bound to the id in the path — the archive actually about to
+   * be sent, never a value the caller could vary independently of the write.
+   *
+   * Once this commits, the grant is gone whether or not the transfer below
+   * completes. That is the honest trade: `res.download` streams outside any
+   * transaction, so there is no way to make "the bytes arrived" atomic with
+   * "the grant was spent", and of the two failure directions the safe one is a
+   * user re-verifying after a broken download rather than a spendable grant
+   * left behind by one that succeeded.
+   */
+  try {
+    inTransaction(() => {
+      spendChallenge(db, req, 'data.download', { jobId });
+    });
+  } catch (err) {
+    if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
+    console.error('Failed to spend the download verification:', err);
+    return res.status(500).json({ error: 'Failed to download export' });
   }
 
   res.download(job.file_location, 'wevolunteer-data-export.zip', (err) => {

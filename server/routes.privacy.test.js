@@ -461,7 +461,13 @@ describe('privacy: data export', () => {
     const statusRes = await srv.call('GET', '/api/privacy/export/status', undefined, studentToken);
     const jobId = statusRes.body.id;
 
-    const res = await srv.call('GET', `/api/privacy/export/download/${jobId}`, undefined, studentToken);
+    // Downloading is gated on `data.download` since the v1.2b audit (F-1), so
+    // this presents a grant bound to the job — otherwise the 400 "not ready"
+    // branch is never reached and the assertion would be measuring the gate.
+    const downloadHeader = await srv.verified(studentToken, 'data.download', {
+      password: 'Password123', params: { jobId }
+    });
+    const res = await srv.call('GET', `/api/privacy/export/download/${jobId}`, undefined, studentToken, downloadHeader);
     expect(res.status).toBe(400);
   });
 

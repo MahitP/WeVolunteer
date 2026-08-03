@@ -670,11 +670,18 @@ router.post('/api/oauth/link', authenticateToken, requireAAL2('oauth.link'), (re
      * No new session is issued.
      *
      * It used to be, because the caller had just proved a password while signed
-     * OUT and needed one. The caller is now already signed in, and re-issuing
-     * would actively hurt: `issueSession` here mints a token with no `jti`, and a
-     * session with no jti can have no challenge bound to it — so linking a
-     * provider would silently cost the user the ability to verify anything else
-     * until they signed in again.
+     * OUT and needed one. The caller is now already signed in — `authenticateToken`
+     * is on this route — so there is nothing to issue: replacing a working
+     * session with an equivalent one is churn, and it would invalidate any other
+     * challenge the user currently holds, since every grant is bound to the
+     * `jti` of the session that opened it.
+     *
+     * An earlier version of this note claimed the reason was that `issueSession`
+     * "mints a token with no jti". That described the local copy this file used
+     * to keep, which Task 6 deleted; the shared `issueSession` imported from
+     * authRoutes.js has always set one. The conclusion was right and the stated
+     * reason was not, which is worse than either alone — the next reader checks
+     * the comment.
      */
     const user = formatUserResponse(userRow);
     res.json({ success: true, user, emailVerified: userRow.email_verified === 1 });
@@ -685,7 +692,29 @@ router.post('/api/oauth/link', authenticateToken, requireAAL2('oauth.link'), (re
   }
 });
 
-router.post('/api/oauth/disconnect', authenticateToken, (req, res) => {
+/**
+ * Removes a provider from the caller's account, behind a fresh proof of identity.
+ *
+ * ── Why this gained a gate (v1.2b audit, F-2) ──
+ *
+ * `POST /api/oauth/link` above has required step-up since Task 6, and the guide
+ * records the rule as "adding a sign-in credential requires step-up". This
+ * endpoint mutates the same table in the opposite direction and asked only for
+ * a session, so the rule held in one direction only.
+ *
+ * The v1.2b plan did look at this route and marked it "already correct" — but
+ * on the strength of the lockout guard below, which answers a different
+ * question. "Never leave an account with no way back in" stops a user stranding
+ * themselves; it says nothing about somebody holding a borrowed session
+ * stripping a provider off an account that still has a password. That costs the
+ * account holder the sign-in route they actually use, and removes one of the
+ * two ways they could have satisfied any future step-up — including the one
+ * that would let them undo it.
+ *
+ * `oauth.unlink` binds `provider`, mirroring `oauth.link`, so a verification
+ * collected to remove Google cannot remove Microsoft instead.
+ */
+router.post('/api/oauth/disconnect', authenticateToken, requireAAL2('oauth.unlink'), (req, res) => {
   const { provider } = req.body;
   if (!provider || !providers[String(provider).toLowerCase()]) {
     return res.status(400).json({ error: 'Unknown provider.' });
@@ -702,7 +731,16 @@ router.post('/api/oauth/disconnect', authenticateToken, (req, res) => {
       return res.status(404).json({ error: 'That provider is not connected to your account.' });
     }
 
-    // Never leave an account with no way back in.
+    /**
+     * Never leave an account with no way back in.
+     *
+     * Still checked BEFORE the grant is spent. A refusal here is the request
+     * not happening, and it must not cost the user the verification they just
+     * performed — least of all this one, where the person is provider-only and
+     * had to complete a whole re-consent round trip at their provider to get
+     * it. Same ordering rule as the "already in progress" check on the export
+     * endpoint.
+     */
     if (userRow.password_hash === '!OAUTH_ONLY!') {
       const providerCount = db.prepare('SELECT COUNT(*) as count FROM oauth_accounts WHERE user_id = ?')
         .get(req.user.id).count;
@@ -714,9 +752,18 @@ router.post('/api/oauth/disconnect', authenticateToken, (req, res) => {
       }
     }
 
-    db.prepare('DELETE FROM oauth_accounts WHERE user_id = ? AND provider = ?').run(req.user.id, providerName);
+    inTransaction(() => {
+      // Spent with the delete it authorises, bound to the provider actually
+      // being removed: no removal without a spent grant, no spent grant
+      // without a removal.
+      spendChallenge(db, req, 'oauth.unlink', { provider: providerName });
+
+      db.prepare('DELETE FROM oauth_accounts WHERE user_id = ? AND provider = ?').run(req.user.id, providerName);
+    });
+
     res.json({ success: true });
   } catch (err) {
+    if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
     console.error('Disconnect Error:', err);
     res.status(500).json({ error: 'Failed to disconnect provider' });
   }
