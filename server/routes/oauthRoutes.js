@@ -134,13 +134,14 @@ function purgeExpiredSignupSessions() {
  *     nothing for a provider-signed-in user.
  *   - `openChallenge` REFUSES to bind a grant to a jti-less session, because a
  *     grant nobody's session owns is spendable by anyone holding its id. With
- *     v1.2b that is decisive: every one of the five sensitive actions now needs
- *     a grant, so a provider-signed-in user would have been answered
- *     `session_not_bindable` on all five — locked out of deleting their own
- *     account, setting a first password, linking a second provider and
- *     exporting their data. Those are the exact capabilities this release exists
- *     to give provider-only accounts, and the copy here would have quietly
- *     withheld them from every account that reached the app through a provider.
+ *     v1.2b that is decisive: every sensitive action now needs a grant, so a
+ *     provider-signed-in user would have been answered `session_not_bindable`
+ *     on all of them — locked out of deleting their own account, setting a
+ *     first password, linking a second provider, disconnecting one, and both
+ *     requesting and collecting their data. Those are the exact capabilities
+ *     this release exists to give provider-only accounts, and the copy here
+ *     would have quietly withheld them from every account that reached the app
+ *     through a provider.
  *
  * Duplicating session minting is what allowed the two to drift for as long as
  * nothing depended on the difference. One definition now, imported like

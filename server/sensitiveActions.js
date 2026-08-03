@@ -59,10 +59,13 @@ export function isSensitiveAction(action) {
  *
  * ── Why a header rather than a body field ──
  *
- *   1. Two of the five sensitive actions are reached by methods that carry no
- *      body worth relying on (account deletion is a DELETE), and a mechanism
- *      that works for three of five is a mechanism someone will forget on the
- *      other two.
+ *   1. Two of the seven sensitive actions are reached by methods that carry no
+ *      body at all — account deletion is a DELETE, and collecting a data export
+ *      is a GET — so a mechanism riding in the body works for five of seven and
+ *      is one someone will forget on the other two. The download is the sharper
+ *      case of the two: it has no body to put a field in even in principle,
+ *      which is also why the browser navigation it used to be could not be
+ *      gated where it stood.
  *   2. `authenticateToken` would otherwise depend on the body parser having
  *      already run. It does today, but that is an ordering fact in app.js, and
  *      the middleware that decides assurance should not be the thing that

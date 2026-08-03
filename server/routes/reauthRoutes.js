@@ -69,7 +69,7 @@ const E = REAUTH_ERRORS;
  * this is reachable rather than theoretical. (Provider sign-ins were a second,
  * permanent source of them until Task 6 gave `oauthRoutes.js` the shared
  * `issueSession`; without that fix every provider-signed-in user would have met
- * this refusal on all five sensitive actions.) Letting the throw escape would
+ * this refusal on every sensitive action.) Letting the throw escape would
  * answer 500 — filing an ordinary, recoverable situation as a server defect and
  * telling the user nothing they can act on.
  *

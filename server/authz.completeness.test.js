@@ -254,7 +254,16 @@ describe('authorization hygiene', () => {
       // case; re-read and re-confirmed each time as the same new-signup
       // `verified` decision described above. That it keeps moving is the guard
       // working as designed — a pinned line is what forces the re-read.
-      './routes/oauthRoutes.js:525',
+      //
+      // Moved to :526 by the v1.2b audit round, which corrected the
+      // `issueSession` note further up the file (it claimed the shared helper
+      // minted no `jti`, describing a copy Task 6 had already deleted) and
+      // widened the same block's "all five sensitive actions" to name the two
+      // the audit added. Re-read once more: unchanged, and still not an
+      // authorization decision — it sets a new signup's initial approval state,
+      // which is a fact about the row being written, not about what its holder
+      // may then do.
+      './routes/oauthRoutes.js:526',
     ]);
     const consumedExceptions = new Set();
 
