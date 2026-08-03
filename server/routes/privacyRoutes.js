@@ -197,6 +197,28 @@ router.get('/api/privacy/export/download/:id', authenticateToken, requireAAL2('d
     return res.status(500).json({ error: 'Failed to download export' });
   }
 
+  /**
+   * The archive must not be written to any cache.
+   *
+   * `res.download` delegates to the `send` library, which defaults to
+   * `Cache-Control: public, max-age=0` — observed on the wire, not assumed. On a
+   * zip containing one (usually minor) person's complete record, `public` is the
+   * wrong word: it invites shared caches to store it, and it lets the browser
+   * write the body to its on-disk HTTP cache, where it outlives the tab. That is
+   * the same threat `src/utils/stepUp.js` reasons about when it keeps grants in
+   * `sessionStorage` rather than `localStorage` — the shared school Chromebook
+   * somebody walks away from.
+   *
+   * Set here rather than passed as an option because `send` only supplies its
+   * own value when the header is absent, so an explicit one wins; the regression
+   * test asserts the emitted header rather than this call, since that is the
+   * only form of the check that survives a library upgrade changing the rule.
+   *
+   * This does not weaken the step-up gate — a cached copy would have bypassed it
+   * entirely, which is why it belongs with that fix rather than after it.
+   */
+  res.set('Cache-Control', 'no-store');
+
   res.download(job.file_location, 'wevolunteer-data-export.zip', (err) => {
     if (err) {
       console.error('Error downloading file:', err);
