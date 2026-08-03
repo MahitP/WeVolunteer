@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
-import { Mail, Lock, AlertCircle, ArrowLeft, Eye, EyeOff, User, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, AlertCircle, ArrowLeft, Eye, EyeOff, User } from 'lucide-react';
 import ProviderButtons from '../components/auth/ProviderButtons';
 import { useStepUp } from '../components/auth/useStepUp';
 import { STEP_UP } from '../utils/stepUp';
@@ -57,13 +57,6 @@ export default function Login({ onLoginSuccess, addToast }) {
 
   const [sentTo, setSentTo] = useState('');
 
-  /**
-   * Focus moves to the error when one appears.
-   *
-   * Without this a screen-reader user submits the form and gets no indication
-   * anything happened — the alert renders above the fields they are still
-   * sitting in, out of reading order and never announced.
-   */
   /**
    * Focus moves to whatever the user has to act on.
    *
@@ -176,11 +169,16 @@ export default function Login({ onLoginSuccess, addToast }) {
   };
 
   /**
-   * `afterToast` lets the link screen add "…and here is what to do next" without
-   * duplicating the sign-in error handling below, which knows how to put the
-   * message on the field the server named.
+   * The ordinary sign-in path.
+   *
+   * The link screen does NOT go through this, and an intermediate draft that
+   * did — via an `afterToast` callback — is worth naming so it is not
+   * reintroduced. That screen has to sign in, spend a step-up grant and redeem
+   * the link token before `onLoginSuccess()` unmounts it, and threading three
+   * ordered steps through a callback on the last of them made the ordering
+   * invisible at exactly the place it matters. It has its own handler instead.
    */
-  const performLogin = async (loginId, loginPassword, { afterToast } = {}) => {
+  const performLogin = async (loginId, loginPassword) => {
     setError('');
     setErrorField(null);
     setLoading(true);
@@ -192,7 +190,6 @@ export default function Login({ onLoginSuccess, addToast }) {
         addToast('Confirm your email address to finish signing in.', 'info');
       } else {
         addToast(`Welcome back, ${result.user.name.split(' ')[0]}.`, 'success');
-        afterToast?.();
       }
       onLoginSuccess();
     } catch (err) {
