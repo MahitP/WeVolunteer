@@ -12,8 +12,9 @@ import { readFileSync } from 'node:fs';
 import authzRoles from './001_authz_roles.js';
 import userCapabilities from './002_user_capabilities.js';
 import reauthChallenges from './003_reauth_challenges.js';
+import errorEvents from './004_error_events.js';
 
-export const MIGRATIONS = [authzRoles, userCapabilities, reauthChallenges];
+export const MIGRATIONS = [authzRoles, userCapabilities, reauthChallenges, errorEvents];
 
 const label = (m) => `${m.version}_${m.name}`;
 
