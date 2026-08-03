@@ -883,4 +883,106 @@ describe('authorization hygiene', () => {
       ).toEqual([]);
     });
   });
+
+  // ── Guard 6 ──────────────────────────────────────────────────────────────
+  describe('every direct consumeChallenge call is declared', () => {
+    /**
+     * Why Guard 5 is not enough on its own.
+     *
+     * Guard 5 pairs a `requireAAL2` gate with a `spendChallenge(db, req, …)` in
+     * the same file, and `spendChallenge` is the only shape it knows. That shape
+     * requires an authenticated `req` carrying the challenge id, the user and the
+     * session jti — which is right for the five gated routes and wrong for one
+     * place: the `auto_linked` branch of the OAuth callback (v1.2b Task 6b). That
+     * handler is reached mid-redirect with no session on the request at all; its
+     * bindings arrive inside the signed OAuth state, so it calls
+     * `consumeChallenge` directly.
+     *
+     * The consequence, recorded as TD-16 before this guard existed: that spend
+     * was invisible to Guard 5, and `oauthRoutes.js` passed only because
+     * `/api/oauth/link` separately contained a conforming one. Deleting the
+     * auto-link spend would have left the grant replayable with the suite green.
+     *
+     * So direct calls are enumerated rather than banned. Banning them would
+     * force the one legitimate case into a contortion; allowing them silently is
+     * what TD-16 was. A new direct call has to be added here, which is the
+     * moment someone has to justify it — the same mechanism `ROUTE_REGISTRY`
+     * uses for a route with no capability gate.
+     */
+    const DECLARED_DIRECT_CONSUMERS = Object.freeze({
+      'server/reauthResponses.js': {
+        reason: 'the implementation of spendChallenge itself — the shape every '
+          + 'other caller is supposed to use',
+      },
+      'server/routes/oauthRoutes.js': {
+        reason: "the auto_linked branch of POST /api/oauth/:provider/callback. The "
+          + 'callback is unauthenticated (it also serves login and signup), so there '
+          + 'is no req.reauthChallengeId or req.sessionJti to read — the challenge id '
+          + 'and jti come from the signed state that /url folded them into. Covered '
+          + 'functionally by routes.oauth.test.js, "spends the grant, so the same '
+          + 'verification cannot link twice".',
+      },
+    });
+
+    /** `consumeChallenge(` call sites, excluding its own declaration. */
+    function findDirectConsumeCallSites(src) {
+      const found = [];
+      stripComments(src).split('\n').forEach((line, i) => {
+        // `export function consumeChallenge(` in reauth.js is the definition.
+        if (/\bfunction\s+consumeChallenge\s*\(/.test(line)) return;
+        for (const _m of line.matchAll(/\bconsumeChallenge\s*\(/g)) {
+          found.push({ line: i + 1 });
+        }
+      });
+      return found;
+    }
+
+    it('fires on an undeclared direct call, and ignores the definition and prose', () => {
+      expect(findDirectConsumeCallSites('  const spent = consumeChallenge({')).toHaveLength(1);
+      expect(findDirectConsumeCallSites('export function consumeChallenge({ db, challengeId })')).toEqual([]);
+      expect(findDirectConsumeCallSites(' * calls consumeChallenge() inside the transaction')).toEqual([]);
+      expect(findDirectConsumeCallSites('// consumeChallenge(x) would be wrong here')).toEqual([]);
+    });
+
+    it('finds no undeclared direct consumeChallenge anywhere in server/', () => {
+      const files = collectServerJsFiles();
+      expect(files.length, 'the server/ walk found no modules to scan').toBeGreaterThan(0);
+
+      const offenders = [];
+      const seen = new Set();
+
+      for (const { url, key } of files) {
+        // reauth.js defines the function and legitimately references it in its
+        // own module; the definition is filtered by the detector, and it has no
+        // call of its own.
+        if (key === 'server/reauth.js') continue;
+
+        const sites = findDirectConsumeCallSites(readFileSync(url, 'utf8'));
+        if (sites.length === 0) continue;
+
+        if (Object.prototype.hasOwnProperty.call(DECLARED_DIRECT_CONSUMERS, key)) {
+          seen.add(key);
+          continue;
+        }
+        offenders.push(
+          `${key}:${sites[0].line}: calls consumeChallenge() directly. Prefer `
+          + 'spendChallenge(db, req, action, params), which reads the three bindings off the '
+          + 'request so a caller cannot pick up two of three — and which Guard 5 can see. '
+          + 'If this call site genuinely has no authenticated request (the OAuth callback is '
+          + 'the only such case today), add it to DECLARED_DIRECT_CONSUMERS with the reason '
+          + 'and a note on what covers it functionally.'
+        );
+      }
+
+      expect(offenders, 'undeclared direct consumeChallenge call(s)').toEqual([]);
+
+      // Stale declarations fail too, exactly as ROUTE_REGISTRY's do: an entry for
+      // a file that no longer consumes directly is a justification for something
+      // that is not happening, and reading it later would mislead.
+      expect(
+        Object.keys(DECLARED_DIRECT_CONSUMERS).filter(k => !seen.has(k)),
+        'DECLARED_DIRECT_CONSUMERS entries that no longer match anything — remove them'
+      ).toEqual([]);
+    });
+  });
 });

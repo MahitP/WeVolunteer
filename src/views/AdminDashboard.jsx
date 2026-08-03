@@ -175,11 +175,24 @@ export default function AdminDashboard({ addToast }) {
           <div className="grid grid-2">
             <div className="card card-pad">
               <div className="eyebrow" style={{ marginBottom: 'var(--s3)' }}>Hours credited by month</div>
-              <BarChart data={totals.monthlyHours} valueKey="hours" labelKey="month" highlightLast />
+              <BarChart
+                data={totals.monthlyHours} valueKey="hours" labelKey="month" highlightLast
+                caption="Hours credited by month" unit="Hours" periodLabel="Month"
+              />
             </div>
             <div className="card card-pad">
               <div className="eyebrow" style={{ marginBottom: 'var(--s3)' }}>Volunteers active by month</div>
-              <BarChart data={totals.monthlyHours} valueKey="volunteers" labelKey="month" highlightLast />
+              {/*
+                The caption is not decoration. The visual half of the chart is
+                aria-hidden, so this is the only description a screen-reader user
+                receives — and until BarChart took a prop it was hardcoded to
+                "Hours by period", which announced this count of PEOPLE as hours.
+              */}
+              <BarChart
+                data={totals.monthlyHours} valueKey="volunteers" labelKey="month" highlightLast
+                caption="Volunteers active by month" unit="Volunteers" periodLabel="Month"
+                emptyText="No volunteers recorded yet"
+              />
             </div>
           </div>
         </section>

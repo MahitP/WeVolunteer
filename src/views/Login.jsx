@@ -3,6 +3,8 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { Mail, Lock, AlertCircle, ArrowLeft, Eye, EyeOff, User, CheckCircle2 } from 'lucide-react';
 import ProviderButtons from '../components/auth/ProviderButtons';
+import { useStepUp } from '../components/auth/useStepUp';
+import { STEP_UP } from '../utils/stepUp';
 import { DEMO_MODE } from '../config';
 
 const DEMO_ACCOUNTS = [
@@ -28,6 +30,7 @@ export default function Login({ onLoginSuccess, addToast }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { run, modal: verifyModal } = useStepUp();
   const linkData = location.state?.linkData;
 
   /**
@@ -102,35 +105,74 @@ export default function Login({ onLoginSuccess, addToast }) {
   };
 
   /**
-   * Signing in on the link screen, which is now all this screen does.
+   * Sign in, then finish the link — in that order, in one screen.
    *
-   * ── Why there is no "connect with your password" form any more (v1.2b) ──
+   * ── Why the old form could not work (v1.2b) ──
    *
-   * There was one, and after Task 6 it could not succeed. `POST /api/oauth/link`
-   * used to be unauthenticated, tied to an account only by a 15-minute token
-   * naming a user id and proved by that account's password — which made it a
-   * password oracle on an endpoint nobody thought of as one. It is now
-   * authenticated and gated on `requireAAL2('oauth.link')`, so a signed-out
-   * caller gets 401 before the handler ever runs. The old form therefore asked
-   * for a password nothing checked and reported "Incorrect password." whatever
-   * the user typed: a dead end that blamed them for it.
+   * `POST /api/oauth/link` used to be unauthenticated, tied to an account only
+   * by a 15-minute token naming a user id and proved by that account's password
+   * — which made it a password oracle on an endpoint nobody thought of as one.
+   * Task 6 made it authenticated and gated it on `requireAAL2('oauth.link')`, so
+   * a signed-out caller now gets 401 before the handler runs. The form was still
+   * passing that password into the argument that had become the headers object,
+   * so it asked for a credential nothing checked and reported "Incorrect
+   * password." whatever the user typed.
    *
-   * The honest flow is the one the endpoint's new shape implies. Sign in
-   * normally — which this screen can already do, and the identifier is
-   * pre-filled from `linkData.email` — and then connect the provider from
-   * Settings, where the connect button carries a step-up verification. Because
-   * `link_required` is only ever returned when an account already holds the
-   * provider's own address, pressing "Continue with <provider>" again while
-   * signed in takes the `auto_linked` path instead and links in one step.
+   * ── Why this does the link here rather than sending them to Settings ──
+   *
+   * We still hold the link token, and it is valid for fifteen minutes. Using it
+   * costs the user one verification. Sending them to Settings to press
+   * "Continue with <provider>" again costs them the same verification PLUS a
+   * second round trip through the provider, to reach the `auto_linked` branch
+   * and end in exactly the same state. Same proof, less work.
+   *
+   * ── Why the order matters ──
+   *
+   * Both steps happen before `onLoginSuccess()`. That call makes App re-render
+   * into the authenticated shell, which unmounts this component — and with it
+   * the verification dialog and the token held in `location.state`. So: sign in
+   * to get a session, spend a grant to link, and only then hand over.
+   *
+   * A failure after sign-in is not a failure overall: the session is real and
+   * the user is signed in. Saying so, and naming Settings as the other way to
+   * finish, beats reporting an error for something that half worked.
    */
   const handleLinkSignIn = async (e) => {
     e.preventDefault();
-    await performLogin(linkData.email, password, {
-      afterToast: () => addToast(
-        `You can now connect ${providerLabel(linkData.provider)} from Settings.`,
-        'info'
-      )
-    });
+    setError('');
+    setErrorField(null);
+    setLoading(true);
+
+    const label = providerLabel(linkData.provider);
+    try {
+      await api.login(linkData.email, password);
+    } catch (err) {
+      setError(err.message || 'That password is not correct.');
+      const code = err.data?.code;
+      setErrorField(code === 'wrong_password' ? 'password' : null);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const linked = await run(
+        STEP_UP.OAUTH_LINK,
+        { provider: linkData.provider },
+        headers => api.linkOAuthAccount(linkData.linkToken, headers)
+      );
+
+      if (linked) addToast(`Signed in, and ${label} is now connected.`, 'success');
+      // Dismissed the verification. They are still signed in, which is the
+      // outcome that matters most here; the link is one tap away in Settings.
+      else addToast(`Signed in. You can connect ${label} from Settings.`, 'info');
+    } catch (err) {
+      addToast(
+        `Signed in, but we could not connect ${label}: ${err.message || 'please try from Settings.'}`,
+        'error'
+      );
+    }
+
+    onLoginSuccess();
   };
 
   /**
@@ -302,18 +344,17 @@ export default function Login({ onLoginSuccess, addToast }) {
           <div className="auth-head">
             <h1 id="link-heading" className="auth-title">Sign in to connect {label}</h1>
             {/*
-              The copy is deliberately about signing in, not about connecting.
-              This form used to claim it would connect the account for a
-              password, and since v1.2b it cannot: /api/oauth/link requires a
-              session, so a signed-out attempt is refused before the handler
-              runs. Promising the link here and delivering "Incorrect password."
-              was the worst of both. Connecting happens in Settings, one step
-              later, behind a verification.
+              The copy says sign in FIRST, because that is the order: the link is
+              made after the session exists, and the verification that authorises
+              it comes between the two. Promising "enter its password and you can
+              use <provider> from then on" — which this screen used to say — is
+              only true if the whole sequence completes, and it hid the
+              verification step entirely.
             */}
             <p className="auth-subtitle">
               <strong>{linkData?.email}</strong> already has a WeVolunteer
-              account. Sign in to it, then connect {label} from Settings — it
-              takes one more tap and you can use {label} from then on.
+              account. Sign in to it and we will connect {label} straight after —
+              we will ask you to confirm it is you once more before we do.
             </p>
           </div>
 
@@ -397,6 +438,7 @@ export default function Login({ onLoginSuccess, addToast }) {
             <button className="auth-link" onClick={() => navigate('/welcome')}>Start over</button>
           </p>
         </main>
+        {verifyModal}
       </div>
     );
   }

@@ -1610,27 +1610,6 @@ when they are done, not when they become uncomfortable to look at.
   the missing capability when the favourites work is next touched.
 - **Effort:** small. **Opened:** 2026-08-01.
 
-#### TD-16 — Guard 5 cannot see the `auto_linked` branch's grant spend
-
-- **Detail:** Guard 5 pairs a `requireAAL2('X')` gate with a
-  `spendChallenge(db, req, 'X', …)` **in the same file**, and its detector
-  requires literally `db` then `req` as the first two arguments. v1.2b Task 6b
-  spends its grant with a direct `consumeChallenge({ … })` call inside the OAuth
-  callback, because the callback is unauthenticated and has no `req` bindings to
-  read — the challenge id and jti arrive in the signed state instead. Guard 5
-  therefore does not see that spend at all. It passes only because
-  `oauthRoutes.js` separately contains `/link`'s conforming spend.
-- **Risk:** deleting the `auto_linked` spend would leave the grant replayable and
-  the static guard would stay green. The behaviour **is** covered by a functional
-  test (`routes.oauth.test.js`, "spends the grant, so the same verification cannot
-  link twice"), which is the stronger check of the two — so this is a coverage
-  asymmetry, not an open hole.
-- **Action:** teach the detector a second shape (a `consumeChallenge` whose
-  `action:` is a literal), or add an explicit declaration listing the sanctioned
-  direct-consume sites so a new one has to be justified. The second is closer to
-  how `ROUTE_REGISTRY` already works.
-- **Effort:** small. **Opened:** 2026-08-03.
-
 #### TD-17 — every gated action costs two requests
 
 - **Detail:** `withStepUp` in `src/utils/stepUp.js` attempts the request, catches
@@ -1644,35 +1623,21 @@ when they are done, not when they become uncomfortable to look at.
   `DELETE /api/auth/account` each effectively allow ten attempts per window
   rather than twenty. Also, for `change-password`, the new password crosses the
   wire twice.
-- **Action:** none required. Documented so the next person reading a doubled
-  request count in a log does not go looking for a bug. If it ever matters, the
-  fix is for the client to open the challenge up-front for actions it knows are
-  gated — which is already what `verifyFirst` does for `oauth.link`.
-- **Effort:** n/a — accepted. **Opened:** 2026-08-03.
+- **Action:** none. **The alternative was weighed and is worse, which is why this
+  is a decision rather than an outstanding item.** Verifying up-front for every
+  gated action — what `verifyFirst` does for `oauth.link`, because that one has no
+  request to retry — means that when the action then fails for a non-auth reason
+  (an export already running, a password that fails policy, a taken email
+  address), the grant is already spent. Grants are single-use, so the user must
+  verify a second time just to retry. Trying first spends nothing on a request
+  that was never going to proceed.
 
-#### TD-18 — `POST /api/oauth/link` now has no client caller
-
-- **Detail:** v1.2b Task 6 made it authenticated and step-up gated. Its only
-  caller was the signed-out Login screen's "enter your password to connect" form,
-  which therefore could no longer succeed — `authenticateToken` refuses before the
-  handler runs, and the form reported "Incorrect password." whatever was typed.
-  That form is now a plain sign-in (`src/views/Login.linkAccount.test.jsx`), and
-  connecting happens afterwards in Settings via the `auto_linked` path.
-- **The endpoint is still reachable in principle, and that is the awkward part.**
-  A link token is minted only when the caller is *not* signed in as the account it
-  names, and the endpoint refuses a token naming anyone but the caller — so using
-  it requires obtaining the token while signed out, signing in, and then
-  presenting it within its 15 minutes. Nothing implements that, and the simpler
-  route (sign in, press the provider button again, take `auto_linked`) reaches the
-  same end state.
-- **Risk:** low, but it is either dead code or a missing flow, and leaving it
-  ambiguous is how a reviewer later "fixes" it by loosening the gate. Server tests
-  still cover it, so it is not untested — it is unreached.
-- **Action:** decide deliberately. Either remove the endpoint and the `linkToken`
-  the callback mints for it, and have `link_required` carry only the instruction;
-  or implement the two-step client flow and keep it. Removal is the smaller
-  surface and is the recommendation.
-- **Effort:** small. **Opened:** 2026-08-03.
+  Recorded so that a doubled request count in a log is not mistaken for a bug,
+  and so nobody "optimises" it away without meeting the same tradeoff. The
+  server's gate ordering was written for this: `POST /api/privacy/export` checks
+  assurance **before** its rate limiter precisely so the refused first attempt
+  does not spend the three-per-fifteen-minutes allowance.
+- **Effort:** n/a — accepted by design. **Opened:** 2026-08-03.
 
 #### TD-8 — `node:sqlite` is experimental
 
@@ -1686,6 +1651,45 @@ when they are done, not when they become uncomfortable to look at.
 ### Resolved
 
 Kept rather than deleted, because the reasoning is the part worth having.
+
+#### TD-16 — Guard 5 could not see the `auto_linked` grant spend — **resolved**
+
+- **Was:** Guard 5 pairs a `requireAAL2('X')` gate with a
+  `spendChallenge(db, req, 'X', …)` in the same file, and that shape needs an
+  authenticated `req`. Task 6b's auto-link spend is a direct
+  `consumeChallenge({ … })`, because the OAuth callback is unauthenticated and
+  its bindings arrive in the signed state — so the guard could not see it, and
+  `oauthRoutes.js` passed only because `/api/oauth/link` separately contained a
+  conforming spend. Deleting the auto-link spend would have left the grant
+  replayable with the suite green.
+- **Fix:** **Guard 6** in `server/authz.completeness.test.js` — direct
+  `consumeChallenge` call sites are enumerated in `DECLARED_DIRECT_CONSUMERS`
+  with a reason and a note on what covers them functionally. Enumerated rather
+  than banned: banning would contort the one legitimate case, and allowing
+  silently was the debt. Stale declarations fail too, exactly as
+  `ROUTE_REGISTRY`'s do. Verified by deleting the auto-link spend — which now
+  fails the build.
+- **Opened and closed:** 2026-08-03.
+
+#### TD-18 — `POST /api/oauth/link` had no client caller — **resolved**
+
+- **Was:** Task 6 made the endpoint authenticated and step-up gated. Its only
+  caller was the signed-out Login screen, which therefore could not succeed. An
+  endpoint with no caller is either dead code or a missing flow, and leaving it
+  ambiguous is how someone later "fixes" it by loosening the gate.
+- **Fix:** the two-step flow, rather than removal. Removal was the first
+  recommendation and was wrong on two counts: this endpoint holds the **only**
+  `requireAAL2('oauth.link')` gate in the codebase, so deleting it would leave
+  that action with no middleware gate anywhere and break Guard 5's
+  "every registered action is gated" assertion; and keeping the token is the
+  better experience — redeeming it costs one verification, whereas sending the
+  user to Settings costs the same verification plus a second round trip through
+  the provider to reach `auto_linked` and the identical end state.
+  `src/views/Login.jsx` now signs in, spends a grant, links, and only then calls
+  `onLoginSuccess()` — in that order, because that call unmounts the component and
+  takes the dialog and the token with it. Asserted as a sequence in
+  `src/views/Login.linkAccount.test.jsx`.
+- **Opened and closed:** 2026-08-03.
 
 #### TD-3 — 90 lint warnings — **resolved**
 
