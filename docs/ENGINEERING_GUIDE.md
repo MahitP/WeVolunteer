@@ -1083,6 +1083,34 @@ already prove — **and it fails silently, because the flow still completes.**
 successful round trip, is the security of the path: a completed OAuth flow
 attests who is at the keyboard and nothing more.
 
+#### The client half: one spelling, one string, one storage
+
+`src/utils/stepUp.js` imports `REAUTH_CHALLENGE_HEADER` and `SENSITIVE_ACTIONS`
+**from `server/sensitiveActions.js`**, the same mirror pattern `src/authz.js`
+uses for the capability table, and for the same reason.
+
+*Why it matters more here than it looks.* A retyped header name is the worst
+available bug in the feature: the client presents its grant under a spelling the
+server never reads, every request silently resolves to AAL1, and every gated
+action answers `reauth_required` — which sends the UI back to the verification
+dialog it has just come from, for ever, with no error anywhere. A retyped
+**action** name is the same class: unregistered actions are refused at
+`/challenge`, and a wrong-but-valid action opens a grant that can never be spent.
+`STEP_UP` is validated against the registry at module load so a drifted name is a
+build-time failure rather than a 403 in production.
+
+**A challenge id must never touch `localStorage`.** The provider re-consent leg
+leaves the site, so the record has to survive a navigation — `sessionStorage`,
+scoped to the tab and cleared when it closes, matches the five-minute life of the
+thing it holds. In `localStorage` a verification id would still be sitting on a
+shared school Chromebook after the student walked away. `signOut` clears both
+records for the same reason it clears `notif_toast_shown`.
+
+**The client must not hold a second opinion about what credentials an account
+has.** `VerifyIdentityModal` renders only the methods the challenge returned.
+Deciding locally is how a provider-only account gets asked five times for a
+password it does not have and is then locked out of its own challenge.
+
 #### Adding a credential requires proving identity — through every door
 
 If two code paths make the same state change, gate both. `POST /api/oauth/link`
@@ -1581,6 +1609,46 @@ when they are done, not when they become uncomfortable to look at.
 - **Action:** assert a ceiling on the category's size so it can only shrink; add
   the missing capability when the favourites work is next touched.
 - **Effort:** small. **Opened:** 2026-08-01.
+
+#### TD-16 — Guard 5 cannot see the `auto_linked` branch's grant spend
+
+- **Detail:** Guard 5 pairs a `requireAAL2('X')` gate with a
+  `spendChallenge(db, req, 'X', …)` **in the same file**, and its detector
+  requires literally `db` then `req` as the first two arguments. v1.2b Task 6b
+  spends its grant with a direct `consumeChallenge({ … })` call inside the OAuth
+  callback, because the callback is unauthenticated and has no `req` bindings to
+  read — the challenge id and jti arrive in the signed state instead. Guard 5
+  therefore does not see that spend at all. It passes only because
+  `oauthRoutes.js` separately contains `/link`'s conforming spend.
+- **Risk:** deleting the `auto_linked` spend would leave the grant replayable and
+  the static guard would stay green. The behaviour **is** covered by a functional
+  test (`routes.oauth.test.js`, "spends the grant, so the same verification cannot
+  link twice"), which is the stronger check of the two — so this is a coverage
+  asymmetry, not an open hole.
+- **Action:** teach the detector a second shape (a `consumeChallenge` whose
+  `action:` is a literal), or add an explicit declaration listing the sanctioned
+  direct-consume sites so a new one has to be justified. The second is closer to
+  how `ROUTE_REGISTRY` already works.
+- **Effort:** small. **Opened:** 2026-08-03.
+
+#### TD-17 — every gated action costs two requests
+
+- **Detail:** `withStepUp` in `src/utils/stepUp.js` attempts the request, catches
+  `reauth_required`, verifies, and retries. So each of the five gated actions
+  makes one request that is certain to 403 before the one that succeeds.
+- **Risk:** low, and the tradeoff was deliberate — trying first is what lets an
+  export already in progress, or a password that fails policy, be reported
+  without first making someone prove who they are for an action that was never
+  going to proceed. The cost is that the wasted 403 counts against `authLimiter`
+  (10 per 15 minutes, failures counted), so `/api/auth/change-password` and
+  `DELETE /api/auth/account` each effectively allow ten attempts per window
+  rather than twenty. Also, for `change-password`, the new password crosses the
+  wire twice.
+- **Action:** none required. Documented so the next person reading a doubled
+  request count in a log does not go looking for a bug. If it ever matters, the
+  fix is for the client to open the challenge up-front for actions it knows are
+  gated — which is already what `verifyFirst` does for `oauth.link`.
+- **Effort:** n/a — accepted. **Opened:** 2026-08-03.
 
 #### TD-8 — `node:sqlite` is experimental
 
