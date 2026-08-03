@@ -1,4 +1,5 @@
 import { db } from '../db.js';
+import { recordError } from '../errorReporter.js';
 import { ZipArchive } from 'archiver';
 import fs from 'fs';
 import path from 'path';
@@ -37,6 +38,25 @@ const STALE_EXPORT_MS = Number(process.env.EXPORT_STALE_MS) || 10 * 60 * 1000;
  * These archives contain a student's full personal record — profile, messages,
  * attendance, certificates — so the directory is created 0o700: owner only.
  */
+/**
+ * Records an export failure. See notificationWorker's twin for the reasoning:
+ * `recordError` never throws, so this wrapper exists to keep the three call
+ * sites identical rather than to add safety it already provides.
+ *
+ * Deliberately NOT wired into `cleanupExpiredExports`' unlink failure: a file
+ * already gone during cleanup is a benign race, and reporting it would be
+ * reporting weather.
+ */
+function reportExportError(err, boundary, context = {}) {
+  recordError(db, {
+    source: 'worker',
+    kind: err?.constructor?.name || 'Error',
+    message: err?.message,
+    stack: err?.stack,
+    context: { component: 'exportWorker', boundary, ...context }
+  });
+}
+
 export function resolveExportDir() {
   if (process.env.WEV_EXPORT_DIR) {
     return path.resolve(process.env.WEV_EXPORT_DIR);
@@ -97,6 +117,7 @@ export function reclaimStaleExports() {
     return result.changes;
   } catch (err) {
     console.error('[ExportWorker] Export reclaim failed:', err);
+    reportExportError(err, 'reclaimStaleExports');
     return 0;
   }
 }
@@ -124,6 +145,7 @@ async function poll() {
     cleanupExpiredExports();
   } catch (error) {
     console.error('[ExportWorker] Error polling:', error);
+    reportExportError(error, 'poll');
   } finally {
     if (isRunning) {
       // Poll every 5 seconds
@@ -200,6 +222,9 @@ async function processJob(job) {
     console.log(`[ExportWorker] Completed job ${id}`);
   } catch (error) {
     console.error(`[ExportWorker] Failed job ${id}:`, error);
+    // The user is about to be told their export failed. Something has to be able
+    // to tell us WHY, and until now nothing did.
+    reportExportError(error, 'processJob', { jobId: id });
     db.prepare(`UPDATE data_export_jobs SET status = 'failed' WHERE id = ?`).run(id);
     
     if (fs.existsSync(tmpFilePath)) {

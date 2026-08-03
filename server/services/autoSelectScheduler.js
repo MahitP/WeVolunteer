@@ -41,6 +41,7 @@
  */
 import { runAndConfirm, hasConfirmedRun } from './autoSelect.js';
 import { notificationService } from './notificationService.js';
+import { recordError } from '../errorReporter.js';
 
 /** How long after the deadline the organizer keeps sole control. */
 const GRACE_HOURS = Number(process.env.AUTO_SELECT_GRACE_HOURS ?? 24);
@@ -85,6 +86,24 @@ let sweepInFlight = false;
  * comparison against `datetime('now')`'s space-separated form misclassifies every
  * timestamp on today's date. See server/datetimeComparison.test.js.
  */
+/**
+ * Records a scheduler failure.
+ *
+ * `db` is threaded through rather than imported: this module already takes its
+ * database as an argument on every entry point, which is what lets a test drive
+ * a sweep against a throwaway file, and importing one here to save a parameter
+ * would quietly take that away.
+ */
+function reportSchedulerError(err, db, boundary, context = {}) {
+  recordError(db, {
+    source: 'worker',
+    kind: err?.constructor?.name || 'Error',
+    message: err?.message,
+    stack: err?.stack,
+    context: { component: 'autoSelectScheduler', boundary, ...context }
+  });
+}
+
 export function findDueEvents(db) {
   const cutoff = new Date(Date.now() - GRACE_HOURS * 3600_000).toISOString();
 
@@ -159,6 +178,15 @@ export function runAutoSelectSweep(db) {
         failed++;
         // Left due on purpose: it will be retried on the next sweep.
         console.error(`[AutoSelect] Selection FAILED for ${event.id}:`, err.message);
+        /**
+         * Reported even though it is retried on the next sweep. Unlike the
+         * notification queue there is no attempt ceiling here, so a permanently
+         * failing event retries for ever and would otherwise never surface. The
+         * repetition is bounded by design rather than by restraint: every
+         * occurrence shares a fingerprint, so it is one group with a climbing
+         * counter, and the per-hour cap stops the evidence duplicating.
+         */
+        reportSchedulerError(err, db, 'selection', { eventId: event.id });
       }
     }
   } catch (err) {
@@ -166,6 +194,7 @@ export function runAutoSelectSweep(db) {
     // interval must survive it; an unhandled rejection here would terminate the
     // process the way the notification worker's used to.
     console.error('[AutoSelect] Sweep failed:', err);
+    reportSchedulerError(err, db, 'sweep');
   } finally {
     sweepInFlight = false;
   }
@@ -199,6 +228,7 @@ export function startAutoSelectScheduler(db) {
       runAutoSelectSweep(db);
     } catch (err) {
       console.error('[AutoSelect] Scheduler tick failed:', err);
+      reportSchedulerError(err, db, 'tick');
     }
   }, INTERVAL_MS);
   // Never the reason the process stays alive; shutdown clears it explicitly.

@@ -1,4 +1,5 @@
 import { db } from '../db.js';
+import { recordError } from '../errorReporter.js';
 import { sendMail, buildHtmlTemplate, escapeHtml } from '../email.js';
 import { getInAppContent } from '../services/notificationContent.js';
 
@@ -74,6 +75,7 @@ export function reclaimStaleJobs() {
     // Reclaiming is best-effort recovery. If it cannot run, the tick that follows
     // must still be attempted rather than the whole loop dying here.
     console.error('[Worker] Notification job reclaim failed:', err);
+    reportWorkerError(err, 'reclaimStuckJobs');
     return 0;
   }
 }
@@ -104,6 +106,7 @@ export function getQueueHealth() {
     };
   } catch (err) {
     console.error('[Worker] Could not read notification queue health:', err);
+    reportWorkerError(err, 'getQueueHealth');
     return { pending: null, processing: null, failed: null, oldestPendingAt: null, error: true };
   }
 }
@@ -172,6 +175,18 @@ export async function processNotificationJobs() {
               `[Worker] Notification job ${job.id} FAILED permanently after `
               + `${newAttempts} attempts: ${err.message}`
             );
+            /**
+             * Reported HERE and not in the outer catch, deliberately.
+             *
+             * A single delivery failure is an expected operational condition —
+             * SMTP is unreliable, which is why this queue has backoff and an
+             * attempt ceiling at all — and reporting each retry would drown the
+             * dashboard in the noise it exists to cut through. Exhaustion is
+             * different: the comment above calls this "the one place a
+             * permanently lost notification becomes visible", and a notification
+             * nobody will ever receive is a defect, not weather.
+             */
+            reportWorkerError(err, 'notificationJobExhausted', { jobId: job.id });
           } else {
             console.warn(
               `[Worker] Notification job ${job.id} attempt ${newAttempts} failed `
@@ -183,13 +198,40 @@ export async function processNotificationJobs() {
             `[Worker] Could not record failure for notification job ${job.id}:`,
             bookkeepingErr
           );
+          // Failing to WRITE the retry bookkeeping is a database problem, not a
+          // delivery problem, and it silently strands the job.
+          reportWorkerError(bookkeepingErr, 'notificationBookkeeping', { jobId: job.id });
         }
       }
     }
   } catch (err) {
     // Terminal for this tick only. The interval fires again in ten seconds.
     console.error('[Worker] Notification job loop failed for this tick:', err);
+    reportWorkerError(err, 'notificationTick');
   }
+}
+
+/**
+ * Records a background failure, or does nothing at all.
+ *
+ * A worker error is the worst kind to lose: nobody is watching a background job,
+ * so an exception here is invisible until somebody notices the work stopped
+ * happening. `recordError` never throws, so this adds no failure mode to a
+ * catch block — the wrapper exists to keep the five call sites in this file
+ * identical, not to add safety `recordError` already provides.
+ *
+ * `source: 'worker'` rather than 'server': these did not arrive on a request,
+ * they have no route, and grouping them together is what makes "the notification
+ * worker is broken" one line on a dashboard instead of five.
+ */
+function reportWorkerError(err, boundary, context = {}) {
+  recordError(db, {
+    source: 'worker',
+    kind: err?.constructor?.name || 'Error',
+    message: err?.message,
+    stack: err?.stack,
+    context: { component: 'notificationWorker', boundary, ...context }
+  });
 }
 
 async function handleEmailJob(job) {

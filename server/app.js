@@ -10,6 +10,7 @@ import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS, COOKIE_NAME } from './config.js';
 import { db } from './db.js';
+import { recordError, hashUserId } from './errorReporter.js';
 
 import authRoutes from './routes/authRoutes.js';
 import accountRoutes from './routes/accountRoutes.js';
@@ -718,4 +719,45 @@ app.use((err, req, res, _next) => {
   // so the log stays a list of things worth investigating.
   console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
+
+  /**
+   * Recorded AFTER the response, and only on this branch.
+   *
+   * ── After ──
+   *
+   * The response is already written when this runs, so nothing here can change
+   * what the user receives. That ordering is the whole reason capture is safe to
+   * put in an error handler at all: this is code running while handling an
+   * exception, and an exception thrown *here* is one Express answers by killing
+   * the response. `recordError` never throws — but the ordering means it would
+   * not matter even if that guarantee were lost.
+   *
+   * ── Only this branch ──
+   *
+   * The CORS 403, the 413 and the 400 above return before reaching this line,
+   * deliberately. `entity.too.large` used to fall through to the 500 branch and
+   * was moved out precisely because "it files a routine rejected request as a
+   * server defect in monitoring, which buries the real 500s among the noise" —
+   * and a dashboard is exactly the monitoring that comment was about. A client
+   * posting an oversized body is not a defect in this application.
+   *
+   * `req.route?.path` is the Express PATTERN (`/api/events/:id`), never
+   * `req.originalUrl` — a real URL carries a query string, and query strings
+   * carry search terms, addresses and email addresses. It is undefined when the
+   * failure happened before routing resolved, which is honest: there was no
+   * route.
+   */
+  recordError(db, {
+    source: 'server',
+    kind: err?.constructor?.name || 'Error',
+    message: err?.message,
+    stack: err?.stack,
+    route: req.route?.path,
+    method: req.method,
+    statusCode: 500,
+    userHash: hashUserId(req.user?.id),
+    role: req.principal?.effectiveRole ?? req.user?.role,
+    release: VERSION,
+    context: { statusCode: 500, method: req.method }
+  });
 });

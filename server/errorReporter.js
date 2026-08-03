@@ -285,6 +285,28 @@ export function fingerprint({ source, kind, message, route }) {
   return crypto.createHash('sha256').update(basis).digest('hex');
 }
 
+/**
+ * The value the `user_hash` column exists to hold.
+ *
+ * The dashboard asks "how many distinct people hit this" and "is this one
+ * person's odd data". A digest answers both. The id would answer a third
+ * question nobody asked and would make this table a second record of who did
+ * what, expiring on a different schedule from the account itself.
+ *
+ * Here rather than at each call site so there is one definition: four
+ * `createHash('sha256')` calls scattered through the workers is four chances for
+ * one of them to store `user.id` by mistake, and that mistake is invisible until
+ * somebody reads the table.
+ *
+ * Truncated to 32 characters, matching `reauth_challenges.ip_hash`. Not a
+ * security boundary — it is a correlation key, and a full digest would be no
+ * less reversible by guessing an id and hashing it.
+ */
+export function hashUserId(userId) {
+  if (typeof userId !== 'string' || userId.length === 0) return null;
+  return crypto.createHash('sha256').update(userId).digest('hex').slice(0, 32);
+}
+
 /* ── Recording ─────────────────────────────────────────────────────────── */
 
 /** Keeps only the keys the schema and the allowlist both admit. */
