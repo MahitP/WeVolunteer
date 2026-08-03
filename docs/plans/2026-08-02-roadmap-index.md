@@ -25,12 +25,12 @@ an instruction set** — see §4 below on why you must not trust it uncritically
 
 ```
 export PATH="/usr/local/bin:$PATH"   # see §3 — this line is not optional
-npm test        # 1679 tests, 114 files, 0 failures
+npm test        # 1692 tests, 115 files, 0 failures
 npm run lint    # clean
 npm run build   # clean
 ```
 
-If your numbers are lower than 1679, you are either on a stale checkout or on
+If your numbers are lower than 1692, you are either on a stale checkout or on
 the wrong Node.
 
 ---
@@ -71,7 +71,7 @@ one with the incident behind it. The four that catch people out:
 - A provider-only account can now set a first password and link a second
   provider. Both were previously impossible, because a password was the only
   credential those endpoints could check.
-- `server/authz.completeness.test.js` now holds **five** build-failing guards.
+- `server/authz.completeness.test.js` now holds **six** build-failing guards.
   Read them before adding a route; they will fail your build otherwise, and
   the failure message tells you what to declare.
 
