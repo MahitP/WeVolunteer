@@ -134,6 +134,12 @@ export function clearReadyGrant() {
   sessionStorage.removeItem(READY_KEY);
 }
 
+/** Everything step-up keeps in the tab. Called on sign-out. */
+export function clearStepUpState() {
+  sessionStorage.removeItem(PENDING_KEY);
+  sessionStorage.removeItem(READY_KEY);
+}
+
 /**
  * Whether this failure means "prove who you are and try again".
  *

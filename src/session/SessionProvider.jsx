@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { can } from '../authz.js';
 import { connectSocket, disconnectSocket } from '../services/socket';
+import { clearStepUpState } from '../utils/stepUp';
 
 const SessionContext = createContext(null);
 
@@ -312,6 +313,18 @@ export function SessionProvider({ addToast, children }) {
     // shared computer — has their unread-notification greeting suppressed by
     // the previous user's flag.
     sessionStorage.removeItem('notif_toast_shown');
+
+    /**
+     * Any step-up verification in flight dies with the session.
+     *
+     * A grant is bound to the signed-out session's `jti`, so it is already
+     * unspendable — a new sign-in mints a new jti and the server answers
+     * `session_mismatch`. This is hygiene rather than a hole being closed: on the
+     * shared school computer the comment above is about, the next person should
+     * not inherit a record naming an action the previous one was part-way through
+     * confirming.
+     */
+    clearStepUpState();
     navigate('/login');
   };
 
