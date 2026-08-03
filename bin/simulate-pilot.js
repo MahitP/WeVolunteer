@@ -41,6 +41,8 @@ if (!process.env.JWT_SECRET) {
 }
 
 const { db } = await import('../server/db.js');
+// Safe as a dynamic import alongside db: auditLog.js reaches nothing.
+const { recordAudit } = await import('../server/auditLog.js');
 
 console.log('--- Simulating Pilot Workflows ---');
 let bugs = [];
@@ -52,9 +54,12 @@ try {
   if (!pendingOrg) bugs.push('No pending organizer found to approve.');
   else {
     db.prepare('UPDATE users SET verified = 1 WHERE id = ?').run(pendingOrg.id);
-    db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
-      'log-' + Date.now(), 'admin-1', 'APPROVE_ORGANIZER', pendingOrg.id, 'Approved via simulation', new Date().toISOString()
-    );
+    recordAudit(db, {
+      adminId: 'admin-1',
+      action: 'APPROVE_ORGANIZER',
+      targetUserId: pendingOrg.id,
+      details: 'Approved via simulation'
+    });
     console.log('  ✓ Admin approved pending organizer.');
   }
 

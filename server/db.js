@@ -1,5 +1,4 @@
 import { DatabaseSync } from 'node:sqlite';
-import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
@@ -9,6 +8,10 @@ import { createCheckinTable } from './attendance.js';
 import { createInstanceLockTable } from './instanceLock.js';
 import { DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from './config.js';
 import { runMigrations } from './migrations/index.js';
+// Safe to import here despite this module opening the database at module scope:
+// auditLog.js imports `node:crypto` and nothing else, and takes `db` as an
+// argument, so there is no cycle back into this file.
+import { recordAudit } from './auditLog.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -154,14 +157,6 @@ function dedupeCaseInsensitiveUsernames(db) {
       INSERT INTO notifications (id, user_id, kind, title, body, link, read, created_at)
       VALUES (?, ?, 'info', ?, ?, NULL, 0, ?)
     `);
-    // admin_id is NOT NULL with a foreign key to users, and no administrator
-    // performed this — the migration did. Attribute it to the affected account,
-    // which is what the self-deletion audit row already does for the same
-    // reason, so the row is traceable without inventing a user.
-    const auditStmt = db.prepare(`
-      INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
-      VALUES (?, ?, 'USERNAME_DEDUPED', ?, ?, ?)
-    `);
     const now = new Date().toISOString();
 
     for (const { key } of groups) {
@@ -197,13 +192,16 @@ function dedupeCaseInsensitiveUsernames(db) {
             + `you can change it in Settings. Your email address and password are unchanged.`,
           now
         );
-        auditStmt.run(
-          `audit-${crypto.randomUUID()}`,
-          member.id,
-          member.id,
-          `Case-insensitive username collision on "${key}": renamed "${member.username}" to "${renamed}"`,
-          now
-        );
+        // admin_id is NOT NULL with a foreign key to users, and no administrator
+        // performed this — the migration did. Attribute it to the affected
+        // account, which is what the self-deletion audit row already does for
+        // the same reason, so the row is traceable without inventing a user.
+        recordAudit(db, {
+          adminId: member.id,
+          action: 'USERNAME_DEDUPED',
+          targetUserId: member.id,
+          details: `Case-insensitive username collision on "${key}": renamed "${member.username}" to "${renamed}"`
+        });
         console.log(`[Username dedupe] ${member.username} -> ${renamed} (id ${member.id})`);
       }
     }
