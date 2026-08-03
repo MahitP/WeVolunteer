@@ -1166,6 +1166,7 @@ Added on the v1.2 branch, pending release:
 | Provider re-consent | `prompt=login` + `max_age=0` (Google), `prompt=login` (Microsoft); returned `sub` compared to the account's linked row |
 | Adding a sign-in credential | Requires step-up through both the `/api/oauth/link` and `auto_linked` callback paths |
 | Removing a sign-in credential | `POST /api/oauth/disconnect` requires step-up (`oauth.unlink`, provider bound); the last-credential guard is checked **before** the grant is spent |
+| Exported archive caching | `Cache-Control: no-store` on the download, asserted on the emitted header — `res.download` otherwise defaults to `public, max-age=0`, and a cached copy is served without reaching the step-up gate at all |
 | Session identity | Every session carries a `jti`; provider sign-ins are per-device revocable |
 | Schema changes | Versioned migration registry with source checksums re-verified on every boot |
 
