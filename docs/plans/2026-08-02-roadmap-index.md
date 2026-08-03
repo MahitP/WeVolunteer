@@ -128,7 +128,10 @@ Specific corrections already found and folded into the v1.2c+ plans:
 
 - `event_categories`, `event_tags`, `event_tag_map` and `user_tag_interests`
   **do not exist.** Categories are a `CHECK` constraint on `events.category`,
-  and SQLite cannot alter a CHECK — so W7 needs a full table rebuild.
+  and SQLite cannot alter a CHECK. v1.4 §4 weighs a full rebuild against an
+  additive `category_id` and recommends the latter — the `events` rebuild would
+  touch every event, application and attendance row, and the benefit is
+  tidiness.
 - `notification_jobs` and `notification_preferences` **already exist**, so W2's
   queue is partly built. Do not reinvent it.
 - The master plan states that `tokens.test.js` will guard the PWA manifest's
@@ -136,6 +139,22 @@ Specific corrections already found and folded into the v1.2c+ plans:
   manifest cannot use `var()`. That needs a new test.
 - `admin_audit_logs` exists but there is **no audit helper function anywhere**
   and no severity column; all eight call sites are raw inline INSERTs.
+
+**And the same treatment was then applied to these plans, which found two more.**
+Both were of the same shape — a schema constraint that blocks the plan's own
+design and only announces itself on the first insert:
+
+- **v1.4** — `events.category` is `NOT NULL` *as well as* CHECK-constrained, so
+  adding `category_id` does not free new inserts from it. Adding a category
+  without a migration needs a compatibility value written into the old column;
+  the plan now specifies `legacy_value` and says so in its acceptance criteria.
+- **v2.0** — `hours_ledger.event_id` and `.slot_id` are `NOT NULL`, and external
+  hours have neither. The rebuild must widen the enums **and** relax those two in
+  the same migration, or the audit table needs rebuilding twice.
+
+The lesson generalises: **when a plan says "additive, no rebuild", check the
+`NOT NULL`s as well as the CHECKs.** A nullable new column does not relax an
+existing constraint on a different one.
 
 ---
 
