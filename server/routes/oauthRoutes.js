@@ -190,11 +190,15 @@ router.post('/api/oauth/:provider/url', (req, res) => {
    * the callback's first branch logs in anyone presenting that provider
    * identity, for as long as the link exists. `POST /api/oauth/link` — the
    * other door to the same state change — is gated on `requireAAL2`, but that
-   * endpoint only serves the mismatched-address flow. The Settings button, for
-   * the ordinary case where the provider's address matches the account's,
-   * comes through here instead. Gating one and not the other would leave the
-   * release's own rule — adding a credential requires proving identity — true
-   * only of the door users do not use.
+   * endpoint only serves the caller who is NOT already signed in as the account
+   * being linked — `link_required`, returned below when an account holds the
+   * provider's own address but this session does not belong to it. The
+   * distinction between the two doors is the SESSION, not the address: both
+   * require the addresses to match. A caller who IS signed in as that account
+   * comes through here, and that is the path the Settings button takes. Gating
+   * one and not the other would leave the release's own rule — adding a
+   * credential requires proving identity — true only of the door users walk
+   * through.
    *
    * `requireAAL2` cannot be middleware on the callback: that route also serves
    * login and signup, neither of which has an account to have verified. And a

@@ -13,6 +13,10 @@ const DEMO_ACCOUNTS = [
   { name: 'System Admin', email: 'admin@example.gov', avatar: '🛠️', role: 'Administrator' }
 ];
 
+/** "google" → "Google". Provider names are lowercase keys on the wire. */
+const providerLabel = (provider) =>
+  provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : 'that provider';
+
 export default function Login({ onLoginSuccess, addToast }) {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -71,11 +75,14 @@ export default function Login({ onLoginSuccess, addToast }) {
   const errorRef = useRef(null);
   useEffect(() => {
     if (!error) return;
-    if (errorField) {
-      document.getElementById(errorField === 'password' ? 'login-password' : 'login-identifier')?.focus();
-    } else {
-      errorRef.current?.focus();
-    }
+    // `?.focus()` rather than an assertion: the link screen's input is
+    // `link-password`, so this lookup finds nothing there and the banner —
+    // which that screen always renders — takes the focus instead.
+    const field = errorField && document.getElementById(
+      errorField === 'password' ? 'login-password' : 'login-identifier'
+    );
+    if (field) field.focus();
+    else errorRef.current?.focus();
   }, [error, errorField]);
 
   useEffect(() => {
@@ -94,21 +101,44 @@ export default function Login({ onLoginSuccess, addToast }) {
     }
   };
 
-  const handleLinkAccount = async (e) => {
+  /**
+   * Signing in on the link screen, which is now all this screen does.
+   *
+   * ── Why there is no "connect with your password" form any more (v1.2b) ──
+   *
+   * There was one, and after Task 6 it could not succeed. `POST /api/oauth/link`
+   * used to be unauthenticated, tied to an account only by a 15-minute token
+   * naming a user id and proved by that account's password — which made it a
+   * password oracle on an endpoint nobody thought of as one. It is now
+   * authenticated and gated on `requireAAL2('oauth.link')`, so a signed-out
+   * caller gets 401 before the handler ever runs. The old form therefore asked
+   * for a password nothing checked and reported "Incorrect password." whatever
+   * the user typed: a dead end that blamed them for it.
+   *
+   * The honest flow is the one the endpoint's new shape implies. Sign in
+   * normally — which this screen can already do, and the identifier is
+   * pre-filled from `linkData.email` — and then connect the provider from
+   * Settings, where the connect button carries a step-up verification. Because
+   * `link_required` is only ever returned when an account already holds the
+   * provider's own address, pressing "Continue with <provider>" again while
+   * signed in takes the `auto_linked` path instead and links in one step.
+   */
+  const handleLinkSignIn = async (e) => {
     e.preventDefault();
-    setError('');
-    setLoading(true);
-    try {
-      await api.linkOAuthAccount(linkData.linkToken, password);
-      addToast('Account connected.', 'success');
-      onLoginSuccess();
-    } catch (err) {
-      setError(err.message || 'Incorrect password.');
-      setLoading(false);
-    }
+    await performLogin(linkData.email, password, {
+      afterToast: () => addToast(
+        `You can now connect ${providerLabel(linkData.provider)} from Settings.`,
+        'info'
+      )
+    });
   };
 
-  const performLogin = async (loginId, loginPassword) => {
+  /**
+   * `afterToast` lets the link screen add "…and here is what to do next" without
+   * duplicating the sign-in error handling below, which knows how to put the
+   * message on the field the server named.
+   */
+  const performLogin = async (loginId, loginPassword, { afterToast } = {}) => {
     setError('');
     setErrorField(null);
     setLoading(true);
@@ -120,6 +150,7 @@ export default function Login({ onLoginSuccess, addToast }) {
         addToast('Confirm your email address to finish signing in.', 'info');
       } else {
         addToast(`Welcome back, ${result.user.name.split(' ')[0]}.`, 'success');
+        afterToast?.();
       }
       onLoginSuccess();
     } catch (err) {
@@ -261,9 +292,7 @@ export default function Login({ onLoginSuccess, addToast }) {
 
   /* ── Connect a provider to an existing account ────────────────────── */
   if (mode === 'link') {
-    const providerLabel = linkData?.provider
-      ? linkData.provider.charAt(0).toUpperCase() + linkData.provider.slice(1)
-      : 'that provider';
+    const label = providerLabel(linkData?.provider);
 
     return (
       <div className="auth">
@@ -271,16 +300,50 @@ export default function Login({ onLoginSuccess, addToast }) {
           <div className="auth-icon" aria-hidden="true"><Lock size={26} /></div>
 
           <div className="auth-head">
-            <h1 id="link-heading" className="auth-title">Connect your {providerLabel} account</h1>
+            <h1 id="link-heading" className="auth-title">Sign in to connect {label}</h1>
+            {/*
+              The copy is deliberately about signing in, not about connecting.
+              This form used to claim it would connect the account for a
+              password, and since v1.2b it cannot: /api/oauth/link requires a
+              session, so a signed-out attempt is refused before the handler
+              runs. Promising the link here and delivering "Incorrect password."
+              was the worst of both. Connecting happens in Settings, one step
+              later, behind a verification.
+            */}
             <p className="auth-subtitle">
-              <strong>{linkData?.email}</strong> already has a {' '}
-              WeVolunteer account. Enter its password once and you can use {providerLabel} from then on.
+              <strong>{linkData?.email}</strong> already has a WeVolunteer
+              account. Sign in to it, then connect {label} from Settings — it
+              takes one more tap and you can use {label} from then on.
             </p>
           </div>
 
-          {errorBanner}
+          {/*
+            This screen shows its error unconditionally, unlike the sign-in form
+            below, which suppresses the banner when the server names a field and
+            renders the message beside that input instead.
 
-          <form onSubmit={handleLinkAccount} className="stack-md" noValidate>
+            Two reasons it has to differ. There is only one field here, so "in a
+            banner" and "beside the field" are the same place. And the shared
+            mechanism does not reach this screen anyway: the field-level messages
+            key on `login-password` / `login-identifier`, and this input is
+            `link-password` — so a wrong password produced no banner, no field
+            message, and no focus move. Silent failure on the one screen where
+            the user has already been bounced once.
+          */}
+          {error && (
+            <div
+              className="alert alert-danger"
+              role="alert"
+              tabIndex={-1}
+              ref={errorRef}
+              style={{ marginBottom: 'var(--s4)' }}
+            >
+              <AlertCircle size={16} aria-hidden="true" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleLinkSignIn} className="stack-md" noValidate>
             {/*
               A hidden username field. Password managers need an identity
               alongside the password to offer the right credential and to save
@@ -325,7 +388,7 @@ export default function Login({ onLoginSuccess, addToast }) {
             </div>
 
             <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={loading || !password}>
-              {loading ? 'Connecting…' : `Connect ${providerLabel}`}
+              {loading ? 'Signing in…' : 'Sign in'}
             </button>
           </form>
 

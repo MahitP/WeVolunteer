@@ -1650,6 +1650,30 @@ when they are done, not when they become uncomfortable to look at.
   gated — which is already what `verifyFirst` does for `oauth.link`.
 - **Effort:** n/a — accepted. **Opened:** 2026-08-03.
 
+#### TD-18 — `POST /api/oauth/link` now has no client caller
+
+- **Detail:** v1.2b Task 6 made it authenticated and step-up gated. Its only
+  caller was the signed-out Login screen's "enter your password to connect" form,
+  which therefore could no longer succeed — `authenticateToken` refuses before the
+  handler runs, and the form reported "Incorrect password." whatever was typed.
+  That form is now a plain sign-in (`src/views/Login.linkAccount.test.jsx`), and
+  connecting happens afterwards in Settings via the `auto_linked` path.
+- **The endpoint is still reachable in principle, and that is the awkward part.**
+  A link token is minted only when the caller is *not* signed in as the account it
+  names, and the endpoint refuses a token naming anyone but the caller — so using
+  it requires obtaining the token while signed out, signing in, and then
+  presenting it within its 15 minutes. Nothing implements that, and the simpler
+  route (sign in, press the provider button again, take `auto_linked`) reaches the
+  same end state.
+- **Risk:** low, but it is either dead code or a missing flow, and leaving it
+  ambiguous is how a reviewer later "fixes" it by loosening the gate. Server tests
+  still cover it, so it is not untested — it is unreached.
+- **Action:** decide deliberately. Either remove the endpoint and the `linkToken`
+  the callback mints for it, and have `link_required` carry only the instruction;
+  or implement the two-step client flow and keep it. Removal is the smaller
+  surface and is the recommendation.
+- **Effort:** small. **Opened:** 2026-08-03.
+
 #### TD-8 — `node:sqlite` is experimental
 
 - **Detail:** emits an experimental warning on every boot; the `<25` Node upper

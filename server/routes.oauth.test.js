@@ -484,9 +484,11 @@ describe('oauth', () => {
   /**
    * ── The `auto_linked` door (v1.2b Task 6b) ──
    *
-   * `POST /api/oauth/link` is the mismatched-address flow. When the provider's
-   * address MATCHES the account's — the ordinary Settings case, and the one
-   * users actually reach — the link is made here, in the callback, instead.
+   * `POST /api/oauth/link` serves the caller who is NOT signed in as the account
+   * being linked (`link_required`). When the caller IS signed in as it — the
+   * Settings case, and the one users actually reach — the link is made here, in
+   * the callback, instead. Both require the provider's address to match the
+   * account's; what differs is the session.
    * Both write the same `oauth_accounts` row, and that row is a new way to sign
    * in: the callback's returning-user branch logs in anyone presenting the
    * identity from then on. So both need the same proof, or the rule this
