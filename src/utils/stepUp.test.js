@@ -21,6 +21,121 @@ import { api } from './api';
 beforeEach(() => { vi.restoreAllMocks(); sessionStorage.clear(); });
 afterEach(() => { vi.restoreAllMocks(); sessionStorage.clear(); });
 
+/**
+ * A build-failing guard over the client, added after the same bug landed twice.
+ *
+ * ── The bug ──
+ *
+ * Task 6 changed five `api` methods so that their last argument is the headers
+ * object carrying the step-up grant. Two call sites were still passing the old
+ * `password` argument in that position: `src/views/Login.jsx` (the provider-link
+ * screen) and `src/components/account/VerifyEmailWall.jsx` (the only way out for
+ * an account with a mistyped address). A string spread into `headers` produces
+ * `{0:'p',1:'a',…}`, no grant is presented, and the endpoint answers 403 — which
+ * both screens reported as "Incorrect password." and "Could not change that
+ * address."
+ *
+ * Neither was caught, because neither screen had a test that submitted its form.
+ * Fixing the two instances does not stop a third, so the class is checked here:
+ * a gated endpoint must be called with something named `headers`, which in
+ * practice means from inside a `run(...)` or `verifyFirst(...)` callback.
+ *
+ * Deliberately a source scan rather than a runtime check. The failure is a
+ * *missing* call — nothing throws, nothing logs, and the endpoint's own tests
+ * pass — so it has to be caught at build time or not at all. The same reasoning
+ * as Guards 4 and 5 in `server/authz.completeness.test.js`.
+ */
+describe('every gated endpoint is called with its grant', () => {
+  /** The `api` methods whose last argument became the headers object in Task 6. */
+  const GATED_METHODS = [
+    'changePassword', 'changeEmail', 'deleteAccount', 'requestExport', 'linkOAuthAccount'
+  ];
+
+  /**
+   * Call sites of `api.<method>(…)` in one source file.
+   *
+   * Kept as a function over a string so the self-test below can drive it with the
+   * exact bug. Reading a regex and believing it is how three role checks got past
+   * a guard earlier in this project.
+   */
+  function findGatedCalls(src) {
+    const found = [];
+    src.split('\n').forEach((line, i) => {
+      // A line that only mentions the name in prose is not a call site.
+      if (/^\s*(\*|\/\/)/.test(line)) return;
+      for (const method of GATED_METHODS) {
+        const re = new RegExp(`\\bapi\\.${method}\\s*\\(([^)]*)\\)`, 'g');
+        for (const m of line.matchAll(re)) {
+          found.push({ line: i + 1, method, args: m[1].trim() });
+        }
+      }
+    });
+    return found;
+  }
+
+  /** Whether a call site hands the grant along. */
+  const carriesGrant = (args) => /\bheaders\b/.test(args);
+
+  it('fires on a call that passes a password, and not on a correct one', () => {
+    // The exact shape of both real bugs.
+    const bug = findGatedCalls('      const res = await api.changeEmail(newEmail.trim(), password);');
+    expect(bug).toHaveLength(1);
+    expect(bug[0].method).toBe('changeEmail');
+    expect(carriesGrant(bug[0].args)).toBe(false);
+
+    const alsoBug = findGatedCalls('      await api.linkOAuthAccount(linkData.linkToken, password);');
+    expect(carriesGrant(alsoBug[0].args)).toBe(false);
+
+    // The shapes that are correct.
+    expect(carriesGrant(findGatedCalls('        headers => api.changeEmail(target, headers)')[0].args)).toBe(true);
+    expect(carriesGrant(findGatedCalls('        headers => api.deleteAccount(headers)')[0].args)).toBe(true);
+    expect(carriesGrant(findGatedCalls('  requestExport: async (headers = {}) => apiFetch(')[0]?.args ?? 'headers')).toBe(true);
+
+    // Prose mentioning a method is not a call site.
+    expect(findGatedCalls("   * `api.changeEmail(newEmail, password)` used to take a password.")).toEqual([]);
+    expect(findGatedCalls("// api.deleteAccount(password) was the old shape")).toEqual([]);
+  });
+
+  it('finds no gated call missing its grant anywhere in src/', async () => {
+    const { readFileSync, readdirSync } = await import('fs');
+    const path = await import('path');
+    const SRC = path.join(process.cwd(), 'src');
+
+    const files = [];
+    const walk = (dir) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) { walk(full); continue; }
+        if (!/\.jsx?$/.test(entry.name) || /\.test\.jsx?$/.test(entry.name)) continue;
+        files.push(full);
+      }
+    };
+    walk(SRC);
+    expect(files.length, 'the src/ walk found nothing to scan').toBeGreaterThan(0);
+
+    const offenders = [];
+    for (const file of files) {
+      const rel = path.relative(process.cwd(), file);
+      // api.js is where the methods are DEFINED; its own `headers = {}`
+      // parameters are the definition, not a call.
+      if (rel === path.join('src', 'utils', 'api.js')) continue;
+
+      for (const site of findGatedCalls(readFileSync(file, 'utf8'))) {
+        if (!carriesGrant(site.args)) {
+          offenders.push(
+            `${rel}:${site.line}: api.${site.method}(${site.args}) does not pass the step-up `
+            + 'headers. This endpoint is behind requireAAL2, so without the grant it answers 403 '
+            + 'and the screen reports a credential error it cannot recover from. Call it through '
+            + "useStepUp's run(...) or verifyFirst(...) so the retry carries the header."
+          );
+        }
+      }
+    }
+
+    expect(offenders, 'gated endpoint call(s) with no step-up grant').toEqual([]);
+  });
+});
+
 describe('the action names come from the shared registry', () => {
   /**
    * A name that has drifted out of the registry cannot produce a grant, so the
