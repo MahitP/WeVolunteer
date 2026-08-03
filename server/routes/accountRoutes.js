@@ -13,6 +13,7 @@ import { VALID_GRADES, JWT_SECRET, COOKIE_NAME, cookieOptions, clearCookieOption
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
 import { requireAAL2 } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
+import { recordAudit } from '../auditLog.js';
 import { db } from '../db.js';
 import {
   validateAccountFields, validatePassword, validateUsername, validateEmail,
@@ -174,13 +175,20 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
 
       // 4. Audit Log
       //
-      // randomUUID, not Date.now(): two deletions in the same millisecond
-      // collided on this PRIMARY KEY, which rolled the transaction back and
-      // failed the whole deletion with a 500 for both people.
-      db.prepare(`
-        INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(`audit-${crypto.randomUUID()}`, req.user.id, 'ACCOUNT_DELETED', req.user.id, 'User self-deleted their account', now);
+      // The incident that produced the UUID id now lives in auditLog.js, which
+      // generates it: two deletions in the same millisecond collided on this
+      // PRIMARY KEY, rolled the transaction back, and failed the whole deletion
+      // with a 500 for both people. No call site can reintroduce a Date.now()
+      // id, because the id is not a parameter.
+      //
+      // admin_id is the account itself: this is a self-deletion, and the column
+      // is NOT NULL with a foreign key, so there is no administrator to name.
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'ACCOUNT_DELETED',
+        targetUserId: req.user.id,
+        details: 'User self-deleted their account'
+      });
 
       /**
        * 5. Tell the organizers who were counting on this person.

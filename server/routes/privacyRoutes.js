@@ -4,6 +4,7 @@ import { authenticateToken, inTransaction } from '../utils.js';
 import { DEMO_MODE } from '../config.js';
 import { requireAAL2 } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
+import { recordAudit } from '../auditLog.js';
 import rateLimit from 'express-rate-limit';
 import fs from 'fs';
 
@@ -76,12 +77,16 @@ router.post('/api/privacy/export', authenticateToken, requireAAL2('data.export')
         VALUES (?, ?, 'pending', ?)
       `).run(jobId, userId, new Date().toISOString());
 
-      // Audit log
-      const auditId = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      db.prepare(`
-        INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
-        VALUES (?, ?, 'DATA_EXPORT_REQUESTED', ?, 'User requested a data export', ?)
-      `).run(auditId, userId, userId, new Date().toISOString()); // Note: Using admin_audit_logs for system logs for now, or we could skip it since WeVolunteer just has admin_audit_logs
+      // Audit log. admin_id is the account itself — this is a self-service
+      // action and the column is NOT NULL with a foreign key, so there is no
+      // administrator to name. (admin_audit_logs is the only audit table this
+      // application has; it carries system rows as well as admin ones.)
+      recordAudit(db, {
+        adminId: userId,
+        action: 'DATA_EXPORT_REQUESTED',
+        targetUserId: userId,
+        details: 'User requested a data export'
+      });
     });
 
     res.status(202).json({ message: 'Export request queued', jobId });
@@ -223,13 +228,32 @@ router.get('/api/privacy/export/download/:id', authenticateToken, requireAAL2('d
     if (err) {
       console.error('Error downloading file:', err);
     } else {
-      // Log successful download
+      /**
+       * Log successful download.
+       *
+       * The one call site in the application that catches. `recordAudit` never
+       * swallows — every other caller runs inside a transaction where a failed
+       * audit must take the work down with it — but this runs in `res.download`'s
+       * completion callback, after the archive has already been streamed to the
+       * user. There is no response left to fail and no transaction left to roll
+       * back, so a throw here would be an unhandled exception in a callback
+       * rather than an error anybody sees.
+       *
+       * The cost is real and is stated rather than hidden: a database failure at
+       * this instant loses the record that the archive was collected, while the
+       * archive still leaves. That is the wrong trade for a download of a
+       * personal-data export and it is recorded as a finding rather than fixed
+       * here — moving the audit ahead of `res.download`, so it is written before
+       * the bytes move and can refuse the download, is a behaviour change beyond
+       * this task's "convert the call sites, refactor nothing" boundary.
+       */
       try {
-        const auditId = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        db.prepare(`
-          INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
-          VALUES (?, ?, 'DATA_EXPORT_DOWNLOADED', ?, 'User downloaded data export', ?)
-        `).run(auditId, userId, userId, new Date().toISOString());
+        recordAudit(db, {
+          adminId: userId,
+          action: 'DATA_EXPORT_DOWNLOADED',
+          targetUserId: userId,
+          details: 'User downloaded data export'
+        });
       } catch (e) {
         console.error('Audit log failed:', e);
       }

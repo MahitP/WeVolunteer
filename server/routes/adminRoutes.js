@@ -1,5 +1,4 @@
 import express from 'express';
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -9,6 +8,7 @@ import { notificationService } from '../services/notificationService.js';
 import { getMailHealth } from '../email.js';
 import { getQueueHealth } from '../workers/notificationWorker.js';
 import { requireCap } from '../authz.js';
+import { recordAudit } from '../auditLog.js';
 
 const router = express.Router();
 
@@ -31,17 +31,12 @@ router.post('/api/admin/organizers/:id/approve', authenticateToken, requireCap('
     db.prepare('UPDATE users SET verified = 1 WHERE id = ?').run(orgId);
     
     // Log the audit event
-    db.prepare(`
-      INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-      `audit-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      req.user.id,
-      'APPROVE_ORGANIZER',
-      orgId,
-      'Approved pending organizer account',
-      new Date().toISOString()
-    );
+    recordAudit(db, {
+      adminId: req.user.id,
+      action: 'APPROVE_ORGANIZER',
+      targetUserId: orgId,
+      details: 'Approved pending organizer account'
+    });
 
     notificationService.dispatch('ORGANIZER_APPROVED', {}, orgId);
     res.json({ success: true });
@@ -74,17 +69,12 @@ router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('org
     db.prepare("DELETE FROM users WHERE id = ? AND role = 'organizer' AND verified = 0").run(orgId);
     
     // Log the audit event
-    db.prepare(`
-      INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-      `audit-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      req.user.id,
-      'DENY_ORGANIZER',
-      orgId,
-      'Denied and deleted pending organizer account request',
-      new Date().toISOString()
-    );
+    recordAudit(db, {
+      adminId: req.user.id,
+      action: 'DENY_ORGANIZER',
+      targetUserId: orgId,
+      details: 'Denied and deleted pending organizer account request'
+    });
 
     res.json({ success: true });
   } catch (error) {
@@ -254,18 +244,13 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
      * foreign key to users, and the reporter is the person the follow-up concerns.
      * What was reported is recorded in `details`.
      */
-    db.prepare(`
-      INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-      `audit-${crypto.randomUUID()}`,
-      req.user.id,
-      'MODERATE_REPORT',
-      report.reporter_id,
-      `Report ${report.id} (${report.target_type} ${report.target_id}) `
-        + `marked ${status} (was ${report.status})`,
-      new Date().toISOString()
-    );
+    recordAudit(db, {
+      adminId: req.user.id,
+      action: 'MODERATE_REPORT',
+      targetUserId: report.reporter_id,
+      details: `Report ${report.id} (${report.target_type} ${report.target_id}) `
+        + `marked ${status} (was ${report.status})`
+    });
 
     res.json({ success: true, message: 'Report updated' });
   } catch (err) {
