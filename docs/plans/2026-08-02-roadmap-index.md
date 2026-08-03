@@ -25,12 +25,12 @@ an instruction set** — see §4 below on why you must not trust it uncritically
 
 ```
 export PATH="/usr/local/bin:$PATH"   # see §3 — this line is not optional
-npm test        # 1730 tests, 119 files, 0 failures
+npm test        # 1737 tests, 120 files, 0 failures
 npm run lint    # clean
 npm run build   # clean
 ```
 
-If your numbers are lower than 1730, you are either on a stale checkout or on
+If your numbers are lower than 1737, you are either on a stale checkout or on
 the wrong Node. (It was 1706 / 117 files before the audit round below added
 `routes.exportDownload.test.js` and `routes.oauthUnlink.test.js`.)
 
@@ -38,7 +38,7 @@ the wrong Node. (It was 1706 / 117 files before the audit round below added
 
 ## 2. What v1.2b established, because everything later depends on it
 
-Thirty-seven commits on `feat/v1.2b-step-up-auth`, `99334a7` … `a73d101`.
+Forty commits on `feat/v1.2b-step-up-auth`, `99334a7` … `d7f8123`.
 
 **Seven actions now require a fresh proof of identity**, not merely a session:
 `account.delete`, `password.change`, `email.change`, `oauth.link`,
@@ -88,7 +88,7 @@ one with the incident behind it. The four that catch people out:
 - Every session carries a `jti`. `openChallenge` refuses to bind a grant to a
   session without one, so provider sign-ins had to be fixed to use the shared
   `issueSession` — a near-copy that omitted the claim would have locked every
-  provider-signed-in user out of all five actions.
+  provider-signed-in user out of every one of the gated actions.
 - A provider-only account can now set a first password and link a second
   provider. Both were previously impossible, because a password was the only
   credential those endpoints could check.
