@@ -25,25 +25,46 @@ an instruction set** — see §4 below on why you must not trust it uncritically
 
 ```
 export PATH="/usr/local/bin:$PATH"   # see §3 — this line is not optional
-npm test        # 1706 tests, 117 files, 0 failures
+npm test        # 1730 tests, 119 files, 0 failures
 npm run lint    # clean
 npm run build   # clean
 ```
 
-If your numbers are lower than 1706, you are either on a stale checkout or on
-the wrong Node.
+If your numbers are lower than 1730, you are either on a stale checkout or on
+the wrong Node. (It was 1706 / 117 files before the audit round below added
+`routes.exportDownload.test.js` and `routes.oauthUnlink.test.js`.)
 
 ---
 
 ## 2. What v1.2b established, because everything later depends on it
 
-Eleven commits on `feat/v1.2b-step-up-auth`, `ae04ca4` … `401d93f` (the last two
-being the sign-out cleanup and these plans).
+Thirty-seven commits on `feat/v1.2b-step-up-auth`, `99334a7` … `a73d101`.
 
-**Five actions now require a fresh proof of identity**, not merely a session:
-`account.delete`, `password.change`, `email.change`, `oauth.link`, `data.export`.
-A grant is bound to one action, with its arguments, from one sign-in, for five
-minutes, once.
+**Seven actions now require a fresh proof of identity**, not merely a session:
+`account.delete`, `password.change`, `email.change`, `oauth.link`,
+`oauth.unlink`, `data.export`, `data.download`. A grant is bound to one action,
+with its arguments, from one sign-in, for five minutes, once.
+
+The last two were added by an independent audit of the finished branch, and the
+reason they were missing is worth more than the fix. The step-up MECHANISM was
+sound — 33 mutants against its enforcement lines killed 31, and both survivors
+were provably equivalent — but its PERIMETER had two holes, each an endpoint
+that reached a gated effect by a route the plan had classified under a different
+property:
+
+- **`data.download`.** `POST /api/privacy/export` was gated; the download that
+  actually emits the archive was not. The gate protected an archive that did not
+  exist yet and left the finished one behind a bare session for the seven days
+  it is retained.
+- **`oauth.unlink`.** `POST /api/oauth/link` was gated; `disconnect` was not. The
+  plan did examine `disconnect` and marked it "already correct" — judging it
+  against *lockout* (the last-credential guard) rather than *assurance*.
+
+Both escaped `authz.completeness.test.js` because its categories classify a
+route by **whose data it touches**, never by **what identity proof it needs**.
+That taxonomy cannot express a step-up gap, so a sixth guard would not have
+caught these either. When adding a gated action, ask where the effect actually
+lands and whether a second endpoint reaches it — see ENGINEERING_GUIDE §6.8.
 
 The rules are written up in full in **`docs/ENGINEERING_GUIDE.md` §6.8**, each
 one with the incident behind it. The four that catch people out:

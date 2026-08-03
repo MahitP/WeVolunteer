@@ -994,10 +994,25 @@ must be redone before shipping.
 
 ### 6.8 Step-up re-authentication (AAL2)
 
-Added in v1.2b. Five actions cannot be performed on the strength of a session
+Added in v1.2b. Seven actions cannot be performed on the strength of a session
 alone; the account holder must re-prove who they are within the last five
 minutes. **The rules below are not style preferences. Each one closes a hole
 that was open in this codebase.**
+
+> **Gate the operation that does the thing, not the one that announces it.**
+> The branch's own audit found two actions missing from this list, and both were
+> the same mistake in different clothes. `POST /api/privacy/export` was gated
+> and `GET /api/privacy/export/download/:id` was not — so the REQUEST was
+> protected and the DISCLOSURE was not, and a completed archive sat behind a
+> bare session for the seven days it is retained. `POST /api/oauth/link` was
+> gated and `POST /api/oauth/disconnect` was not, so "adding a credential
+> requires step-up" held in one direction only.
+>
+> Ask, for each gated action: *where does the effect actually land, and is there
+> a second endpoint that reaches it?* Rule 3 below already says to gate both
+> paths when two of them make the same state change; these two were missed
+> because the second path did not look like the same change — one only reads,
+> and one only removes.
 
 #### The registry is the only list
 
@@ -1138,7 +1153,7 @@ Confirmed at `v1.1.0`:
 | Password minimum length | 8 characters |
 | Login throttling | Active |
 | Account enumeration | Hardened |
-| Privacy export | IDOR-tested; step-up gated as of v1.2b |
+| Privacy export | IDOR-tested; step-up gated as of v1.2b on **both** the request (`data.export`) and the download (`data.download`, bound to the job id) |
 | Secret scanning | Pre-commit hook installed |
 
 Added on the v1.2 branch, pending release:
@@ -1146,10 +1161,11 @@ Added on the v1.2 branch, pending release:
 | Control | Verified behaviour |
 |---|---|
 | Authorization | Capability-based; no role-string comparison anywhere in `server/` or `src/`, enforced by five build-failing guards |
-| Sensitive actions | Five actions behind `requireAAL2`; grants bound to action, params and session; single-use; five-minute lifetime |
+| Sensitive actions | Seven actions behind `requireAAL2`; grants bound to action, params and session; single-use; five-minute lifetime |
 | Step-up brute force | Bounded per challenge (5), per account (15 / 15 min) and per IP (`reauthLimiter`) |
 | Provider re-consent | `prompt=login` + `max_age=0` (Google), `prompt=login` (Microsoft); returned `sub` compared to the account's linked row |
 | Adding a sign-in credential | Requires step-up through both the `/api/oauth/link` and `auto_linked` callback paths |
+| Removing a sign-in credential | `POST /api/oauth/disconnect` requires step-up (`oauth.unlink`, provider bound); the last-credential guard is checked **before** the grant is spent |
 | Session identity | Every session carries a `jti`; provider sign-ins are per-device revocable |
 | Schema changes | Versioned migration registry with source checksums re-verified on every boot |
 
