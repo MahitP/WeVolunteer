@@ -95,6 +95,33 @@ describe('export download: the gate', () => {
     expect(res.status).toBe(200);
   });
 
+  /**
+   * Asserted on the emitted header, not on the `res.set` call.
+   *
+   * `res.download` delegates to `send`, which supplies
+   * `Cache-Control: public, max-age=0` of its own when the header is absent —
+   * measured on the wire before this was added, not assumed. `public` invites
+   * shared caches to store a zip holding one person's entire record, and lets
+   * the browser keep the body in its on-disk cache after the tab closes: the
+   * shared-Chromebook threat `src/utils/stepUp.js` already reasons about. A
+   * cached copy would bypass the step-up gate completely, so this belongs with
+   * that gate rather than beside it.
+   *
+   * Checking the response rather than the call is what survives a library
+   * upgrade that changes whether an explicit header still wins.
+   */
+  it('forbids caching the archive anywhere', async () => {
+    const { cookie } = await srv.signupConfirmed(account());
+    const { jobId } = await completedExport(cookie);
+
+    const header = await srv.verified(cookie, 'data.download', { password: PW, params: { jobId } });
+    const res = await srv.call('GET', `/api/privacy/export/download/${jobId}`, undefined, cookie, header);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('cache-control')).not.toMatch(/public/);
+  });
+
   it('does not accept the data.export grant that produced the archive', async () => {
     const { cookie } = await srv.signupConfirmed(account());
     const { jobId } = await completedExport(cookie);
