@@ -6,6 +6,7 @@ import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, isEmailGateAllowed, COOKIE_NAME
 import { principalFor } from './authz.js';
 import { grantsFor } from './userCapabilities.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
+import { sweepErrors } from './errorReporter.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
 
 /**
@@ -535,6 +536,20 @@ export function runNotificationSweep() {
     // every abandoned one, each carrying an ip_hash. Worthless once expired.
     const challenges = sweepExpiredChallenges(db, now);
     if (challenges > 0) console.log(`[Reauth] Purged ${challenges} spent step-up challenge(s).`);
+
+    /**
+     * Error records: aged evidence, closed groups, and the single-occurrence
+     * client groups an unauthenticated flood leaves behind.
+     *
+     * Here rather than on a timer of its own, deliberately — a second interval
+     * would be a second thing `shutdown.js` has to drain. `sweepErrors` catches
+     * internally and returns counts instead of throwing, so a failure in it
+     * cannot abandon the sweep tasks above it inside this one shared try block.
+     */
+    const errors = sweepErrors(db, now);
+    if (errors.groups > 0 || errors.events > 0) {
+      console.log(`[Errors] Purged ${errors.groups} error group(s) and ${errors.events} event(s).`);
+    }
 
     if (removed > 0) {
       console.log(`[Notifications] Cleaned up ${removed} expired notifications.`);
