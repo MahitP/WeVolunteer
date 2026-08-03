@@ -2,12 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../../utils/api';
 import { DownloadCloud, Clock, AlertTriangle, FileArchive, CheckCircle, Check, XCircle } from 'lucide-react';
 import Modal, { ModalHead } from '../Modal';
+import { useStepUp } from '../auth/useStepUp';
+import { STEP_UP } from '../../utils/stepUp';
 
 export default function DataExportCard({ addToast }) {
   const [status, setStatus] = useState('loading'); // loading, none, pending, processing, completed, failed, expired
   const [job, setJob] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { run, modal: verifyModal } = useStepUp();
 
   useEffect(() => {
     fetchStatus();
@@ -37,10 +40,32 @@ export default function DataExportCard({ addToast }) {
     }
   };
 
+  /**
+   * ── Why this asks for verification at all (v1.2b) ──
+   *
+   * An export is a complete copy of everything the account holds, and this was
+   * the one sensitive action with no proof of identity behind it: an
+   * authenticated request and a rate limit, nothing more. Deleting the account,
+   * changing the password and changing the email address each demanded a
+   * credential; the action that copies every record out — for a population that
+   * is mostly minors — demanded none, which made it the quietest thing a
+   * borrowed session could do.
+   *
+   * The request is attempted before the dialog appears, deliberately. The server
+   * answers "an export is already in progress" before it consumes the grant, and
+   * checks assurance before the rate limiter, so a user is never asked to verify
+   * for an export that was never going to start.
+   */
   const handleRequestExport = async () => {
     setIsSubmitting(true);
     try {
-      await api.requestExport();
+      const res = await run(
+        STEP_UP.DATA_EXPORT,
+        {},
+        headers => api.requestExport(headers)
+      );
+      if (!res) return;
+
       addToast('Data export requested. This may take a few minutes.', 'success');
       await fetchStatus();
     } catch (err) {
@@ -252,6 +277,7 @@ export default function DataExportCard({ addToast }) {
           </div>
         </Modal>
       )}
+      {verifyModal}
     </>
   );
 }
