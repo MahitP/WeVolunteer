@@ -140,21 +140,36 @@ Specific corrections already found and folded into the v1.2c+ plans:
 - `admin_audit_logs` exists but there is **no audit helper function anywhere**
   and no severity column; all eight call sites are raw inline INSERTs.
 
-**And the same treatment was then applied to these plans, which found two more.**
-Both were of the same shape — a schema constraint that blocks the plan's own
-design and only announces itself on the first insert:
+### What has and has not been verified in these plans
 
-- **v1.4** — `events.category` is `NOT NULL` *as well as* CHECK-constrained, so
-  adding `category_id` does not free new inserts from it. Adding a category
-  without a migration needs a compatibility value written into the old column;
-  the plan now specifies `legacy_value` and says so in its acceptance criteria.
-- **v2.0** — `hours_ledger.event_id` and `.slot_id` are `NOT NULL`, and external
-  hours have neither. The rebuild must widen the enums **and** relax those two in
-  the same migration, or the audit table needs rebuilding twice.
+The same treatment was then applied to the four plans themselves. **Every route
+path, file path, table name, capability name and cited line number was checked
+against the code and holds.** Five design claims did not, all in v1.4 and v2.0 —
+which is where the plans interact most with code that already exists, so it is
+where there was most to get wrong:
 
-The lesson generalises: **when a plan says "additive, no rebuild", check the
-`NOT NULL`s as well as the CHECKs.** A nullable new column does not relax an
-existing constraint on a different one.
+| Plan | Was claimed | Actually |
+|---|---|---|
+| v1.4 | additive `category_id` lets a category be added with no migration | `events.category` is **`NOT NULL`** as well as CHECK-constrained, so every insert must still supply one of five legal strings. Needs a `legacy_value` compatibility column — now specified |
+| v1.4 | the `events` rebuild touches "five child tables" (list of seven) | **eight**: the list omitted `conversations`. The plan now says to derive it from `pragma foreign_key_list`, which is what §8.3's fifth guard is for |
+| v1.4 | distance filtering is new work, done as a coarse bbox so no precise position is sent | **already fully built** in `server/eventQuery.js` — haversine in SQL, in miles — and precise positions *are* sent, by design, so the server can paginate. They are neither logged nor stored, which is the fact that matters |
+| v1.4 | "verify the geocode limiter is ≤1/s server-wide" | it is **per-IP, 30/min** — a live Nominatim policy breach, now **TD-19**. The cache and User-Agent the plan asked for already exist |
+| v2.0 | rebuild `hours_ledger` to widen three CHECKs | `event_id` and `slot_id` are **`NOT NULL`** too, and external hours have neither. Both changes must happen in the **same** migration or the audit table is rebuilt twice |
+
+Two generalisations worth carrying:
+
+1. **When a plan says "additive, no rebuild", check the `NOT NULL`s as well as
+   the CHECKs.** A nullable new column does not relax an existing constraint on a
+   different one. Three of the five findings are that mistake.
+2. **Check whether the thing is already built.** Two of the five were features the
+   plan treated as new. Reading the module beats grepping for a name, because the
+   name a codebase uses is rarely the name a plan uses — the master plan missed
+   the whole of step-up by grepping for `reauth` and `step-up`, neither of which
+   this codebase used.
+
+**What has NOT been verified:** that the task sequences are executable. Verifying
+that means executing them. Expect the plans to be right about the codebase and
+merely plausible about the order of work.
 
 ---
 
