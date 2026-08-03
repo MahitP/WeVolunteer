@@ -64,9 +64,31 @@ function formatAddress(addr) {
 /**
  * GET /api/geocode?q=<query>
  *
- * Server-side proxy for Nominatim geocoding. Organizers and admins only.
- * Never called by students. Central rate limiting, caching, and
- * response normalization.
+ * Server-side proxy for Nominatim geocoding, gated on `geocode.use`, with
+ * caching and response normalisation.
+ *
+ * ── ⚠️ The rate limiting is NOT central, despite what this said (TD-19) ──
+ *
+ * `geocodeLimiter` above passes no `keyGenerator`, so `express-rate-limit`
+ * defaults to **per client IP**: thirty requests a minute *each*. The
+ * [Nominatim usage policy](https://operations.osmfoundation.org/policies/nominatim/)
+ * is an absolute maximum of **one request per second for the whole
+ * application**. A handful of organizers on different networks exceeds that.
+ *
+ * This comment used to claim "central rate limiting", which is the reason the
+ * gap survived a read: someone checking whether the policy was honoured would
+ * have found a sentence saying yes.
+ *
+ * The cache below is the only thing currently holding upstream volume down, and
+ * it works — repeat lookups of the same address never leave the process. What is
+ * missing is a **server-wide** throttle in front of the `fetch`, placed after the
+ * cache check so a cached hit never waits. Whether that queues briefly or
+ * fail-fasts with the 429 this handler already returns is a UX decision; see
+ * ENGINEERING_GUIDE TD-19 and v1.4 Task 12.
+ *
+ * The consequence of leaving it is not a 500 — it is OSM blocking this
+ * application's User-Agent, which removes address lookup for every school at
+ * once.
  */
 router.get('/api/geocode', geocodeLimiter, authenticateToken, requireCap('geocode.use'), async (req, res) => {
   const raw = req.query.q;
