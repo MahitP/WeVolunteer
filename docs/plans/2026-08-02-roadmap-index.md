@@ -37,7 +37,8 @@ the wrong Node.
 
 ## 2. What v1.2b established, because everything later depends on it
 
-Nine commits on `feat/v1.2b-step-up-auth`, `ae04ca4` … `724bc3a`.
+Eleven commits on `feat/v1.2b-step-up-auth`, `ae04ca4` … `401d93f` (the last two
+being the sign-out cleanup and these plans).
 
 **Five actions now require a fresh proof of identity**, not merely a session:
 `account.delete`, `password.change`, `email.change`, `oauth.link`, `data.export`.
