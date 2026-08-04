@@ -433,7 +433,13 @@ describe('authorization hygiene', () => {
      */
     const CLIENT_DECLARATIONS = {
       // ── NOT_AUTHORIZATION ──
-      'src/App.jsx:662': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      // Moved 662 -> 671 by v1.2c Task 8, which added an ErrorPage import and
+      // replaced the `denied` redirect with a rendered 403 — both above this
+      // line. Re-read at its new position: unchanged, and still not an
+      // authorization check. `viewingProfile.type` is set from the ?type= query
+      // parameter and decides which overlay to draw; nothing about the viewer.
+      // That the pin keeps moving is the guard working — it forces the re-read.
+      'src/App.jsx:671': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
       'src/components/EventComments.jsx:83': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
       'src/components/EventComments.jsx:84': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
       'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
