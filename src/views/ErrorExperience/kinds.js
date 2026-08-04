@@ -117,10 +117,12 @@ export function weightFor(kind) {
  */
 export const ERROR_ROUTES = Object.freeze({
   '/404': '404',
+  '/403': '403',
   '/500': '500',
   '/crash': 'crash',
   '/chunk': 'chunk',
   '/offline': 'offline',
+  '/expired': 'expired',
   '/maintenance': 'maintenance',
 });
 

@@ -16,7 +16,7 @@ export default function EventCard({
   const isClosed = event.status === 'closed';
   const deadlinePassed = new Date() > new Date(event.applicationDeadline);
   const isOpen = !isCompleted && !isCancelled && !isClosed && !deadlinePassed;
-  const myApps = applications.filter(a => a.eventId === event.id && a.userId === currentUser?.id);
+  const myApps = applications.filter(a => a.eventId === event.id && a.userId === currentUser?.id && a.status !== 'withdrawn' && a.status !== 'rejected');
   const accepted = myApps.some(a => a.status === 'accepted');
   const pending = myApps.some(a => a.status === 'pending');
   const waitlisted = myApps.some(a => a.status === 'waitlisted');

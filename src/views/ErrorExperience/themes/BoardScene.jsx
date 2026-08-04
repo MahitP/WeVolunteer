@@ -163,7 +163,7 @@ function Sheet({ s, i, mode, isAnomaly }) {
             d="M4 8V5.5a5 5 0 0 1 10 0V8"
             fill="none" stroke="var(--warn)" strokeWidth="2.2" strokeLinecap="round"
           />
-          <rect x="1" y="8" width="16" height="13" rx="2.5" fill="var(--warn)" opacity="0.9" />
+          <rect x="1" y="8" width="16" height="13" rx="2.5" fill="var(--warn)" stroke="var(--warn-border)" strokeWidth="1" opacity="0.9" />
         </g>
       ) : (
         /* Ruled lines: a signup sheet is a list of names. Widths vary so it
@@ -197,12 +197,8 @@ export default function BoardScene({ mode = 'gap' }) {
       role="presentation"
       preserveAspectRatio="xMidYMid meet"
     >
-      {/* The cork. A flat rect reads as a card; the speckle reads as a board. */}
-      <rect x="8" y="14" width="384" height="272" rx="10" fill="var(--brand-soft)" />
-      <rect
-        x="8" y="14" width="384" height="272" rx="10"
-        fill="none" stroke="var(--brand-background)" strokeWidth="3"
-      />
+      <rect x="8" y="14" width="384" height="272" rx="10" fill="var(--surface-2)"
+        stroke="var(--border)" strokeWidth="1.5" />
       <g fill="var(--brand-primary)" opacity="0.13">
         {Array.from({ length: 26 }, (_, i) => (
           <circle

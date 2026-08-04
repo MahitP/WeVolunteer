@@ -94,7 +94,7 @@ export default function EventModal({
   const pendingApps = eventApps.filter(a => a.status === 'pending');
   const waitlistApps = eventApps.filter(a => a.status === 'waitlisted');
   const acceptedApps = eventApps.filter(a => a.status === 'accepted');
-  const myApps = eventApps.filter(a => a.userId === currentUser?.id);
+  const myApps = eventApps.filter(a => a.userId === currentUser?.id && a.status !== 'withdrawn' && a.status !== 'rejected');
   const iAmConfirmed = myApps.some(a => a.status === 'accepted');
 
   /* ── Actions ─────────────────────────────────────────────── */
