@@ -33,11 +33,25 @@ describe('ErrorPage: each kind says what happened', () => {
     expect(screen.getByText(/your data is safe/i)).toBeInTheDocument();
   });
 
+  /**
+   * The icon assertion targets the icon's OWN wrapper.
+   *
+   * The first version asked whether ANY element carried aria-hidden, and lucide
+   * marks its own `<svg>` that way — so removing the wrapper's attribute left
+   * the assertion true and the mutation survived. What matters is that the
+   * element wrapping the icon is hidden, so the icon is not announced twice.
+   */
   it('announces itself to assistive technology and hides the decorative icon', () => {
     const { container } = at({ kind: '404' });
     expect(screen.getByRole('alert')).toBeInTheDocument();
-    // The icon repeats the heading; a screen reader should hear it once.
-    expect(container.querySelector('[aria-hidden="true"]')).toBeTruthy();
+
+    const svg = container.querySelector('svg');
+    expect(svg, 'no icon rendered at all').toBeTruthy();
+    expect(
+      svg.closest('[aria-hidden="true"]'),
+      'the icon is not inside an aria-hidden wrapper, so it is announced alongside the heading'
+    ).toBeTruthy();
+    expect(svg.parentElement.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('falls back to 404 for an unknown kind rather than rendering nothing', () => {
