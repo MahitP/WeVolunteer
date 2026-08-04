@@ -5763,6 +5763,11 @@ input:disabled + .premium-slider {
   padding-block: clamp(var(--s6), 6vh, var(--s10));
   padding-inline: max(clamp(var(--s4), 6vw, var(--s12)), calc((100% - 108rem) / 2));
   gap: clamp(var(--s6), 5vw, var(--s12));
+  /* Own its background so nothing from a parent shell bleeds through. This is
+     the same `--paper` `.auth` sits on (--bg-primary → near-black in dark mode,
+     neutral-50 in light mode), restated rather than inherited so the component
+     is self-contained even when the router places it inside a shell context. */
+  background: var(--paper);
   /* The stage takes the larger share: at this weight the artwork is the page.
      The copy column is not squeezed further than this, though — at 0.95fr a
      six-word headline broke into four lines of two words, which reads as a
@@ -5809,6 +5814,37 @@ input:disabled + .premium-slider {
   max-height: min(calc(var(--err-scene-max) * 1.9), 72dvh);
 }
 .err[data-error-weight='immersive'] .err-copy { gap: var(--s4); }
+
+/* The wordmark uses --brand-primary at the default weight, which reads as the
+   product's green inside the shell. At immersive weight the mark stands alone
+   on the page background, and coloured text on a near-black (or near-white)
+   field reads as an accent rather than as a name. --ink is the primary text
+   colour in both themes (near-white in dark, near-black in light), which is
+   what the user brief asks for. The medium weight keeps --brand-primary, since
+   it sits inside a shell that already carries the green identity. */
+.err[data-error-weight='immersive'] .err-mark-text { color: var(--ink); }
+
+/* ── Immersive wash tuning ──
+   The base wash (.err::before) is sized and positioned for the default weight.
+   At immersive weight the element owns the viewport, so the glow can breathe.
+
+   Dark mode: boost the wash so the green accent is atmospheric — the near-
+   black background absorbs most of the light, so a higher opacity is needed
+   for the glow to register as intentional rather than absent.
+
+   Light mode: the base opacity (0.85) already works, but at immersive weight
+   the glow needs to be perceptible against the pale background. A gentle boost
+   gives the page its "not plain white" character without flooding it with
+   colour. */
+[data-theme='dark'] .err[data-error-weight='immersive']::before {
+  opacity: 1;
+  background:
+    radial-gradient(46% 54% at 76% 30%, var(--brand-soft), transparent 68%),
+    radial-gradient(42% 48% at 8% 90%, rgba(47, 191, 131, 0.18), transparent 72%);
+}
+.err[data-error-weight='immersive']::before {
+  opacity: 0.92;
+}
 
 /* ── Stage ── */
 .err-stage {
