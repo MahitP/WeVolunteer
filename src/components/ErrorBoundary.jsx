@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, RotateCw } from 'lucide-react';
+import ErrorPanel from '../views/ErrorExperience/ErrorPanel';
 
 /**
  * Catches a render error and shows a recoverable panel instead of a blank page.
@@ -52,30 +52,31 @@ export default class ErrorBoundary extends React.Component {
       return this.props.fallback({ error, reset: () => this.setState({ error: null }) });
     }
 
+    /**
+     * The medium weight. A section collapsed, not the application — so this is
+     * a panel, and a caller who wants the fullscreen experience passes it as
+     * `fallback` (App.jsx does, for the routed views).
+     *
+     * This used to centre a lucide `AlertTriangle` above the copy. A warning
+     * triangle is browser-chrome iconography and a stock glyph standing in for
+     * artwork, which is the one thing the error system is not allowed to do —
+     * in the component the whole app falls back to, of all places.
+     *
+     * The wording is still the caller's: all three call sites pass copy
+     * specific to what failed ("This event didn't load"), which is far more use
+     * than anything generic written here.
+     */
     return (
-      /* role="alert" so a section collapsing is announced. The three call sites
-         already pass specific copy ("This event didn't load"), which is why the
-         wording here is left alone — only the announcement was missing. */
-      <div className="card" role="alert" style={{ maxWidth: 520, margin: 'var(--s6) auto', padding: 'var(--s6)' }}>
-        <div className="stack-sm" style={{ alignItems: 'flex-start' }}>
-          <span style={{ color: 'var(--danger)' }}><AlertTriangle size={28} /></span>
-          <h2 style={{ fontSize: '1.25rem' }}>{this.props.title || 'Something went wrong'}</h2>
-          <p className="lead">
-            {this.props.message
-              || 'This part of the page failed to load. Your data is safe — nothing was changed.'}
-          </p>
-          <div className="row" style={{ gap: 'var(--s2)', marginTop: 'var(--s3)' }}>
-            <button className="btn btn-primary" onClick={() => window.location.reload()}>
-              <RotateCw size={15} /> Try again
-            </button>
-            {this.props.onDismiss && (
-              <button className="btn btn-secondary" onClick={this.props.onDismiss}>
-                {this.props.dismissLabel || 'Close'}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
+      <ErrorPanel
+        title={this.props.title || 'This section stopped responding'}
+        message={
+          this.props.message
+          || 'This part of the page failed to load. Your data is safe — nothing was changed.'
+        }
+        onRetry={() => window.location.reload()}
+        onDismiss={this.props.onDismiss}
+        dismissLabel={this.props.dismissLabel}
+      />
     );
   }
 }

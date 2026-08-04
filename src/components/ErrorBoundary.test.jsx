@@ -45,6 +45,26 @@ describe('ErrorBoundary fallback', () => {
     expect(container.textContent).not.toContain('component exploded');
   });
 
+  /**
+   * Both fullscreen call sites read `error` out of the fallback's argument to
+   * tell a stale tab (`chunk`) from a real crash. If this hand-off is ever
+   * narrowed to `{ reset }`, `kindForError(undefined)` answers `crash` for
+   * everything and every user of a tab left open across a release is told to
+   * do the one thing that will not help them — with nothing going red.
+   */
+  it('hands the caught error to a custom fallback, not just the reset', () => {
+    const seen = [];
+    render(
+      <ErrorBoundary fallback={(arg) => { seen.push(arg); return <p>caught</p>; }}>
+        <Boom />
+      </ErrorBoundary>
+    );
+    expect(screen.getByText('caught')).toBeInTheDocument();
+    expect(seen[0].error, 'the fallback was given no error to classify').toBeInstanceOf(Error);
+    expect(seen[0].error.message).toBe('component exploded');
+    expect(typeof seen[0].reset).toBe('function');
+  });
+
   it('renders its children when nothing is wrong', () => {
     render(<ErrorBoundary><p>all good</p></ErrorBoundary>);
     expect(screen.getByText('all good')).toBeInTheDocument();
