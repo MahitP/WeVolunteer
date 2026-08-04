@@ -101,15 +101,26 @@ describe('authenticated route table', () => {
     }
   });
 
-  it('student: /events/new and /checkin are denied to the dashboard', async () => {
+  /**
+   * These assert the 403 PAGE now, not the dashboard.
+   *
+   * The outcome under test is unchanged — a student still cannot reach either
+   * route — but the presentation is, deliberately: a denial used to render
+   * `<Navigate to="/" />`, which is why "nothing happens when I click it"
+   * reports exist. The assertion is also stronger than it was. Denied and
+   * "unknown path" BOTH used to land on the dashboard, so the two were
+   * indistinguishable here; 403 and 404 now tell them apart.
+   */
+  it('student: /events/new and /checkin are denied, with a reason', async () => {
     signedInAs(USER('student'));
     const a = renderAt('/events/new');
-    expect(await screen.findByTestId('vol-dash')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /do not have access/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('vol-dash')).not.toBeInTheDocument();
     a.unmount();
 
     signedInAs(USER('student'));
     renderAt('/checkin/evt-1');
-    expect(await screen.findByTestId('vol-dash')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /do not have access/i })).toBeInTheDocument();
   });
 
   it('verified organizer: /events/new renders the form with its props', async () => {
@@ -119,10 +130,11 @@ describe('authenticated route table', () => {
     expect(el.dataset.props).toBe('addToast,onSubmitEvent,setActiveTab');
   });
 
-  it('unverified organizer: /events/new still redirects', async () => {
+  it('unverified organizer: /events/new is still refused', async () => {
     signedInAs(USER('organizer', { verified: false }));
     renderAt('/events/new');
-    expect(await screen.findByTestId('org-dash')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /do not have access/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('org-dash')).not.toBeInTheDocument();
   });
 
   it('organizer: /checkin/:eventId renders the scanner', async () => {
@@ -135,7 +147,7 @@ describe('authenticated route table', () => {
   it('admin: /messages is denied, /events is allowed', async () => {
     signedInAs(USER('admin'));
     const a = renderAt('/messages');
-    expect(await screen.findByTestId('admin-dash')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /do not have access/i })).toBeInTheDocument();
     a.unmount();
 
     signedInAs(USER('admin'));
@@ -154,9 +166,11 @@ describe('authenticated route table', () => {
     expect(await screen.findByTestId('org-profile')).toBeInTheDocument();
     b.unmount();
 
+    // admin has no profile view — SELF_PROFILE marks it 'denied', so this is a
+    // capability refusal and now says so instead of bouncing.
     signedInAs(USER('admin'));
     renderAt('/profile');
-    expect(await screen.findByTestId('admin-dash')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /do not have access/i })).toBeInTheDocument();
   });
 
   it('/events/:id/edit redirects to the event on browse', async () => {
@@ -165,10 +179,12 @@ describe('authenticated route table', () => {
     expect(await screen.findByTestId('browse')).toBeInTheDocument();
   });
 
-  it('unknown path falls back to the dashboard', async () => {
+  it('unknown path renders 404 rather than silently becoming the dashboard', async () => {
     signedInAs(USER('student'));
     renderAt('/nope');
-    expect(await screen.findByTestId('vol-dash')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /could not find that page/i })).toBeInTheDocument();
+    // The old behaviour made a broken link indistinguishable from a working one.
+    expect(screen.queryByTestId('vol-dash')).not.toBeInTheDocument();
   });
 });
 
@@ -187,10 +203,11 @@ describe('signed-out and public routes', () => {
     expect(el.dataset.props).toBe('addToast,onBackToLogin,onSignupSuccess');
   });
 
-  it('sends an unknown signed-out path to welcome', async () => {
+  it('shows a signed-out visitor 404 rather than sending them to welcome', async () => {
     api.getMe.mockResolvedValue(null);
     renderAt('/nope');
-    expect(await screen.findByTestId('welcome')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /could not find that page/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('welcome')).not.toBeInTheDocument();
   });
 
   it('renders certificate verification for a signed-in user', async () => {

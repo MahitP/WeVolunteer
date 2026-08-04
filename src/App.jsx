@@ -5,6 +5,7 @@ import { DEMO_MODE, APP_NAME, SCHOOL_NAME } from './config';
 import DemoBar from './components/DemoBar';
 import NotificationsBell from './components/NotificationsBell';
 import ErrorBoundary from './components/ErrorBoundary';
+import ErrorPage from './views/ErrorPage';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
@@ -508,7 +509,7 @@ function AppShell({ toasts, addToast, removeToast }) {
             element={
               searchParams.has('reset')
                 ? <Navigate to={`/reset-password?token=${encodeURIComponent(searchParams.get('reset'))}`} replace />
-                : <Navigate to="/welcome" replace />
+                : <ErrorPage kind="404" signedIn={false} />
             }
           />
         </Routes>
@@ -579,7 +580,15 @@ function AppShell({ toasts, addToast, removeToast }) {
   };
 
   /** Where a route the user cannot reach sends them. Unchanged from the ternaries. */
-  const denied = <Navigate to="/" replace />;
+  /**
+   * A denied route shows WHY, instead of bouncing to the dashboard.
+   *
+   * This was `<Navigate to="/" replace />`, which is why "nothing happens when I
+   * click it" reports exist: the click did do something — it refused — and said
+   * nothing. Rendering in place also keeps the URL, so the person can send it to
+   * whoever told them to open it.
+   */
+  const denied = <ErrorPage kind="403" />;
 
   return (
     <div className="app">
@@ -770,7 +779,9 @@ function AppShell({ toasts, addToast, removeToast }) {
                 ) : denied
               } />
 
-              <Route path="*" element={<Navigate to="/" replace />} />
+              {/* A dead or typo'd link is shown as one. Redirecting here made a
+                  broken link indistinguishable from a working one. */}
+              <Route path="*" element={<ErrorPage kind="404" />} />
             </Routes>
           )}
           </React.Suspense>
