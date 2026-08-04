@@ -138,4 +138,36 @@ describe('C2 — /reset-password resolves for an authenticated user', () => {
 
     expect(await screen.findByRole('heading', { name: /Choose a new password/i })).toBeInTheDocument();
   });
+
+  /**
+   * The SIGNED-OUT arm, which is the one an emailed reset link actually hits.
+   *
+   * Somebody following a reset link is, by definition, locked out — so this is
+   * the path that matters, and it was untested: the case above signs the user
+   * IN first and therefore never reaches the signed-out catch-all where the
+   * rewrite lives.
+   *
+   * Found by mutation: replacing `searchParams.has('reset')` with `false` broke
+   * password recovery for every locked-out user and the whole client suite
+   * stayed green. v1.2c Task 8 rewrote the else arm of that same ternary to
+   * render a 404, which is exactly the edit that could have taken this branch
+   * with it.
+   */
+  it('rewrites ?reset= for a SIGNED-OUT visitor, who is the one following the email', async () => {
+    signedOut();
+
+    renderAt('/?reset=abc123');
+
+    expect(await screen.findByRole('heading', { name: /Choose a new password/i })).toBeInTheDocument();
+  });
+
+  it('shows a signed-out visitor 404 for an unknown path carrying no reset token', async () => {
+    signedOut();
+
+    renderAt('/nope');
+
+    // The other arm of the same ternary — asserted here so the two cannot be
+    // collapsed into one another without a test noticing.
+    expect(await screen.findByRole('heading', { name: /could not find that page/i })).toBeInTheDocument();
+  });
 });
