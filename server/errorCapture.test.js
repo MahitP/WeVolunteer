@@ -206,17 +206,55 @@ describe('background failures are captured where nobody is watching', () => {
     // is that the sweep survived, which is what the catch exists for.
   });
 
-  it('every wired worker call site uses source: worker and names its component', () => {
-    for (const [file, component] of [
-      ['workers/notificationWorker.js', 'notificationWorker'],
-      ['workers/exportWorker.js', 'exportWorker'],
-      ['services/autoSelectScheduler.js', 'autoSelectScheduler'],
+  /**
+   * Asserted against CODE, not raw file text, and against every individual call
+   * site rather than "the string appears somewhere".
+   *
+   * Both refinements came from mutants that survived the first version. Deleting
+   * the scheduler's sweep report survived, because two other call sites in the
+   * same file still satisfied a whole-file `toContain`. Changing the
+   * notification worker's `source: 'worker'` to `'server'` also survived —
+   * because the DOC COMMENT above that helper contains the literal
+   * `` `source: 'worker'` `` while explaining why it is worker and not server.
+   * The prose kept the assertion true while the code was wrong, which is the
+   * exact failure mode `authz.completeness.test.js` strips comments to avoid.
+   *
+   * `canonicalSource` is the repository's own comment stripper, hand-written
+   * rather than regex-based because a regex cannot tell a comment from the
+   * characters `//` inside a string.
+   */
+  it('every wired call site is real code, names its component, and tags source: worker', async () => {
+    const { canonicalSource } = await import('./migrations/index.js');
+
+    for (const [file, component, boundaries] of [
+      ['workers/notificationWorker.js', 'notificationWorker',
+        ['reclaimStuckJobs', 'getQueueHealth', 'notificationJobExhausted', 'notificationBookkeeping', 'notificationTick']],
+      ['workers/exportWorker.js', 'exportWorker',
+        ['reclaimStaleExports', 'poll', 'processJob']],
+      ['services/autoSelectScheduler.js', 'autoSelectScheduler',
+        ['selection', 'sweep', 'tick']],
     ]) {
-      const src = read(file);
-      expect(src, `${file} does not import the reporter`).toContain("from '../errorReporter.js'");
-      expect(src, `${file} does not tag its source`).toContain("source: 'worker'");
-      expect(src, `${file} does not name its component`).toContain(`component: '${component}'`);
+      const code = canonicalSource(read(file));
+
+      expect(code, `${file} does not import the reporter`).toContain('errorReporter.js');
+      expect(code, `${file} does not tag its source in CODE (a comment does not count)`)
+        .toContain("source: 'worker'");
+      expect(code, `${file} does not name its component`).toContain(`component: '${component}'`);
+
+      // Each boundary individually, so removing ONE call site fails by name.
+      for (const boundary of boundaries) {
+        expect(code, `${file} no longer reports its '${boundary}' failure`)
+          .toContain(`'${boundary}'`);
+      }
     }
+  });
+
+  it('the Express handler tags source: server in code, not only in prose', async () => {
+    const { canonicalSource } = await import('./migrations/index.js');
+    const code = canonicalSource(read('app.js'));
+    expect(code).toContain("source: 'server'");
+    expect(code, 'the handler must not mislabel a request failure as a background one')
+      .not.toContain("source: 'worker'");
   });
 
   /**
