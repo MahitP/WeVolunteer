@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Routes, Route, useNavigate, useLocation, useSearchParams, Navigate } from 'react-router-dom';
+import { Routes, Route, useNavigate, useLocation, useSearchParams, Navigate, matchRoutes } from 'react-router-dom';
 import { api } from './utils/api';
 import { DEMO_MODE, APP_NAME, SCHOOL_NAME } from './config';
 import DemoBar from './components/DemoBar';
 import NotificationsBell from './components/NotificationsBell';
 import ErrorBoundary from './components/ErrorBoundary';
+import BrandMark from './components/common/BrandMark';
 import ErrorExperience, { crashFallback } from './views/ErrorExperience/ErrorExperience';
+import { ERROR_ROUTES } from './views/ErrorExperience/kinds';
 import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
 import useOnline from './hooks/useOnline';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
@@ -239,6 +241,46 @@ export const ROLE_LABEL = {
 const AUTH_FLOW_PATHS = ['/oauth/callback', '/reset-password'];
 
 /**
+ * Addressable takeover URLs — `/404`, `/500`, `/offline` and the rest.
+ *
+ * ── Why the app never NAVIGATES to these ──
+ *
+ * The obvious wiring is "unknown URL, so redirect to /404", and it breaks two
+ * things that matter more than the tidiness it buys.
+ *
+ * It destroys the URL. A 404's single most useful property is that it still
+ * shows what the reader typed or was sent, so they can spot the typo or forward
+ * the link to whoever gave it to them. That is the whole reason this stopped
+ * being `<Navigate to="/" />` in the first place.
+ *
+ * And it turns Back into a trap. `/typo` redirects to `/404`; the reader presses
+ * Back, lands on `/typo`, which redirects to `/404` again. There is no way out
+ * of that with the Back button, which is the first thing anyone reaches for on
+ * an error page. The same loop closes on `/offline`: Back returns to the page
+ * that had no connection, which sends them straight back out again.
+ *
+ * So these are DESTINATIONS. Every takeover renders in place, above the shell,
+ * keeping its URL — and the paths in `ERROR_ROUTES` exist so a state can also be
+ * linked, bookmarked or opened directly. `/maintenance` is only ever reached
+ * that way.
+ */
+
+/**
+ * Every path the authenticated shell serves, as route objects for `matchRoutes`.
+ *
+ * Derived from the same table the router renders, so a route added to
+ * `APP_ROUTES` cannot start 404ing here. `/` and `/profile` are listed
+ * explicitly because they are a different component per persona and live
+ * outside the table for that reason.
+ */
+const SHELL_ROUTE_PATTERNS = [{ path: '/' }, { path: '/profile' }, ...APP_ROUTES.map(r => ({ path: r.path }))];
+
+/** Whether the authenticated shell has anything to render for `pathname`. */
+function shellServes(pathname) {
+  return matchRoutes(SHELL_ROUTE_PATTERNS, pathname) !== null;
+}
+
+/**
  * The toast queue, and the session everything else reads.
  *
  * `addToast` is passed into SessionProvider because the bootstrap has to be able
@@ -445,6 +487,14 @@ function AppShell({ toasts, addToast, removeToast }) {
     );
   }
 
+  /* The takeover routes. Above the session branches because a failure screen
+     must render identically signed in or out, and returned bare — no shell, no
+     OfflineOverlay, no Toasts — because "standalone" is the entire point. */
+  const errorRouteKind = ERROR_ROUTES[currentPath];
+  if (errorRouteKind) {
+    return <ErrorExperience kind={errorRouteKind} signedIn={Boolean(currentUser)} />;
+  }
+
   if (AUTH_FLOW_PATHS.includes(currentPath)) {
     return (
       <>
@@ -508,6 +558,10 @@ function AppShell({ toasts, addToast, removeToast }) {
 
   if (!currentUser) {
     const signedOutProps = {
+      /* Declared empty, not omitted: `withProps` throws on a missing entry
+         precisely so a new route cannot mount with every prop silently absent.
+         Welcome takes no shell props, and `/` renders the same view. */
+      '/': {},
       '/welcome': {},
       '/login': {
         onLoginSuccess: (mode) => (mode === 'signup' ? navigate('/signup') : handleLoginSuccess()),
@@ -628,6 +682,22 @@ function AppShell({ toasts, addToast, removeToast }) {
    */
   const denied = <ErrorExperience kind="403" />;
 
+  /* An unknown URL is a takeover, and it has to be decided HERE rather than by
+     a `<Route path="*">` inside the shell — a catch-all route can only render
+     into the slot the shell already built around it, so the sidebar, topbar and
+     profile menu would still be on screen either side of it.
+
+     `shellServes` asks the router's own matcher against the same table the
+     shell renders, so this cannot drift from the routes below. The URL is left
+     exactly as the reader typed it; the `ERROR_ROUTES` note above says why
+     nothing redirects.
+
+     Guarded on `viewingProfile` because a profile overlay is state, not a path:
+     it renders over whatever route is current, and closing it returns there. */
+  if (!viewingProfile && !shellServes(currentPath)) {
+    return <ErrorExperience kind="404" />;
+  }
+
   /* Offline COVERS the whole shell rather than replacing the routed view.
      Replacing it unmounted everything inside — a half-written event description
      went with it — while the copy laid over the top promised the opposite. And
@@ -637,13 +707,26 @@ function AppShell({ toasts, addToast, removeToast }) {
      the connection does. See OfflineOverlay.jsx. */
   return (
     <OfflineOverlay online={online}>
+    {/* OUTSIDE `.app`, so a caught crash replaces the shell instead of
+        rendering inside it. It used to sit around `<main>` to keep the
+        navigation alive through a failed view — a reasonable trade then, and
+        the wrong one now: a crash is a takeover, and half a shell wrapped
+        around a full-screen apology is exactly the "error card inside the app"
+        this weight exists to stop being.
+
+        `resetKey` still clears the caught error on navigation, so the boundary
+        recovers the moment the reader goes somewhere else. */}
+    <ErrorBoundary
+      resetKey={`${currentPath}:${selectedEventId || ''}:${profileId || ''}`}
+      fallback={crashFallback}
+    >
     <div className="app">
       <a href="#main-content" className="skip-link">Skip to main content</a>
 
       {/* ── Sidebar (desktop / rail on tablet) ── */}
       <aside className="sidebar">
         <a className="brand" href="/" onClick={(e) => { e.preventDefault(); navigate('/'); }}>
-          <span className="brand-mark">WV</span>
+          <BrandMark />
           <span className="brand-text">
             <span className="brand-name">{APP_NAME}</span>
             <span className="brand-sub">{SCHOOL_NAME}</span>
@@ -699,22 +782,10 @@ function AppShell({ toasts, addToast, removeToast }) {
         </header>
 
         <main className="page" id="main-content" tabIndex={-1}>
-          {/* Scoped to the routed content so a failure inside a view leaves the
-              navigation, the notification bell, and sign-out still working —
-              the user can move somewhere else instead of being stuck. resetKey
-              clears a caught error once they do. */}
-          <ErrorBoundary
-            resetKey={`${currentPath}:${selectedEventId || ''}:${profileId || ''}`}
-            /* Fullscreen, not a panel: the whole routed view is gone, so a card
-               floating in an empty <main> would be the weaker answer. The
-               chunk-vs-crash decision lives in `crashFallback`, shared with the
-               shell boundary in main.jsx. */
-            fallback={crashFallback}
-          >
-          {/* Inside the ErrorBoundary, so a chunk that fails to load is caught
-              by the same boundary as a view that throws while rendering — and
-              covering both arms of the ternary below, since the profile views
-              are lazy too. */}
+          {/* Inside the shell boundary above, so a chunk that fails to load is
+              caught alongside a view that throws while rendering — and covering
+              both arms of the ternary below, since the profile views are lazy
+              too. */}
           <React.Suspense fallback={<RouteFallback />}>
           {viewingProfile ? (
             viewingProfile.type === 'organizer' ? (
@@ -828,13 +899,15 @@ function AppShell({ toasts, addToast, removeToast }) {
                 ) : denied
               } />
 
-              {/* A dead or typo'd link is shown as one. Redirecting here made a
-                  broken link indistinguishable from a working one. */}
+              {/* Unreachable in practice — `shellServes` sends an unknown URL
+                  to the takeover above before the shell is built. Kept as the
+                  router's own backstop so a path added to `APP_ROUTES` but not
+                  to `SHELL_ROUTE_PATTERNS` degrades to a 404 rather than to a
+                  blank `<main>`. */}
               <Route path="*" element={<ErrorExperience kind="404" />} />
             </Routes>
           )}
           </React.Suspense>
-          </ErrorBoundary>
         </main>
       </div>
 
@@ -992,6 +1065,7 @@ function AppShell({ toasts, addToast, removeToast }) {
 
       <Toasts toasts={toasts} onRemove={removeToast} />
     </div>
+    </ErrorBoundary>
     </OfflineOverlay>
   );
 }

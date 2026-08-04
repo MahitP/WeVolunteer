@@ -18,9 +18,10 @@ import { render, screen, within, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import ErrorExperience, { crashFallback } from './ErrorExperience';
 import { THEMES } from './themes/index.js';
-import { KINDS, SERIOUS, RETRYABLE } from './kinds';
+import { KINDS, SERIOUS, RETRYABLE, weightFor } from './kinds';
 import { COPY } from './errorCopy';
 import { resetSeed } from './selector';
+import BrandMark from '../../components/common/BrandMark';
 
 const at = (props) =>
   render(<MemoryRouter><ErrorExperience {...props} /></MemoryRouter>);
@@ -85,6 +86,86 @@ describe('every theme, for every kind it is eligible for', () => {
   it.each(PAIRS)('%s / %s names the product', (theme, kind) => {
     at({ theme, kind });
     expect(screen.getByText('WeVolunteer')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Weight is severity, and getting it wrong is a design failure in both
+ * directions: a viewport takeover to say "ask your administrator" is melodrama
+ * that hides the very navigation the reader needs next, and a modest card when
+ * the server is down reads as not understanding what just happened to them.
+ *
+ * Asserted against the WEIGHTS table rather than restated here — a second copy
+ * of the mapping would agree with itself and with nothing else. What is pinned
+ * literally is the part that must not drift silently: which kinds are allowed
+ * to own the screen.
+ */
+describe('weight matches severity', () => {
+  it.each(KINDS.map((k) => [k]))('%s carries its declared weight', (kind) => {
+    const { container } = at({ kind, theme: 'board' });
+    expect(container.querySelector('.err').dataset.errorWeight).toBe(weightFor(kind));
+  });
+
+  /**
+   * `404` and `expired` joined this tier when the middle weight was removed.
+   * Both are takeovers for the same reason: the shell is no help with either.
+   * A dead URL is not something the navigation can fix, and an expired session
+   * has no shell to sit in — the reader is signed out.
+   */
+  it('gives the whole screen to the failures that deserve it, and no others', () => {
+    const immersive = KINDS.filter((k) => weightFor(k) === 'immersive');
+    expect([...immersive].sort()).toEqual(
+      ['404', '500', 'chunk', 'crash', 'expired', 'maintenance', 'offline']
+    );
+  });
+
+  /**
+   * A permission refusal renders inside the authenticated shell, beside a nav,
+   * a bell and a sign-out that all still work. It is the one kind that must not
+   * reserve the viewport.
+   */
+  it('keeps a permission refusal out of the viewport-owning tier', () => {
+    expect(weightFor('403')).toBe('medium');
+  });
+
+  /**
+   * The default is the LOUD one. An unclassified kind has already gone wrong
+   * somewhere; too large wastes a screen, too small buries a failure nobody has
+   * looked at yet.
+   */
+  it('falls back to the takeover weight for a kind nobody registered', () => {
+    expect(weightFor('teapot')).toBe('immersive');
+    const { container } = at({ kind: 'teapot' });
+    expect(container.querySelector('.err').dataset.errorWeight).toBe('immersive');
+  });
+});
+
+describe('every experience is unmistakably WeVolunteer', () => {
+  it.each(PAIRS)('%s / %s carries the product mark beside the wordmark', (theme, kind) => {
+    const { container } = at({ theme, kind });
+    const mark = container.querySelector('.err-mark .brand-mark');
+
+    expect(mark, 'no brand mark — the screen does not say whose it is').toBeTruthy();
+    expect(mark.textContent).toBe('WV');
+    // The wordmark says the name already; announcing "WV" too is the same
+    // thing said twice in a worse voice.
+    expect(mark.getAttribute('aria-hidden')).toBe('true');
+    expect(container.querySelector('.err-mark').textContent).toContain('WeVolunteer');
+  });
+
+  /**
+   * The same component the app shell and the certificate page render. A second
+   * hand-written copy of the markup is how one surface keeps the old mark after
+   * the others change — and the error screens, which nobody opens on purpose,
+   * are exactly the surface that gets forgotten.
+   */
+  it('uses the shared mark rather than its own copy of the markup', () => {
+    const { container } = render(<MemoryRouter><BrandMark /></MemoryRouter>);
+    const shared = container.querySelector('.brand-mark');
+    const { container: err } = at({ kind: '404', theme: 'board' });
+    const inError = err.querySelector('.err-mark .brand-mark');
+
+    expect(inError.outerHTML).toBe(shared.outerHTML);
   });
 });
 

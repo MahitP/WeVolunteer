@@ -48,6 +48,83 @@ export const SERIOUS = Object.freeze(['500', 'crash', 'offline', 'expired']);
 export const RETRYABLE = Object.freeze(['500', 'crash', 'chunk', 'offline', 'maintenance']);
 
 /**
+ * How much room a kind is allowed to take.
+ *
+ * ── Weight is severity, not variety ──
+ *
+ * Using the wrong weight is its own design failure in both directions. A
+ * viewport-owning takeover because one permission was refused is melodrama, and
+ * it throws away a shell the reader can still use. A modest card when the
+ * server is down and their work may be gone reads as not understanding what
+ * just happened to them.
+ *
+ *   immersive — the application, the network, or this URL is the thing that
+ *               failed. Nothing else on screen would be usable, so nothing else
+ *               is on screen: these render ABOVE the shell, with no sidebar,
+ *               topbar, navigation or profile menu anywhere on the page.
+ *   medium    — the reader is fine, the app is fine, this door is closed. The
+ *               shell around it still works and should still be visible.
+ *
+ * ── There are two weights because there are two situations ──
+ *
+ * This was three. `page` sat between them and meant "a whole page, inside the
+ * shell", which turned out to describe nothing: a 404 is a dead URL and the
+ * navigation is no help with it, and an expired session has no shell to stand
+ * in because the reader is signed out. Both are takeovers. Collapsing the
+ * middle removed a weight, a block of CSS and the question of which one a new
+ * kind belongs to.
+ *
+ * `403` is the sole `medium`, and it is the one that matters: it renders inside
+ * the authenticated shell with the nav, the bell and sign-out all live beside
+ * it, because "ask your administrator" is advice the reader acts on by using
+ * the navigation that a takeover would have removed.
+ */
+export const WEIGHTS = Object.freeze({
+  404: 'immersive',
+  500: 'immersive',
+  crash: 'immersive',
+  chunk: 'immersive',
+  offline: 'immersive',
+  maintenance: 'immersive',
+  expired: 'immersive',
+  403: 'medium',
+});
+
+/**
+ * The weight for `kind` — `immersive` for anything unregistered, never nothing.
+ *
+ * The default is the LOUD one on purpose. An unrecognised kind has already gone
+ * wrong somewhere; showing it too large wastes a screen, showing it too small
+ * buries a failure nobody has classified yet.
+ */
+export function weightFor(kind) {
+  return WEIGHTS[kind] ?? 'immersive';
+}
+
+/**
+ * Addressable URLs for the takeover experiences.
+ *
+ * These exist so a failure state can be linked, bookmarked, opened by QA and
+ * pointed at by a server or a status page — `/maintenance` in particular is
+ * only ever reached deliberately.
+ *
+ * ── They are destinations, not redirects ──
+ *
+ * The app does NOT navigate here when it meets one of these failures, and that
+ * is a deliberate refusal rather than an omission. See the note beside this
+ * map's use in App.jsx: redirecting to `/404` throws away the URL the reader
+ * needs, and turns the browser Back button into a loop.
+ */
+export const ERROR_ROUTES = Object.freeze({
+  '/404': '404',
+  '/500': '500',
+  '/crash': 'crash',
+  '/chunk': 'chunk',
+  '/offline': 'offline',
+  '/maintenance': 'maintenance',
+});
+
+/**
  * The sentence every serious kind must contain, in some form.
  *
  * Not a style preference: "did I just lose my hours?" is the actual question a

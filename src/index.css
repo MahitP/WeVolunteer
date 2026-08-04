@@ -5593,10 +5593,25 @@ input:disabled + .premium-slider {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
   align-items: center;
+  /* Centre the ROWS as a block; do not let them absorb the spare height.
+     `align-content` defaults to `normal`, which for grid stretches auto rows to
+     fill the container. Once `immersive` gave this a `100dvh` floor and the
+     phone layout stacked it into two rows, that stretch handed each row half
+     the slack and `align-items: center` then re-centred the content inside its
+     enlarged row — 132px of dead space above the artwork and the actions 20px
+     BELOW the fold, on the one screen whose whole purpose is to offer a way
+     out. Centring the rows instead keeps the composition balanced and keeps
+     every part of it on screen. */
+  align-content: center;
   gap: clamp(var(--s5), 4vw, var(--s10));
-  /* Full-bleed within its region, never 100vh: the authenticated catch-all
-     renders inside the app shell and a viewport-height block pushes the chrome
-     off screen. */
+  /* Each scene's natural ceiling, per theme below. Declared here so it has a
+     default and so `tokens.test.js` — which requires every custom property
+     referenced under src/ to be defined — can see it. Weight scales this rather
+     than replacing it, which is what keeps the per-theme proportions after the
+     layout grows or shrinks. */
+  --err-scene-max: 27rem;
+  /* Defaults for `page` weight. `immersive` and `medium` override the four
+     below and nothing else — see the weight block after the copy rules. */
   min-height: 78vh;
   padding: var(--s8) var(--s6);
   max-width: var(--content-max);
@@ -5648,13 +5663,22 @@ input:disabled + .premium-slider {
 }
 
 .err-mark {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0;
+}
+
+/* The wordmark. The lettering lives on this span rather than on `.err-mark`
+   itself, because `.brand-mark` beside it must NOT inherit the uppercase
+   tracking — it is a badge with its own type, shared with the app shell. */
+.err-mark-text {
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 0.8125rem;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--brand-primary);
-  margin: 0;
 }
 
 /* A chip, not a line of small caps. It gives the column a second anchor point
@@ -5701,6 +5725,186 @@ input:disabled + .premium-slider {
   margin-top: var(--s3);
 }
 
+/* ── Weight ──────────────────────────────────────────────────────────────────
+ *
+ * Three sizes for three severities, driven entirely by `data-error-weight` from
+ * WEIGHTS in kinds.js. Adding a kind is a row in that table, not a block here.
+ *
+ * The defaults above are `page`. Only these four properties change — the grid,
+ * the scene and the copy are the same composition at every weight, which is why
+ * one attribute is enough and there is no per-kind CSS anywhere.
+ */
+
+/* immersive — the app, the network or this URL failed, so nothing else is on
+   screen. These render ABOVE the shell (see `shellServes` in App.jsx), so there
+   is no sidebar, topbar or profile menu anywhere on the page and this element
+   owns the viewport outright.
+
+   `dvh`, not `vh`: on mobile Safari `100vh` is the tallest the viewport ever
+   gets, so with the URL bar showing, a 100vh block is taller than the screen
+   and the actions sit below the fold on the one screen whose whole job is to
+   offer a way out.
+
+   ── Its own place ──
+
+   A takeover is not the app with an error inside it, so it does not use the
+   app's background. The field is deep brand green in BOTH themes: this screen
+   is somewhere else, and a backdrop that follows the theme toggle is the app
+   again. It is also what lets the wordmark be white — the one instruction that
+   only makes sense once the surface behind it is dark.
+
+   Full-bleed, so the colour reaches every edge. The content is centred by the
+   padding rather than by `max-width`, which would have left the field ending in
+   a seam down both sides of a wide monitor. */
+.err[data-error-weight='immersive'] {
+  min-height: 100dvh;
+  max-width: none;
+  margin: 0;
+  padding-block: clamp(var(--s6), 6vh, var(--s10));
+  padding-inline: max(clamp(var(--s4), 6vw, var(--s12)), calc((100% - 108rem) / 2));
+  gap: clamp(var(--s6), 5vw, var(--s12));
+  /* The stage takes the larger share: at this weight the artwork is the page.
+     The copy column is not squeezed further than this, though — at 0.95fr a
+     six-word headline broke into four lines of two words, which reads as a
+     column that ran out of room rather than as a deliberate stack. */
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.3fr);
+  background: linear-gradient(158deg, var(--green-800), var(--green-700) 52%, var(--green-800));
+  color: var(--ink-inv);
+}
+
+/* The wash is tuned for a pale page; on the green field it has to be light
+   rather than brand-soft or it reads as a stain. */
+.err[data-error-weight='immersive']::before {
+  background:
+    radial-gradient(48% 54% at 78% 26%, rgba(255, 255, 255, 0.1), transparent 70%),
+    radial-gradient(42% 48% at 6% 90%, rgba(255, 255, 255, 0.07), transparent 72%);
+  opacity: 1;
+}
+
+/* ── Type on the field ──
+   The wordmark goes white here and nowhere else: it is the identity anchor for
+   a screen that has no navigation to carry the brand. */
+.err[data-error-weight='immersive'] .err-mark-text,
+.err[data-error-weight='immersive'] .err-title {
+  color: var(--ink-inv);
+}
+.err[data-error-weight='immersive'] .err-body {
+  color: var(--ink-inv-2);
+}
+.err[data-error-weight='immersive'] .err-eyebrow {
+  color: var(--ink-inv);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+/* The mark keeps its own tile — this is the app's logo, not a variant of it —
+   but `--brand` is a mid green that all but disappears on green-800, so the
+   tile is lifted to the light end of the brand ramp. Same mark, legible field. */
+.err[data-error-weight='immersive'] .brand-mark {
+  background: var(--green-500);
+  color: var(--ink-inv);
+}
+
+/* ── The artwork is lit the same way in both themes ──
+ *
+ * Every token the scenes draw with is theme-dependent — all eighteen of them —
+ * so on the green field a dark-mode reader got a dark card on a dark ground and
+ * the radio all but disappeared, while a light-mode reader got a bright,
+ * legible one. Same screen, two different qualities of experience.
+ *
+ * A takeover is its own environment: the field does not follow the theme
+ * toggle, so the illustration on it should not either. These pin the scene
+ * palette to its light-mode values, which is the version composed against a
+ * dark ground.
+ *
+ * Scoped to `.err-stage`, NOT to the whole experience. The copy, the chip, the
+ * mark and the buttons all have their own on-field colours a few rules above,
+ * and redefining `--ink` for the entire subtree would put them in a fight this
+ * narrow scope avoids entirely.
+ */
+.err[data-error-weight='immersive'] .err-stage {
+  --surface: var(--neutral-0);
+  --surface-2: var(--neutral-25);
+  --surface-3: var(--neutral-100);
+  --ink: var(--neutral-900);
+  --ink-2: var(--neutral-600);
+  --ink-3: var(--neutral-500);
+  --border: var(--neutral-200);
+  --rule: var(--neutral-200);
+  --brand-primary: var(--brand-primary-light);
+  --brand-soft: var(--brand-soft-light);
+  --brand-background: var(--brand-background-light);
+  --accent: #b45309;
+  --ok: #067647;
+  --warn: #b54708;
+  --warn-tint: #fffaeb;
+  --warn-border: #fedf89;
+  --danger: #b42318;
+  --danger-tint: #fef3f2;
+  --danger-border: #fecdca;
+}
+
+/* Buttons inherit a palette built for a pale page. On the field the primary has
+   to become the light one, or the only way out of the screen is the lowest
+   contrast thing on it. */
+.err[data-error-weight='immersive'] .btn-primary {
+  background: var(--ink-inv);
+  border-color: var(--ink-inv);
+  color: var(--green-800);
+}
+.err[data-error-weight='immersive'] .btn-primary:hover {
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(255, 255, 255, 0.88);
+}
+.err[data-error-weight='immersive'] .btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--ink-inv);
+}
+.err[data-error-weight='immersive'] .btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* medium — the reader is fine, the app is fine, this one door is closed. The
+   shell around it still works and has to stay visible, so this reserves only
+   what it needs. */
+.err[data-error-weight='medium'] {
+  min-height: 0;
+  padding: var(--s6) 0;
+  gap: clamp(var(--s4), 3vw, var(--s8));
+  align-items: center;
+}
+.err[data-error-weight='medium'] .err-title { font-size: clamp(1.5rem, 2.6vw, 2rem); }
+.err[data-error-weight='medium'] .err-body { font-size: 1rem; }
+/* Scaled, not replaced: a flat ceiling here would undo the per-theme
+   proportions above and put the portrait badge and the wide booth row at the
+   same height again. */
+.err[data-error-weight='medium'] .err-scene {
+  max-height: calc(var(--err-scene-max) * 0.64);
+}
+/* The wash is sized for a full page; at this scale it reads as a smudge. */
+.err[data-error-weight='medium']::before { opacity: 0.28; }
+
+/* At immersive weight the headline is the composition, not a label on it.
+   The measure is widened with it: the base 16ch is set for a 2rem headline and
+   becomes about three words per line at 4rem. */
+.err[data-error-weight='immersive'] .err-title {
+  font-size: clamp(2.25rem, 4.4vw, 3.9rem);
+  letter-spacing: -0.038em;
+  max-width: 17ch;
+}
+.err[data-error-weight='immersive'] .err-body {
+  font-size: clamp(1.0625rem, 1.2vw, 1.25rem);
+  max-width: 46ch;
+}
+/* Same reasoning as `medium`, in the other direction. Bounded by the viewport
+   as well as by the theme, so a short window never pushes the actions under the
+   fold to make room for artwork. */
+.err[data-error-weight='immersive'] .err-scene {
+  max-height: min(calc(var(--err-scene-max) * 1.9), 72dvh);
+}
+.err[data-error-weight='immersive'] .err-copy { gap: var(--s4); }
+
 /* ── Stage ── */
 .err-stage {
   position: relative;
@@ -5712,7 +5916,7 @@ input:disabled + .premium-slider {
   display: block;
   width: 100%;
   height: auto;
-  max-height: 27rem;
+  max-height: var(--err-scene-max);
   overflow: visible;
 }
 
@@ -5720,12 +5924,12 @@ input:disabled + .premium-slider {
    portrait badge and wants height, the fair is a wide row and looks stretched
    with it, and letting all six share one ceiling made half of them sit at the
    wrong size next to the same block of copy. */
-.err-board { max-height: 26rem; }
-.err-map   { max-height: 26rem; }
-.err-desk  { max-height: 28.5rem; }
-.err-ops   { max-height: 25rem; }
-.err-radio { max-height: 27rem; }
-.err-fair  { max-height: 23.5rem; }
+.err-board { --err-scene-max: 26rem; }
+.err-map   { --err-scene-max: 26rem; }
+.err-desk  { --err-scene-max: 28.5rem; }
+.err-ops   { --err-scene-max: 25rem; }
+.err-radio { --err-scene-max: 27rem; }
+.err-fair  { --err-scene-max: 23.5rem; }
 
 /* ── Entrance ──
    The copy arrives before the scene, which is the order the reader needs it in:
@@ -5990,11 +6194,18 @@ input:disabled + .premium-slider {
    the copy on a phone. The text stays left-aligned: centring it here would give
    back the exact quality the layout was built to avoid. */
 @media (max-width: 60rem) {
-  .err {
+  /* `[data-error-weight]` is carried on every `.err`, so this matches all three
+     weights — and it is here to WIN, not to filter. The weight rules above are
+     `.err[data-error-weight='x'] .err-scene`, three classes; a bare `.err-scene`
+     is one and would lose to them inside this query, silently keeping a desktop
+     height cap on a stacked phone layout. Matching their specificity and coming
+     later in the file is what makes these overrides actually apply. */
+  .err[data-error-weight] {
     grid-template-columns: 1fr;
     min-height: auto;
     gap: var(--s5);
     padding: var(--s6) var(--s4);
+    max-width: none;
   }
   .err-stage { order: -1; }
   /* Constrain the WIDTH, never the height, once the layout stacks.
@@ -6003,8 +6214,20 @@ input:disabled + .premium-slider {
      768px the illustration sat centred above left-aligned copy, which is the
      one thing this layout exists to avoid. Bounding the width keeps the scene
      flush with the text's left edge and lets the height follow. */
-  .err-scene { max-height: none; max-width: 27rem; }
-  .err-title { max-width: 18ch; }
+  .err[data-error-weight] .err-scene { max-height: none; max-width: 27rem; }
+  .err[data-error-weight] .err-title { max-width: 18ch; font-size: clamp(2rem, 7vw, 2.75rem); }
+
+  /* An immersive failure still owns a phone screen — that is the whole weight —
+     but `min-height: auto` above has already released the desktop rule, so it
+     is restated here against the stacked layout rather than inherited from it.
+
+     There is no `.app` counterpart any more: a takeover is decided above the
+     shell, so `.app` can never contain one. */
+  .err[data-error-weight='immersive'] { min-height: 100dvh; }
+  /* A takeover gets a wider ceiling once stacked: 27rem is set for the medium
+     weight sitting in a column, and on a tablet it left a third of the field
+     empty beside the artwork. */
+  .err[data-error-weight='immersive'] .err-scene { max-width: 34rem; }
 }
 
 @media (max-width: 30rem) {
