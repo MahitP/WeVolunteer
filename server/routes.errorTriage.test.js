@@ -168,10 +168,32 @@ describe('GET /api/errors', () => {
     }
   });
 
+  /**
+   * Express hands back an ARRAY for a repeated parameter, and the two shapes
+   * behave differently under `Number()` — which is exactly why the array guard
+   * exists rather than relying on the `Number.isFinite` check below it.
+   *
+   * Measured: `?limit=5&limit=9` gives `['5','9']` and `Number(['5','9'])` is
+   * NaN, so the finite check alone would already fall back. But `?limit[]=5`
+   * gives the SINGLE-element `['5']`, and `Number(['5'])` is **5** — a real
+   * number that sails past every later check. Without the guard that value is
+   * silently honoured, and the only thing still bounding it is the maximum.
+   *
+   * Both forms are tested because only the second one distinguishes the guard
+   * from the finite check; the first passes either way and would have left the
+   * guard unproven.
+   */
   it('treats a repeated parameter as absent instead of coercing an array', async () => {
     const res = await get('/api/errors?limit=5&limit=9');
     expect(res.status).toBe(200);
     expect(res.body.limit).toBe(50);
+  });
+
+  it('refuses a single-element array from bracket syntax, which Number() would accept', async () => {
+    const res = await get('/api/errors?limit[]=5&offset[]=3');
+    expect(res.status).toBe(200);
+    expect(res.body.limit, 'a bracket-syntax array was coerced instead of refused').toBe(50);
+    expect(res.body.offset, 'a bracket-syntax array was coerced instead of refused').toBe(0);
   });
 
   it('filters by status and source, and ignores an unknown filter value', async () => {
