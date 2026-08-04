@@ -53,7 +53,10 @@ export default class ErrorBoundary extends React.Component {
     }
 
     return (
-      <div className="card" style={{ maxWidth: 520, margin: 'var(--s6) auto', padding: 'var(--s6)' }}>
+      /* role="alert" so a section collapsing is announced. The three call sites
+         already pass specific copy ("This event didn't load"), which is why the
+         wording here is left alone — only the announcement was missing. */
+      <div className="card" role="alert" style={{ maxWidth: 520, margin: 'var(--s6) auto', padding: 'var(--s6)' }}>
         <div className="stack-sm" style={{ alignItems: 'flex-start' }}>
           <span style={{ color: 'var(--danger)' }}><AlertTriangle size={28} /></span>
           <h2 style={{ fontSize: '1.25rem' }}>{this.props.title || 'Something went wrong'}</h2>
@@ -63,7 +66,7 @@ export default class ErrorBoundary extends React.Component {
           </p>
           <div className="row" style={{ gap: 'var(--s2)', marginTop: 'var(--s3)' }}>
             <button className="btn btn-primary" onClick={() => window.location.reload()}>
-              <RotateCw size={15} /> Reload the page
+              <RotateCw size={15} /> Try again
             </button>
             {this.props.onDismiss && (
               <button className="btn btn-secondary" onClick={this.props.onDismiss}>
