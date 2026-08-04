@@ -114,6 +114,26 @@ export const APP_ROUTES = [
  * /welcome stays in App.jsx with the branch it belongs to.
  */
 export const SIGNED_OUT_ROUTES = [
+  /**
+   * `/` is DECLARED, not left to the catch-all.
+   *
+   * It used to work by accident. The signed-out catch-all was
+   * `<Navigate to="/welcome" replace />`, so every unmatched path — including
+   * the root — landed on the welcome page. `2b015d3` replaced that redirect
+   * with a real 404, correctly: a blanket redirect made a typo'd link
+   * indistinguishable from a working one, which is the whole reason the error
+   * experience exists. But `/` had never been a route in its own right, so it
+   * went down with the redirect and the front door started answering 404.
+   *
+   * Restoring the redirect would undo the fix. Declaring the root is what makes
+   * both true at once: `/` is a real page, and `*` still means "no such page".
+   *
+   * Same element as `/welcome` rather than a redirect to it. A redirect would
+   * cost a render and, worse, leave a freshly signed-in user sitting on
+   * `/welcome` — which is not an authenticated route, so the shell would answer
+   * their own front door with a 404.
+   */
+  { path: '/', element: <Welcome /> },
   { path: '/welcome', element: <Welcome /> },
   { path: '/login', element: <Login /> },
   { path: '/signup', element: <Signup /> },

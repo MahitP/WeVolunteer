@@ -2,7 +2,8 @@ import React, { useId, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { RotateCw, ArrowLeft } from 'lucide-react';
 import { APP_NAME } from '../../config';
-import { RETRYABLE, kindForError } from './kinds';
+import BrandMark from '../../components/common/BrandMark';
+import { RETRYABLE, kindForError, weightFor } from './kinds';
 import { copyFor } from './errorCopy';
 import { selectTheme, themeForSeed, modeFor } from './selector';
 import { getTheme } from './themes/index.js';
@@ -32,9 +33,17 @@ import { getTheme } from './themes/index.js';
  * it is a dialog box with better typography. The copy sits left on a narrow
  * measure and the scene bleeds right, which is what gives the screen a horizon.
  *
- * "Full screen" means full-bleed within its region, never `100vh`: the
- * authenticated catch-all renders inside the app shell, and a viewport-height
- * block there pushes the chrome off the screen.
+ * ── Weight ──
+ *
+ * Three of them, from `WEIGHTS` in kinds.js: `immersive` owns the viewport,
+ * `page` fills its region, `medium` stays a contained composition inside a
+ * shell that still works around it. The attribute is the only thing that
+ * changes; the frame, the scene and the copy are identical at every weight.
+ *
+ * `100dvh` is used ONLY where this renders at the top level. Inside the app
+ * shell the same block would push the nav and the topbar off screen, so there
+ * it fills the region it was given instead — `.app .err` in index.css. That is
+ * a correctness constraint, not a style preference.
  */
 
 /**
@@ -86,6 +95,7 @@ export default function ErrorExperience({
   const { eyebrow, title, body } = copyFor(theme.id, kind);
   const { Scene } = theme;
   const canRetry = RETRYABLE.includes(kind);
+  const weight = weightFor(kind);
 
   return (
     <section
@@ -98,11 +108,22 @@ export default function ErrorExperience({
          cannot use one. */
       data-error-kind={kind}
       data-error-theme={theme.id}
+      /* How much room this failure is allowed. The whole layout — viewport
+         fill, type scale, artwork size, spacing — hangs off this one attribute
+         rather than off a class per kind, so adding a kind is a row in
+         `WEIGHTS` and not a new block of CSS. */
+      data-error-weight={weight}
     >
       <div className="err-copy">
         {/* Branding: this is a landing moment and often the only thing on
-            screen. Quiet — the scene is what should be remembered. */}
-        <p className="err-mark">{APP_NAME}</p>
+            screen, so it carries the same mark as the app shell and the
+            certificate page — the SAME component, not a copy of the markup, so
+            the day the mark changes it cannot change everywhere but here.
+            Quiet — the scene is still what should be remembered. */}
+        <p className="err-mark">
+          <BrandMark />
+          <span className="err-mark-text">{APP_NAME}</span>
+        </p>
 
         <p className="err-eyebrow">{eyebrow}</p>
         <h1 className="err-title" id={titleId}>{title}</h1>

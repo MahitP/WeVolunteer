@@ -16,7 +16,7 @@
 import React from 'react';
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import App from './App';
 import { api } from './utils/api';
 import { findErrorKind } from './testUtils/errorExperience';
@@ -70,6 +70,12 @@ const renderAt = (path) => render(
   <MemoryRouter initialEntries={[path]}><App /></MemoryRouter>
 );
 
+/** Reports the router's current location, so "did it redirect?" is assertable. */
+function LocationProbe() {
+  const loc = useLocation();
+  return <div data-testid="where" data-path={loc.pathname} data-search={loc.search} />;
+}
+
 // jsdom does not implement Element.scrollTo; the mobile-nav effect calls it
 // whenever the active tab changes (i.e. after every redirect).
 Element.prototype.scrollTo = () => {};
@@ -77,6 +83,22 @@ Element.prototype.scrollTo = () => {};
 beforeEach(() => vi.clearAllMocks());
 
 describe('authenticated route table', () => {
+  /**
+   * The other half of the root-route claim. Declaring `/` as a signed-out route
+   * must not shadow the authenticated dashboard — react-router ranks by
+   * specificity rather than declaration order, but the two tables are assembled
+   * in different places and only a test says so.
+   */
+  it.each([['student', 'vol-dash'], ['organizer', 'org-dash'], ['admin', 'admin-dash']])(
+    '%s: the root is their dashboard, never a 404',
+    async (role, testId) => {
+      signedInAs(USER(role));
+      renderAt('/');
+      expect(await screen.findByTestId(testId)).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    }
+  );
+
   it('student: /events gets every prop it had before', async () => {
     signedInAs(USER('student'));
     renderAt('/events');
@@ -211,6 +233,26 @@ describe('signed-out and public routes', () => {
     expect(screen.queryByTestId('welcome')).not.toBeInTheDocument();
   });
 
+  /**
+   * The front door is not an unknown route.
+   *
+   * `/` used to work by accident: the signed-out catch-all was
+   * `<Navigate to="/welcome" replace />`, so the root fell through to a blanket
+   * redirect. `2b015d3` replaced that redirect with a real 404 — correctly,
+   * which is what the test directly above asserts — and `/` went down with it,
+   * because it had never been a route of its own. The front door answered 404
+   * to every signed-out visitor.
+   *
+   * Both claims are asserted together on purpose. They pull against each other,
+   * and the obvious repair for either one breaks the other.
+   */
+  it('shows a signed-out visitor the welcome page at the root, not a 404', async () => {
+    api.getMe.mockResolvedValue(null);
+    renderAt('/');
+    expect(await screen.findByTestId('welcome')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('renders certificate verification for a signed-in user', async () => {
     signedInAs(USER('student'));
     renderAt('/verify/ABC123');
@@ -268,5 +310,99 @@ describe('going offline', () => {
     expect(covered.contains(view)).toBe(true);
     expect(covered.querySelector('.app'), 'the shell is outside the cover').toBeTruthy();
     expect(covered.hasAttribute('inert')).toBe(true);
+  });
+});
+
+/**
+ * The takeover architecture.
+ *
+ * ── What is actually being claimed ──
+ *
+ * "Fullscreen" is not a CSS assertion. The visual weight is covered by
+ * `ErrorExperience.test.jsx`; what matters here is structural and only
+ * observable against the real App: when a catastrophic failure renders, the
+ * application shell must not be in the document AT ALL. Not hidden, not
+ * covered, not behind a z-index — absent. A sidebar that is merely painted over
+ * is still a list of tab stops between the reader and the way out.
+ *
+ * The counterpart claim matters just as much: 403 is NOT a takeover, and the
+ * shell has to survive it, because "ask your school administrator" is advice
+ * the reader acts on with the navigation.
+ */
+const SHELL_SELECTORS = ['.app', '.sidebar', '.topbar', '.mobilenav', '[data-testid="profile-menu"]'];
+
+function shellPresent(container) {
+  return SHELL_SELECTORS.filter((sel) => container.querySelector(sel) !== null);
+}
+
+describe('catastrophic failures take over the whole screen', () => {
+  it.each([
+    ['/404', '404'],
+    ['/500', '500'],
+    ['/crash', 'crash'],
+    ['/chunk', 'chunk'],
+    ['/offline', 'offline'],
+    ['/maintenance', 'maintenance'],
+  ])('%s renders the %s experience with no application shell', async (path, kind) => {
+    signedInAs(USER('student'));
+    const { container } = renderAt(path);
+
+    await findErrorKind(kind);
+    expect(container.querySelector('.err').dataset.errorWeight).toBe('immersive');
+    expect(shellPresent(container), `${path} left shell chrome on the page`).toEqual([]);
+  });
+
+  it('takes over for a signed-out visitor too, with the same weight', async () => {
+    api.getMe.mockResolvedValue(null);
+    const { container } = renderAt('/500');
+
+    await findErrorKind('500');
+    expect(container.querySelector('.err').dataset.errorWeight).toBe('immersive');
+    expect(shellPresent(container)).toEqual([]);
+  });
+
+  /**
+   * The regression this replaces: the 404 used to be a `<Route path="*">` INSIDE
+   * the shell, so an unknown URL rendered a full-screen apology with the
+   * sidebar, topbar and profile menu still around it.
+   */
+  it('an unknown URL takes over instead of rendering inside the shell', async () => {
+    signedInAs(USER('student'));
+    const { container } = renderAt('/no-such-page');
+
+    await findErrorKind('404');
+    expect(shellPresent(container), 'unknown URL still rendered inside the shell').toEqual([]);
+  });
+
+  /**
+   * The URL is the payload. Redirecting to `/404` would destroy the one piece
+   * of information the reader needs — and make Back a loop, since the original
+   * URL would redirect straight out again.
+   */
+  it('leaves the unknown URL in the address bar rather than redirecting', async () => {
+    signedInAs(USER('student'));
+    render(
+      <MemoryRouter initialEntries={['/no-such-page?ref=email']}>
+        <App />
+        <LocationProbe />
+      </MemoryRouter>
+    );
+
+    await findErrorKind('404');
+    expect(screen.getByTestId('where').dataset.path).toBe('/no-such-page');
+    expect(screen.getByTestId('where').dataset.search).toBe('?ref=email');
+  });
+});
+
+describe('a permission refusal is not a takeover', () => {
+  it('403 keeps the shell the reader needs to act on the advice', async () => {
+    signedInAs(USER('student'));
+    const { container } = renderAt('/events/new');
+
+    await findErrorKind('403');
+    expect(container.querySelector('.err').dataset.errorWeight).toBe('medium');
+    // The navigation is how "ask your administrator" gets acted on.
+    expect(container.querySelector('.app'), '403 removed the shell').toBeTruthy();
+    expect(container.querySelector('.sidebar')).toBeTruthy();
   });
 });
