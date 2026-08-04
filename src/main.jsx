@@ -7,6 +7,39 @@ import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { crashFallback } from './views/ErrorExperience/ErrorExperience.jsx'
 
 import { LocationProvider } from './contexts/LocationContext.jsx'
+import { reportClientError } from './utils/errorReporting.js'
+
+/**
+ * The failures no React boundary can see.
+ *
+ * A boundary only catches a throw during RENDER. Everything else in a browser
+ * app escapes it: a listener that throws, a `setTimeout` callback, a promise
+ * nobody caught, a script that failed to parse. Those are the failures with no
+ * visible symptom at all — the button silently does nothing and the user
+ * concludes the app is broken, which it is, and we never hear about it.
+ *
+ * Registered before `createRoot` so a throw during the very first render is
+ * still covered. `reportClientError` does the deciding: it caps, dedupes,
+ * refuses network errors and never throws.
+ *
+ * `kind: 'crash'` for both — a status code would be a lie here, since neither
+ * of these came from a response.
+ */
+globalThis.addEventListener?.('error', (event) => {
+  reportClientError(event?.error ?? event?.message, {
+    kind: 'crash',
+    route: globalThis.location?.pathname,
+  });
+});
+
+globalThis.addEventListener?.('unhandledrejection', (event) => {
+  /* `event.reason` is whatever was rejected, which is very often not an Error —
+     a string, a Response, undefined. reportClientError handles all of it. */
+  reportClientError(event?.reason, {
+    kind: 'crash',
+    route: globalThis.location?.pathname,
+  });
+});
 
 // Two last-resort boundaries, because they can rely on different amounts of the
 // app still working.

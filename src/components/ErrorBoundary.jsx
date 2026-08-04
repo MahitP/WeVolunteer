@@ -1,5 +1,7 @@
 import React from 'react';
 import ErrorPanel from '../views/ErrorExperience/ErrorPanel';
+import { reportClientError } from '../utils/errorReporting';
+import { kindForError } from '../views/ErrorExperience/kinds';
 
 /**
  * Catches a render error and shows a recoverable panel instead of a blank page.
@@ -19,9 +21,10 @@ import ErrorPanel from '../views/ErrorExperience/ErrorPanel';
  * somewhere else: without it, a boundary that has caught once keeps showing the
  * fallback forever, even after the thing that failed is gone from the screen.
  *
- * There is no error-reporting service in this deployment, so the error is
- * written to the console — that is the only place a developer can retrieve it
- * from a user's browser.
+ * Every caught error is also reported to `/api/errors/report`, which is the
+ * only way a maintainer sees a failure that happened on somebody else's phone.
+ * The console line is kept as well: it is what a developer reads while the tab
+ * is still open.
  */
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -35,6 +38,17 @@ export default class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, info) {
     console.error('Render error caught by boundary:', error, info?.componentStack);
+
+    /* The console line above is only retrievable by asking the user to open dev
+       tools, which is not a support process for a fourteen-year-old at an event.
+       This is the same failure, sent somewhere a maintainer can actually see it.
+       `reportClientError` decides whether to send — it caps, dedupes, refuses
+       network errors, and never throws, so nothing here can turn a caught error
+       into an uncaught one. See errorReporting.js. */
+    reportClientError(error, {
+      kind: kindForError(error),
+      route: globalThis.location?.pathname,
+    });
   }
 
   componentDidUpdate(prevProps) {
