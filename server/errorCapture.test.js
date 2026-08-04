@@ -296,8 +296,17 @@ describe('background failures are captured where nobody is watching', () => {
 
 describe('no new infrastructure was introduced', () => {
   it('adds no timer, worker, process or route', () => {
+    /**
+     * Capture is instrumentation: it reports from paths that already existed and
+     * introduces none of its own. `app.js` is deliberately excluded from the
+     * route check — Task 6 mounts the client intake there on purpose, and this
+     * assertion originally listed app.js when no such endpoint existed yet.
+     * Narrowed rather than deleted: the claim worth keeping is that the three
+     * BACKGROUND modules gained no HTTP surface, which is where an accidental
+     * one would be genuinely surprising.
+     */
     for (const file of [
-      'app.js', 'workers/notificationWorker.js', 'workers/exportWorker.js',
+      'workers/notificationWorker.js', 'workers/exportWorker.js',
       'services/autoSelectScheduler.js'
     ]) {
       const src = read(file);

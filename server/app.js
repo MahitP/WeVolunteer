@@ -26,6 +26,7 @@ import messageRoutes from './routes/messageRoutes.js';
 import privacyRoutes from './routes/privacyRoutes.js';
 import oauthRoutes from './routes/oauthRoutes.js';
 import reauthRoutes from './routes/reauthRoutes.js';
+import errorRoutes from './routes/errorRoutes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -232,6 +233,27 @@ if (REQUEST_LOG) {
   });
 }
 
+/**
+ * A tighter body cap for the one unauthenticated write, mounted BEFORE the
+ * global parser — and the ordering is the entire point.
+ *
+ * The obvious placement, a route-level `express.json({ limit: '8kb' })` on the
+ * handler itself, does nothing at all. `express.json` marks a request parsed and
+ * skips one that already is, so by the time a router runs, the global parser
+ * below has consumed the body under the 100 kB limit and the tighter cap never
+ * engages. Measured before this was written: a 5 kB body sailed through a 1 kB
+ * route-level limit with a 200.
+ *
+ * That silence is what makes it worth a comment. A test written from the design
+ * would expect a 413, get a 202, and the tempting fix is to relax the test
+ * rather than notice the control was never active.
+ *
+ * Scoped to the one path, so every other route keeps the 100 kB limit below.
+ * A stack trace does not need more than 8 kB, and this is the only endpoint in
+ * the application that accepts a body from someone with no session.
+ */
+app.use('/api/errors/report', express.json({ limit: '8kb' }));
+
 app.use(express.json({ limit: '100kb' }));
 
 // Populates req.cookies for authenticateToken. Mounted before the routers and
@@ -427,6 +449,33 @@ export const reauthLimiter = rateLimit({
   handler: limitHandler('Too many failed verification attempts from this device.'),
 });
 
+/**
+ * Client error reports.
+ *
+ * The only unauthenticated write in the application, so it carries a limiter of
+ * its own rather than relying on the blanket apiLimiter's 600.
+ *
+ * Successes are COUNTED — unlike authLimiter, which skips them. A flood of
+ * accepted reports is exactly what an attacker sends, and this endpoint answers
+ * 202 to everything, so skipping successes would skip the entire attack.
+ *
+ * Twenty per fifteen minutes is far above honest use: the client caps itself at
+ * five reports per page load, so twenty is four full page loads of a completely
+ * broken build from one address.
+ *
+ * Per-IP, and therefore only half the protection. It bounds requests from one
+ * address and says nothing about a thousand; the 500-group ceiling in
+ * errorReporter.js bounds STORAGE regardless of where the traffic comes from.
+ * Neither subsumes the other and both are required.
+ */
+export const errorReportLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.ERROR_REPORT_RATE_LIMIT) || (DEMO_MODE ? 1000 : 20),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  handler: limitHandler('Too many error reports from this device.'),
+});
+
 export const lookupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: DEMO_MODE ? 5000 : 60,
@@ -496,6 +545,7 @@ app.use('/api/auth/change-username', authLimiter);
  * new challenge per guess. Both must pass; the specific one is mounted second
  * so the broad refusal is the one a flood sees first.
  */
+app.use('/api/errors/report', errorReportLimiter);
 app.use('/api/auth/reauth', authLimiter);
 app.use('/api/auth/reauth/password', reauthLimiter);
 
@@ -525,6 +575,7 @@ app.use(geocodeRoutes);
 app.use(weatherRoutes);
 app.use(messageRoutes);
 app.use(privacyRoutes);
+app.use(errorRoutes);
 
 
 // Read once at import rather than per request. Derived from package.json so it
