@@ -281,7 +281,7 @@ export function fingerprint({ source, kind, message, route }) {
     String(kind ?? ''),
     normaliseForFingerprint(message),
     String(route ?? ''),
-  ].join(' ');
+  ].join('\0');
   return crypto.createHash('sha256').update(basis).digest('hex');
 }
 
