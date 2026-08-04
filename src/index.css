@@ -35,11 +35,11 @@
   --green-dark-600: #21a36f;
 
   --neutral-0: #ffffff;
-  --neutral-25: #fcfcfb;
-  --neutral-50: #f7f8f6;
-  --neutral-100: #eff2ee;
-  --neutral-200: #e0e6e1;
-  --neutral-300: #c9d2cc;
+  --neutral-25: #fcfcfd;
+  --neutral-50: #f5f6f8;
+  --neutral-100: #eaebf0;
+  --neutral-200: #d6d9e0;
+  --neutral-300: #c1c5cf;
   --neutral-500: #65746b;
   --neutral-600: #4f5f56;
   --neutral-900: #122019;
@@ -5836,7 +5836,8 @@ input:disabled + .premium-slider {
    the glow needs to be perceptible against the pale background. A gentle boost
    gives the page its "not plain white" character without flooding it with
    colour. */
-[data-theme='dark'] .err[data-error-weight='immersive']::before {
+[data-theme='dark'] .err[data-error-weight='immersive']::before,
+[data-theme='dark'] .err[data-error-weight='medium']::before {
   opacity: 1;
   background:
     radial-gradient(46% 54% at 76% 30%, var(--brand-soft), transparent 68%),
@@ -6176,6 +6177,6 @@ input:disabled + .premium-slider {
   /* At phone width the column IS the bound, so let the scene fill it. */
   .err-scene { max-width: none; }
   .err-body { font-size: 1rem; }
-  .err-actions { width: 100%; }
+  .err-actions { width: 100%; flex-direction: column; align-items: stretch; }
   .err-panel { flex-direction: column; gap: var(--s3); padding: var(--s4); }
 }

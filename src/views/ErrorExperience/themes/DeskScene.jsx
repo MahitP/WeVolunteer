@@ -102,11 +102,12 @@ export default function DeskScene({ mode = 'locked' }) {
         {mode === 'locked' ? (
           /* A closed padlock struck across the badge's own access row. */
           <g transform="translate(186 216)">
-            <rect x="-22" y="-2" width="72" height="18" rx="9" fill="var(--warn-tint)" />
-            <path d="M6 6V3.5a3.6 3.6 0 0 1 7.2 0V6" fill="none" stroke="var(--warn)"
+            <rect x="-22" y="-2" width="72" height="18" rx="9" fill="var(--warn-tint)"
+              stroke="var(--warn-border)" strokeWidth="1.5" />
+            <path d="M -5 6 V 3.5 a 3.6 3.6 0 0 1 7.2 0 V 6" fill="none" stroke="var(--warn)"
               strokeWidth="2" strokeLinecap="round" />
-            <rect x="3.6" y="6" width="12" height="9" rx="2" fill="var(--warn)" />
-            <rect x="22" y="7.5" width="24" height="4" rx="2" fill="var(--warn)" opacity="0.55" />
+            <rect x="-7.4" y="6" width="12" height="9" rx="2" fill="var(--warn)" />
+            <rect x="11" y="7.5" width="24" height="4" rx="2" fill="var(--warn)" opacity="0.55" />
           </g>
         ) : (
           <g transform="translate(186 216)">

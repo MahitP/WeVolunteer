@@ -155,7 +155,7 @@ export default function MapScene({ mode = 'gap' }) {
         <g className="err-map-barrier">
           <rect x="188" y="90" width="6" height="34" rx="3" fill="var(--ink-3)" />
           <rect x="246" y="90" width="6" height="34" rx="3" fill="var(--ink-3)" />
-          <rect x="182" y="94" width="76" height="13" rx="3.5" fill="var(--warn-tint)"
+          <rect x="182" y="97.5" width="76" height="13" rx="3.5" fill="var(--warn-tint)"
             stroke="var(--warn-border)" strokeWidth="1.25" />
           {/* Parallelograms, not skewed rects. `skewX` translates by
               `y * tan(angle)` about the ORIGIN, so at y≈96 these were displaced
@@ -163,7 +163,7 @@ export default function MapScene({ mode = 'gap' }) {
               as paths, each stripe is bounded by construction. */}
           <g fill="var(--warn)" opacity="0.75">
             {[194, 211, 228, 245].map((x) => (
-              <path key={x} d={`M${x} 95.5 L${x + 6.5} 95.5 L${x + 3} 105.5 L${x - 3.5} 105.5 Z`} />
+              <path key={x} d={`M${x} 99 L${x + 6.5} 99 L${x + 3} 109 L${x - 3.5} 109 Z`} />
             ))}
           </g>
         </g>
