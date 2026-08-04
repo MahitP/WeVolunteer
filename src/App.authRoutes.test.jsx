@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
 import { api } from './utils/api';
+import { findErrorKind } from './testUtils/errorExperience';
 
 /**
  * Audit findings C1 and C2 — auth-flow routes must resolve in every session
@@ -168,6 +169,6 @@ describe('C2 — /reset-password resolves for an authenticated user', () => {
 
     // The other arm of the same ternary — asserted here so the two cannot be
     // collapsed into one another without a test noticing.
-    expect(await screen.findByRole('heading', { name: /on the board/i })).toBeInTheDocument();
+    await findErrorKind('404');
   });
 });

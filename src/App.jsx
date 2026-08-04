@@ -5,7 +5,9 @@ import { DEMO_MODE, APP_NAME, SCHOOL_NAME } from './config';
 import DemoBar from './components/DemoBar';
 import NotificationsBell from './components/NotificationsBell';
 import ErrorBoundary from './components/ErrorBoundary';
-import ErrorPage from './views/ErrorPage';
+import ErrorExperience, { crashFallback } from './views/ErrorExperience/ErrorExperience';
+import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
+import useOnline from './hooks/useOnline';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
@@ -31,6 +33,18 @@ import {
 // The routed views are split the same way, in src/routes/index.jsx.
 const EventModal = React.lazy(() => import('./components/EventModal'));
 const ProfileEditModal = React.lazy(() => import('./components/ProfileEditModal'));
+
+/**
+ * The error contact sheet, development only. See ErrorGallery.jsx.
+ *
+ * Both this and the branch that renders it are behind `import.meta.env.DEV`,
+ * which is a literal `false` in a production build — so the branch is dead code
+ * and the chunk is never reachable. A rotating system that cannot be reviewed
+ * in one place is a rotating system nobody reviews.
+ */
+const ErrorGallery = import.meta.env.DEV
+  ? React.lazy(() => import('./views/ErrorExperience/ErrorGallery.jsx'))
+  : null;
 
 /**
  * Fallback for a route whose chunk is still arriving.
@@ -249,6 +263,7 @@ export default function App() {
 }
 
 function AppShell({ toasts, addToast, removeToast }) {
+  const online = useOnline();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -419,6 +434,17 @@ function AppShell({ toasts, addToast, removeToast }) {
   };
   const viewOrganizer = (id) => id && setViewingProfileState({ type: 'organizer', id });
 
+  /* Dev-only contact sheet. Sits with the other early returns — after every
+     hook has run, so rendering it cannot change hook order — and above the
+     session branches, because it must work signed in or out and reads neither. */
+  if (import.meta.env.DEV && currentPath === '/__errors') {
+    return (
+      <React.Suspense fallback={<RouteFallback />}>
+        <ErrorGallery />
+      </React.Suspense>
+    );
+  }
+
   if (AUTH_FLOW_PATHS.includes(currentPath)) {
     return (
       <>
@@ -494,8 +520,20 @@ function AppShell({ toasts, addToast, removeToast }) {
       }
     };
 
+    /* Offline covers the signed-out shell too. Letting somebody type
+       credentials into a form that cannot possibly submit is a worse answer
+       than saying the connection is gone — and the auth-flow paths
+       (/reset-password, /oauth/callback) are handled ABOVE the session
+       branches, so an emailed link still works with no network the moment one
+       returns.
+
+       It COVERS rather than replaces, and it wraps the WHOLE shell rather than
+       just the routes: a half-finished signup form has to survive a dropped bar
+       because the copy on top of it promises it will, and anything left outside
+       the wrapper stays tabbable underneath an opaque cover. See
+       OfflineOverlay.jsx. */
     return (
-      <>
+      <OfflineOverlay online={online} signedIn={false}>
         <React.Suspense fallback={<RouteFallback />}>
         <Routes>
           {SIGNED_OUT_ROUTES.map(route => (
@@ -509,13 +547,13 @@ function AppShell({ toasts, addToast, removeToast }) {
             element={
               searchParams.has('reset')
                 ? <Navigate to={`/reset-password?token=${encodeURIComponent(searchParams.get('reset'))}`} replace />
-                : <ErrorPage kind="404" signedIn={false} />
+                : <ErrorExperience kind="404" signedIn={false} />
             }
           />
         </Routes>
         </React.Suspense>
         <Toasts toasts={toasts} onRemove={removeToast} />
-      </>
+      </OfflineOverlay>
     );
   }
 
@@ -588,9 +626,17 @@ function AppShell({ toasts, addToast, removeToast }) {
    * nothing. Rendering in place also keeps the URL, so the person can send it to
    * whoever told them to open it.
    */
-  const denied = <ErrorPage kind="403" />;
+  const denied = <ErrorExperience kind="403" />;
 
+  /* Offline COVERS the whole shell rather than replacing the routed view.
+     Replacing it unmounted everything inside — a half-written event description
+     went with it — while the copy laid over the top promised the opposite. And
+     it has to wrap the shell, not just <main>: an overlay is opaque, so any nav
+     left outside the wrapper is a tab stop nobody can see. The app underneath
+     stays mounted and inert, and comes back untouched, mid-sentence, the moment
+     the connection does. See OfflineOverlay.jsx. */
   return (
+    <OfflineOverlay online={online}>
     <div className="app">
       <a href="#main-content" className="skip-link">Skip to main content</a>
 
@@ -659,8 +705,11 @@ function AppShell({ toasts, addToast, removeToast }) {
               clears a caught error once they do. */}
           <ErrorBoundary
             resetKey={`${currentPath}:${selectedEventId || ''}:${profileId || ''}`}
-            title="This page didn't load"
-            message="Something went wrong displaying this page. Your data is safe — nothing was changed. Try another tab, or reload."
+            /* Fullscreen, not a panel: the whole routed view is gone, so a card
+               floating in an empty <main> would be the weaker answer. The
+               chunk-vs-crash decision lives in `crashFallback`, shared with the
+               shell boundary in main.jsx. */
+            fallback={crashFallback}
           >
           {/* Inside the ErrorBoundary, so a chunk that fails to load is caught
               by the same boundary as a view that throws while rendering — and
@@ -781,7 +830,7 @@ function AppShell({ toasts, addToast, removeToast }) {
 
               {/* A dead or typo'd link is shown as one. Redirecting here made a
                   broken link indistinguishable from a working one. */}
-              <Route path="*" element={<ErrorPage kind="404" />} />
+              <Route path="*" element={<ErrorExperience kind="404" />} />
             </Routes>
           )}
           </React.Suspense>
@@ -943,5 +992,6 @@ function AppShell({ toasts, addToast, removeToast }) {
 
       <Toasts toasts={toasts} onRemove={removeToast} />
     </div>
+    </OfflineOverlay>
   );
 }
