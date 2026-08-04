@@ -140,3 +140,47 @@ describe('ErrorPage: leaks nothing, and motion is optional', () => {
     }
   });
 });
+
+/**
+ * Motion is opt-out, asserted against the stylesheet.
+ *
+ * The reduced-motion rule cannot be observed by rendering: jsdom does not apply
+ * media queries. Read statically instead, the way the three `src/` guards read
+ * source — otherwise the only thing standing between a vestibular-sensitive
+ * reader and a floating, pulsing board is a comment.
+ */
+describe('ErrorPage: reduced motion is honoured', () => {
+  it('disables every animated class inside a prefers-reduced-motion block', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    // process.cwd(), like tokens.test.js and the other src/ guards: the client
+    // project runs in jsdom, where import.meta.url is not a file: URL.
+    const css = readFileSync(join(process.cwd(), 'src', 'index.css'), 'utf8');
+
+    /**
+     * The stylesheet has SEVERAL reduced-motion blocks — the app already honours
+     * the preference elsewhere — so this collects them all and asks whether ANY
+     * of them covers the board. Reading only the first one silently tested a
+     * different feature's block, which is how this assertion failed the moment
+     * it was written.
+     */
+    const blocks = [];
+    const QUERY = '@media (prefers-reduced-motion: reduce)';
+    for (let i = css.indexOf(QUERY); i !== -1; i = css.indexOf(QUERY, i + 1)) {
+      let depth = 0, end = css.indexOf('{', i);
+      for (let j = end; j < css.length; j++) {
+        if (css[j] === '{') depth++;
+        else if (css[j] === '}' && --depth === 0) { end = j; break; }
+      }
+      blocks.push(css.slice(i, end + 1));
+    }
+    expect(blocks.length, 'no reduced-motion block at all').toBeGreaterThan(0);
+
+    const covering = blocks.find(b => b.includes('.errb-tile'));
+    expect(covering, 'no reduced-motion block covers the error board').toBeTruthy();
+    for (const cls of ['.errb-tile', '.errb-tile-gap', '.errb-tile-locked', '.errb-art-sync .errb-tile']) {
+      expect(covering, `${cls} keeps animating for a reader who asked it not to`).toContain(cls);
+    }
+    expect(covering).toContain('animation: none');
+  });
+});
