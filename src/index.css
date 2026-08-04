@@ -5563,3 +5563,191 @@ input:disabled + .premium-slider {
   cursor: pointer;
 }
 .s-5d6488 { flex-shrink: 0; }
+
+/* ── Full-screen error experiences: "the board" ─────────────────────────────
+ *
+ * An event has slots and students claim spots, so the signup board is the
+ * artifact a volunteer actually looks at. These screens render one, and in each
+ * state exactly one tile is wrong: empty (404), locked (403), refreshing (500).
+ * The tiles around it stay filled and calm, which is the same reassurance the
+ * copy makes — the thing that broke is small and specific.
+ *
+ * Built from divs rather than an asset so it themes from tokens, scales with the
+ * viewport and costs nothing to load. See src/views/ErrorPage.jsx.
+ */
+.errb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  /* Full-bleed within its region, never 100vh: the authenticated catch-all
+     renders inside the app shell and a viewport-height block pushes the chrome
+     off screen. */
+  min-height: 60vh;
+  justify-content: center;
+  gap: var(--s3);
+  padding: var(--s6) var(--s4);
+  max-width: 46rem;
+  margin: 0 auto;
+}
+
+.errb-mark {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.8125rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand-primary);
+  margin: 0;
+}
+
+/* ── The board ── */
+.errb-art {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--s2);
+  width: min(19rem, 78vw);
+  margin: var(--s4) 0 var(--s2);
+}
+
+.errb-tile {
+  /* Per-tile stagger index, overridden inline in JSX. Declared here so it has a
+     defined fallback and so `tokens.test.js` — which requires every custom
+     property referenced under src/ to exist — can see it. */
+  --errb-i: 0;
+  aspect-ratio: 1;
+  border-radius: var(--r-md);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-background);
+  display: grid;
+  place-items: center;
+  /* The board assembles rather than appearing. --errb-i is set per tile in JSX. */
+  animation: errb-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: calc(var(--errb-i, 0) * 45ms);
+}
+
+/* The volunteer who filled that spot. Deliberately abstract — a dot reads as a
+   person at this scale, and anything more literal becomes a stock illustration. */
+.errb-dot {
+  width: 34%;
+  height: 34%;
+  border-radius: var(--r-full);
+  background: var(--brand-primary);
+  opacity: 0.55;
+}
+
+/* Eleven identical dots read as a loading skeleton. A little variance reads as
+   a board filled by different people at different times — which is the point
+   the surrounding tiles are making while one of them is missing. Restrained on
+   purpose: enough to feel hand-filled, not enough to look like noise. */
+.errb-tile:nth-child(3n) .errb-dot   { opacity: 0.38; transform: scale(0.9); }
+.errb-tile:nth-child(4n) .errb-dot   { opacity: 0.68; transform: scale(1.08); }
+.errb-tile:nth-child(5n+2) .errb-dot { opacity: 0.46; }
+
+/* 404 — the spot that is not there. Dashed, empty, and drifting slightly off the
+   grid, which is the whole message in one tile. */
+.errb-tile-gap {
+  background: transparent;
+  /* --ink-3 rather than a border token: the border tokens are tuned to sit back
+     on a card, and in dark mode they left the one tile carrying the message as
+     the faintest thing on screen. */
+  border: 1.5px dashed var(--ink-3);
+  animation:
+    errb-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards,
+    errb-drift 5.5s ease-in-out 900ms infinite;
+}
+
+/* 403 — the board is fine; this spot is not yours. */
+.errb-tile-locked {
+  background: var(--warn-tint);
+  border-color: var(--warn-border);
+  color: var(--warn);
+  animation:
+    errb-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards,
+    errb-nudge 6s ease-in-out 1s infinite;
+}
+
+/* 500 — the whole board is refreshing, so every tile breathes and the failed one
+   is the one holding its breath. */
+.errb-art-sync .errb-tile {
+  animation:
+    errb-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards,
+    errb-breathe 2.4s ease-in-out infinite;
+  animation-delay: calc(var(--errb-i, 0) * 45ms), calc(var(--errb-i, 0) * 90ms);
+}
+.errb-tile-sync {
+  background: var(--danger-tint);
+  border-color: var(--danger-border);
+}
+
+/* ── Words ── */
+.errb-eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0;
+}
+
+.errb-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 4.5vw, 2.125rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0;
+  max-width: 22ch;
+  text-wrap: balance;
+}
+
+.errb-body {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--ink-2);
+  margin: 0;
+  max-width: 46ch;
+}
+
+.errb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+
+@keyframes errb-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.94); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes errb-drift {
+  0%, 100% { transform: translate(0, 0) rotate(-3deg); }
+  50%      { transform: translate(5px, -7px) rotate(4deg); }
+}
+@keyframes errb-nudge {
+  0%, 92%, 100% { transform: none; }
+  95%           { transform: translateX(-2px); }
+  97%           { transform: translateX(2px); }
+}
+@keyframes errb-breathe {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* Motion is decoration here; the message is in the copy and the layout, both of
+   which are unaffected. Everything resolves to its finished state. */
+@media (prefers-reduced-motion: reduce) {
+  .errb-tile,
+  .errb-tile-gap,
+  .errb-tile-locked,
+  .errb-art-sync .errb-tile {
+    animation: none;
+  }
+}
+
+@media (max-width: 30rem) {
+  .errb { min-height: 50vh; padding: var(--s5) var(--s3); }
+  .errb-art { width: min(15rem, 72vw); }
+}

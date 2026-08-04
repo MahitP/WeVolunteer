@@ -168,6 +168,6 @@ describe('C2 — /reset-password resolves for an authenticated user', () => {
 
     // The other arm of the same ternary — asserted here so the two cannot be
     // collapsed into one another without a test noticing.
-    expect(await screen.findByRole('heading', { name: /could not find that page/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /on the board/i })).toBeInTheDocument();
   });
 });

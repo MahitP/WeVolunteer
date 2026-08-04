@@ -114,13 +114,13 @@ describe('authenticated route table', () => {
   it('student: /events/new and /checkin are denied, with a reason', async () => {
     signedInAs(USER('student'));
     const a = renderAt('/events/new');
-    expect(await screen.findByRole('heading', { name: /do not have access/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /yours to open/i })).toBeInTheDocument();
     expect(screen.queryByTestId('vol-dash')).not.toBeInTheDocument();
     a.unmount();
 
     signedInAs(USER('student'));
     renderAt('/checkin/evt-1');
-    expect(await screen.findByRole('heading', { name: /do not have access/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /yours to open/i })).toBeInTheDocument();
   });
 
   it('verified organizer: /events/new renders the form with its props', async () => {
@@ -133,7 +133,7 @@ describe('authenticated route table', () => {
   it('unverified organizer: /events/new is still refused', async () => {
     signedInAs(USER('organizer', { verified: false }));
     renderAt('/events/new');
-    expect(await screen.findByRole('heading', { name: /do not have access/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /yours to open/i })).toBeInTheDocument();
     expect(screen.queryByTestId('org-dash')).not.toBeInTheDocument();
   });
 
@@ -147,7 +147,7 @@ describe('authenticated route table', () => {
   it('admin: /messages is denied, /events is allowed', async () => {
     signedInAs(USER('admin'));
     const a = renderAt('/messages');
-    expect(await screen.findByRole('heading', { name: /do not have access/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /yours to open/i })).toBeInTheDocument();
     a.unmount();
 
     signedInAs(USER('admin'));
@@ -170,7 +170,7 @@ describe('authenticated route table', () => {
     // capability refusal and now says so instead of bouncing.
     signedInAs(USER('admin'));
     renderAt('/profile');
-    expect(await screen.findByRole('heading', { name: /do not have access/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /yours to open/i })).toBeInTheDocument();
   });
 
   it('/events/:id/edit redirects to the event on browse', async () => {
@@ -182,7 +182,7 @@ describe('authenticated route table', () => {
   it('unknown path renders 404 rather than silently becoming the dashboard', async () => {
     signedInAs(USER('student'));
     renderAt('/nope');
-    expect(await screen.findByRole('heading', { name: /could not find that page/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /on the board/i })).toBeInTheDocument();
     // The old behaviour made a broken link indistinguishable from a working one.
     expect(screen.queryByTestId('vol-dash')).not.toBeInTheDocument();
   });
@@ -206,7 +206,7 @@ describe('signed-out and public routes', () => {
   it('shows a signed-out visitor 404 rather than sending them to welcome', async () => {
     api.getMe.mockResolvedValue(null);
     renderAt('/nope');
-    expect(await screen.findByRole('heading', { name: /could not find that page/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /on the board/i })).toBeInTheDocument();
     expect(screen.queryByTestId('welcome')).not.toBeInTheDocument();
   });
 
