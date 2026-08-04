@@ -34,13 +34,36 @@
   --green-dark-500: #2fbf83;
   --green-dark-600: #21a36f;
 
-  --neutral-0: #ffffff;
-  --neutral-25: #fcfcfd;
-  --neutral-50: #f5f6f8;
-  --neutral-100: #eaebf0;
-  --neutral-200: #d6d9e0;
-  --neutral-300: #c1c5cf;
-  --neutral-500: #65746b;
+  /* ── Light-mode neutral ramp ─────────────────────────────────────────────
+     Slate-cast, deliberately: the hue is inherited from the slate-gray palette
+     and only the BRIGHTNESS was retuned here.
+
+     `--neutral-0` is not white. It has exactly two consumers, `--surface` and
+     `--surface-elevated`, and those back the cards, modals, tables, sidebar and
+     topbar across forty-odd rules — so pure #ffffff was not a page colour, it
+     was most of the screen. Stepping it to #fbfcfd is what takes the glare off
+     without touching a single component.
+
+     True white is still available where it is actually wanted: `--print-paper`
+     and `--cert-bg` hold their own values and never read this ramp.
+
+     The ramp must stay strictly monotonic — 0 lighter than 25, 25 than 50, and
+     so on. A previous pass at this darkened `--neutral-0` alone and inverted it
+     against `--neutral-25`, which would have made every card sit DARKER than
+     the muted panels inside it.
+
+     None of this reaches dark mode: `[data-theme='dark']` overrides every
+     semantic that reads these, and references no `--neutral-*` at all. */
+  --neutral-0: #fbfcfd;
+  --neutral-25: #f8f9fb;
+  --neutral-50: #f1f3f6;
+  --neutral-100: #e6e8ee;
+  --neutral-200: #d2d6de;
+  --neutral-300: #bdc2cd;
+  /* Darkened with the page it sits on. Muted ink carries real content — dates,
+     hints, eyebrow labels — and at the old #65746b it fell to 4.43:1 against
+     the new paper, under AA. #637269 restores 4.56:1. */
+  --neutral-500: #637269;
   --neutral-600: #4f5f56;
   --neutral-900: #122019;
 
