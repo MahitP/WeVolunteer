@@ -352,15 +352,37 @@ describe('intake: structural guarantees', () => {
       'a registry entry for an unauthenticated route fails the build as stale'
     ).not.toContain('/api/errors/report');
 
-    // Asserted on CODE. The module's own header explains why it deliberately
-    // does NOT use `authenticateToken`, and a raw text check is satisfied by
-    // that sentence while the middleware is present — the same prose-vs-code
-    // trap Task 5's structural tests hit.
+    /**
+     * Scoped to the intake's OWN registration, not the whole file.
+     *
+     * Task 7 added the triage API to this module, and those four routes are
+     * correctly `authenticateToken` + `requireCap`. A file-wide assertion was
+     * right when the intake was the only route here and became wrong the moment
+     * it was not — it would now fail for the very reason the file is correct.
+     *
+     * So the check is the middleware chain between the path and the handler:
+     * everything from `router.post('/api/errors/report'` up to the arrow. That
+     * is the list that decides whether this endpoint is reachable without a
+     * session, and it is what must stay empty.
+     *
+     * Still read from CODE, because the module's header explains why it
+     * deliberately does NOT use `authenticateToken`, and a raw text check is
+     * satisfied by that sentence while the middleware is present — the
+     * prose-vs-code trap from Task 5.
+     */
     const { canonicalSource } = await import('./migrations/index.js');
-    const route = canonicalSource(readFileSync(path.join(here, 'routes', 'errorRoutes.js'), 'utf8'));
-    expect(route, 'the intake must stay unauthenticated').not.toContain('authenticateToken');
-    expect(route, 'no capability gate belongs on an unauthenticated report').not.toContain('requireCap');
-    expect(route, 'no step-up belongs on an unauthenticated report').not.toContain('requireAAL2');
+    const code = canonicalSource(readFileSync(path.join(here, 'routes', 'errorRoutes.js'), 'utf8'));
+
+    const at = code.indexOf("router.post('/api/errors/report'");
+    expect(at, 'the intake route registration has moved or been renamed').toBeGreaterThan(-1);
+    const chain = code.slice(at, code.indexOf('=>', at));
+
+    expect(chain, 'the intake must stay unauthenticated').not.toContain('authenticateToken');
+    expect(chain, 'no capability gate belongs on an unauthenticated report').not.toContain('requireCap');
+    expect(chain, 'no step-up belongs on an unauthenticated report').not.toContain('requireAAL2');
+
+    // Step-up has no place anywhere in this module, authenticated or not.
+    expect(code, 'a step-up gate appeared in the error routes').not.toContain('requireAAL2');
   });
 
   it('is mounted behind its own limiter, and the limiter counts successes', async () => {

@@ -5,6 +5,9 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { db } from '../db.js';
 import { JWT_SECRET, COOKIE_NAME } from '../config.js';
+import { authenticateToken, inTransaction } from '../utils.js';
+import { requireCap } from '../authz.js';
+import { recordAudit } from '../auditLog.js';
 import { recordError, hashUserId } from '../errorReporter.js';
 
 const router = express.Router();
@@ -146,6 +149,230 @@ router.post('/api/errors/report', (req, res) => {
     // `recordError` does not throw, so this is for everything around it — a
     // hostile getter on the body, say. The response has already gone.
     try { console.error('[errorRoutes] failed to accept a client report:', err?.message ?? err); } catch { /* nothing left */ }
+  }
+});
+
+/* ── The triage API ────────────────────────────────────────────────────────
+ *
+ * Everything below is `super_admin` only, through `requireCap` on capabilities
+ * that live in `SUPER_ONLY`. That is not a convention here, it is the access
+ * control: these endpoints return redacted stack traces, file paths and internal
+ * structure, and `can()` refuses a SUPER_ONLY capability BEFORE it consults
+ * per-user grants — so no `user_capabilities` row can reach them and
+ * `capability.grant` is not a path to the dashboard.
+ *
+ * No `else if (can(...))` cascade appears anywhere below. `super_admin` holds
+ * `'*'`, so such a chain is not mutually exclusive; on the v1.2a branch that
+ * exact shape produced a real data leak. There is one gate per route and no
+ * branching on identity at all.
+ *
+ * None of these needs a `ROUTE_REGISTRY` entry: each carries a `capabilityGate`,
+ * which is what Guard 2 looks for.
+ */
+
+const GROUP_STATUSES = Object.freeze(['open', 'resolved', 'ignored']);
+const SOURCES = Object.freeze(['server', 'client', 'worker']);
+
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 200;
+
+/**
+ * Query parameters are hostile even here.
+ *
+ * The caller is the platform owner, so this is not about them — it is about the
+ * fact that `?limit=1e9` or `?limit[]=x` reaching SQLite unclamped is a
+ * self-inflicted denial of service on the largest tables in the schema, and an
+ * authenticated foot-gun is still a foot-gun. Express gives an ARRAY for a
+ * repeated parameter, so a bare `Number()` on it would yield NaN or, worse for
+ * a single-element array, a number — both are refused here in favour of the
+ * default.
+ */
+function boundedInt(raw, { fallback, min, max }) {
+  if (Array.isArray(raw) || raw === undefined || raw === null || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;                 // NaN, Infinity, '12abc'
+  const floored = Math.floor(n);
+  if (max === undefined) return Math.max(min, floored);
+  return Math.min(max, Math.max(min, floored));
+}
+
+/** An unrecognised filter value is ignored rather than refused: a filter is a
+ *  view, and answering 400 for one would make the dashboard brittle for no gain. */
+const oneOf = (raw, allowed) => (typeof raw === 'string' && allowed.includes(raw) ? raw : null);
+
+/* 1 ── GET /api/errors ─────────────────────────────────────────────────── */
+
+router.get('/api/errors', authenticateToken, requireCap('error.read'), (req, res) => {
+  try {
+    const limit = boundedInt(req.query.limit, { fallback: DEFAULT_LIMIT, min: 1, max: MAX_LIMIT });
+    const offset = boundedInt(req.query.offset, { fallback: 0, min: 0 });
+    const status = oneOf(req.query.status, GROUP_STATUSES);
+    const source = oneOf(req.query.source, SOURCES);
+
+    const where = [];
+    const params = [];
+    if (status) { where.push('status = ?'); params.push(status); }
+    if (source) { where.push('source = ?'); params.push(source); }
+    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const { total } = db.prepare(`SELECT COUNT(*) AS total FROM error_groups ${clause}`).get(...params);
+
+    // last_seen_at DESC is what the triage index is built for, and the order the
+    // dashboard reads in: the thing that broke most recently is the thing most
+    // likely to still be broken.
+    const groups = db.prepare(`
+      SELECT * FROM error_groups ${clause}
+       ORDER BY last_seen_at DESC, fingerprint ASC
+       LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
+
+    return res.json({ groups, total, limit, offset });
+  } catch (err) {
+    console.error('Failed to list error groups:', err);
+    return res.status(500).json({ error: 'Could not load error groups.' });
+  }
+});
+
+/* 2 ── GET /api/errors/summary ─────────────────────────────────────────────
+ *
+ * REGISTERED BEFORE `/:fingerprint`, AND THAT ORDERING IS THE CORRECTNESS.
+ *
+ * Express matches in registration order and `summary` is a perfectly legal
+ * value for `:fingerprint`. The other way round, this route never runs: the
+ * parameterised handler looks up a group called "summary", finds none, and
+ * answers 404. The endpoint would "exist", every gate would be right, the
+ * authorization suite would stay green, and the dashboard chart would simply be
+ * empty for ever — a routing bug wearing a not-found's clothes, most likely
+ * diagnosed as a broken chart.
+ *
+ * The rule for anything added later: every literal path goes above every
+ * parameterised one that could swallow it.
+ */
+router.get('/api/errors/summary', authenticateToken, requireCap('error.read'), (req, res) => {
+  try {
+    /**
+     * Occurrences by day come from EVENTS, not groups.
+     *
+     * A group carries one `last_seen_at`, so counting groups by day would draw
+     * "problems whose most recent sighting was Tuesday" and call it Tuesday's
+     * error volume. Events are the occurrences. They are capped at 50 per group
+     * and swept at 30 days, so this chart is explicitly a 30-day window over
+     * retained evidence — not an all-time total, and the dashboard must not
+     * imply otherwise.
+     */
+    const byDay = db.prepare(`
+      SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS count
+        FROM error_events
+       GROUP BY day
+       ORDER BY day ASC
+    `).all();
+
+    // By source, from GROUPS: how many distinct problems, and how many times
+    // they have happened in total — the counter survives its evidence.
+    const bySource = db.prepare(`
+      SELECT source,
+             COUNT(*) AS groups,
+             COALESCE(SUM(occurrences), 0) AS occurrences
+        FROM error_groups
+       GROUP BY source
+       ORDER BY source ASC
+    `).all();
+
+    const byStatus = db.prepare(`
+      SELECT status, COUNT(*) AS groups FROM error_groups GROUP BY status ORDER BY status ASC
+    `).all();
+
+    return res.json({ byDay, bySource, byStatus });
+  } catch (err) {
+    console.error('Failed to summarise errors:', err);
+    return res.status(500).json({ error: 'Could not load the error summary.' });
+  }
+});
+
+/* 3 ── GET /api/errors/:fingerprint ────────────────────────────────────── */
+
+router.get('/api/errors/:fingerprint', authenticateToken, requireCap('error.read'), (req, res) => {
+  try {
+    const group = db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(req.params.fingerprint);
+    if (!group) return res.status(404).json({ error: 'No such error group.' });
+
+    /**
+     * No pagination here, deliberately.
+     *
+     * The storage layer already caps evidence at 50 rows per fingerprint on
+     * insert, so this result set is bounded by construction. Adding a second,
+     * independent bound would be a number that could drift from the real one and
+     * a knob that suggests there is more to fetch when there is not.
+     */
+    const events = db.prepare(`
+      SELECT * FROM error_events WHERE fingerprint = ? ORDER BY occurred_at DESC, id DESC
+    `).all(req.params.fingerprint);
+
+    return res.json({ group, events });
+  } catch (err) {
+    console.error('Failed to load an error group:', err);
+    return res.status(500).json({ error: 'Could not load that error group.' });
+  }
+});
+
+/* 4 ── PATCH /api/errors/:fingerprint ──────────────────────────────────── */
+
+/**
+ * Resolve, ignore, or reopen a group.
+ *
+ * ── Why the write and the audit row are one transaction ──
+ *
+ * `recordAudit` throws rather than returning, so wrapping both makes them atomic
+ * in each direction: no status change without a record of who made it, and no
+ * audit row describing a change that rolled back. "Who closed this" is a
+ * question a district will ask about a moderation-adjacent surface, and a
+ * silently-lost audit row looks exactly like nobody having done it.
+ *
+ * Reads are deliberately NOT audited. The plan asks for it on the state change
+ * only, and `admin_audit_logs` has no retention sweep at all — auditing every
+ * dashboard poll would create an unbounded write path in a table nothing
+ * expires, and bury eight genuinely consequential actions under thousands of
+ * "the owner looked at a list".
+ */
+router.patch('/api/errors/:fingerprint', authenticateToken, requireCap('error.write'), (req, res) => {
+  const { fingerprint } = req.params;
+  const status = req.body?.status;
+
+  if (!GROUP_STATUSES.includes(status)) {
+    return res.status(400).json({
+      error: `status must be one of: ${GROUP_STATUSES.join(', ')}.`,
+      field: 'status'
+    });
+  }
+
+  try {
+    const existing = db.prepare('SELECT status FROM error_groups WHERE fingerprint = ?').get(fingerprint);
+    if (!existing) return res.status(404).json({ error: 'No such error group.' });
+
+    const now = new Date().toISOString();
+    const resolving = status === 'resolved';
+
+    inTransaction(() => {
+      db.prepare(`
+        UPDATE error_groups
+           SET status = ?, resolved_at = ?, resolved_by = ?
+         WHERE fingerprint = ?
+      `).run(status, resolving ? now : null, resolving ? req.user.id : null, fingerprint);
+
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'ERROR_GROUP_STATUS_CHANGED',
+        // An error group is not a user, and the column is nullable — inventing
+        // a target here would put an unrelated person\'s id on the row.
+        targetUserId: null,
+        details: `Error group ${fingerprint}: ${existing.status} -> ${status}`
+      });
+    });
+
+    return res.json({ fingerprint, status, previousStatus: existing.status });
+  } catch (err) {
+    console.error('Failed to update an error group:', err);
+    return res.status(500).json({ error: 'Could not update that error group.' });
   }
 });
 

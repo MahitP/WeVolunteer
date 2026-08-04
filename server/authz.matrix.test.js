@@ -370,6 +370,31 @@ const EXPECTED = [
   ['GET', '/api/geocode?q=main+st',
     { student: 403, organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 'allow' }],
 
+  // ── errorRoutes.js (v1.2c Task 7) ──
+  //
+  // `error.read` and `error.write` are SUPER_ONLY, so `admin` is denied here
+  // alongside every other role — the one place in this table where a school
+  // admin is refused something. That is the design: these endpoints return
+  // redacted stack traces and internal structure, and `can()` refuses a
+  // SUPER_ONLY capability before it consults per-user grants, so no
+  // `user_capabilities` row can reach them either.
+  //
+  // The unauthenticated intake (`POST /api/errors/report`) is deliberately NOT
+  // in this table: it carries no authenticateToken, so the blanket
+  // "401 when unauthenticated" assertion below does not apply to it.
+  ['GET', '/api/errors',
+    { student: 403, organizer: 403, admin: 403, super_admin: 'allow', partner: 403 }],
+  ['GET', '/api/errors/summary',
+    { student: 403, organizer: 403, admin: 403, super_admin: 'allow', partner: 403 }],
+  // A fingerprint that does not exist: every gate runs before the lookup, so
+  // the denied roles get 403 and super_admin reaches a 404 — which counts as
+  // 'allow' here, because the row is testing the gate and not the lookup.
+  ['GET', '/api/errors/no-such-fingerprint',
+    { student: 403, organizer: 403, admin: 403, super_admin: 404, partner: 403 }],
+  ['PATCH', '/api/errors/no-such-fingerprint',
+    { student: 403, organizer: 403, admin: 403, super_admin: 404, partner: 403 },
+    { body: { status: 'resolved' } }],
+
   // ── eventRoutes.js, continued: kept LAST in the whole table ──
   //
   // Real event-softball id, denied-roles-first ordering (same hazard as the
