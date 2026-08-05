@@ -5,16 +5,19 @@
 **Purpose.** State, in writing, that WeVolunteer uses no tracking — and enumerate the small
 number of storage mechanisms it *does* use, so the claim is verifiable rather than a boast.
 
-**Audience.** Privacy-conscious guardians, district procurement reviewers, and anyone
-comparing WeVolunteer against ed-tech that does track.
+**Audience.** Privacy-conscious guardians, school and nonprofit reviewers deciding whether to
+let their students take part, and anyone comparing WeVolunteer against ed-tech that does track.
 
 **Required sections.** The claim · what is actually stored and why · what is not used · why
 there is no cookie banner · third-party storage · changes.
 
-**Decisions required.** None. This document is publishable today.
+**Decisions required.** One placeholder remains — the policy-archive URL, shared with the Terms
+and the Privacy Policy. Everything else is resolved: the error-diagnostics retention figures are
+now the real ones from `sweepErrors` in `server/errorReporter.js` (30 / 30 / 180 / 7 days), not
+the rounded "90 days" the Privacy Policy previously published.
 
 **Why write it when there are no trackers?** Three reasons. It is a **procurement asset** —
-district reviewers ask this question and a written answer shortens the review. It is a
+school and nonprofit reviewers ask this question and a written answer shortens the review. It is a
 **commitment** — publishing it makes adding an analytics SDK a policy change rather than a
 Tuesday. And "we don't track you" is only credible when accompanied by a precise account of
 what you *do* store; unaccompanied, it reads as marketing.
@@ -29,6 +32,8 @@ recommended in the handoff spec.
 ## Draft
 
 # Cookies and tracking
+
+**Version 1.0 · Last updated 2026-08-05**
 
 **Short version: WeVolunteer does not track you.** No advertising cookies, no analytics
 services, no pixels, no fingerprinting, no third-party scripts of any kind.
@@ -148,7 +153,18 @@ tracking, and it is minimised deliberately:
 - **The page address is stored as a pattern** (`/events/:id`) rather than the real URL
 - **The contents of the page are never recorded**
 
-Diagnostics are kept for [[N]] days and used only to fix bugs.
+Diagnostics are used only to fix bugs, and they are deleted on a schedule:
+
+| What | Kept for |
+|---|---|
+| The detailed record of one error | **30 days** |
+| The summary of a problem we have already dealt with | **30 days** after we last saw it |
+| The summary of a problem nobody has dealt with yet | **180 days** after we last saw it |
+| A one-off glitch, seen once, from one browser | **7 days** |
+
+An unfixed problem is still true, which is why its summary lasts longer than the individual
+records behind it. The same schedule is in the
+[Privacy Policy](01-privacy-policy.md#how-long-we-keep-things).
 
 ## Other companies
 
@@ -180,6 +196,8 @@ clearing your browser storage.
 ## Changes
 
 If we ever add anything that stores data on your device, we will update this page **before**
-it ships and tell you in the app. Previous versions are kept at [[POLICY_ARCHIVE_URL]].
+it ships and tell you in the app. Previous versions are kept at
+**[[TODO: policy archive URL — depends on the public URL decision. The same TODO appears in the
+Terms of Service and the Privacy Policy; all three must resolve to the same real link.]]**
 
 Questions: **wevolunteer.platform@gmail.com**

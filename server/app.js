@@ -27,6 +27,7 @@ import privacyRoutes from './routes/privacyRoutes.js';
 import oauthRoutes from './routes/oauthRoutes.js';
 import reauthRoutes from './routes/reauthRoutes.js';
 import errorRoutes from './routes/errorRoutes.js';
+import legalRoutes from './routes/legalRoutes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -576,6 +577,7 @@ app.use(weatherRoutes);
 app.use(messageRoutes);
 app.use(privacyRoutes);
 app.use(errorRoutes);
+app.use(legalRoutes);
 
 
 // Read once at import rather than per request. Derived from package.json so it

@@ -45,6 +45,8 @@ const Messages = React.lazy(() => import('../views/Messages'));
 const Settings = React.lazy(() => import('../views/Settings'));
 const ErrorDashboard = React.lazy(() => import('../views/ErrorDashboard'));
 const PrivacyNotice = React.lazy(() => import('../views/PrivacyNotice'));
+const LegalCenter = React.lazy(() => import('../views/legal/LegalCenter'));
+const LegalDocument = React.lazy(() => import('../views/legal/LegalDocument'));
 
 /**
  * Views App.jsx routes itself rather than through a table below.
@@ -160,6 +162,23 @@ export const SIGNED_OUT_ROUTES = [
 export const PUBLIC_ROUTES = [
   { path: '/verify/:code', element: <CertificateVerification /> },
   { path: '/privacy', element: <PrivacyNotice /> },
+  /**
+   * The Legal Center, public for the same reason and more sharply.
+   *
+   * The signup consent block links to the Terms and the Community Guidelines,
+   * and it is read by somebody who is deciding whether to create an account —
+   * i.e. precisely when they have none. Those two links pointed at
+   * `/legal/terms` and `/legal/guidelines`, neither of which was ever declared
+   * here, so both answered 404 inside the consent flow.
+   *
+   * The paths use the registry's canonical slugs (`terms-of-service`,
+   * `community-guidelines`) rather than the short aliases the form used. An
+   * alias layer would be a second naming scheme to keep in step with
+   * `server/legalDocuments.js`, and the whole point of deriving the catalogue
+   * from the registry is that there is one name per document.
+   */
+  { path: '/legal', element: <LegalCenter /> },
+  { path: '/legal/:slug', element: <LegalDocument /> },
 ];
 
 /**

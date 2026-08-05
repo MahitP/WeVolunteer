@@ -774,5 +774,17 @@ export const api = {
     apiFetch(`/api/errors/${encodeURIComponent(fingerprint)}`, {
       method: 'PATCH',
       body: JSON.stringify({ status })
-    })
+    }),
+
+  // ── Legal Center ───────────────────────────────
+  // Both endpoints are unauthenticated on purpose: the signup form asks somebody
+  // with no account to agree to the Terms, so a session-gated Terms page is a
+  // link the only person who needs it cannot follow.
+
+  /** The published catalogue: slug, title, version, effective date, scope. */
+  fetchLegalDocuments: async () => apiFetch('/api/legal/documents'),
+
+  /** One document and its Markdown source, verified against its pinned hash. */
+  fetchLegalDocument: async (slug) =>
+    apiFetch(`/api/legal/documents/${encodeURIComponent(slug)}`)
 };

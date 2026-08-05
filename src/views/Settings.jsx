@@ -13,7 +13,7 @@ import UsernameCard from '../components/account/UsernameCard';
 import { api } from '../utils/api';
 import { useTheme } from '../hooks/useTheme';
 import { APP_NAME, SCHOOL_NAME, SUPPORT_EMAIL, STUDENT_GUIDE_URL, ORGANIZER_GUIDE_URL } from '../config';
-import { Sun, Moon, SunMoon, ExternalLink, Mail } from 'lucide-react';
+import { Sun, Moon, SunMoon, ExternalLink, Mail, Scale } from 'lucide-react';
 
 export default function Settings({ currentUser, addToast, onProfileChange }) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -279,7 +279,20 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
             label: 'Report a problem',
             href: `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} problem report`)}`,
             external: false
-          }
+          },
+          /**
+           * Unconditional, unlike the three above.
+           *
+           * The others depend on a school publishing a URL, and the comment above
+           * explains why an unset one is omitted rather than shown dead. The Legal
+           * Center has no such dependency — it is served by this application from
+           * documents in this repository, so it is always a real destination.
+           *
+           * It also has to be reachable from somewhere durable. A user looking for
+           * "what did I agree to" after signup has no other route to it: the
+           * signup links are behind an account they already made.
+           */
+          { label: 'Terms, privacy and safety policies', href: '/legal', external: false, internal: true }
         ].filter(Boolean);
 
         return (
@@ -287,7 +300,7 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
             {links.length > 0 ? (
               <div className="card">
                 <div className="nav">
-                  {links.map(({ label, href, external }, i) => (
+                  {links.map(({ label, href, external, internal }, i) => (
                     <a
                       key={label}
                       className={`nav-item settings-help-link${i === links.length - 1 ? ' is-last' : ''}`}
@@ -295,9 +308,14 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                       {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
                     >
                       <span className="settings-help-label">{label}</span>
+                      {/* The icon says what will happen: a new tab, an email
+                          client, or a page in this app. Three destinations that
+                          behave differently should not look identical. */}
                       {external
                         ? <ExternalLink size={16} className="dim" aria-label="Opens in a new tab" />
-                        : <Mail size={16} className="dim" aria-hidden="true" />}
+                        : internal
+                          ? <Scale size={16} className="dim" aria-hidden="true" />
+                          : <Mail size={16} className="dim" aria-hidden="true" />}
                     </a>
                   ))}
                 </div>

@@ -14,7 +14,12 @@ what happens after a report · mandated reporting · in-person event safety · w
 · contacts including crisis lines.
 
 **Decisions resolved.** Organizer↔applicant messaging is intentional and stays. Reports go to
-wevolunteer.platform@gmail.com. **Still open:** the monitored hours for that inbox.
+wevolunteer.platform@gmail.com. The operator is a sole proprietor, so "we" is one person and the
+draft does not imply a safety team. **No guardian consent step exists and none is being built** —
+the "For parents and guardians" section says so rather than letting a reader assume it.
+
+**Still open:** the monitored hours for the report inbox — the one `[[TODO: ...]]` left in this
+document, and the thing the "within one business day" promise rests on.
 
 > **Needs counsel review** on the mandated-reporter procedure specifically. New Jersey is a
 > universal mandated-reporter state (N.J.S.A. 9:6-8.10): *any person* with reasonable cause to
@@ -42,6 +47,8 @@ wevolunteer.platform@gmail.com. **Still open:** the monitored hours for that inb
 ## Draft
 
 # Staying safe on WeVolunteer
+
+**Version 1.0 · Last updated 2026-08-05**
 
 WeVolunteer connects students with adults who run volunteer events. That is the point of it,
 and it is also the thing we have to be most careful about. This page explains the rules,
@@ -132,8 +139,11 @@ Accepting an organizer account means accepting these rules. They are also in the
 5. Contact details you receive are **for running that event only**. Do not copy them into a
    personal address book, a mailing list, or another system.
 6. Delete them when the event is over.
-7. Do not share them with anyone — including other organizers, and including your own
-   organization — without the student's and guardian's agreement.
+7. Do not share them outside your own organization at all — not with other organizers, not with
+   another programme, not with anyone. Inside your organization, share only what a specific
+   person needs to run this event (a shift supervisor's check-in list, for example), and make
+   sure they are bound by the same rules. The
+   [Organizer Agreement](09-organizer-agreement.md) §4 is the binding version of this rule.
 
 ### At your event
 
@@ -162,6 +172,22 @@ who else will be there.
 You can contact us directly at **wevolunteer.platform@gmail.com** with any concern, and you do not need
 your student's permission to do so.
 
+### The part we would rather you heard from us
+
+**There is no parent or guardian consent step, and there is no guardian verification.** We do not
+ask for your email address, we do not send you anything to approve, and we do not notify you
+automatically if your student is suspended, if a report involves them, or if they delete their
+account. A student aged 13 or over can sign up on their own.
+
+What stands in its place: a hard age floor of 13 checked on our servers, the private-by-default
+settings above, organizers who only ever see contact details for events your student applied to,
+a Report button everywhere, and blocking that works in one direction only so an adult can never
+use it against a student.
+
+We would rather tell you that than print "a guardian must approve" and not check. The
+[Privacy Policy](01-privacy-policy.md) says the same thing in more detail, and it lists what you
+can ask us for at any time.
+
 ---
 
 ## How to report something
@@ -169,7 +195,11 @@ your student's permission to do so.
 **In the app** — every conversation, comment, and event page has a **Report** button. This is
 the fastest route and it tells us exactly what you are reporting.
 
-**By email** — **wevolunteer.platform@gmail.com**, monitored [[HOURS]].
+**By email** — **wevolunteer.platform@gmail.com**, monitored
+**[[TODO: monitored hours for the safety inbox — the actual hours and days one person reads this
+mailbox, in plain words ("weekdays, 8am to 9pm Eastern"). It has to be a commitment that can be
+kept by one person, because it is one person. This gates the "within one business day" promise
+below: do not publish that promise with this blank, and do not publish hours you cannot hold.]]**
 
 **Emergencies** — call 911. Do not wait for us.
 

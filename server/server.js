@@ -34,8 +34,39 @@ import { startRetentionWorker } from './workers/retentionWorker.js';
 import {
   acquireInstanceLock, startInstanceLockHeartbeat, shouldRefuseBoot, describeConflict
 } from './instanceLock.js';
+import { verifyPolicyFiles } from './legalContent.js';
 
 initDatabase();
+
+/**
+ * Refuse to serve policy text this build cannot vouch for.
+ *
+ * The Legal Center reads the published Markdown out of `docs/legal/policies`,
+ * which is the first thing in this server that needs `docs/` to be deployed
+ * alongside it. A deployment that ships the code without the documents, or with
+ * documents edited after their version was pinned, would otherwise fail one
+ * request at a time — and the failing request is somebody trying to read the
+ * terms they are being held to.
+ *
+ * So it fails here instead, on the same principle as the production guards in
+ * `config.js`: a missing `JWT_SECRET` refuses to boot rather than issuing
+ * unsigned tokens. Fatal in production only. In development a missing document
+ * is usually a half-finished branch, and killing the dev server over it would
+ * make the drift harder to fix rather than easier — the warning names the
+ * problem and `npm test` fails on it regardless.
+ */
+try {
+  const verified = verifyPolicyFiles();
+  if (!IS_PRODUCTION) console.log(`[legal] ${verified} published documents verified against their pinned hashes.`);
+} catch (err) {
+  if (IS_PRODUCTION) {
+    console.error('FATAL: published legal documents failed verification.');
+    console.error('');
+    console.error(err.message);
+    process.exit(1);
+  }
+  console.warn(`[legal] WARNING: ${err.message}`);
+}
 
 /**
  * Refuse to run a second instance against the same database.
