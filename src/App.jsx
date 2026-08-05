@@ -170,6 +170,37 @@ for (const entry of NAV) {
   }
 }
 
+/**
+ * Which nav entry a path belongs to — the highlighted rail item and the key
+ * `PAGE_META` is read with.
+ *
+ * ── This is a second copy of a mapping NAV already holds ──
+ *
+ * It cannot simply be derived from `NAV`, and the reasons are worth stating so
+ * the next person does not "simplify" it back into a bug. `/settings` has no
+ * nav entry at all but still needs a tab and a title. `/events/new` must be
+ * tested BEFORE `/events`, because the second is a prefix of the first and the
+ * chain would otherwise report every new-event page as `browse`. And `/` maps
+ * to `dashboard`, which is a different component per persona.
+ *
+ * So it stays hand-written — but it is hoisted out of the component, exported,
+ * and covered by a test asserting every NAV path resolves to its own id.
+ * `/errors` was added to NAV without a branch here, and the result was a page
+ * titled "Review queue" with the wrong rail item highlighted: silent, and
+ * invisible to every existing test.
+ */
+export function tabForPath(pathname) {
+  if (pathname.startsWith('/events/new')) return 'create';
+  if (pathname.startsWith('/events')) return 'browse';
+  if (pathname.startsWith('/errors')) return 'errors';
+  if (pathname.startsWith('/calendar')) return 'calendar';
+  if (pathname.startsWith('/notifications')) return 'notifications';
+  if (pathname.startsWith('/profile')) return 'profile';
+  if (pathname.startsWith('/settings')) return 'settings';
+  if (pathname.startsWith('/messages')) return 'messages';
+  return 'dashboard';
+}
+
 /** Every nav entry the user may see, `/` first, in the order the shell renders. */
 export function navItemsFor(user) {
   const dashboard = DASHBOARD_NAV[personaFor(user)];
@@ -378,16 +409,8 @@ function AppShell({ toasts, addToast, removeToast }) {
   const profileType = searchParams.get('type');
   const viewingProfile = profileId && profileType ? { type: profileType, id: profileId } : null;
 
-  // Determine active tab for UI selection
   const currentPath = location.pathname;
-  let activeTab = 'dashboard';
-  if (currentPath.startsWith('/events/new')) activeTab = 'create';
-  else if (currentPath.startsWith('/events')) activeTab = 'browse';
-  else if (currentPath.startsWith('/calendar')) activeTab = 'calendar';
-  else if (currentPath.startsWith('/notifications')) activeTab = 'notifications';
-  else if (currentPath.startsWith('/profile')) activeTab = 'profile';
-  else if (currentPath.startsWith('/settings')) activeTab = 'settings';
-  else if (currentPath.startsWith('/messages')) activeTab = 'messages';
+  const activeTab = tabForPath(currentPath);
 
   // Auto-scroll the active item into view on mobile
   useEffect(() => {

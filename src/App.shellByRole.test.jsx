@@ -23,7 +23,7 @@ import React from 'react';
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import App, { navItemsFor, ROLE_LABEL } from './App';
+import App, { navItemsFor, ROLE_LABEL, tabForPath } from './App';
 import ProfileMenu from './components/account/ProfileMenu';
 import { ROLES } from './authz.js';
 import { api } from './utils/api';
@@ -82,6 +82,37 @@ beforeEach(() => vi.clearAllMocks());
 /** The sidebar's entries, in render order. */
 const sidebarLabels = () =>
   [...document.querySelectorAll('.sidebar .nav .nav-item span:first-of-type')].map(el => el.textContent);
+
+/**
+ * The rail highlight and the page title both key off `tabForPath`, which is a
+ * hand-written second copy of a mapping `NAV` already holds. It cannot be
+ * derived — `/settings` has no nav entry, and `/events/new` must be matched
+ * before `/events` — so it is guarded instead.
+ *
+ * `/errors` shipped in NAV with no branch in that chain: the page rendered
+ * correctly, titled "Review queue", with the wrong rail item highlighted. No
+ * existing test noticed, because every one of them asserted the route or the
+ * capability rather than what the shell said the reader was looking at.
+ */
+describe('every nav entry knows which page it is', () => {
+  it.each(navItemsFor({ id: 'x', role: 'super_admin', verified: true }).map((n) => [n.id, n.path]))(
+    '%s resolves its own path to itself',
+    (id, path) => {
+      expect(tabForPath(path)).toBe(id);
+    }
+  );
+
+  it('falls back to the dashboard for anything unrecognised', () => {
+    expect(tabForPath('/nope')).toBe('dashboard');
+    expect(tabForPath('/')).toBe('dashboard');
+  });
+
+  /* Prefix order is load-bearing: `/events` is a prefix of `/events/new`. */
+  it('does not let a shorter path swallow a longer one', () => {
+    expect(tabForPath('/events/new')).toBe('create');
+    expect(tabForPath('/events')).toBe('browse');
+  });
+});
 
 describe('navigation, per role', () => {
   /**
