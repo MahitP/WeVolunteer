@@ -286,7 +286,7 @@ export default function AdminDashboard({ addToast }) {
         <div className="section-head">
           <h2>Moderation queue</h2>
           {reports.filter(r => r.status === 'open').length > 0 && (
-            <span className="section-action tag tag-error">{reports.filter(r => r.status === 'open').length} waiting</span>
+            <span className="section-action tag tag-danger">{reports.filter(r => r.status === 'open').length} waiting</span>
           )}
         </div>
 
@@ -303,7 +303,7 @@ export default function AdminDashboard({ addToast }) {
                 <div className="row-between row-wrap" style={{ gap: 'var(--s4)', alignItems: 'flex-start' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="row" style={{ gap: 'var(--s2)', marginBottom: 'var(--s1)' }}>
-                      <span className={`tag ${report.status === 'open' ? 'tag-error' : 'tag-ok'}`}>
+                      <span className={`tag ${report.status === 'open' ? 'tag-danger' : 'tag-ok'}`}>
                         {report.status.toUpperCase()}
                       </span>
                       <span className="small strong capitalize">Reported {report.target_type}</span>
