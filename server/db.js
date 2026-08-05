@@ -9,6 +9,10 @@ import { createInstanceLockTable } from './instanceLock.js';
 import { DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from './config.js';
 import { runMigrations } from './migrations/index.js';
 import { syncLegalDocuments } from './consent.js';
+// Same reasoning as auditLog.js below: organizerAgreement.js takes `db` as an
+// argument and reaches only consent.js and legalDocuments.js, neither of which
+// imports this file, so there is no cycle.
+import { acceptOrganizerAgreement } from './organizerAgreement.js';
 // Safe to import here despite this module opening the database at module scope:
 // auditLog.js imports `node:crypto` and nothing else, and takes `db` as an
 // argument, so there is no cycle back into this file.
@@ -942,6 +946,49 @@ export function initDatabase() {
    * actually agreed to.
    */
   syncLegalDocuments(db);
+  seedOrganizerAcceptance();
+}
+
+/**
+ * Gives the seeded approved organizer an Organizer Agreement acceptance row.
+ *
+ * ── Why the demo needs this ──
+ *
+ * An organizer holds none of the capabilities that reach a student —
+ * `applicant.review`, `attendance.mark`, `event.create` and the rest — until an
+ * acceptance is on record. See `server/organizerAgreement.js`. Without this row
+ * the demo's only working organizer could not open the applicant list for the
+ * events they are seeded as running.
+ *
+ * ── Why a row rather than an exemption ──
+ *
+ * The tempting alternative is to skip the check for seeded accounts. That would
+ * be a second code path in which the gate does not apply, and the demo would stop
+ * demonstrating the system it is a demo of. Writing the row keeps the mechanism
+ * identical for seeded and real organizers.
+ *
+ * `user-org-pending` deliberately gets nothing. It is seeded as awaiting approval,
+ * so an account with the organizer role and no acceptance is exactly what it
+ * should be — which also makes it the natural fixture for the withheld state.
+ *
+ * ── Why here and not in `seedDatabase` ──
+ *
+ * `seedDatabase` runs before `runMigrations`, and migration 007 is what creates
+ * `legal_acceptances`. Writing it there threw `no such table` on every boot with
+ * an empty database. Same constraint, and same reason, as `syncLegalDocuments`
+ * above.
+ *
+ * Idempotent: `acceptOrganizerAgreement` returns early when the current version
+ * is already accepted, so this converges on every boot rather than accumulating a
+ * row per restart.
+ */
+function seedOrganizerAcceptance() {
+  if (!DEMO_MODE) return;
+
+  const organizer = db.prepare("SELECT id, role FROM users WHERE id = 'user-org-1'").get();
+  if (!organizer) return;
+
+  acceptOrganizerAgreement(db, { userId: organizer.id, now: new Date().toISOString() });
 }
 
 /**
@@ -1018,6 +1065,7 @@ function seedDatabase() {
   insertUser.run('user-admin', 'System Admin', 'admin@example.gov', 'sysadmin', passwordHash, 'N/A', 'admin', 1, '🛠️', 'Platform administrator.', 'South Brunswick', JSON.stringify(['Moderation']), nowStr);
   insertUser.run('user-org-1', 'Jacquelyn Katzenback', 'jkatzenback@vikings.org', 'jkatzenback', passwordHash, 'Adult', 'organizer', 1, '👩‍💼', 'Coordinator for Vikings Softball.', 'Vikings Softball', JSON.stringify(['Coordination']), nowStr);
   insertUser.run('user-org-pending', 'Robert Miller', 'rmiller@sbpl.info', 'rmiller', passwordHash, 'Adult', 'organizer', 0, '👨‍🏫', 'Library Director. Pending admin approval.', 'SBPL', JSON.stringify(['Events']), nowStr);
+
 
   // Softball volunteers
   insertUser.run('user-diana', 'Diana Sanger', 'diana.sanger@gmail.com', 'dianasanger', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'SB Softball Booster', JSON.stringify(['Cooking']), nowStr);

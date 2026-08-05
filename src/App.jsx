@@ -88,7 +88,29 @@ const PERSONAS = [
   { id: 'partner', cap: 'analytics.public' },   // partner
 ];
 
-const personaFor = (user) => PERSONAS.find(p => can(user, p.cap))?.id ?? null;
+/**
+ * ── Persona asks WHO, not WHAT-MAY-THEY-DO ──
+ *
+ * Derived against the role's own capabilities, with any withheld set ignored.
+ * That distinction is the whole point of this function and it is load-bearing.
+ *
+ * An organizer who has not accepted the Organizer Agreement holds none of the
+ * capabilities that reach a student — `event.create` among them, which is the
+ * very capability the `host` row tests. Consulting the withheld list here gave
+ * that organizer NO persona, so they fell through the cascade to
+ * "No dashboard for this account": the one state in the product where an
+ * explanation matters most produced a dead end that named no reason, offered no
+ * next step, and hid the acceptance banner that exists precisely to be seen
+ * there. They are still a host. They are a host who has not signed yet.
+ *
+ * This grants nothing. Persona chooses which dashboard COMPONENT renders; every
+ * panel inside it goes to the API, and the server refuses each one on the same
+ * withheld list. The nav, which genuinely is a "what may they do" question,
+ * still filters on the gated `can()` a few lines below — so the entries stay
+ * hidden while the dashboard that explains why stays reachable.
+ */
+const personaFor = (user) =>
+  PERSONAS.find(p => can(user && { ...user, withheld: [] }, p.cap))?.id ?? null;
 
 /**
  * The `/` nav entry, per persona. A persona absent from this map gets no `/`
@@ -703,6 +725,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/messages': {},
     '/portfolio': { currentUser },
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
+    '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
     '/errors': { addToast }
   };
 

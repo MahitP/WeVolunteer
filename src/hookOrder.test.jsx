@@ -35,13 +35,19 @@ import { MemoryRouter } from 'react-router-dom';
 import MapPreview from './components/location/MapPreview.jsx';
 import OrganizerDashboard from './views/OrganizerDashboard.jsx';
 
-// The dashboard fetches stats on mount. The hook-order contract is independent
-// of that, so the call is stubbed to a never-resolving promise rather than mocked
-// per-assertion.
+// The dashboard fetches stats and its Organizer Agreement status on mount. The
+// hook-order contract is independent of both, so the calls are stubbed to
+// never-resolving promises rather than mocked per-assertion.
+//
+// Every `api.*` the component calls on mount must appear here. A missing key is
+// not a silent no-op — it is `undefined is not a function` thrown from inside a
+// passive effect, which surfaces as a hook-order failure and sends the reader
+// looking for a hook problem that does not exist. That happened once already.
 vi.mock('./utils/api', () => ({
   api: {
     fetchOrganizerStats: () => new Promise(() => {}),
-    fetchEventStats: () => new Promise(() => {})
+    fetchEventStats: () => new Promise(() => {}),
+    fetchOrganizerAgreement: () => new Promise(() => {})
   }
 }));
 

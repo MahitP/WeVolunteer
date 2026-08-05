@@ -6490,3 +6490,48 @@ input:disabled + .premium-slider {
   .policy-body { max-width: none; font-size: 1rem; }
   .policy-heading { margin-top: var(--s6); }
 }
+
+/* ── Organizer Agreement acceptance ─────────────────────────────────────────
+ *
+ * Seven checkboxes, each a separate undertaking. They are laid out with generous
+ * targets and spacing on purpose: this is the one form in the product whose value
+ * comes entirely from having been read, so it is deliberately not compact.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+.oa-fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s5);
+  background: var(--surface-2);
+}
+.oa-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0 var(--s2);
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+.oa-undertaking {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  /* Comfortably past the 44px touch-target minimum once the row wraps, which it
+     does on a phone for every one of these labels. */
+  padding: var(--s3) 0;
+  cursor: pointer;
+}
+.oa-undertaking input { width: 20px; height: 20px; margin-top: 2px; flex: none; }
+.oa-undertaking + .oa-undertaking { border-top: 1px solid var(--border); }
+
+/* The banner an organizer sees on their dashboard while the agreement is
+   outstanding. It is a link, so the whole block is the target. */
+.oa-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  text-decoration: none;
+  color: inherit;
+}
+.oa-banner:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }

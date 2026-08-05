@@ -5,6 +5,7 @@ import { sendNotificationEmail, sendMail } from './email.js';
 import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, isEmailGateAllowed, COOKIE_NAME } from './config.js';
 import { principalFor } from './authz.js';
 import { grantsFor } from './userCapabilities.js';
+import { withheldCapabilitiesFor } from './organizerAgreement.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
 import { sweepErrors } from './errorReporter.js';
 import { sendErrorAlerts } from './alerting.js';
@@ -69,9 +70,30 @@ export function purgeExpiredRevocations(now = new Date()) {
  * `fetchGrants` is injectable purely so a test can spy on call counts
  * without going through `db.js` — production code never passes it and gets
  * the real `grantsFor` bound to the live connection.
+ *
+ * ── `withheld` is eager, and that is deliberate ──
+ *
+ * `grants` is lazy because most requests never read it. The withheld list is the
+ * opposite: `can()` consults it on EVERY capability check, so deferring it would
+ * buy nothing and a lazy getter that `can()` forgets to trigger would fail open —
+ * the one direction an authorization mechanism must never fail.
+ *
+ * It costs one indexed query per authenticated request, and only for organizers:
+ * `withheldCapabilitiesFor` returns `[]` without touching the database for every
+ * other role. See `server/organizerAgreement.js` for why the list exists.
+ *
+ * `computeWithheld` is injectable for the same reason `fetchGrants` is: so this
+ * function's own contract — the shape of the principal, and the laziness of
+ * `grants` — can be tested against a throwaway handle with no schema, rather than
+ * requiring a fully migrated database to assert that a field is spelled
+ * correctly. Production never passes it.
  */
-export function buildPrincipal(userRow, fetchGrants = (id) => grantsFor(db, id)) {
-  const principal = principalFor(userRow);
+export function buildPrincipal(
+  userRow,
+  fetchGrants = (id) => grantsFor(db, id),
+  computeWithheld = (row) => withheldCapabilitiesFor(db, row)
+) {
+  const principal = principalFor(userRow, { withheld: computeWithheld(userRow) });
   let cached = null;
   Object.defineProperty(principal, 'grants', {
     get() {

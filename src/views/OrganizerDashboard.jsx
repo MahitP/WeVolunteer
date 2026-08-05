@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Eye, Pencil, Trash2, Search, Copy, Download, ClipboardCheck, ShieldAlert, ShieldCheck, ArrowRight, Inbox, CalendarPlus, Lock, Unlock } from 'lucide-react';
+import { Calendar, Eye, Pencil, Trash2, Search, Copy, Download, ClipboardCheck, ShieldAlert, ShieldCheck, ArrowRight, Inbox, CalendarPlus, Lock, Unlock, AlertTriangle } from 'lucide-react';
 import { formatHours, formatDay, formatTimeRange, isoToLocalInput, countdown, timeAgo, gradeLabel, eventPermissions } from '../utils/helpers';
 import { api } from '../utils/api';
 import Modal, { ModalHead } from '../components/Modal';
@@ -29,9 +29,20 @@ export default function OrganizerDashboard({
   const [editingEvent, setEditingEvent] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [stats, setStats] = useState(null);
+  /**
+   * `null` until the answer is known, so the banner below is never rendered
+   * speculatively. Three states, not two: unknown, outstanding, accepted.
+   */
+  const [agreementOutstanding, setAgreementOutstanding] = useState(null);
   useEffect(() => {
     let cancelled = false;
     api.fetchOrganizerStats().then(s => !cancelled && setStats(s)).catch(() => {});
+    api.fetchOrganizerAgreement()
+      .then(s => !cancelled && setAgreementOutstanding(Boolean(s.required) && !s.accepted))
+      // A failed status check must not invent an obligation. Staying silent is the
+      // safe direction here: the server enforces the gate regardless, so the worst
+      // case is a missing explanation rather than a false accusation.
+      .catch(() => !cancelled && setAgreementOutstanding(false));
     return () => {
       cancelled = true;
     };
@@ -272,6 +283,34 @@ export default function OrganizerDashboard({
   }
 
   return <div className="stack-lg">
+      {/**
+        * The way out of the withheld state.
+        *
+        * An organizer who has not accepted the Organizer Agreement holds none of
+        * the capabilities that reach a student, so this dashboard renders with
+        * every panel empty and no explanation — which reads as a broken app rather
+        * than as a pending obligation. First thing on the page, before anything
+        * else, for the same reason the privacy notice puts its incompleteness
+        * warning above any reassuring content.
+        *
+        * It renders only when the agreement is genuinely outstanding: `null` while
+        * the status is still loading, so it never flashes at an organizer who has
+        * already accepted.
+        */}
+      {agreementOutstanding && (
+        <a className="alert alert-warn oa-banner" href="/organizer-agreement">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <span className="stack-xs">
+            <strong>Your organizer tools are paused</strong>
+            <span className="small">
+              You have not yet accepted the Organizer Agreement. Until you do, you cannot
+              create events, see who applied, mark attendance, or message students.
+              Accepting it takes a minute and restores everything.
+            </span>
+          </span>
+        </a>
+      )}
+
       <div className="dashboard-greeting" style={{ marginBottom: '-var(--s4)' }}>
         <h1 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
           {greetingMessage}

@@ -217,6 +217,45 @@ describe('the `/` dashboard, per role', () => {
     expect(await screen.findByText(/No dashboard for this account/i)).toBeInTheDocument();
     expect(screen.queryByTestId('org-dash')).not.toBeInTheDocument();
   });
+
+  /**
+   * ── The organizer whose capabilities are withheld ──
+   *
+   * An organizer who has not accepted the Organizer Agreement holds none of the
+   * capabilities that reach a student, `event.create` included — and
+   * `event.create` is the capability the `host` persona row tests.
+   *
+   * Deriving the persona from the GATED `can()` therefore gave them no persona
+   * at all and dropped them on "No dashboard for this account": a dead end
+   * naming no reason and offering no next step, which also hid the acceptance
+   * banner OrganizerDashboard renders for exactly this state. Found by driving
+   * the real flow in a browser, not by any test — hence this one.
+   *
+   * They are still a host. They are a host who has not signed yet.
+   */
+  it('an organizer with withheld capabilities still reaches the organizer dashboard', async () => {
+    signedInAs(USER('organizer', {
+      withheld: ['event.create', 'applicant.review', 'message.send'],
+    }));
+    renderAt('/');
+
+    expect(await screen.findByTestId('org-dash')).toBeInTheDocument();
+    expect(screen.queryByText(/No dashboard for this account/i)).not.toBeInTheDocument();
+  });
+
+  it('still hides the nav entries those withheld capabilities gate', async () => {
+    // The other half, and the reason persona and nav must answer DIFFERENT
+    // questions: the dashboard that explains the pause stays reachable while the
+    // controls that would 403 stay hidden. One test passing without the other
+    // means the distinction collapsed.
+    const labels = navItemsFor(USER('organizer', {
+      withheld: ['event.create', 'message.send'],
+    })).map(n => n.label);
+
+    expect(labels).not.toContain('New event');
+    expect(labels).not.toContain('Messages');
+    expect(labels).toContain('Opportunities');
+  });
 });
 
 describe('/profile, per role', () => {

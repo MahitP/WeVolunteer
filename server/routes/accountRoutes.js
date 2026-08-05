@@ -11,10 +11,14 @@ import {
 import { VALID_GRADES, JWT_SECRET, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
-import { requireAAL2 } from '../authz.js';
+import { requireAAL2, ROLE } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import { recordAudit } from '../auditLog.js';
 import { db } from '../db.js';
+import {
+  acceptOrganizerAgreement, organizerAgreementStatus
+} from '../organizerAgreement.js';
+import { ORGANIZER_DOCUMENTS } from '../legalDocuments.js';
 import {
   validateAccountFields, validatePassword, validateUsername, validateEmail,
   validateProfilePatch, isCurrentPassword
@@ -814,5 +818,92 @@ router.get('/api/auth/check-email', (req, res) => {
 
 // 15. List my notifications
 
+
+/**
+ * ── The Organizer Agreement ─────────────────────────────────────────────────
+ *
+ * Both routes act only on the caller's own account, which is why they live in
+ * this file rather than in `adminRoutes.js`. The point of the whole mechanism is
+ * that acceptance is the ORGANIZER's act and not something an administrator can
+ * perform for them — see `server/organizerAgreement.js` for why approval and
+ * acceptance cannot stand in for one another.
+ */
+
+/**
+ * What the caller must accept, and whether they have.
+ *
+ * Readable by any authenticated user, not just organizers. A student gets
+ * `required: false` rather than a 403: the client asks this on load to decide
+ * whether to show the interstitial, and an error response for the ordinary case
+ * would make "no agreement needed" indistinguishable from "the request failed".
+ */
+router.get('/api/legal/organizer-agreement', authenticateToken, (req, res) => {
+  try {
+    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'Account not found' });
+    res.json(organizerAgreementStatus(db, user));
+  } catch (error) {
+    console.error('Organizer agreement status error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Accept it.
+ *
+ * ── Every checkbox is required, and the server is what enforces that ──
+ *
+ * The agreement itemises its undertakings and the form renders one checkbox per
+ * item. A client that ticks the box for the reader is a client bug; a server that
+ * accepts a submission with `acknowledged: false` records a consent that was
+ * never given, and that record is the only thing standing behind the document.
+ * `=== true` and not a truthy test, for the reason `assertConsent` gives: the
+ * string "false" is truthy.
+ *
+ * No step-up re-authentication. It is tempting — this is a consequential act —
+ * but the seven registered sensitive actions are all things that change WHO CAN
+ * REACH an account. This adds an obligation to the person already signed in, and
+ * gating it would mean an organizer who cannot complete a re-auth round trip is
+ * locked out of the only action that restores their account.
+ */
+router.post('/api/legal/organizer-agreement/accept', authenticateToken, (req, res) => {
+  try {
+    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'Account not found' });
+
+    if (user.role !== ROLE.ORGANIZER) {
+      // Refused rather than recorded. An acceptance row for somebody the
+      // agreement does not bind is a false record, and a false record in this
+      // table is worse than a missing one.
+      return res.status(400).json({
+        error: 'The Organizer Agreement applies to organizer accounts.',
+        code: 'not_an_organizer',
+      });
+    }
+
+    if (req.body?.acknowledged !== true) {
+      return res.status(400).json({
+        error: 'Every undertaking must be acknowledged before the agreement can be accepted.',
+        code: 'acknowledgement_required',
+      });
+    }
+
+    const result = acceptOrganizerAgreement(db, { userId: user.id, req });
+
+    recordAudit(db, {
+      adminId: user.id,
+      action: 'ACCEPT_ORGANIZER_AGREEMENT',
+      targetUserId: user.id,
+      details: result.already
+        ? 'Re-submitted an agreement already accepted at the current version; no new record written'
+        : `Accepted ${ORGANIZER_DOCUMENTS.map(d => `${d.slug}@${d.version}`).join(', ')}`,
+    });
+
+    res.json({ accepted: true, alreadyAccepted: result.already, recorded: result.recorded });
+  } catch (error) {
+    console.error('Organizer agreement acceptance error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 export default router;

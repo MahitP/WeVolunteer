@@ -786,5 +786,21 @@ export const api = {
 
   /** One document and its Markdown source, verified against its pinned hash. */
   fetchLegalDocument: async (slug) =>
-    apiFetch(`/api/legal/documents/${encodeURIComponent(slug)}`)
+    apiFetch(`/api/legal/documents/${encodeURIComponent(slug)}`),
+
+  /**
+   * Whether the caller must accept the Organizer Agreement, and whether they have.
+   *
+   * Authenticated, unlike the two above, and reachable by an organizer holding
+   * almost no capabilities — that withheld state is what these two calls exist to
+   * let them escape.
+   */
+  fetchOrganizerAgreement: async () => apiFetch('/api/legal/organizer-agreement'),
+
+  /** Records acceptance. The server refuses a body that acknowledges nothing. */
+  acceptOrganizerAgreement: async () =>
+    apiFetch('/api/legal/organizer-agreement/accept', {
+      method: 'POST',
+      body: JSON.stringify({ acknowledged: true })
+    })
 };

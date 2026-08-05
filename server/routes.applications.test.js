@@ -152,6 +152,18 @@ describe('applications: bulk organizer actions', () => {
     const adminTok = await srv.login('admin@example.gov');
     await srv.call('POST', '/api/admin/organizers/user-org-pending/approve', undefined, adminTok);
     const otherOrg = await srv.login('rmiller@sbpl.info');
+    /**
+     * Approval is no longer sufficient on its own (v1.2c).
+     *
+     * An admin approving an organizer says "we believe this person is who they
+     * say they are"; it does not record the organizer's own undertaking about
+     * handling students' contact details. Until the Organizer Agreement is
+     * accepted, `event.create` is withheld — see server/organizerAgreement.js.
+     *
+     * Accepted through the real endpoint rather than by inserting a row, so this
+     * setup exercises the same path a real organizer takes.
+     */
+    await srv.call('POST', '/api/legal/organizer-agreement/accept', { acknowledged: true }, otherOrg);
     const future = new Date(Date.now() + 30 * 864e5).toISOString();
     const mk = await srv.call('POST', '/api/events', {
       title: 'Foreign', description: 'd', category: 'Other', location: 'Elsewhere',

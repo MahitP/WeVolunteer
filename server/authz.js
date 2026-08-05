@@ -41,6 +41,37 @@
 
 export const ROLES = ['student', 'organizer', 'admin', 'super_admin', 'partner'];
 
+/**
+ * The role names, addressable by identifier.
+ *
+ * ── Why this exists ──
+ *
+ * `authz.completeness.test.js` fails the build on any `.role` property compared
+ * against a role-name LITERAL, and its failure message names the remedy: "import
+ * role names from authz.js's ROLES rather than hardcoding them". `ROLES` is an
+ * array, so it answers "is this a real role" but gives no way to name one.
+ *
+ * A handful of decisions genuinely are about a role rather than a capability. The
+ * example that prompted this is the Organizer Agreement: it binds organizers, and
+ * it deliberately does not bind admins, who are covered by the Admin
+ * Responsibilities Policy instead. That cannot be expressed as a capability —
+ * admins hold `attendance.mark` and `attendance.view` too, so gating on those
+ * would withhold oversight from administrators for not signing a document that
+ * does not apply to them.
+ *
+ * So the rule the guard is really enforcing is "role names live in one file", not
+ * "roles are never named". This is that one file. A typo here is a build failure
+ * (`can()` refuses any role not in `ROLES`); a typo in a scattered string literal
+ * is a silent deny, which is the class of bug this module was written to end.
+ */
+export const ROLE = Object.freeze({
+  STUDENT: 'student',
+  ORGANIZER: 'organizer',
+  ADMIN: 'admin',
+  SUPER_ADMIN: 'super_admin',
+  PARTNER: 'partner',
+});
+
 export const CAPABILITIES = {
   student: [
     'event.view', 'event.apply', 'application.withdraw',
@@ -122,7 +153,7 @@ const SUPER_ONLY_SET = new Set(SUPER_ONLY);
  */
 export function principalFor(
   userRow,
-  { grants = [], aal = 1, aalAction = null, actorId = null, effectiveRole = null } = {}
+  { grants = [], aal = 1, aalAction = null, actorId = null, effectiveRole = null, withheld = [] } = {}
 ) {
   if (!userRow) return null;
   return {
@@ -133,6 +164,7 @@ export function principalFor(
     grants,
     aal,
     aalAction,
+    withheld,
     impersonating: Boolean(actorId),
   };
 }
@@ -144,6 +176,43 @@ export function can(principal, capability) {
 
   const role = principal.effectiveRole;
   if (!ROLES.includes(role)) return false;
+
+  /**
+   * Withheld capabilities: an absolute deny, tested before anything grants.
+   *
+   * ── Why this exists ──
+   *
+   * An organizer receives students' names, email addresses and attendance
+   * records. The Organizer Agreement is the undertaking they make about handling
+   * it, and until v1.2 nothing recorded whether they had ever made it — an admin
+   * clicked approve and the capabilities arrived, so adults held minors' contact
+   * details under no recorded obligation at all.
+   *
+   * ── Why the check is here rather than on the routes ──
+   *
+   * Route-level gates have to be remembered. There are ten capabilities in the
+   * organizer set and more will be added; a gate missed on one new route is a
+   * silent hole, and it would pass every functional test. Withholding at the
+   * capability layer means a route that asks `can()` — which every route does,
+   * enforced by six build-failing guards — cannot accidentally answer yes.
+   *
+   * ── Why BEFORE the wildcard ──
+   *
+   * Ordering is the whole correctness argument, and it is the same argument as
+   * the cascade rule in this file's header. `super_admin` holds '*', so a
+   * withheld check placed after it would be unreachable for exactly the
+   * principal with the most reach. Nothing withholds from super_admin today —
+   * `buildPrincipal` computes the list from the organizer agreement only — but
+   * "it happens not to matter yet" is not a property worth depending on.
+   *
+   * ── Why it is passed in rather than computed here ──
+   *
+   * This module imports nothing and must keep importing nothing. Deciding
+   * whether an acceptance row exists needs the database, so the caller decides
+   * WHAT to withhold and this function only enforces THAT it is withheld. See
+   * `server/organizerAgreement.js`.
+   */
+  if (Array.isArray(principal.withheld) && principal.withheld.includes(capability)) return false;
 
   const roleCaps = CAPABILITIES[role] || [];
   if (roleCaps.includes('*')) return true;             // super_admin

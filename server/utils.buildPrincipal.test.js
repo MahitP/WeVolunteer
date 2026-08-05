@@ -78,9 +78,23 @@ describe('buildPrincipal — lazy, memoizing grants', () => {
 
   it('leaves every other principal field exactly as principalFor would produce', async () => {
     const { buildPrincipal } = await freshUtils();
+    /**
+     * The third argument is the withheld-capability provider, injected for the
+     * same reason `fetchGrants` is.
+     *
+     * Without it the real one runs, and it queries `legal_acceptances` for an
+     * organizer — a table this test's throwaway database has never had, because
+     * the file deliberately opens a bare connection rather than migrating one.
+     * The point here is the SHAPE of the principal; needing a full schema to
+     * assert that a field is spelled correctly would be the tail wagging the dog.
+     *
+     * The real provider's behaviour is covered in
+     * server/organizerAgreement.test.js.
+     */
     const principal = buildPrincipal(
       { id: 'user-x', role: 'organizer' },
-      () => ['whatever']
+      () => ['whatever'],
+      () => []
     );
 
     expect(principal).toMatchObject({
@@ -89,7 +103,30 @@ describe('buildPrincipal — lazy, memoizing grants', () => {
       effectiveRole: 'organizer',
       actorId: null,
       aal: 1,
+      withheld: [],
       impersonating: false
     });
+  });
+
+  it('puts the withheld list on the principal eagerly, not behind a getter', async () => {
+    /**
+     * `grants` is lazy on purpose; `withheld` must not be. `can()` consults it on
+     * every capability check, and a lazy getter that a future refactor forgets to
+     * trigger would make the withheld list empty — i.e. it would fail OPEN, which
+     * is the one direction an authorization mechanism must never fail.
+     */
+    const { buildPrincipal } = await freshUtils();
+    const computeWithheld = vi.fn(() => ['event.create']);
+
+    const principal = buildPrincipal(
+      { id: 'user-x', role: 'organizer' },
+      () => [],
+      computeWithheld
+    );
+
+    // Called without anything having read the property.
+    expect(computeWithheld).toHaveBeenCalledTimes(1);
+    expect(principal.withheld).toEqual(['event.create']);
+    expect(Object.getOwnPropertyDescriptor(principal, 'withheld').get).toBeUndefined();
   });
 });

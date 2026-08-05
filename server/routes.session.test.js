@@ -66,6 +66,30 @@ describe('authenticateToken: reads identity from the database', () => {
     // Promote the account directly in the DB — the token is untouched.
     const db = new DatabaseSync(process.env.WEV_DB_PATH);
     db.prepare("UPDATE users SET role = 'organizer', email_verified = 1 WHERE id = ?").run(userId);
+
+    /**
+     * And record the Organizer Agreement acceptance the promotion implies.
+     *
+     * This test is about ONE thing: that role is re-read from the database rather
+     * than trusted from the JWT payload. Since v1.2c an organizer holds none of
+     * the capabilities that reach a student until an acceptance row exists (see
+     * server/organizerAgreement.js), so a bare `UPDATE users SET role` produces an
+     * organizer who is correctly refused — and the 403 would look like the live
+     * role read having failed, when it is the gate working.
+     *
+     * Writing the row keeps the assertion below measuring what it was written to
+     * measure. It is emphatically NOT a workaround: an organizer without this row
+     * SHOULD be refused, which is asserted directly in
+     * server/routes.organizerAgreement.test.js.
+     */
+    const { ORGANIZER_DOCUMENTS } = await import('./legalDocuments.js');
+    for (const doc of ORGANIZER_DOCUMENTS) {
+      db.prepare(`
+        INSERT INTO legal_acceptances
+          (id, user_id, document_slug, version, content_hash, accepted_at, method, context, ip_prefix, ua_family)
+        VALUES (?, ?, ?, ?, ?, ?, 'test_fixture', 'live-role-read', NULL, NULL)
+      `).run(`acc-fixture-${userId}`, userId, doc.slug, doc.version, doc.contentHash, new Date().toISOString());
+    }
     db.close();
 
     // Hit an organizer-only endpoint with the SAME (still student-shaped) token.
