@@ -99,9 +99,18 @@ export default function ReportModal({ targetType, targetId, onClose, addToast })
                 maxLength={1000}
                 autoFocus
               />
+              {/* WeVolunteer is an independent platform, not a school district
+                  service — the Organizer Agreement §1 says so in terms. This
+                  previously read "contact your school directly", which sent a
+                  student in danger to an organisation that does not run this
+                  platform, cannot see this report, and has no power to act on
+                  it. The correct answers are the emergency number and the New
+                  Jersey hotline, both of which the Youth Safety Guidelines
+                  already publish. */}
               <p className="small dim" id="report-reason-hint">
-                A sentence is enough. If someone is in immediate danger, contact your school
-                directly rather than waiting for a moderator.
+                A sentence is enough. If someone is in immediate danger, call <strong>911</strong>.
+                To report abuse in New Jersey, call <strong>1-877-NJ-ABUSE</strong> (1-877-652-2873) —
+                they take anonymous calls, 24 hours. Do not wait for a moderator.
               </p>
             </div>
           </div>

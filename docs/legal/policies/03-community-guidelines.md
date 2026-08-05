@@ -32,7 +32,7 @@ to absorb that. This document is the standard.
 
 # Community Guidelines
 
-**Version 2.0 · Last updated 2026-08-05** · Part of the
+**Version 2.1 · Last updated 2026-08-05** · Part of the
 [Terms of Service](02-terms-of-service.md), and accepted with them
 
 WeVolunteer is a small community of students and the adults who organise volunteer work. It
@@ -121,8 +121,14 @@ Organizers who credit hours that were not worked lose their accounts.
 Use the **Report** button on any conversation, comment, or event. Or email
 **wevolunteer.platform@gmail.com**.
 
-You can report anonymously. You will not get in trouble for reporting something that turns out
-to be nothing — we would far rather look.
+**We never tell the person you reported who reported them.** Your name is attached to the
+report so we can ask you a follow-up question — an administrator can see it, and nobody else
+can. If you would rather we did not know either, email the address above from an account that
+is not yours, or call the hotlines in the Youth Safety Guidelines, which take anonymous
+reports.
+
+You will not get in trouble for reporting something that turns out to be nothing — we would
+far rather look.
 
 ## What we do about violations
 
