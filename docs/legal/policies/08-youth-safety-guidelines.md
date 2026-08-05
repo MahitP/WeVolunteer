@@ -48,7 +48,7 @@ document, and the thing the "within one business day" promise rests on.
 
 # Staying safe on WeVolunteer
 
-**Version 1.0 · Last updated 2026-08-05**
+**Version 1.1 · Last updated 2026-08-05**
 
 WeVolunteer connects students with adults who run volunteer events. That is the point of it,
 and it is also the thing we have to be most careful about. This page explains the rules,
@@ -208,8 +208,14 @@ do not have to give your name.
 
 **988 Suicide & Crisis Lifeline** — call or text **988**, 24 hours.
 
-You can report anonymously. You will not get in trouble for reporting something that turns
-out to be nothing.
+**The hotlines above are anonymous. A report inside the app is not.** When you use the Report
+button your name is attached, so that an administrator can come back to you with a question —
+they can see it, and the person you reported never does. We do not tell them who reported
+them, and trying to find out is itself grounds for removal.
+
+If you want to raise something without us knowing who you are, use one of the hotlines above.
+
+You will not get in trouble for reporting something that turns out to be nothing.
 
 ---
 

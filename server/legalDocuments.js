@@ -137,14 +137,14 @@ export const LEGAL_DOCUMENTS = [
   },
   {
     slug: 'community-guidelines',
-    version: '2.0',
+    version: '2.1',
     title: 'Community Guidelines',
     consentType: 'agree',
     scope: 'signup',
     summary: 'How people are expected to behave here, what is not allowed, and what happens when someone breaks the rules.',
     effectiveAt: '2026-08-05',
     file: '03-community-guidelines.md',
-    contentHash: 'b4420da91b24e4748e2e17e49a0ef68a8fc1c01bcbb3fb96f8bb61eec805b5b2',
+    contentHash: '88375d5406dbb96a73701b51e6b7b1b436b1cd684050ee73787319b1a60851cc',
     bundledWith: 'terms-of-service',
   },
   {
@@ -173,14 +173,14 @@ export const LEGAL_DOCUMENTS = [
   },
   {
     slug: 'youth-safety-guidelines',
-    version: '1.0',
+    version: '1.1',
     title: 'Youth Safety Guidelines',
     consentType: 'notice',
     scope: 'notice',
     summary: 'How to stay safe volunteering, what an adult here should never ask you for, and how to report it when they do.',
     effectiveAt: '2026-08-05',
     file: '08-youth-safety-guidelines.md',
-    contentHash: 'bb4d19fef130fb5e8ce9eea51750eb913574d23d9462949f10b2f22422ebdee4',
+    contentHash: 'f0a01025c6d875a037b7c7875be754324742777beba5ad5cb97c2b57d8892656',
     bundledWith: null,
   },
   {

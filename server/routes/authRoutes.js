@@ -449,9 +449,22 @@ router.post('/api/auth/login', async (req, res) => {
       });
     }
 
+    /**
+     * The suspension notice, and who it sends the user to.
+     *
+     * This read "Contact your school administrator." WeVolunteer is an
+     * independent platform and not a school district service — a school
+     * administrator has no access to it, cannot see the suspension, and cannot
+     * review it. The one screen a suspended user is guaranteed to see pointed
+     * them at somebody powerless, while the Community Guidelines and the Terms
+     * both commit to an appeal answered within five business days at an address
+     * this message never mentioned.
+     */
     if (userRow.account_status === 'suspended') {
       return res.status(403).json({
-        error: 'This account has been suspended. Contact your school administrator.',
+        error: 'This account has been suspended. If you think that is wrong, email '
+          + 'wevolunteer.platform@gmail.com to ask for a review — we reply within five '
+          + 'business days with the outcome and the reason.',
         code: 'suspended'
       });
     }
