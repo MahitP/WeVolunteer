@@ -207,26 +207,52 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
 // A3. Get All Reports
 router.get('/api/admin/reports', authenticateToken, requireCap('report.resolve'), (req, res) => {
   try {
+    /**
+     * LEFT JOIN, not JOIN, and this is load-bearing.
+     *
+     * `reports.reporter_id` became nullable in migration 011 — it was ON DELETE
+     * CASCADE, which meant the retention sweep purging a reporter's anonymised
+     * shell destroyed their safety report. With the cascade severed to SET NULL,
+     * an inner join would make those reports vanish from this queue instead:
+     * the quietest possible failure, and the one a moderator cannot notice,
+     * because nothing renders to tell them anything is missing.
+     *
+     * `reporter_name_snapshot` is taken at report time and is what the queue
+     * falls back to. The final literal covers reports filed before the snapshot
+     * column existed.
+     */
     const reports = db.prepare(`
-      SELECT r.*, u.name as reporter_name, u.email as reporter_email
+      SELECT r.*,
+             COALESCE(u.name, r.reporter_name_snapshot, 'Account since deleted') as reporter_name,
+             u.email as reporter_email
       FROM reports r
-      JOIN users u ON r.reporter_id = u.id
-      ORDER BY 
+      LEFT JOIN users u ON r.reporter_id = u.id
+      ORDER BY
         CASE WHEN r.status = 'open' THEN 1 ELSE 2 END,
         r.created_at DESC
     `).all();
-    
-    // Enrich with target info
+
+    /**
+     * Enrich from the live row, and fall back to the snapshot taken at report
+     * time rather than to the words 'Deleted Comment'.
+     *
+     * That string was the visible symptom of a real hole: the author of a
+     * reported comment could delete it and leave the moderator holding a report
+     * about nothing. The hold added in this release stops that while a report is
+     * live, and the snapshot is what survives once it is resolved.
+     */
     for (const report of reports) {
-      if (report.target_type === 'event') {
-        const event = db.prepare('SELECT title FROM events WHERE id = ?').get(report.target_id);
-        report.target_title = event ? event.title : 'Deleted Event';
-      } else if (report.target_type === 'comment') {
-        const comment = db.prepare('SELECT body FROM event_comments WHERE id = ?').get(report.target_id);
-        report.target_title = comment ? comment.body : 'Deleted Comment';
-      }
+      const live = report.target_type === 'event'
+        ? db.prepare('SELECT title AS text FROM events WHERE id = ?').get(report.target_id)
+        : db.prepare('SELECT body AS text FROM event_comments WHERE id = ?').get(report.target_id);
+
+      report.target_title = live?.text ?? report.target_body_snapshot ?? null;
+      // The moderator is told which of the two they are reading. A snapshot and
+      // a live row are different kinds of evidence and a decision may turn on it.
+      report.target_is_snapshot = !live && report.target_body_snapshot != null;
+      report.target_missing = !live && report.target_body_snapshot == null;
     }
-    
+
     res.json(reports);
   } catch (err) {
     console.error('Fetch reports error:', err);
@@ -279,6 +305,159 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
     res.json({ success: true, message: 'Report updated' });
   } catch (err) {
     console.error('Update report error:', err);
+    res.status(500).json({ error: 'Failed to update report' });
+  }
+});
+
+/* ── Conversation reports ──────────────────────────────────────────────────
+ *
+ * Why these three routes are in a release about evidence preservation.
+ *
+ * `conversation_reports` has been write-only since it was created: two INSERTs
+ * in messageRoutes.js and no reader anywhere in server/. The most
+ * safety-critical report type on the platform — the one the Youth Safety
+ * Guidelines point every student at — landed in a table nobody could open.
+ *
+ * That was survivable while nothing depended on the status column. It stopped
+ * being survivable in this release: the delete holds and the retention hold are
+ * scoped to reports that are open or being reviewed, and nothing in the product
+ * could move a conversation report out of 'open'. A hold with no key is not a
+ * safety mechanism, it is a permanent lock on an organizer's events and on a
+ * deleted account's shell.
+ *
+ * So this is the minimum that makes the holds releasable and the preserved
+ * evidence readable, and deliberately nothing more. Assignment, notes,
+ * categories, priority, cursor pagination and the fold into the main `reports`
+ * queue are specified in docs/specs/2026-08-05-trust-and-safety-mvp.md and
+ * belong to the moderation-queue release. Ids are preserved by that fold, so
+ * these paths survive it.
+ */
+
+router.get('/api/admin/reports/conversation', authenticateToken, requireCap('report.resolve'), (req, res) => {
+  try {
+    /**
+     * Every displayed name comes from the snapshot first and the live row only
+     * as a refinement, which is the opposite of the usual instinct. The live
+     * row is the destructible one: accounts anonymise on deletion, and the
+     * event a conversation hung from is the reported organizer's own to delete.
+     * The snapshot is what the report actually said at the time it was filed.
+     */
+    const reports = db.prepare(`
+      SELECT cr.id, cr.conversation_id, cr.reason, cr.details, cr.status, cr.created_at,
+             COALESCE(cr.reporter_name_snapshot, ru.name, 'Account since deleted') AS reporter_name,
+             COALESCE(cr.reported_name_snapshot, pu.name, 'Account since deleted') AS reported_name,
+             cr.reported_role_snapshot AS reported_role,
+             COALESCE(cr.event_title_snapshot, e.title)  AS event_title,
+             (SELECT COUNT(*) FROM conversation_report_messages m WHERE m.report_id = cr.id)
+               AS evidence_count,
+             (c.id IS NOT NULL) AS conversation_still_exists
+      FROM conversation_reports cr
+      LEFT JOIN users ru        ON ru.id = cr.reporter_id
+      LEFT JOIN users pu        ON pu.id = cr.reported_user_id
+      LEFT JOIN conversations c ON c.id  = cr.conversation_id
+      LEFT JOIN events e        ON e.id  = cr.event_id_snapshot
+      ORDER BY
+        CASE WHEN cr.status IN ('open', 'reviewing') THEN 1 ELSE 2 END,
+        CASE WHEN cr.reason = 'safety' THEN 1 ELSE 2 END,
+        cr.created_at ASC
+    `).all();
+
+    /**
+     * No message bodies here, deliberately. A list view is scanned, often with
+     * somebody else at the desk; a student's disclosure is not scannable
+     * content. Bodies come only from the evidence route below, which logs the
+     * read — which is what the Youth Safety Guidelines already promise in print.
+     *
+     * Oldest first within the open band, unlike the `reports` queue above.
+     * Newest-first starves the oldest unanswered report, which is by
+     * construction the one most likely to be a real harm nobody answered.
+     */
+    res.json(reports.map(r => ({ ...r, conversation_still_exists: Boolean(r.conversation_still_exists) })));
+  } catch (err) {
+    console.error('Fetch conversation reports error:', err);
+    res.status(500).json({ error: 'Failed to fetch conversation reports' });
+  }
+});
+
+router.get('/api/admin/reports/conversation/:id/evidence', authenticateToken, requireCap('report.evidence.read'), (req, res) => {
+  try {
+    const report = db.prepare(
+      'SELECT id, reporter_id, reported_user_id, status FROM conversation_reports WHERE id = ?'
+    ).get(req.params.id);
+    if (!report) return res.status(404).json({ error: 'Report not found' });
+
+    const messages = db.prepare(`
+      SELECT m.message_id, m.sender_id, m.body, m.created_at,
+             COALESCE(u.name, 'Account since deleted') AS sender_name
+      FROM conversation_report_messages m
+      LEFT JOIN users u ON u.id = m.sender_id
+      WHERE m.report_id = ?
+      ORDER BY m.created_at ASC
+    `).all(req.params.id);
+
+    /**
+     * The read is logged before the bodies leave the building.
+     *
+     * Youth Safety Guidelines: "This is the one situation in which an
+     * administrator reads private messages, and it is logged." Until this route
+     * existed the sentence described something that could not happen, so it was
+     * not logged either. It can happen now, so it is.
+     *
+     * `target_user_id` is the reported party rather than the reporter: the
+     * question this row has to answer later is whose private messages were
+     * read.
+     */
+    recordAudit(db, {
+      adminId: req.user.id,
+      action: 'REPORT_EVIDENCE_VIEWED',
+      targetUserId: report.reported_user_id || report.reporter_id,
+      details: `Read ${messages.length} preserved message(s) for conversation report ${report.id}`
+    });
+
+    res.json({ reportId: report.id, status: report.status, messages });
+  } catch (err) {
+    console.error('Fetch report evidence error:', err);
+    res.status(500).json({ error: 'Failed to fetch preserved evidence' });
+  }
+});
+
+router.patch('/api/admin/reports/conversation/:id', authenticateToken, requireCap('report.resolve'), (req, res) => {
+  const { status } = req.body;
+  if (!['open', 'reviewing', 'resolved', 'dismissed'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+
+  try {
+    const report = db.prepare(
+      'SELECT id, reporter_id, reported_user_id, conversation_id, status FROM conversation_reports WHERE id = ?'
+    ).get(req.params.id);
+    if (!report) return res.status(404).json({ error: 'Report not found' });
+
+    /**
+     * Status is the only column this route may write, and migration 011's
+     * `conversation_reports_immutable` trigger is what makes that true rather
+     * than merely intended: what a report says is a record of what was said,
+     * and an UPDATE reaching `details` would abort at the database.
+     *
+     * Resolving is also what releases the delete hold on the reported event and
+     * the retention hold on a deleted party's shell — so it is a decision with
+     * consequences beyond the queue, and it is audited for that reason.
+     */
+    inTransaction(() => {
+      db.prepare('UPDATE conversation_reports SET status = ? WHERE id = ?').run(status, req.params.id);
+
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'MODERATE_REPORT',
+        targetUserId: report.reported_user_id || report.reporter_id,
+        details: `Conversation report ${report.id} marked ${status} (was ${report.status}); `
+          + `releases evidence holds on the reported conversation when not open/reviewing`
+      });
+    });
+
+    res.json({ success: true, message: 'Report updated' });
+  } catch (err) {
+    console.error('Update conversation report error:', err);
     res.status(500).json({ error: 'Failed to update report' });
   }
 });

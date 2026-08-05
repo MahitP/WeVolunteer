@@ -34,6 +34,9 @@ export default function OrganizerDashboard({
    * speculatively. Three states, not two: unknown, outstanding, accepted.
    */
   const [agreementOutstanding, setAgreementOutstanding] = useState(null);
+  // A deletion refused because the event is under a live safety review. Kept on
+  // screen rather than left to a toast — see handleDelete.
+  const [heldReason, setHeldReason] = useState(null);
   useEffect(() => {
     let cancelled = false;
     api.fetchOrganizerStats().then(s => !cancelled && setStats(s)).catch(() => {});
@@ -96,12 +99,26 @@ export default function OrganizerDashboard({
     const signups = appsForMe.filter(a => a.eventId === event.id).length;
     const warning = signups > 0 ? `\n\n${signups} volunteer sign-up${signups !== 1 ? 's' : ''} will be removed with it.` : '';
     if (!window.confirm(`Delete "${event.title}"?${warning}\n\nThis cannot be undone.`)) return;
+    setHeldReason(null);
     try {
       await api.deleteEvent(event.id);
       addToast(`"${event.title}" deleted.`, 'success');
       if (refreshEvents) refreshEvents();
     } catch (err) {
-      addToast(`Could not delete: ${err.message}`, 'error');
+      /**
+       * A 409 already explains itself in full — "Could not delete: This event
+       * cannot be deleted while…" says it twice — so the prefix is dropped and
+       * the server's sentence stands.
+       *
+       * The evidence hold is additionally kept on screen rather than left to a
+       * five-second toast. It is the one refusal here that the reader cannot
+       * predict from anything on their own dashboard, and it is deliberately
+       * NOT pre-computed onto the delete button: shipping a "this is under
+       * review" flag with every event would tell the subject of a report, at
+       * rest and on every page load, something the 409 only says if they try.
+       */
+      if (err.status === 409) setHeldReason(err.message);
+      addToast(err.status === 409 ? err.message : `Could not delete: ${err.message}`, 'error');
     }
   };
   const handleToggleStatus = async event => {
@@ -309,6 +326,18 @@ export default function OrganizerDashboard({
             </span>
           </span>
         </a>
+      )}
+
+      {/* `role="alert"` announces the refusal without moving focus, which would
+          be an unexpected context change and would strand the focus ring. */}
+      {heldReason && (
+        <div className="alert alert-warn" role="alert">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <span className="stack-xs">
+            <strong>This event is on hold</strong>
+            <span className="small">{heldReason}</span>
+          </span>
+        </div>
       )}
 
       <div className="dashboard-greeting" style={{ marginBottom: '-var(--s4)' }}>

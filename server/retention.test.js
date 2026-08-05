@@ -203,8 +203,60 @@ describe('what retention must NEVER touch', () => {
       + 'evidence deleted underneath it'
     ).toBeTruthy();
 
-    db.prepare('DELETE FROM conversation_report_messages WHERE report_id = ?').run(reportId);
-    db.prepare('DELETE FROM conversation_reports WHERE id = ?').run(reportId);
+    /**
+     * The fixture is deliberately NOT cleaned up.
+     *
+     * It used to delete both rows here so later tests started from a clean
+     * slate. Migration 011 made that impossible on purpose: evidence rows take
+     * no DELETE at all, from any code path including this one, and the report
+     * envelope takes none either. Resolving the report is the supported way to
+     * release everything that hangs off it, and it is what the product does.
+     */
+    db.prepare("UPDATE conversation_reports SET status = 'resolved' WHERE id = ?").run(reportId);
+    expect(
+      db.prepare('SELECT COUNT(*) c FROM conversation_report_messages WHERE report_id = ?')
+        .get(reportId).c,
+      'resolving a report must not remove the evidence it was decided on'
+    ).toBe(1);
+  });
+
+  it('refuses to delete or rewrite a preserved snapshot, at the database', () => {
+    /**
+     * The immutability is a trigger rather than a convention, so this asserts
+     * against raw SQL rather than through a route. A test that only exercised
+     * the application would prove nothing about a bin/ script or a sqlite3
+     * session, and those are exactly the paths a person destroying evidence
+     * about themselves would reach for if they could.
+     */
+    const reported = seedMessage(10);
+    const reportId = `rep-immut-${Date.now()}`;
+    db.prepare(`
+      INSERT INTO conversation_reports (id, reporter_id, conversation_id, reason, details, snapshot_created_at, created_at)
+      VALUES (?, 'user-student-1', ?, 'safety', 'original disclosure', ?, ?)
+    `).run(reportId, reported.convId, new Date().toISOString(), new Date().toISOString());
+    db.prepare(`
+      INSERT INTO conversation_report_messages (report_id, message_id, sender_id, body, created_at)
+      VALUES (?, ?, 'user-student-1', 'what was actually said', ?)
+    `).run(reportId, reported.id, new Date().toISOString());
+
+    expect(() => db.prepare('DELETE FROM conversation_report_messages WHERE report_id = ?').run(reportId))
+      .toThrow(/frozen evidence snapshot/);
+    expect(() => db.prepare("UPDATE conversation_report_messages SET body = 'nothing happened' WHERE report_id = ?").run(reportId))
+      .toThrow(/frozen evidence snapshot/);
+    expect(() => db.prepare('DELETE FROM conversation_reports WHERE id = ?').run(reportId))
+      .toThrow(/never deleted/);
+    expect(() => db.prepare("UPDATE conversation_reports SET details = 'I made it up' WHERE id = ?").run(reportId))
+      .toThrow(/record of what was said/);
+
+    // The one column that must stay writable, or a report could never be closed
+    // and every hold keyed on it would be permanent.
+    expect(() => db.prepare("UPDATE conversation_reports SET status = 'resolved' WHERE id = ?").run(reportId))
+      .not.toThrow();
+
+    expect(
+      db.prepare('SELECT body FROM conversation_report_messages WHERE report_id = ?').get(reportId).body,
+      'the snapshot must still say what it said'
+    ).toBe('what was actually said');
   });
 });
 

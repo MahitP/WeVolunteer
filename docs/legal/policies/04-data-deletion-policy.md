@@ -52,7 +52,11 @@ stays, because some things stay, and you should know which before you decide —
 ## The short version
 
 - Your profile, messages, notifications, and preferences are **removed**.
-- Your name is **scrambled** to a first name and last initial everywhere it remains.
+- Your name is **scrambled** to a first name and last initial everywhere it remains — with one
+  exception: a safety report, and any messages saved with it, keep the words that were actually
+  written, including names inside them. See "Safety reports" below.
+- **A safety report you filed, or one filed about you, stays.** It is the record of a decision
+  about somebody's safety and it survives account deletion.
 - Your **verified volunteer hours and attendance stay**, because they are your school record.
 - **Certificates you already earned keep your full name on them**, so schools can still check
   them. This is the part most people do not expect.
@@ -140,6 +144,40 @@ they took part in.
 ### Comments
 
 Comments you posted on events stay, shown from your scrambled name.
+
+### Safety reports
+
+If you reported somebody, or somebody reported you, that report stays. So do the messages that
+were saved with it at the time it was filed.
+
+**What stays:** the report, what it said, the category it was filed under, your name as it was
+when you filed it, and a copy of the messages saved with the report. Those messages are kept
+word for word, which means a name written inside a message stays as it was written. We cannot
+scramble it without changing what somebody actually said, and a record of an accusation that has
+been quietly edited is not a record of anything.
+
+**What does not stay:** your profile, your bio, your school, your photo, your other messages,
+and your account. Those are removed exactly as described above. The report does not keep your
+account alive and you cannot sign in.
+
+**Why.** A report is the only record of a decision somebody made about whether a student was
+safe. It protects you at least as much as it protects us. Before we changed this, a student who
+reported an adult and then deleted their account had their own report destroyed along with the
+account — their privacy right erasing the record of what had been done to them. The same was
+true if the adult deleted the event: the report went with it.
+
+**Who can see it.** Only an administrator, and only through the report. Reading the saved
+messages is recorded in our logs every time it happens. Nobody can edit or delete a report or
+the messages saved with it — that is enforced by the database, not by a rule we promise to
+follow.
+
+**How long.** Indefinitely today, and we say why, and what we are doing about it, in the
+[Privacy Policy](01-privacy-policy.md#how-long-we-keep-things).
+
+**If you delete your account while a report is open**, the account is deleted and scrambled
+straight away, as always. The empty shell that is left behind is normally removed after three
+years; if a report naming you is still open at that point, it waits until the report is closed,
+so that a moderator looking at the report can still see the conversation it is about.
 
 ### Administrator logs
 

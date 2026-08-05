@@ -28,6 +28,8 @@ export default function AdminDashboard({ addToast }) {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [busyId, setBusyId] = useState(null);
+  // A deletion refused because the event is under a live safety review.
+  const [heldReason, setHeldReason] = useState(null);
 
   const loadData = async () => {
     try {
@@ -95,12 +97,17 @@ export default function AdminDashboard({ addToast }) {
 
   const removeEvent = async (event) => {
     if (!window.confirm(`Remove "${event.title}"?\n\nAll sign-ups for it will be deleted. This cannot be undone.`)) return;
+    setHeldReason(null);
     try {
       await api.deleteEvent(event.id);
       addToast(`"${event.title}" removed.`, 'success');
       loadData();
     } catch (err) {
-      addToast(`Could not remove: ${err.message}`, 'error');
+      // The evidence hold applies to administrators too — it is about the
+      // evidence, not about who is asking — so this surface needs the same
+      // persistent explanation the organizer's does.
+      if (err.status === 409) setHeldReason(err.message);
+      addToast(err.status === 409 ? err.message : `Could not remove: ${err.message}`, 'error');
     }
   };
 
@@ -117,6 +124,16 @@ export default function AdminDashboard({ addToast }) {
 
   return (
     <div className="stack-lg">
+      {heldReason && (
+        <div className="alert alert-warn" role="alert">
+          <Flag size={18} aria-hidden="true" />
+          <span className="stack-xs">
+            <strong>This event is on hold</strong>
+            <span className="small">{heldReason}</span>
+          </span>
+        </div>
+      )}
+
       {/* ── Platform totals ── */}
       {totals && (
         <section className="stats">
@@ -310,14 +327,37 @@ export default function AdminDashboard({ addToast }) {
                       <span className="small dim">{formatDay(report.created_at)}</span>
                     </div>
                     
+                    {/* The email is only rendered when there is a live account
+                        behind it. `reporter_id` is nullable since the reporter
+                        cascade was severed, so a purged reporter leaves the
+                        snapshotted name and nothing to contact. "(undefined)"
+                        beside a student's name is worse than no email. */}
                     <div className="small" style={{ marginBottom: 'var(--s2)' }}>
                       <span className="dim">Reported by: </span>
-                      <span className="strong">{report.reporter_name}</span> <span className="muted">({report.reporter_email})</span>
+                      <span className="strong">{report.reporter_name}</span>
+                      {report.reporter_email && <span className="muted"> ({report.reporter_email})</span>}
                     </div>
 
                     <div className="inset" style={{ marginBottom: 'var(--s3)', background: 'var(--surface-2)' }}>
                       <div className="small strong" style={{ marginBottom: 4 }}>Target Content:</div>
-                      <p className="small muted">"{report.target_title}"</p>
+                      {/* Three distinct states, and a moderator's decision can
+                          turn on which one they are reading. The old code showed
+                          the literal string 'Deleted Comment' for the last two
+                          without distinguishing them. */}
+                      {report.target_missing ? (
+                        <p className="small muted">
+                          No copy of this was kept — it was deleted before reports were preserved.
+                        </p>
+                      ) : (
+                        <>
+                          <p className="small muted">&quot;{report.target_title}&quot;</p>
+                          {report.target_is_snapshot && (
+                            <p className="small dim">
+                              Preserved copy — the original was deleted after this report was filed.
+                            </p>
+                          )}
+                        </>
+                      )}
                     </div>
 
                     <div className="small strong" style={{ marginBottom: 4 }}>Reason for report:</div>

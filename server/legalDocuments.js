@@ -148,15 +148,23 @@ export const LEGAL_DOCUMENTS = [
     bundledWith: 'terms-of-service',
   },
   {
+    /**
+     * 3.0 — MAJOR, and by the letter of the rule above: "a changed retention
+     * period". Safety reports and the messages saved with them became a third
+     * indefinitely-kept class, and the account shell's flat three years gained
+     * two exceptions. A reader of 2.0 was told in terms that only hours and
+     * certificates outlive everything; that is no longer true, and it is
+     * exactly the kind of statement someone decides whether to sign up on.
+     */
     slug: 'privacy-policy',
-    version: '2.0',
+    version: '3.0',
     title: 'Privacy Policy',
     consentType: 'acknowledge',
     scope: 'signup',
     summary: 'What we collect, why, who can see it, how long we keep it, and how to get it back or have it deleted.',
     effectiveAt: '2026-08-05',
     file: '01-privacy-policy.md',
-    contentHash: 'fb8cc282b83dcf878ddcb38ef3bed1232dacb1f254b280a4f0ba7d6defa42626',
+    contentHash: '717282f9ed4e62dede535ecae3541c037f09c906c048a8fac57fee1bf93d33ec',
     bundledWith: null,
   },
   {
@@ -208,15 +216,24 @@ export const LEGAL_DOCUMENTS = [
     bundledWith: null,
   },
   {
+    /**
+     * 2.0 — MAJOR. A new exception to deletion, which is the one thing this
+     * document exists to enumerate: the Terms make it the exclusive register of
+     * what survives an account deletion ("except where we have said in the Data
+     * Deletion Policy that something is kept, and why"), and until now it did
+     * not mention safety reports at all. Code that kept a report past deletion
+     * while this document stayed silent would be an unstated exception to a
+     * published promise, at the exact moment a student decides to press delete.
+     */
     slug: 'data-deletion-policy',
-    version: '1.0',
+    version: '2.0',
     title: 'Data Deletion Policy',
     consentType: 'notice',
     scope: 'notice',
     summary: 'What deleting your account removes, what survives and why, and how to ask for something to be erased.',
     effectiveAt: '2026-08-05',
     file: '04-data-deletion-policy.md',
-    contentHash: 'a64709abcc86e890cb1f9a8b2922787541c2a74b572164bbf937c64e731e0570',
+    contentHash: '3a5a984454ae36e26116bcf163012cc1df7477d552b0409c19ee98d584749c9e',
     bundledWith: null,
   },
   {
