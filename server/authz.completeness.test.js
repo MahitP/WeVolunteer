@@ -438,12 +438,15 @@ describe('authorization hygiene', () => {
       // it (the shell is now wrapped in `OfflineOverlay`, and the offline ternary
       // that used to sit directly above this line is gone), then 730 -> 720 when
       // the two boundaries' identical chunk-vs-crash closures were extracted to a
-      // shared `crashFallback`. Re-read at each of those positions: unchanged
-      // every time, and still not an authorization check. `viewingProfile.type`
+      // shared `crashFallback`, then 720 -> 821 across the rest of v1.2c and
+      // 821 -> 826 when the public-route branch above it stopped hardcoding
+      // `/verify/` and started deriving the test from PUBLIC_ROUTES. Re-read at
+      // each of those positions: unchanged every time, and still not an
+      // authorization check. `viewingProfile.type`
       // is set from the ?type= query parameter and decides which overlay to draw;
       // nothing about the viewer. That the pin keeps moving is the guard working
       // — it forces the re-read.
-      'src/App.jsx:821': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      'src/App.jsx:826': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
       'src/components/EventComments.jsx:83': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
       'src/components/EventComments.jsx:84': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
       'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },

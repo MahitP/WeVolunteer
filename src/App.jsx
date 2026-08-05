@@ -20,7 +20,7 @@ import EmptyState from './components/common/EmptyState';
 import { can } from './authz.js';
 import { SessionProvider, useSession } from './session/SessionProvider.jsx';
 import {
-  APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES, withProps,
+  APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES, isPublicPath, withProps,
   AdminDashboard, VolunteerDashboard, OrganizerDashboard,
   VolunteerProfile, OrganizerProfile, OAuthCallback, ResetPassword
 } from './routes/index.jsx';
@@ -572,8 +572,13 @@ function AppShell({ toasts, addToast, removeToast }) {
     );
   }
 
-  // Public Routes (like certificate verification) bypass auth checks
-  if (currentPath.startsWith('/verify/')) {
+  /* Public routes (certificate verification, the privacy notice) bypass auth
+     checks. The test is DERIVED from PUBLIC_ROUTES rather than restated: this
+     was `currentPath.startsWith('/verify/')`, a hardcoded second copy of the
+     table, so adding a route to PUBLIC_ROUTES left it unreachable — it fell
+     through to the signed-out catch-all and answered 404 while looking
+     correctly declared. */
+  if (isPublicPath(currentPath)) {
     return (
       <React.Suspense fallback={<RouteFallback />}>
         <Routes>
