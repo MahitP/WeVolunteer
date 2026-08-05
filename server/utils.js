@@ -1,12 +1,13 @@
 import jwt from 'jsonwebtoken';
 import { db } from './db.js';
 import { notificationService } from './services/notificationService.js';
-import { sendNotificationEmail } from './email.js';
+import { sendNotificationEmail, sendMail } from './email.js';
 import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, isEmailGateAllowed, COOKIE_NAME } from './config.js';
 import { principalFor } from './authz.js';
 import { grantsFor } from './userCapabilities.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
 import { sweepErrors } from './errorReporter.js';
+import { sendErrorAlerts } from './alerting.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
 
 /**
@@ -550,6 +551,29 @@ export function runNotificationSweep() {
     if (errors.groups > 0 || errors.events > 0) {
       console.log(`[Errors] Purged ${errors.groups} error group(s) and ${errors.events} event(s).`);
     }
+
+    /**
+     * Tell somebody a server or worker error appeared.
+     *
+     * Here for the same reasons `sweepErrors` is: no new interval, nothing more
+     * for `shutdown.js` to drain, and it catches internally so it cannot
+     * abandon this shared try block.
+     *
+     * Deliberately NOT awaited. This sweep is synchronous and its callers do
+     * not await it, so awaiting an SMTP round trip would either block the tick
+     * behind a slow mail server or, worse, make the sweep's timing depend on
+     * one. `sendErrorAlerts` marks the groups synchronously before it sends, so
+     * the next tick cannot double-send even if this one is still in flight. The
+     * `.catch` is belt and braces — the function does not reject — but an
+     * unhandled rejection here would be reported by our own error capture,
+     * which is the loop worth refusing outright.
+     */
+    sendErrorAlerts(db, { send: sendMail, now, appUrl: process.env.APP_URL })
+      .then(({ sent, reason }) => {
+        if (sent > 0) console.log(`[Alerts] Sent an alert covering ${sent} new problem(s).`);
+        else if (reason === 'failed') console.warn('[Alerts] Alert send failed — see the error above.');
+      })
+      .catch(() => { /* sendErrorAlerts does not reject; this is belt and braces */ });
 
     if (removed > 0) {
       console.log(`[Notifications] Cleaned up ${removed} expired notifications.`);
