@@ -190,10 +190,11 @@ wrong, contact **wevolunteer.platform@gmail.com** and we will look at the record
 |---|---|---|
 | **Volunteer hours and attendance** | **Kept indefinitely** | This is your service record. People come back for it years later — for a college application, a scholarship, a job. Deleting it would destroy the thing WeVolunteer exists to build |
 | **Certificates** | **Kept indefinitely** | So a college or employer can still verify one years after you earned it. See the [Certificate Verification Policy](06-certificate-verification-policy.md) — including what this means if you delete your account |
-| Account and profile | While your account is open. After deletion, your details are replaced with a shortened name, and the remaining shell is deleted after **3 years** | |
+| Account and profile | While your account is open. After deletion, your details are replaced with a shortened name, and the remaining shell is deleted after **3 years** — unless you have volunteer hours or a certificate, which the shell has to outlive, or you are named in an open safety report, in which case it waits until that report is closed | The two exceptions are narrow and neither is open-ended: hours and certificates are the record the shell exists to support, and a report gets closed |
 | Applications | 3 years after the event | Long enough to resolve a dispute about a placement |
 | Messages | **3 years** — longer if the conversation has been reported | Long enough to investigate a safety report, which often surfaces late. A reported conversation is never deleted on schedule, because that would destroy the evidence an investigation needs |
-| Comments | Until the event is deleted | |
+| **Safety reports, and the messages saved with them** | **Kept indefinitely** | A report is the record of a decision we made about somebody's safety, and both the person who reported and the person reported are entitled to have it still exist if it is ever questioned. It is kept even if you delete your account, and it cannot be edited or deleted by anyone — including us. See the [Data Deletion Policy](04-data-deletion-policy.md) |
+| Comments | Until the event is deleted — and an event named in an open safety report cannot be deleted until that report is closed | |
 | Error diagnostics | The detailed record of one error: **30 days**. The summary of a problem we have already dealt with: **30 days**. The summary of a problem nobody has dealt with yet: **180 days**. A one-off glitch seen once from one browser: **7 days** | Long enough to find and fix a bug, and no longer. A problem nobody has fixed is still true, which is why its summary outlives the individual records |
 | Administrator audit logs | **1 year** | So misuse of an administrator account can be traced later |
 | Data export archives | **7 days**, then deleted automatically | Already enforced in code |
@@ -201,9 +202,28 @@ wrong, contact **wevolunteer.platform@gmail.com** and we will look at the record
 These periods are enforced by a job that runs every day and deletes what has aged out — they
 are not just a statement of intent. Two exceptions are deliberate and are called out below.
 
-**Two things are kept indefinitely, and we want to be straight about it:** your hours and your
-certificates. That is a deliberate choice, because a service record that expires is not a
-service record. Everything else has an end date.
+**Three things are kept indefinitely, and we want to be straight about it:** your hours, your
+certificates, and safety reports. The first two are a deliberate choice, because a service record
+that expires is not a service record. The third is different, and worth explaining rather than
+burying in a table.
+
+A safety report is the only record of a decision somebody made about whether a student was safe.
+If that decision is ever questioned — by you, by a parent, by a school, or by a court — the report
+and the messages saved with it are what the answer rests on, and they protect the person who
+reported at least as much as they protect us. A student who reports an adult and later deletes
+their account should not thereby erase the record of what was done to them, and that is exactly
+what used to happen. So a report survives the deletion of the account that filed it, the account
+it was about, and the event it happened at. What survives is the report itself, the reporter's
+name as it was at the time, and a copy of the messages that were saved with it — not your profile,
+which is still removed and scrambled.
+
+**We have not yet set an end date for safety reports, and we should.** "Indefinitely" is the
+honest description of what the software does today, not a considered retention period, and we are
+taking legal advice on what the right one is — the answer is tied to how long a person who was a
+minor at the time keeps the right to bring a claim in New Jersey, which is a long time. We will
+publish the period here when we have it.
+
+Everything else has an end date.
 
 **There is currently no way to make your certificates stop being verifiable.** We are building an
 option to void them when you delete your account — removing your name and stopping the codes working —

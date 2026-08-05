@@ -14,6 +14,7 @@ import { db } from '../db.js';
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
 import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
+import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
 
 const router = express.Router();
 
@@ -803,6 +804,29 @@ router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.modera
       return res.status(409).json({
         error: 'This event is complete and can no longer be deleted.',
         code: 'event_completed'
+      });
+    }
+
+    /**
+     * An event is not only an event. Deleting it takes every comment on it and —
+     * by cascade through `conversations` — every private thread held under it,
+     * which is where a safety report and its evidence snapshot live.
+     *
+     * The guards above did not cover this. Attendance is zero before an event
+     * runs, and grooming happens before an event runs, so the window in which
+     * the evidence was destructible was precisely the window in which the harm
+     * occurs — and the reported organizer needed no privilege beyond owning
+     * their own event.
+     *
+     * The hold applies to administrators too, and that is deliberate rather than
+     * an oversight about `event.moderate`: the refusal is about the evidence, not
+     * about who is asking, and an administrator named in a report is exactly the
+     * case where trusting the administrator is the wrong default.
+     */
+    if (eventHasLiveReport(db, eventId)) {
+      return res.status(409).json({
+        error: EVENT_HELD_MESSAGE,
+        code: 'report_evidence_held'
       });
     }
 

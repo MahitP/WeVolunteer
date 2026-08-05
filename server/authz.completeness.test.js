@@ -457,8 +457,8 @@ describe('authorization hygiene', () => {
       // nothing about the viewer. That the pin keeps moving is the guard working
       // — it forces the re-read.
       'src/App.jsx:849': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
-      'src/components/EventComments.jsx:83': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
-      'src/components/EventComments.jsx:84': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
+      'src/components/EventComments.jsx:112': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
+      'src/components/EventComments.jsx:113': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
       'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
       /**
        * Re-anchored in v1.2c. All four still describe the same thing — the shape
@@ -479,7 +479,7 @@ describe('authorization hygiene', () => {
       // ── UNCONVERTED_UX — real role branches, out of Task 17's scope ──
       'src/components/EventActionPanel.jsx:14': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates the apply/withdraw panel; wants can(event.apply)' },
       'src/components/EventCard.jsx:70': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply) — no favourite.* capability exists yet' },
-      'src/components/EventComments.jsx:75': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`canDelete` is own-comment OR admin; wants can(event.moderate), which is what DELETE /api/comments/:id already enforces' },
+      'src/components/EventComments.jsx:104': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`canDelete` is own-comment OR admin; wants can(event.moderate), which is what DELETE /api/comments/:id already enforces' },
       'src/components/EventDetailsExperience.jsx:74': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates the apply affordances; wants can(event.apply)' },
       'src/components/EventDetailsExperience.jsx:249': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply)' },
       'src/components/EventModal.jsx:67': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isOwner` is role AND id; the id half is the correct ownership test, the role half wants can(event.edit.own)' },

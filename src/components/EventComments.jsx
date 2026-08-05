@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 // so oxlint's jsx-no-undef fired and the button threw
 // `ReferenceError: Loader2 is not defined` the instant anyone pressed Post —
 // taking the comment thread down with it, on the success path.
-import { MessageSquare, Send, Trash2, Flag, Loader2 } from 'lucide-react';
+import { MessageSquare, Send, Trash2, Flag, Loader2, AlertTriangle } from 'lucide-react';
 import LoadingSkeleton from './common/LoadingSkeleton';
 import { api } from '../utils/api';
 import { timeAgo } from '../utils/helpers';
@@ -15,6 +15,9 @@ export default function EventComments({ eventId, currentUser, addToast }) {
   const [body, setBody] = useState('');
   const [posting, setPosting] = useState(false);
   const [reportTarget, setReportTarget] = useState(null);
+  // A deletion refused because the comment is under review. Held in state
+  // rather than shown only as a toast: see handleDelete.
+  const [heldReason, setHeldReason] = useState(null);
 
   const load = async () => {
     try {
@@ -47,12 +50,28 @@ export default function EventComments({ eventId, currentUser, addToast }) {
 
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this comment?')) return;
+    setHeldReason(null);
     try {
       await api.deleteComment(id);
       setComments(c => c.filter(x => x.id !== id));
     } catch (e) {
       console.error(e);
-      addToast('Failed to delete comment', 'error');
+      /**
+       * The server's own words, not a generic string.
+       *
+       * This handler used to discard `e.message` entirely and toast "Failed to
+       * delete comment", so the one refusal that needs explaining — a comment
+       * held because a moderator is reviewing a report about it — reached the
+       * user as a shrug.
+       *
+       * The hold is also rendered inline beside the thread rather than only as
+       * a toast, for the reason ReportModal already records: a transient
+       * message on a safety surface means somebody who looked away learned
+       * nothing and pressed the button again. Toasts here auto-dismiss after
+       * five seconds.
+       */
+      if (e.status === 409) setHeldReason(e.message);
+      addToast(e.message || 'Failed to delete comment', 'error');
     }
   };
 
@@ -62,6 +81,16 @@ export default function EventComments({ eventId, currentUser, addToast }) {
         <MessageSquare size={18} />
         Questions &amp; Discussion
       </h3>
+
+      {/* Persistent, adjacent to the thread the refusal is about. `role="alert"`
+          announces it without moving focus — focus stays on the delete button,
+          which is not disabled, so the keyboard user is not stranded. */}
+      {heldReason && (
+        <div className="alert alert-warn" role="alert" style={{ marginBottom: 'var(--s4)' }}>
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span>{heldReason}</span>
+        </div>
+      )}
 
       {loading ? (
         <LoadingSkeleton heights={[20, 20]} className="stack-sm" style={{ opacity: 0.5 }} />

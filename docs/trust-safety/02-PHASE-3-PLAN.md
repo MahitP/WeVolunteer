@@ -83,18 +83,48 @@ reads reports which the reported party can delete first is not a queue.
 
 Ordered by harm prevented per unit of work. Each step leaves `main` shippable.
 
-### PR-1 — Stop the evidence being destroyable ⚠️ not started
+### PR-1 — Stop the evidence being destroyable ✅ done
 
-The §1 finding. Independent of the schema work and should not wait for it.
+The §1 finding, plus five more found while building it. Migration **011**, `ownTransaction`,
+all six ENGINEERING_GUIDE §8.3 guards.
 
-- Refuse `DELETE /api/events/:id` when any conversation under it is named by a live report —
-  same shape as the existing `attendance_exists` 409 at `eventRoutes.js:794`
-- Refuse `DELETE /api/comments/:id` for a reported comment
-- Exempt held rows from `retentionWorker.sweep`, and assert it the way
-  `assertPreservedTablesUntouched` already asserts the preserved tables
-- Add "is party to a live report" to the shell-purge exclusion — a purged shell cascades
-  conversations and reports away (`retentionWorker.js:148`)
-- **Tests:** the exact scenario in §1, failing first
+Delivered:
+
+- `DELETE /api/events/:id` → `409 report_evidence_held`; `DELETE /api/comments/:id` →
+  `409 under_review`. Both hold against administrators too
+- Cascades severed: `conversation_reports.conversation_id` loses its FK entirely; `reporter_id`
+  on both report tables becomes `SET NULL` beside a name snapshot
+- Snapshots so a surviving row is still legible: reporter name, reported party and their role,
+  event id and title on `conversation_reports`; target body, author and author name on `reports`
+- Immutability by trigger, not convention — no `DELETE`, no `UPDATE` of what a report says
+- `RETAINABLE_MESSAGE_PREDICATE` and the three hold queries have one definition, in
+  `server/evidenceHolds.js`
+- Three admin routes so the evidence is readable and the holds are releasable, incl. the new
+  `report.evidence.read` capability, audit-logged
+- Privacy Policy → 3.0, Data Deletion Policy → 2.0, both MAJOR (changed retention period)
+- 13 regression tests in `server/evidencePreservation.test.js`, 2 in `server/retention.test.js`
+
+**Five things this plan had wrong or missing, all found by running the code:**
+
+1. **The pre-existing test file proved nothing.** Every scenario reused the same slot times, so
+   the second application collided on the conflict check, no conversation opened, and four of
+   six tests failed inside the *fixture* rather than at an assertion. A green-looking finding
+   that was neither.
+2. **The plan's shell-purge fix was the wrong one.** "Add is-party-to-a-live-report to the
+   shell-purge exclusion" holds the shell past the published three-year period with no stated
+   end — a second published-policy violation in the opposite direction. Severing the cascade
+   keeps the report *and* keeps the period true. The hold is now narrow: it covers only the
+   surrounding context of a still-open report, and it is disclosed.
+3. **`assertPreservedTablesUntouched` ran after `COMMIT`.** Detection without rollback. The one
+   guard the retention worker is proudest of could not undo the loss it detected, and the
+   scheduler swallowed the error into a single log line.
+4. **`events.organizer_id` is `ON DELETE CASCADE`.** Purging an organizer shell deletes every
+   event they ran and cascades into `attendance` — *other people's* credited hours, and reports
+   filed by other students about other people. The purge exemption only ever checked the purged
+   account's own rows. Not in §1, not in the spec, worse than either.
+5. **Nothing could close a conversation report.** No `UPDATE conversation_reports` existed
+   anywhere in `server/`, so every hold this PR adds would have been permanent. That is why the
+   three admin routes are in PR-1 rather than PR-5.
 
 ### PR-2 — Migration 011, the `reports` rebuild ⚠️ not started
 
@@ -157,11 +187,24 @@ defect this project has now had three times.
 
 ## 4. Open items this plan does not resolve
 
-- **Moderation-record retention.** `admin_audit_logs` is swept at 365 days. New Jersey tolls
-  limitations for minors, so a 13-year-old's claim can survive to roughly age 20. A safety
-  record that expires in twelve months is self-harm — it is as much the operator's defence as
-  anyone's case. Needs its own retention class, and the published retention table cannot be
-  updated until the migration enforces it.
+- **The evidence retention period is a counsel question, and it is now published as an open
+  one.** PR-1 made safety reports a third indefinitely-kept class, and the Privacy Policy says
+  so in terms — including that "indefinitely" is what the software does rather than a considered
+  period, and that we are taking advice. The horizon is tied to how long someone who was a minor
+  keeps the right to sue in New Jersey: ordinary tolling under N.J.S.A. 2A:14-21 reaches roughly
+  age 20, but **N.J.S.A. 2A:14-2b allows child sexual-abuse claims until age 55**, which is a
+  ~42-year window for exactly the evidence this phase preserves. Against that, the amended COPPA
+  Rule §312.10 forbids indefinite retention of a child's data and wants a stated period. Those
+  pull in opposite directions and the resolution is not an engineering call. **Launch blocker.**
+- **Moderation-record retention.** `admin_audit_logs` is still swept at 365 days, deliberately
+  untouched by PR-1 — the moment it is exempted, three published documents become false at once
+  (`01-privacy-policy.md`, `10-admin-responsibilities-policy.md`, `04-data-deletion-policy.md`
+  all publish the same one-year figure). Needs its own retention class, and all three edited
+  together. Same counsel review as the item above.
+- **18 U.S.C. §2258A(h) carries its own 90-day preservation duty** for reported content, and
+  PR-1's evidence read route is precisely what creates the actual knowledge that triggers the
+  reporting duty. Still zero matches for §2258A or NCMEC anywhere in `docs/legal/` or `server/`.
+  Procedure, not code, and cheap to write.
 - **No litigation hold.** The retention worker sweeps unconditionally. There is no way to
   freeze anything after a preservation request.
 - **18 U.S.C. §2258A / NCMEC appears nowhere** in `docs/legal/` or `server/` — zero matches.

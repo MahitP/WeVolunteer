@@ -6,6 +6,7 @@ import { can, requireCap } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
+import { commentHasLiveReport, COMMENT_HELD_MESSAGE } from '../evidenceHolds.js';
 
 const router = express.Router();
 
@@ -134,6 +135,16 @@ router.delete('/api/comments/:id', authenticateToken, (req, res) => {
     // Own comment, or moderation reach — never an unscoped `else`.
     if (cmt.user_id !== req.principal.userId && !can(req.principal, 'event.moderate')) {
       return res.status(403).json({ error: 'Access denied' });
+    }
+    /**
+     * A comment under a live report is evidence, and this route hard-deletes.
+     * The author is the person most motivated to reach it and needs no
+     * privilege to do so — it is their own comment. The moderator path is held
+     * too, for the reason the event hold is: the refusal is about the evidence,
+     * not about who is asking.
+     */
+    if (commentHasLiveReport(db, req.params.id)) {
+      return res.status(409).json({ error: COMMENT_HELD_MESSAGE, code: 'under_review' });
     }
     db.prepare('DELETE FROM event_comments WHERE id = ?').run(req.params.id);
     res.json({ success: true });
@@ -621,10 +632,49 @@ router.post('/api/reports', authenticateToken, (req, res) => {
     const id = 'rep_' + crypto.randomBytes(8).toString('hex');
     const now = new Date().toISOString();
 
+    /**
+     * The reporter's name is snapshotted at report time, not joined at read
+     * time. `reporter_id` is ON DELETE SET NULL since migration 011 — the
+     * cascade it replaced destroyed a reporter's own safety report when the
+     * retention sweep purged their anonymised shell — so the live join can
+     * return nothing and the moderation queue needs a name regardless.
+     *
+     * `req.user.name` is re-read from the users row by `authenticateToken` on
+     * every request, so this is the name of record and not something the client
+     * asserted.
+     *
+     * The target is snapshotted for a sharper reason. `target_id` carries no
+     * foreign key, so a deleted comment leaves the report pointing at nothing
+     * and the moderation queue rendering the string 'Deleted Comment' where the
+     * evidence should be — and the person most motivated to delete that comment
+     * is its author, who needs no privilege to do it. What the report says was
+     * wrong is worthless without a copy of what was said.
+     *
+     * Deliberately NOT an existence check: a report against something that has
+     * already gone is still filed, with nulls, rather than refused. Refusing
+     * would also turn this endpoint into an oracle for whether an id exists.
+     */
+    const target = targetType === 'comment'
+      ? db.prepare(`
+          SELECT ec.body AS body, ec.user_id AS author_id, u.name AS author_name
+          FROM event_comments ec LEFT JOIN users u ON u.id = ec.user_id WHERE ec.id = ?
+        `).get(targetId)
+      : db.prepare(`
+          SELECT e.title AS body, e.organizer_id AS author_id, u.name AS author_name
+          FROM events e LEFT JOIN users u ON u.id = e.organizer_id WHERE e.id = ?
+        `).get(targetId);
+
     db.prepare(`
-      INSERT INTO reports (id, reporter_id, target_type, target_id, reason, status, created_at)
-      VALUES (?, ?, ?, ?, ?, 'open', ?)
-    `).run(id, req.user.id, targetType, targetId, reason, now);
+      INSERT INTO reports
+        (id, reporter_id, reporter_name_snapshot, target_type, target_id,
+         target_body_snapshot, target_author_id, target_author_name_snapshot,
+         reason, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+    `).run(
+      id, req.user.id, req.user.name ?? null, targetType, targetId,
+      target?.body ?? null, target?.author_id ?? null, target?.author_name ?? null,
+      reason, now
+    );
 
     res.json({ success: true, message: 'Report submitted successfully' });
   } catch (err) {

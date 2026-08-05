@@ -19,10 +19,11 @@ import legalConsent from './007_legal_consent.js';
 import dateOfBirth from './008_date_of_birth.js';
 import userBlocks from './009_user_blocks.js';
 import graduationYear from './010_graduation_year.js';
+import evidencePreservation from './011_evidence_preservation.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
-  legalConsent, dateOfBirth, userBlocks, graduationYear,
+  legalConsent, dateOfBirth, userBlocks, graduationYear, evidencePreservation,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

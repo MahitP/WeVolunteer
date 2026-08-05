@@ -36,6 +36,8 @@
  * three years from now.
  */
 
+import { RETAINABLE_MESSAGE_PREDICATE, userIsPartyToLiveReport } from '../evidenceHolds.js';
+
 /** Published periods. Changing one here means changing the Privacy Policy too. */
 export const RETENTION = {
   /** Messages: 3 years. The longer end of the stated 1–3 year band, deliberately
@@ -51,8 +53,21 @@ export const RETENTION = {
 
 const DAY_MS = 86400000;
 
-/** Tables this sweep must never touch. Asserted, not merely intended. */
-export const PRESERVED_TABLES = ['certificates', 'attendance', 'hours_ledger'];
+/**
+ * Tables this sweep must never touch. Asserted, not merely intended.
+ *
+ * The three safety tables joined the original three in v1.2c. They are a
+ * different kind of preserved: certificates and hours are kept because a student
+ * needs them years later, reports and their snapshots because an investigation
+ * does — and because the party most motivated to destroy them is the party they
+ * are about. Migration 011 makes them undeletable at the database level; naming
+ * them here means a sweep that somehow removed one fails loudly instead of
+ * succeeding quietly, which is the failure mode nobody would notice.
+ */
+export const PRESERVED_TABLES = [
+  'certificates', 'attendance', 'hours_ledger',
+  'reports', 'conversation_reports', 'conversation_report_messages',
+];
 
 function cutoff(now, days) {
   return new Date(now.getTime() - days * DAY_MS).toISOString();
@@ -116,14 +131,19 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
      * Deletion must never silently destroy moderation evidence. A conversation
      * under investigation can easily outlive the ordinary retention window —
      * an investigation that started at two years and eleven months would find
-     * its evidence deleted underneath it. `conversation_report_messages`
-     * snapshots the reported messages, so the exemption is a subquery against
-     * it rather than a flag somebody has to remember to set.
+     * its evidence deleted underneath it.
+     *
+     * The exemption used to name `conversation_report_messages` alone, and that
+     * was not enough: the snapshot is CAPPED at twenty caller-named ids, or the
+     * last ten messages when none are named, so message eleven of a reported
+     * conversation was swept while the report was still open. The predicate now
+     * lives in evidenceHolds.js and covers the whole live thread. One
+     * definition, because a second copy of it is a second way to lose evidence.
      */
     db.prepare(`
       DELETE FROM messages
       WHERE created_at < ?
-        AND id NOT IN (SELECT message_id FROM conversation_report_messages)
+        AND ${RETAINABLE_MESSAGE_PREDICATE}
     `).run(messageCutoff);
 
     db.prepare('DELETE FROM admin_audit_logs WHERE created_at < ?').run(auditCutoff);
@@ -144,6 +164,23 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
      * on them: the subquery excludes any account that still has attendance or
      * a certificate, which after three years is the normal case for a real
      * volunteer and means their record — under a shortened name — survives.
+     *
+     * ── The organizer clause, and why the two above were not enough ──
+     *
+     * `events.organizer_id` is also ON DELETE CASCADE (db.js). Purging an
+     * organizer's shell therefore deletes every event they ever ran, and each of
+     * those events cascades onward into `attendance`, `conversations` (and so
+     * into messages and reported conversations), `event_comments` and
+     * `event_announcements`.
+     *
+     * The two clauses above are scoped to the purged account's OWN rows, and
+     * `attendance.user_id` is always the volunteer, never the organizer — so an
+     * organizer shell was never exempt no matter how many students' credited
+     * hours hung off their events. That is the one outcome this file's
+     * assertion exists to make impossible, arriving by a route the assertion
+     * could not see. It is time-armed rather than live (nothing purges until
+     * three years after the first deletion) which is precisely why it had to be
+     * found by reading the schema rather than by waiting.
      */
     const purgeable = db.prepare(`
       SELECT id FROM users
@@ -152,17 +189,66 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
         AND deleted_at < ?
         AND id NOT IN (SELECT DISTINCT user_id FROM attendance)
         AND id NOT IN (SELECT DISTINCT user_id FROM certificates)
+        AND id NOT IN (
+          SELECT DISTINCT e.organizer_id FROM events e
+          WHERE EXISTS (SELECT 1 FROM attendance a WHERE a.event_id = e.id)
+             OR EXISTS (SELECT 1 FROM certificates c WHERE c.event_id = e.id)
+        )
     `).all(deletedCutoff).map(r => r.id);
 
+    /**
+     * A shell that is party to a live report waits for the report, not the clock.
+     *
+     * Migration 011 severed the cascades, so purging the shell no longer
+     * destroys the report itself — it survives with the name snapshots taken at
+     * report time. What the purge still destroys is the surrounding context:
+     * `conversations` cascades from both `student_id` and `organizer_id`, taking
+     * the live thread and every message in it that the capped snapshot did not
+     * capture. A moderator would be left reading ten messages of a four-hundred
+     * message thread with nothing to say the rest ever existed.
+     *
+     * Held in BOTH directions, and the reporter side is the one that is easy to
+     * miss: this used to be the path by which a student who reported an adult
+     * and then deleted their own account had their safety report destroyed three
+     * years later, by their own privacy right.
+     *
+     * The hold is bounded by the report being resolved, not by a longer timer,
+     * and the Privacy Policy's account row says so. A number here would be a
+     * number nobody could defend; a queue can discharge "until somebody has
+     * dealt with it".
+     */
+    const heldByReport = [];
     for (const id of purgeable) {
+      if (userIsPartyToLiveReport(db, id)) { heldByReport.push(id); continue; }
       db.prepare('DELETE FROM legal_acceptances WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM users WHERE id = ?').run(id);
     }
 
+    /**
+     * The assertion runs BEFORE the commit, and that ordering is the whole
+     * point of it.
+     *
+     * It used to run after. A sweep that destroyed certificates, credited hours
+     * or safety evidence would throw, the catch below would issue a ROLLBACK
+     * against a transaction that had already committed, the resulting error
+     * would be swallowed by that inner try, and the scheduler would log one line
+     * reading "sweep failed" over a database that had permanently lost the one
+     * class of data this file promises to keep for ever. Detection without
+     * rollback is not a guard, and the failure it was watching for is not
+     * recoverable by hand.
+     *
+     * Inside the transaction, the throw reaches the ROLLBACK while the rollback
+     * still means something.
+     */
+    assertPreservedTablesUntouched(db, before);
+
     db.exec('COMMIT');
 
-    assertPreservedTablesUntouched(db, before);
-    return { ...countable, purgedAccounts: purgeable.length };
+    return {
+      ...countable,
+      purgedAccounts: purgeable.length - heldByReport.length,
+      heldByReport: heldByReport.length,
+    };
   } catch (err) {
     try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
     throw err;

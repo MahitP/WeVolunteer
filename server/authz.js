@@ -93,6 +93,17 @@ export const CAPABILITIES = {
   admin: [
     'event.view', 'event.moderate', 'organizer.approve', 'user.suspend',
     'report.resolve', 'audit.read', 'analytics.school',
+    /**
+     * Reading the message bodies preserved with a safety report is split from
+     * deciding the report, and holds the same roles today, so nothing changes
+     * for anybody now. The split is what makes a per-user grant (migration 002)
+     * able to create a triage-only helper who sorts the queue and never reads a
+     * student's private messages — the most invasive power on this platform.
+     * It cannot go in SUPER_ONLY, because SUPER_ONLY capabilities are
+     * unreachable by grant, and grantability is the entire reason it exists as
+     * a separate name.
+     */
+    'report.evidence.read',
     'service.verify.external', 'capability.grant',
     'attendance.mark', 'attendance.view',
     'self.read', 'self.write', 'geocode.use',

@@ -106,9 +106,20 @@ describe('010_graduation_year — applies and registers', () => {
     // line in db.js: that pass runs BEFORE runMigrations, so the column would
     // exist when 001 rebuilds `users`, and 001 correctly refuses to copy a
     // column it does not know about.
+    //
+    // This used to assert that 010 was the HIGHEST version in the registry,
+    // which is a different and much stronger claim than the one the test name
+    // makes — it fails the moment anybody adds an eleventh migration, for no
+    // reason connected to graduation_year. What matters is the ORDER relative
+    // to 001, so that is what is asserted.
     const { MIGRATIONS } = await import('./migrations/index.js');
     const versions = MIGRATIONS.map(m => m.version);
     expect(versions).toContain(10);
-    expect(Math.max(...versions.filter(v => v !== 10))).toBeLessThan(10);
+
+    const ordered = [...MIGRATIONS].sort((a, b) => a.version - b.version).map(m => m.version);
+    expect(
+      ordered.indexOf(10),
+      '010 must be ordered after 001, or 001 rebuilds users while graduation_year exists'
+    ).toBeGreaterThan(ordered.indexOf(1));
   });
 });

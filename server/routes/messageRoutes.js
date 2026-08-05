@@ -341,11 +341,42 @@ router.post('/api/messages/conversations/:id/report', authenticateToken, (req, r
     const reportId = newId('msg-report');
     const now = new Date().toISOString();
 
+    /**
+     * The context a moderator needs, captured now rather than joined later.
+     *
+     * Everything on the other side of those joins is destructible by the person
+     * the report is about: the conversation cascades from the event, the event
+     * is the organizer's own to delete, and the users rows are anonymised on
+     * account deletion and hard-purged three years later. Migration 011 severed
+     * the cascades so the report survives; these columns are what make the
+     * surviving row still legible. A report that reads "someone reported
+     * something about someone" is not evidence of anything.
+     *
+     * The reported party is whichever participant is not the reporter. Read from
+     * the conversation rather than accepted from the client for the obvious
+     * reason.
+     */
+    const otherPartyId = conversation.student_id === req.user.id
+      ? conversation.organizer_id
+      : conversation.student_id;
+    const otherParty = db.prepare('SELECT name, role FROM users WHERE id = ?').get(otherPartyId);
+    const event = db.prepare('SELECT id, title FROM events WHERE id = ?').get(conversation.event_id);
+
     inTransaction(() => {
       db.prepare(`
-        INSERT INTO conversation_reports (id, reporter_id, conversation_id, reason, details, snapshot_created_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(reportId, req.user.id, conversation.id, reason, details || null, now, now);
+        INSERT INTO conversation_reports (
+          id, reporter_id, reporter_name_snapshot, conversation_id,
+          reported_user_id, reported_name_snapshot, reported_role_snapshot,
+          event_id_snapshot, event_title_snapshot,
+          reason, details, snapshot_created_at, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        reportId, req.user.id, req.user.name ?? null, conversation.id,
+        otherPartyId ?? null, otherParty?.name ?? null, otherParty?.role ?? null,
+        conversation.event_id ?? null, event?.title ?? null,
+        reason, details || null, now, now
+      );
 
       const snapshotRows = messageIds.length > 0
         ? messageIds.map(id => db.prepare(`
