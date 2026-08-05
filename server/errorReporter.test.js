@@ -59,6 +59,43 @@ describe('redactMessage — one rule, one realistic positive', () => {
       .not.toContain('1f0c9a2b-77de');
   });
 
+  /**
+   * Every way a person actually writes a phone number.
+   *
+   * The digit-run rule already named "a phone number" among the things it
+   * caught, and caught only the unformatted form. The v1.2c release review
+   * probed the rules with realistic PII shapes rather than reading them, and
+   * every separated form went through untouched — in an application whose users
+   * are mostly minors.
+   */
+  it.each([
+    ['dashed', 'sms to 555-123-4567 failed'],
+    ['dotted', 'sms to 555.123.4567 failed'],
+    ['spaced', 'sms to 555 123 4567 failed'],
+    ['parenthesised with country code', 'sms to +1 (555) 123-4567 failed'],
+    ['parenthesised', 'sms to (555) 123-4567 failed'],
+    ['unformatted', 'sms to 5551234567 failed'],
+  ])('removes a %s phone number', (_label, input) => {
+    const out = redactMessage(input);
+    expect(out).not.toMatch(/\d{3}[\s.-]?\d{4}/);
+    expect(out).toContain(REDACTED);
+  });
+
+  /**
+   * The other half, and the reason the pattern is narrow rather than greedy: a
+   * message in which every number has been redacted cannot be debugged from, so
+   * over-redaction is a real cost rather than a safe default.
+   */
+  it.each([
+    ['an ISO date', 'deployed 2026-08-04'],
+    ['a semver', 'bundle v1.2.3 failed'],
+    ['a stack position', 'at Foo (/assets/x.js:123:456)'],
+    ['an ISO timestamp', 'occurred 2026-08-04T00:25:42.649Z'],
+    ['a coordinate pair', 'near 40.7128 -74.0060'],
+  ])('leaves %s alone', (_label, input) => {
+    expect(redactMessage(input)).toBe(input);
+  });
+
   it('removes a long hex run and a long digit run', () => {
     expect(redactMessage(`cert ${'a1b2c3d4'.repeat(4)} missing`)).toContain(REDACTED);
     expect(redactMessage('phone 5551234567 unreachable')).not.toContain('5551234567');

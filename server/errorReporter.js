@@ -104,6 +104,20 @@ const REDACTIONS = [
   [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'bearer token'],
   [/\breauth-[A-Za-z0-9-]{8,}/gi, 'step-up challenge id'],
   [/\b[0-9a-f]{24,}\b/gi, 'long hex run — a token, hash or id'],
+  /* Written phone numbers, BEFORE the digit-run rule below and separate from
+     it. That rule names a phone number as one of the things it catches, and it
+     only ever caught unformatted ones: `5551234567` was redacted while
+     `555-123-4567`, `555.123.4567`, `555 123 4567` and `+1 (555) 123-4567`
+     went through untouched — which is every way a person actually writes one.
+     Found by probing the rules with realistic PII shapes during the v1.2c
+     release review rather than by reading them.
+
+     Deliberately narrow: it requires the 3-3-4 grouping, so dates
+     (`2026-08-04`), versions (`1.2.3`), stack positions (`/x.js:123:456`),
+     ISO timestamps and coordinate pairs are all left alone. Over-redaction has
+     its own cost — a message where every number is `[redacted]` cannot be
+     debugged from. */
+  [/(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g, 'phone number'],
   [/\b\d{7,}\b/g, 'long digit run — an id or a phone number'],
 ];
 
