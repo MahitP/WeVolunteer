@@ -754,10 +754,19 @@ app.use((err, req, res, _next) => {
    * misleads the caller — nothing suggests "send less" — and it files a routine
    * rejected request as a server defect in monitoring, which buries the real
    * 500s among the noise.
+   *
+   * The limit is read from the error rather than written into the sentence,
+   * because it is NOT one number. `/api/errors/report` is mounted with its own
+   * 8 kB parser, and a 9 kB report to that path was refused — correctly — while
+   * being told "the limit is 100kb", which is the one piece of advice guaranteed
+   * not to work. body-parser puts the limit it actually applied on `err.limit`.
    */
   if (err.type === 'entity.too.large') {
+    const kb = Number.isFinite(err.limit) ? Math.round(err.limit / 1024) : null;
     return res.status(413).json({
-      error: 'That request was too large. The limit is 100kb.',
+      error: kb
+        ? `That request was too large. The limit is ${kb}kb.`
+        : 'That request was too large.',
       code: 'payload_too_large'
     });
   }

@@ -342,6 +342,31 @@ describe('intake: the 8 kB body cap actually engages', () => {
     });
     expect(over.status).toBe(413);
   });
+
+  /**
+   * The 413 must name the limit that actually applied.
+   *
+   * There are two parsers and therefore two limits, and the message used to
+   * hardcode one of them: a 9 kB report to this path was refused by the 8 kB
+   * parser and told "the limit is 100kb" — the single piece of advice
+   * guaranteed not to work, on the endpoint a browser retries from. Asserted on
+   * both paths together, because a message that is right for one and wrong for
+   * the other is exactly the bug, and either half alone would pass.
+   */
+  it('reports the limit that actually applied, not a hardcoded one', async () => {
+    const intake = await post({ kind: 'Error', message: 'x'.repeat(20_000), route: '/events' });
+    expect(intake.status).toBe(413);
+    const intakeBody = await intake.json();
+    expect(intakeBody.error).toContain('8kb');
+    expect(intakeBody.code).toBe('payload_too_large');
+
+    const global = await fetch(`${srv.base}/api/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'a@b.co', password: 'p'.repeat(200_000) }),
+    });
+    expect(global.status).toBe(413);
+    expect((await global.json()).error).toContain('100kb');
+  });
 });
 
 describe('intake: structural guarantees', () => {

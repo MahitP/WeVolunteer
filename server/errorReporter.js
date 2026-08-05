@@ -99,10 +99,35 @@ const CONTEXT_KEYS = Object.freeze([
  * segments are eaten by the generic long-token rule.
  */
 const REDACTIONS = [
-  [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, 'email address'],
+  /* The local part and the domain are matched with UNICODE letter classes, not
+     `A-Za-z`. With the ASCII-only version the rule did not fail cleanly on
+     `josé.garcía@lincolnhigh.k12.il.us` — it matched from the first ASCII run
+     that reached the `@` and stored `josé.garcí[redacted]`, leaving the
+     student's given name and most of their surname in the table. A partial
+     match is worse than no match: the row looks redacted, so nobody reads it
+     as a leak. Accented names are ordinary in a school district, and the
+     notification worker records the message of a failed send verbatim, so a
+     single bounce is the whole path. Found by probing the rules with realistic
+     PII during the v1.2c final release review.
+
+     `\p{M}` is here because a combining mark is a separate code point: without
+     it a decomposed `e` + U+0301 would end the match at the mark and reproduce
+     the same partial leak in a different alphabet. */
+  [/[\p{L}\p{M}\p{N}._%+-]+@[\p{L}\p{M}\p{N}.-]+\.[\p{L}]{2,}/gu, 'email address'],
   [/\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]+\.?[A-Za-z0-9_-]*/g, 'JWT'],
   [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'bearer token'],
   [/\breauth-[A-Za-z0-9-]{8,}/gi, 'step-up challenge id'],
+  /* A certificate code is a BEARER CREDENTIAL, not an identifier:
+     `GET /api/certificates/verify/:code` is unauthenticated and answers with a
+     student's name, the event, and their hours. `normaliseClientRoute` already
+     refuses to store one in `route`; a code that arrives inside a *message*
+     reached the table anyway, and would sit there for up to 180 days.
+
+     Spelled with the generator's own alphabet (`certificates.js`, which
+     excludes I, O, 0 and 1) and deliberately case-SENSITIVE, so it cannot eat
+     an unrelated lowercase path segment — `wev-test-abcd`, the shape
+     `testServer.js` gives its scratch directories, appears in stack traces. */
+  [/\bWEV-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}\b/g, 'certificate code'],
   [/\b[0-9a-f]{24,}\b/gi, 'long hex run — a token, hash or id'],
   /* Written phone numbers, BEFORE the digit-run rule below and separate from
      it. That rule names a phone number as one of the things it catches, and it

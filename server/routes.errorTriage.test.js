@@ -169,6 +169,30 @@ describe('GET /api/errors', () => {
   });
 
   /**
+   * The case the list above could not see, and the reason `limit` and `offset`
+   * are now clamped the same way.
+   *
+   * `limit` had a maximum from the start and `offset` had none. Every hostile
+   * value anybody thought to try was small or non-finite, so the gap held: a
+   * FINITE offset past `Number.MAX_SAFE_INTEGER` floors to itself, `node:sqlite`
+   * refuses to bind it, and the handler's catch answered **500**. The one
+   * unbounded parameter was reachable as an error, on the screen whose whole
+   * job is to show errors.
+   *
+   * Asserted on the status FIRST: a 500 here previously came back with a
+   * plausible body, so an offset-only assertion would have read as a pass.
+   */
+  it.each(['1e20', '99999999999999999999', '1e308', '123456789012345678901234567890'])(
+    'clamps a finite offset past the safe-integer range instead of answering 500 (%s)',
+    async (raw) => {
+      const res = await get(`/api/errors?offset=${raw}`);
+      expect(res.status, `offset=${raw} reached SQLite unclamped`).toBe(200);
+      expect(res.body.offset).toBe(1_000_000);
+      expect(res.body.groups).toEqual([]);
+    }
+  );
+
+  /**
    * Express hands back an ARRAY for a repeated parameter, and the two shapes
    * behave differently under `Number()` — which is exactly why the array guard
    * exists rather than relying on the `Number.isFinite` check below it.

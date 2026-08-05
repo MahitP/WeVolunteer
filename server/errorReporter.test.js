@@ -45,6 +45,60 @@ describe('redactMessage — one rule, one realistic positive', () => {
     expect(out).toContain(REDACTED);
   });
 
+  /**
+   * An accented name must not survive INSIDE the match.
+   *
+   * The rule was `[A-Za-z0-9._%+-]+@…` and therefore stopped at the first
+   * non-ASCII character, so it did not fail cleanly — it matched from the
+   * ASCII run that reached the `@` and stored `josé.garcí[redacted]`, which is
+   * the student's given name and most of their surname, on a row that looks
+   * redacted. `notificationWorker.js` records the message of a failed send
+   * verbatim, so one bounce is the whole path.
+   *
+   * Asserted on the FRAGMENTS rather than on the whole address: the full string
+   * was already absent before the fix, and a test that only checked for it
+   * passed while the leak was in the table.
+   */
+  it.each([
+    ['precomposed accents', 'SMTP bounce for josé.garcía@lincolnhigh.k12.il.us', ['josé', 'garcí']],
+    // NFD: the accents are separate combining marks, which is why `\p{M}` is in
+    // the character class — without it the match would end at the mark and
+    // reproduce the same partial leak in a different normalisation form.
+    ['decomposed accents', 'SMTP bounce for josé.garcía@lincolnhigh.org'.normalize('NFD'),
+      ['josé'.normalize('NFD'), 'garcí'.normalize('NFD')]],
+    ['non-latin script', 'SMTP bounce for 田中@例え.jp', ['田中']],
+    ['accented domain', 'SMTP bounce for admin@schüle.de', ['schüle']],
+  ])('removes an email address written with %s', (_label, input, fragments) => {
+    const out = redactMessage(input);
+    for (const fragment of fragments) expect(out).not.toContain(fragment);
+    expect(out).toContain(REDACTED);
+  });
+
+  /**
+   * A certificate code is a bearer credential, not an identifier:
+   * `GET /api/certificates/verify/:code` is unauthenticated and answers with a
+   * student's name, their event and their hours. The route normaliser has
+   * always refused to store one; a code arriving inside a message did not go
+   * through that path and reached the table.
+   */
+  it('removes a certificate code', () => {
+    const out = redactMessage('Certificate WEV-4K7P-9X2M could not be rendered');
+    expect(out).not.toContain('WEV-4K7P-9X2M');
+    expect(out).toContain(REDACTED);
+  });
+
+  /**
+   * The cost side of the same rule. `testServer.js` names its scratch
+   * directories `wev-test-XXXXXX`, and those appear in stack traces — a
+   * case-insensitive code rule would eat them and make traces unreadable.
+   */
+  it.each([
+    ['a lowercase scratch path', 'at boot (/var/folders/wev-test-abcd/x.js:1:1)'],
+    ['the excluded alphabet', 'code WEV-I0O1-I0O1 is not one of ours'],
+  ])('leaves %s alone', (_label, input) => {
+    expect(redactMessage(input)).toBe(input);
+  });
+
   it('removes a JWT', () => {
     const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6InUtMSJ9.abc123def456';
     expect(redactMessage(`token ${jwt} rejected`)).not.toContain('eyJhbGci');

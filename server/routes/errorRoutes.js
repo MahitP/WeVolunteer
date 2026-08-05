@@ -177,6 +177,20 @@ const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 /**
+ * A ceiling on `offset`, for the same reason `limit` has one.
+ *
+ * `limit` was clamped from the start and `offset` was not, and the gap was not
+ * cosmetic: `?offset=1e20` floors to a number above `Number.MAX_SAFE_INTEGER`,
+ * `node:sqlite` refuses to bind it, and the dashboard answered **500**. So the
+ * one parameter left unbounded was reachable as an error, on the screen whose
+ * job is to show errors.
+ *
+ * A million is far past any page anyone will turn to — retention caps the table
+ * long before that — and far below where the arithmetic stops being exact.
+ */
+const MAX_OFFSET = 1_000_000;
+
+/**
  * Query parameters are hostile even here.
  *
  * The caller is the platform owner, so this is not about them — it is about the
@@ -186,14 +200,16 @@ const MAX_LIMIT = 200;
  * repeated parameter, so a bare `Number()` on it would yield NaN or, worse for
  * a single-element array, a number — both are refused here in favour of the
  * default.
+ *
+ * `max` is REQUIRED, not optional. It used to be optional, and the single
+ * caller that omitted it — `offset` — is exactly the one that reached SQLite
+ * unclamped and answered 500. An optional bound is a bound somebody forgets.
  */
 function boundedInt(raw, { fallback, min, max }) {
   if (Array.isArray(raw) || raw === undefined || raw === null || raw === '') return fallback;
   const n = Number(raw);
   if (!Number.isFinite(n)) return fallback;                 // NaN, Infinity, '12abc'
-  const floored = Math.floor(n);
-  if (max === undefined) return Math.max(min, floored);
-  return Math.min(max, Math.max(min, floored));
+  return Math.min(max, Math.max(min, Math.floor(n)));
 }
 
 /** An unrecognised filter value is ignored rather than refused: a filter is a
@@ -205,7 +221,7 @@ const oneOf = (raw, allowed) => (typeof raw === 'string' && allowed.includes(raw
 router.get('/api/errors', authenticateToken, requireCap('error.read'), (req, res) => {
   try {
     const limit = boundedInt(req.query.limit, { fallback: DEFAULT_LIMIT, min: 1, max: MAX_LIMIT });
-    const offset = boundedInt(req.query.offset, { fallback: 0, min: 0 });
+    const offset = boundedInt(req.query.offset, { fallback: 0, min: 0, max: MAX_OFFSET });
     const status = oneOf(req.query.status, GROUP_STATUSES);
     const source = oneOf(req.query.source, SOURCES);
 
