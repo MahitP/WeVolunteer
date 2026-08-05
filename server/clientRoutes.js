@@ -78,6 +78,11 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/messages',
   '/portfolio',
   '/settings',
+  /* Allowed, not excluded. The path is a literal with no parameter, so it can
+     carry no value about anybody. And a crash ON the triage screen is the one
+     failure that must never report as `unknown`: it is the tool used to find
+     every other failure, so a blind spot here hides all of them. */
+  '/errors',
 
   // src/routes/index.jsx — SIGNED_OUT_ROUTES
   '/welcome',

@@ -726,5 +726,53 @@ export const api = {
     apiFetch(`/api/auth/reauth/oauth/${provider}/callback`, {
       method: 'POST',
       body: JSON.stringify({ code, state })
+    }),
+
+  /* ── Error triage ─────────────────────────────────────────────────────────
+   *
+   * All four are `super_admin` only. `error.read` and `error.write` live in
+   * `SUPER_ONLY`, so `can()` refuses them before it consults per-user grants —
+   * hiding the nav entry is UX, and these are re-checked server-side on every
+   * request. See server/routes/errorRoutes.js.
+   */
+
+  /**
+   * A page of error groups, newest activity first.
+   *
+   * Unrecognised `status`/`source` values are IGNORED by the server rather than
+   * refused, deliberately — a filter is a view, and answering 400 for one would
+   * make the dashboard brittle for no gain. Blank values are dropped here so a
+   * cleared filter sends nothing at all rather than `status=`.
+   */
+  fetchErrorGroups: async ({ status, source, limit, offset } = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries({ status, source, limit, offset })) {
+      if (v === undefined || v === null || v === '') continue;
+      qs.set(k, String(v));
+    }
+    const query = qs.toString();
+    return apiFetch(`/api/errors${query ? `?${query}` : ''}`);
+  },
+
+  /** `{ byDay, bySource, byStatus }`. byDay is a 30-day window over retained
+   *  evidence, not an all-time total — the events it counts are swept. */
+  fetchErrorSummary: async () => apiFetch('/api/errors/summary'),
+
+  /**
+   * One group and its retained events.
+   *
+   * Encoded even though a fingerprint is hex from `createHash`: this value
+   * reaches here from a URL, and a path segment that is interpolated raw is a
+   * habit that only has to be wrong once.
+   */
+  fetchErrorGroup: async (fingerprint) =>
+    apiFetch(`/api/errors/${encodeURIComponent(fingerprint)}`),
+
+  /** Resolve, ignore or reopen. Audit-logged server-side, in the same
+   *  transaction as the status change. */
+  updateErrorStatus: async (fingerprint, status) =>
+    apiFetch(`/api/errors/${encodeURIComponent(fingerprint)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status })
     })
 };
