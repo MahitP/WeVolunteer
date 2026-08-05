@@ -317,16 +317,26 @@ export default function ErrorDashboard({ addToast }) {
   const canPrev = offset > 0;
   const canNext = offset + PAGE_SIZE < total;
 
-  const openCount = summary?.byStatus?.find((s) => s.status === 'open')?.groups ?? 0;
+  const statusCount = (name) => summary?.byStatus?.find((s) => s.status === name)?.groups ?? 0;
   const totalOccurrences = (summary?.bySource ?? []).reduce((n, s) => n + (s.occurrences ?? 0), 0);
   const clientGroups = summary?.bySource?.find((s) => s.source === 'client')?.groups ?? 0;
 
   return (
     <div className="stack-lg">
+      {/* FOUR, not three. `.stats` is `auto-fit minmax(150px, 1fr)`, so at phone
+          width it resolves to two columns — and three tiles leave a bordered
+          empty cell sitting in the grid, which reads as a stat that failed to
+          load. Four fills 2x2 on a phone and a single row on a desktop. The
+          fourth is not filler: "how much of the queue has been dealt with" is
+          the other half of "how much is open". */}
       <section className="stats">
         <div className="stat">
           <div className="stat-label">Open problems</div>
-          <div className="stat-value">{openCount}</div>
+          <div className="stat-value">{statusCount('open')}</div>
+        </div>
+        <div className="stat">
+          <div className="stat-label">Resolved</div>
+          <div className="stat-value">{statusCount('resolved')}</div>
         </div>
         <div className="stat">
           <div className="stat-label">Total occurrences</div>
