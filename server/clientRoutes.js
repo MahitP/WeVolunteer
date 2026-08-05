@@ -95,6 +95,13 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
      anybody — and it is read by people who have no account yet, which makes a
      crash here one that costs a signup rather than an inconvenience. */
   '/privacy',
+  /* The Legal Center. Allowed for the same reason as `/privacy`, and the
+     `:slug` parameter is safe under the rule this file is built on: the stored
+     value is the matched PATTERN, so the slug cannot survive matching. It would
+     be harmless even if it did — a policy slug is public and identical for every
+     reader, so it says nothing about who was reading it. */
+  '/legal',
+  '/legal/:slug',
 ]);
 
 /**

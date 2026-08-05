@@ -9,8 +9,8 @@ that are not deleted — precisely enough that no student is surprised afterward
 regulator checking whether the promise matches the behaviour.
 
 **Required sections.** What deletion does · what is removed · what is kept and why · the
-certificate exception · timing · what you cannot undo · guardian requests · school district
-requests · how to ask questions.
+certificate exception · timing · what you cannot undo · guardian requests · what a school or
+partner organization cannot do · how to ask questions.
 
 **Decisions resolved.** Hours and certificates indefinite · messages 3 years · audit logs 1 year
 · anonymised shells purged after 3 years. **Still open:** whether a grace period precedes
@@ -24,14 +24,27 @@ anonymisation (re-audit Q9 — the "When it happens" section below currently pro
 >
 > Indefinite retention is now a deliberate decision, which resolves half of R-02. The other half
 > — disclosure and a revocation path — remains. The draft below is written **honestly against
-> current behaviour**; the "Choose what happens to your certificates" section describes the void
-> option, which **does not exist yet** and must be deleted before publication until it does.
+> current behaviour**.
+>
+> **The "Choose what happens to your certificates" section is retained, marker and all.**
+> Certificate voiding is scheduled to be built later in this programme, so the section is kept as
+> the specification of what the text will say once it ships — not deleted and rewritten. Its
+> `[[NOT YET IMPLEMENTED]]` marker is deliberate and **blocks publication of this document until
+> the feature lands**, which is the correct behaviour: publishing a choice that does not exist
+> would be a misrepresentation, and deleting the section would lose the drafted text. Whoever
+> ships the feature removes the marker in the same pull request.
+>
+> Until then, the Privacy Policy carries the honest version of the same fact — that no way to
+> switch off indefinite certificates exists today — and must be kept in step with this section
+> when it changes.
 
 ---
 
 ## Draft
 
 # What happens when you delete your account
+
+**Version 1.0 · Last updated 2026-08-05**
 
 Deleting your WeVolunteer account is permanent. This page explains exactly what goes and what
 stays, because some things stay, and you should know which before you decide — not after.

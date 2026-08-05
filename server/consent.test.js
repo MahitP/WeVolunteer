@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer } from './testServer.js';
 import { ipPrefix, uaFamily, assertConsent, ConsentMissing, slugToKey } from './consent.js';
-import { LEGAL_DOCUMENTS, CONSENT_CONTROLS, hashPolicyFile, requiredConsentKeys } from './legalDocuments.js';
+import { LEGAL_DOCUMENTS, SIGNUP_DOCUMENTS, CONSENT_CONTROLS, hashPolicyFile, requiredConsentKeys } from './legalDocuments.js';
 
 /**
  * Consent: recorded, enforced server-side, and pinned to document content.
@@ -128,10 +128,33 @@ describe('the document registry', () => {
     }
   });
 
-  it('gives every consent-bearing document a control, directly or by bundling', () => {
-    for (const doc of LEGAL_DOCUMENTS.filter(d => d.consentType !== 'notice')) {
+  it('gives every signup document a control, directly or by bundling', () => {
+    /**
+     * Scoped to SIGNUP_DOCUMENTS, not to "everything that is not a notice".
+     *
+     * Those two sets were identical until the Organizer Agreement was registered.
+     * It is `consentType: 'agree'` — a real contract — but `scope: 'organizer'`,
+     * so it is collected when somebody becomes an organizer and must NOT have a
+     * signup control. Under the old filter this test would have demanded one,
+     * and satisfying it would have put undertakings about handling other
+     * students' contact details in front of every fourteen-year-old.
+     */
+    for (const doc of SIGNUP_DOCUMENTS) {
       const covered = CONSENT_CONTROLS.some(c => c.covers.includes(doc.slug));
       expect(covered, `${doc.slug} has no consent control and would never be presented`).toBe(true);
+    }
+  });
+
+  it('keeps every consent-bearing document reachable by some scope', () => {
+    // The reverse guard, and the reason narrowing the test above is safe: a
+    // document that needs acceptance must be collected SOMEWHERE. A contract
+    // registered with `scope: 'notice'` would be published, never accepted, and
+    // silently unenforceable — which is the failure the registry exists to stop.
+    for (const doc of LEGAL_DOCUMENTS.filter(d => d.consentType !== 'notice')) {
+      expect(
+        ['signup', 'organizer-onboarding'].includes(doc.scope),
+        `${doc.slug} needs acceptance but its scope (${doc.scope}) collects none`
+      ).toBe(true);
     }
   });
 
@@ -214,13 +237,22 @@ describe('signup enforces and records consent', () => {
     expect(user).toBeTruthy();
 
     const rows = db.prepare('SELECT * FROM legal_acceptances WHERE user_id = ?').all(user.id);
-    const expected = LEGAL_DOCUMENTS.filter(d => d.consentType !== 'notice');
+    const expected = SIGNUP_DOCUMENTS;
 
     expect(
       rows.length,
-      'one row per document, including the ones bundled onto another checkbox — the record '
-      + 'must name every document accepted, not just the one the box was labelled with'
+      'one row per signup document, including the ones bundled onto another checkbox — the '
+      + 'record must name every document accepted, not just the one the box was labelled with'
     ).toBe(expected.length);
+
+    // And nothing outside that scope. A student must not leave signup holding an
+    // acceptance row for the Organizer Agreement: it was never shown to them, and
+    // a row claiming otherwise is a false record rather than a harmless extra.
+    const outOfScope = rows.filter(r => !expected.some(d => d.slug === r.document_slug));
+    expect(
+      outOfScope.map(r => r.document_slug),
+      'signup recorded acceptance of a document it never presented'
+    ).toEqual([]);
 
     for (const doc of expected) {
       const row = rows.find(r => r.document_slug === doc.slug);
@@ -286,7 +318,7 @@ describe('signup enforces and records consent', () => {
 
     const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
     const rows = db.prepare('SELECT * FROM legal_acceptances WHERE user_id = ?').all(user.id);
-    expect(rows.length).toBe(LEGAL_DOCUMENTS.filter(d => d.consentType !== 'notice').length);
+    expect(rows.length).toBe(SIGNUP_DOCUMENTS.length);
     expect(rows[0].method).toBe('oauth_signup');
     expect(rows[0].context).toBe('oauth:google');
   });

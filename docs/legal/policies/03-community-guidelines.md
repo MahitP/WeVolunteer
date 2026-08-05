@@ -10,19 +10,30 @@ moderation decisions rest on a published standard rather than an administrator's
 **Required sections.** The principle · what belongs here · what does not · messages ·
 comments · profiles · hours honesty · reporting · what we do about violations · appeals.
 
-**Decisions required.** Moderation response SLA (proposed below) · whether appeals go to an
-admin or the district.
+**Decisions resolved.** The moderation SLA is the one published below. **Appeals go to a
+WeVolunteer administrator** — there is no district and no external appeal body, and the draft
+says so rather than implying an independence that does not exist.
+
+**Guardian notification removed.** This document previously promised to tell a parent or guardian
+about a suspension or removal for any user under 18. **WeVolunteer collects no guardian contact
+details and no mechanism does**, so that promise could not be kept for anyone. It has been
+replaced with what actually happens. Do not reintroduce it without the collection mechanism to
+back it, and per the current product decision that mechanism is not being built.
 
 **Why this matters legally.** Content moderation without a published standard is arbitrary,
-and arbitrary enforcement against a student is the kind of thing a parent escalates. A
-published ladder of consequences also demonstrates good faith if a HIB or harassment claim
-ever reaches the district.
+and arbitrary enforcement against a student is the kind of thing a parent escalates. A published
+ladder of consequences is also the evidence of good faith if a harassment or bullying complaint
+ever turns into a claim — and because WeVolunteer is independent, there is no district behind it
+to absorb that. This document is the standard.
 
 ---
 
 ## Draft
 
 # Community Guidelines
+
+**Version 2.0 · Last updated 2026-08-05** · Part of the
+[Terms of Service](02-terms-of-service.md), and accepted with them
 
 WeVolunteer is a small community of students and the adults who organise volunteer work. It
 works because people are decent to each other. These are the rules that keep it that way.
@@ -127,7 +138,11 @@ We skip straight to step 4 for anything in the "never" list.
 **Our response times:** a report reaches a human within **one business day**. Anything flagged
 as a safety concern is looked at **the same day**.
 
-If you are under 18, we tell your parent or guardian about a suspension or removal.
+**We tell you** — the account holder — what happened and why, at the email address on your
+account. **We do not automatically tell your parent or guardian**, because we do not ask for
+their contact details and do not have them. The exception is a situation where someone may have
+been harmed: then we go to the authorities, and to your school or a guardian if we can reach
+them.
 
 ## If you think we got it wrong
 

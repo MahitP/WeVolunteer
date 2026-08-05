@@ -555,6 +555,13 @@ export default function Login({ onLoginSuccess, addToast }) {
           <button className="auth-link" onClick={() => navigate('/signup')}>Create an account</button>
         </p>
 
+        {/* Reachable from the front door, signed out. Somebody deciding whether
+            this app is safe to use should not have to create an account to read
+            the safety and privacy policies first. */}
+        <p className="auth-footer">
+          <a className="auth-link" href="/legal">Terms, privacy and safety policies</a>
+        </p>
+
         {DEMO_MODE && (
           <div className="auth-demo">
             <div className="eyebrow" style={{ textAlign: 'center', marginBottom: 'var(--s3)' }}>

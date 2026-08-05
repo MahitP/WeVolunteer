@@ -19,6 +19,17 @@ is disclosure — a student must understand, before deleting, that their name pe
 couples to the age gate:** COPPA §312.10 forbids indefinite retention of a child's data, so
 indefinite certificates are lawful only while no under-13 account can exist (re-audit R-01/R-02).
 
+**The `[[NOT YET BUILT]]` block near the end is retained deliberately.** Certificate voiding is
+scheduled later in this programme; the block holds the drafted text for when it ships and blocks
+publication until then, which is correct — a document that offered the choice today would be
+describing a feature that does not exist. Whoever ships voiding removes this marker and the twin
+in [`04-data-deletion-policy.md`](04-data-deletion-policy.md) in the same pull request, and
+updates the Privacy Policy paragraph that currently states plainly that no such option exists.
+
+**One thing corrected in this pass.** "If a code does not work" listed an expired verification
+period as a possible cause, in a document whose next section says certificates never expire. It
+listed three causes; there are two.
+
 **Code facts this document relies on** (all verified):
 - `GET /api/certificates/verify/:code` — unauthenticated by design (`attendanceRoutes.js:243`)
 - Codes are `WEV-XXXX-XXXX`, from `crypto.randomBytes(5)` — 40 bits (`certificates.js:60`)
@@ -33,6 +44,8 @@ indefinite certificates are lawful only while no under-13 account can exist (re-
 
 # Certificate verification
 
+**Version 1.0 · Last updated 2026-08-05**
+
 WeVolunteer issues a certificate when a student completes a volunteer event. Each certificate
 has a code on it. Anyone holding that code can check the certificate is real.
 
@@ -43,8 +56,10 @@ are on them.
 
 ### How to verify
 
-Go to **[[PUBLIC_URL]]/verify** and enter the code printed on the certificate. It looks like
-`WEV-4K2P-9XQF`.
+Go to **[[TODO: public URL — the address WeVolunteer is served from in production, the value
+`APP_URL` will hold. This is printed on every certificate, so it has to be decided before the
+first certificate is issued, not before this document publishes.]]/verify** and enter the code
+printed on the certificate. It looks like `WEV-4K2P-9XQF`.
 
 You do not need an account and you do not need to sign in.
 
@@ -86,12 +101,15 @@ student's school.
 
 ### If a code does not work
 
-Three reasons, and we cannot tell you which from the outside:
+Two reasons, and we cannot tell you which from the outside:
 
 1. The code was typed wrong — check for confusable characters, and note codes are not
    case-sensitive.
-2. The certificate has passed its verification period (see below).
-3. The certificate is not genuine.
+2. The certificate is not genuine.
+
+**"It expired" is not on that list.** Certificates do not expire and there is no verification
+period to run out — see [Certificates stay verifiable indefinitely](#if-you-delete-your-account)
+below. A code that fails was mistyped or was never issued by us.
 
 If you believe you have been given a forged certificate, tell us at **wevolunteer.platform@gmail.com**. We
 take that seriously and we will investigate.

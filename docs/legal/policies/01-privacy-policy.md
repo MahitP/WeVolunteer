@@ -19,23 +19,38 @@ reading level.
 6. How long it is kept — **required in the notice by COPPA §312.10**
 7. Your choices and rights, with the mechanism for each
 8. Guardians: how to ask questions and make requests
-9. Under-13 statement
+9. The age policy, and the plain statement that no guardian consent step exists
 10. Third parties and subprocessors
 11. Security
 12. Changes to this notice
 13. How to contact a human
 
-**Decisions required before publication.**
-- **DECISION 1** — controller identity depends on posture
-- **DECISION 2** — minimum age; the under-13 section cannot be written without it
-- **DECISION 5** — retention periods; §312.10 makes this non-optional
-- **DECISION 9** — the contact address
+**Decisions resolved.**
+- **Controller identity** — Mahit Pulavarthi, a sole proprietor doing business as WeVolunteer.
+  Named in exactly one place in the draft (the operator block under the title) so that a future
+  conversion to an LLC, corporation, or nonprofit edits one block and a version number.
+- **Posture** — independent platform. No school or district is a controller, a joint controller,
+  or an operator of anything described here.
+- **Minimum age** — 13, enforced server-side on every signup path
+  (`accountValidation.js`, `MINIMUM_AGE = 13`; migration 008).
+- **Retention periods** — filled in throughout and enforced by
+  `server/workers/retentionWorker.js` and `sweepErrors` in `server/errorReporter.js`. Hours and
+  certificates are indefinite by deliberate decision; everything else has an end date.
+- **Guardian consent** — **there is none and none will be built.** No guardian email is
+  collected, no confirmation is sent, nothing is verified, and no guardian is notified of
+  anything. The draft discloses that in plain words. Do not reintroduce language implying
+  otherwise.
+- **Contact** — wevolunteer.platform@gmail.com, monitored by the operator.
+
+**Still open — see the `[[TODO: ...]]` markers in the draft.** The email-sending provider, the
+hosting provider, and the policy-archive URL.
 
 **Relationship to existing code.** This supersedes `src/views/PrivacyNotice.jsx` as the
 *source of truth*, but that page's architecture is correct and should be kept: factual
-sections are hard-coded because they are engineering facts; district-specific facts arrive
-as configuration and the page declares itself incomplete until they do. This draft supplies
-the text those config values should hold.
+sections are hard-coded because they are engineering facts; operator-specific facts (the entity
+name, the postal address, the vendor names) arrive as configuration and the page declares itself
+incomplete until they do. This draft supplies the text those config values should hold. There are
+no district-specific facts — that branch is gone.
 
 ---
 
@@ -43,7 +58,14 @@ the text those config values should hold.
 
 # Privacy at WeVolunteer
 
-**Last updated: [[DATE]]** · Applies to WeVolunteer version 1.2 and later
+**Version 2.0 · Last updated 2026-08-05** · Applies to WeVolunteer version 1.2 and later
+
+> **THE OPERATOR — the only place in this document that names the legal entity.**
+> WeVolunteer is operated by **Mahit Pulavarthi, a sole proprietor doing business as
+> WeVolunteer**, based in South Brunswick, Middlesex County, New Jersey. That person is
+> responsible for the information described on this page. Everywhere else this document says
+> "we," "us," or "WeVolunteer," it means that person. If the operator later becomes an LLC, a
+> corporation, or a nonprofit, this block changes and almost nothing else does.
 
 WeVolunteer helps students find volunteer work and keep track of their service hours. To do
 that, it has to store some information about you. This page explains all of it.
@@ -53,6 +75,8 @@ problem and we want to hear about it: **wevolunteer.platform@gmail.com**.
 
 ## The short version
 
+- **You have to be 13 or older.** There is no parent or guardian approval step, and we do not
+  check with anyone — the age rule is the control, and both of those facts are explained below.
 - We store your name, email, grade, and the record of volunteering you do.
 - Your profile is **private unless you change it**.
 - Organizers see your contact details **only** for events you applied to.
@@ -63,7 +87,8 @@ problem and we want to hear about it: **wevolunteer.platform@gmail.com**.
 
 ## Who is responsible for your information
 
-**[[LEGAL_ENTITY_NAME]]** operates WeVolunteer and is responsible for your information.
+The operator named at the top of this page runs WeVolunteer and is responsible for your
+information. One person, not a company and not a school.
 
 WeVolunteer is an **independent platform**. Schools and community organizations can take part —
 organizers post events, students volunteer — but **your school does not run WeVolunteer and
@@ -113,7 +138,8 @@ any time.
 applications to anybody else's events. Organizers agree in writing to use your details only
 to run the event and not to keep or share them afterwards.
 
-**Administrators** at [[OWNER]] can see accounts, events, and applications across the
+**WeVolunteer administrators** — the operator, and anyone the operator has given an
+administrator account to — can see accounts, events, and applications across the
 platform, because somebody has to be able to run it and answer problems. Administrator
 access is logged. Looking at a student's record without a work reason is a misuse of the
 role, not a perk of it.
@@ -168,7 +194,7 @@ wrong, contact **wevolunteer.platform@gmail.com** and we will look at the record
 | Applications | 3 years after the event | Long enough to resolve a dispute about a placement |
 | Messages | **3 years** — longer if the conversation has been reported | Long enough to investigate a safety report, which often surfaces late. A reported conversation is never deleted on schedule, because that would destroy the evidence an investigation needs |
 | Comments | Until the event is deleted | |
-| Error diagnostics | 90 days | Long enough to fix a bug |
+| Error diagnostics | The detailed record of one error: **30 days**. The summary of a problem we have already dealt with: **30 days**. The summary of a problem nobody has dealt with yet: **180 days**. A one-off glitch seen once from one browser: **7 days** | Long enough to find and fix a bug, and no longer. A problem nobody has fixed is still true, which is why its summary outlives the individual records |
 | Administrator audit logs | **1 year** | So misuse of an administrator account can be traced later |
 | Data export archives | **7 days**, then deleted automatically | Already enforced in code |
 
@@ -179,8 +205,12 @@ are not just a statement of intent. Two exceptions are deliberate and are called
 certificates. That is a deliberate choice, because a service record that expires is not a
 service record. Everything else has an end date.
 
-If you would rather your certificates did not last forever, you can void them when you delete
-your account — see the [Data Deletion Policy](04-data-deletion-policy.md).
+**There is currently no way to make your certificates stop being verifiable.** We are building an
+option to void them when you delete your account — removing your name and stopping the codes working —
+but **it does not exist yet**, so the only accurate thing we can tell you today is that a
+certificate you have earned keeps your full name on it, permanently. The
+[Data Deletion Policy](04-data-deletion-policy.md) explains exactly what that means. Please read
+it before you delete, not after.
 
 ## Your choices
 
@@ -206,17 +236,35 @@ within **45 days**.
 
 Because WeVolunteer is independent, **your school cannot do this for you.** Ask us directly.
 
-[[PENDING — guardian consent mechanism, see re-audit Q2. Once built, add:
-"When a student under 18 signs up, we ask for a guardian's email address and send you a link to
-confirm. We will email you if your student's account is suspended, if a safety report involves
-them, or if their account is deleted."]]
-
 One thing to know: students aged 13 and over can also make these requests themselves, and we
 will tell the student when an account change is made on their behalf.
 
-## Students under 13
+### What we do not do, and want you to know before you go looking for it
 
-WeVolunteer is for students in grade 9 and above and **is not for children under 13**.
+**There is no parent or guardian consent step on WeVolunteer, and we are not building one.**
+Specifically:
+
+- We **do not ask for a guardian's email address** at signup, or at any other point.
+- We **do not send a confirmation link** to anybody, and nothing waits for an approval.
+- We **do not verify** that a guardian saw these policies, or that one exists.
+- We **do not notify a guardian** automatically about anything — not a suspension, not a safety
+  report, not a deletion. If you have not given us your email address, we do not have it.
+
+A student aged 13 or over can create an account, apply to events, and message an organizer
+about them without anyone telling you. **What actually protects your student** is the hard age
+floor, a private-by-default profile, an off-by-default leaderboard, organizers seeing contact
+details only for events your student applied to, a Report button on every conversation, and
+one-directional blocking that an adult cannot use against a student.
+
+We would rather write that paragraph than print "a guardian must agree" and not check. If you
+want to be involved, the way to do it is to ask your student to show you the app — and to email
+us, which you can do at any time without their permission.
+
+## Age: you must be 13 or older
+
+WeVolunteer is for students in grades 9–12 or the equivalent. **The minimum age is 13, and it
+is a hard floor.** There is no version of WeVolunteer for children under 13 and there is no way
+to get an exception.
 
 We ask your date of birth when you sign up and do not create accounts for anyone under 13.
 That check runs on our servers, not just in your browser, and it applies however you sign up —
@@ -229,18 +277,24 @@ a child under 13 has an account, email **wevolunteer.platform@gmail.com** and we
 This is also why we can keep hours and certificates forever: the law does not allow keeping a
 child's information indefinitely, and the age check is what makes that promise a safe one.
 
+**The age check is the control, and it is doing the work a guardian consent step would do
+elsewhere.** We do not ask a parent or guardian to approve a signup, and we do not check with
+anyone — see [What we do not do](#what-we-do-not-do-and-want-you-to-know-before-you-go-looking-for-it)
+above. We are telling you that on the same page as the age rule, on purpose, so that nobody
+assumes a second layer that is not there.
+
 ## Other companies involved
 
 WeVolunteer runs on a small number of outside services. Here is all of them:
 
 | Service | What it receives | What it is for |
 |---|---|---|
-| **[[SMTP_PROVIDER]]** | Your email address and the message | Sending you notification and security emails |
+| **[[TODO: email-sending provider — name the SMTP service configured in `SMTP_*` for production. This row cannot publish as a placeholder: a named subprocessor list is the point of the table.]]** | Your email address and the message | Sending you notification and security emails |
 | **Google** (only if you sign in with Google) | Your email address and basic profile | Signing you in. We ask Google for nothing else |
 | **OpenStreetMap / Nominatim** | Event location text | Turning an event address into map coordinates. **Never anything about you** |
 | **Open-Meteo** | Event coordinates | The weather forecast on an event page. **Never anything about you** |
 | **CARTO** | **Your IP address**, when a map is shown | Loading the map images. It does not receive your name or account — see below |
-| **[[HOSTING_PROVIDER]]** | Stores the database | Running the service |
+| **[[TODO: hosting provider — name the company that hosts the server and stores the SQLite database in production, and state whether the data stays in the United States.]]** | Stores the database | Running the service |
 
 Two of these are contacted by our servers, so they never see your device.
 
@@ -283,9 +337,16 @@ between, and you should not wait to hear it from one.
 
 If we change something that matters, we will tell you in the app before it takes effect —
 not by quietly editing this page. The "last updated" date at the top always reflects the
-current version, and previous versions are kept at [[POLICY_ARCHIVE_URL]].
+current version, and previous versions are kept at
+**[[TODO: policy archive URL — depends on the public URL decision. The same TODO appears in the
+Terms of Service and the Cookie Notice; all three must resolve to the same real link, because
+this is a promise to keep superseded versions readable.]]**
 
 ## Contact
 
-**wevolunteer.platform@gmail.com** — monitored by [[ROLE_TITLE]]. We acknowledge within 10 business
-days.
+**wevolunteer.platform@gmail.com** — read by the operator personally. We acknowledge within 10
+business days.
+
+Being one person is the honest answer to "who monitors this?", and it is why we do not claim a
+24-hour response. For anything urgent, the numbers in the
+[Youth Safety Guidelines](08-youth-safety-guidelines.md) reach people who are awake.

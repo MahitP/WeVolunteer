@@ -35,6 +35,8 @@ than an internal convention, and gives a student a route when a record is wrong.
 
 # How volunteer records work
 
+**Version 1.0 · Last updated 2026-08-05**
+
 Your volunteer record is the list of events you attended and the hours you were credited. It
 may matter for graduation, scholarships, or college applications, so this page explains exactly
 how it is built and what to do if it is wrong.

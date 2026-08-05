@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { LEGAL_DOCUMENTS, CONSENT_CONTROLS, documentBySlug } from './legalDocuments.js';
+import { LEGAL_DOCUMENTS, SIGNUP_DOCUMENTS, CONSENT_CONTROLS, documentBySlug } from './legalDocuments.js';
 
 /**
  * Recording and enforcing consent.
@@ -129,10 +129,18 @@ export function slugToKey(slug) {
  * 'reconsent', 'organizer_approval', …) because a record that cannot say
  * whether the person clicked a checkbox or an administrator ticked it on their
  * behalf is not much of a record.
+ *
+ * The default target set is SIGNUP_DOCUMENTS — the documents scoped to
+ * registration — and deliberately not "everything that isn't a notice". Those
+ * two were the same set until the Organizer Agreement was registered, and it is
+ * `consentType: 'agree'`: under the old filter, registering it would have
+ * written every new student an acceptance row for undertakings about handling
+ * other students' contact details that they were never shown. Callers that mean
+ * something other than signup pass `documents` explicitly.
  */
 export function recordAcceptances(db, { userId, method, context = null, req = null, documents = null, now = null }) {
   const at = now ?? new Date().toISOString();
-  const targets = documents ?? LEGAL_DOCUMENTS.filter(d => d.consentType !== 'notice');
+  const targets = documents ?? SIGNUP_DOCUMENTS;
 
   const prefix = req ? ipPrefix(req.ip || req.socket?.remoteAddress || '') : null;
   const family = req ? uaFamily(req.get?.('user-agent') || req.headers?.['user-agent'] || '') : null;

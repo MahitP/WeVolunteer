@@ -13,7 +13,18 @@ Nothing currently limits that except good character.
 what you may never do · reports and messages · mandated reporting · corrections · audit ·
 access review · leaving · consequences · acknowledgement.
 
-**Decisions required.** DECISION 9 (who holds these roles) · access-review cadence.
+**Decisions resolved.** The operator is a sole proprietor — Mahit Pulavarthi, doing business as
+WeVolunteer — so every administrator answers to that person and to nobody else. There is no
+district layer and no school administrator layer, which is exactly why the written rule below is
+load-bearing.
+
+**Still open — see the `[[TODO: ...]]` markers in the draft.** Who signs off on granting and
+reviewing administrator accounts, where the administrator register lives, and the access-review
+cadence. Three operational decisions, no engineering.
+
+**Guardian contact.** WeVolunteer holds no guardian contact details and nothing collects any. Two
+places in this document implied an administrator could notify a guardian; both now say what is
+actually possible.
 
 **Why this is a policy and not a code change.** Most controls in this codebase are enforced by
 `authz.js`. This one cannot be: an administrator's job *requires* broad read access, so the
@@ -39,12 +50,18 @@ This document is what you agree to in exchange.
 ## Who may hold this role
 
 Administrator accounts are granted only to **WeVolunteer's named operators**, by
-**[[APPROVER]]**, and only where the person's job actually requires it. There is no district
-and no school administrator layer — everyone with this access answers to WeVolunteer alone,
-which is exactly why the rules below are written down.
+**[[TODO: approver — name the person (by role, not just "the owner") who authorises a new
+administrator account and who is accountable for the register. For a sole proprietorship this is
+almost certainly the owner; it needs to be written down and stated here so that "who let this
+person in?" has an answer.]]**, and only where the person's job actually requires it. There is no
+district and no school administrator layer — everyone with this access answers to WeVolunteer
+alone, which is exactly why the rules below are written down.
 
-There is a **register of current administrators** at [[LOCATION]]. If you are not on it, you
-should not have the access.
+There is a **register of current administrators** at
+**[[TODO: register location — where the list of current administrators lives, and who can read
+it. It must be somewhere durable and outside the application's own database, so that a
+compromised or broken database does not also destroy the record of who had access.]]**. If you
+are not on it, you should not have the access.
 
 ## The core rule
 
@@ -106,7 +123,9 @@ As an administrator you are more likely than most people to encounter this. So:
 - **Do not investigate it yourself.** Do not interview the student. Do not contact a suspected
   abuser. Preserve what you have and report it.
 - **Then act on the platform** — suspend accounts, preserve records — and notify
-  **wevolunteer.platform@gmail.com**, and where a student may be at risk, their guardian and their school.
+  **wevolunteer.platform@gmail.com**. Where a student may be at risk, also tell their school or
+  guardian **if you can reach them**: WeVolunteer collects no guardian contact details, so DCP&P
+  and the police are the routes that always work and the ones that must not be skipped.
 - **Preserve everything.** Do not delete a conversation that is part of a report, even at a
   participant's request.
 
@@ -132,8 +151,11 @@ match your tasks, you will be asked about it. That is the system working, not an
 
 ## Access review
 
-**[[APPROVER]]** reviews the administrator register and a sample of the audit log every
-**[[QUARTERLY?]]**, and:
+The approver named under **Who may hold this role** reviews the administrator register and a
+sample of the audit log every
+**[[TODO: access-review cadence — how often the register and an audit-log sample are reviewed.
+Recommended: quarterly, and immediately whenever someone's role changes. Say a period you will
+actually keep; a published cadence you miss is worse than a longer one you hit.]]**, and:
 
 - removes accounts for people who have changed roles or left
 - checks that granted capabilities still match actual jobs
@@ -168,9 +190,9 @@ Your confidentiality obligation does not end when your access does.
 ## If you get this wrong
 
 Depending on what happened: retraining, removal of access, removal from the role,
-notification to the affected student and their guardian, and — for deliberate misuse of
-children's information — referral
-to the authorities.
+notification to the affected student (and their guardian, where we can reach one — we hold no
+guardian contact details, so that is not something to count on), and — for deliberate misuse of
+children's information — referral to the authorities.
 
 **Tell someone immediately if you make a mistake.** An administrator who reports their own
 error is fixing a problem. One who hides it is creating a much larger one, and the audit log
@@ -185,4 +207,9 @@ means it will be found anyway.
       DCP&P at 1-877-NJ-ABUSE, and that telling WeVolunteer instead is not enough.
 - [ ] I will report my own mistakes promptly.
 
-**Name:** [[NAME]] · **Role:** [[ROLE]] · **Date:** [[TIMESTAMP]] · **Version:** [[VERSION]]
+**Name:** *your name, from your account* · **Role:** *the administrator role you hold* ·
+**Date and time:** *recorded when you accept* · **Version:** *1.0 — the version of this document
+you were shown*
+
+*These four values are filled in from your account and stored with your acknowledgement. They
+are not blanks for you to type.*

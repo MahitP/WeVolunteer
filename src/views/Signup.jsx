@@ -700,10 +700,18 @@ export default function Signup({ onSignupSuccess, addToast }) {
                 <label htmlFor="su-terms" style={{ cursor: 'pointer' }}>
                   I agree to the Terms of Service and to follow the Community Guidelines.
                 </label>
+                {/* The registry's canonical slugs. These were `/legal/terms` and
+                    `/legal/guidelines` — short aliases that were never declared as
+                    routes, so both answered 404 from inside the consent block. A
+                    "read the Terms" link pointing at nothing is not a broken link,
+                    it is a misrepresentation about the availability of the terms,
+                    and this is the one place in the app where that is being
+                    asserted. App.routeTable.test.jsx now fails the build on any
+                    internal href that does not resolve. */}
                 <span id="su-terms-links" className="small dim">
-                  <a className="auth-link" href="/legal/terms" target="_blank" rel="noopener noreferrer">Read the Terms</a>
+                  <a className="auth-link" href="/legal/terms-of-service" target="_blank" rel="noopener noreferrer">Read the Terms</a>
                   {' · '}
-                  <a className="auth-link" href="/legal/guidelines" target="_blank" rel="noopener noreferrer">Read the Guidelines</a>
+                  <a className="auth-link" href="/legal/community-guidelines" target="_blank" rel="noopener noreferrer">Read the Guidelines</a>
                 </span>
                 {errors.termsAccepted && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.termsAccepted}</span>}
               </div>
@@ -747,6 +755,14 @@ export default function Signup({ onSignupSuccess, addToast }) {
         <p className="auth-footer">
           Already have an account?{' '}
           <button className="auth-link" onClick={() => navigate('/login')}>Sign in</button>
+        </p>
+
+        {/* In addition to the two links inside the consent block, not instead of
+            them. The consent links are the ones that make the checkbox honest;
+            this one is for a reader who wants the whole set — including the Youth
+            Safety Guidelines, which nobody is asked to tick. */}
+        <p className="auth-footer">
+          <a className="auth-link" href="/legal">All policies and safety guidelines</a>
         </p>
       </main>
     </div>

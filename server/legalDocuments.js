@@ -60,6 +60,27 @@ import { fileURLToPath } from 'node:url';
  * its checkbox: a second box for one contract is friction without legal
  * benefit. They are still registered separately so the acceptance record names
  * both documents and both versions.
+ *
+ * ── scope ──
+ *
+ * WHEN a document is put in front of somebody, which is a different question
+ * from whether it is a contract.
+ *
+ *   'signup'  — every account agrees or acknowledges at registration.
+ *   'notice'  — published and linked; no acceptance collected.
+ *   'organizer-onboarding'
+ *             — a contract, but only for the people it binds. The Organizer
+ *               Agreement is `consentType: 'agree'`; demanding it from every
+ *               fourteen-year-old at signup would be asking students to accept
+ *               undertakings about handling other students' contact details.
+ *               Spelled with the suffix because `'organizer'` alone is a ROLE
+ *               name, and comparing against a quoted role literal fails the
+ *               build — see ORGANIZER_DOCUMENTS below for why renaming beats
+ *               taking the guard's exemption.
+ *
+ * `scope` and not `consentType` is what drives the signup form, because the two
+ * genuinely differ for exactly one document and conflating them is how the
+ * Organizer Agreement would end up as a fourth mandatory signup checkbox.
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -68,57 +89,189 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const POLICY_DIR = path.join(HERE, '..', 'docs', 'legal', 'policies');
 
 /**
- * ── v1.1, 2026-08-05 — all three MINOR ──
+ * ── v2.0, 2026-08-05 — the three signup documents, MAJOR ──
  *
- * Classified MINOR (notice only, no re-consent) because nothing was taken away
- * and nothing new is collected:
+ * MAJOR, so every existing acceptance is stale and re-consent is required. Three
+ * independent reasons, any one of which would be enough:
  *
- *   - Terms and Community Guidelines lost an internal editorial block that had
- *     marked enforcement powers as unbuilt. Suspension and blocking now ship,
- *     so the user-facing text describes real behaviour and did not change.
- *   - The Privacy Policy gained its under-13 section — a disclosure of a
- *     protection that already exists (the age gate) rather than a new
- *     practice — and a sentence noting that the retention periods are enforced
- *     by a daily job rather than merely stated.
+ *   - **The counterparty is now named.** v1.1 shipped with a literal
+ *     `[[LEGAL_ENTITY_NAME]]` in the text. A reader could not tell who they were
+ *     contracting with, which is not a detail — it is the identity of the other
+ *     party. It is now "Mahit Pulavarthi, a sole proprietor doing business as
+ *     WeVolunteer".
+ *   - **The Terms gained obligations and a liability cap.** New organizer
+ *     duties, an intellectual-property section, a dispute process, a governing
+ *     law and venue clause, and a limit on recoverable loss. A reader of v1.1 is
+ *     unambiguously worse off in at least one respect, which is the test.
+ *   - **The Privacy Policy corrected a retention period and withdrew a stated
+ *     option.** It had published error-diagnostics retention as 90 days when the
+ *     code sweeps at 30/30/180/7, and it had described certificate voiding at
+ *     deletion as available when it is not built. A policy describing a right the
+ *     software does not offer is the version worth invalidating.
  *
- * A reader of v1.0 is not worse off under v1.1, which is the test. Users who
- * accepted 1.0 stay accepted at 1.0; MINOR requires notice, not re-acceptance.
+ * The other seven documents are registered here for the first time, at v1.0.
+ * They have never been published, so there is no prior version for a reader to be
+ * worse off than.
+ *
+ * ── The previous entry, kept for the version history ──
+ *
+ * v1.1 was classified MINOR: the Terms and Community Guidelines lost an internal
+ * editorial block that had marked enforcement powers as unbuilt (suspension and
+ * blocking shipped, so the user-facing text described real behaviour and did not
+ * change), and the Privacy Policy gained its under-13 section — a disclosure of a
+ * protection that already existed rather than a new practice.
  */
 export const LEGAL_DOCUMENTS = [
   {
     slug: 'terms-of-service',
-    version: '1.1',
+    version: '2.0',
     title: 'Terms of Service',
     consentType: 'agree',
+    scope: 'signup',
+    summary: 'The agreement between you and WeVolunteer: what you may do here, what we owe you, and how an account ends.',
+    effectiveAt: '2026-08-05',
     file: '02-terms-of-service.md',
-    contentHash: 'a9a2f8fc949b09a401d0b3e395f273825c77a6ce84cafc72f7a25426014d4d84',
+    contentHash: '96aa53dad01787a84b017f6e177d90ea2f7859f87102f5bcec7e8262dfdbf64c',
     /** Presented with, and accepted by, the same control as the Terms. */
     bundledWith: null,
   },
   {
     slug: 'community-guidelines',
-    version: '1.1',
+    version: '2.0',
     title: 'Community Guidelines',
     consentType: 'agree',
+    scope: 'signup',
+    summary: 'How people are expected to behave here, what is not allowed, and what happens when someone breaks the rules.',
+    effectiveAt: '2026-08-05',
     file: '03-community-guidelines.md',
-    contentHash: '85fc34d0ad2deaff5f4ca39810198f0b5ff17e5ef777f3e076c89d882069320b',
+    contentHash: 'b4420da91b24e4748e2e17e49a0ef68a8fc1c01bcbb3fb96f8bb61eec805b5b2',
     bundledWith: 'terms-of-service',
   },
   {
     slug: 'privacy-policy',
-    version: '1.1',
+    version: '2.0',
     title: 'Privacy Policy',
     consentType: 'acknowledge',
+    scope: 'signup',
+    summary: 'What we collect, why, who can see it, how long we keep it, and how to get it back or have it deleted.',
+    effectiveAt: '2026-08-05',
     file: '01-privacy-policy.md',
-    contentHash: 'd5da708de5de29411c9760539b8e710d4e4c35d11113cafb44f762705cd33636',
+    contentHash: 'fb8cc282b83dcf878ddcb38ef3bed1232dacb1f254b280a4f0ba7d6defa42626',
+    bundledWith: null,
+  },
+  {
+    slug: 'organizer-agreement',
+    version: '1.0',
+    title: 'Organizer Agreement',
+    consentType: 'agree',
+    scope: 'organizer-onboarding',
+    summary: 'The undertakings an organizer makes before receiving students\' contact details: protect it, use it only for the event, record attendance honestly.',
+    effectiveAt: '2026-08-05',
+    file: '09-organizer-agreement.md',
+    contentHash: '3267acbae5de9732bc44ec6843565d13755dc8bda11ffd2e993b724046e3d60c',
+    bundledWith: null,
+  },
+  {
+    slug: 'youth-safety-guidelines',
+    version: '1.0',
+    title: 'Youth Safety Guidelines',
+    consentType: 'notice',
+    scope: 'notice',
+    summary: 'How to stay safe volunteering, what an adult here should never ask you for, and how to report it when they do.',
+    effectiveAt: '2026-08-05',
+    file: '08-youth-safety-guidelines.md',
+    contentHash: 'bb4d19fef130fb5e8ce9eea51750eb913574d23d9462949f10b2f22422ebdee4',
+    bundledWith: null,
+  },
+  {
+    slug: 'certificate-verification-policy',
+    version: '1.0',
+    title: 'Certificate Verification Policy',
+    consentType: 'notice',
+    scope: 'notice',
+    summary: 'What a WeVolunteer certificate proves, what it does not, and how anyone can check whether one is real.',
+    effectiveAt: '2026-08-05',
+    file: '06-certificate-verification-policy.md',
+    contentHash: '30aa3b6b09a022b63697092794c69a1748b99b89d0461de67d2caf95861a3e4d',
+    bundledWith: null,
+  },
+  {
+    slug: 'volunteer-record-policy',
+    version: '1.0',
+    title: 'Volunteer Record Policy',
+    consentType: 'notice',
+    scope: 'notice',
+    summary: 'How your service hours are recorded, why a confirmed hour is never re-priced, and what happens if a record is wrong.',
+    effectiveAt: '2026-08-05',
+    file: '07-volunteer-record-policy.md',
+    contentHash: '50fba883942d0aee6a98aa4d903547aab60b7722e7d288b1845ea9ab8e3eb092',
+    bundledWith: null,
+  },
+  {
+    slug: 'data-deletion-policy',
+    version: '1.0',
+    title: 'Data Deletion Policy',
+    consentType: 'notice',
+    scope: 'notice',
+    summary: 'What deleting your account removes, what survives and why, and how to ask for something to be erased.',
+    effectiveAt: '2026-08-05',
+    file: '04-data-deletion-policy.md',
+    contentHash: 'a64709abcc86e890cb1f9a8b2922787541c2a74b572164bbf937c64e731e0570',
+    bundledWith: null,
+  },
+  {
+    slug: 'cookie-and-tracking-notice',
+    version: '1.0',
+    title: 'Cookie and Tracking Notice',
+    consentType: 'notice',
+    scope: 'notice',
+    summary: 'The cookies this site sets, all of which are needed to keep you signed in. No advertising or analytics trackers.',
+    effectiveAt: '2026-08-05',
+    file: '05-cookie-and-tracking-notice.md',
+    contentHash: 'efe5466cdd8cbf3bedb8f1b4d9e2ccc9ee965a0de8f9079408cf8f8723ab3ddb',
+    bundledWith: null,
+  },
+  {
+    slug: 'admin-responsibilities-policy',
+    version: '1.0',
+    title: 'Admin Responsibilities Policy',
+    consentType: 'notice',
+    scope: 'notice',
+    summary: 'What administrators may do, what is logged when they do it, and the limits on looking at a student\'s record.',
+    effectiveAt: '2026-08-05',
+    file: '10-admin-responsibilities-policy.md',
+    contentHash: '1c57c1a9e0ea44876992288861257753b90f760cbe15e93e95da632565830ee2',
     bundledWith: null,
   },
 ];
 
-/** Documents whose acceptance is collected at signup, in presentation order. */
-export const SIGNUP_DOCUMENTS = LEGAL_DOCUMENTS.filter(
-  d => d.consentType === 'agree' || d.consentType === 'acknowledge'
-);
+/**
+ * Documents whose acceptance is collected at signup, in presentation order.
+ *
+ * Keyed on `scope` and not `consentType`. The Organizer Agreement is a contract
+ * — `consentType: 'agree'` — but it binds organizers, not students, so a filter
+ * on consentType would silently make it a fourth mandatory signup checkbox the
+ * moment it was registered.
+ */
+export const SIGNUP_DOCUMENTS = LEGAL_DOCUMENTS.filter(d => d.scope === 'signup');
+
+/**
+ * Documents an organizer accepts before receiving applicants' contact details.
+ *
+ * The scope value is `'organizer-onboarding'` and not `'organizer'` on purpose.
+ * `'organizer'` is a ROLE NAME, and `authz.completeness.test.js` fails the build
+ * on any comparison against a quoted role literal anywhere in `server/` or
+ * `src/` — a guard that exists because role-string comparisons are how
+ * authorization decisions drift out of the capability table.
+ *
+ * `d.scope === 'organizer'` in a view is not an authorization decision (it asks
+ * about a document, not a person) and the guard offers a declared-exemption
+ * escape hatch for exactly that case. Renaming the value is better than taking
+ * it: an exemption is a permanent hole in a security guard, added to preserve a
+ * word — and the longer name is more accurate anyway, since it names WHEN the
+ * document is collected rather than who the reader is.
+ */
+export const ORGANIZER_DOCUMENTS = LEGAL_DOCUMENTS.filter(d => d.scope === 'organizer-onboarding');
 
 /**
  * The distinct consent controls a signup form must show.
@@ -138,10 +291,66 @@ export function documentBySlug(slug) {
   return LEGAL_DOCUMENTS.find(d => d.slug === slug) || null;
 }
 
-/** sha256 of a document's published source, for the drift test and the CLI. */
+/**
+ * The marker separating the drafting brief from the document itself.
+ *
+ * Each file in `docs/legal/policies/` opens with a `## Specification` block —
+ * purpose, audience, required sections, the decisions that were resolved and why
+ * — and then the real document under `## Draft`. Keeping the two together is
+ * deliberate and worth preserving: the reasoning behind a clause is most useful
+ * next to the clause.
+ *
+ * But only the second half is the policy. The first half is an internal editorial
+ * artifact, and it was briefly served to users: the Terms page opened with
+ * "Purpose. Establish the contract" and a list of required sections, which reads
+ * as a draft somebody published by accident, and undermines the document it is
+ * attached to.
+ */
+const PUBLISHED_MARKER = '\n## Draft\n';
+
+/** Thrown when a policy file has no publishable body. */
+export class PolicyStructureError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'PolicyStructureError';
+  }
+}
+
+/**
+ * The publishable half of a policy file.
+ *
+ * Throws rather than falling back to the whole file. A fallback would mean a file
+ * that lost its marker silently starts serving the drafting brief as the terms —
+ * the exact failure this function exists to prevent, reintroduced as the error
+ * path. Failing loudly turns it into a boot refusal and a build failure instead.
+ */
+export function publishedBody(source) {
+  const text = String(source).replace(/\r\n/g, '\n');
+  const at = text.indexOf(PUBLISHED_MARKER);
+  if (at === -1) {
+    throw new PolicyStructureError(
+      `Policy source has no "## Draft" marker, so its publishable body cannot be `
+      + 'identified. Every file in docs/legal/policies/ must separate its internal '
+      + 'Specification block from the document with that heading.'
+    );
+  }
+  return text.slice(at + PUBLISHED_MARKER.length).replace(/^\n+/, '');
+}
+
+/**
+ * sha256 of a document's PUBLISHED body, for the drift test and the CLI.
+ *
+ * Over the published half and not the whole file, which matters for the reason the
+ * module header gives: an acceptance record's hash is what proves what somebody
+ * agreed to. Hashing the whole file would mean editing the drafting notes — pure
+ * internal commentary no user ever sees — invalidates every acceptance row and
+ * forces a version bump on a document whose text did not change. Hashing the body
+ * makes the hash mean exactly "the words the user read", so it moves when those
+ * words move and not otherwise.
+ */
 export function hashPolicyFile(file) {
-  const source = readFileSync(path.join(POLICY_DIR, file));
-  return createHash('sha256').update(source).digest('hex');
+  const source = readFileSync(path.join(POLICY_DIR, file), 'utf8');
+  return createHash('sha256').update(publishedBody(source)).digest('hex');
 }
 
 /**

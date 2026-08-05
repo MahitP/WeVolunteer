@@ -5,33 +5,50 @@
 **Purpose.** Establish the contract: what WeVolunteer provides, what users may and may not
 do, who bears which risk, and how disputes are resolved.
 
-**Audience.** All users; guardians (who supply the enforceable agreement for minors); school
-counsel evaluating adoption.
+**Audience.** All users — students and organizers. Guardians read it, but they are not a party
+to it and no mechanism asks them to be. School staff evaluating adoption read it too.
 
 **Required sections.** Acceptance and capacity · eligibility and age · account rules ·
-acceptable use · content and licence · service hours disclaimer · events happen offline ·
-suspension and termination · disclaimers · limitation of liability · indemnity · changes ·
-governing law and venue · dispute resolution · contact.
+acceptable use · user responsibilities (student and organizer, separately) · service hours
+disclaimer · events happen offline · intellectual property · suspension, termination and
+appeals · disclaimers · limitation of liability · indemnity · changes · dispute resolution
+process · governing law and venue · contact.
 
-**Decisions required.** DECISION 1 (posture) · DECISION 2 (age) · DECISION 7 (legal entity —
-**you cannot publish a ToS without a legal person to be a party to it**) · DECISION 8
-(governing law).
+**Decisions resolved.**
+- **Operator** — a sole proprietorship. Mahit Pulavarthi, doing business as WeVolunteer. Named
+  in exactly one place in the draft (the operator block under the title) so that a future
+  conversion to an LLC, corporation, or nonprofit is a version bump that edits one block.
+- **Posture** — independent platform. No school or district is a party to these terms, operates
+  the platform, controls accounts, or indemnifies the operator. Any surviving sentence implying
+  otherwise is a defect.
+- **Age** — 13 and over, grades 9–12 or equivalent. Enforced server-side
+  (`accountValidation.js`, `MINIMUM_AGE = 13`) on every signup path including Google.
+- **Guardian consent** — **there is none, and none will be built.** No guardian email is
+  collected, no confirmation link is sent, nothing is verified, and no guardian is notified of
+  anything. The draft says so in plain words instead of implying a protection that does not
+  exist. Do not reintroduce guardian-consent language into this document; it would be a
+  misrepresentation about an available protection, which is the FTC Act §5 shape.
+- **Governing law and venue** — New Jersey law, Middlesex County venue (the operator is in
+  South Brunswick, Middlesex County). **Needs owner confirmation** before publication.
 
-> **This is the one document in the set that needs a lawyer to draft, not merely review.**
-> The draft below is a structured starting point that will save an attorney several hours.
-> Three clauses in particular — limitation of liability, indemnity, and dispute resolution —
-> are drafted conservatively and deliberately left un-aggressive, because a ToS that
-> over-reaches against minors is both unenforceable and bad for trust.
+**Still open — see the `[[TODO: ...]]` markers in the draft.** The liability cap figure, the
+postal address, the policy-archive URL, and counsel's sign-off on the no-arbitration choice.
 
-**A structural point counsel will raise, and it got worse.** A minor's agreement to a contract
-is generally **voidable**. That means this ToS is not, by itself, a reliable liability shield
-against student users.
+> **This is still the one document in the set that most benefits from a lawyer reading it
+> before it goes live.** The draft below is complete and internally consistent, and the three
+> clauses counsel will go to first — limitation of liability, indemnity, and dispute resolution
+> — are drafted conservatively on purpose.
 
-In the district model there were two things carrying that weight: the district's own agreement,
-and a guardian acknowledgement. **The independent-platform decision removes the first one.** A
-guardian acknowledgement at signup for every user under 18 is now the *only* mechanism left, and
-it has gone from advisable to structurally necessary (re-audit R-27, P0). Design accordingly
-rather than pretending the checkbox solves it.
+**The structural point counsel will raise, and the honest answer.** A minor's agreement to a
+contract is generally **voidable**. This document is therefore not a reliable liability shield
+against student users, and with no district agreement and no guardian acknowledgement behind
+it, nothing else in the stack is either.
+
+That is a **decision, not an oversight**: the platform will not build guardian verification, so
+the residual exposure is accepted and managed by the things that do exist — a hard age floor, a
+narrow data footprint, an honest liability section that does not overreach, real enforcement
+(suspension, blocking, applicant-scoped messaging), and disclosure written to be understood by
+a fourteen-year-old. §10 of `../00-COMPLIANCE-AND-RISK.md` should be read alongside this.
 
 ---
 
@@ -39,7 +56,14 @@ rather than pretending the checkbox solves it.
 
 # WeVolunteer Terms of Service
 
-**Last updated: [[DATE]]** · Operated by **[[LEGAL_ENTITY_NAME]]** ("we," "us")
+**Version 2.0 · Last updated 2026-08-05**
+
+> **THE OPERATOR — the only place in this document that names the legal entity.**
+> WeVolunteer is operated by **Mahit Pulavarthi, a sole proprietor doing business as
+> WeVolunteer**, based in South Brunswick, Middlesex County, New Jersey. Everywhere else this
+> document says "we," "us," or "WeVolunteer," it means that person. If the operator later
+> becomes an LLC, a corporation, or a nonprofit, this block changes and almost nothing else
+> does.
 
 These terms are an agreement between you and us about how you use WeVolunteer. We have kept
 them as short and as plain as we can. Where a sentence has to be precise for legal reasons,
@@ -49,20 +73,40 @@ we say what it means first.
 
 By creating an account or using WeVolunteer, you agree to these terms.
 
-**If you are under 18,** a parent or guardian must review and agree to these terms with you.
-WeVolunteer is an independent platform. **Your school has not agreed to these terms for you**,
-and cannot. This is between you and us.
+WeVolunteer is an **independent platform**. **Your school has not agreed to these terms for
+you, and cannot.** No school or district runs WeVolunteer, controls your account, sets these
+rules, or stands behind them. This is between you and us.
+
+**If you are under 18 — read this part carefully, because it is not the usual sentence.** We
+ask you to read these terms with a parent or guardian before you create an account, and we mean
+it. But be clear about what we do and do not do:
+
+- We **do not** ask for a parent or guardian's email address.
+- We **do not** send anyone a link to confirm that you may sign up.
+- We **do not** check that a guardian read this, or that one exists.
+- There is **no guardian approval step**, and we are not building one.
+
+So nothing stops you signing up without telling anyone. We are telling you that plainly rather
+than printing "a guardian must agree" and quietly not checking — a promise nobody verifies is
+worse than no promise. What that means in practice is that the responsibility for reading and
+understanding this sits with you, which is part of why we have kept it short.
 
 If you do not agree, do not create an account. If you already have one and you stop agreeing,
 you can delete it at any time.
 
 ## 2. Who can use WeVolunteer
 
-- You must be **[[MINIMUM_AGE]] or older**. WeVolunteer is not for children under 13.
+- You must be **13 or older**. WeVolunteer is built for students in grades 9–12 or the
+  equivalent, and **it is not for children under 13**.
+- We ask your date of birth when you sign up and refuse to create an account for anyone under
+  13. That check runs on our servers, not just in your browser, and it applies however you sign
+  up — including with Google. We will not tell you how close you were, because that would just
+  be telling you which year to type instead.
 - You must give accurate information when you sign up. Your name and grade are shown to
   organizers who need to know who is volunteering, so a false one is not a harmless joke.
 - One account per person. Do not share your account or sign in as someone else.
-- Organizer accounts require approval before they can post events.
+- Organizer accounts require approval before they can post events. **Approval is not a
+  background check** — see section 7.
 
 ## 3. Your account
 
@@ -76,24 +120,107 @@ are not going to remove it.
 
 ## 4. What you may not do
 
-Do not:
+This is the acceptable-use section. Do not:
+
+**To other people**
 
 - Harass, bully, threaten, or intimidate anyone
 - Post or send anything sexual involving a minor, ever, in any form
-- Lie about your identity, age, or role, or impersonate anyone
-- Claim volunteer hours you did not work, or help anybody else do so
+- Comment on another user's body or appearance, or ask anyone for photos
+- Ask a student to keep a conversation secret from their parents, guardians, or teachers
+- Ask a student for private contact details — phone number, home address, social media handles
+- Offer anyone money, gifts, alcohol, vapes, or drugs
+- Ask to meet a student alone, anywhere, for any reason
+
+**With information**
+
+- Lie about your identity, age, grade, school, or role, or impersonate anyone
 - Share another person's private information — their contact details, address, photo, or
   schedule — without their permission
-- Use another student's contact details for anything other than the event you got them for
-- Try to break, overload, scrape, or get around the security of the service
+- Use a student's contact details for anything other than the event you received them for
+- Use certificate verification to find out whether a particular person volunteers, to collect
+  students' names, or to try codes at scale
+
+**With the service itself**
+
+- Claim volunteer hours you did not work, or help anybody else do so
+- Create more than one account, or create an account to get around a block or a suspension
+- Try to influence an Auto Select draw, a leaderboard position, or an hours total by any means
+  other than volunteering — including coordinating with an organizer to record hours that were
+  not worked
+- File reports you know to be false, or use the Report button to harass someone
+- Scrape, bulk-download, or automate access to WeVolunteer; use bots or scripts against it; or
+  resell access to it
+- Try to break, overload, probe, or get around the security of the service, or access an
+  account, event, or record you were not given access to
 - Use WeVolunteer to advertise, recruit, sell, or fundraise for anything unrelated to a
   volunteer event
 - Post anything illegal
 
 The [Community Guidelines](03-community-guidelines.md) explain what these look like in
-practice. Breaking them is breaking these terms.
+practice, and they are part of these terms. Breaking them is breaking these terms.
 
-## 5. Volunteer hours are a record, not a promise
+## 5. What you are responsible for
+
+Everyone is responsible for the rules in section 4. Beyond that, the two roles carry different
+obligations, because they hold different amounts of other people's information.
+
+### 5.1 If you are a student volunteer
+
+- **Be accurate.** Your name, grade, and school are how an organizer knows who is coming.
+- **Turn up, or say you cannot.** If you are accepted and something changes, withdraw or tell
+  the organizer. Repeatedly signing up and not appearing takes a place from someone else.
+- **Do not claim hours you did not work,** and do not ask an organizer to credit them.
+- **Look after other students' information.** If you learn another volunteer's contact details
+  through an event, they are for that event.
+- **Tell an adult where you are going.** Before you go somewhere to volunteer, especially
+  somewhere new, tell a parent, guardian, or another adult you trust. This is not boilerplate;
+  it is the actual advice, and it is the main thing we cannot do for you.
+- **Report what worries you.** You will not get in trouble for reporting something that turns
+  out to be nothing. See the [Youth Safety Guidelines](08-youth-safety-guidelines.md).
+
+### 5.2 If you are an organizer
+
+Organizer accounts carry obligations student accounts do not, because organizers receive
+minors' contact details. The full set is in the
+[Organizer Agreement](09-organizer-agreement.md). These are the commitments at the level of
+these terms, and they bind you from the moment your organizer account is approved:
+
+- **Protect student information.** Names, email addresses, grade levels, and attendance you
+  receive through WeVolunteer are confidential. Do not share them with anyone who does not need
+  them to run the event in front of you — including other organizers, colleagues, other
+  departments of your own organization, and your family.
+- **Use contact details only for the event they came from.** No mailing lists, no newsletters,
+  no CRM, no recruiting for anything else, no fundraising, no personal address book, and no use
+  after the event is over. Delete any copy you made outside WeVolunteer within **30 days** of
+  the event finishing.
+- **Communicate appropriately, and on the platform.** Message students through WeVolunteer,
+  about the event they applied to. Do not move a conversation to text, personal email, or a
+  social app — on-platform messages can be reviewed if there is ever a problem and a message
+  from your personal phone cannot. Never ask a student to keep a conversation from their
+  parents, guardians, or teachers. Never comment on a student's appearance and never send
+  anything sexual.
+- **Record attendance and hours accurately.** The hours you credit become part of a student's
+  record and may count toward graduation, a scholarship, or a college application. Record what
+  actually happened. Do not round up as a favour and do not withhold hours a student earned as
+  a punishment. If you make a mistake, tell us — do not quietly adjust it later.
+- **Follow the safety rules.** At least two adults present at all times; never alone with a
+  single student, at any point, for any reason; and the permissions, insurance, and supervision
+  your activity actually requires. See the
+  [Youth Safety Guidelines](08-youth-safety-guidelines.md).
+- **Never misuse a student's contact information** — not to recruit, not to solicit, not to
+  contact them about anything other than the event they applied to, and not after it ends.
+- **Report suspected harm to a child yourself.** New Jersey law requires *any person* with
+  reasonable cause to believe a child has been abused or neglected to report it immediately to
+  the Division of Child Protection and Permanency at **1-877-NJ-ABUSE**
+  (N.J.S.A. 9:6-8.10). Telling us instead does not discharge that duty. Tell us as well, so we
+  can act on the platform.
+- **Do not represent that WeVolunteer has vetted you.** We have not.
+
+Breaking any of these is grounds for removing your organizer account, and for anything
+involving a risk to a student we will act first and explain afterwards.
+
+## 6. Volunteer hours are a record, not a promise
 
 This matters, so it is its own section.
 
@@ -109,14 +236,15 @@ This matters, so it is its own section.
   wevolunteer.platform@gmail.com. Once hours are credited we do not re-price them if the event is later
   edited — a credit is a snapshot of what was true when you earned it.
 
-## 6. Events happen in the real world
+## 7. Events happen in the real world
 
 WeVolunteer helps you find and apply to volunteer events. **We do not run the events.**
 
 The organizer is responsible for the event: supervision, safety, insurance, permissions, and
 following the law. We do not check organizers' insurance, run background checks on them, or
-inspect their venues. **No school or district does this for us either** — we are independent, so
-no one else has checked.
+inspect their venues. Approving an organizer account means an administrator looked at it —
+nothing more. **No school or district does this for us either** — we are independent, so no one
+else has checked.
 
 Before you go somewhere to volunteer, especially somewhere new, tell a parent or guardian
 where you are going. This is not legal boilerplate; it is the actual advice.
@@ -125,31 +253,72 @@ If something at an event makes you uncomfortable or unsafe, leave, and then tell
 wevolunteer.platform@gmail.com and tell an adult you trust. See the
 [Youth Safety Guidelines](08-youth-safety-guidelines.md).
 
-## 7. Things you post
+## 8. Who owns what
+
+### The platform is ours
+
+The WeVolunteer software, its design, its name and logo, and the text of these policies belong
+to the operator named at the top of this document. Using WeVolunteer does not give you any
+ownership of it or any licence to it beyond ordinary use of the service. Do not copy, resell,
+rebrand, or reverse-engineer it, and do not use its name or logo to suggest we endorse you.
+
+Nothing here stops you describing WeVolunteer, linking to it, quoting these policies, or
+telling anybody what you think of us.
+
+### What you post stays yours
 
 You keep ownership of what you write and upload — your bio, avatar, comments, and messages.
 
 By posting, you give us permission to store and display it as needed to run the service (for
-example, showing your comment on an event page to other people at that event). That
-permission ends when you delete the content or your account, except where we have said in the
+example, showing your comment on an event page to other people at that event). It is a
+permission to operate the platform and nothing more: we do not licence your content to anyone
+else, we do not use it in advertising, and we do not sell it. That permission ends when you
+delete the content or your account, except where we have said in the
 [Data Deletion Policy](04-data-deletion-policy.md) that something is kept, and why.
 
-Do not post anything you do not have the right to post.
+### Material you upload
+
+When you upload a file — an avatar, a photo, a document — you confirm that you made it or you
+have the right to use it, and that it does not contain someone else's private information. Do
+not upload a photo of another student without their permission.
 
 We may remove content that breaks these terms or the Community Guidelines. Where we do, we
 will tell you what was removed and why, unless telling you would interfere with a safety
 investigation.
 
-## 8. Suspending or closing accounts
+If you believe something on WeVolunteer infringes your copyright, email
+wevolunteer.platform@gmail.com with a link to it, what it copies, and how to reach you. We will
+look at it, and we will usually take the content down while we do.
 
-We may suspend or close an account that breaks these terms. Where we can, we will warn first
+## 9. Suspending or closing accounts
+
+**Suspension.** We may suspend an account while we look into something. A suspension ends every
+session that account has, on every device, immediately — not at the next sign-in. Your
+volunteer hours and attendance are untouched by a suspension.
+
+**Removal.** We may close an account that breaks these terms. Where we can, we will warn first
 and explain what happened. For anything involving a risk to a student's safety, we will act
 first and explain after.
 
-You can close your own account whenever you like, from Settings. See the
-[Data Deletion Policy](04-data-deletion-policy.md) for exactly what happens.
+**What we take into account.** What happened, whether it was deliberate, whether it has
+happened before, and whether anyone was put at risk. The ladder of consequences is published in
+the [Community Guidelines](03-community-guidelines.md), and anything on the "never" list there
+skips it.
 
-## 9. What we do not promise
+**Appeals.** If you think we got it wrong, email wevolunteer.platform@gmail.com saying what
+happened and why you disagree. We reply within **5 business days** with the outcome and the
+reason. If we were wrong, we say so and we undo it.
+
+We will be straight about the limit of that: WeVolunteer is one person. We cannot always
+promise that a different person reviews your appeal than the one who made the original
+decision. We will tell you who reviewed it. We would rather say that than promise an
+independence we cannot deliver.
+
+**Closing your own account.** You can do it whenever you like, from Settings. See the
+[Data Deletion Policy](04-data-deletion-policy.md) for exactly what happens — including the
+parts that are kept, which you should read before you decide rather than after.
+
+## 10. What we do not promise
 
 WeVolunteer is provided **as is**. In plain terms: we work hard to keep it running correctly,
 but we cannot promise it will never be unavailable, never lose data, or never have a bug. To
@@ -159,53 +328,127 @@ particular purpose, and non-infringement.
 We do not promise that any event will happen, that any organizer is suitable, or that you
 will be selected for anything you apply to.
 
-## 10. Limits on what we owe you
+## 11. Limits on what we owe you
 
-To the extent the law allows, and **except where the harm was caused by our own recklessness
-or intentional misconduct**, we are not liable for indirect, incidental, or consequential
-losses, and our total liability to you is limited to **[[LIABILITY_CAP]]**.
+Read this section. It decides who carries a loss when something goes wrong, and it is written
+to be honest rather than maximal.
 
-Some states do not allow these limits, so parts of this section may not apply to you. Nothing
-in these terms limits liability that cannot legally be limited — including, for the avoidance
-of doubt, liability for personal injury caused by our negligence.
+### What we do not limit at all
 
-> **Note for counsel:** the cap is left unset deliberately. For a free service operated by
-> [[ENTITY]], a nominal cap (e.g. $100, or fees paid) is conventional, but a cap that reads as
-> derisory against a child-safety claim is worse than no cap at all in front of a jury. Advise.
+Nothing in these terms limits or excludes our liability for:
 
-## 11. Indemnity
+- **death or personal injury** caused by our negligence;
+- our own **fraud** or fraudulent misrepresentation;
+- our **gross negligence or willful misconduct**;
+- anything else the law does not allow us to limit or exclude.
+
+We are saying this first, and plainly, because a sole proprietor cannot lawfully disclaim those
+things in New Jersey or in most other states — and a document that pretends otherwise is less
+likely to be enforced, not more.
+
+### What we do limit
+
+Subject to the section above, and to the extent New Jersey law allows:
+
+- We are not liable for **indirect, incidental, special, or consequential** losses. For
+  example: a scholarship you were not awarded, a place you did not get, or a requirement you
+  did not meet, where WeVolunteer was not the direct cause.
+- We are not liable for the **acts or omissions of an organizer, another user, or anyone else
+  at an event.** We do not run events, supervise them, or vet the people running them, and we
+  say so in section 7 rather than only here.
+- We are not liable for what a **third party** does with information you chose to give it —
+  including anyone you hand a certificate code to.
+- For everything else, taken together, our total liability to you is limited to
+  **[[TODO: liability cap — owner and counsel to set a figure. See the note below; the drafting
+  recommendation is a small, honest number (for example $100) rather than "fees paid," since
+  the service is free and "fees paid" would read as zero.]]**
+
+### If you are under 18
+
+If a court decides any part of this section cannot be applied to you because of your age, that
+part simply does not apply to you and the rest of the section still does. We are not going to
+argue that a minor waived something a minor cannot waive.
+
+Some states do not allow some of these limits at all. Where that is true, the limit does not
+apply to you and nothing else in this section changes.
+
+> **Note for counsel, kept in the published version because it is honest rather than
+> embarrassing:** this section is deliberately weaker than a standard consumer ToS. The
+> carve-outs for gross negligence, willful misconduct, and personal injury are stated rather
+> than buried in a "to the extent permitted" catch-all, because for a sole proprietor
+> operating a platform used by minors they are not waivable in practice and an aggressive cap
+> read to a jury in a child-safety case is worse than a modest one. Where this leaves the
+> operator genuinely exposed is a matter of insurance, not drafting.
+
+## 12. Indemnity
 
 If you break these terms and that causes a third party to make a claim against us, you agree
-to cover our reasonable costs. **This section does not apply to users under 18** — we are not
-asking minors to indemnify us, and we would not enforce it if we did.
+to cover our reasonable costs.
 
-## 12. Changes
+**This section does not apply to users under 18.** We are not asking minors to indemnify us,
+and we would not enforce it if we did. For organizers, who are adults and who receive minors'
+contact details, it does apply.
+
+## 13. Changes
 
 We may change these terms. If a change matters, we will tell you in the app at least
 **30 days** before it takes effect, and you can close your account if you do not agree. We
 will not change them quietly.
 
-Old versions stay available at [[POLICY_ARCHIVE_URL]].
+A change that leaves you worse off — new collection, new sharing, a right taken away, a longer
+retention period — gets a new major version and we ask you to accept it again. A clarification
+gets a minor version and notice only.
 
-## 13. Which law applies
+Old versions stay available at
+**[[TODO: policy archive URL — depends on the public URL decision. Until this is a real link,
+the archive commitment in this section, in the Privacy Policy, and in the Cookie Notice is
+unkeepable.]]**
 
-These terms are governed by the laws of **[[GOVERNING_STATE — recommended: New Jersey]]**,
-without regard to conflict-of-laws rules. Any dispute goes to the state or federal courts
-located in **[[VENUE_COUNTY]], New Jersey**.
+## 14. If we disagree
 
-There is no arbitration clause and no class-action waiver in these terms. That is a
-deliberate choice: forcing minors and their families into arbitration over a free school
-service is not a good look and is increasingly disfavoured by courts. [[Counsel: confirm.]]
+We would much rather fix a problem than argue about one, so:
 
-## 14. Odds and ends
+1. **Tell us first.** Email wevolunteer.platform@gmail.com describing what happened and what
+   you would like us to do. We will acknowledge within **10 business days**.
+2. **We try to sort it out within 30 days.** Most things are a mistake, a missing record, or a
+   misunderstanding, and they get fixed at this step.
+3. **If that does not work,** either of us can take it to court — see section 15.
+
+**There is no arbitration clause in these terms and no class-action waiver.** That is a
+deliberate choice: forcing minors and their families into private arbitration over a free
+service is not something we are willing to do, and courts increasingly disfavour it.
+[[TODO: counsel to confirm the no-arbitration, no-class-action-waiver choice, and confirm New
+Jersey law and Middlesex County venue in section 15, before publication.]]
+
+**Step 1 is not a precondition for anything that matters.** Nothing in this section stops you,
+or requires you to wait, before calling 911, reporting suspected child abuse to DCP&P at
+1-877-NJ-ABUSE, telling your school, or contacting the New Jersey Division of Consumer Affairs,
+the Attorney General, or the FTC. This section is about disagreements over the service, not
+about safety.
+
+## 15. Which law applies
+
+These terms are governed by the laws of the **State of New Jersey**, without regard to
+conflict-of-laws rules. Any dispute that reaches a court goes to the state or federal courts
+located in **Middlesex County, New Jersey**.
+
+If you are a consumer somewhere whose own law gives you rights you cannot waive, this section
+does not take them away from you.
+
+## 16. Odds and ends
 
 - If any part of these terms is unenforceable, the rest still stands.
 - Not enforcing something once does not mean we give up the right to enforce it later.
-- You may not transfer your account or your rights under these terms to anyone else.
+- You may not transfer your account or your rights under these terms to anyone else. We may
+  transfer ours if the operator's legal form changes — for example on becoming an LLC — and we
+  will tell you if that happens.
 - These terms, plus the policies they link to, are the whole agreement between us.
 
-## 15. Contact
+## 17. Contact
 
-**[[LEGAL_ENTITY_NAME]]**
-[[POSTAL_ADDRESS]]
+The operator named at the top of this document, at:
+
+[[TODO: postal address — required on a published ToS and for regulator and legal correspondence.
+Owner to supply the address to print; a home address may not be the right answer, so this may
+need a mail-forwarding or registered-agent decision first.]]
 wevolunteer.platform@gmail.com

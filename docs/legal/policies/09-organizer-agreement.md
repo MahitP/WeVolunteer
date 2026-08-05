@@ -16,8 +16,20 @@ confidentiality · no onward disclosure · deletion after the event · contact r
 safety · mandated reporting · accurate hours · what we may do · term and termination ·
 acknowledgement.
 
-**Decisions required.** DECISION 1 (in Posture A, the district may impose its own terms that
-supersede) · DECISION 3 (messaging scope) · DECISION 7 (who is the counterparty).
+**Decisions resolved.**
+- **Counterparty** — Mahit Pulavarthi, a sole proprietor doing business as WeVolunteer, named in
+  exactly one place in the draft (the operator block in §1) so a future change of legal form
+  edits one block and a version number.
+- **Posture** — independent platform. No district imposes terms here and none supersedes this
+  agreement. An organizer's own employer or school may impose stricter rules on the organizer,
+  which is a different thing and is addressed in §1.
+- **Messaging scope** — applicants only, and it is **enforced in code**, not merely promised:
+  `eligibleRelationship()` refuses a conversation with a student who has not applied to one of
+  your events (covered by `server/messaging.applicantScope.test.js`). §6 now states the rule
+  directly instead of carrying a branch.
+- **Guardian contact** — WeVolunteer holds **no guardian contact details at all** and no
+  mechanism collects any. §10 previously implied we could notify a student's guardian; it now
+  says what we can actually do.
 
 > **Needs counsel review.** Also needs a product change: acceptance must be **recorded** —
 > version, timestamp, identity — and gated on `organizer.approve`. An agreement that is
@@ -34,7 +46,7 @@ no legal effect.
 
 # WeVolunteer Organizer Agreement
 
-**Version [[VERSION]] · [[DATE]]**
+**Version 1.0 · 2026-08-05**
 
 You are applying to post volunteer events for students. Most of those students are minors.
 This agreement sets out what you may do with what you learn about them.
@@ -44,7 +56,14 @@ confirmation is recorded.
 
 ## 1. Who this binds
 
-This is an agreement between you personally and **[[LEGAL_ENTITY_NAME]]**. If you are acting
+> **THE OPERATOR — the only place in this document that names the legal entity.**
+> WeVolunteer is operated by **Mahit Pulavarthi, a sole proprietor doing business as
+> WeVolunteer**, based in South Brunswick, Middlesex County, New Jersey. That person is the
+> other party to this agreement. Everywhere else this document says "we," "us," or
+> "WeVolunteer," it means that person. If the operator later becomes an LLC, a corporation, or a
+> nonprofit, this block changes and almost nothing else does.
+
+This is an agreement between you personally and the operator named above. If you are acting
 for an organization, it binds that organization too, and you confirm you are allowed to agree
 on its behalf.
 
@@ -101,9 +120,9 @@ at wevolunteer.platform@gmail.com before you do.
 - **Message students through WeVolunteer**, not through personal channels. On-platform
   messages can be reviewed if there is ever a problem. A text from your personal phone
   cannot.
-- **Only about the event they applied to.**
-  [[DECISION 3: if the answer is "applicants only," add: "Do not contact a student who has
-  not applied to an event you run."]]
+- **Only about the event they applied to.** Do not contact a student who has not applied to an
+  event you run. *The platform enforces this — you will not be able to open a conversation with
+  a student who has not applied to one of your events.*
 - **Never ask a student to keep a conversation private** from their parents, guardians, or
   teachers.
 - **Never ask for personal contact details** — phone number, home address, social media
@@ -157,8 +176,13 @@ We may:
 - Review your events, messages, and attendance records if there is a report or a concern
 - Ask you to correct or remove content
 - Suspend or remove your organizer account
-- Tell the authorities, and the student's school and guardian, about conduct that puts a
-  student at risk
+- Report conduct that puts a student at risk to the authorities — including DCP&P and the
+  police — and tell the student's school or guardian where we are able to reach them
+
+On that last point, so that nobody relies on something we cannot do: **WeVolunteer does not
+collect guardian contact details.** We can always report to the authorities, and we can always
+suspend an account. We can only reach a guardian if the student has told us how, or if a school
+or the authorities put us in touch. Do not assume a guardian has been informed.
 
 For anything involving a student's safety, we will act first and explain afterwards.
 
@@ -196,5 +220,9 @@ By accepting, you confirm:
 - [ ] I will record volunteer hours accurately.
 - [ ] I understand WeVolunteer has not run a background check on me.
 
-**Accepted by:** [[NAME]] · **Organization:** [[ORG]] · **Date:** [[TIMESTAMP]] ·
-**Version:** [[VERSION]]
+**Accepted by:** *your name, from your account* · **Organization:** *the organization you gave
+on your organizer application* · **Date and time:** *recorded automatically when you accept* ·
+**Version:** *1.0 — the version of this document you were shown*
+
+*These four values are filled in from your account and stored with your acceptance. They are
+not blanks for you to type.*
