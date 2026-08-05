@@ -6159,8 +6159,8 @@ input:disabled + .premium-slider {
    the copy on a phone. The text stays left-aligned: centring it here would give
    back the exact quality the layout was built to avoid. */
 @media (max-width: 60rem) {
-  /* `[data-error-weight]` is carried on every `.err`, so this matches all three
-     weights — and it is here to WIN, not to filter. The weight rules above are
+  /* `[data-error-weight]` is carried on every `.err`, so this matches every
+     weight — and it is here to WIN, not to filter. The weight rules above are
      `.err[data-error-weight='x'] .err-scene`, three classes; a bare `.err-scene`
      is one and would lose to them inside this query, silently keeping a desktop
      height cap on a stacked phone layout. Matching their specificity and coming
