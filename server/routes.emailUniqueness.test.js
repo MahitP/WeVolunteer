@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { DatabaseSync } from 'node:sqlite';
-import { startTestServer } from './testServer.js';
+import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 
 /**
  * F-11: email uniqueness must be case-insensitive, on write and on lookup,
@@ -21,7 +21,7 @@ describe('case-insensitive email uniqueness (API)', () => {
     await srv.close();
   });
 
-  const signup = (email, overrides = {}) => srv.call('POST', '/api/auth/signup', {
+  const signup = (email, overrides = {}) => srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
     email, password: 'Password123', name: 'Test User',
     username: `u${Math.random().toString(36).slice(2, 9)}`,
     role: 'student', grade: '10',

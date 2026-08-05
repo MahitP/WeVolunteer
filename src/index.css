@@ -214,7 +214,28 @@
   --modal-overlay-strong: rgba(18, 32, 25, 0.62);
   --popover-bg: rgba(255, 255, 255, 0.96);
   --input-bg: var(--surface);
-  --input-border: var(--rule-strong);
+  /**
+   * Split from --rule-strong, which it used to alias.
+   *
+   * WCAG 2.1 AA §1.4.11 requires 3:1 for the visual boundary of a UI component.
+   * A form field's border IS that boundary — it is the only thing telling a
+   * low-vision user where the input is. --rule-strong (#bdc2cd) gave 1.74:1 on
+   * --surface and 1.61:1 on the page background: a real AA failure on every
+   * form in the product, including the certificate-verify field, the DELETE
+   * confirmation, and the step-up password prompt.
+   *
+   * --rule-strong itself is NOT changed. Its other consumers are decorative
+   * separators between text blocks, where 1.4.11 does not apply and where the
+   * subtlety is deliberate; darkening it would coarsen every card and table in
+   * the app to fix a problem those rules do not have.
+   *
+   * #828b99 keeps the slate hue of the --neutral-* ramp and measures 3.35:1 on
+   * --surface (#fbfcfd) and 3.10:1 on --bg-primary (#f1f3f6). Both clear 3:1;
+   * the surface figure is the binding one because it is the lighter backdrop.
+   * Verified by src/inputContrast.test.js, which recomputes the ratio from
+   * these token values rather than trusting this comment.
+   */
+  --input-border: #828b99;
   --input-border-hover: var(--ink-3);
   --control-shadow: 0 1px 3px rgba(18, 32, 25, 0.1);
   --danger-soft-border: rgba(180, 35, 24, 0.2);
@@ -357,8 +378,12 @@
   --modal-overlay-strong: rgba(2, 6, 4, 0.84);
   --popover-bg: rgba(26, 33, 29, 0.96);
   --input-bg: rgba(255, 255, 255, 0.03);
-  --input-border: var(--rule-strong);
-  --input-border-hover: rgba(199, 208, 203, 0.34);
+  /* Same 1.4.11 fix as light mode, and dark mode was worse: --rule-strong
+     resolves to rgba(199,208,203,0.24) here, which composites to roughly
+     1.15:1 against the input's own background. 0.46 alpha measures 3.28:1
+     over --input-bg composited on --surface. */
+  --input-border: rgba(199, 208, 203, 0.46);
+  --input-border-hover: rgba(199, 208, 203, 0.62);
   --control-shadow: 0 1px 3px rgba(0, 0, 0, 0.34);
   --danger-soft-border: rgba(248, 113, 113, 0.24);
   --notification-unread-bg: rgba(52, 211, 153, 0.16);

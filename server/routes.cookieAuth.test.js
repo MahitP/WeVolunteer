@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { startTestServer } from './testServer.js';
+import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 
 let srv;
 beforeAll(async () => { srv = await startTestServer(); });
@@ -135,6 +135,7 @@ describe('login and signup issue a session cookie', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        ...TEST_SIGNUP_DEFAULTS,
         email: `cookie-${suffix}@example.org`, password: 'Password123',
         name: 'Cookie Test', role: 'student', grade: '10', username: `cookie_${suffix}`
       })
@@ -285,7 +286,7 @@ describe('severed Authorization header fallback', () => {
     const signupRes = await fetch(`${srv.base}/api/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'test_no_token@example.com', password: 'Password123', name: 'Test', role: 'student', grade: '9', username: 'test_no_token' })
+      body: JSON.stringify({ ...TEST_SIGNUP_DEFAULTS, email: 'test_no_token@example.com', password: 'Password123', name: 'Test', role: 'student', grade: '9', username: 'test_no_token' })
     });
     const signupBody = await signupRes.json();
     expect(signupBody.token).toBeUndefined();

@@ -17,7 +17,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { startTestServer } from './testServer.js';
+import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 
 let srv;
 beforeAll(async () => {
@@ -33,7 +33,7 @@ afterAll(async () => {
 
 const rnd = () => Math.random().toString(36).slice(2, 9);
 
-const signup = (over = {}) => srv.call('POST', '/api/auth/signup', {
+const signup = (over = {}) => srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
   email: `delete-${rnd()}@example.org`,
   password: 'Password123', name: 'Delete Me', role: 'student', grade: '10',
   username: `delete_${rnd()}`,
@@ -216,7 +216,7 @@ describe('Account Deletion System', () => {
     // Sign up through the provider, which is what produces the '!OAUTH_ONLY!'
     // sentinel and the linked oauth_accounts row.
     const urlRes = await srv.call('POST', '/api/oauth/google/url', {
-      signupData: { name: 'Provider Only', username, role: 'student', grade: '10', skills: [] }
+      signupData: { ...TEST_SIGNUP_DEFAULTS, name: 'Provider Only', username, role: 'student', grade: '10', skills: [] }
     });
     expect(urlRes.status).toBe(200);
     const state = new URL(urlRes.body.url).searchParams.get('state');
@@ -260,7 +260,7 @@ describe('Account Deletion System', () => {
     const username = `wrongsub_${rnd()}`;
 
     const urlRes = await srv.call('POST', '/api/oauth/google/url', {
-      signupData: { name: 'Wrong Sub', username, role: 'student', grade: '10', skills: [] }
+      signupData: { ...TEST_SIGNUP_DEFAULTS, name: 'Wrong Sub', username, role: 'student', grade: '10', skills: [] }
     });
     const state = new URL(urlRes.body.url).searchParams.get('state');
     const nonceCookie = (urlRes.headers.get('set-cookie') || '').match(/(wev_oauth_state_[a-f0-9]{8}=[^;]+)/)?.[1];

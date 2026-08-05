@@ -73,7 +73,9 @@ export default function Signup({ onSignupSuccess, addToast }) {
     avatar: '👤',
     school: '',
     skillsInput: '',
-    privacyAccepted: false
+    dateOfBirth: '',
+    termsAccepted: false,
+    privacyAcknowledged: false
   });
 
   const [errors, setErrors] = useState({});
@@ -151,7 +153,16 @@ export default function Signup({ onSignupSuccess, addToast }) {
     if (failed) return `Username: ${failed.label.toLowerCase()}.`;
     if (usernameStatus === 'checking') return 'Checking whether that username is free…';
     if (usernameStatus === 'taken') return 'That username is already taken.';
-    if (PRIVACY_URL && !form.privacyAccepted) return 'Please confirm you have read the privacy notice.';
+    /* The age gate. Enforced server-side (accountValidation.js); this only
+       explains the refusal before the request rather than after it. */
+    if (!form.dateOfBirth) return 'Enter your date of birth.';
+    /* Both consent controls are required, unconditionally. This used to be
+       gated on PRIVACY_URL being set, which meant a default build asked for
+       nothing — and the answer never reached the server in any build, because
+       baseFields() dropped it. The API now refuses a signup without consent
+       (server/consent.js). */
+    if (!form.termsAccepted) return 'Please agree to the Terms of Service to continue.';
+    if (!form.privacyAcknowledged) return 'Please confirm you have seen how we handle your information.';
     return null;
   })();
 
@@ -195,6 +206,23 @@ export default function Signup({ onSignupSuccess, addToast }) {
   };
 
   const baseFields = () => ({
+    /**
+     * The consent block, on both signup paths.
+     *
+     * baseFields() feeds the password submit AND finishProviderSignup(), so
+     * putting consent here is what makes the provider path carry it too — the
+     * hole most likely to be missed, and the one that would make the whole
+     * record worthless.
+     *
+     * Keys are the camelCased document slugs the server expects; the Terms
+     * control also covers the Community Guidelines, which are incorporated by
+     * reference and recorded as their own acceptance row server-side.
+     */
+    consent: {
+      termsOfService: form.termsAccepted,
+      privacyPolicy: form.privacyAcknowledged,
+    },
+    dateOfBirth: form.dateOfBirth,
     name: form.name.trim(),
     username: form.username.trim(),
     role: form.role,
@@ -604,25 +632,108 @@ export default function Signup({ onSignupSuccess, addToast }) {
             <span id="su-skills-hint" className="field-hint">Separate with commas. Organizers use these when choosing volunteers.</span>
           </div>
 
-          {PRIVACY_URL && (
+          {/*
+            Date of birth: the age gate.
+
+            Asked neutrally — the form does not state the minimum age before
+            asking, because a screen that announces "you must be 13" teaches a
+            child which answer to give. The server refuses under-13 and returns
+            `code: 'under_minimum_age'`; it never echoes the computed age back.
+
+            `max` stops the date picker offering the future; it is a
+            convenience, not the check.
+          */}
+          <div className="field">
+            <label htmlFor="su-dob">Date of birth</label>
+            <input
+              id="su-dob"
+              name="dateOfBirth"
+              type="date"
+              className="input"
+              value={form.dateOfBirth}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={e => set('dateOfBirth', e.target.value)}
+              aria-invalid={!!errors.dateOfBirth}
+              aria-describedby="su-dob-hint"
+            />
+            <span id="su-dob-hint" className="field-hint">
+              We ask because WeVolunteer is for students in grade 9 and up.
+            </span>
+            {errors.dateOfBirth && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.dateOfBirth}</span>}
+          </div>
+
+          {/*
+            Consent.
+
+            Two controls, not one and not four. The Terms are a contract and
+            need an affirmative act; the Privacy Policy is a disclosure, so the
+            verb is "seen", not "agree" — asking a fourteen-year-old to *agree*
+            to a privacy notice implies they could disagree and still sign up.
+            Community Guidelines share the Terms checkbox because they are
+            incorporated by reference; the server still records them as their
+            own acceptance row so the evidence names every document.
+
+            No longer wrapped in `{PRIVACY_URL && …}`. That gate meant a default
+            build rendered no consent control at all, and the answer never
+            reached the server in any build because baseFields() dropped it.
+            Links open in a new tab so opening the Terms cannot cost the user
+            the form they have half-filled.
+          */}
+          <div className="stack-sm" style={{ marginTop: 'var(--s4)' }}>
+            <p className="small dim">
+              We store your name, email, and grade so organizers know who is volunteering.
+              Your profile is private unless you change it, and you can download or delete
+              everything later.
+            </p>
+
+            <div className="field row">
+              <input
+                id="su-terms"
+                type="checkbox"
+                checked={form.termsAccepted}
+                onChange={e => set('termsAccepted', e.target.checked)}
+                aria-invalid={!!errors.termsAccepted}
+                aria-describedby="su-terms-links"
+                style={{ width: 20, height: 20, marginTop: 4 }}
+              />
+              <div className="stack-xs" style={{ flex: 1 }}>
+                <label htmlFor="su-terms" style={{ cursor: 'pointer' }}>
+                  I agree to the Terms of Service and to follow the Community Guidelines.
+                </label>
+                <span id="su-terms-links" className="small dim">
+                  <a className="auth-link" href="/legal/terms" target="_blank" rel="noopener noreferrer">Read the Terms</a>
+                  {' · '}
+                  <a className="auth-link" href="/legal/guidelines" target="_blank" rel="noopener noreferrer">Read the Guidelines</a>
+                </span>
+                {errors.termsAccepted && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.termsAccepted}</span>}
+              </div>
+            </div>
+
             <div className="field row">
               <input
                 id="su-privacy"
                 type="checkbox"
-                checked={form.privacyAccepted}
-                onChange={e => set('privacyAccepted', e.target.checked)}
-                aria-invalid={!!errors.privacyAccepted}
+                checked={form.privacyAcknowledged}
+                onChange={e => set('privacyAcknowledged', e.target.checked)}
+                aria-invalid={!!errors.privacyAcknowledged}
+                aria-describedby="su-privacy-links"
                 style={{ width: 20, height: 20, marginTop: 4 }}
               />
               <div className="stack-xs" style={{ flex: 1 }}>
                 <label htmlFor="su-privacy" style={{ cursor: 'pointer' }}>
-                  I have read the{' '}
-                  <a className="auth-link" href={PRIVACY_URL} target="_blank" rel="noopener noreferrer">privacy notice</a>
+                  I&rsquo;ve seen how WeVolunteer handles my information.
                 </label>
-                {errors.privacyAccepted && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.privacyAccepted}</span>}
+                <span id="su-privacy-links" className="small dim">
+                  <a className="auth-link" href={PRIVACY_URL} target="_blank" rel="noopener noreferrer">Read the Privacy Policy</a>
+                </span>
+                {errors.privacyAcknowledged && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.privacyAcknowledged}</span>}
               </div>
             </div>
-          )}
+
+            <p className="small dim">
+              Under 18? Please go through this with a parent or guardian.
+            </p>
+          </div>
 
           <div style={{ marginTop: 'var(--s4)' }}>
             <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={loading || !!detailsBlocker}>

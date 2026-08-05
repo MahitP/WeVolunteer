@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { startTestServer } from './testServer.js';
+import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 
 /**
  * The account-enumeration surface, pinned.
@@ -150,7 +150,7 @@ describe('login: the deliberate oracle, pinned so it cannot drift unnoticed', ()
 
 describe('signup reports a taken identity, which it must to be usable', () => {
   it('says the email is taken rather than failing opaquely', async () => {
-    const res = await srv.call('POST', '/api/auth/signup', {
+    const res = await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       name: 'Dup', grade: '11', role: 'student', school: 'SB',
       email: REAL, username: 'dupuser1', password: 'GoodPass123!'
     });
@@ -159,7 +159,7 @@ describe('signup reports a taken identity, which it must to be usable', () => {
   });
 
   it('does not disclose anything about the existing account', async () => {
-    const res = await srv.call('POST', '/api/auth/signup', {
+    const res = await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       name: 'Dup', grade: '11', role: 'student', school: 'SB',
       email: REAL, username: 'dupuser2', password: 'GoodPass123!'
     });

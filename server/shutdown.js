@@ -33,6 +33,7 @@ import { stopNotificationWorker } from './workers/notificationWorker.js';
 import { stopExportWorker } from './workers/exportWorker.js';
 import { releaseInstanceLock, stopInstanceLockHeartbeat } from './instanceLock.js';
 import { stopAutoSelectScheduler } from './services/autoSelectScheduler.js';
+import { stopRetentionWorker } from './workers/retentionWorker.js';
 
 /**
  * How long to wait for in-flight requests before giving up on them.
@@ -92,6 +93,7 @@ export async function shutdown({ signal, httpServer, io, intervals = [] }) {
   stopExportWorker();
   stopInstanceLockHeartbeat();
   stopAutoSelectScheduler();
+  stopRetentionWorker();
 
   /**
    * 3. Disconnect realtime clients.

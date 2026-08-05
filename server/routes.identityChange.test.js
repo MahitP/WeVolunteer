@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
+import { TEST_SIGNUP_DEFAULTS } from './testConsent.js';
 
 /**
  * Changing the email address, the password, and the username (audit findings
@@ -64,7 +65,7 @@ async function makeProviderOnlyUser(over = {}) {
   const sub = `sub-${username}`;
 
   const urlRes = await srv.call('POST', '/api/oauth/google/url', {
-    signupData: { name: 'Provider Person', username, role: 'student', grade: '10', skills: [] }
+    signupData: { ...TEST_SIGNUP_DEFAULTS, name: 'Provider Person', username, role: 'student', grade: '10', skills: [] }
   });
   const state = new URL(urlRes.body.url).searchParams.get('state');
   const nonceCookie = (urlRes.headers.get('set-cookie') || '').match(/(wev_oauth_state_[a-f0-9]{8}=[^;]+)/)?.[1];
@@ -338,7 +339,7 @@ describe('U2 — changing the email address', () => {
    * correcting the address has to be one of the things inside it.
    */
   it('is reachable by an UNCONFIRMED account, which is the whole point', async () => {
-    const signup = await srv.call('POST', '/api/auth/signup', {
+    const signup = await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       name: 'Typo Person',
       email: `typo-${rnd()}@example.org`,
       username: `typo_${rnd()}`,

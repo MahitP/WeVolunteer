@@ -253,7 +253,12 @@ describe('authorization hygiene', () => {
      * "may this kind of actor do X" pattern Guard 1 exists to ban.
      */
     const REVIEWED_NON_AUTH_EXCEPTIONS = new Set([
-      './routes/authRoutes.js:223',
+      // `fields.role === 'organizer' ? 0 : 1` — chooses the initial `verified`
+      // value for a brand-new account, i.e. whether staff must approve it. Not
+      // an authorization decision about a caller: there is no principal yet.
+      // Moved from :223 when the signup handler gained its server-side consent
+      // gate (recordAcceptances / assertConsent).
+      './routes/authRoutes.js:257',
       // Moved from :379 in v1.2b Task 5 when `resolveProvider` gained an
       // export and the docstring above it explaining why; to :405 in Task 6
       // (the local `issueSession` became an import with a docstring explaining
@@ -274,7 +279,7 @@ describe('authorization hygiene', () => {
       // authorization decision — it sets a new signup's initial approval state,
       // which is a fact about the row being written, not about what its holder
       // may then do.
-      './routes/oauthRoutes.js:526',
+      './routes/oauthRoutes.js:554',
     ]);
     const consumedExceptions = new Set();
 
@@ -450,10 +455,10 @@ describe('authorization hygiene', () => {
       'src/components/EventComments.jsx:83': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
       'src/components/EventComments.jsx:84': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
       'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
-      'src/views/Signup.jsx:94': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'the signup form\'s own role <select> value, defaulting the grade field — there is no session and no principal at this point' },
-      'src/views/Signup.jsx:183': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'toast tone for the account just requested (organizers await approval); form state, not an actor' },
-      'src/views/Signup.jsx:203': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which school value to submit for the account being created; form state, not an actor' },
-      'src/views/Signup.jsx:244': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which fields the signup form shows for the selected account type; form state, not an actor' },
+      'src/views/Signup.jsx:96': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'the signup form\'s own role <select> value, defaulting the grade field — there is no session and no principal at this point' },
+      'src/views/Signup.jsx:194': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'toast tone for the account just requested (organizers await approval); form state, not an actor' },
+      'src/views/Signup.jsx:231': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which school value to submit for the account being created; form state, not an actor' },
+      'src/views/Signup.jsx:272': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which fields the signup form shows for the selected account type; form state, not an actor' },
 
       // ── UNCONVERTED_UX — real role branches, out of Task 17's scope ──
       'src/components/EventActionPanel.jsx:14': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates the apply/withdraw panel; wants can(event.apply)' },
@@ -611,6 +616,7 @@ describe('authorization hygiene', () => {
       'GET /api/notifications': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
       'PATCH /api/notifications': { category: CATEGORY.SELF_ONLY, reason: 'update scoped to caller\'s own id' },
       'GET /api/favorites': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
+      'GET /api/blocks': { category: CATEGORY.SELF_ONLY, reason: 'WHERE blocker_id = caller — reads only the caller\'s own block list' },
       'POST /api/favorites/:eventId': { category: CATEGORY.SELF_ONLY, reason: 'insert/delete scoped to caller\'s own id' },
       'GET /api/oauth/accounts': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
       'POST /api/oauth/disconnect': { category: CATEGORY.SELF_ONLY, reason: 'delete scoped to caller\'s own id; behind requireAAL2(\'oauth.unlink\') with the provider bound, mirroring /api/oauth/link — removing a credential is a credential change (v1.2b audit F-2). The last-credential guard is checked BEFORE the grant is spent' },

@@ -8,6 +8,7 @@ import { createCheckinTable } from './attendance.js';
 import { createInstanceLockTable } from './instanceLock.js';
 import { DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from './config.js';
 import { runMigrations } from './migrations/index.js';
+import { syncLegalDocuments } from './consent.js';
 // Safe to import here despite this module opening the database at module scope:
 // auditLog.js imports `node:crypto` and nothing else, and takes `db` as an
 // argument, so there is no cycle back into this file.
@@ -755,6 +756,22 @@ export function initDatabase() {
   addColumnIfMissing('users', 'account_status', "TEXT CHECK(account_status IN ('active', 'deleted', 'suspended')) DEFAULT 'active'");
   addColumnIfMissing('users', 'deleted_at', 'TEXT');
 
+  /**
+   * Suspension detail lives in migration 006, NOT here.
+   *
+   * The obvious placement is an `addColumnIfMissing` on the line above, next to
+   * `account_status`, and it does not work: `runMigrations` runs LAST in
+   * `initDatabase()`, so any column added here exists before migration 001
+   * rebuilds the `users` table — and 001's unknown-column guard (ENGINEERING_GUIDE
+   * §8.3) correctly refuses to copy a table carrying columns its explicit column
+   * list does not name. On a fresh database that is a hard boot failure.
+   *
+   * Adding them to 001 instead would change its source checksum, which the
+   * registry re-verifies on every boot, breaking every database that has already
+   * run it. So they go in a migration ordered after the rebuild. See
+   * server/migrations/006_account_suspension.js.
+   */
+
 
   // Location Picker: structured geo data alongside the existing text `location`.
   addColumnIfMissing('events', 'address', 'TEXT');
@@ -910,6 +927,21 @@ export function initDatabase() {
   // Versioned migrations run last: they may rebuild tables the bootstrap above
   // just created, and they assume the pre-v1.2 schema is fully in place.
   runMigrations(db);
+
+  /**
+   * Publish the legal document catalogue.
+   *
+   * After `runMigrations`, because migration 007 creates the table it writes to.
+   *
+   * Deliberately NOT seeded inside that migration: document versions change far
+   * more often than the schema does, and freezing the catalogue into a migration
+   * would mean a new migration file every time a policy is revised. This is
+   * idempotent and derived from `server/legalDocuments.js`, so it converges on
+   * every boot — and it throws if a published version's content hash has
+   * changed, because that means acceptance rows now point at text nobody
+   * actually agreed to.
+   */
+  syncLegalDocuments(db);
 }
 
 /**

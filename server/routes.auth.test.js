@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { startTestServer } from './testServer.js';
+import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 
 // One server for the whole file. See the note above.
 let srv;
@@ -24,7 +24,7 @@ describe('auth: email verification state', () => {
   });
 
   it('creates a new signup unconfirmed and signs it in anyway', async () => {
-    const res = await srv.call('POST', '/api/auth/signup', {
+    const res = await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       email: 'verify.check@example.org', password: 'Password123',
       name: 'Verify Check', role: 'student', grade: '10', username: 'verify_check'
     });
@@ -38,7 +38,7 @@ describe('auth: email verification state', () => {
   });
 
   it('rejects a signup password that fails the complexity rules', async () => {
-    const res = await srv.call('POST', '/api/auth/signup', {
+    const res = await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       email: 'short.pass@example.org', password: 'short',
       name: 'Short Pass', role: 'student', grade: '10', username: 'short_pass'
     });
@@ -48,7 +48,7 @@ describe('auth: email verification state', () => {
   });
 
   it('names every unmet password rule at once rather than one at a time', async () => {
-    const res = await srv.call('POST', '/api/auth/signup', {
+    const res = await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       email: 'weak.pass@example.org', password: 'aaaaaaaa',
       name: 'Weak Pass', role: 'student', grade: '10', username: 'weak_pass'
     });
@@ -58,7 +58,7 @@ describe('auth: email verification state', () => {
   });
 
   it('confines an unconfirmed account to the allowlist, and frees it on confirmation', async () => {
-    const res = await srv.call('POST', '/api/auth/signup', {
+    const res = await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       email: 'gated.signup@example.org', password: 'Password123',
       name: 'Gated Signup', role: 'student', grade: '10', username: 'gated_signup'
     });
@@ -89,7 +89,7 @@ describe('auth: email verification state', () => {
    */
   it('does not let an unconfirmed account act by signing in again', async () => {
     const email = 'bypass.attempt@example.org';
-    await srv.call('POST', '/api/auth/signup', {
+    await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       email, password: 'Password123',
       name: 'Bypass Attempt', role: 'student', grade: '10', username: 'bypass_attempt'
     });
@@ -173,7 +173,7 @@ describe('auth: password reset', () => {
 });
 
 describe('auth: username', () => {
-  const signup = (over = {}) => srv.call('POST', '/api/auth/signup', {
+  const signup = (over = {}) => srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
     email: `u${Math.random().toString(36).slice(2, 9)}@example.org`,
     password: 'Password123', name: 'Some Person', role: 'student', grade: '10',
     username: `u${Math.random().toString(36).slice(2, 9)}`,

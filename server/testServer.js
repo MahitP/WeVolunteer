@@ -1,3 +1,7 @@
+// Re-exported so suites already importing from here need no second import.
+// Defined in testConsent.js because that module never reaches db.js.
+export { TEST_CONSENT, TEST_SIGNUP_DEFAULTS } from './testConsent.js';
+import { TEST_SIGNUP_DEFAULTS } from './testConsent.js';
 import { mkdtempSync, rmSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
@@ -7,6 +11,7 @@ import path from 'path';
 // header name has exactly one definition and tests read it from there rather
 // than retyping the wire form — see sensitiveActions.js's header.
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
+
 
 /**
  * Boots the real Express app in-process against a throwaway SQLite file.
@@ -105,8 +110,10 @@ export async function startTestServer() {
     return res.cookie;
   };
   
+  // Consent supplied for the same reason signupConfirmed does: this helper's
+  // job is "give me an account", not "exercise the consent gate".
   const signup = async (email, password, rest) => {
-    const res = await call('POST', '/api/auth/signup', { email, password, ...rest });
+    const res = await call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS, email, password, ...rest });
     return res.cookie;
   };
 
@@ -132,9 +139,20 @@ export async function startTestServer() {
     return res.cookie;
   };
 
-  /** Signs up and confirms in one step, returning a session cookie ready to use. */
+  /**
+   * Signs up and confirms in one step, returning a session cookie ready to use.
+   *
+   * Supplies TEST_CONSENT unless the caller sets `consent` themselves. This
+   * helper's entire purpose is "give me a working confirmed account", so consent
+   * is setup here rather than subject matter — the same reason it does not make
+   * the caller pass an email-verification token either.
+   *
+   * `call()` deliberately does NOT do this. A harness that quietly supplied
+   * consent to every signup would make a future test of the consent gate pass
+   * while testing nothing.
+   */
   const signupConfirmed = async (payload) => {
-    const res = await call('POST', '/api/auth/signup', payload);
+    const res = await call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS, ...payload });
     if (res.status !== 201) throw new Error(`Signup failed: ${JSON.stringify(res.body)}`);
     const cookie = await confirmEmail(res.body.user.id);
     return { cookie, user: res.body.user };

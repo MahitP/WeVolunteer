@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { db } from './db.js';
 import { inTransaction } from './utils.js';
 import { can, principalFor } from './authz.js';
+import { isBlockedBetween } from './blocking.js';
 
 export const MESSAGE_MAX_LENGTH = 4000;
 export const MESSAGE_PAGE_LIMIT = 50;
@@ -99,19 +100,61 @@ export function eligibleRelationship({ eventId, actor, studentId = null, princip
   }
 
   const student = db.prepare("SELECT id, name, avatar, role FROM users WHERE id = ? AND role = 'student'").get(resolvedStudentId);
-  if (!student) return { ok: false, status: 404, error: 'Volunteer not found' };
 
-  const relationship = db.prepare(`
-    SELECT a.*, s.start_datetime, s.end_datetime
-    FROM applications a
-    JOIN slots s ON s.id = a.slot_id
-    WHERE a.event_id = ? AND a.user_id = ?
-    ORDER BY a.applied_at ASC
-  `).all(eventId, resolvedStudentId);
+  const relationship = student
+    ? db.prepare(`
+        SELECT a.*, s.start_datetime, s.end_datetime
+        FROM applications a
+        JOIN slots s ON s.id = a.slot_id
+        WHERE a.event_id = ? AND a.user_id = ?
+        ORDER BY a.applied_at ASC
+      `).all(eventId, resolvedStudentId)
+    : [];
 
-  // Staff (admin, and super_admin via the wildcard) may open a conversation
-  // ahead of any application existing; everyone else needs a real one.
-  if (!can(p, 'event.moderate') && relationship.length === 0) {
+  const isStaff = can(p, 'event.moderate');
+
+  /**
+   * ── The two refusals below used to be distinguishable, and that was a leak ──
+   *
+   * An unknown id answered 404 'Volunteer not found'; a real student who had
+   * not applied answered 403 'Messaging unlocks…'. No conversation opened
+   * either way — the rule held — but the PAIR of codes is an existence oracle.
+   * An organizer could walk arbitrary ids against any event they host and read
+   * off which ones belong to students, learning the roster of a platform whose
+   * users are mostly minors without ever sending a message.
+   *
+   * This codebase has fixed exactly this shape once already: the export
+   * download collapsed a foreign job and a missing one into a single 404 for
+   * the same reason (see routes/privacyRoutes.js and privacyExportIdor.test.js).
+   * Messaging was the remaining instance.
+   *
+   * Staff keep the precise 404. `event.moderate` already grants a full view of
+   * every user through the admin surfaces, so there is no existence left to
+   * protect from them, and a moderator chasing a bad id needs to be told the id
+   * is bad rather than being sent to look for a nonexistent application.
+   *
+   * Everyone else gets ONE answer for both cases. It is phrased as the reason
+   * that is true in the overwhelmingly common case — an organizer messaging
+   * someone who has not applied — and it confirms nothing about the id.
+   */
+  if (isStaff) {
+    if (!student) return { ok: false, status: 404, error: 'Volunteer not found' };
+  } else if (!student || relationship.length === 0) {
+    return { ok: false, status: 403, error: 'Messaging unlocks after an application exists for this event' };
+  }
+
+  /**
+   * A block closes the channel in both directions.
+   *
+   * Checked after the application rule so that a blocked pair is refused for
+   * the same reason a stranger is — the message does not confirm that a block
+   * exists, which would tell an organizer that a specific student blocked them
+   * and turn a safety control into a provocation.
+   *
+   * Staff are exempt: moderation has to be able to reach both parties precisely
+   * when a block has been placed, and `event.moderate` is not a party to it.
+   */
+  if (!isStaff && isBlockedBetween(db, resolvedStudentId, actor.id)) {
     return { ok: false, status: 403, error: 'Messaging unlocks after an application exists for this event' };
   }
 
