@@ -254,7 +254,23 @@ function Detail({ fingerprint, onBack, onStatusChange, addToast }) {
                     replaced before storage, so nothing here needs masking on
                     the way out. It scrolls rather than wraps because a wrapped
                     stack frame is unreadable. */}
-                {ev.stack && <pre className="etri-stack">{ev.stack}</pre>}
+                {/* Focusable because it SCROLLS. `overflow-x: auto` plus a
+                    max-height makes this a scroll container, and a scroll
+                    container that cannot be focused cannot be scrolled by
+                    anyone using a keyboard — the trace is simply unreadable
+                    past its own edges (WCAG 2.1.1).
+                    `group` rather than `region`: a region is a landmark, and
+                    there can be fifty of these on one screen. */}
+                {ev.stack && (
+                  <pre
+                    className="etri-stack"
+                    tabIndex={0}
+                    role="group"
+                    aria-label={`Stack trace, ${relative(ev.occurred_at)}`}
+                  >
+                    {ev.stack}
+                  </pre>
+                )}
               </div>
             ))}
           </div>

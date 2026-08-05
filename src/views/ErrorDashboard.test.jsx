@@ -247,6 +247,27 @@ describe('the detail view and the resolution workflow', () => {
     }
   });
 
+  /**
+   * A stack trace is wider and taller than its box, so `.etri-stack` is a
+   * scroll container. A scroll container that cannot be focused cannot be
+   * scrolled by keyboard at all — the trace is unreadable past its own edges
+   * for anyone not using a pointer (WCAG 2.1.1). Invisible in a screenshot,
+   * and invisible to every other test here, which is why it has its own.
+   */
+  it('lets a keyboard reach the scrollable stack trace', async () => {
+    api.fetchErrorGroup.mockResolvedValue({
+      group: GROUP(),
+      events: [{ id: 1, fingerprint: 'a'.repeat(64), occurred_at: new Date().toISOString(),
+        stack: 'TypeError: boom\n    at Foo (/assets/x.js:1:1)', route: '/events',
+        method: 'GET', status_code: null, user_hash: 'h', role: 'student' }],
+    });
+    await open();
+
+    const pre = await screen.findByLabelText(/stack trace/i);
+    expect(pre.tagName).toBe('PRE');
+    expect(pre.getAttribute('tabindex'), 'not reachable by keyboard').toBe('0');
+  });
+
   it('reports a failed status change instead of showing it as done', async () => {
     const toasts = [];
     at({ addToast: (m, t) => toasts.push({ m, t }) });
