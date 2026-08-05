@@ -243,3 +243,72 @@ classification, which is the system working as intended.
 Reporting beyond conversations · moderator dashboard · appeals workflow · message redaction ·
 organizer agreement acceptance · Legal Center · re-consent middleware and read-only mode ·
 privacy request workflow · guardian consent.
+
+---
+
+# Session 3 — 2026-08-05 (continuation)
+
+**Suite: 163 files, 2642 tests, all passing.** Lint, build, migration checksums and
+document hashes clean. Previous session ended at 156 / 2517; the intervening
+uncommitted work took it to 163 / 2632 with four failures, which is where this session
+started.
+
+This session inherited an unfinished Phase 2 (Organizer Agreement) as uncommitted
+working-tree changes and finished it. Committed as `f6e8a53`.
+
+## Baseline found
+
+Four failing tests, none of them the hook-ordering problem the previous session's note
+suspected:
+
+| Failure | Actual cause |
+|---|---|
+| `hookOrder.test.jsx` ×3 | The `vi.mock('./utils/api')` factory lacked `fetchOrganizerAgreement`, which the dashboard now calls on mount. `undefined is not a function` thrown from inside a passive effect surfaces as a hook-order failure. There was no hook-order defect. |
+| `authz.completeness.test.js` ×1 | Guard 1's line-anchored client declaration for `src/App.jsx` had shifted. The guard working as designed, as its own note predicts. |
+
+## Shipped
+
+### R-04 closed — the Organizer Agreement now binds ✅
+
+The backend (`server/organizerAgreement.js`, migration-free — it rides `legal_acceptances`
+from 007) was already written and correct. Verified rather than rewritten: ten
+capabilities withheld, checked in `can()` **before** the `super_admin` wildcard, computed
+eagerly on the principal because a lazy getter `can()` forgets to trigger fails **open**.
+
+Three defects were found by driving the flow end-to-end, none by reading it:
+
+1. **`personaFor()` consulted the withheld set.** The `host` persona is keyed on
+   `event.create` — a withheld capability — so an organizer who had not accepted had **no
+   persona** and landed on "No dashboard for this account". A dead end that named no
+   reason, offered no next step, and hid the acceptance banner written for exactly that
+   state. Persona asks *who the shell is talking to*, not *what may they do*; it now
+   derives against the ungated capability set. The nav, which genuinely is a permission
+   question, still filters on the gated `can()`. Regression test fails against the
+   unfixed code.
+2. **`/api/auth/me` did not carry `withheld`.** The client capability table therefore
+   disagreed with the server's, and the nav offered "New event", "Calendar" and "Messages"
+   to an organizer for whom all three 403. Added at that route rather than in
+   `formatUserResponse`, whose other caller describes **somebody else** — the field says
+   whether a named person has signed an agreement and belongs only on their own payload.
+3. The test-mock gap above.
+
+### Verified, not assumed
+
+Driven against an isolated demo-seeded instance on its own database:
+
+- approved-but-unaccepted organizer → `applicant.review` **403**, `event.create` **403**
+- `acknowledged: false` → **400**, `acknowledged: true` → **200**
+- same session, no re-sign-in → `withheld: []`, `applicant.review` past the gate
+- re-submit → `alreadyAccepted: true, recorded: 0` (no second row at the same version)
+- the record: `organizer-agreement@1.0`, content hash, timestamp, `ip_prefix
+  127.0.0.0/24` (never a full address), `ua_family` only, audit rows **both** ways
+- the UI: seven checkboxes, submit disabled at 6/7, enabled at 7/7, toast → redirect →
+  nav restored, banner gone
+
+## Still not built — unchanged from session 2
+
+`reports.target_type` is still `CHECK(target_type IN ('event','comment'))`. No reporting
+of users, organizers, messages, certificates or impersonation. The queue has `status`
+only — no priority, assignment, reviewer, notes, or resolution history. No appeals
+workflow. No guardian consent (no reference to it anywhere in server code). No Legal
+Center hub. No re-consent middleware or read-only grace period. No message redaction.
