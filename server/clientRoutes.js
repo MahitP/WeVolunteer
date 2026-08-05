@@ -91,6 +91,10 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
 
   // src/routes/index.jsx — PUBLIC_ROUTES
   '/verify/:code',
+  /* Allowed. A literal path with no parameter, so it can carry nothing about
+     anybody — and it is read by people who have no account yet, which makes a
+     crash here one that costs a signup rather than an inconvenience. */
+  '/privacy',
 ]);
 
 /**

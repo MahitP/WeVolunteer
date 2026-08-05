@@ -49,6 +49,7 @@ vi.mock('./views/Login', () => stub('login'));
 vi.mock('./views/Signup', () => stub('signup'));
 vi.mock('./views/CertificateVerification', () => stub('cert'));
 vi.mock('./views/ErrorDashboard', () => stub('error-dash'));
+vi.mock('./views/PrivacyNotice', () => stub('privacy'));
 // Eager shell chrome that talks to the (auto-mocked) api — not what this checks.
 vi.mock('./components/ThemeToggle', () => ({ default: () => <div data-testid="theme" /> }));
 vi.mock('./components/NotificationsBell', () => ({ default: () => <div data-testid="bell" /> }));
@@ -286,6 +287,31 @@ describe('signed-out and public routes', () => {
     signedInAs(USER('student'));
     renderAt('/verify/ABC123');
     expect(await screen.findByTestId('cert')).toBeInTheDocument();
+  });
+
+  /**
+   * The privacy notice must be readable with NO session — that is the whole
+   * point of it. Someone deciding whether to hand over a child's name, email,
+   * grade and school reads it before they have an account, and the signup form
+   * links to it from the signed-out shell.
+   *
+   * This is also the regression test for how it was nearly unreachable. The
+   * public-route branch in App.jsx tested `currentPath.startsWith('/verify/')`
+   * — a hardcoded second copy of PUBLIC_ROUTES — so a route added to the table
+   * fell through to the signed-out catch-all and answered 404 while looking
+   * perfectly declared. The check is derived from the table now, and asserting
+   * BOTH public routes here is what keeps it derived.
+   */
+  it('renders the privacy notice to a signed-out visitor', async () => {
+    api.getMe.mockResolvedValue(null);
+    renderAt('/privacy');
+    expect(await screen.findByTestId('privacy')).toBeInTheDocument();
+  });
+
+  it('renders the privacy notice to a signed-in user too', async () => {
+    signedInAs(USER('student'));
+    renderAt('/privacy');
+    expect(await screen.findByTestId('privacy')).toBeInTheDocument();
   });
 });
 

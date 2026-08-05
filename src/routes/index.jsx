@@ -44,6 +44,7 @@ const CheckInView = React.lazy(() => import('../views/CheckInView'));
 const Messages = React.lazy(() => import('../views/Messages'));
 const Settings = React.lazy(() => import('../views/Settings'));
 const ErrorDashboard = React.lazy(() => import('../views/ErrorDashboard'));
+const PrivacyNotice = React.lazy(() => import('../views/PrivacyNotice'));
 
 /**
  * Views App.jsx routes itself rather than through a table below.
@@ -146,11 +147,37 @@ export const SIGNED_OUT_ROUTES = [
 
 /**
  * Reachable in any session state, because the link is handed to someone outside
- * the app: a certificate's verification code is printed on the certificate.
+ * the app: a certificate's verification code is printed on the certificate, and
+ * the privacy notice is linked from the signup form — which is read by somebody
+ * deciding whether to create an account, i.e. precisely when they have none.
+ *
+ * `isPublicPath` below is what actually makes these reachable, and it is derived
+ * from this array rather than restated. It used to be `currentPath.startsWith(
+ * '/verify/')` in App.jsx: a second, hardcoded copy of this list, so a route
+ * added here was silently unreachable — it would fall through to the signed-out
+ * catch-all and answer 404 while looking correctly declared.
  */
 export const PUBLIC_ROUTES = [
   { path: '/verify/:code', element: <CertificateVerification /> },
+  { path: '/privacy', element: <PrivacyNotice /> },
 ];
+
+/**
+ * Whether a path is served without a session.
+ *
+ * Segment-wise, not `startsWith`: a prefix test on `/privacy` would also match
+ * `/privacy-settings`, and on `/verify` would match `/verifyx`. `:param`
+ * matches exactly one segment, which is the same rule the router applies and
+ * the same one `server/clientRoutes.js` uses for its allowlist.
+ */
+export function isPublicPath(pathname) {
+  const segments = String(pathname || '').split('?')[0].split('/').filter(Boolean);
+  return PUBLIC_ROUTES.some(({ path }) => {
+    const pattern = path.split('/').filter(Boolean);
+    if (pattern.length !== segments.length) return false;
+    return pattern.every((seg, i) => seg.startsWith(':') || seg === segments[i]);
+  });
+}
 
 /** Every declared route, for the table-wide invariants in routes.test.jsx. */
 export const ROUTES = [...APP_ROUTES, ...SIGNED_OUT_ROUTES, ...PUBLIC_ROUTES];

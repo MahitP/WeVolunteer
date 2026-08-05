@@ -32,8 +32,45 @@ export const ENABLE_LEADERBOARD = import.meta.env.VITE_ENABLE_LEADERBOARD !== 'f
  * none exists. The district supplies the URL; this only wires it in.
  *
  * Set VITE_PRIVACY_URL at build time to switch on the signup acknowledgement.
+ * It may be an external URL, or the built-in notice at `/privacy` — see
+ * PRIVACY_CONTACT below for what the built-in page will and will not claim.
  */
 export const PRIVACY_URL = import.meta.env.VITE_PRIVACY_URL || '';
+
+/**
+ * The three facts the built-in privacy notice cannot know, and must not invent.
+ *
+ * ── Why these are separate values and not prose in the page ──
+ *
+ * `/privacy` states what this software collects and who it shows it to. Those
+ * are engineering facts, readable from the schema and the route handlers, and
+ * writing them down is a straightforward improvement over the status quo, which
+ * is silence.
+ *
+ * These three are not that. How long a district keeps student records, who a
+ * family contacts to correct or delete them, and what consent applies below 13
+ * are decisions a district makes and is accountable for. Software cannot
+ * supply them, and a plausible-looking default would be the exact failure the
+ * PRIVACY_URL comment above exists to prevent — it would manufacture the
+ * appearance of a policy somebody had reviewed.
+ *
+ * So they are empty by default and the page says loudly that it is incomplete
+ * until they are filled in. An unfinished notice that admits it is unfinished
+ * is honest. One that quietly reads as finished is not.
+ */
+export const PRIVACY_CONTACT = import.meta.env.VITE_PRIVACY_CONTACT || '';
+export const PRIVACY_RETENTION = import.meta.env.VITE_PRIVACY_RETENTION || '';
+export const PRIVACY_UNDER13 = import.meta.env.VITE_PRIVACY_UNDER13 || '';
+
+/**
+ * Who adopted this notice. Shown so a reader knows whose policy they are
+ * reading rather than assuming it is the software vendor's.
+ */
+export const PRIVACY_OWNER = import.meta.env.VITE_PRIVACY_OWNER || '';
+
+/** True only when a district has supplied every value the notice needs. */
+export const privacyNoticeComplete = () =>
+  Boolean(PRIVACY_CONTACT && PRIVACY_RETENTION && PRIVACY_UNDER13 && PRIVACY_OWNER);
 
 /**
  * The origin printed on a certificate, for whoever has to verify it.
