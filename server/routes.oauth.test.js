@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import jwt from 'jsonwebtoken';
+import { TEST_SIGNUP_DEFAULTS } from './testConsent.js';
 
 /**
  * OAuth sign-in, sign-up, linking and unlinking.
@@ -164,7 +165,7 @@ describe('oauth', () => {
    */
   it('refuses to let a pending signup assign itself the admin role', async () => {
     const { res } = await begin('google', {
-      signupData: {
+      signupData: { ...TEST_SIGNUP_DEFAULTS,
         name: 'Sneaky Person', username: 'sneaky_admin', role: 'admin',
         grade: 'N/A', school: 'Nowhere', skills: []
       }
@@ -180,13 +181,13 @@ describe('oauth', () => {
 
   it('refuses a pending signup with an invalid grade or username', async () => {
     const bad = await begin('google', {
-      signupData: { name: 'X', username: 'ok_name', role: 'student', grade: 'Kindergarten' }
+      signupData: { ...TEST_SIGNUP_DEFAULTS, name: 'X', username: 'ok_name', role: 'student', grade: 'Kindergarten' }
     });
     expect(bad.res.status).toBe(400);
     expect(bad.res.body.field).toBe('grade');
 
     const worse = await begin('google', {
-      signupData: { name: 'X', username: '1nvalid!', role: 'student', grade: '10' }
+      signupData: { ...TEST_SIGNUP_DEFAULTS, name: 'X', username: '1nvalid!', role: 'student', grade: '10' }
     });
     expect(worse.res.status).toBe(400);
     expect(worse.res.body.field).toBe('username');
@@ -199,7 +200,7 @@ describe('oauth', () => {
    */
   it('never stores a password in the pending-signup row', async () => {
     await begin('google', {
-      signupData: {
+      signupData: { ...TEST_SIGNUP_DEFAULTS,
         name: 'Pending Person', username: 'pending_person', role: 'student',
         grade: '10', password: 'SuperSecret123', skills: []
       }
@@ -221,7 +222,7 @@ describe('oauth', () => {
     const email = `newgrad-${Math.random().toString(36).slice(2, 9)}@example.org`;
     const username = `newgrad_${Math.random().toString(36).slice(2, 7)}`;
     const { state, nonceCookie } = await begin('google', {
-      signupData: { name: 'New Grad', username, role: 'student', grade: '11', skills: [] }
+      signupData: { ...TEST_SIGNUP_DEFAULTS, name: 'New Grad', username, role: 'student', grade: '11', skills: [] }
     });
 
     const res = await callback('google', {
@@ -242,7 +243,7 @@ describe('oauth', () => {
     const username = `returning_${Math.random().toString(36).slice(2, 7)}`;
 
     const first = await begin('google', {
-      signupData: { name: 'Returning Person', username, role: 'student', grade: '9', skills: [] }
+      signupData: { ...TEST_SIGNUP_DEFAULTS, name: 'Returning Person', username, role: 'student', grade: '9', skills: [] }
     });
     const created = await callback('google', { code: identity({ email, sub }), state: first.state, nonceCookie: first.nonceCookie });
     expect(created.body.action).toBe('login');
@@ -263,7 +264,7 @@ describe('oauth', () => {
     const email = `msuser-${Math.random().toString(36).slice(2, 9)}@example.org`;
     const username = `msuser_${Math.random().toString(36).slice(2, 7)}`;
     const { state, nonceCookie } = await begin('microsoft', {
-      signupData: { name: 'MS User', username, role: 'student', grade: '10', skills: [] }
+      signupData: { ...TEST_SIGNUP_DEFAULTS, name: 'MS User', username, role: 'student', grade: '10', skills: [] }
     });
 
     const res = await callback('microsoft', {
@@ -447,7 +448,7 @@ describe('oauth', () => {
     const googleSub = `sub-${username}`;
 
     const { state, nonceCookie } = await begin('google', {
-      signupData: { name: 'Two Providers', username, role: 'student', grade: '10', skills: [] }
+      signupData: { ...TEST_SIGNUP_DEFAULTS, name: 'Two Providers', username, role: 'student', grade: '10', skills: [] }
     });
     const created = await callback('google', { code: identity({ email, sub: googleSub }), state, nonceCookie });
     expect(created.status).toBe(200);
@@ -662,7 +663,7 @@ describe('oauth', () => {
     const email = `onlyprov-${Math.random().toString(36).slice(2, 9)}@example.org`;
     const username = `onlyprov_${Math.random().toString(36).slice(2, 7)}`;
     const { state, nonceCookie } = await begin('google', {
-      signupData: { name: 'Only Provider', username, role: 'student', grade: '10', skills: [] }
+      signupData: { ...TEST_SIGNUP_DEFAULTS, name: 'Only Provider', username, role: 'student', grade: '10', skills: [] }
     });
     const created = await callback('google', { code: identity({ email, sub: `sub-${username}` }), state, nonceCookie });
     expect(created.cookie).toBeTruthy();

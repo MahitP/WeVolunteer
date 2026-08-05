@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { startTestServer } from './testServer.js';
+import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 
 let srv;
 beforeAll(async () => { srv = await startTestServer(); });
@@ -66,7 +66,7 @@ describe('Admin Audit Logging', () => {
 
   it('logs when an admin denies an organizer', async () => {
     // We need to create a temporary pending organizer to deny
-    const { body } = await srv.call('POST', '/api/auth/signup', {
+    const { body } = await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       email: 'badorg@example.com',
       password: 'Password123',
       name: 'Bad Org',

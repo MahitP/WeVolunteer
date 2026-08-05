@@ -11,6 +11,7 @@ import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthRespon
 // mid-redirect with the bindings carried in the signed state instead.
 import { consumeChallenge } from '../reauth.js';
 import { validateAccountFields } from '../accountValidation.js';
+import { assertConsent, recordAcceptances, ConsentMissing } from '../consent.js';
 import { issueVerificationToken, sendVerificationMail } from '../services/verification.js';
 import { issueSession } from './authRoutes.js';
 
@@ -243,7 +244,34 @@ router.post('/api/oauth/:provider/url', (req, res) => {
      */
     const check = validateAccountFields({ ...sd, email: 'placeholder@example.com' });
     if (!check.ok) {
-      return res.status(400).json({ error: check.error, field: check.field });
+      return res.status(400).json({ error: check.error, field: check.field, code: check.code });
+    }
+
+    /**
+     * Consent, checked here for the same two reasons the fields above are.
+     *
+     * This is a THIRD account-creation path — distinct from the password form
+     * and from `POST /api/auth/signup` with a `signupToken` — and it INSERTs
+     * into `users` directly in the callback below. It was missed when the
+     * consent gate was added to authRoutes.js, which would have left a route
+     * that creates accounts with no acceptance record at all: the exact hole
+     * that makes the whole consent record worthless, since an attacker or an
+     * ordinary user would simply arrive by the ungated door.
+     *
+     * Validated before the redirect so a refusal costs the user nothing; the
+     * answer is carried in `statePayload` and written with the account.
+     */
+    try {
+      assertConsent(sd);
+    } catch (err) {
+      if (err instanceof ConsentMissing) {
+        return res.status(400).json({
+          error: 'Please agree to the Terms of Service and confirm you have seen the Privacy Policy.',
+          code: 'consent_required',
+          missing: err.missing,
+        });
+      }
+      throw err;
     }
 
     const { email: _discardEmail, ...safeFields } = check.value;
@@ -516,8 +544,8 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
 
       inTransaction(() => {
         db.prepare(`
-          INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, email_verified, avatar, bio, school, skills, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, email_verified, avatar, bio, school, skills, date_of_birth, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           newUserId, fields.name, providerEmail, fields.username, '!OAUTH_ONLY!',
           fields.grade, fields.role,
@@ -525,13 +553,26 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
           // is a separate gate from confirming an email address.
           fields.role === 'organizer' ? 0 : 1,
           emailVerified,
-          fields.avatar, fields.bio, fields.school, JSON.stringify(fields.skills), now
+          fields.avatar, fields.bio, fields.school, JSON.stringify(fields.skills),
+          fields.dateOfBirth, now
         );
 
         db.prepare(`
           INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at, last_used_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).run(`oauth-${crypto.randomUUID()}`, newUserId, providerName, providerUserId, providerEmail, now, now, now);
+
+        // Same transaction as the account row, for the reason authRoutes.js
+        // records: an account without its acceptance rows is an account that
+        // never agreed to anything, and it looks entirely normal until someone
+        // asks what this person agreed to.
+        recordAcceptances(db, {
+          userId: newUserId,
+          method: 'oauth_signup',
+          context: `oauth:${providerName}`,
+          req,
+          now,
+        });
       });
 
       const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(newUserId);

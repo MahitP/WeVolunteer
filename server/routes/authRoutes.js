@@ -11,6 +11,7 @@ import {
 import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
 import { authenticateToken, formatUserResponse, inTransaction, revokeSession } from '../utils.js';
+import { assertConsent, recordAcceptances, ConsentMissing } from '../consent.js';
 import { db, initDatabase } from '../db.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
@@ -173,7 +174,10 @@ router.post('/api/auth/signup', async (req, res) => {
 
   const check = validateAccountFields({ ...req.body, email: emailSource });
   if (!check.ok) {
-    return res.status(400).json({ error: check.error, field: check.field });
+    // `code` is passed through so the client can treat an age refusal as
+    // terminal rather than as a field to correct — an age screen that invites
+    // a retry with a different year is a formality, not a gate.
+    return res.status(400).json({ error: check.error, field: check.field, code: check.code });
   }
   const fields = check.value;
 
@@ -200,6 +204,36 @@ router.post('/api/auth/signup', async (req, res) => {
     if (!passwordCheck.ok) {
       return res.status(400).json({ error: passwordCheck.error, field: passwordCheck.field });
     }
+  }
+
+  /**
+   * Consent, checked on the server because the checkbox never was.
+   *
+   * `Signup.jsx` rendered a privacy checkbox and validated it, and then
+   * `baseFields()` — the object actually sent — did not include it. It never
+   * left the browser, the server never saw it, and nothing stored it. The
+   * control was also wrapped in `{PRIVACY_URL && ...}` with an empty default,
+   * so a default build asked for nothing at all. The platform published
+   * policies while holding no evidence that anyone had accepted one, which is
+   * what makes a Terms of Service unenforceable.
+   *
+   * Placed here, ahead of the uniqueness queries, because it is a free local
+   * check and because it applies identically to BOTH signup paths — this one
+   * endpoint serves the password form and the provider flow (distinguished by
+   * `signupToken`), so a single gate covers both. An OAuth user who was never
+   * asked is exactly the hole that would make the whole record worthless.
+   */
+  try {
+    assertConsent(req.body);
+  } catch (err) {
+    if (err instanceof ConsentMissing) {
+      return res.status(400).json({
+        error: 'Please agree to the Terms of Service and confirm you have seen the Privacy Policy.',
+        code: 'consent_required',
+        missing: err.missing,
+      });
+    }
+    throw err;
   }
 
   // Explicit checks for clean, field-attributed messages. The UNIQUE-violation
@@ -231,12 +265,13 @@ router.post('/api/auth/signup', async (req, res) => {
 
     inTransaction(() => {
       db.prepare(`
-        INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, email_verified, avatar, bio, school, skills, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, email_verified, avatar, bio, school, skills, date_of_birth, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         userId, fields.name, fields.email, fields.username, passwordHash,
         fields.grade, fields.role, verifiedVal, emailVerifiedVal,
-        fields.avatar, fields.bio, fields.school, JSON.stringify(fields.skills), now
+        fields.avatar, fields.bio, fields.school, JSON.stringify(fields.skills),
+        fields.dateOfBirth, now
       );
 
       if (oauthData) {
@@ -245,6 +280,29 @@ router.post('/api/auth/signup', async (req, res) => {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).run(`oauth-${crypto.randomUUID()}`, userId, oauthData.provider, oauthData.providerUserId, oauthData.providerEmail, now, now, now);
       }
+
+      /**
+       * Written in the SAME transaction as the account row.
+       *
+       * An account that exists without its acceptance rows is an account that
+       * never agreed to anything, and it would look entirely normal in every
+       * functional test — the user can sign in, the profile renders, nothing
+       * errors. It only surfaces when somebody asks what this person agreed to
+       * and there is no answer.
+       *
+       * This is the same atomicity rule `spendChallenge` follows for step-up
+       * grants, for the same reason and with the same shape: both writes commit
+       * or neither does. `now` is shared with the user INSERT so the account and
+       * its consent carry an identical timestamp rather than two that differ by
+       * a millisecond and invite questions later.
+       */
+      recordAcceptances(db, {
+        userId,
+        method: oauthData ? 'oauth_signup' : 'signup',
+        context: oauthData ? `oauth:${oauthData.provider}` : 'password',
+        req,
+        now,
+      });
     });
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);

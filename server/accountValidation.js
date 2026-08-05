@@ -233,7 +233,83 @@ export function validateProfilePatch(patch) {
  * Returns normalised values so callers write the same shape to the database
  * regardless of which door the request came through.
  */
-export function validateAccountFields({ name, username, email, role, grade, bio, school, skills, avatar }) {
+/** Minimum age for a WeVolunteer account. Not a preference — see below. */
+export const MINIMUM_AGE = 13;
+
+/**
+ * Whole years between `dob` and `asOf`, by calendar — never by dividing days.
+ *
+ * `(now - dob) / 365.25` is off by a day around leap years, which on a hard
+ * 13-year boundary means a child is admitted or an eligible teenager refused
+ * depending on which February they were born in. Comparing month and day is the
+ * only version that is right on the birthday itself.
+ */
+export function ageOn(dob, asOf = new Date()) {
+  let age = asOf.getUTCFullYear() - dob.getUTCFullYear();
+  const monthDelta = asOf.getUTCMonth() - dob.getUTCMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && asOf.getUTCDate() < dob.getUTCDate())) age -= 1;
+  return age;
+}
+
+/**
+ * The age gate.
+ *
+ * ── Why the refusal message says so little ──
+ *
+ * It reports one thing — too young — and never echoes the computed age or how
+ * far off the person was. A gate that says "you must be 13, you are 12" teaches
+ * the child exactly which year to retype, which is how an age screen becomes a
+ * formality. The client is expected to make the refusal terminal for the same
+ * reason.
+ *
+ * ── Why this refuses a missing value rather than defaulting ──
+ *
+ * COPPA attaches on actual knowledge of a user under 13, and as an independent
+ * platform there is no district between WeVolunteer and the child. An absent
+ * birth date is not "probably an adult"; it is the state in which the platform
+ * cannot answer the only question that matters. It is also what makes the
+ * indefinite retention of certificates and hours lawful — the amended Rule
+ * forbids retaining a child's data indefinitely, so "no child is here" is the
+ * load-bearing premise of that decision.
+ */
+export function validateDateOfBirth(raw, { now = new Date() } = {}) {
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return { ok: false, field: 'dateOfBirth', error: 'Enter your date of birth.' };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
+    return { ok: false, field: 'dateOfBirth', error: 'Enter your date of birth as YYYY-MM-DD.' };
+  }
+
+  const dob = new Date(`${raw.trim()}T00:00:00Z`);
+  if (Number.isNaN(dob.getTime())) {
+    return { ok: false, field: 'dateOfBirth', error: 'That is not a real date.' };
+  }
+  if (dob.getTime() > now.getTime()) {
+    return { ok: false, field: 'dateOfBirth', error: 'That date is in the future.' };
+  }
+
+  const age = ageOn(dob, now);
+
+  // An implausible age is a typo (a mistyped year) far more often than a
+  // supercentenarian signing up to volunteer, and letting it through puts a
+  // meaningless birth date on the record for ever.
+  if (age > 120) {
+    return { ok: false, field: 'dateOfBirth', error: 'Please check the year.' };
+  }
+
+  if (age < MINIMUM_AGE) {
+    return {
+      ok: false,
+      field: 'dateOfBirth',
+      code: 'under_minimum_age',
+      error: `You need to be ${MINIMUM_AGE} or older to use WeVolunteer.`,
+    };
+  }
+
+  return { ok: true, value: raw.trim(), age };
+}
+
+export function validateAccountFields({ name, username, email, role, grade, bio, school, skills, avatar, dateOfBirth }) {
   if (typeof name !== 'string' || !name.trim()) {
     return { ok: false, field: 'name', error: 'Enter your full name.' };
   }
@@ -243,6 +319,9 @@ export function validateAccountFields({ name, username, email, role, grade, bio,
 
   const emailResult = validateEmail(email);
   if (!emailResult.ok) return emailResult;
+
+  const dobResult = validateDateOfBirth(dateOfBirth);
+  if (!dobResult.ok) return dobResult;
 
   const usernameResult = validateUsername(username);
   if (!usernameResult.ok) return usernameResult;
@@ -288,6 +367,7 @@ export function validateAccountFields({ name, username, email, role, grade, bio,
       username: usernameResult.value,
       role,
       grade,
+      dateOfBirth: dobResult.value,
       bio: bio == null ? '' : bio,
       school: school == null ? '' : school,
       avatar: avatar || '👤',

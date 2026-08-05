@@ -35,7 +35,24 @@ export const ENABLE_LEADERBOARD = import.meta.env.VITE_ENABLE_LEADERBOARD !== 'f
  * It may be an external URL, or the built-in notice at `/privacy` — see
  * PRIVACY_CONTACT below for what the built-in page will and will not claim.
  */
-export const PRIVACY_URL = import.meta.env.VITE_PRIVACY_URL || '';
+/**
+ * Defaults to the built-in notice, no longer to the empty string.
+ *
+ * The empty default made sense when there was nothing to point at: a link to
+ * nowhere is worse than no link. `/privacy` now exists and is reachable signed
+ * out, so silence is no longer the honest default — it is just a broken link
+ * dressed as caution.
+ *
+ * This mattered more than it looked. The signup consent control was wrapped in
+ * `{PRIVACY_URL && …}`, so with the empty default a stock build rendered NO
+ * consent control at all. Combined with `baseFields()` never sending the
+ * answer, the platform collected nothing and could prove nothing. The gate is
+ * gone from the markup and the server now refuses a signup without consent;
+ * this makes the link resolve to something real in every build.
+ *
+ * Still overridable for a deployment that publishes its own notice elsewhere.
+ */
+export const PRIVACY_URL = import.meta.env.VITE_PRIVACY_URL || '/privacy';
 
 /**
  * The three facts the built-in privacy notice cannot know, and must not invent.

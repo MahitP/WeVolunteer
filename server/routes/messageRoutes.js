@@ -1,9 +1,11 @@
 import express from 'express';
 import { authenticateToken, inTransaction } from '../utils.js';
-import { can } from '../authz.js';
+import { can, requireCap } from '../authz.js';
+import { isBlockedBetween, block, unblock } from '../blocking.js';
 import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
+import { recordAudit } from '../auditLog.js';
 import {
   MESSAGE_MAX_LENGTH,
   MESSAGE_PAGE_LIMIT,
@@ -138,6 +140,28 @@ router.post('/api/messages/conversations/:id/messages', authenticateToken, (req,
     if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
     if (!isConversationParticipant(conversation.id, req.user.id)) {
       return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    /**
+     * A block closes an EXISTING conversation, not just the opening of a new one.
+     *
+     * `eligibleRelationship` guards `resolve`, which is only reached when a
+     * conversation is first opened — an already-open thread never passes
+     * through it again. Without this check, blocking would silently do nothing
+     * for the only case that matters: the conversation the student is currently
+     * in, with the person they want to stop hearing from.
+     *
+     * Deliberately placed BEFORE the lifecycle check so a blocked sender is
+     * refused whether or not the thread is still writable, and phrased as the
+     * generic read-only refusal so the block is not announced back to the
+     * blocked party.
+     */
+    const other = otherParticipant(conversation.id, req.user.id);
+    if (other && !can(req.principal, 'event.moderate') && isBlockedBetween(db, req.user.id, other.id)) {
+      return res.status(409).json({
+        error: 'This conversation is read-only.',
+        code: 'conversation_read_only'
+      });
     }
 
     const lifecycle = computeConversationLifecycle(conversation, new Date());
@@ -402,6 +426,97 @@ router.get('/api/messages/users/search', authenticateToken, (req, res) => {
     console.error('User search error:', err);
     res.status(500).json({ error: 'Failed to search users' });
   }
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Blocking
+ *
+ * The one safety control a student holds themselves. Everything else on this
+ * platform is reactive — report it, and a human eventually acts — which depends
+ * on the student trusting the response and being willing to wait. Blocking
+ * works immediately, with nobody else involved.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Who the caller has blocked. */
+router.get('/api/blocks', authenticateToken, (req, res) => {
+  const rows = db.prepare(`
+    SELECT b.blocked_id AS id, u.name, u.avatar, b.created_at
+    FROM user_blocks b
+    JOIN users u ON u.id = b.blocked_id
+    WHERE b.blocker_id = ?
+    ORDER BY b.created_at DESC
+  `).all(req.user.id);
+  res.json({ blocked: rows });
+});
+
+/**
+ * Blocks somebody.
+ *
+ * ── Why only students may call this ──
+ *
+ * Gated on `event.apply`, which students hold and organizers do not. An
+ * organizer able to block would be able to sever the channel a student would
+ * use to complain about them, before anybody reviewed anything — turning a
+ * safety feature into a silencing tool. An organizer being harassed has the
+ * report queue, administrators, and suspension, all of which involve a second
+ * person. Expressed as a capability, never a role comparison.
+ */
+router.post('/api/blocks/:userId', authenticateToken, requireCap('event.apply'), (req, res) => {
+  const targetId = req.params.userId;
+
+  if (targetId === req.user.id) {
+    return res.status(400).json({ error: 'You cannot block yourself.' });
+  }
+
+  const target = db.prepare("SELECT id FROM users WHERE id = ? AND account_status != 'deleted'").get(targetId);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+
+  let created = false;
+  try {
+    inTransaction(() => {
+      created = block(db, { blockerId: req.user.id, blockedId: targetId });
+
+      /**
+       * A block against an adult is a safety signal, not a preference.
+       *
+       * Recorded so that a pattern — several students blocking the same
+       * organizer — is visible to moderation without anyone having filed a
+       * report. Students frequently block rather than report, because blocking
+       * is immediate and reporting feels like an accusation; if that signal is
+       * not captured, the platform loses its earliest warning.
+       *
+       * Only on creation: a repeat tap is not new information.
+       */
+      if (created) {
+        recordAudit(db, {
+          adminId: req.user.id,
+          action: 'USER_BLOCKED',
+          targetUserId: targetId,
+          details: 'Student blocked another account'
+        });
+      }
+    });
+  } catch (err) {
+    console.error('Failed to block user:', err);
+    return res.status(500).json({ error: 'Failed to block' });
+  }
+
+  // Idempotent: a second tap is a no-op, not an error page.
+  res.json({ success: true, blocked: true, created });
+});
+
+/** Removes a block. */
+router.delete('/api/blocks/:userId', authenticateToken, requireCap('event.apply'), (req, res) => {
+  const removed = unblock(db, { blockerId: req.user.id, blockedId: req.params.userId });
+  if (removed) {
+    recordAudit(db, {
+      adminId: req.user.id,
+      action: 'USER_UNBLOCKED',
+      targetUserId: req.params.userId,
+      details: 'Student removed a block'
+    });
+  }
+  res.json({ success: true, blocked: false, removed });
 });
 
 export default router;

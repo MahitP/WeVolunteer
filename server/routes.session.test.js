@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import jwt from 'jsonwebtoken';
-import { startTestServer } from './testServer.js';
+import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 
 // One server for the whole file — a second startTestServer() call would reuse
 // the same module-cached db.js and not actually start a second instance.
@@ -9,7 +9,7 @@ let srv;
 beforeAll(async () => { srv = await startTestServer(); });
 afterAll(async () => { await srv.close(); });
 
-const signup = (over = {}) => srv.call('POST', '/api/auth/signup', {
+const signup = (over = {}) => srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
   email: `session-${Math.random().toString(36).slice(2, 9)}@example.org`,
   password: 'Password123', name: 'Session Test', role: 'student', grade: '10',
   username: `session_${Math.random().toString(36).slice(2, 9)}`,
@@ -35,7 +35,16 @@ describe('authenticateToken: reads identity from the database', () => {
     expect(before.status).toBe(200);
 
     // Delete the row directly, out from under the still-unexpired token.
+    //
+    // The consent rows have to go first. `legal_acceptances.user_id` is
+    // ON DELETE RESTRICT — deliberately, so that a future hard-delete path
+    // cannot silently destroy the evidence that a user agreed to the Terms —
+    // and this fixture is a hard delete. The product's own deletion path is
+    // anonymisation (an UPDATE), so it never hits this; the one real hard
+    // delete, denying a pending organizer, clears these rows explicitly for
+    // the same reason and with the same two lines.
     const db = new DatabaseSync(process.env.WEV_DB_PATH);
+    db.prepare('DELETE FROM legal_acceptances WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);
     db.close();
 

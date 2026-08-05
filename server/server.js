@@ -30,6 +30,7 @@ import { startNotificationWorker } from './workers/notificationWorker.js';
 import { startExportWorker } from './workers/exportWorker.js';
 import { installShutdownHandlers } from './shutdown.js';
 import { startAutoSelectScheduler } from './services/autoSelectScheduler.js';
+import { startRetentionWorker } from './workers/retentionWorker.js';
 import {
   acquireInstanceLock, startInstanceLockHeartbeat, shouldRefuseBoot, describeConflict
 } from './instanceLock.js';
@@ -85,6 +86,10 @@ startExportWorker();
  * than in this process.
  */
 const autoSelectTimer = startAutoSelectScheduler(db);
+
+// Retention enforcement. The Privacy Policy publishes periods; this is what
+// makes them true rather than a representation nothing implements.
+startRetentionWorker(db);
 
 const httpServer = createServer(app);
 const io = initSocketServer(httpServer);

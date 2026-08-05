@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
+import { TEST_SIGNUP_DEFAULTS } from './testConsent.js';
 
 describe('auth: email verification (flag on)', () => {
   let srv;
@@ -23,7 +24,7 @@ describe('auth: email verification (flag on)', () => {
     return row?.token;
   };
 
-  const signup = (email) => srv.call('POST', '/api/auth/signup', {
+  const signup = (email) => srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
     email, password: 'Password123', name: 'Test Person', role: 'student', grade: '10',
     username: `u${Math.random().toString(36).slice(2, 9)}`
   });

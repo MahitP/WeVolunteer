@@ -2,12 +2,12 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 
-import { authenticateToken, formatUserResponse } from '../utils.js';
+import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
 import { db } from '../db.js';
 import { notificationService } from '../services/notificationService.js';
 import { getMailHealth } from '../email.js';
 import { getQueueHealth } from '../workers/notificationWorker.js';
-import { requireCap } from '../authz.js';
+import { requireCap, can, principalFor } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 
 const router = express.Router();
@@ -66,14 +66,38 @@ router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('org
       });
     }
 
-    db.prepare("DELETE FROM users WHERE id = ? AND role = 'organizer' AND verified = 0").run(orgId);
-    
-    // Log the audit event
-    recordAudit(db, {
-      adminId: req.user.id,
-      action: 'DENY_ORGANIZER',
-      targetUserId: orgId,
-      details: 'Denied and deleted pending organizer account request'
+    inTransaction(() => {
+      /**
+       * Consent rows go with the denied registration, and only here.
+       *
+       * `legal_acceptances.user_id` is ON DELETE RESTRICT, deliberately: an
+       * acceptance record must survive the account, because it is the evidence
+       * that the person agreed and it would be needed precisely if they later
+       * said they had not. Account deletion is anonymisation — an UPDATE — so
+       * that constraint never fires there.
+       *
+       * This route is the product's one genuine hard delete, and it is a
+       * different situation: a pending organizer who is denied never became a
+       * user. There is no relationship to evidence, no service record, and
+       * nothing they could later dispute — so retaining consent rows about a
+       * refused registration would be keeping data on someone we declined,
+       * which is the wrong side of the trade.
+       *
+       * Explicit and scoped to this id rather than relaxing the constraint to
+       * CASCADE: RESTRICT is what stops a future hard-delete path silently
+       * destroying real users' consent evidence, and that guard is worth more
+       * than the two lines it costs here.
+       */
+      db.prepare('DELETE FROM legal_acceptances WHERE user_id = ?').run(orgId);
+      db.prepare("DELETE FROM users WHERE id = ? AND role = 'organizer' AND verified = 0").run(orgId);
+
+      // Log the audit event
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'DENY_ORGANIZER',
+        targetUserId: orgId,
+        details: 'Denied and deleted pending organizer account request'
+      });
     });
 
     res.json({ success: true });
@@ -438,6 +462,232 @@ router.get('/api/admin/system/status', authenticateToken, requireCap('audit.read
     backup: backupStatus(),
     hoursLedger: hoursLedgerStatus()
   });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Account suspension
+ *
+ * ── Why this exists ──
+ *
+ * `account_status` has accepted 'suspended' since v1.1 and sign-in has refused
+ * it for just as long — but no route ever set it, so `user.suspend` was a
+ * capability with nothing behind it. The practical consequence was that an
+ * administrator holding a credible safety report about an adult messaging a
+ * minor could mark the report resolved and delete a comment, and could not
+ * remove the person from the platform. On a service whose deliberate design
+ * lets organizers message students, that was the gap that made every other
+ * safety control theoretical.
+ *
+ * ── Suspend, never delete ──
+ *
+ * `/api/admin/organizers/:id/deny` is scoped to `verified = 0` on purpose: its
+ * comment explains that an unscoped delete by id would take an approved
+ * organizer's events with it via ON DELETE CASCADE, and their volunteers'
+ * attendance rows with those — silently destroying credited service hours.
+ * That reasoning applies with equal force here, which is why suspension is a
+ * status change and not a removal. A suspended organizer keeps their row,
+ * their events keep their attendance, and the students who volunteered keep
+ * their hours.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const MIN_SUSPENSION_REASON = 10;
+
+/**
+ * Whether `actor` may act on `target`, given both rows.
+ *
+ * Deny-by-default and ordered most-privileged-first, following the rule in
+ * authz.js: `can()` answers true for every capability a super_admin asks
+ * about, so any cascade that tests a narrower capability first puts
+ * super_admin in the wrong branch.
+ *
+ * The specific escalation this closes: `user.suspend` is an ordinary admin
+ * capability, and without a role check an admin could suspend the super_admin
+ * who could otherwise undo it — locking the owner out of their own platform
+ * using a capability granted for moderating students.
+ */
+function suspensionTargetError(actorPrincipal, actorId, target) {
+  if (!target) return { status: 404, error: 'User not found' };
+  if (target.id === actorId) {
+    return { status: 400, error: 'You cannot suspend your own account.' };
+  }
+  if (target.account_status === 'deleted') {
+    return { status: 409, error: 'That account has already been deleted.' };
+  }
+
+  /**
+   * The target's privilege is asked as a CAPABILITY question, never as a role
+   * comparison — `target.role === 'admin'` is exactly what guard 1 in
+   * authz.completeness.test.js fails the build on, and rightly: a role string
+   * in an authorization decision is how a new role gets silently mishandled.
+   *
+   * Built with no per-user grants on purpose. A grant is revocable and
+   * individually assigned, so it should not shield its holder from moderation;
+   * the question here is "does this KIND of account outrank the actor", which
+   * is a property of the base role.
+   */
+  const targetPrincipal = principalFor(target);
+
+  // `admin.create` is SUPER_ONLY, so this is "the target is a super admin"
+  // spelled as a capability. Nobody may suspend one — including another super
+  // admin, because the failure mode is a platform with no one able to undo it.
+  if (can(targetPrincipal, 'admin.create')) {
+    return { status: 403, error: 'A super administrator cannot be suspended.' };
+  }
+
+  // The target can themselves suspend people, i.e. is an administrator. Only a
+  // super admin may act on one; otherwise `user.suspend` — an ordinary admin
+  // capability granted for moderating students — becomes a way for one
+  // administrator to remove another.
+  if (can(targetPrincipal, 'user.suspend') && !can(actorPrincipal, 'admin.create')) {
+    return { status: 403, error: 'Only a super administrator can suspend an administrator.' };
+  }
+
+  return null;
+}
+
+/**
+ * Suspends an account and ends every session it holds.
+ *
+ * The `token_version` bump is the load-bearing half. Setting `account_status`
+ * alone would stop the *next sign-in* and leave every already-issued cookie
+ * working for up to seven days — so the person you just suspended for
+ * messaging a student could carry on messaging that student for a week.
+ * `authenticateToken` re-reads the user on every request and compares
+ * `token_version`, so incrementing it invalidates all outstanding sessions on
+ * the next request they make.
+ *
+ * Both writes are in one transaction with the audit row: a suspension that is
+ * recorded but not enforced, or enforced but not recorded, are both worse than
+ * one that fails cleanly and can be retried.
+ */
+router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.suspend'), (req, res) => {
+  const targetId = req.params.id;
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+
+  /**
+   * A reason is mandatory, and long enough to be a sentence.
+   *
+   * Suspension is the most consequential action an administrator can take
+   * against a user, it is appealable, and the Admin Responsibilities Policy
+   * commits to telling the person why. A blank or one-word reason makes that
+   * commitment unkeepable at exactly the moment it matters, and the appeal
+   * reviewer — often the same small team — has nothing to review.
+   */
+  if (reason.length < MIN_SUSPENSION_REASON) {
+    return res.status(400).json({
+      error: `A reason of at least ${MIN_SUSPENSION_REASON} characters is required. The user is told why, and it is what an appeal is reviewed against.`,
+      code: 'reason_required'
+    });
+  }
+
+  const target = db.prepare(
+    'SELECT id, name, role, account_status FROM users WHERE id = ?'
+  ).get(targetId);
+
+  const refusal = suspensionTargetError(req.principal, req.user.id, target);
+  if (refusal) return res.status(refusal.status).json({ error: refusal.error });
+
+  if (target.account_status === 'suspended') {
+    return res.status(409).json({ error: 'That account is already suspended.', code: 'already_suspended' });
+  }
+
+  const now = new Date().toISOString();
+
+  try {
+    inTransaction(() => {
+      db.prepare(`
+        UPDATE users
+        SET account_status = 'suspended',
+            suspended_at = ?,
+            suspension_reason = ?,
+            suspended_by = ?,
+            token_version = token_version + 1
+        WHERE id = ?
+      `).run(now, reason, req.user.id, targetId);
+
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'ACCOUNT_SUSPENDED',
+        targetUserId: targetId,
+        details: `Suspended: ${reason}`
+      });
+    });
+  } catch (err) {
+    console.error('Failed to suspend account:', err);
+    return res.status(500).json({ error: 'Failed to suspend account' });
+  }
+
+  /**
+   * Reported, not auto-cancelled.
+   *
+   * A suspended organizer may still host events with volunteers already
+   * accepted onto shifts. Cancelling those automatically would strand students
+   * with no notice as a side effect of a moderation action, and un-cancelling
+   * is not a thing this product can do. So the count comes back for the
+   * administrator to act on deliberately.
+   */
+  const activeEvents = db.prepare(`
+    SELECT COUNT(*) AS count FROM events
+    WHERE organizer_id = ? AND status NOT IN ('completed', 'cancelled')
+  `).get(targetId).count;
+
+  res.json({
+    success: true,
+    userId: targetId,
+    status: 'suspended',
+    suspendedAt: now,
+    activeEvents,
+    message: activeEvents > 0
+      ? `Account suspended. This organizer still hosts ${activeEvents} active event(s) — reassign or cancel them.`
+      : 'Account suspended. All of their sessions have been ended.'
+  });
+});
+
+/** Restores a suspended account. Clears the suspension detail; leaves the audit trail. */
+router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('user.suspend'), (req, res) => {
+  const targetId = req.params.id;
+
+  const target = db.prepare(
+    'SELECT id, name, role, account_status FROM users WHERE id = ?'
+  ).get(targetId);
+
+  const refusal = suspensionTargetError(req.principal, req.user.id, target);
+  if (refusal) return res.status(refusal.status).json({ error: refusal.error });
+
+  if (target.account_status !== 'suspended') {
+    return res.status(409).json({ error: 'That account is not suspended.', code: 'not_suspended' });
+  }
+
+  const note = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+
+  try {
+    inTransaction(() => {
+      // token_version is deliberately NOT bumped. There are no live sessions to
+      // invalidate — the suspension already ended them — and bumping again
+      // would only invalidate the session of an administrator who happened to
+      // be acting as this user, which is not a thing that can happen here.
+      db.prepare(`
+        UPDATE users
+        SET account_status = 'active',
+            suspended_at = NULL,
+            suspension_reason = NULL,
+            suspended_by = NULL
+        WHERE id = ?
+      `).run(targetId);
+
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'ACCOUNT_UNSUSPENDED',
+        targetUserId: targetId,
+        details: note ? `Reinstated: ${note}` : 'Reinstated'
+      });
+    });
+  } catch (err) {
+    console.error('Failed to unsuspend account:', err);
+    return res.status(500).json({ error: 'Failed to reinstate account' });
+  }
+
+  res.json({ success: true, userId: targetId, status: 'active' });
 });
 
 export default router;

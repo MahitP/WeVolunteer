@@ -14,8 +14,15 @@ import userCapabilities from './002_user_capabilities.js';
 import reauthChallenges from './003_reauth_challenges.js';
 import errorEvents from './004_error_events.js';
 import errorAlerts from './005_error_alerts.js';
+import accountSuspension from './006_account_suspension.js';
+import legalConsent from './007_legal_consent.js';
+import dateOfBirth from './008_date_of_birth.js';
+import userBlocks from './009_user_blocks.js';
 
-export const MIGRATIONS = [authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts];
+export const MIGRATIONS = [
+  authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
+  legalConsent, dateOfBirth, userBlocks,
+];
 
 const label = (m) => `${m.version}_${m.name}`;
 

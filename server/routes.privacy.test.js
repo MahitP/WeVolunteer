@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { startTestServer } from './testServer.js';
+import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 
 // One server for the whole file (Tasks 5 and 6 append more describes below).
 let srv;
@@ -29,7 +29,7 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
     // relationship to test against, independent of the pre-existing seeded
     // Priya<->jkatzenback link. A future slot also gives us a non-vacuous
     // upcomingCount to assert on.
-    const signupRes = await srv.call('POST', '/api/auth/signup', {
+    const signupRes = await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       email: 'privacy.fresh.student@example.org', password: 'Password123',
       name: 'Privacy Fresh Student', role: 'student', grade: '9',
       school: 'Test High School',
@@ -371,7 +371,7 @@ describe('privacy: data export', () => {
   };
 
   beforeAll(async () => {
-    const signupRes = await srv.call('POST', '/api/auth/signup', {
+    const signupRes = await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       email: 'export.student@example.org', password: 'Password123',
       name: 'Export Student', role: 'student', grade: '9',
       school: 'Test High School',
@@ -484,7 +484,7 @@ describe('privacy: data export', () => {
     const sub = `sub-${username}`;
 
     const urlRes = await srv.call('POST', '/api/oauth/google/url', {
-      signupData: { name: 'Export Provider', username, role: 'student', grade: '10', skills: [] }
+      signupData: { ...TEST_SIGNUP_DEFAULTS, name: 'Export Provider', username, role: 'student', grade: '10', skills: [] }
     });
     expect(urlRes.status).toBe(200);
     const state = new URL(urlRes.body.url).searchParams.get('state');
