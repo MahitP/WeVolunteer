@@ -47,6 +47,7 @@ const ErrorDashboard = React.lazy(() => import('../views/ErrorDashboard'));
 const PrivacyNotice = React.lazy(() => import('../views/PrivacyNotice'));
 const LegalCenter = React.lazy(() => import('../views/legal/LegalCenter'));
 const LegalDocument = React.lazy(() => import('../views/legal/LegalDocument'));
+const OrganizerAgreement = React.lazy(() => import('../views/legal/OrganizerAgreement'));
 
 /**
  * Views App.jsx routes itself rather than through a table below.
@@ -110,6 +111,16 @@ export const APP_ROUTES = [
   { path: '/messages', element: <Messages />, requiredCap: 'message.send' },
   { path: '/portfolio', element: <VolunteerPortfolio />, requiredCap: 'portfolio.write' },
   { path: '/settings', element: <Settings /> },
+  /**
+   * Declared with NO `requiredCap`, deliberately.
+   *
+   * This is the screen an organizer uses to accept the Organizer Agreement, and
+   * until they do they hold none of the capabilities that reach a student. Gating
+   * it on any of those would gate it on the very thing accepting it grants — a
+   * lockout, from the one page that undoes the lock. See
+   * server/organizerAgreement.js.
+   */
+  { path: '/organizer-agreement', element: <OrganizerAgreement /> },
   /* Error triage. `error.read` is SUPER_ONLY, so `can()` refuses it before it
      consults per-user grants — no capability grant can reach this route, and
      the nav entry that points at it is hidden by the same capability. */

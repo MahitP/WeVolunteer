@@ -21,6 +21,37 @@ const PASSWORD_RULES = [
   { id: 'number', label: 'A number', test: p => /[0-9]/.test(p) }
 ];
 
+/**
+ * "Class of ____", mirroring server/accountValidation.js.
+ *
+ * Duplicated for the same reason PASSWORD_RULES is: the option list has to be
+ * computed synchronously to render, and `accountValidation.js` cannot come into
+ * the bundle — it imports bcryptjs and the server config. `src/authz.js`'s
+ * re-export trick is not available here for that reason.
+ *
+ * Drift here is a cosmetic bug and never an eligibility one, because the server
+ * recomputes the grade from the class year it receives and ignores the `grade`
+ * in the payload entirely. The list is computed from the clock rather than
+ * written down for the same reason it is on the server: a literal range is right
+ * for one school year and then starts offering years that have already
+ * graduated.
+ */
+const HS_GRADES = ['9', '10', '11', '12'];
+const ORDINAL = { 9: '9th', 10: '10th', 11: '11th', 12: '12th' };
+
+/** The calendar year the school year in progress ends in — July is the boundary. */
+const schoolYearEndYear = (now = new Date()) =>
+  now.getUTCMonth() <= 5 ? now.getUTCFullYear() : now.getUTCFullYear() + 1;
+
+/** Eligible class years, seniors first. */
+const CLASS_YEARS = HS_GRADES.map((_, i) => schoolYearEndYear() + i);
+
+const gradeForClassYear = (year) =>
+  HS_GRADES[HS_GRADES.length - 1 - (Number(year) - schoolYearEndYear())] ?? '';
+
+/** Matches the old `grade: '10'` default: a sophomore is the median applicant. */
+const DEFAULT_CLASS_YEAR = String(schoolYearEndYear() + 2);
+
 const USERNAME_RULES = [
   { id: 'length', label: '3–20 characters', test: u => u.length >= 3 && u.length <= 20 },
   { id: 'charset', label: 'Letters, numbers and underscores only', test: u => /^[a-zA-Z0-9_]+$/.test(u) },
@@ -69,7 +100,16 @@ export default function Signup({ onSignupSuccess, addToast }) {
     password: '',
     confirmPassword: '',
     role: 'student',
-    grade: '10',
+    /**
+     * The class year is the only grade-level field in this form.
+     *
+     * There used to be a `grade` here as well, set from `role`. Two fields for
+     * one fact is how they end up disagreeing, and grade is the one that decays
+     * — nothing advances it, so a stored grade is wrong from the following
+     * August. The payload's `grade` is now computed from this value, and the
+     * server recomputes it again from the class year it receives.
+     */
+    graduationYear: DEFAULT_CLASS_YEAR,
     avatar: '👤',
     school: '',
     skillsInput: '',
@@ -91,11 +131,7 @@ export default function Signup({ onSignupSuccess, addToast }) {
   }, [errors.api]);
 
   const set = (name, value) => {
-    setForm(prev => {
-      const next = { ...prev, [name]: value };
-      if (name === 'role') next.grade = value === 'organizer' ? 'Adult' : '10';
-      return next;
-    });
+    setForm(prev => ({ ...prev, [name]: value }));
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
   };
 
@@ -205,32 +241,47 @@ export default function Signup({ onSignupSuccess, addToast }) {
     }
   };
 
-  const baseFields = () => ({
+  const baseFields = () => {
     /**
-     * The consent block, on both signup paths.
+     * One field decides both. An organizer has no class year — the select offers
+     * "not in high school" for an adult volunteer too — and in both cases the
+     * grade is 'Adult' and no year is sent, so a stored graduation year always
+     * means "this person is in school".
      *
-     * baseFields() feeds the password submit AND finishProviderSignup(), so
-     * putting consent here is what makes the provider path carry it too — the
-     * hole most likely to be missed, and the one that would make the whole
-     * record worthless.
-     *
-     * Keys are the camelCased document slugs the server expects; the Terms
-     * control also covers the Community Guidelines, which are incorporated by
-     * reference and recorded as their own acceptance row server-side.
+     * `grade` is still sent because the API has always required it, but it is
+     * derived here rather than chosen, and the server derives it again from
+     * `graduationYear` rather than believing this copy.
      */
-    consent: {
-      termsOfService: form.termsAccepted,
-      privacyPolicy: form.privacyAcknowledged,
-    },
-    dateOfBirth: form.dateOfBirth,
-    name: form.name.trim(),
-    username: form.username.trim(),
-    role: form.role,
-    grade: form.grade,
-    avatar: form.avatar,
-    school: form.role === 'student' ? form.school : (form.school || 'Community organization'),
-    skills: form.skillsInput.split(',').map(s => s.trim()).filter(Boolean)
-  });
+    const classYear = form.role === 'student' ? form.graduationYear : '';
+
+    return {
+      /**
+       * The consent block, on both signup paths.
+       *
+       * baseFields() feeds the password submit AND finishProviderSignup(), so
+       * putting consent here is what makes the provider path carry it too — the
+       * hole most likely to be missed, and the one that would make the whole
+       * record worthless.
+       *
+       * Keys are the camelCased document slugs the server expects; the Terms
+       * control also covers the Community Guidelines, which are incorporated by
+       * reference and recorded as their own acceptance row server-side.
+       */
+      consent: {
+        termsOfService: form.termsAccepted,
+        privacyPolicy: form.privacyAcknowledged,
+      },
+      dateOfBirth: form.dateOfBirth,
+      name: form.name.trim(),
+      username: form.username.trim(),
+      role: form.role,
+      grade: classYear ? gradeForClassYear(classYear) : 'Adult',
+      ...(classYear ? { graduationYear: Number(classYear) } : {}),
+      avatar: form.avatar,
+      school: form.role === 'student' ? form.school : (form.school || 'Community organization'),
+      skills: form.skillsInput.split(',').map(s => s.trim()).filter(Boolean)
+    };
+  };
 
   /** Finish a signup that began at a provider — the address is already proven. */
   const finishProviderSignup = () => submit(
@@ -575,15 +626,48 @@ export default function Signup({ onSignupSuccess, addToast }) {
 
           <div className="field-row">
             {isStudent && (
+              /*
+                Class of ____ — and the only grade-level control on this form.
+
+                There were two fields here (grade, and nothing else) and now
+                there is one, because grade level and graduation year are the
+                same fact and only one of them stays true. A grade is wrong from
+                the following August: nothing in the product advances it. The
+                class year never changes, and the grade is derived from it — the
+                option label shows that derivation rather than hiding it, so
+                nobody has to guess which year "Class of 2029" means today.
+
+                "Not in high school" is what the old `Adult` option was for: a
+                parent or adult volunteering. It sends no class year at all,
+                rather than a placeholder one.
+
+                Enforced server-side (accountValidation.js), which recomputes the
+                grade from whichever year arrives and refuses one outside the
+                eligible range.
+              */
               <div className="field" style={{ flex: 1 }}>
-                <label htmlFor="su-grade">Grade</label>
-                <select id="su-grade" name="grade" className="select input-lg" value={form.grade} onChange={e => set('grade', e.target.value)}>
-                  <option value="9">9th grade</option>
-                  <option value="10">10th grade</option>
-                  <option value="11">11th grade</option>
-                  <option value="12">12th grade</option>
-                  <option value="Adult">Parent or adult</option>
+                <label htmlFor="su-grad-year">Class of</label>
+                <select
+                  id="su-grad-year"
+                  name="graduationYear"
+                  className="select input-lg"
+                  value={form.graduationYear}
+                  onChange={e => set('graduationYear', e.target.value)}
+                  aria-invalid={!!errors.graduationYear}
+                  aria-describedby="su-grad-year-hint"
+                >
+                  {CLASS_YEARS.map(y => (
+                    <option key={y} value={String(y)}>
+                      Class of {y} — {ORDINAL[gradeForClassYear(y)]} grade
+                    </option>
+                  ))}
+                  <option value="">Not in high school</option>
                 </select>
+                <span id="su-grad-year-hint" className="field-hint">
+                  The year you expect to graduate. We keep this instead of your grade so it
+                  stays right every September.
+                </span>
+                {errors.graduationYear && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.graduationYear}</span>}
               </div>
             )}
             <div className="field" style={{ flex: 2 }}>

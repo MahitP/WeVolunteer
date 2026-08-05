@@ -309,7 +309,173 @@ export function validateDateOfBirth(raw, { now = new Date() } = {}) {
   return { ok: true, value: raw.trim(), age };
 }
 
-export function validateAccountFields({ name, username, email, role, grade, bio, school, skills, avatar, dateOfBirth }) {
+/* ── Graduation year ("Class of ____") ───────────────────────────────────── */
+
+/**
+ * The grades that have a graduation year, lowest first.
+ *
+ * `VALID_GRADES` also contains 'Adult' and 'N/A', which are the two values that
+ * mean "not enrolled in high school". Neither has a class year, which is why
+ * this list is separate rather than derived by trimming that one.
+ */
+export const HIGH_SCHOOL_GRADES = ['9', '10', '11', '12'];
+
+/**
+ * The calendar year the school year *currently in progress* ends in.
+ *
+ * A class is named for the year it graduates, not the year it started, so in
+ * August 2026 the seniors are the Class of 2027. July is the boundary: months
+ * January–June belong to a school year that ends in this calendar year, and
+ * July–December to one that ends in the next.
+ *
+ * UTC throughout, matching `ageOn` above — a local-time read would move this
+ * boundary by a day depending on where the server sits, and on 30 June or 1 July
+ * that is a whole class year.
+ */
+export function schoolYearEndYear(now = new Date()) {
+  const year = now.getUTCFullYear();
+  return now.getUTCMonth() <= 5 ? year : year + 1;
+}
+
+/**
+ * The class years a person may register with, computed from the clock.
+ *
+ * Derived, never written down, because a literal range is right for one school
+ * year and quietly wrong for every one after it — "2027–2030" would still be
+ * accepted in 2031, when it means "already graduated". The two ends come from
+ * the eligibility rule itself:
+ *
+ *   - `min` — the current seniors. Anyone earlier has already graduated, so they
+ *     are not a student here.
+ *   - `max` — this year's incoming freshmen, i.e. `min` plus the number of grades
+ *     above ninth. Anyone later is not in high school yet.
+ *
+ * The 13-year minimum age is NOT a term in this range, and deliberately: the
+ * birth date answers that question exactly (`validateDateOfBirth`), and a class
+ * year cannot — a ninth grader is usually 14 but may be 13, and folding an age
+ * assumption in here would either duplicate the gate or contradict it.
+ */
+export function graduationYearRange(now = new Date()) {
+  const min = schoolYearEndYear(now);
+  return { min, max: min + HIGH_SCHOOL_GRADES.length - 1 };
+}
+
+/** The class year a person in `grade` graduates in, or null for a non-student grade. */
+export function graduationYearForGrade(grade, now = new Date()) {
+  const i = HIGH_SCHOOL_GRADES.indexOf(String(grade));
+  if (i === -1) return null;
+  return schoolYearEndYear(now) + (HIGH_SCHOOL_GRADES.length - 1 - i);
+}
+
+/**
+ * The grade a class year puts someone in today, or null if that year is outside
+ * the eligible range.
+ *
+ * This is the authoritative expression of grade level. See
+ * `validateGraduationYear` for why it, and not a stored grade, is the truth.
+ */
+export function gradeForGraduationYear(year, now = new Date()) {
+  const { min, max } = graduationYearRange(now);
+  if (!Number.isInteger(year) || year < min || year > max) return null;
+  return HIGH_SCHOOL_GRADES[HIGH_SCHOOL_GRADES.length - 1 - (year - min)];
+}
+
+/**
+ * The class year, and the grade that follows from it.
+ *
+ * ── Which of the two is stored, and why it is this one ──
+ *
+ * Grade level and graduation year are the same fact expressed two ways, and
+ * storing both as independently-editable columns would guarantee they eventually
+ * disagree. Only one can be the truth, and it is the class year:
+ *
+ *   - A stored **grade** is wrong every August. Nothing advances it — no job, no
+ *     login hook — so a tenth grader who signed up in 2026 is still recorded as
+ *     a tenth grader when they graduate, and every eligibility question asked of
+ *     that column gets a stale answer that looks perfectly valid.
+ *   - A stored **class year** never changes and never needs to. "Class of 2029"
+ *     is as true in 2031 as the day it was typed, and today's grade falls out of
+ *     it with one subtraction.
+ *
+ * So `users.graduation_year` is the source of truth (migration 010) and grade is
+ * DERIVED from it by `gradeForGraduationYear`. `users.grade` predates this and is
+ * NOT NULL, so it still holds a value — but it is a materialisation of the
+ * derived answer, and this function is the only thing that decides what goes in
+ * it at signup. Recomputing it from `graduation_year` is always safe; the reverse
+ * is not.
+ *
+ * ── Why a client-supplied grade is overridden rather than trusted ──
+ *
+ * A payload carrying both a class year and a grade is carrying one fact and one
+ * claim. The claim loses: whatever `grade` says, the stored grade is recomputed
+ * from the class year. That is the eligibility enforcement the product asked for
+ * — it is what stops a request hand-written with `grade: '12'` and
+ * `graduationYear: <freshman year>` from registering a ninth grader as a senior
+ * and reaching whatever a school scopes to seniors. It also means the two columns
+ * cannot be written in contradiction, because only one input decided both.
+ *
+ * ── Why an absent year is derived instead of refused ──
+ *
+ * Only at account creation, and only from the grade the applicant just picked:
+ * at that instant "the grade I am in" is true by construction, so the class year
+ * it implies is exact. This is the one-time conversion of a perishable claim
+ * into the durable fact, not an ongoing fallback — nothing recomputes
+ * `graduation_year` later, because after signup there is no fresh grade to
+ * compute it from. A supplied year is still checked, and a supplied *bad* year is
+ * refused rather than quietly replaced by the derived one.
+ *
+ * ── Adults ──
+ *
+ * Organizers register as `grade: 'Adult'`, and 'N/A' exists for the same reason.
+ * A graduation year is meaningless for them, so it is null — never zero, never
+ * the current year. A field mandatory for one role and meaningless for another
+ * cannot be mandatory in a shared path, and supplying one anyway is refused
+ * rather than ignored, so a stored year always means "this person is in school".
+ *
+ * @returns {{ok: true, value: number|null, grade?: string}
+ *          | {ok: false, field: string, error: string}}
+ */
+export function validateGraduationYear(raw, { grade, now = new Date() } = {}) {
+  const isStudentGrade = HIGH_SCHOOL_GRADES.includes(String(grade));
+  const supplied = raw !== undefined && raw !== null && raw !== '';
+
+  if (!supplied) {
+    return { ok: true, value: isStudentGrade ? graduationYearForGrade(grade, now) : null };
+  }
+
+  if (!isStudentGrade) {
+    return {
+      ok: false,
+      field: 'graduationYear',
+      error: 'Only students in grades 9 through 12 have a graduation year.',
+    };
+  }
+
+  // A number or a four-digit string, and nothing else. `Number('')` is 0 and
+  // `Number('2027abc')` is NaN, so parsing is done by shape first: an accepted
+  // year has to look like a year before it is compared to anything.
+  const year = typeof raw === 'number' ? raw : (/^\d{4}$/.test(String(raw).trim()) ? Number(String(raw).trim()) : NaN);
+  if (!Number.isInteger(year)) {
+    return { ok: false, field: 'graduationYear', error: 'Choose the year you expect to graduate.' };
+  }
+
+  const { min, max } = graduationYearRange(now);
+  const derivedGrade = gradeForGraduationYear(year, now);
+  if (!derivedGrade) {
+    // The range is named, because unlike the age gate there is nothing to teach
+    // someone by naming it — a class year is not a secret, and a person who
+    // mistyped one needs to know which years the platform serves.
+    return {
+      ok: false,
+      field: 'graduationYear',
+      error: `WeVolunteer is for students graduating between ${min} and ${max}. Choose one of those years.`,
+    };
+  }
+
+  return { ok: true, value: year, grade: derivedGrade };
+}
+
+export function validateAccountFields({ name, username, email, role, grade, bio, school, skills, avatar, dateOfBirth, graduationYear }) {
   if (typeof name !== 'string' || !name.trim()) {
     return { ok: false, field: 'name', error: 'Enter your full name.' };
   }
@@ -332,6 +498,13 @@ export function validateAccountFields({ name, username, email, role, grade, bio,
   if (!VALID_GRADES.includes(grade)) {
     return { ok: false, field: 'grade', error: `Grade must be one of: ${VALID_GRADES.join(', ')}` };
   }
+
+  // Checked against the CLAIMED grade — the 'Adult'/'N/A' refusal needs to know
+  // what the applicant said they were — and then it decides the grade that is
+  // actually stored. See validateGraduationYear for why the claim does not win.
+  const gradYear = validateGraduationYear(graduationYear, { grade });
+  if (!gradYear.ok) return gradYear;
+  const effectiveGrade = gradYear.grade ?? grade;
 
   if (bio != null && (typeof bio !== 'string' || bio.length > BIO_MAX)) {
     return { ok: false, field: 'bio', error: `Your bio must be ${BIO_MAX} characters or fewer.` };
@@ -366,7 +539,8 @@ export function validateAccountFields({ name, username, email, role, grade, bio,
       email: emailResult.value,
       username: usernameResult.value,
       role,
-      grade,
+      grade: effectiveGrade,
+      graduationYear: gradYear.value,
       dateOfBirth: dobResult.value,
       bio: bio == null ? '' : bio,
       school: school == null ? '' : school,

@@ -257,8 +257,11 @@ describe('authorization hygiene', () => {
       // value for a brand-new account, i.e. whether staff must approve it. Not
       // an authorization decision about a caller: there is no principal yet.
       // Moved from :223 when the signup handler gained its server-side consent
-      // gate (recordAcceptances / assertConsent).
-      './routes/authRoutes.js:257',
+      // gate (recordAcceptances / assertConsent), then :257 -> :258 when
+      // `withheldCapabilitiesFor` was imported for the /api/auth/me payload.
+      // Re-read at both positions: unchanged, and still not an authorization
+      // decision.
+      './routes/authRoutes.js:258',
       // Moved from :379 in v1.2b Task 5 when `resolveProvider` gained an
       // export and the docstring above it explaining why; to :405 in Task 6
       // (the local `issueSession` became an import with a docstring explaining
@@ -443,22 +446,35 @@ describe('authorization hygiene', () => {
       // it (the shell is now wrapped in `OfflineOverlay`, and the offline ternary
       // that used to sit directly above this line is gone), then 730 -> 720 when
       // the two boundaries' identical chunk-vs-crash closures were extracted to a
-      // shared `crashFallback`, then 720 -> 821 across the rest of v1.2c and
+      // shared `crashFallback`, then 720 -> 821 across the rest of v1.2c,
       // 821 -> 826 when the public-route branch above it stopped hardcoding
-      // `/verify/` and started deriving the test from PUBLIC_ROUTES. Re-read at
-      // each of those positions: unchanged every time, and still not an
-      // authorization check. `viewingProfile.type`
+      // `/verify/` and started deriving the test from PUBLIC_ROUTES, and
+      // 826 -> 827 when `/organizer-agreement` was added to the route prop map,
+      // and 827 -> 849 when `personaFor` gained the comment explaining why it
+      // ignores the withheld set. Re-read at each of those positions: unchanged
+      // every time, and still not an authorization check. `viewingProfile.type`
       // is set from the ?type= query parameter and decides which overlay to draw;
       // nothing about the viewer. That the pin keeps moving is the guard working
       // — it forces the re-read.
-      'src/App.jsx:826': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      'src/App.jsx:849': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
       'src/components/EventComments.jsx:83': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
       'src/components/EventComments.jsx:84': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
       'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
-      'src/views/Signup.jsx:96': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'the signup form\'s own role <select> value, defaulting the grade field — there is no session and no principal at this point' },
-      'src/views/Signup.jsx:194': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'toast tone for the account just requested (organizers await approval); form state, not an actor' },
-      'src/views/Signup.jsx:231': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which school value to submit for the account being created; form state, not an actor' },
-      'src/views/Signup.jsx:272': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which fields the signup form shows for the selected account type; form state, not an actor' },
+      /**
+       * Re-anchored in v1.2c. All four still describe the same thing — the shape
+       * of a form being filled in by somebody who has no account yet, so there is
+       * no session and no principal for any of them to be an authorization
+       * decision about.
+       *
+       * The old `:96` entry is gone rather than moved: it guarded a comparison
+       * that defaulted the `grade` field from the selected role, and the grade
+       * field itself no longer exists in this form. `:255` below is its
+       * replacement and asks a different question (which class year to submit).
+       */
+      'src/views/Signup.jsx:230': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'toast tone for the account just requested (organizers await approval); form state, not an actor' },
+      'src/views/Signup.jsx:255': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'whether to submit a class year at all — organizers have no graduation year; form state, not an actor, and the server recomputes the grade from it regardless' },
+      'src/views/Signup.jsx:281': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which school value to submit for the account being created; form state, not an actor' },
+      'src/views/Signup.jsx:323': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which fields the signup form shows for the selected account type; form state, not an actor' },
 
       // ── UNCONVERTED_UX — real role branches, out of Task 17's scope ──
       'src/components/EventActionPanel.jsx:14': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates the apply/withdraw panel; wants can(event.apply)' },
@@ -632,6 +648,25 @@ describe('authorization hygiene', () => {
       'POST /api/oauth/link': { category: CATEGORY.SELF_ONLY, reason: 'link token must name the caller (403 otherwise, oauthRoutes.js); the oauth_accounts insert is scoped to req.user.id, and the route is behind requireAAL2(\'oauth.link\') with the provider bound' },
       'POST /api/privacy/export': { category: CATEGORY.SELF_ONLY, reason: 'insert scoped to caller\'s own id' },
       'GET /api/privacy/export/status': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
+
+      /**
+       * ── The Organizer Agreement (v1.2c) ──
+       *
+       * Both read and write only the caller's own acceptance rows, and both are
+       * deliberately reachable by an organizer who currently holds NO capability
+       * that touches a student — that withheld state is precisely what these two
+       * routes exist to let them escape. Gating them on a capability would gate
+       * them on the thing the agreement grants, which is a lockout: the only
+       * action that restores the account would be unreachable from it.
+       *
+       * The status route is open to every authenticated role rather than
+       * organizer-only, because the client asks it on load to decide whether to
+       * show the interstitial. A student gets `required: false`; answering 403
+       * would make "no agreement needed" indistinguishable from "the request
+       * failed".
+       */
+      'GET /api/legal/organizer-agreement': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'reads only the caller\'s own acceptance state (organizerAgreementStatus scoped to req.user.id); every role may ask, and a non-organizer gets required:false rather than a refusal' },
+      'POST /api/legal/organizer-agreement/accept': { category: CATEGORY.SELF_ONLY, reason: 'writes acceptance rows for req.user.id only; refuses a non-organizer with 400 rather than recording a false acceptance, and must stay reachable while the organizer\'s student-facing capabilities are withheld (accountRoutes.js)' },
       'GET /api/privacy/export/download/:id': { category: CATEGORY.SELF_ONLY, reason: 'job.user_id !== caller -> 404 (always the caller\'s own export job); behind requireAAL2(\'data.download\') with the jobId bound — this is where the archive actually leaves, and gating only the request left a completed one behind a bare session for seven days (v1.2b audit F-1)' },
 
       /**

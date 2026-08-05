@@ -12,6 +12,7 @@ import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearC
 
 import { authenticateToken, formatUserResponse, inTransaction, revokeSession } from '../utils.js';
 import { assertConsent, recordAcceptances, ConsentMissing } from '../consent.js';
+import { withheldCapabilitiesFor } from '../organizerAgreement.js';
 import { db, initDatabase } from '../db.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
@@ -264,12 +265,20 @@ router.post('/api/auth/signup', async (req, res) => {
     const emailVerifiedVal = oauthData && oauthData.providerEmailVerified === true ? 1 : 0;
 
     inTransaction(() => {
+      /**
+       * `graduation_year` is the stored truth about grade level;
+       * `fields.grade` is the value DERIVED from it by
+       * `validateGraduationYear`, never the one the client claimed. Writing
+       * `req.body.grade` here instead would reintroduce exactly the
+       * contradiction the derivation exists to prevent — and would let a
+       * hand-written request register a ninth grader as a senior.
+       */
       db.prepare(`
-        INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, email_verified, avatar, bio, school, skills, date_of_birth, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (id, name, email, username, password_hash, grade, graduation_year, role, verified, email_verified, avatar, bio, school, skills, date_of_birth, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         userId, fields.name, fields.email, fields.username, passwordHash,
-        fields.grade, fields.role, verifiedVal, emailVerifiedVal,
+        fields.grade, fields.graduationYear, fields.role, verifiedVal, emailVerifiedVal,
         fields.avatar, fields.bio, fields.school, JSON.stringify(fields.skills),
         fields.dateOfBirth, now
       );
@@ -502,13 +511,33 @@ router.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// 3. Get Authenticated User Details (Me)
+/**
+ * 3. Get Authenticated User Details (Me)
+ *
+ * ── Why `withheld` is added here and not in `formatUserResponse` ──
+ *
+ * This is the ONLY payload the client's `currentUser` is ever built from —
+ * `SessionProvider` sets it from `api.getMe()` and from nowhere else, including
+ * after an acceptance, which calls `refreshAll`. So this is the one place the
+ * field is read, and adding it to the shared formatter would instead attach it
+ * to two payloads describing OTHER people (the admin user list, and a profile
+ * view), where it discloses whether some third party has signed an agreement to
+ * anyone who can see them.
+ *
+ * It is what lets the client's `can()` agree with the server about an organizer
+ * who has not yet accepted; see the header in `src/authz.js`. The gate itself is
+ * server-side and derived per request — this changes what is offered, never what
+ * is allowed.
+ */
 router.get('/api/auth/me', authenticateToken, (req, res) => {
   try {
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!userRow) return res.status(404).json({ error: 'User not found' });
-    
-    res.json(formatUserResponse(userRow));
+
+    res.json({
+      ...formatUserResponse(userRow),
+      withheld: withheldCapabilitiesFor(db, userRow),
+    });
   } catch (error) {
     console.error('Auth check error:', error);
     res.status(500).json({ error: 'Internal server error' });

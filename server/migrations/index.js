@@ -18,10 +18,11 @@ import accountSuspension from './006_account_suspension.js';
 import legalConsent from './007_legal_consent.js';
 import dateOfBirth from './008_date_of_birth.js';
 import userBlocks from './009_user_blocks.js';
+import graduationYear from './010_graduation_year.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
-  legalConsent, dateOfBirth, userBlocks,
+  legalConsent, dateOfBirth, userBlocks, graduationYear,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
