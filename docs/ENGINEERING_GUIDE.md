@@ -1169,6 +1169,120 @@ Added on the v1.2 branch, pending release:
 | Exported archive caching | `Cache-Control: no-store` on the download, asserted on the emitted header — `res.download` otherwise defaults to `public, max-age=0`, and a cached copy is served without reaching the step-up gate at all |
 | Session identity | Every session carries a `jti`; provider sign-ins are per-device revocable |
 | Schema changes | Versioned migration registry with source checksums re-verified on every boot |
+| Error capture | Redacts before storing; hashes the user id; stores a route *pattern*, never a URL; no request body field exists to store one in |
+| Error intake | Unauthenticated by design, bounded by a per-IP limiter, an 8 kB body cap, and a storage ceiling on client-created groups |
+
+---
+
+### 6.10 Error capture and retention (v1.2c)
+
+The application records its own failures. That means a table full of text
+written by the code paths most likely to be holding somebody's data at the
+moment they broke — so the rules below are about what must **never** reach it,
+and each one names the reason rather than the rule alone.
+
+The population is mostly minors. PII is the whole risk here, and every decision
+in this subsection exists because of it.
+
+#### The four decisions that carry the privacy property
+
+1. **Redaction happens before storage, never on the way out.** A message is
+   rewritten before it is written down, so a leak cannot be undone by a later
+   reader, a database dump, or a backup. `redactMessage` in
+   `server/errorReporter.js` replaces, in this order — most specific first, so a
+   JWT is recognised as a JWT before the generic long-token rule eats its
+   segments: email addresses, JWTs, `Bearer` tokens, step-up challenge ids, hex
+   runs of 24+ characters, and digit runs of 7+. Truncation happens **last**, so
+   a secret near the end of a long message is redacted before the cut rather
+   than preserved by it.
+2. **The user is a hash, never an id.** `user_hash` is a one-way digest. It
+   answers "how many distinct people hit this" — which is the only question
+   triage needs — without naming any of them.
+3. **The route is a pattern, never a URL.** `/users/:id/profile`, never
+   `/users/user-student-2/profile`. Anything not matching an approved pattern in
+   `server/clientRoutes.js` is stored as the literal `'unknown'`. Query strings
+   and fragments are dropped before matching, which is what keeps a reset token
+   or an OAuth `code` out of the table.
+4. **There is no request-body column.** Not "we don't populate it" — the schema
+   has nowhere to put one. A field that does not exist cannot be filled in by a
+   future change that seemed harmless.
+
+`context` is an allowlist, not a denylist: only the keys in `CONTEXT_KEYS` are
+kept, each redacted and truncated to 200 characters. A denylist fails on the
+first thing nobody thought of; an allowlist fails closed. `password`,
+`newEmail` and `challengeId` are not on it and therefore cannot be stored,
+whatever a caller believes it is passing.
+
+#### Groups, events, fingerprints
+
+An **error group** is one *problem*. An **error event** is one *occurrence* of
+it. They are separate because they are retained differently and answer different
+questions: the group carries the counter and the status, the events carry the
+evidence.
+
+A **fingerprint** is `sha256(source, kind, normalised message, route)`, joined
+with a NUL — a separator chosen because it cannot occur in any of the joined
+values, so no two distinct inputs can collide by shifting where one field ends.
+Normalisation collapses ids and numbers, so the same bug reported a thousand
+times with a different id in the message is one group, while genuinely different
+failures stay apart.
+
+**Sources** are `server`, `client` and `worker`, and the source is assigned
+server-side on every path. A client that sends `source: 'server'` is ignored
+rather than refused — refusing would tell it which values matter.
+
+#### Lifecycle
+
+    open ──(someone triages it)──> resolved ──(it happens again)──> open
+      │                                 ▲
+      └────────(not worth fixing)──> ignored
+
+`resolved` is a statement about *belief*, not about the code. Nothing verifies
+that the fix worked, so a group that recurs after being resolved **reopens
+itself**: the next occurrence moves `last_seen_at` and sets `status` back to
+`open`. A silently-still-broken thing sitting in a "resolved" list is worse than
+no dashboard at all, because it converts an unknown problem into a wrong answer.
+
+Status changes are audit-logged through `server/auditLog.js`, in the **same
+transaction** as the change — no status change without a record of who made it,
+and no audit row describing a change that rolled back. Reads are deliberately
+not audited: `admin_audit_logs` has no retention sweep, so auditing every
+dashboard poll would create an unbounded write path in a table nothing expires,
+and bury the consequential actions under "the owner looked at a list".
+
+#### Limits — every one of them measured, not aspirational
+
+| Bound | Value | Why it is not covered by the others |
+|---|---|---|
+| Intake rate | 20 per IP / 15 min (`ERROR_REPORT_RATE_LIMIT`) | Bounds *requests* from one address; does nothing about a thousand addresses |
+| Body size | 8 kB, mounted **path-scoped before** the global 100 kB parser | Mounted after it, the global parser wins and the cap is a no-op |
+| Events per group | 50 | The counter keeps climbing; only the duplication stops |
+| Events per hour | 100 per fingerprint | Bounds a burst that would otherwise fill the evidence quota in seconds |
+| Client-created groups | 500, then a single `client-overflow` row | The fingerprint is computed over a client-supplied message, so the number of distinct groups is attacker-chosen and one line of script |
+| Reports per page load | 5, deduped by message + first frame | Client-side; a render loop produces thousands per second and no server bound stops the traffic leaving |
+
+Every response from `POST /api/errors/report` is `202`, whether the report was
+stored, collapsed, dropped at the ceiling, or lost. That uniformity is a
+security property: a distinct answer for "ceiling reached" is a progress meter
+for an attack, and a failure status invites a retry that amplifies the flood
+that caused it.
+
+#### Retention
+
+| Rows | Kept for |
+|---|---|
+| Events | 30 days |
+| Resolved / ignored groups | 30 days |
+| Open groups | 180 days |
+| Client groups seen exactly once | 7 days |
+
+The sweep is idempotent and never throws — it runs beside the other sweeps in
+`utils.js`, where an exception would abandon every sweep registered after it.
+
+**Consequence for readers of the dashboard:** the occurrences-by-day chart is a
+30-day window over *retained evidence*, not an all-time total. Group counters
+outlive the events that produced them, so a group can legitimately show 2,000
+occurrences and no evidence at all.
 
 ---
 
