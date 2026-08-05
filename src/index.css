@@ -6203,3 +6203,114 @@ input:disabled + .premium-slider {
   .err-actions { width: 100%; flex-direction: column; align-items: stretch; }
   .err-panel { flex-direction: column; gap: var(--s3); padding: var(--s4); }
 }
+
+/* ── Error triage ───────────────────────────────────────────────────────────
+ *
+ * The super-admin dashboard at /errors. See src/views/ErrorDashboard.jsx.
+ *
+ * Everything here exists because error data is shaped unlike anything else in
+ * the app: a message can be a minified one-liner with no spaces, a route can be
+ * a long Express pattern, a fingerprint is 64 unbroken hex characters, and a
+ * stack is wide, pre-formatted and must not be reflowed. Each of those breaks a
+ * normal card layout in a different way.
+ */
+
+/* A whole row is one control, so the target is the row rather than a link
+   buried in it — this is a triage list read on a phone at an event. */
+.etri-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s4);
+  width: 100%;
+  padding: var(--s4);
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.etri-row:hover { border-color: var(--border-hover); background: var(--surface-2); }
+.etri-row:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.etri-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  /* Without this a long unbroken message makes the flex item refuse to shrink,
+     and the count column is pushed off the side of the card. */
+  min-width: 0;
+  flex: 1;
+}
+
+.etri-row-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--s1);
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.etri-count {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1;
+}
+
+/* `anywhere`, not `break-word`: a minified stack frame is one token thousands
+   of characters long, and `break-word` leaves it overflowing. */
+.etri-message {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.etri-route {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* 64 hex characters with no break opportunity in them at all. `break-all` is
+   the only thing that stops this widening the page on a phone. */
+.etri-fingerprint {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  word-break: break-all;
+}
+
+/* Scrolls rather than wraps: a wrapped stack frame is unreadable, and the
+   indentation is what makes the frames legible in the first place. */
+.etri-stack {
+  margin: 0;
+  padding: var(--s3);
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+  overflow-x: auto;
+  white-space: pre;
+  max-height: 18rem;
+}
+
+@media (max-width: 40rem) {
+  /* The count column stops earning its width on a phone; stacking keeps the
+     message on the full width instead of a two-word column beside it. */
+  .etri-row { flex-direction: column; gap: var(--s3); }
+  .etri-row-meta {
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--s3);
+    text-align: left;
+  }
+}

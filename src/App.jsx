@@ -26,7 +26,7 @@ import {
 } from './routes/index.jsx';
 import {
   LayoutDashboard, Compass, CalendarPlus, ShieldCheck, LogOut, CalendarDays,
-  UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon
+  UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon, Bug
 } from 'lucide-react';
 
 // The two heaviest modals. EventModal pulls in the whole organizer surface —
@@ -146,6 +146,11 @@ const NAV = [
   { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, requiredCap: 'message.send' },
   { id: 'create', path: '/events/new', label: 'New event', icon: CalendarPlus, requiredCap: 'event.create', requiresVerified: true },
   { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, requiredCap: 'self.read' },
+  /* Error triage. `error.read` is SUPER_ONLY, so this is invisible to every
+     role but the platform owner and unreachable even with a per-user grant.
+     Placed before `profile` rather than appended: `navItems.slice(0, 4)` is the
+     mobile primary row, and super_admin's first four must not shift. */
+  { id: 'errors', path: '/errors', label: 'Errors', icon: Bug, requiredCap: 'error.read' },
   { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS }
 ];
 
@@ -207,7 +212,8 @@ const PAGE_META = {
   staff: {
     dashboard: { title: 'Review queue', sub: 'Approve organizers and moderate events' },
     browse: { title: 'All events', sub: 'Everything posted across the district' },
-    notifications: { title: 'Notifications', sub: 'Platform activity' }
+    notifications: { title: 'Notifications', sub: 'Platform activity' },
+    errors: { title: 'Errors', sub: 'Crashes and faults reported by browsers, the server, and background jobs' }
   },
   partner: {
     dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
@@ -668,7 +674,8 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/notifications': { onViewEvent: openEventById, onCountChange: () => setNotifKey(k => k + 1) },
     '/messages': {},
     '/portfolio': { currentUser },
-    '/settings': { currentUser, addToast, onProfileChange: refreshAll }
+    '/settings': { currentUser, addToast, onProfileChange: refreshAll },
+    '/errors': { addToast }
   };
 
   /** Where a route the user cannot reach sends them. Unchanged from the ternaries. */

@@ -48,6 +48,7 @@ vi.mock('./views/Welcome', () => stub('welcome'));
 vi.mock('./views/Login', () => stub('login'));
 vi.mock('./views/Signup', () => stub('signup'));
 vi.mock('./views/CertificateVerification', () => stub('cert'));
+vi.mock('./views/ErrorDashboard', () => stub('error-dash'));
 // Eager shell chrome that talks to the (auto-mocked) api — not what this checks.
 vi.mock('./components/ThemeToggle', () => ({ default: () => <div data-testid="theme" /> }));
 vi.mock('./components/NotificationsBell', () => ({ default: () => <div data-testid="bell" /> }));
@@ -251,6 +252,34 @@ describe('signed-out and public routes', () => {
     renderAt('/');
     expect(await screen.findByTestId('welcome')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  /**
+   * The error dashboard, denied by the route and not merely hidden by the nav.
+   *
+   * Hiding a nav entry is UX; typing the URL is one keystroke. `error.read` is
+   * SUPER_ONLY, so `can()` refuses it before it consults per-user grants — no
+   * `user_capabilities` row can reach this and `capability.grant` is not a path
+   * to it. Asserted per role rather than once, because the failure mode is one
+   * role slipping through, not all of them.
+   */
+  it.each([['student'], ['organizer'], ['admin'], ['partner']])(
+    '%s is refused /errors even by typing the URL',
+    async (role) => {
+      signedInAs(USER(role));
+      renderAt('/errors');
+      await findErrorKind('403');
+      expect(screen.queryByTestId('error-dash')).not.toBeInTheDocument();
+    }
+  );
+
+  it('super_admin reaches /errors with the props the view needs', async () => {
+    signedInAs(USER('super_admin'));
+    renderAt('/errors');
+    const el = await screen.findByTestId('error-dash');
+    // `withProps` clones with the map's entry; a missing entry mounts the view
+    // with every prop silently absent rather than throwing.
+    expect(el.dataset.props).toBe('addToast');
   });
 
   it('renders certificate verification for a signed-in user', async () => {

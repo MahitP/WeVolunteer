@@ -100,11 +100,36 @@ describe('navigation, per role', () => {
   it('super_admin gets a populated rail, not an empty shell', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
-      'Review queue', 'Opportunities', 'Calendar', 'Messages', 'New event', 'Notifications', 'My profile'
+      'Review queue', 'Opportunities', 'Calendar', 'Messages', 'New event',
+      'Notifications', 'Errors', 'My profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
     expect(items.length).toBeGreaterThan(0);
   });
+
+  /**
+   * `Errors` is the only SUPER_ONLY entry in the rail, and the ordering above is
+   * not incidental. `navItems.slice(0, 4)` is the mobile primary row, so an
+   * entry inserted earlier would push `Messages` behind "More" for the platform
+   * owner — a nav regression that no assertion about the SET would catch.
+   */
+  it('adds Errors without disturbing the mobile primary row', () => {
+    const labels = navItemsFor(USER('super_admin')).map(n => n.label);
+    expect(labels.slice(0, 4)).toEqual(['Review queue', 'Opportunities', 'Calendar', 'Messages']);
+    expect(labels.indexOf('Errors')).toBeGreaterThan(3);
+  });
+
+  /**
+   * The gate that matters. `error.read` is SUPER_ONLY, so `can()` refuses it
+   * before consulting per-user grants — this asserts the consequence rather
+   * than the mechanism, because the consequence is what a user experiences.
+   */
+  it.each([['student'], ['organizer'], ['admin'], ['partner']])(
+    '%s is never offered the error dashboard',
+    (role) => {
+      expect(navItemsFor(USER(role)).map(n => n.label)).not.toContain('Errors');
+    }
+  );
 
   it('partner gets only what analytics.public/event.view justify', () => {
     // No dashboard entry, because partner has no dashboard to be sent to —
@@ -122,7 +147,8 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
-      'Review queue', 'Opportunities', 'Calendar', 'Messages', 'New event', 'Notifications', 'My profile'
+      'Review queue', 'Opportunities', 'Calendar', 'Messages', 'New event',
+      'Notifications', 'Errors', 'My profile'
     ]);
   });
 

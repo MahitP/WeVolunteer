@@ -43,6 +43,7 @@ const VolunteerPortfolio = React.lazy(() => import('../views/VolunteerPortfolio'
 const CheckInView = React.lazy(() => import('../views/CheckInView'));
 const Messages = React.lazy(() => import('../views/Messages'));
 const Settings = React.lazy(() => import('../views/Settings'));
+const ErrorDashboard = React.lazy(() => import('../views/ErrorDashboard'));
 
 /**
  * Views App.jsx routes itself rather than through a table below.
@@ -106,6 +107,10 @@ export const APP_ROUTES = [
   { path: '/messages', element: <Messages />, requiredCap: 'message.send' },
   { path: '/portfolio', element: <VolunteerPortfolio />, requiredCap: 'portfolio.write' },
   { path: '/settings', element: <Settings /> },
+  /* Error triage. `error.read` is SUPER_ONLY, so `can()` refuses it before it
+     consults per-user grants — no capability grant can reach this route, and
+     the nav entry that points at it is hidden by the same capability. */
+  { path: '/errors', element: <ErrorDashboard />, requiredCap: 'error.read' },
 ];
 
 /**
