@@ -976,12 +976,16 @@ thing standing between a secret and the remote. Never bypass it with
 `--no-verify` to "fix it in the next commit" — the object is already written
 once the commit exists.
 
-### 6.7 Known accepted advisory
+### 6.7 Known accepted advisories
 
-`npm audit` reports two high-severity entries. Both are the same advisory
-([GHSA-qwww-vcr4-c8h2](https://github.com/advisories/GHSA-qwww-vcr4-c8h2),
-react-router RSC-mode CSRF bypass), counted twice via `react-router` and
-`react-router-dom`.
+`npm audit` reports **three** high-severity entries, which are **two** distinct
+advisories. Re-verified at the v1.2c final release review; the count was two at
+v1.2b and the third arrived through a transitive dev dependency without any
+change to this repository, which is the normal way this section goes stale.
+
+**1 — react-router RSC-mode CSRF bypass** (two of the three entries).
+[GHSA-qwww-vcr4-c8h2](https://github.com/advisories/GHSA-qwww-vcr4-c8h2),
+counted twice via `react-router` and `react-router-dom`.
 
 **Assessed as not applicable**, with the reasoning recorded in `README.md`: the
 advisory is scoped to React Router's React Server Components mode. WeVolunteer
@@ -991,6 +995,30 @@ advisory describes is never instantiated.
 Re-assess whenever the advisory is updated or the routing architecture changes.
 If WeVolunteer ever adopts server components, **this assessment is void** and
 must be redone before shipping.
+
+Re-verified at v1.2c against the code rather than against the previous
+assessment: `src/main.jsx` mounts `BrowserRouter`, there is no
+`createBrowserRouter`, no `RouterProvider`, and no route `loader`/`action`
+anywhere in `src/`. The advisory's range (`7.12.0 – 8.2.0`) still covers the
+pinned `7.18.1` and **no fixed 7.x exists** — `npm audit fix --force` resolves
+it by *downgrading* to `react-router-dom@7.11.0`, which is a breaking change
+taken to remove a risk that is not instantiated. Do not run it.
+
+**2 — brace-expansion denial of service.**
+[GHSA-rgw5-rvv9-x895](https://github.com/advisories/GHSA-rgw5-rvv9-x895),
+unbounded intermediate arrays in glob expansion.
+
+**Assessed as not shipped.** The path is
+`server → nodemon → minimatch → brace-expansion`, and `nodemon` is a
+`devDependency` used only by `npm run dev`. It is not installed by a production
+`npm ci --omit=dev`, is not imported by any runtime module, and the input it
+expands is a developer's own watch glob rather than anything a user supplies.
+
+A non-breaking fix **is** available (`npm audit fix`, no major bumps). It was
+deliberately not taken during the release review itself: touching
+`package-lock.json` invalidates every gate that had already been run against it,
+in exchange for removing a dev-only hazard. Take it as the first commit *after*
+the merge, not as part of it.
 
 ### 6.8 Step-up re-authentication (AAL2)
 
@@ -1191,10 +1219,37 @@ in this subsection exists because of it.
    reader, a database dump, or a backup. `redactMessage` in
    `server/errorReporter.js` replaces, in this order — most specific first, so a
    JWT is recognised as a JWT before the generic long-token rule eats its
-   segments: email addresses, JWTs, `Bearer` tokens, step-up challenge ids, hex
-   runs of 24+ characters, and digit runs of 7+. Truncation happens **last**, so
-   a secret near the end of a long message is redacted before the cut rather
-   than preserved by it.
+   segments: email addresses (matched with **Unicode** letter classes, not
+   `A-Za-z`), JWTs, `Bearer` tokens, step-up challenge ids, certificate codes,
+   hex runs of 24+ characters, written phone numbers in 3-3-4 grouping, and
+   digit runs of 7+. Truncation happens **last**, so a secret near the end of a
+   long message is redacted before the cut rather than preserved by it.
+
+   Two of those rules were added by release reviews that *probed* the
+   redactor with realistic PII instead of reading it, and both were **partial**
+   failures rather than absent ones — the more dangerous shape, because the
+   stored row looks redacted:
+
+   - The digit-run rule named "a phone number" among the things it caught and
+     only ever caught unformatted ones. `555-123-4567`, `555.123.4567` and
+     `+1 (555) 123-4567` — every way a person actually writes one — went
+     through untouched (v1.2c review).
+   - The email rule was ASCII-only, so it did not stop at a non-ASCII name, it
+     matched from the ASCII run that reached the `@`:
+     `josé.garcía@school.org` was stored as `josé.garcí[redacted]`, which is a
+     student's given name and most of their surname. Accented names are ordinary
+     in a school district, and `notificationWorker.js` records the message of a
+     failed send verbatim, so one bounced email is the whole path (v1.2c final
+     review).
+
+   **What redaction does NOT cover, stated so nobody assumes otherwise:**
+   personal names, street addresses, IP addresses, dates of birth, and
+   free-text a caller chose to interpolate. There is no pattern for a name, and
+   a rule broad enough to catch one would redact the words that make a message
+   diagnosable. The control for those is upstream and is the real one: *do not
+   interpolate user data into an error message.* Every `throw new Error(...)` in
+   `server/` was checked against this at v1.2c and none carries a name, an
+   address or an email; the rules above are the second line, not the first.
 2. **The user is a hash, never an id.** `user_hash` is a one-way digest. It
    answers "how many distinct people hit this" — which is the only question
    triage needs — without naming any of them.
