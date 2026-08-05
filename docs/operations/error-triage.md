@@ -18,8 +18,79 @@ per-user capability grant is refused for them before it is even considered. If
 you cannot see the Errors entry, you are not meant to, and typing the URL gives
 the same refusal.
 
-There is nothing to configure. Errors arrive on their own — from browsers, from
-the server, and from background jobs.
+Errors arrive on their own — from browsers, from the server, and from background
+jobs. Nothing needs configuring for that.
+
+**Alerts do need configuring**, and are covered next.
+
+---
+
+## Getting told, instead of remembering to look
+
+A dashboard nobody opens is not monitoring. Set `ALERT_EMAIL` in
+`/etc/wevolunteer/wevolunteer.env` — comma-separated for more than one address —
+and the application emails you when a new problem appears.
+
+```
+ALERT_EMAIL=ops@district.example
+ALERT_MIN_INTERVAL_MS=3600000     # optional; one hour is the default
+```
+
+It uses the SMTP settings the application already requires. There is no service
+to install and nothing to operate.
+
+**When an alert is sent.** On the existing 15-minute maintenance tick, if there
+is at least one **open** `server` or `worker` problem that has never been
+alerted on. Everything eligible goes into one email.
+
+**When one is not.**
+
+| You see no alert because | What to do |
+|---|---|
+| `ALERT_EMAIL` is unset | Set it. This is the default and it means alerting is off. |
+| The problem is `client` source | Working as intended — see below. |
+| The problem was already alerted on | Nothing. One alert per problem, ever. |
+| Someone resolved or ignored it before the tick | Nothing. Triaged problems do not alert. |
+| Another alert went out less than `ALERT_MIN_INTERVAL_MS` ago | Nothing. It will be in the next one — throttling delays, it never drops. |
+
+**Browser errors never alert.** The error class in a client report is supplied by
+whoever sent the report, and a browser extension throwing on somebody's laptop is
+not an incident. Client problems still appear on the dashboard; they just do not
+wake anyone. Check the dashboard for those on your normal cadence.
+
+### What the email says, and why it says so little
+
+It carries the number of new problems, each one's error class, its fingerprint,
+and a link to `/errors`. It does **not** carry the error message, the stack
+trace, the route, or anything about who was affected.
+
+That is not an oversight and please do not "improve" it. An alert leaves the
+application and lands in a mailbox that `error.read` does not protect, and which
+will be forwarded. Redaction makes a message safe enough for a table behind a
+super-only capability — it does not make it safe to mail, because it does not
+cover names, addresses, or IP addresses (ENGINEERING_GUIDE §6.10). The alert
+tells you *that* something broke and where to look; looking requires signing in.
+`server/alerting.test.js` fails the build if any of that content appears in the
+body.
+
+### An alert is not a guarantee of delivery
+
+Problems are marked as alerted **before** the email is handed to the mail server,
+so a failed send loses that one digest rather than re-sending the same one every
+15 minutes forever. A repeating alert is how a channel gets muted, and a muted
+channel loses every future alert. If mail is broken you will see
+`[Alerts] Alert send failed` in the service log, and the problems themselves are
+still in the dashboard.
+
+### Backup failures alert separately
+
+Nothing above covers a failed backup. `bin/backup.sh` exits non-zero and systemd
+records a failed unit; add an `OnFailure=` to
+`deploy/wevolunteer-backup.service` to turn that into something a human sees.
+
+This is a second mechanism on purpose. A backup that cannot run is exactly the
+situation in which the application may not be running either, so routing that
+alert through the application would route it through the thing that is broken.
 
 ---
 
