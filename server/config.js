@@ -207,14 +207,44 @@ if (IS_PRODUCTION && ANY_OAUTH_PROVIDER_CONFIGURED) {
 }
 
 /**
- * Whether a provider can actually be used, so the UI can hide a button that
- * would otherwise fail after the user has already left the site. Unconfigured
- * is a normal state (a district may run email-only), not an error.
+ * Whether this server will PROCESS a provider — the gate `resolveProvider` uses
+ * on the callback. The mock transport counts, because an explicit
+ * OAUTH_ALLOW_MOCK opt-in is how the test suite drives a full callback without
+ * real credentials. Unconfigured is a normal state (a district may run
+ * email-only), not an error.
  */
 export const OAUTH_PROVIDERS_ENABLED = {
   google: OAUTH_ALLOW_MOCK || Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET),
   microsoft: OAUTH_ALLOW_MOCK || Boolean(MICROSOFT_CLIENT_ID && MICROSOFT_CLIENT_SECRET),
   // Apple has no implementation behind it — see oauth/providers/apple.js.
+  apple: false
+};
+
+/**
+ * Whether a PERSON WITH A BROWSER can complete the flow — which is a different
+ * question, and the one the sign-in buttons must be driven by.
+ *
+ * The mock is a callback-side transport: `verifyCallback` reads its identity out
+ * of the `code` parameter. `getAuthUrl` has no mock branch in either provider, so
+ * the redirect that starts the flow always goes to the real provider. A mock
+ * opt-in therefore does nothing whatsoever for someone pressing a button.
+ *
+ * Conflating the two made OAUTH_ALLOW_MOCK advertise every provider, and since
+ * it defaults to `!IS_PRODUCTION` that is every development environment. The
+ * Microsoft button rendered with MICROSOFT_CLIENT_ID unset, and pressing it
+ * redirected to login.microsoftonline.com with `client_id=`, which Microsoft
+ * rejects:
+ *
+ *     AADSTS900144: The request body must contain the following parameter:
+ *     'client_id'
+ *
+ * Credentials only, no mock: if the button cannot reach a provider that will
+ * accept it, it is not an option we may offer. In production OAUTH_ALLOW_MOCK is
+ * off (and refuses to boot), so this and the map above agree there.
+ */
+export const OAUTH_PROVIDERS_CONFIGURED = {
+  google: Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET),
+  microsoft: Boolean(MICROSOFT_CLIENT_ID && MICROSOFT_CLIENT_SECRET),
   apple: false
 };
 

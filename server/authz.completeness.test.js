@@ -282,7 +282,14 @@ describe('authorization hygiene', () => {
       // authorization decision — it sets a new signup's initial approval state,
       // which is a fact about the row being written, not about what its holder
       // may then do.
-      './routes/oauthRoutes.js:554',
+      //
+      // Moved to :561 by the AADSTS900144 fix, which added the
+      // OAUTH_PROVIDERS_CONFIGURED import and a comment on `/api/oauth/providers`
+      // explaining why that endpoint reports configuration rather than the
+      // mock-inclusive enablement map. Re-read again: unchanged, and still the
+      // same `verified` decision — nothing about it became an authorization
+      // check.
+      './routes/oauthRoutes.js:561',
     ]);
     const consumedExceptions = new Set();
 
