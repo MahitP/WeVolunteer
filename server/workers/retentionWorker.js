@@ -37,6 +37,7 @@
  */
 
 import { RETAINABLE_MESSAGE_PREDICATE, userIsPartyToLiveReport } from '../evidenceHolds.js';
+import { recordError } from '../errorReporter.js';
 
 /** Published periods. Changing one here means changing the Privacy Policy too. */
 export const RETENTION = {
@@ -301,6 +302,57 @@ let timer = null;
 /** Once a day is ample: nothing here is time-critical to the hour. */
 const SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Records a retention failure where somebody will see it.
+ *
+ * Every other background job in the application reports through `recordError`
+ * (notificationWorker, exportWorker, autoSelectScheduler); this one used to
+ * `console.error` and stop there, which is the difference between a failure on
+ * the error dashboard — and therefore eligible for the alert email — and a line
+ * in the journal nobody reads.
+ *
+ * It matters most for the one thing this file exists to guarantee.
+ * `assertPreservedTablesUntouched` is the loudest alarm in the codebase: it
+ * fires when a sweep has touched certificates, credited hours or safety
+ * evidence. Detecting that and telling nobody is not a guard. The assertion's
+ * own comment calls a silent widening "the failure mode nobody would notice";
+ * the reporting is what makes that stop being true.
+ *
+ * `recordError` never throws, and takes the same db handle the sweep was given —
+ * so a database too broken to sweep is also too broken to file the report, which
+ * is honest rather than a new failure mode.
+ */
+function reportRetentionError(db, err, boundary) {
+  recordError(db, {
+    source: 'worker',
+    kind: err?.constructor?.name || 'Error',
+    message: err?.message,
+    stack: err?.stack,
+    context: { component: 'retentionWorker', boundary }
+  });
+}
+
+/**
+ * Starts retention enforcement, and runs one sweep immediately.
+ *
+ * ── Why the immediate sweep is load-bearing ──
+ *
+ * This used to arm the interval and return, so the first sweep was 24 hours
+ * away. Any deployment restarted more often than daily therefore enforced the
+ * published retention periods NEVER: not late, not partially — never, while
+ * `/health` reported ok and the Privacy Policy kept promising them. A pilot
+ * being configured, a nightly redeploy, or a crash loop is enough.
+ *
+ * That is precisely the gap this file's header was written to close ("Publishing
+ * a period you do not enforce is worse than publishing none"), reintroduced one
+ * layer above the code that closed it.
+ *
+ * `autoSelectScheduler.js` already had this shape and states the reasoning: the
+ * immediate pass is startup recovery, for work that came due while the process
+ * was down. Retention is the same shape. Safe to run at boot for the same reason
+ * it is safe to run at all — `sweep()` is idempotent, deletes only by age, and
+ * asserts the preserved tables before committing.
+ */
 export function startRetentionWorker(db) {
   if (timer) return;
 
@@ -331,10 +383,15 @@ export function startRetentionWorker(db) {
       }
     } catch (err) {
       // Never throw from a timer callback: an unhandled rejection here takes
-      // the process down for a housekeeping task.
+      // the process down for a housekeeping task. The startup call below runs on
+      // the caller's stack, where an escape would take the BOOT down instead.
       console.error('[Retention] sweep failed:', err.message);
+      reportRetentionError(db, err, 'retentionSweep');
     }
   };
+
+  // Startup recovery, before the interval is armed — see this function's header.
+  run();
 
   timer = setInterval(run, SWEEP_INTERVAL_MS);
   if (typeof timer.unref === 'function') timer.unref();
