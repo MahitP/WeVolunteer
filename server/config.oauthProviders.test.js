@@ -35,6 +35,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
+import { readdirSync, readFileSync } from 'fs';
+import path from 'path';
 
 const root = process.cwd().replace(/\\/g, '/');
 
@@ -92,7 +94,59 @@ const SECRET_ONLY = {
   microsoft: { MICROSOFT_CLIENT_SECRET: 'ms-secret' },
 };
 
-for (const providerId of ['google', 'microsoft']) {
+/**
+ * The providers these states run against, DERIVED rather than listed.
+ *
+ * This loop used to be `['google', 'microsoft']`. That is a guard which silently
+ * stops covering the thing it was written for the moment a fourth file lands in
+ * `server/oauth/providers/` — the new provider gets none of the six cases below,
+ * and the suite stays green because a loop over a shorter list does not fail, it
+ * just tests less. The same failure mode `errorStyles.test.js` documents for its
+ * hand-written list of animated classes.
+ *
+ * Deriving it means the credential fixtures are now the thing that has to be
+ * complete, and a missing one fails loudly (below) instead of quietly skipping.
+ * Read from the filesystem rather than by importing the modules, because
+ * importing reaches `config.js`, which snapshots `process.env` at module scope —
+ * and this suite runs with both providers configured, which is precisely the
+ * environment these cases must not run in.
+ */
+const PROVIDER_DIR = path.join(process.cwd(), 'server', 'oauth', 'providers');
+
+const IMPLEMENTED_PROVIDERS = readdirSync(PROVIDER_DIR)
+  .filter(f => f.endsWith('.js') && !f.includes('.test.'))
+  .map(f => [path.basename(f, '.js'), readFileSync(path.join(PROVIDER_DIR, f), 'utf8')])
+  // An unimplemented placeholder has no credentials to be missing. `apple.js` is
+  // covered by its own case at the bottom of this file instead.
+  .filter(([, source]) => !/implemented:\s*false/.test(source))
+  .map(([id]) => id);
+
+it('every implemented provider has credential fixtures to be tested with', () => {
+  // Without this, adding a provider and forgetting its fixtures produces
+  // `probe(id, undefined)` — which merges nothing, leaves the provider
+  // unconfigured, and turns the "fully configured" case into a second copy of
+  // the "nothing configured" case. Green, and covering the opposite of what it
+  // claims.
+  for (const id of IMPLEMENTED_PROVIDERS) {
+    for (const [name, fixtures] of [
+      ['CONFIGURED', CONFIGURED], ['ID_ONLY', ID_ONLY], ['SECRET_ONLY', SECRET_ONLY],
+    ]) {
+      expect(
+        fixtures[id],
+        `${id} is an implemented sign-in provider with no ${name} fixture. Add its `
+        + 'credential environment variables so the missing-id, missing-secret, '
+        + 'both-missing, mock-mode and configured cases can run against it.',
+      ).toBeTruthy();
+    }
+  }
+});
+
+it('is actually guarding the providers that exist', () => {
+  expect(IMPLEMENTED_PROVIDERS).toContain('google');
+  expect(IMPLEMENTED_PROVIDERS).toContain('microsoft');
+});
+
+for (const providerId of IMPLEMENTED_PROVIDERS) {
   describe(`${providerId} provider states`, () => {
     it('fully configured: advertised, and mints a URL carrying the client id', () => {
       const r = probe(providerId, CONFIGURED[providerId]);
