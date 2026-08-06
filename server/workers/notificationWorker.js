@@ -153,7 +153,9 @@ export async function processNotificationJobs() {
           throw new Error(`Unknown channel: ${job.channel}`);
         }
 
-        // On success, we just delete the job to save space
+        // On success — or on a deliberate drop — we just delete the job to save
+        // space. A dropped job is not a failure and must not be retried; see
+        // `handleEmailJob`'s DROPPED return.
         db.prepare("DELETE FROM notification_jobs WHERE id = ?").run(job.id);
       } catch (err) {
         try {
@@ -236,10 +238,48 @@ function reportWorkerError(err, boundary, context = {}) {
 
 async function handleEmailJob(job) {
   const { event, payload, userId } = JSON.parse(job.payload);
-  
-  const user = db.prepare('SELECT email, name FROM users WHERE id = ?').get(userId);
+
+  const user = db.prepare('SELECT email, name, account_status FROM users WHERE id = ?').get(userId);
   if (!user) throw new Error('User not found');
-  
+
+  /**
+   * A deleted account is not a delivery failure. Drop the job.
+   *
+   * Deletion is a SOFT delete — accountRoutes.js anonymises the row and rewrites
+   * the address to `deleted_<id>@system.local`, because certificates, attendance
+   * and the hours ledger hang off that id and are kept indefinitely. It does not
+   * clear `notification_jobs`, which has no `user_id` column to clear it by (the
+   * id is inside the JSON payload).
+   *
+   * So anything already queued for that person used to be posted to the
+   * placeholder. `.local` is reserved by RFC 6762 and resolves nowhere, so in
+   * production that meant five attempts over ~62 minutes of backoff, then
+   * `status = 'failed'`, then `notificationJobExhausted` — a dashboard row and an
+   * alert email, for mail that was correctly undeliverable.
+   *
+   * The damage is to the alert channel, not the mail. A student exercising their
+   * deletion right manufactured false alerts in the one place that is supposed to
+   * mean "something is broken", and a hard bounce per attempt against the
+   * district's sending domain. An alert channel that cries wolf gets filtered,
+   * and then the next real outage is missed.
+   *
+   * Checked HERE rather than purged at deletion time on purpose: this also covers
+   * a job enqueued by a request that lost the race with the deletion, needs no
+   * `json_extract` scan inside the deletion transaction, and needs no schema
+   * change.
+   *
+   * Deliberately narrow — `deleted` only, never "not active". A SUSPENDED account
+   * is the one the platform most needs to reach: the suspension notice carries the
+   * appeal link, and appeal outcome notices are mandatory. Widening this would cut
+   * off the only channel a suspended student has.
+   */
+  if (user.account_status === 'deleted') {
+    console.log(
+      `[Worker] Dropping notification job ${job.id}: the recipient account has been deleted.`
+    );
+    return;
+  }
+
   const content = getInAppContent(event, payload);
   const subject = content.title;
   let text = content.body;
