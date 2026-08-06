@@ -49,7 +49,6 @@ vi.mock('./views/Login', () => stub('login'));
 vi.mock('./views/Signup', () => stub('signup'));
 vi.mock('./views/CertificateVerification', () => stub('cert'));
 vi.mock('./views/ErrorDashboard', () => stub('error-dash'));
-vi.mock('./views/PrivacyNotice', () => stub('privacy'));
 // Eager shell chrome that talks to the (auto-mocked) api — not what this checks.
 vi.mock('./components/ThemeToggle', () => ({ default: () => <div data-testid="theme" /> }));
 vi.mock('./components/NotificationsBell', () => ({ default: () => <div data-testid="bell" /> }));

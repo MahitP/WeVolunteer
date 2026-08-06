@@ -21,9 +21,11 @@ Tuesday. And "we don't track you" is only credible when accompanied by a precise
 what you *do* store; unaccompanied, it reads as marketing.
 
 **Verification note.** Every claim below was checked against the code. If a future change adds
-storage, this document and `src/views/PrivacyNotice.jsx` must change in the same commit. A test
-asserting the absence of third-party network calls at build time would make that automatic —
-recommended in the handoff spec.
+storage, this document must change in the same commit. (It used to name
+`src/views/PrivacyNotice.jsx` as the other half of that pair; that view has been deleted, and
+this registry document is now the only place the claim is made.) A test asserting the absence of
+third-party network calls at build time would make that automatic — recommended in the handoff
+spec.
 
 ---
 
