@@ -1308,6 +1308,54 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
     });
   }
 
+  /**
+   * `until` — an ISO-8601 instant, or absent/null for indefinite.
+   *
+   * Validated here rather than bound straight into the UPDATE, because every
+   * malformed value has a way of becoming a suspension that does not mean what
+   * the moderator chose:
+   *
+   *   - An unparseable string stores as unreadable, and `isSuspended` fails CLOSED
+   *     on unreadable dates — so a typo would silently produce the permanent
+   *     suspension the moderator was trying to avoid.
+   *   - A date already in the past stores a suspension that is over before it
+   *     begins. It would end at the next request, which reads to everybody as the
+   *     suspension having silently failed.
+   *   - A non-string is refused rather than coerced, the same rule
+   *     `resolutionNote` learned the hard way: `{ until: 1 }` would otherwise
+   *     become "1970-01-01".
+   *
+   * Normalised to `toISOString()` so both columns that carry a deadline hold the
+   * same zone-marked form. The incident behind that is a few lines below, where
+   * `datetime('now','+30 days')` wrote a zone-less string that `new Date()` then
+   * read as local time.
+   */
+  const rawUntil = req.body?.until;
+  let until = null;
+  if (rawUntil !== undefined && rawUntil !== null && rawUntil !== '') {
+    if (typeof rawUntil !== 'string') {
+      return res.status(400).json({
+        error: 'An end date must be an ISO-8601 date string, or omitted for a suspension with no end date.',
+        code: 'invalid_until',
+      });
+    }
+    const parsed = Date.parse(rawUntil);
+    if (Number.isNaN(parsed)) {
+      return res.status(400).json({
+        error: `"${rawUntil}" is not a date this can read. Use an ISO-8601 instant, or omit it for no end date.`,
+        code: 'invalid_until',
+      });
+    }
+    if (parsed <= Date.now()) {
+      return res.status(400).json({
+        error: 'That end date has already passed, so the suspension would be over before it started. '
+          + 'Choose a future date, or omit it for a suspension with no end date.',
+        code: 'until_in_past',
+      });
+    }
+    until = new Date(parsed).toISOString();
+  }
+
   const target = db.prepare(
     'SELECT id, name, role, account_status FROM users WHERE id = ?'
   ).get(targetId);
@@ -1337,26 +1385,43 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
 
   try {
     inTransaction(() => {
+      /**
+       * `suspension_lifted_at` is cleared as well as the deadline set.
+       *
+       * A previously-suspended account carries the timestamp of when that ended.
+       * Leaving it in place would make the new suspension read as already over —
+       * the row would say suspended, until this date, and lifted at some earlier
+       * one — which is the sort of self-contradicting record that gets a decision
+       * overturned on appeal for the wrong reason.
+       */
       db.prepare(`
         UPDATE users
         SET account_status = 'suspended',
             suspended_at = ?,
+            suspended_until = ?,
+            suspension_lifted_at = NULL,
             suspension_reason = ?,
             suspended_by = ?,
             token_version = token_version + 1
         WHERE id = ?
-      `).run(now, reason, req.user.id, targetId);
+      `).run(now, until, reason, req.user.id, targetId);
 
       db.prepare(`
         INSERT INTO appeal_tokens (token, user_id, expires_at)
         VALUES (?, ?, ?)
       `).run(token, targetId, expiresAt);
 
+      /**
+       * The duration is part of the decision, so it is part of the record.
+       * "Suspended: messaging a student after being asked to stop" and the same
+       * words for one week are different administrative acts, and the trail has to
+       * be able to tell them apart years later.
+       */
       recordAudit(db, {
         adminId: req.user.id,
         action: 'ACCOUNT_SUSPENDED',
         targetUserId: targetId,
-        details: `Suspended: ${reason}`
+        details: `Suspended ${until ? `until ${until}` : 'indefinitely'}: ${reason}`
       });
 
       /**
@@ -1370,7 +1435,16 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
        * makes it a clean, retryable failure instead of a silent one.
        */
       notificationService.dispatch(
-        'ACCOUNT_SUSPENDED', { reason, token, appealDeadline }, targetId
+        /**
+         * `suspendedUntil` rides along so the notice can say when it ends.
+         *
+         * A person told only that they are suspended has no way to distinguish a
+         * week from for ever, and will either wait indefinitely for something that
+         * already lapsed or appeal something that was about to end on its own. The
+         * template falls back to the indefinite wording when it is null, so an
+         * indefinite suspension reads exactly as it did before.
+         */
+        'ACCOUNT_SUSPENDED', { reason, token, appealDeadline, suspendedUntil: until }, targetId
       );
     });
   } catch (err) {
@@ -1392,15 +1466,20 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
     WHERE organizer_id = ? AND status NOT IN ('completed', 'cancelled')
   `).get(targetId).count;
 
+  const duration = until
+    ? `until ${new Date(until).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
+    : 'with no end date';
+
   res.json({
     success: true,
     userId: targetId,
     status: 'suspended',
     suspendedAt: now,
+    suspendedUntil: until,
     activeEvents,
     message: activeEvents > 0
-      ? `Account suspended. This organizer still hosts ${activeEvents} active event(s) — reassign or cancel them.`
-      : 'Account suspended. All of their sessions have been ended.'
+      ? `Account suspended ${duration}. This organizer still hosts ${activeEvents} active event(s) — reassign or cancel them.`
+      : `Account suspended ${duration}. All of their sessions have been ended.`
   });
 });
 
@@ -1427,10 +1506,28 @@ router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('use
       // invalidate — the suspension already ended them — and bumping again
       // would only invalidate the session of an administrator who happened to
       // be acting as this user, which is not a thing that can happen here.
+      /**
+       * `suspended_until` is cleared with the rest of the suspension detail.
+       *
+       * It has to be. Left behind, a past deadline is inert but a FUTURE one is
+       * not: `isSuspended` reads `account_status` first, so the account works
+       * again — until somebody suspends it a second time without naming a
+       * deadline, at which point it silently inherits the old one and ends on a
+       * date nobody chose. The same class of dormant-value bug as the appeal
+       * tokens below, which stayed live through an unsuspend and became usable
+       * again on the next suspension.
+       *
+       * `suspension_lifted_at` is deliberately NOT set here. It records that a
+       * suspension ran out on its own (see `suspension.js`); a reinstatement by
+       * hand is a different act, and it is the audit row below — which is not
+       * swept for a year and names who did it — that records this one. Writing
+       * both would make the two indistinguishable on the row.
+       */
       db.prepare(`
         UPDATE users
         SET account_status = 'active',
             suspended_at = NULL,
+            suspended_until = NULL,
             suspension_reason = NULL,
             suspended_by = NULL
         WHERE id = ?

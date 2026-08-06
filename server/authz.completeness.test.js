@@ -258,10 +258,12 @@ describe('authorization hygiene', () => {
       // an authorization decision about a caller: there is no principal yet.
       // Moved from :223 when the signup handler gained its server-side consent
       // gate (recordAcceptances / assertConsent), then :257 -> :258 when
-      // `withheldCapabilitiesFor` was imported for the /api/auth/me payload.
-      // Re-read at both positions: unchanged, and still not an authorization
+      // `withheldCapabilitiesFor` was imported for the /api/auth/me payload, then
+      // :258 -> :259 when `isSuspended`/`liftIfExpired` were imported so the
+      // sign-in refusal could honour a suspension's end date.
+      // Re-read at every position: unchanged, and still not an authorization
       // decision.
-      './routes/authRoutes.js:258',
+      './routes/authRoutes.js:259',
       // Moved from :379 in v1.2b Task 5 when `resolveProvider` gained an
       // export and the docstring above it explaining why; to :405 in Task 6
       // (the local `issueSession` became an import with a docstring explaining
