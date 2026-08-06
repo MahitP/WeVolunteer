@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertTriangle, UserX, MessageSquareWarning, MessageSquare } from 'lucide-react';
+import { AlertTriangle, UserX, UserCheck, MessageSquareWarning, MessageSquare } from 'lucide-react';
 import { api } from '../../utils/api';
 import { can } from '../../authz';
 
@@ -32,7 +32,7 @@ import { can } from '../../authz';
 const MIN_REASON = 10;
 
 export default function SubjectActions({ subject, user, onDone, addToast }) {
-  const [open, setOpen] = useState(null);              // 'warn' | 'suspend' | null
+  const [open, setOpen] = useState(null);   // 'warn' | 'suspend' | 'unsuspend' | null
   const [reason, setReason] = useState('');
   const [until, setUntil] = useState('');
   const [busy, setBusy] = useState(false);
@@ -87,9 +87,19 @@ export default function SubjectActions({ subject, user, onDone, addToast }) {
     }
   };
 
+  /**
+   * Lifting a suspension needs no reason, and that is the endpoint's rule rather
+   * than a shortcut taken here: `POST /unsuspend` treats the note as optional
+   * because the asymmetry is deliberate. Imposing a sanction has to be justified —
+   * the person is told why and an appeal is reviewed against it. Removing one does
+   * not, and requiring twenty characters before somebody can undo their own
+   * mistake is friction pointed the wrong way.
+   */
+  const reasonOptional = open === 'unsuspend';
+
   const submit = async (e) => {
     e.preventDefault();
-    if (reason.trim().length < MIN_REASON) {
+    if (!reasonOptional && reason.trim().length < MIN_REASON) {
       setError(`Say what this is about, in at least ${MIN_REASON} characters. `
         + 'These words are shown to the person.');
       return;
@@ -100,6 +110,9 @@ export default function SubjectActions({ subject, user, onDone, addToast }) {
       if (open === 'warn') {
         await api.warnUser(subject.id, reason.trim());
         addToast?.(`${subject.name} has been warned and told why.`, 'success');
+      } else if (open === 'unsuspend') {
+        await api.unsuspendUser(subject.id, reason.trim() || undefined);
+        addToast?.(`${subject.name} can sign in again.`, 'success');
       } else {
         /**
          * A date input gives `YYYY-MM-DD`, which `new Date()` reads as UTC
@@ -177,6 +190,20 @@ export default function SubjectActions({ subject, user, onDone, addToast }) {
               <UserX size={14} aria-hidden="true" /> Suspend
             </button>
           )}
+          {/**
+            * The way back.
+            *
+            * `unsuspendUser` existed but was reachable only from `AdminAppeals`,
+            * i.e. only by the person appealing. An administrator who suspended the
+            * wrong account, or changed their mind, had no route to reverse it and
+            * had to wait for the student to appeal something the administrator
+            * already knew was wrong.
+            */}
+          {maySuspend && alreadySuspended && (
+            <button className="btn btn-ghost btn-sm" onClick={() => setOpen('unsuspend')}>
+              <UserCheck size={14} aria-hidden="true" /> Lift the suspension
+            </button>
+          )}
         </div>
       )}
 
@@ -191,9 +218,9 @@ export default function SubjectActions({ subject, user, onDone, addToast }) {
 
           <div className="field">
             <label className="strong small" htmlFor="subject-action-reason">
-              {open === 'warn'
-                ? 'What are you warning them about?'
-                : 'Why are you suspending them?'}
+              {open === 'warn' ? 'What are you warning them about?'
+                : open === 'unsuspend' ? 'Anything to tell them? (optional)'
+                  : 'Why are you suspending them?'}
             </label>
             <textarea
               id="subject-action-reason"
@@ -212,6 +239,8 @@ export default function SubjectActions({ subject, user, onDone, addToast }) {
             <p className="small dim" id="subject-action-hint">
               {subject.name} is shown these words.
               {open === 'suspend' && ' It is also what an appeal is reviewed against.'}
+              {open === 'unsuspend'
+                && ' They are told their account works again either way — this just adds context.'}
             </p>
           </div>
 
@@ -245,12 +274,13 @@ export default function SubjectActions({ subject, user, onDone, addToast }) {
             </button>
             <button
               type="submit"
-              className={open === 'warn' ? 'btn btn-primary btn-sm' : 'btn btn-danger btn-sm'}
-              disabled={busy || reason.trim().length < MIN_REASON}
+              className={open === 'suspend' ? 'btn btn-danger btn-sm' : 'btn btn-primary btn-sm'}
+              disabled={busy || (!reasonOptional && reason.trim().length < MIN_REASON)}
             >
-              {busy
-                ? 'Saving…'
-                : open === 'warn' ? 'Issue the warning' : 'Suspend this account'}
+              {busy ? 'Saving…'
+                : open === 'warn' ? 'Issue the warning'
+                  : open === 'unsuspend' ? 'Lift the suspension'
+                    : 'Suspend this account'}
             </button>
           </div>
         </form>
