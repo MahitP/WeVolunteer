@@ -451,6 +451,21 @@ describe('five failed attempts lock the challenge', () => {
  * `app.js`'s reauthLimiter bounds the same thing per IP. These tests are about
  * the half it does not cover, which is why they drive the module directly.
  */
+/**
+ * Explicit budgets on this block, measured rather than guessed.
+ *
+ * Each of the four tests below drives the account ceiling by exhausting three whole
+ * challenges, so each one performs 3 x MAX_ATTEMPTS real bcrypt comparisons — the cost is the
+ * point, because the ceiling is what stops an attacker opening a fresh challenge per guess.
+ *
+ * In isolation they run 1.7-2.0s against vitest's 5000ms default. Under the parallel load of
+ * the full suite one of them was measured at 5094ms and timed out. Nothing was hung: the work
+ * simply did not fit, which makes it a flake rather than a defect in the code under test — and
+ * flakiness is a defect in its own right here, on the gate every other gate depends on.
+ *
+ * 20s is ~10x the isolated cost. The global default stays 5000ms so a genuinely hung test still
+ * fails fast, and the ceiling these tests cover is not weakened to fit a timer.
+ */
 describe('the account-level guessing ceiling', () => {
   it('stops guessing across fresh challenges, not just within one', async () => {
     const userId = makeUser();
@@ -471,7 +486,7 @@ describe('the account-level guessing ceiling', () => {
 
     expect(res).toEqual({ ok: false, error: 'account_locked' });
     expect(row(fresh.id).attempts, 'a refused-by-account guess still charged the challenge').toBe(0);
-  });
+  }, 20000);
 
   it('refuses the correct password too — a ceiling the right guess opens is not one', async () => {
     const userId = makeUser();
@@ -487,7 +502,7 @@ describe('the account-level guessing ceiling', () => {
 
     expect(res).toEqual({ ok: false, error: 'account_locked' });
     expect(row(fresh.id).granted_at).toBe(null);
-  });
+  }, 20000);
 
   it('is scoped to the account — one user cannot spend another user\'s budget', async () => {
     const noisy = makeUser();
@@ -504,7 +519,7 @@ describe('the account-level guessing ceiling', () => {
     const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId: quiet, password: PASSWORD });
 
     expect(res).toEqual({ ok: true });
-  });
+  }, 20000);
 
   it('counts only the window, so an old spree does not lock an account for ever', async () => {
     const userId = makeUser();
@@ -531,7 +546,7 @@ describe('the account-level guessing ceiling', () => {
     const res = await reauth.grantByPassword({ db, challengeId: fresh.id, userId, password: PASSWORD });
 
     expect(res).toEqual({ ok: true });
-  });
+  }, 20000);
 
   it('applies to the OAuth path on the same budget', async () => {
     const userId = makeUser({ providers: [['google', 'oauth-ceiling-sub']] });
