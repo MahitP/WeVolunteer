@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { db } from '../db.js';
-import { JWT_SECRET, COOKIE_NAME, cookieOptions, OAUTH_PROVIDERS_ENABLED } from '../config.js';
+import { JWT_SECRET, COOKIE_NAME, cookieOptions, OAUTH_PROVIDERS_ENABLED, OAUTH_PROVIDERS_CONFIGURED } from '../config.js';
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
 import { requireAAL2 } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
@@ -149,13 +149,20 @@ function purgeExpiredSignupSessions() {
  * `OAUTH_ONLY` beside it.
  */
 
-/** Which buttons the client should render. Public: it reveals only deployment config. */
+/**
+ * Which buttons the client should render. Public: it reveals only deployment config.
+ *
+ * Reports OAUTH_PROVIDERS_CONFIGURED, not OAUTH_PROVIDERS_ENABLED. This endpoint
+ * decides what a person is invited to press, and only real credentials make a
+ * provider pressable — the mock transport cannot help, because it lives past the
+ * redirect in `verifyCallback`. See the comment on both maps in config.js.
+ */
 router.get('/api/oauth/providers', (req, res) => {
   res.json(
     Object.entries(providers).map(([key, p]) => ({
       id: key,
       label: p.label || key,
-      enabled: Boolean(OAUTH_PROVIDERS_ENABLED[key]),
+      enabled: Boolean(OAUTH_PROVIDERS_CONFIGURED[key]),
       implemented: p.implemented !== false
     }))
   );
