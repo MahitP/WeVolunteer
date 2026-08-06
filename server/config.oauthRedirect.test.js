@@ -113,3 +113,76 @@ describe('OAUTH_REDIRECT_URI in production', () => {
     expect(r.stderr).toMatch(/WARNING: OAUTH_REDIRECT_URI is not https/);
   });
 });
+
+/**
+ * OAUTH_ALLOW_MOCK — the guard with the worst consequence and, until now, no test.
+ *
+ * The mock transport skips the provider code exchange entirely and takes the
+ * identity straight out of the request body, so with it enabled
+ * `POST /api/oauth/google/callback` with
+ * `{"code":"{\"email\":\"admin@district.org\",\"sub\":\"1\"}"}` is an
+ * unauthenticated sign-in as any account, including a super administrator. It is
+ * the single most dangerous configuration this application can hold.
+ *
+ * `config.js` has carried the refusal since the mock was made opt-in, and its
+ * header documents the incident behind it — but nothing pinned it. Every other
+ * production boot guard in this file and in `config.jwtSecret.test.js` is covered;
+ * this one was covered by its own comment. The comment above `describe('OAUTH_
+ * REDIRECT_URI in production')` even cites it as precedent ("a placeholder
+ * JWT_SECRET and OAUTH_ALLOW_MOCK in production both refuse to boot") while
+ * asserting nothing about it.
+ *
+ * Two properties matter and they are separate. The refusal is what stops a
+ * deliberate mistake; the DEFAULT is what protects the deployment that never
+ * heard of the variable, which is every real one.
+ */
+describe('OAUTH_ALLOW_MOCK in production', () => {
+  it('refuses to boot a production process that enables the mock transport', () => {
+    const r = boot({ ...PROD, OAUTH_ALLOW_MOCK: 'true' });
+    expect(r.booted).toBe(false);
+  });
+
+  it('says why, in terms an operator can act on', () => {
+    const r = boot({ ...PROD, OAUTH_ALLOW_MOCK: 'true' });
+    // The message has to name the consequence, not just the variable: "unset
+    // OAUTH_ALLOW_MOCK" is not a reason to take a production outage.
+    expect(r.stderr).toMatch(/OAUTH_ALLOW_MOCK/);
+    expect(r.stderr).toMatch(/sign in as any user|unsigned identity/i);
+  });
+
+  it('refuses even with real provider credentials and a correct redirect URI', () => {
+    // The dangerous combination is not "misconfigured OAuth". It is a production
+    // process that looks entirely correct and also accepts a forged identity.
+    const r = boot({
+      ...PROD, ...GOOGLE, OAUTH_ALLOW_MOCK: 'true',
+      OAUTH_REDIRECT_URI: 'https://volunteers.example.org/oauth/callback',
+    });
+    expect(r.booted).toBe(false);
+    expect(r.stderr).toMatch(/OAUTH_ALLOW_MOCK/);
+  });
+
+  it('defaults OFF in production, so an operator who never heard of it is safe', () => {
+    const r = boot({ ...PROD, OAUTH_ALLOW_MOCK: '' });
+    expect(r.booted).toBe(true);
+  });
+
+  it('and the providers it would have force-enabled report unavailable', () => {
+    // OAUTH_PROVIDERS_ENABLED ORs the mock flag in, so a mock left on would
+    // advertise "Continue with Google" on a deployment with no Google credentials.
+    // With no provider configured and no mock, both must be false.
+    const root = process.cwd().replace(/\\/g, '/');
+    const res = spawnSync(process.execPath, ['--input-type=module', '-e', `
+        const c = await import('${root}/server/config.js');
+        console.log('MOCK:' + c.OAUTH_ALLOW_MOCK
+          + ' GOOGLE:' + c.OAUTH_PROVIDERS_ENABLED.google
+          + ' MICROSOFT:' + c.OAUTH_PROVIDERS_ENABLED.microsoft);
+      `], { env: { ...process.env, ...PROD, OAUTH_ALLOW_MOCK: '' }, encoding: 'utf8' });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain('MOCK:false GOOGLE:false MICROSOFT:false');
+  });
+
+  it('stays available in development, which is what it is for', () => {
+    const r = boot({ NODE_ENV: 'development', JWT_SECRET: STRONG, OAUTH_ALLOW_MOCK: 'true' });
+    expect(r.booted).toBe(true);
+  });
+});
