@@ -29,6 +29,7 @@ import reauthRoutes from './routes/reauthRoutes.js';
 import errorRoutes from './routes/errorRoutes.js';
 import legalRoutes from './routes/legalRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
+import appealsRoutes from './routes/appealsRoutes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -451,6 +452,31 @@ export const reauthLimiter = rateLimit({
   handler: limitHandler('Too many verification attempts.'),
 });
 
+export const appealLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: DEMO_MODE ? 1000 : 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  handler: limitHandler('We have received your recent attempts. Please give our team time to review your case.'),
+});
+
+/**
+ * Reading an appeal form, as opposed to filing one.
+ *
+ * Deliberately generous, and separate from `appealLimiter`, because the person
+ * hitting it is locked out of their account and this page is the only thing they
+ * can reach. Re-reading it — to check the deadline, to re-read the reason, to
+ * show a parent — must never cost them the ability to file. Still bounded,
+ * because the route is unauthenticated and answers about a real account.
+ */
+export const appealReadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: DEMO_MODE ? 1000 : 60,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  handler: limitHandler('Too many requests. Please wait a moment and reload the page.'),
+});
+
 /**
  * Client error reports.
  *
@@ -580,6 +606,27 @@ app.use(privacyRoutes);
 app.use(errorRoutes);
 app.use(legalRoutes);
 app.use(reportRoutes);
+/**
+ * Reading the appeal form must not spend the budget for filing it.
+ *
+ * This was `app.use('/api/appeals/token', appealLimiter, mailIpCeilingLimiter)`,
+ * which applies to every method. `appealLimiter` is 5 per 15 minutes keyed on IP
+ * with successes counted — so a suspended student who opened the link, reloaded
+ * after a typo and came back later had spent their entire filing allowance on
+ * page views. On a school NAT, where the whole district shares one address, five
+ * page loads locked out everybody. Worse, `mailIpCeilingLimiter` is shared with
+ * forgot-password and resend-verification, so appeal *reads* could exhaust the
+ * campus's password resets.
+ *
+ * Split by method: reads get a generous limiter of their own and never touch the
+ * mail ceiling (a read sends no mail); writes keep the strict pair.
+ */
+app.get('/api/appeals/token/:token', appealReadLimiter);
+app.post('/api/appeals/token/:token', appealLimiter, mailIpCeilingLimiter);
+// The authenticated sibling had no limiter at all, so one signed-in account
+// could bury the queue that a genuinely suspended student is waiting in.
+app.post('/api/appeals', appealLimiter);
+app.use(appealsRoutes);
 
 
 // Read once at import rather than per request. Derived from package.json so it

@@ -123,7 +123,7 @@ describe('navigation, per role', () => {
   it.each([
     ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'My profile']],
     ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'New event', 'Notifications', 'My profile']],
-    ['admin', ['Review queue', 'Opportunities', 'Notifications']]
+    ['admin', ['Review queue', 'Opportunities', 'Notifications', 'Appeals']]
   ])('%s is unchanged by the conversion', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
   });
@@ -132,7 +132,7 @@ describe('navigation, per role', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
       'Review queue', 'Opportunities', 'Calendar', 'Messages', 'New event',
-      'Notifications', 'Errors', 'My profile'
+      'Notifications', 'Errors', 'Appeals', 'My profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
     expect(items.length).toBeGreaterThan(0);
@@ -179,7 +179,7 @@ describe('navigation, per role', () => {
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
       'Review queue', 'Opportunities', 'Calendar', 'Messages', 'New event',
-      'Notifications', 'Errors', 'My profile'
+      'Notifications', 'Errors', 'Appeals', 'My profile'
     ]);
   });
 
@@ -187,7 +187,7 @@ describe('navigation, per role', () => {
     signedInAs(USER('admin'));
     renderAt('/');
     await screen.findByTestId('admin-dash');
-    expect(sidebarLabels()).toEqual(['Review queue', 'Opportunities', 'Notifications']);
+    expect(sidebarLabels()).toEqual(['Review queue', 'Opportunities', 'Notifications', 'Appeals']);
   });
 });
 

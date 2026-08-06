@@ -1084,6 +1084,17 @@ router.get('/api/admin/system/status', authenticateToken, requireCap('audit.read
 const MIN_SUSPENSION_REASON = 10;
 
 /**
+ * How long an appeal link lives.
+ *
+ * One definition, used by both the suspension path and the manual re-issue
+ * below, because those two drifted once already — one wrote a zone-less SQLite
+ * datetime and the other an ISO-8601 UTC string, and the same "30 days" meant
+ * different instants. The Community Guidelines' five business days is our REPLY
+ * time, not the appellant's filing window.
+ */
+const APPEAL_TOKEN_DAYS = 30;
+
+/**
  * Whether `actor` may act on `target`, given both rows.
  *
  * Deny-by-default and ordered most-privileged-first, following the rule in
@@ -1183,6 +1194,20 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
   }
 
   const now = new Date().toISOString();
+  const token = crypto.randomBytes(32).toString('hex');
+
+  /**
+   * ISO-8601 UTC, matching the re-issue route below.
+   *
+   * This was `datetime('now','+30 days')`, which SQLite writes as
+   * "2026-09-04 23:29:10" — no zone marker. `new Date()` parses that form as
+   * LOCAL time, so the real expiry drifted by the server's UTC offset and the
+   * two issuance paths in this file disagreed about when the same 30 days ended.
+   */
+  const expiresAt = new Date(Date.now() + APPEAL_TOKEN_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const appealDeadline = new Date(expiresAt).toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric',
+  });
 
   try {
     inTransaction(() => {
@@ -1195,6 +1220,11 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
             token_version = token_version + 1
         WHERE id = ?
       `).run(now, reason, req.user.id, targetId);
+
+      db.prepare(`
+        INSERT INTO appeal_tokens (token, user_id, expires_at)
+        VALUES (?, ?, ?)
+      `).run(token, targetId, expiresAt);
 
       recordAudit(db, {
         adminId: req.user.id,
@@ -1214,7 +1244,7 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
        * makes it a clean, retryable failure instead of a silent one.
        */
       notificationService.dispatch(
-        'ACCOUNT_SUSPENDED', { reason }, targetId
+        'ACCOUNT_SUSPENDED', { reason, token, appealDeadline }, targetId
       );
     });
   } catch (err) {
@@ -1280,12 +1310,61 @@ router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('use
         WHERE id = ?
       `).run(targetId);
 
+      /**
+       * Outstanding appeal tokens are spent at reinstatement.
+       *
+       * A token stayed live through an unsuspend. It answered 404 only because
+       * the route checked `account_status`, so it lay dormant and became usable
+       * again the moment the person was suspended a SECOND time — carrying an
+       * appeal window that opened before the thing being appealed, and letting
+       * an old link disclose a new suspension's reason. Verified by running it.
+       * Expiring them here makes each enforcement action carry its own token.
+       */
+      db.prepare(
+        "UPDATE appeal_tokens SET expires_at = ? WHERE user_id = ? AND used_at IS NULL"
+      ).run(new Date().toISOString(), targetId);
+
+      /**
+       * If a reversed appeal ordered this reinstatement, say so in both trails.
+       *
+       * Reversing an appeal and reinstating the account are deliberately two
+       * actions — the second is behind `user.suspend`, which the deciding
+       * reviewer may not hold. The cost of that separation was that nothing
+       * connected them: the audit log recorded a reinstatement with no reason
+       * anybody could trace back to the appeal that required it, and the appeal's
+       * own history stopped at the decision, so "was this person ever actually
+       * let back in?" had no answer on the record.
+       *
+       * Looked up rather than passed in, so the link is recorded however the
+       * reinstatement was reached — including by an administrator who never
+       * opened the appeal.
+       */
+      const orderedBy = db.prepare(`
+        SELECT id FROM appeals
+         WHERE user_id = ? AND decision = 'reversed' AND status = 'resolved'
+         ORDER BY decided_at DESC LIMIT 1
+      `).get(targetId);
+
       recordAudit(db, {
         adminId: req.user.id,
         action: 'ACCOUNT_UNSUSPENDED',
         targetUserId: targetId,
-        details: note ? `Reinstated: ${note}` : 'Reinstated'
+        details: (note ? `Reinstated: ${note}` : 'Reinstated')
+          + (orderedBy ? ` (completes reversed appeal ${orderedBy.id})` : '')
       });
+
+      if (orderedBy) {
+        db.prepare(`
+          INSERT INTO appeal_events (id, appeal_id, actor_id, actor_role, action,
+                                     from_status, to_status, note, created_at)
+          VALUES (?, ?, ?, 'reviewer', 'remedy_completed', 'resolved', 'resolved', ?, ?)
+        `).run(
+          `apev_${crypto.randomBytes(8).toString('hex')}`,
+          orderedBy.id, req.user.id,
+          'Account reinstated, completing the reversal.',
+          new Date().toISOString()
+        );
+      }
 
       /**
        * The good-news half of the enforcement class.
@@ -1304,6 +1383,49 @@ router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('use
   }
 
   res.json({ success: true, userId: targetId, status: 'active' });
+});
+
+router.post('/api/admin/users/:id/appeal-token', authenticateToken, requireCap('user.suspend'), (req, res) => {
+  const targetId = req.params.id;
+
+  const target = db.prepare(
+    'SELECT id, account_status FROM users WHERE id = ?'
+  ).get(targetId);
+
+  if (!target) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  if (target.account_status !== 'suspended') {
+    return res.status(409).json({ error: 'User is not suspended' });
+  }
+
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + APPEAL_TOKEN_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  try {
+    inTransaction(() => {
+      // Invalidate existing tokens
+      db.prepare('UPDATE appeal_tokens SET expires_at = ? WHERE user_id = ? AND used_at IS NULL').run(new Date().toISOString(), targetId);
+      
+      db.prepare(`
+        INSERT INTO appeal_tokens (token, user_id, expires_at)
+        VALUES (?, ?, ?)
+      `).run(token, targetId, expiresAt);
+
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'APPEAL_TOKEN_ISSUED',
+        targetUserId: targetId,
+        details: 'Appeal token issued manually'
+      });
+    });
+  } catch (err) {
+    console.error('Failed to issue appeal token:', err);
+    return res.status(500).json({ error: 'Failed to issue appeal token' });
+  }
+
+  res.json({ success: true, token, expiresAt });
 });
 
 export default router;

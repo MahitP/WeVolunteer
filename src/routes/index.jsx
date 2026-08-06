@@ -48,6 +48,8 @@ const PrivacyNotice = React.lazy(() => import('../views/PrivacyNotice'));
 const LegalCenter = React.lazy(() => import('../views/legal/LegalCenter'));
 const LegalDocument = React.lazy(() => import('../views/legal/LegalDocument'));
 const OrganizerAgreement = React.lazy(() => import('../views/legal/OrganizerAgreement'));
+const Appeal = React.lazy(() => import('../views/Appeal'));
+const AdminAppeals = React.lazy(() => import('../views/AdminAppeals'));
 
 /**
  * Views App.jsx routes itself rather than through a table below.
@@ -125,6 +127,7 @@ export const APP_ROUTES = [
      consults per-user grants — no capability grant can reach this route, and
      the nav entry that points at it is hidden by the same capability. */
   { path: '/errors', element: <ErrorDashboard />, requiredCap: 'error.read' },
+  { path: '/admin/appeals', element: <AdminAppeals />, requiredCap: 'appeal.review' },
 ];
 
 /**
@@ -190,6 +193,7 @@ export const PUBLIC_ROUTES = [
    */
   { path: '/legal', element: <LegalCenter /> },
   { path: '/legal/:slug', element: <LegalDocument /> },
+  { path: '/appeal/:token', element: <Appeal /> },
 ];
 
 /**
