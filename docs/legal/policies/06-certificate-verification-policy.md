@@ -44,7 +44,7 @@ listed three causes; there are two.
 
 # Certificate verification
 
-**Version 1.0 · Last updated 2026-08-06**
+**Version 1.1 · Last updated 2026-08-06**
 
 WeVolunteer issues a certificate when a student completes a volunteer event. Each certificate
 has a code on it. Anyone holding that code can check the certificate is real.
