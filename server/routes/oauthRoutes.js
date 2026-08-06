@@ -15,6 +15,7 @@ import { assertConsent, recordAcceptances, ConsentMissing } from '../consent.js'
 import { issueVerificationToken, sendVerificationMail } from '../services/verification.js';
 import { issueSession } from './authRoutes.js';
 
+import { isSuspended, liftIfExpired } from '../suspension.js';
 import googleProvider from '../oauth/providers/google.js';
 import microsoftProvider from '../oauth/providers/microsoft.js';
 import appleProvider from '../oauth/providers/apple.js';
@@ -417,9 +418,24 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
         db.prepare('DELETE FROM oauth_accounts WHERE id = ?').run(oauthRow.id);
         return res.status(401).json({ error: 'That account was deleted. You can create a new one.' });
       }
-      if (userRow.account_status === 'suspended') {
+      /**
+       * `isSuspended`, not the status string — and this is the sign-in path where
+       * getting it wrong is WORST.
+       *
+       * A timed suspension ends when its deadline passes, but `account_status`
+       * stays 'suspended' until something lifts it. Comparing the string here
+       * refuses a student whose week is up, and for a provider-only account there
+       * is no password path to fall back on — so it is not a delay, it is a
+       * permanent lockout from an account whose sanction has already expired, with
+       * nothing on screen to explain it.
+       *
+       * `liftIfExpired` normalises the row on the way past, exactly as the password
+       * path does, so the two doors agree about who is suspended.
+       */
+      if (isSuspended(userRow)) {
         return res.status(403).json({ error: 'Account is suspended' });
       }
+      liftIfExpired(db, userRow);
 
       db.prepare('UPDATE oauth_accounts SET last_used_at = ?, provider_email = ? WHERE id = ?')
         .run(new Date().toISOString(), providerEmail, oauthRow.id);
@@ -438,9 +454,15 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
         // address here means an active person; treat anything else as absent.
         return res.status(401).json({ error: 'That account was deleted. You can create a new one.' });
       }
-      if (existingUser.account_status === 'suspended') {
+      /**
+       * Same rule on the address-match branch. This one ends in linking a new way
+       * to sign in, so admitting somebody whose suspension is live would be worse
+       * than a session: it would leave them a credential.
+       */
+      if (isSuspended(existingUser)) {
         return res.status(403).json({ error: 'Account is suspended' });
       }
+      liftIfExpired(db, existingUser);
 
       /**
        * Signed in as that very account — but a live session is not enough.

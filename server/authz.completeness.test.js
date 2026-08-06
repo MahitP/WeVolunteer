@@ -297,7 +297,14 @@ describe('authorization hygiene', () => {
       // a credential-less provider must not read as "coming soon". Re-read a
       // fifth time: still the new-signup `verified` flag, still a fact about the
       // row being written rather than about what its holder may do.
-      './routes/oauthRoutes.js:584',
+      //
+      // 584 -> 606 when both sign-in branches were converted to `isSuspended()`,
+      // so a timed suspension that had expired stopped locking a provider-only
+      // account out permanently. Re-read a sixth time: unchanged, and still the
+      // `verified` flag on a row being created. Worth noting that the change which
+      // moved it IS an authorization fix, made a few lines above; this line is
+      // still not one.
+      './routes/oauthRoutes.js:606',
     ]);
     const consumedExceptions = new Set();
 

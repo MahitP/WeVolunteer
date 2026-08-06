@@ -475,23 +475,34 @@ router.post('/api/auth/login', async (req, res) => {
      * Guidelines' promise to tell somebody the outcome is not kept by telling them
      * only that there is one.
      */
+    /**
+     * ── Why the END DATE is not here ──
+     *
+     * This branch runs BEFORE the password is checked, which it has to: telling a
+     * suspended person their password is wrong sends them round the reset loop for
+     * a problem a reset cannot fix. The cost is that anybody who can guess an email
+     * address reaches this message.
+     *
+     * That the account exists and is suspended is already disclosed here and is an
+     * accepted product decision — `GENERIC_LOGIN_ERRORS` is the documented switch
+     * for reversing it. The DATE is not covered by that decision. It is a detail of
+     * a moderation action against a named person, frequently a minor, and it must
+     * not be readable by anyone who types their address into a login form.
+     *
+     * The person themselves loses very little: the end date is in the mandatory
+     * notice sent to them when the suspension was imposed (see
+     * `ACCOUNT_WARNED`/`ACCOUNT_SUSPENDED` in `notificationContent.js`, which names
+     * it in prose), and that notice goes to the address on the account rather than
+     * to whoever is typing it into a form. There is deliberately no
+     * authenticated place to repeat it, because a suspended account never gets a
+     * session — which is the whole point of the suspension.
+     */
     if (isSuspended(userRow)) {
-      const until = userRow.suspended_until
-        ? new Date(userRow.suspended_until)
-        : null;
-      const when = until && !Number.isNaN(until.getTime())
-        ? until.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
-        : null;
-
       return res.status(403).json({
-        error: (when
-          ? `This account is suspended until ${when}. `
-          : 'This account has been suspended. ')
-          + 'If you think that is wrong, email '
+        error: 'This account has been suspended. If you think that is wrong, email '
           + 'wevolunteer.platform@gmail.com to ask for a review — we reply within five '
           + 'business days with the outcome and the reason.',
         code: 'suspended',
-        suspendedUntil: userRow.suspended_until ?? null,
       });
     }
     liftIfExpired(db, userRow);
