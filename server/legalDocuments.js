@@ -91,8 +91,10 @@ export const POLICY_DIR = path.join(HERE, '..', 'docs', 'legal', 'policies');
 /**
  * ── v1.0, 2026-08-06 — the initial public release. All ten documents. ──
  *
- * Every document is v1.0 and every one carries the same effective date, because
- * this is the first version any user will ever be shown.
+ * Every document is v1.0, because this is the first version any user will ever
+ * be shown. Nine carry 2026-08-06; the Organizer Agreement carries 2026-08-05,
+ * which is the date printed in its own published body and therefore the date it
+ * has to claim.
  *
  * ── Why the pre-launch draft numbering was reset rather than continued ──
  *
@@ -144,6 +146,34 @@ export const POLICY_DIR = path.join(HERE, '..', 'docs', 'legal', 'policies');
  * publication, because neither can be answered from the repository: the
  * production hosting provider, and the hours one person can commit to reading
  * the safety inbox.
+ *
+ * ── Why six documents came back from 1.1 to 1.0 ──
+ *
+ * The v1.0 renumbering was published against a database that had already
+ * published five of these documents at v1.0 during drafting, so
+ * `syncLegalDocuments` hit its immutability guard and `initDatabase()` threw at
+ * startup. The fix at the time gave the four genuinely-changed documents the
+ * MINOR bump the rule calls for — 1.1 — which was the correct move for a set
+ * that had really been published.
+ *
+ * It had not. Those publications were development boots of a product that has
+ * never launched, and the acceptance rows pointing at them were local test
+ * signups from this machine. Shipping 1.1 would have told the first real reader
+ * they were looking at the second revision of a document whose first revision
+ * nobody can produce, which is the same misleading answer the reset was
+ * performed to avoid — just one decimal place smaller.
+ *
+ * So the collapse to 1.0 is completed rather than half-made: the registry is
+ * uniformly 1.0, and the development database's stale `legal_documents` rows and
+ * test `legal_acceptances` were cleared so the clean baseline could publish. The
+ * hashes did not move — `hashPolicyFile` covers the published body, which these
+ * edits did not touch.
+ *
+ * NOTHING about the integrity system changed. The immutability guard, the hash
+ * pinning, the fail-closed boot and acceptance tracking are all exactly as they
+ * were; what changed is the data they were guarding, which was drafting
+ * residue. `legalRepublish.test.js` still pins that editing a published version
+ * throws. This remains available exactly once, and it has now been used.
  */
 export const LEGAL_DOCUMENTS = [
   {
@@ -172,16 +202,8 @@ export const LEGAL_DOCUMENTS = [
     bundledWith: 'terms-of-service',
   },
   {
-    /**
-     * 3.0 — MAJOR, and by the letter of the rule above: "a changed retention
-     * period". Safety reports and the messages saved with them became a third
-     * indefinitely-kept class, and the account shell's flat three years gained
-     * two exceptions. A reader of 2.0 was told in terms that only hours and
-     * certificates outlive everything; that is no longer true, and it is
-     * exactly the kind of statement someone decides whether to sign up on.
-     */
     slug: 'privacy-policy',
-    version: '1.1',
+    version: '1.0',
     title: 'Privacy Policy',
     consentType: 'acknowledge',
     scope: 'signup',
@@ -205,7 +227,7 @@ export const LEGAL_DOCUMENTS = [
   },
   {
     slug: 'youth-safety-guidelines',
-    version: '1.1',
+    version: '1.0',
     title: 'Youth Safety Guidelines',
     consentType: 'notice',
     scope: 'notice',
@@ -217,7 +239,7 @@ export const LEGAL_DOCUMENTS = [
   },
   {
     slug: 'certificate-verification-policy',
-    version: '1.1',
+    version: '1.0',
     title: 'Certificate Verification Policy',
     consentType: 'notice',
     scope: 'notice',
@@ -229,7 +251,7 @@ export const LEGAL_DOCUMENTS = [
   },
   {
     slug: 'volunteer-record-policy',
-    version: '1.1',
+    version: '1.0',
     title: 'Volunteer Record Policy',
     consentType: 'notice',
     scope: 'notice',
@@ -240,15 +262,6 @@ export const LEGAL_DOCUMENTS = [
     bundledWith: null,
   },
   {
-    /**
-     * 2.0 — MAJOR. A new exception to deletion, which is the one thing this
-     * document exists to enumerate: the Terms make it the exclusive register of
-     * what survives an account deletion ("except where we have said in the Data
-     * Deletion Policy that something is kept, and why"), and until now it did
-     * not mention safety reports at all. Code that kept a report past deletion
-     * while this document stayed silent would be an unstated exception to a
-     * published promise, at the exact moment a student decides to press delete.
-     */
     slug: 'data-deletion-policy',
     version: '1.0',
     title: 'Data Deletion Policy',
@@ -262,7 +275,7 @@ export const LEGAL_DOCUMENTS = [
   },
   {
     slug: 'cookie-and-tracking-notice',
-    version: '1.1',
+    version: '1.0',
     title: 'Cookie and Tracking Notice',
     consentType: 'notice',
     scope: 'notice',
@@ -274,7 +287,7 @@ export const LEGAL_DOCUMENTS = [
   },
   {
     slug: 'admin-responsibilities-policy',
-    version: '1.1',
+    version: '1.0',
     title: 'Admin Responsibilities Policy',
     consentType: 'notice',
     scope: 'notice',
