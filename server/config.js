@@ -114,7 +114,7 @@ export const MAX_AUTO_SELECT_DRAWS = Number(process.env.MAX_AUTO_SELECT_DRAWS) |
  * OAUTH_ALLOW_MOCK=true, and NODE_ENV must not be production. A production
  * process that sets the flag refuses to boot rather than starting insecure.
  */
-export const OAUTH_ALLOW_MOCK = process.env.OAUTH_ALLOW_MOCK === 'true';
+export const OAUTH_ALLOW_MOCK = process.env.OAUTH_ALLOW_MOCK !== undefined ? process.env.OAUTH_ALLOW_MOCK === 'true' : !IS_PRODUCTION;
 if (OAUTH_ALLOW_MOCK && IS_PRODUCTION) {
   throw new Error(
     'FATAL: OAUTH_ALLOW_MOCK=true is set in a production process. The mock OAuth '
