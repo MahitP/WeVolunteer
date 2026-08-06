@@ -990,7 +990,15 @@ counted twice via `react-router` and `react-router-dom`.
 **Assessed as not applicable**, with the reasoning recorded in `README.md`: the
 advisory is scoped to React Router's React Server Components mode. WeVolunteer
 is a client-rendered SPA with no server components, so the attack surface the
-advisory describes is never instantiated.
+advisory describes is never instantiated. Re-verified against the code — not
+against the previous assessment — during the v1.2c release review: `src/main.jsx`
+mounts `BrowserRouter`, and there is no `createBrowserRouter`, no
+`RouterProvider`, and no route `loader`/`action` anywhere in `src/`.
+
+**Never clear it with `npm audit fix --force`.** No fixed 7.x exists. The
+`--force` resolution *downgrades* `react-router-dom` to 7.11.0, which npm itself
+flags as a breaking change — trading a working router for the removal of a risk
+this application does not carry.
 
 Re-assess whenever the advisory is updated or the routing architecture changes.
 If WeVolunteer ever adopts server components, **this assessment is void** and
@@ -1000,7 +1008,7 @@ Re-verified at v1.2c against the code rather than against the previous
 assessment: `src/main.jsx` mounts `BrowserRouter`, there is no
 `createBrowserRouter`, no `RouterProvider`, and no route `loader`/`action`
 anywhere in `src/`. The advisory's range (`7.12.0 – 8.2.0`) still covers the
-pinned `7.18.1` and **no fixed 7.x exists** — `npm audit fix --force` resolves
+pinned `7.18.2` and **no fixed 7.x exists** — `npm audit fix --force` resolves
 it by *downgrading* to `react-router-dom@7.11.0`, which is a breaking change
 taken to remove a risk that is not instantiated. Do not run it.
 
@@ -1008,17 +1016,22 @@ taken to remove a risk that is not instantiated. Do not run it.
 [GHSA-rgw5-rvv9-x895](https://github.com/advisories/GHSA-rgw5-rvv9-x895),
 unbounded intermediate arrays in glob expansion.
 
-**Assessed as not shipped.** The path is
+**Assessed as not shipped, then remediated.** The path was
 `server → nodemon → minimatch → brace-expansion`, and `nodemon` is a
-`devDependency` used only by `npm run dev`. It is not installed by a production
-`npm ci --omit=dev`, is not imported by any runtime module, and the input it
-expands is a developer's own watch glob rather than anything a user supplies.
+`devDependency` used only by `npm run dev`. It was not installed by a production
+`npm ci --omit=dev`, was not imported by any runtime module, and the input it
+expands is a developer's own watch glob rather than anything a user supplies — so
+it never touched the production runtime.
 
-A non-breaking fix **is** available (`npm audit fix`, no major bumps). It was
-deliberately not taken during the release review itself: touching
-`package-lock.json` invalidates every gate that had already been run against it,
-in exchange for removing a dev-only hazard. Take it as the first commit *after*
-the merge, not as part of it.
+A non-breaking fix was available and has now been taken (`npm audit fix`, no
+major bumps): `brace-expansion` 5.0.8 → 5.0.9, which also carried
+`react-router`/`react-router-dom` 7.18.1 → 7.18.2 as an in-range patch bump.
+
+It was deliberately **deferred** out of the v1.2c release review rather than
+folded into it, because touching `package-lock.json` invalidates every gate that
+had already been run against it. **That sequencing is the general rule, not a
+one-off: a dependency change is its own commit, with its own four gates, never a
+late amendment to a reviewed release.**
 
 ### 6.8 Step-up re-authentication (AAL2)
 
