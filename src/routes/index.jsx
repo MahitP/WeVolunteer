@@ -44,7 +44,6 @@ const CheckInView = React.lazy(() => import('../views/CheckInView'));
 const Messages = React.lazy(() => import('../views/Messages'));
 const Settings = React.lazy(() => import('../views/Settings'));
 const ErrorDashboard = React.lazy(() => import('../views/ErrorDashboard'));
-const PrivacyNotice = React.lazy(() => import('../views/PrivacyNotice'));
 const LegalCenter = React.lazy(() => import('../views/legal/LegalCenter'));
 const LegalDocument = React.lazy(() => import('../views/legal/LegalDocument'));
 const OrganizerAgreement = React.lazy(() => import('../views/legal/OrganizerAgreement'));
@@ -184,6 +183,10 @@ export const PUBLIC_ROUTES = [
    * `PrivacyNotice.jsx`, a hand-written page assembled from `src/config.js` values
    * that predates the registry — and the Privacy Policy's own specification block
    * says it supersedes that view as the source of truth.
+   *
+   * That view is now deleted. It survived the redirect landing here as an unused
+   * `React.lazy` import, which still pulled a second, diverging privacy page into
+   * the bundle and left it one line away from being routed again.
    *
    * The consequence was not cosmetic. `PRIVACY_URL` defaulted to `/privacy`, and
    * that is the link inside the signup consent block, so the person being asked to

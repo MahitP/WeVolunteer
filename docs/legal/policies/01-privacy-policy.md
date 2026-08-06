@@ -48,8 +48,9 @@ is Gmail, so it is Google, and the row merges with the existing Google entry. Th
 promise is resolved by this being v1.0 — there are no superseded versions yet, so the draft says
 so and offers previous versions on request once there are any.
 
-**Relationship to existing code.** This supersedes `src/views/PrivacyNotice.jsx` as the
-*source of truth*, but that page's architecture is correct and should be kept: factual
+**Relationship to existing code.** This superseded `src/views/PrivacyNotice.jsx` as the
+*source of truth*, and that view has now been deleted — `/privacy` redirects here, so there is
+one privacy page again. Its architecture is worth remembering rather than keeping: factual
 sections are hard-coded because they are engineering facts; operator-specific facts (the entity
 name, the postal address, the vendor names) arrive as configuration and the page declares itself
 incomplete until they do. This draft supplies the text those config values should hold. There are
