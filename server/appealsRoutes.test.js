@@ -239,6 +239,63 @@ describe('statement preservation', () => {
     expect(appeal.suspension_reason_snapshot).toBe(REASON);
     expect(appeal.suspended_by_name_snapshot).toBeTruthy();
   });
+
+  /**
+   * The snapshot has to reach the APPELLANT, not just the table.
+   *
+   * The test above proves the column is frozen. It says nothing about whether
+   * anybody can read it, and the person the snapshot exists for could not: the
+   * token route's `appeal` query selected six columns and
+   * `suspension_reason_snapshot` was not among them, so the
+   * `?? appeal?.suspension_reason_snapshot` fallback beside it read `undefined`
+   * on every request and collapsed to null.
+   *
+   * The visible consequence is narrow and bad. `unsuspend` NULLs the live
+   * columns, so the moment an appeal SUCCEEDS — or a suspension is lifted while
+   * the appeal is still open — the reinstated student opening their link is told
+   * they were suspended for nothing, with no date. That is the single reader for
+   * whom migration 015 froze these columns in the first place, and the one
+   * conversation ("what was I actually accused of") the record is supposed to
+   * settle years later.
+   *
+   * Asserted through HTTP rather than against the row, because the row was
+   * always right. The defect was entirely in the reading.
+   */
+  it('still tells a REINSTATED appellant what they were suspended for', async () => {
+    const uid = makeUser();
+    const REASON = 'Shared another student\'s phone number in a public event comment.';
+    const { token } = await suspend(uid, REASON);
+    await fileAppeal(token);
+
+    const t = await adminToken();
+    await jf(`/api/admin/users/${uid}/unsuspend`, {
+      method: 'POST', headers: { Cookie: `wev_session=${t}` },
+      body: JSON.stringify({ reason: 'Appeal granted — reinstating the account.' }),
+    });
+
+    const res = await fetch(srv.base + `/api/appeals/token/${token}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    // The live column is NULL by design at this point. The appellant must still
+    // be shown the reason they are appealing.
+    expect(db.prepare('SELECT suspension_reason FROM users WHERE id = ?').get(uid).suspension_reason)
+      .toBeNull();
+    expect(body.suspensionReason).toBe(REASON);
+    // And the date, which had no fallback at all.
+    expect(body.suspendedAt).toBeTruthy();
+  });
+
+  it('prefers the live reason while the suspension is still in force', async () => {
+    const uid = makeUser();
+    const REASON = 'Repeatedly ignored an organizer\'s instruction to stop messaging.';
+    const { token } = await suspend(uid, REASON);
+    await fileAppeal(token);
+
+    const body = await (await fetch(srv.base + `/api/appeals/token/${token}`)).json();
+    expect(body.suspensionReason).toBe(REASON);
+    expect(body.accountStatus).toBe('suspended');
+  });
 });
 
 /* ────────────────────────────── Conflict of interest ─────────────────────── */
