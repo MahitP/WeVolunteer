@@ -86,18 +86,29 @@ export default function ProviderButtons({ onSelect, disabled, labelFor, showUnav
         const Button = BUTTONS[p.id];
         if (!Button) return null;
 
-        // Not configured (or not built): visible, clearly unavailable, inert.
-        // "Coming soon" reads the same for Microsoft-not-configured and
-        // Apple-not-implemented because the difference is ours, not the user's.
+        /**
+         * Unusable: visible, clearly so, and inert.
+         *
+         * These used to share one "coming soon", on the reasoning that the
+         * difference between "we have not built it" and "this site has not
+         * configured it" is ours rather than the user's. The AADSTS900144
+         * incident is the counter-example. "Coming soon" on a provider that is
+         * one environment variable away reads as a roadmap item, so nobody
+         * treats it as a fault — including the operator, who sees the same
+         * screen as everybody else and has no other signal that their own
+         * deployment is misconfigured.
+         *
+         * `not_set_up` says which it is without naming a variable or admitting
+         * anything about the deployment a signed-out visitor should not know.
+         * `ConnectedAccounts` has drawn the same distinction all along
+         * ("Not set up on this site"); this brings the auth screens in line.
+         */
         if (!p.enabled) {
-          return (
-            <Button
-              key={p.id}
-              text={`${p.label} — coming soon`}
-              disabled
-              onClick={() => {}}
-            />
-          );
+          const text = p.state === 'misconfigured'
+            ? `${p.label} — not set up on this site`
+            : `${p.label} — coming soon`;
+
+          return <Button key={p.id} text={text} disabled onClick={() => {}} />;
         }
 
         return (

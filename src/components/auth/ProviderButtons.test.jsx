@@ -44,9 +44,9 @@ const mockProviders = (list) =>
 
 /** What the server sends when only Google is configured — the reported state. */
 const GOOGLE_ONLY = [
-  { id: 'google', label: 'Google', enabled: true, implemented: true },
-  { id: 'microsoft', label: 'Microsoft', enabled: false, implemented: true },
-  { id: 'apple', label: 'Apple', enabled: false, implemented: false }
+  { id: 'google', label: 'Google', enabled: true, implemented: true, state: 'available' },
+  { id: 'microsoft', label: 'Microsoft', enabled: false, implemented: true, state: 'misconfigured' },
+  { id: 'apple', label: 'Apple', enabled: false, implemented: false, state: 'coming_soon' }
 ];
 
 const ALL_CONFIGURED = [
@@ -94,22 +94,44 @@ describe('unconfigured providers', () => {
     expect(stateOf('microsoft')).not.toBeNull();
   });
 
-  it('marks an unconfigured Microsoft as coming soon, and disables it', async () => {
+  /**
+   * Misconfigured and unimplemented are disabled identically and worded
+   * differently.
+   *
+   * They used to share "coming soon". That is what let AADSTS900144 sit
+   * unnoticed: a Microsoft button one environment variable away from working
+   * announced itself as a roadmap item, so the operator — who sees this same
+   * screen — had no signal that their own deployment was incomplete.
+   */
+  it('says a credential-less Microsoft is not set up, rather than coming soon', async () => {
     mockProviders(GOOGLE_ONLY);
     render(<ProviderButtons onSelect={() => {}} />);
     await waitFor(() => expect(stateOf('microsoft')).not.toBeNull());
     const ms = stateOf('microsoft');
     expect(ms.disabled).toBe(true);
-    expect(ms.text).toMatch(/coming soon/i);
+    expect(ms.text).toMatch(/not set up on this site/i);
+    expect(ms.text).not.toMatch(/coming soon/i);
   });
 
-  it('treats Apple the same way, so the two read consistently', async () => {
+  it('keeps "coming soon" for Apple, which genuinely is not built', async () => {
     mockProviders(GOOGLE_ONLY);
     render(<ProviderButtons onSelect={() => {}} />);
     await waitFor(() => expect(stateOf('apple')).not.toBeNull());
     const apple = stateOf('apple');
     expect(apple.disabled).toBe(true);
     expect(apple.text).toMatch(/coming soon/i);
+  });
+
+  /**
+   * A server that predates the `state` field still renders something sane.
+   * `/api/oauth/providers` is a public endpoint and a cached bundle can outlive
+   * a deploy, so the absent-field path is a real one rather than a hypothetical.
+   */
+  it('falls back to "coming soon" when the server sends no state field', async () => {
+    mockProviders([{ id: 'microsoft', label: 'Microsoft', enabled: false, implemented: true }]);
+    render(<ProviderButtons onSelect={() => {}} />);
+    await waitFor(() => expect(stateOf('microsoft')).not.toBeNull());
+    expect(stateOf('microsoft').text).toMatch(/coming soon/i);
   });
 
   it('leaves a configured provider enabled and free of the coming-soon label', async () => {
@@ -166,9 +188,12 @@ describe('degraded and loading states', () => {
     render(<ProviderButtons onSelect={() => {}} labelFor={(l) => `Sign up with ${l}`} />);
     await waitFor(() => expect(stateOf('google')).not.toBeNull());
     expect(stateOf('google').text).toBe('Sign up with Google');
-    // An unavailable one keeps the coming-soon wording rather than an
-    // invitation to do something it cannot do.
-    expect(stateOf('microsoft').text).toMatch(/coming soon/i);
+    // An unavailable one keeps its own unavailability wording rather than an
+    // invitation to do something it cannot do. Which wording that is depends on
+    // WHY it is unavailable and is asserted above; what matters here is only
+    // that the caller's label was not applied to it.
+    expect(stateOf('microsoft').text).not.toMatch(/sign up with/i);
+    expect(stateOf('microsoft').text).toMatch(/not set up on this site/i);
   });
 
   it('disables usable providers while a request is in flight', async () => {

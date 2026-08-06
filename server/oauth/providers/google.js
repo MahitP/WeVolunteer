@@ -1,5 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
 import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OAUTH_REDIRECT_URI, OAUTH_ALLOW_MOCK } from '../../config.js';
+import { assertProviderConfigured } from '../credentials.js';
 
 const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OAUTH_REDIRECT_URI);
 
@@ -41,6 +42,18 @@ export default {
    * form of the check that survives a library upgrade dropping an option.
    */
   getAuthUrl(state, { forceReauth = false } = {}) {
+    /**
+     * Same refusal as microsoft.js, and it matters here despite Google being the
+     * provider that happens to be configured today. `generateAuthUrl` does not
+     * validate: with no client id it returns a URL carrying `client_id=` exactly
+     * as the hand-built Microsoft one did. This defect was Microsoft-shaped only
+     * by accident of which credentials were in .env.
+     */
+    assertProviderConfigured('google', {
+      clientId: GOOGLE_CLIENT_ID,
+      clientSecret: GOOGLE_CLIENT_SECRET,
+    });
+
     return client.generateAuthUrl({
       access_type: 'offline',
       scope: ['https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile'],

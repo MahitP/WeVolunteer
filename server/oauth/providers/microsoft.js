@@ -1,4 +1,5 @@
 import { MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, OAUTH_REDIRECT_URI, OAUTH_ALLOW_MOCK } from '../../config.js';
+import { assertProviderConfigured } from '../credentials.js';
 
 export default {
   id: 'microsoft',
@@ -22,6 +23,14 @@ export default {
    * assertion goes.
    */
   getAuthUrl(state, { forceReauth = false } = {}) {
+    // Never mint `client_id=`. This is the AADSTS900144 the pilot hit — see
+    // ../credentials.js for why the refusal lives at construction time and why
+    // the mock does not exempt it.
+    assertProviderConfigured('microsoft', {
+      clientId: MICROSOFT_CLIENT_ID,
+      clientSecret: MICROSOFT_CLIENT_SECRET,
+    });
+
     const params = new URLSearchParams({
       client_id: MICROSOFT_CLIENT_ID,
       response_type: 'code',

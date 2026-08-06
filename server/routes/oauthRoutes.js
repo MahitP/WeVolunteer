@@ -159,12 +159,35 @@ function purgeExpiredSignupSessions() {
  */
 router.get('/api/oauth/providers', (req, res) => {
   res.json(
-    Object.entries(providers).map(([key, p]) => ({
-      id: key,
-      label: p.label || key,
-      enabled: Boolean(OAUTH_PROVIDERS_CONFIGURED[key]),
-      implemented: p.implemented !== false
-    }))
+    Object.entries(providers).map(([key, p]) => {
+      const implemented = p.implemented !== false;
+      const configured = Boolean(OAUTH_PROVIDERS_CONFIGURED[key]);
+
+      /**
+       * `state` distinguishes the two reasons a provider is unusable, which
+       * `enabled: false` alone cannot.
+       *
+       *   coming_soon   — no implementation behind it (Apple). Ours to build.
+       *   misconfigured — implemented, but this deployment has no credentials.
+       *                   Ours to configure, and an operator seeing it on their
+       *                   own site is being told which it is.
+       *   available     — usable now.
+       *
+       * They read identically to a student and differently to whoever runs the
+       * site, which is the point: "coming soon" on a provider that is merely
+       * missing an environment variable is how a deployment mistake gets
+       * mistaken for a roadmap item and left alone.
+       *
+       * `enabled` and `implemented` are kept alongside it. They are what the
+       * existing clients read, and dropping them to introduce `state` would be a
+       * breaking change to a public endpoint for no gain.
+       */
+      const state = !implemented ? 'coming_soon'
+        : configured ? 'available'
+          : 'misconfigured';
+
+      return { id: key, label: p.label || key, enabled: configured, implemented, state };
+    })
   );
 });
 
