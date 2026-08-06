@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertTriangle, UserX, MessageSquareWarning } from 'lucide-react';
+import { AlertTriangle, UserX, MessageSquareWarning, MessageSquare } from 'lucide-react';
 import { api } from '../../utils/api';
 import { can } from '../../authz';
 
@@ -40,6 +40,16 @@ export default function SubjectActions({ subject, user, onDone, addToast }) {
 
   const mayWarn = can(user, 'user.warn');
   const maySuspend = can(user, 'user.suspend');
+  /**
+   * `report.resolve`, matching the endpoint's gate — NOT `message.send`.
+   *
+   * Taking part in a conversation is one thing; choosing an arbitrary person by id
+   * to start one with is a moderation power. An organizer holds `message.send` and
+   * must not reach a stranger through it, so the server gates the resolve on the
+   * moderation capability and this mirrors it. Asking `message.send` here would
+   * render a button that 403s for exactly the role most likely to press it.
+   */
+  const mayMessage = can(user, 'report.resolve');
 
   /**
    * Nothing to act on, so nothing is offered.
@@ -51,11 +61,31 @@ export default function SubjectActions({ subject, user, onDone, addToast }) {
    * "warn this person" button pointed at the child who filed the report.
    */
   if (!subject) return null;
-  if (!mayWarn && !maySuspend) return null;
+  if (!mayWarn && !maySuspend && !mayMessage) return null;
 
   const alreadySuspended = subject.accountStatus === 'suspended';
 
   const close = () => { setOpen(null); setReason(''); setUntil(''); setError(null); };
+
+  /**
+   * Opens the thread and sends the moderator to it.
+   *
+   * A full navigation rather than an inline composer: the conversation lives in
+   * `/messages`, with its own history, unread state and realtime updates, and a
+   * second place to type into the same thread is a second thing to keep correct.
+   * The resolve is idempotent, so arriving here twice reopens rather than splits.
+   */
+  const message = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { conversation } = await api.resolveAdminConversation(subject.id);
+      window.location.assign(`/messages?conversation=${encodeURIComponent(conversation.id)}`);
+    } catch (err) {
+      setError(err?.message || 'Could not open a conversation with this person.');
+      setBusy(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -113,8 +143,30 @@ export default function SubjectActions({ subject, user, onDone, addToast }) {
         </p>
       )}
 
+      {/* Rendered outside the form, because "Message them" can fail with no form
+          open — and an error shown only inside a block that is not mounted is an
+          error nobody sees. */}
+      {error && !open && (
+        <div className="alert alert-danger" role="alert">
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span>{error}</span>
+        </div>
+      )}
+
       {!open && (
         <div className="row row-wrap" style={{ gap: 'var(--s2)' }}>
+          {mayMessage && (
+            /**
+             * Offered FIRST, and before the two enforcement actions, because it is
+             * usually the right first step: most reports are resolved by asking
+             * somebody what happened, and a moderator who can only warn or suspend
+             * will warn or suspend.
+             */
+            <button className="btn btn-ghost btn-sm" onClick={message} disabled={busy}>
+              <MessageSquare size={14} aria-hidden="true" />
+              {busy && open === null ? 'Opening…' : 'Message them'}
+            </button>
+          )}
           {mayWarn && (
             <button className="btn btn-ghost btn-sm" onClick={() => setOpen('warn')}>
               <MessageSquareWarning size={14} aria-hidden="true" /> Warn them

@@ -190,10 +190,29 @@ describe('authenticated route table', () => {
     expect(el.dataset.props).toBe('currentUser');
   });
 
-  it('admin: /messages is denied, /events is allowed', async () => {
+  /**
+   * Admin now REACHES `/messages`, and the flip was deliberate.
+   *
+   * This asserted a 403 because admin did not hold `message.send`. That was right
+   * while it lasted: the capability had been granted once and reverted, because
+   * `conversations` was `(event_id, student_id, organizer_id)` all NOT NULL, so an
+   * administrator who opened a thread was not a participant and the route led to
+   * an empty inbox. A 403 was the more honest of the two wrong answers.
+   *
+   * Migration 018 added the `admin_student` / `admin_organizer` kinds with
+   * membership in `conversation_participants`, and
+   * `server/routes.adminMessaging.test.js` proves an admin can now open a thread,
+   * send, and be read by the other party. So the route leads somewhere, and
+   * refusing it would withhold a working feature.
+   *
+   * `/events` is kept in the same case as the control: it proves the render path
+   * works for this role, so a failure above is about the capability rather than
+   * about the harness.
+   */
+  it('admin: /messages and /events both render', async () => {
     signedInAs(USER('admin'));
     const a = renderAt('/messages');
-    await findErrorKind('403');
+    expect(await screen.findByTestId('messages')).toBeInTheDocument();
     a.unmount();
 
     signedInAs(USER('admin'));

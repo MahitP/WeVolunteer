@@ -174,3 +174,53 @@ describe('suspending', () => {
     await waitFor(() => expect(onDone).toHaveBeenCalled());
   });
 });
+
+/**
+ * Opening a moderation conversation.
+ *
+ * Offered on `report.resolve`, matching the endpoint, NOT on `message.send`.
+ * Participating in a conversation is one thing; picking an arbitrary person by id
+ * to start one with is a moderation power, and an organizer holds `message.send`.
+ */
+describe('messaging the person', () => {
+  beforeEach(() => {
+    api.resolveAdminConversation.mockResolvedValue({ conversation: { id: 'conv_9' } });
+  });
+
+  it('is offered to a moderator, before the enforcement actions', () => {
+    show();
+    const labels = screen.getAllByRole('button').map(b => b.textContent);
+    expect(labels[0]).toMatch(/Message them/);
+  });
+
+  it('is not offered to somebody who only holds message.send', () => {
+    show({ user: { id: 'u_org', role: 'organizer' } });
+    expect(screen.queryByRole('button', { name: /Message them/ })).not.toBeInTheDocument();
+  });
+
+  it('opens the thread and navigates to it', async () => {
+    const assign = vi.fn();
+    // jsdom's window.location is not assignable; replace just what is used.
+    const original = window.location;
+    delete window.location;
+    window.location = { ...original, assign };
+
+    try {
+      show();
+      fireEvent.click(screen.getByRole('button', { name: /Message them/ }));
+
+      await waitFor(() => expect(api.resolveAdminConversation).toHaveBeenCalledWith('u_org'));
+      await waitFor(() => expect(assign).toHaveBeenCalledWith('/messages?conversation=conv_9'));
+    } finally {
+      window.location = original;
+    }
+  });
+
+  it('shows a failure rather than silently doing nothing', async () => {
+    api.resolveAdminConversation.mockRejectedValue(new Error('Person not found'));
+    show();
+    fireEvent.click(screen.getByRole('button', { name: /Message them/ }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Person not found');
+  });
+});

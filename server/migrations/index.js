@@ -26,6 +26,7 @@ import appeals from './014_appeals.js';
 import appealsIntegrity from './015_appeals_integrity.js';
 import legalV1Republish from './016_legal_v1_republish.js';
 import timedSuspension from './017_timed_suspension.js';
+import adminConversations from './018_admin_conversations.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -52,6 +53,14 @@ export const MIGRATIONS = [
    * newest, not because anything before it is a prerequisite.
    */
   timedSuspension,
+  /**
+   * 018 REBUILDS `conversations`, which has three ON DELETE CASCADE children —
+   * one of them students' private messages. It carries the six guards
+   * ENGINEERING_GUIDE §8.3 requires and runs with `ownTransaction: true`, because
+   * `PRAGMA foreign_keys = OFF` is a silent no-op inside an open transaction and
+   * the whole rebuild depends on it taking effect.
+   */
+  adminConversations,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
