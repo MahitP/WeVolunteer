@@ -1,4 +1,24 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+
+/**
+ * A file-wide budget, measured rather than guessed.
+ *
+ * Every test here drives the login throttle by making real sign-in attempts, so each
+ * one performs a handful of bcrypt comparisons — the cost is the point, because the
+ * throttle is what the file exists to prove. `clears the bucket on a successful
+ * sign-in` alone does twelve.
+ *
+ * Isolated they run ~1.3s against vitest's 5000ms default. Under the parallel load of
+ * the full suite that one was measured at 5083ms and timed out. Nothing was hung: the
+ * work did not fit, which makes it a flake rather than a defect in the code under
+ * test — and flakiness is a defect in its own right on the gate every other gate
+ * depends on.
+ *
+ * Set once for the file rather than per test, because every test in it has the same
+ * shape and the same exposure. The global default stays 5000ms so a genuinely hung
+ * test elsewhere still fails fast.
+ */
+vi.setConfig({ testTimeout: 20000 });
 
 /**
  * Stage 2 hardening findings: S1, S2, S3 and U1.
