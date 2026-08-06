@@ -107,6 +107,26 @@ describe('the report dialog only offers reasons the server accepts', () => {
     'utf8'
   );
 
+  /**
+   * The explicit timeout is measured, not superstition.
+   *
+   * This test does 18 full round trips — `categoriesForTarget('conversation')`
+   * returns 18 values, and each iteration builds a whole conversation fixture
+   * (signup included, so bcrypt is in the loop) before posting the report. In
+   * isolation that is ~2.0-2.1s, comfortably inside vitest's 5000ms default.
+   * Under the parallel load of the full suite it was measured at 5122ms and
+   * timed out — the run that found it was ~2% over the line.
+   *
+   * So the suite had a test that failed randomly on a busy machine, on the gate
+   * every other gate depends on. Flakiness is a defect here, not a re-run
+   * (ENGINEERING_GUIDE), and this is not TD-11: nothing crashed, the work simply
+   * did not fit. Raising the budget for the two loop tests is the honest fix —
+   * they are legitimately slow rather than hung, and trimming the taxonomy they
+   * cover to fit a timer would weaken the guard.
+   *
+   * 20s is ~10x the isolated cost and ~4x the worst observed under load. The
+   * global default stays at 5000ms so a genuinely hung test still fails fast.
+   */
   it('offers nothing the server would reject', async () => {
     const { categoriesForTarget } = await import('./moderation.js');
     const offered = categoriesForTarget('conversation').map(c => c.value);
@@ -129,7 +149,7 @@ describe('the report dialog only offers reasons the server accepts', () => {
       if (res.status !== 201 && res.status !== 200) refused.push(`${category} -> ${res.status}`);
     }
     expect(refused, 'these would 400 and the student would see nothing').toEqual([]);
-  });
+  }, 20000);
 
   /**
    * The category that replaced `safety`, and the one the Youth Safety Guidelines
@@ -155,7 +175,10 @@ describe('the report dialog only offers reasons the server accepts', () => {
       );
       expect([200, 201], `legacy reason ${reason} stopped working`).toContain(res.status);
     }
-  });
+    // Same shape as the loop above (fixture + bcrypt per iteration), so the same
+    // exposure — four categories rather than eighteen, but on a loaded machine the
+    // margin is the same kind of thin. Measured at ~440ms in isolation.
+  }, 20000);
 
   it('surfaces a failure instead of only logging it', () => {
     // The old handler was `catch (err) { console.error(err); setSubmitting(false); }`
