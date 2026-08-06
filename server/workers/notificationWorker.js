@@ -253,7 +253,10 @@ async function handleEmailJob(job) {
       ctaText = 'View Event Details';
       ctaUrl = `${APP_URL}/?event=${eventId}`;
     } else {
-      ctaText = 'View Details';
+      // `ctaText` lets a notice name its own action. "View Details" on the mail
+      // telling a student their account is suspended is the least informative
+      // label the product could put on its most consequential button.
+      ctaText = content.ctaText || 'View Details';
       ctaUrl = `${APP_URL}${content.link}`;
     }
   }

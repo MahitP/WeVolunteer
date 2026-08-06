@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { api } from '../../utils/api';
 import Modal, { ModalHead } from '../Modal';
+import { groupedCategoriesFor, MAX_DESCRIPTION_LENGTH } from '../../moderation';
 
 /**
  * Report a conversation to the moderators.
@@ -9,20 +10,25 @@ import Modal, { ModalHead } from '../Modal';
  * ── The bug that mattered ──
  *
  * The reason dropdown offered `spam · harassment · inappropriate · other`. The
- * server accepts `inappropriate · spam · safety · other` — enforced twice, in the
- * route and by a CHECK constraint on `conversation_reports.reason`. So
- * "Harassment or bullying", the reason a student is most likely to reach for, was
- * rejected with 400 every time.
- *
- * And the only error handling was `console.error(err)` followed by re-enabling
- * the button. A student reporting harassment pressed Submit, saw the button come
+ * server accepted `inappropriate · spam · safety · other` — enforced twice, in
+ * the route and by a CHECK constraint. So "Harassment or bullying", the reason a
+ * student is most likely to reach for, was rejected with 400 every time, and the
+ * only error handling was `console.error(err)` followed by re-enabling the
+ * button. A student reporting harassment pressed Submit, saw the button come
  * back, and was told nothing whatsoever. The report was never filed and they had
  * no way to know. `safety` — the most serious of the four — was not offered at
  * all.
  *
- * The options are now exactly the server's set, so nothing offered can be
- * refused, and a failure is shown inline and announced rather than logged to a
- * console nobody has open.
+ * ── Why it now offers eighteen ──
+ *
+ * The four-value enum was replaced by a taxonomy written in students' own words,
+ * imported from `server/moderation.js` through `src/moderation.js` rather than
+ * retyped here. That import is the actual fix: the reason this dialog was broken
+ * for as long as it was is that its list and the server's list were two lists.
+ *
+ * A conversation is the surface where the safety categories belong, so it offers
+ * all of them — the ones naming a specific danger are exactly the ones a private
+ * message thread is where they happen.
  *
  * ── Why it moved to the shared Modal ──
  *
@@ -32,32 +38,27 @@ import Modal, { ModalHead } from '../Modal';
  * upset and may be on a keyboard or a screen reader, that is the wrong place to
  * be missing all of it.
  */
-
-/**
- * Kept deliberately in lockstep with the server's accepted set
- * (server/routes/messageRoutes.js and the CHECK on conversation_reports.reason).
- * A value here that is not there fails with a 400 the user cannot act on.
- */
-const REASONS = [
-  { value: 'safety', label: 'Someone may be unsafe' },
-  { value: 'inappropriate', label: 'Inappropriate or abusive content' },
-  { value: 'spam', label: 'Spam or unwanted advertising' },
-  { value: 'other', label: 'Something else' }
-];
-
 export default function ReportModal({ conversationId, onClose }) {
-  const [reason, setReason] = useState('safety');
+  const [category, setCategory] = useState('');
   const [details, setDetails] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState(null);
 
+  const groups = useMemo(() => groupedCategoriesFor('conversation'), []);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!category) {
+      setError('Choose what is happening, so a moderator knows what to look at.');
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      await api.reportConversation(conversationId, reason, details, []);
+      // The route takes the category in `reason` and still understands the four
+      // legacy values, so an older build in a tab somebody left open keeps working.
+      await api.reportConversation(conversationId, category, details.trim());
       setSuccess(true);
     } catch (err) {
       setError(err.message || 'Could not send the report. Please try again.');
@@ -75,7 +76,7 @@ export default function ReportModal({ conversationId, onClose }) {
         <>
           <ModalHead
             title="Report sent"
-            description="Thank you. A moderator will review this conversation."
+            description="Thank you. A moderator will review this conversation, including the messages in it."
             onClose={onClose}
           />
           <div className="modal-foot">
@@ -110,18 +111,30 @@ export default function ReportModal({ conversationId, onClose }) {
                   <select
                     id="report-reason"
                     className="select"
-                    value={reason}
-                    onChange={(e) => { setReason(e.target.value); if (error) setError(null); }}
+                    value={category}
+                    onChange={(e) => { setCategory(e.target.value); if (error) setError(null); }}
+                    aria-describedby="report-reason-hint"
+                    required
+                    disabled={submitting}
                   >
-                    {REASONS.map(r => (
-                      <option key={r.value} value={r.value}>{r.label}</option>
+                    <option value="">Choose one…</option>
+                    {groups.map(group => (
+                      <optgroup key={group.key} label={group.label}>
+                        {group.options.map(option => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
+                  <p className="small dim" id="report-reason-hint">
+                    If a conversation makes you uneasy and you cannot say exactly why, that is
+                    reason enough — pick “Something feels wrong and I can’t explain why”.
+                  </p>
                 </div>
 
                 <div className="field">
                   <label className="strong small" htmlFor="report-details">
-                    Anything else a moderator should know?
+                    Anything else a moderator should know? <span className="dim">(optional)</span>
                   </label>
                   <textarea
                     id="report-details"
@@ -131,11 +144,13 @@ export default function ReportModal({ conversationId, onClose }) {
                     onChange={(e) => setDetails(e.target.value)}
                     placeholder="Optional. A sentence is enough."
                     aria-describedby="report-details-hint"
-                    maxLength={1000}
+                    maxLength={MAX_DESCRIPTION_LENGTH}
+                    disabled={submitting}
                   />
                   <p className="small dim" id="report-details-hint">
-                    If someone is in immediate danger, tell a teacher or call your local
-                    emergency number rather than waiting for a moderator.
+                    If someone is in immediate danger, call <strong>911</strong>. To report abuse in
+                    New Jersey, call <strong>1-877-NJ-ABUSE</strong> (1-877-652-2873) — they take
+                    anonymous calls, 24 hours. Do not wait for a moderator.
                   </p>
                 </div>
               </div>
@@ -145,7 +160,7 @@ export default function ReportModal({ conversationId, onClose }) {
               <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>
                 Cancel
               </button>
-              <button type="submit" className="btn btn-danger" disabled={submitting}>
+              <button type="submit" className="btn btn-danger" disabled={submitting || !category}>
                 {submitting ? 'Sending…' : 'Send report'}
               </button>
             </div>

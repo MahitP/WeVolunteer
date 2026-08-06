@@ -236,6 +236,33 @@ export function can(principal, capability) {
 }
 
 /**
+ * Which base roles hold a capability, derived from the table above.
+ *
+ * ── Why this exists ──
+ *
+ * Some work is not a request. "Tell every moderator an urgent safety report just
+ * arrived" has to find the moderators before there is a principal to ask `can()`
+ * about, and the obvious way to write that — `WHERE role IN ('admin',
+ * 'super_admin')` — is a role-string comparison with all the usual problems: it
+ * is a second source of truth about who moderates, it goes stale the moment the
+ * table changes, and it is invisible to Guard 1, which cannot see inside a SQL
+ * string literal.
+ *
+ * So the role list is computed FROM the capability table, through `can()`, which
+ * means `SUPER_ONLY` and the `'*'` wildcard are honoured by construction and a
+ * capability moved between roles moves the query with it. Callers still have to
+ * union in per-user grants themselves — those live in the database, and this
+ * module deliberately imports nothing.
+ *
+ * Not a substitute for `requireCap` on a request. This answers "who are they",
+ * never "may this caller".
+ */
+export function rolesWithCapability(capability) {
+  if (!CAPABILITY_SET.has(capability)) return [];
+  return ROLES.filter(role => can(principalFor({ id: `role:${role}`, role }), capability));
+}
+
+/**
  * The only authorization primitive route files may use.
  *
  * Must be mounted AFTER authenticateToken, which is what populates

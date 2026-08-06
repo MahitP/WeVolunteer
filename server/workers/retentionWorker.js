@@ -67,6 +67,21 @@ const DAY_MS = 86400000;
 export const PRESERVED_TABLES = [
   'certificates', 'attendance', 'hours_ledger',
   'reports', 'conversation_reports', 'conversation_report_messages',
+  /**
+   * The adjudication record, added with migration 015.
+   *
+   * A suspension is permanent by default and appealable years later. Until now
+   * the only durable trace of an appeal decision was an `admin_audit_logs` row,
+   * and this worker sweeps that table at 365 days — so on day 366 a permanently
+   * suspended student's entire due-process record was the word 'stands' in a
+   * column, with no statement, no reasons and no reviewer. These three tables
+   * hold the answer to "who decided what, on what evidence, when", which is the
+   * question a parent or a district asks long after the year is up.
+   *
+   * `assertPreservedTablesUntouched` turns that from an intention into an
+   * assertion after every sweep.
+   */
+  'appeals', 'appeal_events', 'moderation_actions', 'report_evidence',
 ];
 
 function cutoff(now, days) {

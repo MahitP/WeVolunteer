@@ -95,3 +95,10 @@ backups/
 !**/*.pub.pem
 service-account*.json
 gha-creds-*.json
+
+# Runtime SQLite databases. `*.db` above does not cover the `.sqlite`
+# extension, and `server/database.sqlite` was sitting untracked and
+# committable — a live database file one broad `git add` away from the repo.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

@@ -86,6 +86,7 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
      failure that must never report as `unknown`: it is the tool used to find
      every other failure, so a blind spot here hides all of them. */
   '/errors',
+  '/admin/appeals',
 
   // src/routes/index.jsx — SIGNED_OUT_ROUTES
   '/welcome',
@@ -105,6 +106,7 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
      reader, so it says nothing about who was reading it. */
   '/legal',
   '/legal/:slug',
+  '/appeal/:token',
 ]);
 
 /**

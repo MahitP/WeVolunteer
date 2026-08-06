@@ -42,7 +42,7 @@ async function fileReport() {
   const events = (await srv.call('GET', '/api/events', undefined, student)).body;
   const eventId = (Array.isArray(events) ? events : events.events)[0].id;
   const res = await srv.call('POST', '/api/reports', {
-    targetType: 'event', targetId: eventId, reason: 'Testing the audit trail'
+    targetType: 'event', targetId: eventId, reason: 'other', details: 'Testing the audit trail'
   }, student);
   expect([200, 201]).toContain(res.status);
   const { db } = await import('./db.js');
@@ -54,7 +54,7 @@ describe('moderation decisions are recorded', () => {
     const reportId = await fileReport();
     const before = (await auditRows('MODERATE_REPORT')).length;
 
-    const res = await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'resolved' }, admin);
+    const res = await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'resolved', resolution: 'content_removed', resolutionNote: 'This is a long enough note to pass.' }, admin);
     expect(res.status).toBe(200);
 
     const rows = await auditRows('MODERATE_REPORT');
@@ -66,21 +66,21 @@ describe('moderation decisions are recorded', () => {
 
   it('logs a dismissal, which is the decision most worth being able to defend', async () => {
     const reportId = await fileReport();
-    await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'dismissed' }, admin);
+    await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'dismissed', resolution: 'no_action', resolutionNote: 'This is a long enough note to pass.' }, admin);
     const rows = await auditRows('MODERATE_REPORT');
     expect(rows[0].details).toMatch(/dismissed/);
   });
 
   it('records the reporter as the target so the row is traceable to a person', async () => {
     const reportId = await fileReport();
-    await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'resolved' }, admin);
+    await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'resolved', resolution: 'content_removed', resolutionNote: 'This is a long enough note to pass.' }, admin);
     const rows = await auditRows('MODERATE_REPORT');
     expect(rows[0].target_user_id, 'a moderation row with no subject is hard to follow up').toBeTruthy();
   });
 
   it('writes nothing when the report does not exist', async () => {
     const before = (await auditRows('MODERATE_REPORT')).length;
-    const res = await srv.call('PATCH', '/api/admin/reports/does-not-exist', { status: 'resolved' }, admin);
+    const res = await srv.call('PATCH', '/api/admin/reports/does-not-exist', { status: 'resolved', resolution: 'content_removed', resolutionNote: 'This is a long enough note to pass.' }, admin);
     expect(res.status).toBe(404);
     expect((await auditRows('MODERATE_REPORT')).length).toBe(before);
   });
@@ -97,7 +97,7 @@ describe('moderation decisions are recorded', () => {
     const reportId = await fileReport();
     const student = await srv.login('leo.chen28@gmail.com');
     const before = (await auditRows('MODERATE_REPORT')).length;
-    const res = await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'dismissed' }, student);
+    const res = await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'dismissed', resolution: 'no_action', resolutionNote: 'This is a long enough note to pass.' }, student);
     expect(res.status).toBe(403);
     expect((await auditRows('MODERATE_REPORT')).length).toBe(before);
   });

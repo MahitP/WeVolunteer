@@ -19,6 +19,24 @@ import EmptyState from '../components/common/EmptyState';
 import { api } from '../utils/api';
 import { formatHours, formatDay, eventPermissions } from '../utils/helpers';
 import { BarChart } from '../components/BarChart';
+import ResolutionModal from '../components/ResolutionModal';
+import { categoryLabel } from '../moderation';
+
+/**
+ * The statuses a report can still be worked in, and how each one is coloured.
+ *
+ * `escalated` counts as live for the same reason `evidenceHolds.js` treats it
+ * that way: a report that has left the queue for a phone call is the last one
+ * whose evidence should look finished.
+ */
+const LIVE_STATUSES = new Set(['open', 'reviewing', 'escalated']);
+const STATUS_TAG = {
+  open: 'tag-danger',
+  reviewing: 'tag-info',
+  escalated: 'tag-warn',
+  resolved: 'tag-ok',
+  dismissed: 'tag-ok',
+};
 
 export default function AdminDashboard({ addToast }) {
   const [pendingOrganizers, setPendingOrganizers] = useState([]);
@@ -30,6 +48,7 @@ export default function AdminDashboard({ addToast }) {
   const [busyId, setBusyId] = useState(null);
   // A deletion refused because the event is under a live safety review.
   const [heldReason, setHeldReason] = useState(null);
+  const [resolvingReport, setResolvingReport] = useState(null); // { id, status }
 
   const loadData = async () => {
     try {
@@ -52,14 +71,40 @@ export default function AdminDashboard({ addToast }) {
 
   useEffect(() => { loadData(); }, []);
 
-  const resolveReport = async (reportId, status) => {
+  /**
+   * Closing a report, with the resolution and the note the server requires.
+   *
+   * The error is re-thrown so `ResolutionModal` can show it inline and keep what
+   * the moderator typed. It used to be swallowed into a toast and the dialog
+   * closed regardless, which on a refusal — a note one character short, a
+   * conflict of interest — lost the note and told them the report was updated.
+   */
+  const submitResolution = async (reportId, status, resolution, resolutionNote) => {
+    setBusyId(reportId);
+    try {
+      await api.apiFetch(`/api/admin/reports/${reportId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status, resolution, resolutionNote })
+      });
+      addToast(`Report marked as ${status}.`, 'success');
+      setResolvingReport(null);
+      loadData();
+    } catch (err) {
+      addToast(`Failed to update report: ${err.message}`, 'error');
+      throw err;
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  /** Moving a report along without closing it — no resolution is required yet. */
+  const setReportStatus = async (reportId, status) => {
     setBusyId(reportId);
     try {
       await api.apiFetch(`/api/admin/reports/${reportId}`, {
         method: 'PATCH',
         body: JSON.stringify({ status })
       });
-      addToast(`Report marked as ${status}.`, 'success');
       loadData();
     } catch (err) {
       addToast(`Failed to update report: ${err.message}`, 'error');
@@ -124,6 +169,15 @@ export default function AdminDashboard({ addToast }) {
 
   return (
     <div className="stack-lg">
+      {resolvingReport && (
+        <ResolutionModal 
+          report={resolvingReport}
+          onClose={() => setResolvingReport(null)}
+          onSubmit={submitResolution}
+          isSubmitting={busyId === resolvingReport.id}
+        />
+      )}
+      
       {heldReason && (
         <div className="alert alert-warn" role="alert">
           <Flag size={18} aria-hidden="true" />
@@ -319,14 +373,30 @@ export default function AdminDashboard({ addToast }) {
               <div key={report.id} className="card card-pad" style={{ opacity: report.status === 'resolved' || report.status === 'dismissed' ? 0.6 : 1 }}>
                 <div className="row-between row-wrap" style={{ gap: 'var(--s4)', alignItems: 'flex-start' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="row" style={{ gap: 'var(--s2)', marginBottom: 'var(--s1)' }}>
-                      <span className={`tag ${report.status === 'open' ? 'tag-danger' : 'tag-ok'}`}>
+                    <div className="row row-wrap" style={{ gap: 'var(--s2)', marginBottom: 'var(--s1)' }}>
+                      <span className={`tag ${STATUS_TAG[report.status] ?? 'tag-info'}`}>
                         {report.status.toUpperCase()}
                       </span>
+                      {/* Priority is derived server-side from the category and
+                          from who is reporting whom, and it decides whether this
+                          is looked at today or tomorrow. It was computed on every
+                          report and then shown on none of them, which made the
+                          whole derivation invisible to the person it exists to
+                          help. */}
+                      {report.priority === 'urgent' && (
+                        <span className="tag tag-warn">URGENT</span>
+                      )}
                       <span className="small strong capitalize">Reported {report.target_type}</span>
                       <span className="small dim">{formatDay(report.created_at)}</span>
                     </div>
-                    
+
+                    {/* What the reporter said was wrong, in the words they were
+                        offered. The stored value is snake_case and is never shown. */}
+                    <div className="small" style={{ marginBottom: 'var(--s2)' }}>
+                      <span className="dim">Category: </span>
+                      <span className="strong">{categoryLabel(report.category)}</span>
+                    </div>
+
                     {/* The email is only rendered when there is a live account
                         behind it. `reporter_id` is nullable since the reporter
                         cascade was severed, so a purged reporter leaves the
@@ -339,43 +409,97 @@ export default function AdminDashboard({ addToast }) {
                     </div>
 
                     <div className="inset" style={{ marginBottom: 'var(--s3)', background: 'var(--surface-2)' }}>
-                      <div className="small strong" style={{ marginBottom: 4 }}>Target Content:</div>
+                      <div className="small strong" style={{ marginBottom: 4 }}>What was reported:</div>
+
+                      {/* What was pointed at. A conversation, a person and a
+                          certificate have no body of their own, so without the
+                          snapshot label they rendered as an unlabelled row — the
+                          same blank cell a moderator reads as "nothing wrong
+                          here". */}
+                      {report.target_label && (
+                        <p className="small strong">{report.target_label}</p>
+                      )}
+
                       {/* Three distinct states, and a moderator's decision can
-                          turn on which one they are reading. The old code showed
-                          the literal string 'Deleted Comment' for the last two
-                          without distinguishing them. */}
-                      {report.target_missing ? (
+                          turn on which one they are reading. `target_missing` is
+                          now only ever true when there is genuinely nothing: it
+                          used to be true for every conversation and message
+                          report, so the queue told the moderator "no copy was
+                          kept" about reports holding hundreds of preserved
+                          messages. */}
+                      {report.target_title && (
+                        <p className="small muted">&quot;{report.target_title}&quot;</p>
+                      )}
+                      {report.target_is_snapshot && (
+                        <p className="small dim">
+                          Preserved copy — the original was deleted after this report was filed.
+                        </p>
+                      )}
+                      {report.target_missing && (
                         <p className="small muted">
                           No copy of this was kept — it was deleted before reports were preserved.
                         </p>
-                      ) : (
-                        <>
-                          <p className="small muted">&quot;{report.target_title}&quot;</p>
-                          {report.target_is_snapshot && (
-                            <p className="small dim">
-                              Preserved copy — the original was deleted after this report was filed.
-                            </p>
-                          )}
-                        </>
+                      )}
+
+                      {/* Evidence availability, so a moderator knows there is
+                          something to open. Reading it is a separate, logged act
+                          behind its own capability, which is why the count is
+                          here and the bodies are not. */}
+                      {report.evidence_count > 0 && (
+                        <p className="small dim">
+                          {report.evidence_count} message{report.evidence_count === 1 ? '' : 's'} preserved
+                          as evidence.
+                        </p>
                       )}
                     </div>
 
-                    <div className="small strong" style={{ marginBottom: 4 }}>Reason for report:</div>
-                    <p className="small">{report.reason}</p>
+                    {/* The reporter's own words. This read `report.reason`, a
+                        column the unified model renamed to `description`, so the
+                        heading was followed by nothing at all on every report in
+                        the queue — the one part of a report that is authoritative
+                        content rather than a derived label. */}
+                    <div className="small strong" style={{ marginBottom: 4 }}>What they told us:</div>
+                    {report.description
+                      ? <p className="small">{report.description}</p>
+                      : <p className="small dim">They chose a category and did not add anything else.</p>}
+
+                    {/* A closed report keeps its outcome visible: "who decided
+                        this, and why" is the question an appeal starts from. */}
+                    {report.resolution && (
+                      <p className="small dim" style={{ marginTop: 'var(--s2)' }}>
+                        {report.resolution.replace(/_/g, ' ')}
+                        {report.resolved_by_name ? ` — ${report.resolved_by_name}` : ''}
+                      </p>
+                    )}
                   </div>
 
-                  {report.status === 'open' && (
-                    <div className="row" style={{ gap: 'var(--s2)' }}>
-                      <button 
-                        className="btn btn-ghost btn-sm" 
-                        onClick={() => resolveReport(report.id, 'dismissed')}
+                  {/* Actions on every LIVE status, not just `open`.
+                      They were gated on `open` alone, so the moment a moderator
+                      picked a report up it lost its buttons: `reviewing` and
+                      `escalated` reports could be created and then never closed
+                      from the product at all — and an escalated report is by
+                      definition the one somebody is actively dealing with. */}
+                  {LIVE_STATUSES.has(report.status) && (
+                    <div className="row row-wrap" style={{ gap: 'var(--s2)' }}>
+                      {report.status === 'open' && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setReportStatus(report.id, 'reviewing')}
+                          disabled={busyId === report.id}
+                        >
+                          Start review
+                        </button>
+                      )}
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setResolvingReport({ id: report.id, status: 'dismissed' })}
                         disabled={busyId === report.id}
                       >
                         Dismiss
                       </button>
-                      <button 
+                      <button
                         className="btn btn-primary btn-sm"
-                        onClick={() => resolveReport(report.id, 'resolved')}
+                        onClick={() => setResolvingReport({ id: report.id, status: 'resolved' })}
                         disabled={busyId === report.id}
                       >
                         <CheckCircle size={14} /> Resolve

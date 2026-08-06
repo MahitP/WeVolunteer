@@ -80,34 +80,81 @@ describe('the report reasons the server accepts', () => {
   });
 });
 
+/**
+ * ── How this guard changed, and why it is now stronger ──
+ *
+ * It used to scrape a `const REASONS = [...]` table out of the dialog's source
+ * and check every scraped value against the server's four. That worked, but it
+ * was guarding a copy: the dialog kept its own list, the server kept its own
+ * list, and the test's whole job was to notice when the two drifted.
+ *
+ * The dialog no longer has a list. It imports the taxonomy from
+ * `server/moderation.js` — the same module the route validates against — so the
+ * drift the scrape existed to catch is now structurally impossible, and a regex
+ * over source would only be checking that somebody had not reintroduced a
+ * hardcoded array.
+ *
+ * So the guard asserts the property instead of the shape: every value the dialog
+ * can offer is put through the real endpoint and must be accepted. That is what
+ * the original test was actually trying to prove, it survives any refactor of how
+ * the options are built, and it catches a taxonomy value the server would refuse
+ * — which the scrape never could, because it only compared two lists in the
+ * repository rather than asking the running server.
+ */
 describe('the report dialog only offers reasons the server accepts', () => {
   const dialog = readFileSync(
     path.join(process.cwd(), 'src', 'components', 'messages', 'ReportModal.jsx'),
     'utf8'
   );
 
+  it('offers nothing the server would reject', async () => {
+    const { categoriesForTarget } = await import('./moderation.js');
+    const offered = categoriesForTarget('conversation').map(c => c.value);
+    expect(offered.length, 'the dialog offers no options at all').toBeGreaterThan(2);
+
+    const { db } = await import('./db.js');
+    const refused = [];
+    for (const category of offered) {
+      // A conversation of its own per category: duplicate suppression answers a
+      // second live report of the same target with the FIRST report's id, which
+      // would make every case after the first assert against the wrong row.
+      const ctx = await conversationForReporting();
+      db.prepare("UPDATE reports SET status = 'dismissed' WHERE target_id = ?")
+        .run(ctx.conversationId);
+
+      const res = await srv.call(
+        'POST', `/api/messages/conversations/${ctx.conversationId}/report`,
+        { reason: category, details: 'x' }, ctx.student
+      );
+      if (res.status !== 201 && res.status !== 200) refused.push(`${category} -> ${res.status}`);
+    }
+    expect(refused, 'these would 400 and the student would see nothing').toEqual([]);
+  });
+
   /**
-   * Reads the REASONS table the dialog builds its <option>s from, which is the
-   * source of truth. (It used to be inline `<option value="…">` literals; the
-   * scrape is kept general so either shape is covered.)
+   * The category that replaced `safety`, and the one the Youth Safety Guidelines
+   * point every uncertain student at: "If a conversation makes you uneasy and you
+   * cannot say exactly why, that is reason enough to report it." It was missing
+   * from the dialog entirely when this file was written.
    */
-  const offered = (() => {
-    const block = dialog.match(/const REASONS\s*=\s*\[([\s\S]*?)\];/);
-    if (block) return [...block[1].matchAll(/value:\s*'([^']+)'/g)].map(m => m[1]);
-    return [...dialog.matchAll(/<option value="([^"]+)"/g)].map(m => m[1]);
-  })();
-
-  it('renders a set of options at all', () => {
-    expect(offered.length).toBeGreaterThan(2);
+  it('offers the option for a student who cannot say what is wrong', async () => {
+    const { categoriesForTarget } = await import('./moderation.js');
+    expect(categoriesForTarget('conversation').map(c => c.value)).toContain('something_feels_wrong');
   });
 
-  it('offers nothing the server would reject', () => {
-    const invalid = offered.filter(v => !ACCEPTED.includes(v));
-    expect(invalid, 'these would 400 and the user would see nothing').toEqual([]);
-  });
+  it('still accepts the four legacy reasons, so an older build keeps working', async () => {
+    const { db } = await import('./db.js');
+    for (const reason of ACCEPTED) {
+      const ctx = await conversationForReporting();
+      db.prepare("UPDATE reports SET status = 'dismissed' WHERE target_id = ?")
+        .run(ctx.conversationId);
 
-  it('offers the safety reason, which matters most and was missing', () => {
-    expect(offered).toContain('safety');
+      const res = await srv.call(
+        'POST', `/api/messages/conversations/${ctx.conversationId}/report`,
+        { reason, details: 'x' }, ctx.student
+      );
+      expect([200, 201], `legacy reason ${reason} stopped working`).toContain(res.status);
+    }
   });
 
   it('surfaces a failure instead of only logging it', () => {
