@@ -500,15 +500,62 @@ describe('catastrophic failures take over the whole screen', () => {
   });
 });
 
-describe('a permission refusal is not a takeover', () => {
-  it('403 keeps the shell the reader needs to act on the advice', async () => {
+/**
+ * A permission refusal IS a takeover.
+ *
+ * ── This reverses an earlier decision, deliberately ──
+ *
+ * This block used to assert the opposite: that a 403 keeps the shell, on the
+ * reasoning that "the navigation is how 'ask your administrator' gets acted on".
+ * That is a real argument and it is why the refusal was left rendering as a card
+ * inside `<main>`, as the only error state that did.
+ *
+ * It was overruled by what it looked like in use. The reader saw the nav rail,
+ * the topbar and their own profile menu still on screen, framing a message
+ * saying this area is not for them — which reads as a page that failed to load
+ * rather than a decision that was made, and leaves live navigation for the
+ * section they have just been refused. The product owner asked for every error
+ * state to take the screen, naming this one specifically, twice.
+ *
+ * The argument it replaces is answered rather than discarded: `ErrorExperience`
+ * carries its own recovery action, so "where do I go now" is still on screen —
+ * it is one deliberate link instead of a whole shell that implies the refusal
+ * was incidental.
+ *
+ * The 403's `errorWeight` stays `medium`. Weight is about how alarming the copy
+ * is allowed to be, and being refused a page is still not an emergency; it is
+ * only the chrome that changed.
+ */
+describe('a permission refusal is a takeover', () => {
+  it('403 replaces the shell, like every other error state', async () => {
     signedInAs(USER('student'));
     const { container } = renderAt('/events/new');
 
     await findErrorKind('403');
     expect(container.querySelector('.err').dataset.errorWeight).toBe('medium');
-    // The navigation is how "ask your administrator" gets acted on.
-    expect(container.querySelector('.app'), '403 removed the shell').toBeTruthy();
+    expect(container.querySelector('.app'), '403 kept the shell').toBeNull();
+    expect(container.querySelector('.sidebar')).toBeNull();
+  });
+
+  /**
+   * An unverified organizer reaching /events/new is refused by
+   * `requiresVerified`, which no capability expresses — so it is a separate
+   * branch in `deniedRoute` and a separate way to keep the shell by accident.
+   */
+  it('takes over for an unverified account on a verified-only route', async () => {
+    signedInAs(USER('organizer', { verified: false }));
+    const { container } = renderAt('/events/new');
+
+    await findErrorKind('403');
+    expect(container.querySelector('.app'), '403 kept the shell').toBeNull();
+  });
+
+  /** A route the reader CAN reach must still render inside the shell. */
+  it('does not take over a route the reader is allowed to open', async () => {
+    signedInAs(USER('organizer'));
+    const { container } = renderAt('/events/new');
+
+    await waitFor(() => expect(container.querySelector('.app')).toBeTruthy());
     expect(container.querySelector('.sidebar')).toBeTruthy();
   });
 });

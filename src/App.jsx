@@ -343,6 +343,47 @@ function shellServes(pathname) {
 }
 
 /**
+ * Whether `user` is refused the route at `pathname` — decided BEFORE the shell,
+ * for the same reason the 404 is.
+ *
+ * The note on the 404 takeover below says it exactly: a refusal rendered from
+ * inside the route table "can only render into the slot the shell already built
+ * around it, so the sidebar, topbar and profile menu would still be on screen
+ * either side of it". That was true of the 403 the whole time. It was the one
+ * error state still rendering as a card inside the running app — nav rail down
+ * the left, profile menu top right, "Your badge doesn't open this one" in the
+ * content well — while 404, 500, the crash boundary and the offline overlay had
+ * all been moved out to take the screen.
+ *
+ * It reads as a page that failed to load rather than a decision, and it leaves
+ * the nav for a section the reader has just been told they cannot open.
+ *
+ * Matched with the router's own matcher against APP_ROUTES, so a `:param` route
+ * resolves the same way here as it does when the table renders it, and the two
+ * cannot disagree about which route a path is.
+ *
+ * Returns the ROUTE, not a boolean, so the caller can tell the reader what was
+ * refused rather than only that something was.
+ *
+ * The two conditions below MIRROR the route table's own element ternary exactly
+ * — `requiresVerified` first, then `requiredCap` — and deliberately nothing
+ * more. This function decides whether the shell is built at all, so any
+ * condition here that the table does not also apply would refuse a route the
+ * table would have rendered, with no way for the reader to reach it. The NAV
+ * table in this file additionally supports `requiredCapAny`; APP_ROUTES does
+ * not use it, and this must not start honouring it before the table does.
+ */
+function deniedRoute(pathname, user) {
+  const matched = matchRoutes(APP_ROUTES.map(r => ({ path: r.path, route: r })), pathname);
+  const route = matched?.[matched.length - 1]?.route?.route;
+  if (!route) return null;
+
+  if (route.requiresVerified && !user.verified) return route;
+  if (route.requiredCap && !can(user, route.requiredCap)) return route;
+  return null;
+}
+
+/**
  * The toast queue, and the session everything else reads.
  *
  * `addToast` is passed into SessionProvider because the bootstrap has to be able
@@ -758,6 +799,14 @@ function AppShell({ toasts, addToast, removeToast }) {
      it renders over whatever route is current, and closing it returns there. */
   if (!viewingProfile && !shellServes(currentPath)) {
     return <ErrorExperience kind="404" />;
+  }
+
+  /* A refusal is a takeover too, and was the last error state that was not.
+     Same guard as the 404 above and for the same reason — see `deniedRoute`.
+     The `denied` element stays wired into the table below as the router's own
+     backstop, exactly like the `<Route path="*">` 404 does. */
+  if (!viewingProfile && deniedRoute(currentPath, currentUser)) {
+    return <ErrorExperience kind="403" />;
   }
 
   /* Offline COVERS the whole shell rather than replacing the routed view.
