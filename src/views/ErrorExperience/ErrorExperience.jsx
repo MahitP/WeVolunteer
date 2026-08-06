@@ -5,6 +5,7 @@ import { APP_NAME } from '../../config';
 import BrandMark from '../../components/common/BrandMark';
 import { RETRYABLE, kindForError, weightFor } from './kinds';
 import { copyFor } from './errorCopy';
+import { denialDetail } from './denialDetail';
 import { selectTheme, themeForSeed, modeFor } from './selector';
 import { getTheme } from './themes/index.js';
 
@@ -66,6 +67,7 @@ export default function ErrorExperience({
   theme: forcedTheme,
   seed,
   onRetry,
+  denied,
 }) {
   const titleId = useId();
 
@@ -93,6 +95,14 @@ export default function ErrorExperience({
   }, [forcedTheme, seed, kind]);
 
   const { eyebrow, title, body } = copyFor(theme.id, kind);
+  /**
+   * Guarded on `kind` as well as on `denied`, so a caller cannot attach a
+   * permission explanation to a 500 or a crash. Those are written flat and
+   * reassurance-first on purpose (see errorCopy.js's tone ladder), and a sentence
+   * about capabilities underneath one would be answering a question nobody asked
+   * at the moment they have possibly just lost work.
+   */
+  const detail = kind === '403' ? denialDetail(denied) : null;
   const { Scene } = theme;
   const canRetry = RETRYABLE.includes(kind);
   const weight = weightFor(kind);
@@ -128,6 +138,17 @@ export default function ErrorExperience({
         <p className="err-eyebrow">{eyebrow}</p>
         <h1 className="err-title" id={titleId}>{title}</h1>
         <p className="err-body">{body}</p>
+
+        {/* The facts a refusal has to carry, under the themed acknowledgement:
+            which feature, why this account is refused, and who can change it.
+            Only ever rendered for a 403 with a matched route — see
+            denialDetail.js for why the path alone is not the reason. */}
+        {detail && (
+          <p className="err-detail">
+            {detail.reason}
+            {detail.remedy ? ` ${detail.remedy}` : ''}
+          </p>
+        )}
 
         <div className="err-actions">
           {canRetry && (

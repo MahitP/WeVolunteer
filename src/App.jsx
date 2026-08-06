@@ -783,7 +783,12 @@ function AppShell({ toasts, addToast, removeToast }) {
    * nothing. Rendering in place also keeps the URL, so the person can send it to
    * whoever told them to open it.
    */
-  const denied = <ErrorExperience kind="403" />;
+  /**
+   * `route` is optional because one caller has none: `/profile` is refused for a
+   * role that has no profile VIEW rather than for a missing capability, so there
+   * is no route condition to explain and the themed copy stands alone.
+   */
+  const deniedFallback = (route) => <ErrorExperience kind="403" denied={route} />;
 
   /* An unknown URL is a takeover, and it has to be decided HERE rather than by
      a `<Route path="*">` inside the shell — a catch-all route can only render
@@ -803,10 +808,15 @@ function AppShell({ toasts, addToast, removeToast }) {
 
   /* A refusal is a takeover too, and was the last error state that was not.
      Same guard as the 404 above and for the same reason — see `deniedRoute`.
-     The `denied` element stays wired into the table below as the router's own
+     `deniedFallback` stays wired into the table below as the router's own
      backstop, exactly like the `<Route path="*">` 404 does. */
-  if (!viewingProfile && deniedRoute(currentPath, currentUser)) {
-    return <ErrorExperience kind="403" />;
+  /* `deniedRoute` returns the matched ROUTE rather than a boolean precisely so the
+     refusal can name what was refused and why — see denialDetail.js. Passing it
+     through is what turns "limited to certain accounts" into something a reader
+     can act on. */
+  const deniedMatch = viewingProfile ? null : deniedRoute(currentPath, currentUser);
+  if (deniedMatch) {
+    return <ErrorExperience kind="403" denied={deniedMatch} />;
   }
 
   /* Offline COVERS the whole shell rather than replacing the routed view.
@@ -971,10 +981,10 @@ function AppShell({ toasts, addToast, removeToast }) {
                   path={route.path}
                   element={
                     route.requiresVerified && !currentUser.verified
-                      ? denied
+                      ? deniedFallback(route)
                       : route.requiredCap
                         ? (
-                          <Can user={currentUser} cap={route.requiredCap} fallback={denied}>
+                          <Can user={currentUser} cap={route.requiredCap} fallback={deniedFallback(route)}>
                             {withProps(route, appRouteProps)}
                           </Can>
                         )
@@ -1007,7 +1017,7 @@ function AppShell({ toasts, addToast, removeToast }) {
                     title="No service record for this account"
                     message="Profiles show a volunteer's service record or an organizer's hosting record. This account has neither — your account details live in Settings."
                   />
-                ) : denied
+                ) : deniedFallback()
               } />
 
               {/* Unreachable in practice — `shellServes` sends an unknown URL

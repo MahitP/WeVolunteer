@@ -44,7 +44,7 @@ export const COPY = Object.freeze({
     403: {
       eyebrow: 'Wrong pin',
       title: 'That sheet is pinned up for someone else',
-      body: 'This part of the board is limited to certain accounts. If you should be on it, your school administrator can add you.',
+      body: 'This part of the board is limited to certain accounts. If you should be on it, a WeVolunteer administrator can pin you up.',
     },
     500: {
       eyebrow: 'Our side',
@@ -78,7 +78,7 @@ export const COPY = Object.freeze({
     403: {
       eyebrow: 'Checkpoint',
       title: 'There’s a steward on this corridor',
-      body: 'This route is open to certain accounts only. Your school administrator can wave you through if you should be past here.',
+      body: 'This route is open to certain accounts only. A WeVolunteer administrator can wave you through if you should be past here.',
     },
     expired: {
       eyebrow: 'Signed out',
@@ -97,7 +97,7 @@ export const COPY = Object.freeze({
     403: {
       eyebrow: 'Badge check',
       title: 'Your badge doesn’t open this one',
-      body: 'This area is limited to certain accounts. If that looks wrong, your school administrator can change what your badge covers.',
+      body: 'This area is limited to certain accounts. If that looks wrong, a WeVolunteer administrator can change what your badge covers.',
     },
     expired: {
       eyebrow: 'Checked out',
