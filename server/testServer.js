@@ -27,6 +27,29 @@ export async function startTestServer() {
   process.env.DEMO_MODE = 'true';
   process.env.JWT_SECRET = 'test-secret-not-for-production';
 
+  /**
+   * Both providers are configured, because `getAuthUrl` now refuses to mint a
+   * URL with an empty client id (see oauth/credentials.js — that refusal is the
+   * AADSTS900144 fix, and exempting the mock is what let the bug live).
+   *
+   * Six test files drive `POST /api/oauth/:provider/url` or the step-up
+   * re-consent redirect, and every one of them wants a well-formed authorize URL
+   * rather than a 503. Setting the pair here rather than in each file keeps the
+   * server suite modelling an ordinary configured deployment.
+   *
+   * Deliberately NOT overwriting a value already in the environment: it lets a
+   * developer point a run at a real client without editing this file, and the
+   * `??=` means CI (where neither is set) always gets these.
+   *
+   * The four-state provider matrix — configured, credential-less, disabled and
+   * unimplemented — is asserted in config.oauthProviders.test.js, which controls
+   * the environment itself in a subprocess instead of inheriting this one.
+   */
+  process.env.GOOGLE_CLIENT_ID ??= 'test-google-client.apps.googleusercontent.com';
+  process.env.GOOGLE_CLIENT_SECRET ??= 'test-google-secret';
+  process.env.MICROSOFT_CLIENT_ID ??= 'test-microsoft-client-id';
+  process.env.MICROSOFT_CLIENT_SECRET ??= 'test-microsoft-secret';
+
   const { initDatabase, db } = await import('./db.js');
   const { app } = await import('./app.js');
 

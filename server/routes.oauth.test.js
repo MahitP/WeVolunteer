@@ -694,46 +694,20 @@ describe('oauth', () => {
   });
 
   /**
-   * The button must not be offered for a provider with no credentials, even
-   * though this suite runs with OAUTH_ALLOW_MOCK=true.
-   *
-   * ── The bug ──
-   *
-   * `OAUTH_PROVIDERS_ENABLED` read `OAUTH_ALLOW_MOCK || <credentials present>`,
-   * and OAUTH_ALLOW_MOCK defaults to `!IS_PRODUCTION`. So in ordinary development
-   * every provider reported `enabled: true` regardless of configuration, and
-   * ProviderButtons rendered a live "Continue with Microsoft" button.
-   *
-   * Pressing it did NOT reach the mock. The mock transport lives in
-   * `verifyCallback`, which only runs after the provider redirects back;
-   * `getAuthUrl` has no mock branch and builds a real
-   * login.microsoftonline.com URL. With MICROSOFT_CLIENT_ID unset that URL
-   * carried `client_id=`, and Microsoft answered:
-   *
-   *     AADSTS900144: The request body must contain the following parameter:
-   *     'client_id'
-   *
-   * — a dead end on an advertised sign-in path. Google escaped it only because
-   * real Google credentials happened to be present in .env.
-   *
-   * ── Why the listing and `resolveProvider` deliberately disagree ──
-   *
-   * They answer different questions. This endpoint answers "can a person with a
-   * browser complete this flow", which needs a real client id. `resolveProvider`
-   * answers "will this server process this provider", which under an explicit
-   * mock opt-in is still yes — that is what lets the rest of this file drive the
-   * callback with a mock identity. In production OAUTH_ALLOW_MOCK is off and
-   * refuses to boot, so the two answers converge.
+   * The credential-less, mock-enabled and misconfigured provider states are in
+   * config.oauthProviders.test.js, which boots a subprocess with an environment
+   * it controls. They cannot live here: `testServer.js` configures both
+   * providers for the whole server suite (six files need a well-formed authorize
+   * URL), so this process can only ever observe the configured state.
    */
-  it('does not advertise a provider that has no credentials, even under the mock', async () => {
-    expect(process.env.MICROSOFT_CLIENT_ID).toBeFalsy();
+  it('mints an authorize URL carrying a real client_id', async () => {
+    const { res } = await begin('microsoft');
+    expect(res.status).toBe(200);
 
-    const res = await srv.call('GET', '/api/oauth/providers');
-    const microsoft = res.body.find(p => p.id === 'microsoft');
-
-    // Implemented — the code is there and correct — but not usable here.
-    expect(microsoft.implemented).toBe(true);
-    expect(microsoft.enabled).toBe(false);
+    const url = new URL(res.body.url);
+    expect(url.hostname).toBe('login.microsoftonline.com');
+    // The AADSTS900144 regression, in one line: present, and not empty.
+    expect(url.searchParams.get('client_id')).toBeTruthy();
   });
 
   it('answers 501 rather than failing silently for Apple', async () => {
