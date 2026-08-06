@@ -27,12 +27,20 @@ beforeAll(async () => {
 });
 afterAll(async () => { await srv.close(); });
 
-/** Puts every seeded account back to active, so ordering between tests cannot matter. */
+/**
+ * Puts every seeded account back to active, so ordering between tests cannot matter.
+ *
+ * `suspended_until` and `suspension_lifted_at` are cleared too. A leftover FUTURE
+ * deadline is not inert: the next suspension in another test would inherit it and
+ * end on a date that test never chose, which is a cross-test dependency that
+ * presents as a flake rather than a failure.
+ */
 function resetAccounts() {
   db.prepare(`
     UPDATE users
-    SET account_status = 'active', suspended_at = NULL, suspension_reason = NULL, suspended_by = NULL
-    WHERE account_status = 'suspended'
+    SET account_status = 'active', suspended_at = NULL, suspension_reason = NULL,
+        suspended_by = NULL, suspended_until = NULL, suspension_lifted_at = NULL
+    WHERE account_status = 'suspended' OR suspended_until IS NOT NULL
   `).run();
 }
 
@@ -309,5 +317,189 @@ describe('POST /api/admin/users/:id/unsuspend', () => {
     const studentToken = await srv.login('leo.chen28@gmail.com');
     const res = await srv.call('POST', '/api/admin/users/user-student-2/unsuspend', {}, studentToken);
     expect(res.status).toBe(403);
+  });
+});
+
+/**
+ * Suspensions that end on their own.
+ *
+ * ── Why the deadline is enforced from the data, not by a job ──
+ *
+ * Every suspension this platform could express used to be permanent until
+ * somebody remembered to lift it. A week-long suspension had to be recorded as
+ * indefinite, and the only thing between "one week" and "for ever" was memory.
+ *
+ * The requirement attached to fixing that was "do not create fake expiration
+ * behaviour", so the deadline is authoritative in the ROW and both enforcement
+ * points ask a question about time (`server/suspension.js`). That is what these
+ * cases pin: a suspension whose deadline has passed stops applying immediately,
+ * with no background work involved — which is the difference between a real
+ * expiry and a scheduled job pretending to be one. The cases below never run the
+ * sweep.
+ */
+describe('timed suspension', () => {
+  let adminToken;
+
+  beforeAll(async () => { adminToken = await srv.login('admin@example.gov'); });
+  beforeEach(() => resetAccounts());
+
+  const inDays = (n) => new Date(Date.now() + n * 86400_000).toISOString();
+
+  /** Backdates a live suspension's deadline, i.e. simulates the clock passing it. */
+  const expireNow = (userId) => db.prepare(
+    'UPDATE users SET suspended_until = ? WHERE id = ?'
+  ).run(new Date(Date.now() - 1000).toISOString(), userId);
+
+  it('stores the end date and reports it back', async () => {
+    const until = inDays(7);
+    const res = await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+      { reason: GOOD_REASON, until }, adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.suspendedUntil).toBe(until);
+    expect(db.prepare('SELECT suspended_until FROM users WHERE id = ?')
+      .get('user-student-2').suspended_until).toBe(until);
+  });
+
+  it('still blocks while the deadline is in the future', async () => {
+    await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+      { reason: GOOD_REASON, until: inDays(7) }, adminToken);
+
+    const res = await srv.call('POST', '/api/auth/login',
+      { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
+    expect([401, 403]).toContain(res.status);
+  });
+
+  /** The whole point: access comes back on its own, with nothing having run. */
+  it('lets the account sign in again once the deadline passes', async () => {
+    await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+      { reason: GOOD_REASON, until: inDays(7) }, adminToken);
+    expireNow('user-student-2');
+
+    const res = await srv.call('POST', '/api/auth/login',
+      { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+  });
+
+  it('normalises the row when the deadline has passed, keeping why it happened', async () => {
+    await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+      { reason: GOOD_REASON, until: inDays(7) }, adminToken);
+    expireNow('user-student-2');
+
+    await srv.call('POST', '/api/auth/login',
+      { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
+
+    const row = db.prepare(`SELECT account_status, suspension_reason, suspension_lifted_at
+                              FROM users WHERE id = ?`).get('user-student-2');
+    expect(row.account_status).toBe('active');
+    expect(row.suspension_lifted_at).toBeTruthy();
+    /**
+     * The reason SURVIVES an expiry, unlike a reinstatement by hand. A moderator
+     * handling a repeat incident needs to know there was a first one, and the
+     * audit row that would otherwise carry it is swept at 365 days.
+     */
+    expect(row.suspension_reason).toBe(GOOD_REASON);
+  });
+
+  it('an existing session is refused while suspended and works after expiry', async () => {
+    const victim = await srv.login('emiller2027@gmail.com');
+    await srv.call('POST', '/api/admin/users/user-student-3/suspend',
+      { reason: GOOD_REASON, until: inDays(3) }, adminToken);
+
+    // The suspension bumped token_version, so the old cookie is dead regardless.
+    const during = await srv.call('GET', '/api/auth/me', undefined, victim);
+    expect([401, 403]).toContain(during.status);
+
+    expireNow('user-student-3');
+    const after = await srv.call('POST', '/api/auth/login',
+      { email: 'emiller2027@gmail.com', password: 'password123' });
+    expect(after.status).toBe(200);
+  });
+
+  it('keeps indefinite as the default when no end date is given', async () => {
+    await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+      { reason: GOOD_REASON }, adminToken);
+
+    expect(db.prepare('SELECT suspended_until FROM users WHERE id = ?')
+      .get('user-student-2').suspended_until).toBe(null);
+
+    const res = await srv.call('POST', '/api/auth/login',
+      { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
+    expect([401, 403]).toContain(res.status);
+  });
+
+  it('names the end date in the refusal, so it is not mistaken for permanent', async () => {
+    const until = inDays(7);
+    await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+      { reason: GOOD_REASON, until }, adminToken);
+
+    const res = await srv.call('POST', '/api/auth/login',
+      { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
+    expect(res.body.error).toMatch(/suspended until/i);
+    expect(res.body.suspendedUntil).toBe(until);
+  });
+
+  describe('refusals', () => {
+    it('refuses a deadline that has already passed', async () => {
+      const res = await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+        { reason: GOOD_REASON, until: inDays(-1) }, adminToken);
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('until_in_past');
+      expect(db.prepare('SELECT account_status FROM users WHERE id = ?')
+        .get('user-student-2').account_status).toBe('active');
+    });
+
+    /**
+     * A typo must not become the permanent suspension the moderator was avoiding.
+     * `isSuspended` fails CLOSED on an unreadable date, so an unvalidated write
+     * would silently produce exactly that.
+     */
+    it('refuses a deadline it cannot read, rather than storing it', async () => {
+      const res = await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+        { reason: GOOD_REASON, until: 'next tuesday' }, adminToken);
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('invalid_until');
+    });
+
+    /** `{ until: 1 }` must not coerce to 1970 — the same rule resolutionNote learned. */
+    it('refuses a non-string deadline instead of coercing it', async () => {
+      const res = await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+        { reason: GOOD_REASON, until: 1 }, adminToken);
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('invalid_until');
+    });
+  });
+
+  /**
+   * A future deadline left on a reinstated row is not inert: the next suspension
+   * would inherit it and end on a date nobody chose. Same class of dormant-value
+   * bug as the appeal tokens that stayed live through an unsuspend.
+   */
+  it('does not let a reinstated account inherit its old deadline', async () => {
+    await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+      { reason: GOOD_REASON, until: inDays(7) }, adminToken);
+    await srv.call('POST', '/api/admin/users/user-student-2/unsuspend', {}, adminToken);
+
+    expect(db.prepare('SELECT suspended_until FROM users WHERE id = ?')
+      .get('user-student-2').suspended_until).toBe(null);
+
+    await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+      { reason: GOOD_REASON }, adminToken);
+    expect(db.prepare('SELECT suspended_until FROM users WHERE id = ?')
+      .get('user-student-2').suspended_until, 'inherited a deadline nobody chose').toBe(null);
+  });
+
+  it('records the duration in the audit trail', async () => {
+    const until = inDays(7);
+    await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+      { reason: GOOD_REASON, until }, adminToken);
+
+    const row = db.prepare(`SELECT details FROM admin_audit_logs
+                             WHERE action = 'ACCOUNT_SUSPENDED' AND target_user_id = ?
+                             ORDER BY rowid DESC LIMIT 1`).get('user-student-2');
+    expect(row.details).toContain(until);
   });
 });

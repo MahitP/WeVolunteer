@@ -16,6 +16,7 @@ import { withheldCapabilitiesFor } from '../organizerAgreement.js';
 import { db, initDatabase } from '../db.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
+import { isSuspended, liftIfExpired } from '../suspension.js';
 
 const router = express.Router();
 
@@ -460,14 +461,40 @@ router.post('/api/auth/login', async (req, res) => {
      * both commit to an appeal answered within five business days at an address
      * this message never mentioned.
      */
-    if (userRow.account_status === 'suspended') {
+    /**
+     * `isSuspended`, not `account_status === 'suspended'`.
+     *
+     * A timed suspension ends when its deadline passes, and this is the door the
+     * person walks back through — comparing the status string alone would keep
+     * somebody locked out after their own end date, which is the failure the
+     * stored deadline exists to prevent. `liftIfExpired` then corrects the row so
+     * the rest of the platform stops calling them suspended.
+     *
+     * The end date is named in the refusal. A suspension the person cannot see the
+     * end of is indistinguishable from a permanent one, and the Community
+     * Guidelines' promise to tell somebody the outcome is not kept by telling them
+     * only that there is one.
+     */
+    if (isSuspended(userRow)) {
+      const until = userRow.suspended_until
+        ? new Date(userRow.suspended_until)
+        : null;
+      const when = until && !Number.isNaN(until.getTime())
+        ? until.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+        : null;
+
       return res.status(403).json({
-        error: 'This account has been suspended. If you think that is wrong, email '
+        error: (when
+          ? `This account is suspended until ${when}. `
+          : 'This account has been suspended. ')
+          + 'If you think that is wrong, email '
           + 'wevolunteer.platform@gmail.com to ask for a review — we reply within five '
           + 'business days with the outcome and the reason.',
-        code: 'suspended'
+        code: 'suspended',
+        suspendedUntil: userRow.suspended_until ?? null,
       });
     }
+    liftIfExpired(db, userRow);
 
     /**
      * An account that signs in only through a provider has the OAUTH_ONLY

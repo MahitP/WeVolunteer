@@ -10,6 +10,7 @@ import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
 import { sweepErrors } from './errorReporter.js';
 import { sendErrorAlerts } from './alerting.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
+import { isSuspended, liftIfExpired } from './suspension.js';
 
 /**
  * Whether this specific session has been signed out.
@@ -178,12 +179,27 @@ export function authenticateToken(req, res, next) {
     // trusting the (up to 7-day-old) token payload, so a deleted user's
     // token stops working and a role/email change takes effect immediately.
     const userRow = db.prepare(
-      'SELECT id, role, email, name, email_verified, token_version, account_status FROM users WHERE id = ?'
+      'SELECT id, role, email, name, email_verified, token_version, account_status, suspended_until FROM users WHERE id = ?'
     ).get(decodedUser.id);
 
     if (!userRow) return res.status(401).json({ error: 'Account no longer exists' });
     if (userRow.account_status === 'deleted') return res.status(401).json({ error: 'Account has been deleted' });
-    if (userRow.account_status === 'suspended') return res.status(403).json({ error: 'Account is suspended' });
+
+    /**
+     * Asked as a question about time, not a string comparison.
+     *
+     * A timed suspension stops applying the instant its deadline passes, and it
+     * has to stop applying HERE as well as at sign-in — this is the check that
+     * governs an already-issued cookie, so a stale definition of "suspended"
+     * here is the one that lets a suspended person keep working. `isSuspended`
+     * is the single definition; see server/suspension.js.
+     *
+     * The row is normalised on the way past so that administrative views, which
+     * read `account_status` directly, stop describing this person as suspended.
+     * The sweep does the same thing for accounts that never come back.
+     */
+    if (isSuspended(userRow)) return res.status(403).json({ error: 'Account is suspended' });
+    liftIfExpired(db, userRow);
 
     if ((decodedUser.tokenVersion ?? 0) !== userRow.token_version) {
       return res.status(401).json({ error: 'Session expired, please sign in again' });

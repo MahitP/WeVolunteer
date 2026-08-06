@@ -320,7 +320,26 @@ export function getInAppContent(event, payload) {
      * `/appeal/${token}` is the single canonical form: client route, server SPA
      * allowlist (clientRoutes.js) and this link now all agree.
      */
-    case 'ACCOUNT_SUSPENDED':
+    /**
+     * ── Why the end date is in the notice ──
+     *
+     * A person told only that they are suspended cannot tell a week from for
+     * ever. Both mistakes that follow are bad ones: waiting indefinitely for
+     * something that lapsed weeks ago, or spending an appeal — of which they get
+     * one — on a suspension that was going to end on Monday anyway.
+     *
+     * Falls back to the original wording when `suspendedUntil` is absent, because
+     * an indefinite suspension is still a real option and must not be described
+     * as having an end.
+     */
+    case 'ACCOUNT_SUSPENDED': {
+      const endsAt = payload.suspendedUntil ? new Date(payload.suspendedUntil) : null;
+      const endsOn = endsAt && !Number.isNaN(endsAt.getTime())
+        ? endsAt.toLocaleDateString('en-US', {
+          weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+        })
+        : null;
+
       return {
         kind,
         priority: NOTIFICATION_PRIORITY.CRITICAL,
@@ -328,6 +347,11 @@ export function getInAppContent(event, payload) {
         body:
           "You can't sign in to WeVolunteer right now. Here's why:\n\n"
           + `${payload.reason}\n\n`
+          + (endsOn
+            ? `This suspension ends on ${endsOn}. You do not need to do anything — `
+              + 'you will be able to sign in again from that date.\n\n'
+            : 'This suspension does not have an end date. It stays in place until an '
+              + 'administrator lifts it.\n\n')
           + 'Your volunteer hours, your attendance record and your certificates are all safe. '
           + "Nothing has been deleted, and any certificate code you've already shared still works.\n\n"
           + 'If you think we got this wrong, or there is something we did not know, you can appeal. '
@@ -338,6 +362,7 @@ export function getInAppContent(event, payload) {
         ctaText: 'Appeal this decision',
         link: `/appeal/${payload.token}`
       };
+    }
 
     /**
      * The good news half of the enforcement class.

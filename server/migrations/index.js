@@ -25,6 +25,7 @@ import reportEvidenceAndFold from './013_report_evidence_and_fold.js';
 import appeals from './014_appeals.js';
 import appealsIntegrity from './015_appeals_integrity.js';
 import legalV1Republish from './016_legal_v1_republish.js';
+import timedSuspension from './017_timed_suspension.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -45,6 +46,12 @@ export const MIGRATIONS = [
    * thing that was throwing.
    */
   legalV1Republish,
+  /**
+   * 017 is additive and order-independent: two nullable columns on `users`,
+   * read by nothing that runs during migration. It is last because it is
+   * newest, not because anything before it is a prerequisite.
+   */
+  timedSuspension,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
