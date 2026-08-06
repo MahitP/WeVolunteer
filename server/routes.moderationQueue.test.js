@@ -827,17 +827,176 @@ describe('reading preserved evidence', () => {
   });
 
   /**
-   * DEFECT — the evidence read is logged only to `admin_audit_logs`.
+   * The snapshot's own timestamp, alongside the message's.
    *
-   * That table is swept at 365 days. `moderation_actions` is the durable,
-   * report-scoped, append-only trail and is exempt from the sweep — and the
-   * specification puts `evidence_viewed` there for exactly this reason: a
-   * district asking "who read this student's messages" two years after a
-   * suspension gets nothing from a table that was emptied on day 366.
+   * `created_at` is when the message was sent; `captured_at` is when the report
+   * froze it. They are different facts and the difference is the one a moderator
+   * needs: it is what distinguishes a preserved copy from a live read, and it is
+   * the answer to "was this edited between being sent and being reported". The
+   * column has existed since migration 013 and the route never selected it, so
+   * the viewer had no way to say the words "preserved copy" honestly.
+   */
+  it('carries the capture time so the viewer can say when the copy was frozen', async () => {
+    const reportId = await reportedConversation('conv_evidence_captured');
+    const res = await srv.call('GET', `/api/admin/reports/${reportId}/evidence`, undefined, await adminToken());
+
+    expect(res.status).toBe(200);
+    for (const message of res.body.messages) {
+      expect(message.captured_at, 'no capture time, so "preserved" is unevidenced').toBeTruthy();
+      expect(Number.isNaN(Date.parse(message.captured_at))).toBe(false);
+    }
+  });
+
+  /**
+   * The evidence read is recorded to the DURABLE trail as well.
+   *
+   * `admin_audit_logs` is swept at 365 days. `moderation_actions` is the
+   * report-scoped, append-only trail and is exempt from the sweep — a district
+   * asking "who read this student's messages" two years after a suspension gets
+   * nothing from a table that was emptied on day 366.
    */
   it('records the evidence read on the durable report history too', async () => {
     const reportId = await reportedConversation('conv_evidence_history');
     await srv.call('GET', `/api/admin/reports/${reportId}/evidence`, undefined, await adminToken());
     expect(historyFor(reportId).some(h => h.action === 'evidence_viewed')).toBe(true);
+  });
+});
+
+/**
+ * `GET /api/admin/reports/:id` — one report, with the trail of what was done to it.
+ *
+ * ── Why this endpoint exists ──
+ *
+ * `moderation_actions` was written on every decision and read back by nothing.
+ * Every status change, reprioritisation, assignment, resolution, self-review and
+ * evidence read has been recorded since v1.2, and the only way to see any of it
+ * was to open the database by hand. So the append-only trail that exists to
+ * answer "who decided this, and why" answered it to nobody, and a moderator
+ * picking up a report had no way to know it had already been reviewed and
+ * reopened.
+ *
+ * ── Why the evidence bodies are NOT in this response ──
+ *
+ * This route is gated on `report.resolve`; the bodies are gated on
+ * `report.evidence.read`. `server/authz.js` splits those two capabilities
+ * deliberately, so that a per-user grant can create a triage-only helper who
+ * sorts the queue and never reads a student's private messages. Folding the
+ * bodies into the detail response would collapse that split silently — the
+ * helper would receive them on every open, and the separate capability would
+ * still look like it was doing something.
+ */
+describe('report detail', () => {
+  it('returns the report with its history, oldest first', async () => {
+    const reportId = await fileReport();
+    await srv.call('PATCH', `/api/admin/reports/${reportId}`,
+      { status: 'reviewing' }, await adminToken());
+    /**
+     * Flipped rather than set to a literal. Priority is DERIVED at filing — a
+     * student reporting an event an adult posted floors at `urgent` — so setting
+     * it to `urgent` is frequently a no-op, and a no-op writes no history row.
+     * The test would then be asserting the absence of a change it never made.
+     */
+    const flipped = rowFor(reportId).priority === 'urgent' ? 'normal' : 'urgent';
+    await srv.call('PATCH', `/api/admin/reports/${reportId}`,
+      { priority: flipped }, await adminToken());
+
+    const res = await srv.call('GET', `/api/admin/reports/${reportId}`, undefined, await adminToken());
+    expect(res.status).toBe(200);
+    expect(res.body.report.id).toBe(reportId);
+    expect(res.body.report.status).toBe('reviewing');
+
+    const actions = res.body.history.map(h => h.action);
+    expect(actions).toContain('status_changed');
+    expect(actions).toContain('prioritised');
+    // Oldest first: a timeline read top-to-bottom is the order things happened.
+    expect(actions.indexOf('status_changed')).toBeLessThan(actions.indexOf('prioritised'));
+  });
+
+  /**
+   * An anonymous history row says somebody changed this without saying who,
+   * which is the single question the table exists to answer.
+   */
+  it('names who took each action', async () => {
+    const reportId = await fileReport();
+    await srv.call('PATCH', `/api/admin/reports/${reportId}`,
+      { status: 'reviewing' }, await adminToken());
+
+    const res = await srv.call('GET', `/api/admin/reports/${reportId}`, undefined, await adminToken());
+    const row = res.body.history.find(h => h.action === 'status_changed');
+    expect(row.actor_name).toBeTruthy();
+    expect(row.created_at).toBeTruthy();
+    expect(row.old_status).toBe('open');
+    expect(row.new_status).toBe('reviewing');
+  });
+
+  it('carries the same target and reporter enrichment the queue does', async () => {
+    const reportId = await fileReport();
+    const res = await srv.call('GET', `/api/admin/reports/${reportId}`, undefined, await adminToken());
+
+    // Same derived fields as the list, so one renderer serves both surfaces
+    // rather than the detail view re-deriving them and disagreeing.
+    expect(res.body.report.reporter_name).toBeTruthy();
+    expect(res.body.report).toHaveProperty('target_label');
+    expect(res.body.report).toHaveProperty('target_is_snapshot');
+    expect(res.body.report).toHaveProperty('target_missing');
+    expect(res.body.report).toHaveProperty('evidence_count');
+  });
+
+  it('never includes the evidence bodies, which are a separate capability', async () => {
+    const reportId = await fileReport();
+    const res = await srv.call('GET', `/api/admin/reports/${reportId}`, undefined, await adminToken());
+    expect(res.body.messages).toBeUndefined();
+    expect(JSON.stringify(res.body)).not.toContain('evidence body');
+  });
+
+  it('404s a report that does not exist', async () => {
+    const res = await srv.call('GET', '/api/admin/reports/rep_nope', undefined, await adminToken());
+    expect(res.status).toBe(404);
+  });
+
+  it('refuses a student, an organizer and a stranger', async () => {
+    const { cookie: studentCookie } = await freshReporter();
+    const reportId = await fileReport();
+
+    for (const cookie of [studentCookie, await srv.login(organizerEmail), undefined]) {
+      const res = await srv.call('GET', `/api/admin/reports/${reportId}`, undefined, cookie);
+      expect([401, 403]).toContain(res.status);
+    }
+  });
+
+  /**
+   * Reading a report's own metadata is NOT logged, and that is a decision rather
+   * than an omission: `GET /api/admin/reports` already returns every field this
+   * route does, to the same capability, and logging one but not the other would
+   * produce a trail that reads as complete and is not. The read that IS logged is
+   * the one that discloses private message bodies, which is a different act.
+   */
+  it('does not log a metadata read as an evidence read', async () => {
+    const reportId = await fileReport();
+    const before = db.prepare(
+      "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'"
+    ).get().c;
+
+    await srv.call('GET', `/api/admin/reports/${reportId}`, undefined, await adminToken());
+
+    expect(db.prepare(
+      "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'"
+    ).get().c).toBe(before);
+    expect(historyFor(reportId).some(h => h.action === 'evidence_viewed')).toBe(false);
+  });
+
+  /**
+   * The evidence read DOES appear here, which is the point of showing the trail.
+   *
+   * "Who read this student's private messages" is the question a parent or a
+   * district asks, and the timeline is where a moderator sees that somebody
+   * already has.
+   */
+  it('shows an evidence read in the timeline', async () => {
+    const reportId = await fileReport();
+    await srv.call('GET', `/api/admin/reports/${reportId}/evidence`, undefined, await adminToken());
+
+    const res = await srv.call('GET', `/api/admin/reports/${reportId}`, undefined, await adminToken());
+    expect(res.body.history.some(h => h.action === 'evidence_viewed')).toBe(true);
   });
 });

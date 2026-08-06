@@ -656,6 +656,34 @@ export const api = {
 
   // ── V2: Admin totals & Organizer duplicate ─────
   fetchAdminStats: async () => apiFetch('/api/admin/stats'),
+
+  /**
+   * ── Moderation Center: one report, and its preserved evidence ──
+   *
+   * Two methods for two capabilities, deliberately not one.
+   *
+   * `fetchReport` is gated server-side on `report.resolve` and returns the report
+   * plus its append-only action history. `fetchReportEvidence` is gated on
+   * `report.evidence.read` and returns the frozen message bodies — a separate
+   * capability precisely so a triage-only helper can work the queue without ever
+   * reading a student's private messages (see server/authz.js).
+   *
+   * So the evidence is fetched only when a moderator asks for it, not eagerly
+   * alongside the report. Reading it is a disclosure the Youth Safety Guidelines
+   * make a promise about, and the server writes an audit row and a durable
+   * `evidence_viewed` history row on every call. Prefetching would log a read
+   * that nobody performed and make the trail describe something untrue.
+   */
+  fetchReport: async (reportId) => apiFetch(`/api/admin/reports/${encodeURIComponent(reportId)}`),
+
+  fetchReportEvidence: async (reportId) =>
+    apiFetch(`/api/admin/reports/${encodeURIComponent(reportId)}/evidence`),
+
+  updateReport: async (reportId, patch) =>
+    apiFetch(`/api/admin/reports/${encodeURIComponent(reportId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
   duplicateEvent: async (eventId) => apiFetch(`/api/events/${eventId}/duplicate`, { method: 'POST' }),
   fetchAutoSelectRuns: async (eventId) => apiFetch(`/api/events/${eventId}/auto-select/runs`),
   runAutoSelect: async (eventId, reason = '') => apiFetch(`/api/events/${eventId}/auto-select/run`, { 

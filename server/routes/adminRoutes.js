@@ -226,6 +226,53 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
  * expected state: the point of the snapshots is that a report outlives the thing
  * it is about.
  */
+/**
+ * What the moderator sees for the target, in three honestly-distinguished
+ * states. A decision can turn on which one they are reading, so the queue says
+ * which it is rather than rendering all three the same way.
+ *
+ *   live      — the content still exists and this is it
+ *   snapshot  — the original is gone; this is the copy taken when the report was
+ *               filed, which is why the copy is taken
+ *   missing   — genuinely nothing was preserved (pre-snapshot reports only)
+ *
+ * `target_name_snapshot` is what identifies a target with no body of its own: a
+ * conversation, a person, a certificate. Without it those reports render as an
+ * unlabelled row, which is the same blank cell a moderator reads as "nothing
+ * wrong here".
+ *
+ * ── Why this is a function rather than a loop inside the queue handler ──
+ *
+ * The report detail route answers with the same report the queue lists, and a
+ * second derivation of these four fields is a second set of rules for what
+ * "missing" means. The failure that produces is specific and has already
+ * happened once on this surface: `target_missing` was true for every
+ * conversation report, so the queue told the moderator no copy was kept about
+ * reports holding hundreds of preserved messages. Two copies of that logic means
+ * fixing it in one place and leaving the other one lying.
+ */
+function describeTarget(report) {
+  const live = liveTarget(db, report);
+  const body = live?.text ?? report.target_body_snapshot ?? null;
+
+  report.target_label = report.target_name_snapshot
+    ?? (report.target_type === 'certificate' ? `Certificate ${report.target_id}` : null);
+  report.target_title = body;
+  report.target_is_snapshot = !live && report.target_body_snapshot != null;
+  /**
+   * Only ever true when there is genuinely nothing to show. A report with
+   * preserved evidence is never "missing", whatever happened to the live row —
+   * the evidence IS the record, and saying otherwise talks a moderator out of
+   * opening it.
+   */
+  report.target_missing = !live
+    && report.target_body_snapshot == null
+    && report.target_name_snapshot == null
+    && report.evidence_count === 0;
+  report.target_exists = Boolean(live);
+  return report;
+}
+
 function liveTarget(db, report) {
   const one = (sql) => db.prepare(sql).get(report.target_id) ?? null;
   switch (report.target_type) {
@@ -383,41 +430,7 @@ router.get('/api/admin/reports', authenticateToken, requireCap('report.resolve')
          r.created_at ASC
     `).all(...params, ...LIVE_REPORT_STATUSES);
 
-    /**
-     * What the moderator sees for the target, in three honestly-distinguished
-     * states. A decision can turn on which one they are reading, so the queue
-     * says which it is rather than rendering all three the same way.
-     *
-     *   live      — the content still exists and this is it
-     *   snapshot  — the original is gone; this is the copy taken when the report
-     *               was filed, which is why the copy is taken
-     *   missing   — genuinely nothing was preserved (pre-snapshot reports only)
-     *
-     * `target_name_snapshot` is what identifies a target with no body of its own:
-     * a conversation, a person, a certificate. Without it those reports render as
-     * an unlabelled row, which is the same blank cell a moderator reads as
-     * "nothing wrong here".
-     */
-    for (const report of reports) {
-      const live = liveTarget(db, report);
-      const body = live?.text ?? report.target_body_snapshot ?? null;
-
-      report.target_label = report.target_name_snapshot
-        ?? (report.target_type === 'certificate' ? `Certificate ${report.target_id}` : null);
-      report.target_title = body;
-      report.target_is_snapshot = !live && report.target_body_snapshot != null;
-      /**
-       * Only ever true when there is genuinely nothing to show. A report with
-       * preserved evidence is never "missing", whatever happened to the live row
-       * — the evidence IS the record, and saying otherwise talks a moderator out
-       * of opening it.
-       */
-      report.target_missing = !live
-        && report.target_body_snapshot == null
-        && report.target_name_snapshot == null
-        && report.evidence_count === 0;
-      report.target_exists = Boolean(live);
-    }
+    for (const report of reports) describeTarget(report);
 
     /**
      * The counts are the whole dashboard for a one-person team: how much is
@@ -813,6 +826,157 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
   }
 });
 
+/**
+ * The CSV export is declared ABOVE `/:id`, and the order is load-bearing.
+ *
+ * Express matches in declaration order, so a `/:id` pattern declared first
+ * captures the literal path `/export` with `id = "export"`, and the export answers
+ * 404 "Report not found" instead of a CSV — with both routes looking perfectly
+ * correct in isolation. `routes.admin.test.js` caught exactly that when `/:id` was
+ * first added below it; keeping literal paths ahead of parameterised ones is what
+ * stops it recurring.
+ */
+// A5. Export Data to CSV
+router.get('/api/admin/reports/export', authenticateToken, requireCap('report.resolve'), (req, res) => {
+  try {
+    const students = db.prepare(`
+      SELECT 
+        u.id, 
+        u.name, 
+        u.email, 
+        u.school, 
+        u.created_at,
+        COALESCE(SUM(at.hours_awarded), 0) as total_hours
+      FROM users u
+      LEFT JOIN attendance at ON at.user_id = u.id AND at.present = 1
+      WHERE u.role = 'student'
+      GROUP BY u.id
+      ORDER BY u.name ASC
+    `).all();
+
+    const sanitizeCsv = (val) => {
+      let str = String(val || '');
+      if (/^[=+\-@\t\r]/.test(str)) {
+        str = "'" + str;
+      }
+      return `"${str.replace(/"/g, '""')}"`;
+    };
+
+    // Create CSV content
+    const headers = ['ID', 'Name', 'Email', 'School/Affiliation', 'Joined Date', 'Total Credited Hours'];
+    const rows = students.map(s => [
+      s.id,
+      sanitizeCsv(s.name),
+      sanitizeCsv(s.email),
+      sanitizeCsv(s.school),
+      s.created_at,
+      s.total_hours
+    ]);
+    
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="wevolunteer_students_export.csv"');
+    res.send(csvContent);
+  } catch (err) {
+    console.error('Export error:', err);
+    res.status(500).json({ error: 'Failed to generate CSV export' });
+  }
+});
+
+/**
+ * One report, with the trail of what has been done to it.
+ *
+ * ── Why this exists ──
+ *
+ * `moderation_actions` has been written on every decision since v1.2 and read
+ * back by nothing. Status changes, reprioritisations, assignments, resolutions,
+ * self-reviews and evidence reads were all recorded, and the only way to see any
+ * of it was to open the database by hand. So the append-only trail that exists
+ * to answer "who decided this, and why" answered it to nobody — and a moderator
+ * picking a report up could not tell that it had already been decided once and
+ * reopened, which is precisely the context that changes what they do next.
+ *
+ * ── Why the evidence bodies are NOT in this response ──
+ *
+ * This route is gated on `report.resolve`. The bodies are gated on
+ * `report.evidence.read`, and `server/authz.js` splits those two capabilities
+ * deliberately: the split is what lets a per-user grant create a triage-only
+ * helper who sorts the queue and never reads a student's private messages, which
+ * is the most invasive power on this platform. Folding the bodies in here would
+ * collapse that split silently — the helper would receive them on every open,
+ * while the separate capability still looked like it was doing something.
+ *
+ * So the two reads stay two requests. The cost is one extra round trip when a
+ * moderator chooses to open the evidence; the benefit is that choosing to is a
+ * distinct, logged act rather than a side effect of viewing a report.
+ *
+ * ── Why this read is not logged ──
+ *
+ * `GET /api/admin/reports` already returns every field this route does, to the
+ * same capability. Logging one and not the other produces a trail that reads as
+ * complete and is not. The read that is logged is the one that discloses message
+ * bodies, because that is the act the Youth Safety Guidelines make a promise
+ * about.
+ */
+router.get('/api/admin/reports/:id', authenticateToken, requireCap('report.resolve'), (req, res) => {
+  try {
+    /**
+     * Same columns and the same LEFT JOINs as the queue, for the same reason:
+     * `reporter_id`, `assigned_to` and `resolved_by` are all nullable since the
+     * retention sweep's cascades were severed, and an inner join would make a
+     * report whose reporter has been purged disappear — the quietest possible
+     * failure on a safety surface.
+     */
+    const report = db.prepare(`
+      SELECT r.*,
+             COALESCE(u.name, r.reporter_name_snapshot, 'Account since deleted') AS reporter_name,
+             u.email AS reporter_email,
+             a.name AS assigned_to_name,
+             rb.name AS resolved_by_name,
+             (SELECT COUNT(*) FROM report_evidence WHERE report_id = r.id) AS evidence_count
+        FROM reports r
+        LEFT JOIN users u  ON u.id  = r.reporter_id
+        LEFT JOIN users a  ON a.id  = r.assigned_to
+        LEFT JOIN users rb ON rb.id = r.resolved_by
+       WHERE r.id = ?
+    `).get(req.params.id);
+
+    if (!report) return res.status(404).json({ error: 'Report not found' });
+
+    describeTarget(report);
+
+    /**
+     * Oldest first, so the timeline reads top-to-bottom in the order things
+     * happened. `rowid` breaks ties because one PATCH writes several rows with
+     * an identical `created_at` — status, priority and assignment change in one
+     * transaction and share its timestamp — and without the tiebreak their order
+     * is whatever the query planner felt like, which for a history is not a
+     * detail.
+     *
+     * LEFT JOIN on the actor: `moderation_actions.actor_id` outlives the account
+     * that acted, and an inner join would delete a moderator's decisions from the
+     * record when they leave the school.
+     */
+    const history = db.prepare(`
+      SELECT ma.id, ma.action, ma.actor_id, ma.created_at,
+             ma.old_status, ma.new_status,
+             ma.old_priority, ma.new_priority,
+             ma.old_resolution, ma.new_resolution,
+             COALESCE(us.name, 'Account since deleted') AS actor_name
+        FROM moderation_actions ma
+        LEFT JOIN users us ON us.id = ma.actor_id
+       WHERE ma.report_id = ?
+       ORDER BY ma.created_at ASC, ma.rowid ASC
+    `).all(req.params.id);
+
+    res.json({ report, history });
+  } catch (err) {
+    console.error('Fetch report detail error:', err);
+    res.status(500).json({ error: 'Failed to fetch report' });
+  }
+});
+
 router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('report.evidence.read'), (req, res) => {
   try {
     const report = db.prepare(
@@ -820,8 +984,17 @@ router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('rep
     ).get(req.params.id);
     if (!report) return res.status(404).json({ error: 'Report not found' });
 
+    /**
+     * `captured_at` alongside `created_at`, because they are different facts and
+     * the difference is the one a moderator needs. `created_at` is when the
+     * message was sent; `captured_at` is when this report froze a copy of it. The
+     * gap between them is what makes the words "preserved copy" mean something
+     * rather than being a label the UI asserts — and it is the answer to "could
+     * this have been edited after it was reported", which is no, because the row
+     * carrying it has been immutable at the database since migration 013.
+     */
     const messages = db.prepare(`
-      SELECT m.message_id, m.sender_id, m.body, m.created_at,
+      SELECT m.message_id, m.sender_id, m.body, m.created_at, m.captured_at,
              COALESCE(u.name, m.sender_name_snapshot, 'Account since deleted') AS sender_name
       FROM report_evidence m
       LEFT JOIN users u ON u.id = m.sender_id
@@ -874,53 +1047,6 @@ router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('rep
 
 
 
-// A5. Export Data to CSV
-router.get('/api/admin/reports/export', authenticateToken, requireCap('report.resolve'), (req, res) => {
-  try {
-    const students = db.prepare(`
-      SELECT 
-        u.id, 
-        u.name, 
-        u.email, 
-        u.school, 
-        u.created_at,
-        COALESCE(SUM(at.hours_awarded), 0) as total_hours
-      FROM users u
-      LEFT JOIN attendance at ON at.user_id = u.id AND at.present = 1
-      WHERE u.role = 'student'
-      GROUP BY u.id
-      ORDER BY u.name ASC
-    `).all();
-
-    const sanitizeCsv = (val) => {
-      let str = String(val || '');
-      if (/^[=+\-@\t\r]/.test(str)) {
-        str = "'" + str;
-      }
-      return `"${str.replace(/"/g, '""')}"`;
-    };
-
-    // Create CSV content
-    const headers = ['ID', 'Name', 'Email', 'School/Affiliation', 'Joined Date', 'Total Credited Hours'];
-    const rows = students.map(s => [
-      s.id,
-      sanitizeCsv(s.name),
-      sanitizeCsv(s.email),
-      sanitizeCsv(s.school),
-      s.created_at,
-      s.total_hours
-    ]);
-    
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="wevolunteer_students_export.csv"');
-    res.send(csvContent);
-  } catch (err) {
-    console.error('Export error:', err);
-    res.status(500).json({ error: 'Failed to generate CSV export' });
-  }
-});
 
 // A6. System Status
 /**

@@ -930,7 +930,7 @@ function AppShell({ toasts, addToast, removeToast }) {
                   swallowed 403 for partner — a dashboard of zeros reads as
                   data, which is worse than an empty state. */}
               <Route path="/" element={
-                persona === 'staff' ? <AdminDashboard addToast={addToast} /> :
+                persona === 'staff' ? <AdminDashboard addToast={addToast} user={currentUser} /> :
                 persona === 'volunteer' ? (
                   <VolunteerDashboard
                     currentUser={currentUser}
