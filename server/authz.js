@@ -120,6 +120,22 @@ export const CAPABILITIES = {
      */
     'report.evidence.read',
     'service.verify.external', 'capability.grant',
+    /**
+     * Messaging, granted only now that there is a conversation shape that can
+     * hold an administrator.
+     *
+     * This was tried once before and reverted, correctly. `conversations` was
+     * `(event_id, student_id, organizer_id)` all NOT NULL, and
+     * `resolveConversation` always wrote the row between the student and the
+     * organizer — so an admin who opened one was not a participant and got 404 on
+     * both read and send. The capability replaced a permission error with an empty
+     * inbox, which is a worse outcome, not a better one.
+     *
+     * Migration 018 added the `admin_student` / `admin_organizer` kinds and
+     * membership through `conversation_participants`, so the capability now
+     * describes something the data model can actually do.
+     */
+    'message.send',
     'attendance.mark', 'attendance.view',
     'self.read', 'self.write', 'geocode.use',
     // Deliberate widening (Task 7d, same pattern as attendanceRoutes.js's

@@ -2,7 +2,8 @@ import express from 'express';
 import { authenticateToken, inTransaction } from '../utils.js';
 import { reportLimiter } from '../reportLimiter.js';
 import { createReport } from '../reportService.js';
-import { can, requireCap } from '../authz.js';
+import { can, requireCap, principalFor } from '../authz.js';
+import { grantsFor } from '../userCapabilities.js';
 import { isBlockedBetween, block, unblock } from '../blocking.js';
 import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
@@ -21,6 +22,7 @@ import {
   listConversationsForUser,
   newId,
   otherParticipant,
+  resolveAdminConversation,
   resolveConversation
 } from '../messaging.js';
 
@@ -88,6 +90,80 @@ router.post('/api/messages/conversations/resolve', authenticateToken, (req, res)
     res.status(500).json({ error: 'Failed to open conversation' });
   }
 });
+
+/**
+ * Opens (or reopens) an administrator's own thread with one person.
+ *
+ * ── Why this is a separate endpoint ──
+ *
+ * `/resolve` derives a (student, organizer, event) triple from an event id and
+ * checks the caller's relationship to it. This has no event and names the
+ * counterparty directly, so every branch of that handler would have had to ask
+ * which mode it was in.
+ *
+ * ── Gated on `report.resolve`, not `message.send` ──
+ *
+ * `message.send` is what lets somebody participate in a conversation, and students
+ * and organizers hold it. What this endpoint does is different and stronger: it
+ * lets the caller open a channel to a person they have no event in common with,
+ * chosen by id. That is a moderation power, so it is gated on the moderation
+ * capability — an organizer holding `message.send` must not be able to reach an
+ * arbitrary student through it.
+ */
+router.post('/api/messages/admin/conversations/resolve', authenticateToken,
+  requireCap('report.resolve'), (req, res) => {
+    try {
+      const { userId } = req.body || {};
+      if (!userId || typeof userId !== 'string') {
+        return res.status(400).json({ error: 'userId is required' });
+      }
+
+      /**
+       * The counterparty's principal is built with their per-user grants, because
+       * `adminThreadKind` asks what they can DO rather than what role they hold —
+       * a student granted `event.create` is an organizer for the purpose of which
+       * thread shape applies to them.
+       */
+      const target = db.prepare(
+        "SELECT id, role FROM users WHERE id = ? AND account_status != 'deleted'"
+      ).get(userId);
+      if (!target) return res.status(404).json({ error: 'Person not found' });
+
+      const counterpartyPrincipal = principalFor(target, { grants: grantsFor(db, target.id) });
+
+      const result = resolveAdminConversation({
+        actor: req.user, counterpartyId: userId, counterpartyPrincipal,
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+
+      /**
+       * Recorded when the channel is opened, not only when a message is sent.
+       *
+       * "An administrator opened a line to this student" is the fact worth having
+       * on the record — it is the act that a person who has done nothing wrong
+       * might reasonably ask about later. The message bodies are deliberately NOT
+       * copied here: `admin_audit_logs` has a broader audience than the
+       * conversation does, and the same reasoning the report trail uses for
+       * resolution notes applies unchanged.
+       */
+      // Read as prose, not as an enum. This row is read by a person asking why an
+      // administrator contacted a student, and "Opened a admin_student thread" is
+      // the sort of thing that makes a record look machine-generated and unread.
+      const who = result.conversation.kind === 'admin_organizer' ? 'organizer' : 'student';
+
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'ADMIN_CONVERSATION_OPENED',
+        targetUserId: userId,
+        details: `Opened a moderation conversation with a ${who} (${result.conversation.id})`,
+      });
+
+      res.status(200).json({ conversation: result.conversation });
+    } catch (err) {
+      console.error('Resolve admin conversation error:', err);
+      res.status(500).json({ error: 'Failed to open conversation' });
+    }
+  });
 
 router.get('/api/messages/conversations/:id/messages', authenticateToken, (req, res) => {
   try {
@@ -212,9 +288,25 @@ router.post('/api/messages/conversations/:id/messages', authenticateToken, (req,
       const participant = getParticipant(conversation.id, userId);
       const muted = participant?.muted_until && new Date(participant.muted_until) > new Date();
       if (!muted) {
+        /**
+         * The context line names what the thread is, and a moderation thread is
+         * not "Volunteer conversation".
+         *
+         * The fallback used to be reached only by an event-scoped thread whose
+         * event had been deleted, where it was a reasonable thing to say. An admin
+         * thread has no event by design, so without this every message from an
+         * administrator would arrive labelled as being about a volunteer
+         * opportunity — which is exactly what it is not, and is misleading in the
+         * one case where the recipient most needs to know who is contacting them
+         * and why.
+         */
+        const context = decorated.kind === 'student_organizer'
+          ? (decorated.event?.title || 'Volunteer conversation')
+          : 'Message from a WeVolunteer administrator';
+
         notificationService.dispatch('DIRECT_MESSAGE', {
           title: `New message from ${sender?.name || 'Someone'}`,
-          body: `${decorated.event?.title || 'Volunteer conversation'}: ${body.slice(0, 120)}`,
+          body: `${context}: ${body.slice(0, 120)}`,
           link: `/messages?conversation=${conversation.id}`
         }, userId);
       }

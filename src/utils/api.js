@@ -705,6 +705,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(until ? { reason, until } : { reason }),
     }),
+
+  /**
+   * Opens (or reopens) this administrator's own thread with one person.
+   *
+   * Gated server-side on `report.resolve` rather than `message.send`: participating
+   * in a conversation is one thing, choosing an arbitrary person by id to start one
+   * with is a moderation power, and an organizer holding `message.send` must not
+   * reach a stranger through it. Idempotent — the same thread comes back, enforced
+   * by a partial unique index rather than only by the lookup.
+   */
+  resolveAdminConversation: async (userId) =>
+    apiFetch('/api/messages/admin/conversations/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    }),
   duplicateEvent: async (eventId) => apiFetch(`/api/events/${eventId}/duplicate`, { method: 'POST' }),
   fetchAutoSelectRuns: async (eventId) => apiFetch(`/api/events/${eventId}/auto-select/runs`),
   runAutoSelect: async (eventId, reason = '') => apiFetch(`/api/events/${eventId}/auto-select/run`, { 

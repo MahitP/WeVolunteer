@@ -123,8 +123,26 @@ describe('navigation, per role', () => {
   it.each([
     ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'My profile']],
     ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'New event', 'Notifications', 'My profile']],
-    ['admin', ['Moderation Center', 'Opportunities', 'Notifications', 'Appeals']]
-  ])('%s is unchanged by the conversion', (role, expected) => {
+    /**
+     * Admin GAINED `Messages`, and this pin was updated deliberately rather than
+     * relaxed.
+     *
+     * It previously read `['Moderation Center', 'Opportunities', 'Notifications',
+     * 'Appeals']` because admin did not hold `message.send` — and that was correct
+     * at the time for a reason worth keeping on the record: the capability was
+     * granted once before and reverted, because `conversations` was
+     * `(event_id, student_id, organizer_id)` all NOT NULL and an admin who opened
+     * one was not a participant. The nav entry would have led to an empty inbox.
+     *
+     * Migration 018 gave the table `admin_student` / `admin_organizer` kinds with
+     * membership in `conversation_participants`, so the entry now leads somewhere.
+     *
+     * `Messages` lands third, inside `navItems.slice(0, 4)` — the mobile primary
+     * row — which is the right place for it: reaching a person is a moderation
+     * action, not an afterthought behind "More".
+     */
+    ['admin', ['Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Appeals']]
+  ])('%s nav is what its capabilities justify', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
   });
 
@@ -183,11 +201,13 @@ describe('navigation, per role', () => {
     ]);
   });
 
-  it('leaves the admin sidebar exactly as it was', async () => {
+  it('renders the admin rail, including the Messages entry 018 made real', async () => {
     signedInAs(USER('admin'));
     renderAt('/');
     await screen.findByTestId('admin-dash');
-    expect(sidebarLabels()).toEqual(['Moderation Center', 'Opportunities', 'Notifications', 'Appeals']);
+    expect(sidebarLabels()).toEqual([
+      'Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Appeals',
+    ]);
   });
 });
 

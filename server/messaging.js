@@ -198,6 +198,113 @@ export function resolveConversation({ eventId, actor, studentId = null, principa
   return { ok: true, conversation: decorateConversation(conversation, actor.id), relationship: rel };
 }
 
+/**
+ * Which `kind` an administrator's thread with this person is.
+ *
+ * Derived from the counterparty's capabilities rather than a role string, per
+ * `authz.js`, and ordered most-privileged-first because `can()` answers true for
+ * every capability a super_admin asks about — testing `event.apply` first would
+ * classify an administrator as a student.
+ *
+ * Returns null for somebody an administrator has no moderation thread shape for.
+ * That is deliberately an explicit deny rather than a default: a `partner`, or any
+ * future capability-poor role, must not silently land in whichever branch happens
+ * to be last.
+ */
+export function adminThreadKind(counterpartyPrincipal) {
+  if (can(counterpartyPrincipal, 'event.create')) return 'admin_organizer';
+  if (can(counterpartyPrincipal, 'event.apply')) return 'admin_student';
+  return null;
+}
+
+/**
+ * Finds or creates an administrator's thread with one person.
+ *
+ * ── Why this is not `resolveConversation` with a null eventId ──
+ *
+ * That function's whole job is deriving a (student, organizer, event) triple from
+ * an event and checking the actor's relationship to it. None of that applies here:
+ * there is no event, the relationship is "an administrator may contact a member of
+ * this platform", and the counterparty is named directly rather than inferred.
+ * Overloading it would mean a function whose every branch had to ask which mode it
+ * was in.
+ *
+ * ── Uniqueness ──
+ *
+ * Keyed on (kind, created_by, counterparty) and enforced by a partial unique index
+ * (migration 018), not just by this lookup. The index is what makes pressing
+ * "message" twice idempotent even if two requests interleave; the lookup is what
+ * makes the normal case not raise.
+ */
+export function resolveAdminConversation({ actor, counterpartyId, counterpartyPrincipal }) {
+  if (!counterpartyId || typeof counterpartyId !== 'string') {
+    return { ok: false, status: 400, error: 'A person to contact is required' };
+  }
+  if (counterpartyId === actor.id) {
+    return { ok: false, status: 400, error: 'You cannot open a conversation with yourself' };
+  }
+
+  const counterparty = db.prepare(
+    "SELECT id, role, account_status FROM users WHERE id = ? AND account_status != 'deleted'"
+  ).get(counterpartyId);
+  if (!counterparty) return { ok: false, status: 404, error: 'Person not found' };
+
+  const kind = adminThreadKind(counterpartyPrincipal);
+  if (!kind) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'There is no message thread for this kind of account.',
+    };
+  }
+
+  /**
+   * The counterparty occupies the role column that describes them, and the
+   * administrator is identified by `created_by` plus their participant row. The
+   * CHECK constraints in migration 018 enforce that exactly one of the two role
+   * columns is filled, so this mapping is not merely convention.
+   */
+  const studentId = kind === 'admin_student' ? counterparty.id : null;
+  const organizerId = kind === 'admin_organizer' ? counterparty.id : null;
+
+  let conversation = db.prepare(`
+    SELECT * FROM conversations
+     WHERE kind = ? AND created_by = ? AND COALESCE(student_id, organizer_id) = ?
+  `).get(kind, actor.id, counterparty.id);
+
+  if (!conversation) {
+    const now = new Date().toISOString();
+    const conversationId = newId('conv');
+    inTransaction(() => {
+      db.prepare(`
+        INSERT INTO conversations (id, kind, event_id, student_id, organizer_id, created_by, created_at)
+        VALUES (?, ?, NULL, ?, ?, ?, ?)
+      `).run(conversationId, kind, studentId, organizerId, actor.id, now);
+
+      /**
+       * `role_at_creation` is a snapshot, and the administrator's is recorded as
+       * what they were when the thread opened. It is what tells a reader a year
+       * later that this thread was opened by staff rather than by a peer — the
+       * account's current role may have changed by then.
+       */
+      db.prepare(`
+        INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
+        VALUES (?, ?, ?, ?), (?, ?, ?, ?)
+      `).run(
+        conversationId, actor.id, actor.role, now,
+        conversationId, counterparty.id, counterparty.role, now
+      );
+    });
+    conversation = getConversation(conversationId);
+  }
+
+  return {
+    ok: true,
+    created: true,
+    conversation: decorateConversation(conversation, actor.id),
+  };
+}
+
 export function decorateConversation(conversation, viewerId) {
   if (!conversation) return null;
   const event = db.prepare(`
@@ -223,6 +330,19 @@ export function decorateConversation(conversation, viewerId) {
 
   return {
     id: conversation.id,
+    /**
+     * What kind of thread this is, so the client can render it without inferring.
+     *
+     * Inferring it from `event === null` is the trap: an event-scoped thread whose
+     * event was deleted also has a null event (the row cascades), and it must NOT
+     * be treated as a moderation thread — its lifecycle rules still apply and its
+     * participants are still a student and an organizer. `kind` is the stored
+     * fact; the shape of the joined data is a consequence.
+     *
+     * Defaulted for rows read before migration 018 ran, which cannot be any other
+     * kind because no other kind could be created.
+     */
+    kind: conversation.kind || 'student_organizer',
     eventId: conversation.event_id,
     studentId: conversation.student_id,
     organizerId: conversation.organizer_id,
@@ -297,6 +417,29 @@ export function unreadCount(conversationId, userId) {
 }
 
 export function computeConversationLifecycle(conversation, now = new Date()) {
+  /**
+   * A moderation thread never goes read-only, and this returns EARLY rather than
+   * relying on the queries below finding nothing.
+   *
+   * They would find nothing — `event_id` is NULL, so both lookups come back empty
+   * and the function falls through to "active". But that is an accident of how the
+   * absence of an event happens to flow through event-shaped SQL, not a decision,
+   * and it would stop being true the moment somebody added a rule keyed on
+   * `created_at` or on the absence of applications (an admin thread has none,
+   * which reads exactly like a student who withdrew — the branch below turns THAT
+   * read-only after seven days).
+   *
+   * The rule itself is the point: the event-driven rules exist so a thread about a
+   * finished shift stops accepting messages. A student's channel to an
+   * administrator is not about a shift, and closing it 30 days after some
+   * unrelated event ended would shut the one route a person has for raising
+   * something — including an appeal. This is the hazard the audit named when it
+   * rejected putting an admin in the `organizer_id` slot.
+   */
+  if (conversation.kind && conversation.kind !== 'student_organizer') {
+    return { state: 'active', writable: true, reason: null, banner: null };
+  }
+
   const apps = db.prepare(`
     SELECT a.status, a.applied_at, s.end_datetime
     FROM applications a
