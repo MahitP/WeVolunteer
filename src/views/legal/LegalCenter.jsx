@@ -124,10 +124,10 @@ export default function LegalCenter() {
   const total = documents?.filter(d => matches(d, query)).length ?? 0;
 
   return (
-    <main className="content stack-lg" aria-labelledby="legal-title">
+    <main className="content legal-page stack-lg" aria-labelledby="legal-title">
       <div className="stack-sm">
-        <h1 id="legal-title">Legal Center</h1>
-        <p className="small dim">
+        <h1 id="legal-title" className="legal-title">Legal Center</h1>
+        <p className="legal-meta">
           Everything WeVolunteer asks you to agree to, and everything it promises in
           return. Written to be read — if a section is not clear, that is a bug and
           you can tell us.
