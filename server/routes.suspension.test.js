@@ -428,15 +428,54 @@ describe('timed suspension', () => {
     expect([401, 403]).toContain(res.status);
   });
 
-  it('names the end date in the refusal, so it is not mistaken for permanent', async () => {
+  /**
+   * The sign-in refusal must NOT name the end date.
+   *
+   * That branch runs before the password is checked — it has to, or a suspended
+   * person is sent round the password-reset loop for something a reset cannot fix —
+   * so anybody who can guess an email address reaches this message. That the
+   * account exists and is suspended is already disclosed and is an accepted product
+   * decision (`GENERIC_LOGIN_ERRORS` reverses it). The DATE is not covered by that
+   * decision: it is a detail of a moderation action against a named minor, and it
+   * belongs in the notice sent to the account, not in a response to an unproven
+   * request.
+   *
+   * This was briefly the opposite. It read the date back and asserted it was
+   * present, which is how the disclosure was found.
+   */
+  it('does not disclose the end date to an unauthenticated caller', async () => {
     const until = inDays(7);
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
       { reason: GOOD_REASON, until }, adminToken);
 
     const res = await srv.call('POST', '/api/auth/login',
-      { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
-    expect(res.body.error).toMatch(/suspended until/i);
-    expect(res.body.suspendedUntil).toBe(until);
+      { email: 'priya.patel.nhs@outlook.com', password: 'wrong-on-purpose' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('suspended');
+    expect(res.body.suspendedUntil, 'the deadline must not leave the building here')
+      .toBeUndefined();
+    expect(JSON.stringify(res.body), 'no part of the date may appear in the message')
+      .not.toContain(until.slice(0, 10));
+  });
+
+  /**
+   * The person IS told when it ends — in the mandatory notice, which goes to the
+   * address on the account rather than to whoever typed it into a form.
+   */
+  it('names the end date in the notice sent to the person', async () => {
+    const until = inDays(7);
+    await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+      { reason: GOOD_REASON, until }, adminToken);
+
+    const notice = db.prepare(`
+      SELECT body FROM notifications
+       WHERE user_id = 'user-student-2' AND title LIKE '%suspended%'
+       ORDER BY rowid DESC LIMIT 1
+    `).get();
+
+    expect(notice, 'a suspension with no notice is a lockout with no explanation').toBeTruthy();
+    expect(notice.body).toMatch(/This suspension ends on /);
   });
 
   describe('refusals', () => {

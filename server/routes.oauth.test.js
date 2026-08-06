@@ -74,6 +74,87 @@ describe('oauth', () => {
     ...over
   });
 
+  /**
+   * ── Suspension, at the door a provider-only account has to use ──
+   *
+   * Both sign-in branches of this handler compared `account_status ===
+   * 'suspended'`. With timed suspensions that is a second, wrong definition:
+   * `account_status` stays 'suspended' until something normalises the row, and
+   * nothing on this path ever did.
+   *
+   * So a student suspended for a week and signing in with Google was still refused
+   * after their week was up — and for an account with no password there is no other
+   * door, which makes it a permanent lockout from an account whose sanction has
+   * already expired, with nothing on screen to explain it.
+   *
+   * `server/suspension.test.js` fails the build on the comparison. These two prove
+   * the behaviour, because the guard would also pass for a handler that stopped
+   * enforcing suspension altogether.
+   */
+  describe('a suspended account', () => {
+    /**
+     * Attaches a provider identity to an account that already exists, which is
+     * exactly what the returning-user branch reads.
+     *
+     * Written directly rather than driven through provider signup, because signup
+     * is a two-step flow (`signup_required` then `POST /api/auth/signup` with the
+     * token) and none of it is what these two cases are about. The row this writes
+     * is byte-identical to the one the callback writes.
+     */
+    const linkProvider = (db, userId, sub, email) => {
+      const now = new Date().toISOString();
+      db.prepare(`
+        INSERT INTO oauth_accounts
+          (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at)
+        VALUES (?, ?, 'google', ?, ?, ?, ?)
+      `).run(`oa-${sub}`, userId, sub, email, now, now);
+    };
+
+    const suspend = (db, userId, until) => db.prepare(`
+      UPDATE users SET account_status = 'suspended', suspended_at = ?,
+             suspended_until = ?, suspension_reason = 'testing the provider door'
+       WHERE id = ?
+    `).run(new Date().toISOString(), until, userId);
+
+    it('is refused while the suspension is live', async () => {
+      const { db } = await import('./db.js');
+      const sub = 'sub-suspended-live';
+      const id = 'user-student-2';
+      const email = 'priya.patel.nhs@outlook.com';
+      linkProvider(db, id, sub, email);
+      suspend(db, id, new Date(Date.now() + 7 * 86400_000).toISOString());
+
+      const { state, nonceCookie } = await begin('google');
+      const res = await callback('google', { code: identity({ sub, email }), state, nonceCookie });
+
+      expect(res.status).toBe(403);
+      expect(res.cookie, 'a refused provider sign-in must not hand out a session').toBeFalsy();
+    });
+
+    it('signs in again once the deadline has passed, and the row is normalised', async () => {
+      const { db } = await import('./db.js');
+      const sub = 'sub-suspended-expired';
+      const id = 'user-student-3';
+      const email = 'emiller2027@gmail.com';
+      linkProvider(db, id, sub, email);
+      suspend(db, id, new Date(Date.now() - 1000).toISOString());
+
+      const { state, nonceCookie } = await begin('google');
+      const res = await callback('google', { code: identity({ sub, email }), state, nonceCookie });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.cookie).toBeTruthy();
+
+      const row = db.prepare(
+        'SELECT account_status, suspension_lifted_at, suspension_reason FROM users WHERE id = ?'
+      ).get(id);
+      expect(row.account_status).toBe('active');
+      expect(row.suspension_lifted_at).toBeTruthy();
+      // The record of why survives the expiry, as it does on the password path.
+      expect(row.suspension_reason).toBe('testing the provider door');
+    });
+  });
+
   // ── The bypasses ──────────────────────────────────────────────────
 
   it('refuses a callback whose state was never issued by us', async () => {
