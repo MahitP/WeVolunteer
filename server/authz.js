@@ -92,6 +92,21 @@ export const CAPABILITIES = {
   ],
   admin: [
     'event.view', 'event.moderate', 'organizer.approve', 'user.suspend',
+    /**
+     * Issuing a formal warning, split from `user.suspend`.
+     *
+     * Not folded into `user.suspend` even though every holder of that capability
+     * can obviously do worse: the name would then be lying about what it permits,
+     * and the split is what makes the useful grant possible — a triage helper who
+     * can tell somebody to stop, and cannot lock them out. `REPORT_RESOLUTIONS`
+     * has offered `warning_issued` since v1.2, so until now the outcome existed as
+     * a label on a closed report and the person was never told.
+     *
+     * Not `report.resolve` either. A warning is an action against a PERSON, and
+     * anyone who can sort a queue should not thereby be able to put a permanent
+     * disciplinary notice on a student's record.
+     */
+    'user.warn',
     'report.resolve', 'appeal.review', 'audit.read', 'analytics.school',
     /**
      * Reading the message bodies preserved with a safety report is split from
