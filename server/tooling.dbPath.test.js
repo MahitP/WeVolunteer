@@ -1,4 +1,23 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+/**
+ * A file-wide budget, measured rather than guessed.
+ *
+ * The two tests in `verifyHours.js operates on the database WEV_DB_PATH names` each
+ * build a throwaway database and then `execFileSync` a fresh `node` process against
+ * it. Spawning a Node process and booting its data layer is the cost being measured,
+ * and it is not something the test can avoid — the whole point is that the REAL CLI
+ * honours the environment variable.
+ *
+ * Isolated they run ~0.3s against vitest's 5000ms default. Under the parallel load of
+ * the full suite one was measured at 5085ms and timed out: process startup is exactly
+ * what gets slow when every core is already busy. Nothing was hung, so this is a
+ * flake rather than a defect in the code under test — and flakiness is a defect in
+ * its own right on the gate every other gate depends on.
+ *
+ * The global default stays 5000ms so a genuinely hung test elsewhere still fails fast.
+ */
+vi.setConfig({ testTimeout: 20000 });
+
 import { execFileSync } from 'child_process';
 import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'fs';
 import { tmpdir } from 'os';
