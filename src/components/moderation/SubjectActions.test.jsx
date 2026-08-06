@@ -224,3 +224,64 @@ describe('messaging the person', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Person not found');
   });
 });
+
+/**
+ * Lifting a suspension.
+ *
+ * `unsuspendUser` existed but was reachable only from `AdminAppeals` — i.e. only by
+ * the person appealing. An administrator who suspended the wrong account had no
+ * route to reverse it and had to wait for the student to appeal something the
+ * administrator already knew was wrong.
+ */
+describe('lifting a suspension', () => {
+  const SUSPENDED = { ...SUBJECT, accountStatus: 'suspended', suspendedUntil: null };
+
+  beforeEach(() => { api.unsuspendUser.mockResolvedValue({ success: true }); });
+
+  it('is offered when the account is suspended, and Suspend is not', () => {
+    show({ subject: SUSPENDED });
+    expect(screen.getByRole('button', { name: /Lift the suspension/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Suspend$/ })).not.toBeInTheDocument();
+  });
+
+  it('is not offered when the account is active', () => {
+    show();
+    expect(screen.queryByRole('button', { name: /Lift the suspension/ })).not.toBeInTheDocument();
+  });
+
+  /**
+   * The asymmetry is deliberate and matches the endpoint: imposing a sanction has
+   * to be justified, removing one does not. Requiring twenty characters before
+   * somebody can undo their own mistake is friction pointed the wrong way.
+   */
+  it('does not require a reason', async () => {
+    show({ subject: SUSPENDED });
+    fireEvent.click(screen.getByRole('button', { name: /Lift the suspension/ }));
+
+    const submit = screen.getByRole('button', { name: /^Lift the suspension$/ });
+    expect(submit).not.toBeDisabled();
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(api.unsuspendUser).toHaveBeenCalledWith('u_org', undefined));
+  });
+
+  it('passes a note along when one is given', async () => {
+    show({ subject: SUSPENDED });
+    fireEvent.click(screen.getByRole('button', { name: /Lift the suspension/ }));
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'Reviewed again — this was the wrong account.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^Lift the suspension$/ }));
+
+    await waitFor(() => expect(api.unsuspendUser).toHaveBeenCalledWith(
+      'u_org', 'Reviewed again — this was the wrong account.',
+    ));
+  });
+
+  /** No end date to choose: the suspension is ending now, not on a schedule. */
+  it('offers no end-date field', () => {
+    show({ subject: SUSPENDED });
+    fireEvent.click(screen.getByRole('button', { name: /Lift the suspension/ }));
+    expect(screen.queryByLabelText(/Until/)).not.toBeInTheDocument();
+  });
+});

@@ -476,7 +476,11 @@ describe('authorization hygiene', () => {
       // again — unchanged, and still the ?type= view discriminator. Worth noting
       // that the change which moved it is itself an authorization decision, made
       // one screen earlier; this line is still not one.
-      'src/App.jsx:902': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      // 902 -> 912 when the refusal gained its explanation: `deniedFallback` took
+      // a route argument so a 403 could name the feature and the remedy
+      // (denialDetail.js), and `deniedMatch` was hoisted above the early return.
+      // Re-read once more — unchanged, and still the ?type= view discriminator.
+      'src/App.jsx:912': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
       'src/components/EventComments.jsx:112': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
       'src/components/EventComments.jsx:113': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
       'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
