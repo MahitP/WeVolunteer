@@ -31,7 +31,7 @@ recommended in the handoff spec.
 
 # Cookies and tracking
 
-**Version 1.0 · Last updated 2026-08-06**
+**Version 1.1 · Last updated 2026-08-06**
 
 **Short version: WeVolunteer does not track you.** No advertising cookies, no analytics
 services, no pixels, no fingerprinting, no third-party scripts of any kind.

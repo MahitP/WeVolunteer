@@ -24,6 +24,7 @@ import unifiedReports from './012_unified_reports.js';
 import reportEvidenceAndFold from './013_report_evidence_and_fold.js';
 import appeals from './014_appeals.js';
 import appealsIntegrity from './015_appeals_integrity.js';
+import legalV1Republish from './016_legal_v1_republish.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -37,6 +38,13 @@ export const MIGRATIONS = [
   // recovers statements from appeals not yet decided, so the longer it is
   // deferred the more of them are already overwritten.
   appealsIntegrity,
+  /**
+   * 016 must run BEFORE `syncLegalDocuments`, which it does: `initDatabase()` calls
+   * `runMigrations` first and syncs the catalogue afterwards. Reversing that
+   * ordering restores the boot crash 016 exists to repair, because sync is the
+   * thing that was throwing.
+   */
+  legalV1Republish,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
