@@ -92,7 +92,7 @@ export const CAPABILITIES = {
   ],
   admin: [
     'event.view', 'event.moderate', 'organizer.approve', 'user.suspend',
-    'report.resolve', 'audit.read', 'analytics.school',
+    'report.resolve', 'appeal.review', 'audit.read', 'analytics.school',
     /**
      * Reading the message bodies preserved with a safety report is split from
      * deciding the report, and holds the same roles today, so nothing changes

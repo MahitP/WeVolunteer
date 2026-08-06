@@ -173,6 +173,7 @@ const NAV = [
      Placed before `profile` rather than appended: `navItems.slice(0, 4)` is the
      mobile primary row, and super_admin's first four must not shift. */
   { id: 'errors', path: '/errors', label: 'Errors', icon: Bug, requiredCap: 'error.read' },
+  { id: 'appeals', path: '/admin/appeals', label: 'Appeals', icon: ShieldCheck, requiredCap: 'appeal.review' },
   { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS }
 ];
 
@@ -220,6 +221,7 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/profile')) return 'profile';
   if (pathname.startsWith('/settings')) return 'settings';
   if (pathname.startsWith('/messages')) return 'messages';
+  if (pathname.startsWith('/admin/appeals')) return 'appeals';
   return 'dashboard';
 }
 
@@ -266,7 +268,8 @@ const PAGE_META = {
     dashboard: { title: 'Review queue', sub: 'Approve organizers and moderate events' },
     browse: { title: 'All events', sub: 'Everything posted across the district' },
     notifications: { title: 'Notifications', sub: 'Platform activity' },
-    errors: { title: 'Errors', sub: 'Crashes and faults reported by browsers, the server, and background jobs' }
+    errors: { title: 'Errors', sub: 'Crashes and faults reported by browsers, the server, and background jobs' },
+    appeals: { title: 'Appeals', sub: 'Review and decide user suspension appeals' }
   },
   partner: {
     dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
@@ -726,7 +729,8 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/portfolio': { currentUser },
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
     '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
-    '/errors': { addToast }
+    '/errors': { addToast },
+    '/admin/appeals': {}
   };
 
   /** Where a route the user cannot reach sends them. Unchanged from the ternaries. */
