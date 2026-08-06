@@ -10,18 +10,26 @@
  * dismissing a report about themselves, and on a two-person team that is the
  * refusal most likely to matter and least likely to be exercised by hand.
  *
- * ── The `it.fails` cases ──
+ * ── The `FIXED — was:` headers ──
  *
- * Six cases below are marked `it.fails`. Each one asserts the behaviour the
- * Trust & Safety specification requires and the code does not yet have, so it is
- * GREEN while the defect is present and goes RED the moment somebody fixes it.
- * That is deliberate: a defect written down as a passing characterization test
- * quietly becomes the specification, and a defect left untested is a defect
- * nobody is holding. When you fix one, delete the `.fails` — the test is already
- * written and already asserts the right thing.
+ * Nine cases below open with one. They were written as `it.fails` — green while the
+ * defect was present, red the moment somebody fixed it — because a defect recorded
+ * as a passing characterization test quietly becomes the specification, and a defect
+ * left untested is a defect nobody is holding.
  *
- * Every one of them is reproduced against a running server in this file, not
- * inferred from reading.
+ * All nine have since been fixed and the `.fails` markers removed, so every one of
+ * these now asserts correct behaviour and passes. The descriptions are kept, and
+ * relabelled, because each one records WHY the assertion is worth making — a
+ * resolution note of "1.0", a history row with no actor, a queue claiming no copy
+ * was kept about a report holding hundreds of preserved messages. Deleting them
+ * would leave nine assertions that look arbitrary.
+ *
+ * They read as live defects until this pass, which is its own small hazard: the
+ * header promised six `it.fails` cases that no longer existed, so the file described
+ * the code as broken in nine ways it is not.
+ *
+ * Every one was reproduced against a running server in this file, not inferred from
+ * reading.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -168,7 +176,7 @@ describe('conflict of interest', () => {
   });
 
   /**
-   * DEFECT — the refusal has no escalation path.
+   * FIXED — was: the refusal has no escalation path.
    *
    * The specification says the conflict refusal escalates to a principal holding
    * `admin.create` (super_admin), and that only when the super_admin is
@@ -259,7 +267,7 @@ describe('resolving requires a stated reason', () => {
   });
 
   /**
-   * DEFECT — the twenty-character minimum is bypassable with a non-string.
+   * FIXED — was: the twenty-character minimum is bypassable with a non-string.
    *
    * The check is `!resolutionNote || resolutionNote.length < 20`. A number has no
    * `.length`, so `undefined < 20` is false and the guard passes: `resolutionNote: 1`
@@ -280,7 +288,7 @@ describe('resolving requires a stated reason', () => {
   });
 
   /**
-   * DEFECT — a non-string resolution note that SQLite cannot bind is a 500.
+   * FIXED — was: a non-string resolution note that SQLite cannot bind is a 500.
    *
    * `resolutionNote: true` reaches `node:sqlite`, which refuses to bind a
    * boolean, and the handler's catch turns a malformed client payload into
@@ -296,7 +304,7 @@ describe('resolving requires a stated reason', () => {
   });
 
   /**
-   * DEFECT — `resolution` is never checked against its enum.
+   * FIXED — was: `resolution` is never checked against its enum.
    *
    * The value goes straight into the UPDATE and the table's CHECK constraint
    * rejects it, so a typo'd resolution is a 500 rather than a 400 naming the
@@ -314,7 +322,7 @@ describe('resolving requires a stated reason', () => {
 
 describe('assignment', () => {
   /**
-   * DEFECT — `assignedTo` is written unvalidated.
+   * FIXED — was: `assignedTo` is written unvalidated.
    *
    * The specification says it may be `null`, `'me'`, or the id of somebody who
    * holds `report.resolve`. Today it is bound straight into the UPDATE: `'me'`
@@ -403,7 +411,7 @@ describe('what a decision records', () => {
   });
 
   /**
-   * DEFECT — every status change writes two history rows, one anonymous.
+   * FIXED — was: every status change writes two history rows, one anonymous.
    *
    * Migration 012's `reports_audit` trigger fires AFTER UPDATE and inserts an
    * `action='updated'` row with a NULL `actor_id`; the route then inserts its own
@@ -425,7 +433,7 @@ describe('what a decision records', () => {
   });
 
   /**
-   * DEFECT — `updated_at` is written once, at insert, and never again.
+   * FIXED — was: `updated_at` is written once, at insert, and never again.
    *
    * The column exists, is NOT NULL, and is set to `created_at` when the report is
    * filed. No `PATCH` ever moves it, so "when did this last change" is
@@ -441,7 +449,7 @@ describe('what a decision records', () => {
   });
 
   /**
-   * DEFECT — reopening leaves the previous resolution in place.
+   * FIXED — was: reopening leaves the previous resolution in place.
    *
    * `resolved` -> `open` is allowed, and correctly so: a reopen is a real
    * moderation act. But `resolution`, `resolution_note`, `resolved_by` and
@@ -532,7 +540,7 @@ describe('the queue a moderator actually reads', () => {
   });
 
   /**
-   * DEFECT — the queue enriches only `event` and `comment` targets.
+   * FIXED — was: the queue enriches only `event` and `comment` targets.
    *
    * The enrichment loop looks the target up in `events` for an event and in
    * `event_comments` for everything else. A conversation, message, user,
