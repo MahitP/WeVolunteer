@@ -53,7 +53,7 @@ route for anything urgent.
 
 # Staying safe on WeVolunteer
 
-**Version 1.0 · Last updated 2026-08-06**
+**Version 1.1 · Last updated 2026-08-06**
 
 WeVolunteer connects students with adults who run volunteer events. That is the point of it,
 and it is also the thing we have to be most careful about. This page explains the rules,
@@ -200,12 +200,13 @@ can ask us for at any time.
 **In the app** — every conversation, comment, and event page has a **Report** button. This is
 the fastest route and it tells us exactly what you are reporting.
 
-**By email** — **wevolunteer.platform@gmail.com**, read by one person, usually
-**[[OWNER DECISION — BLOCKS PUBLICATION: the hours and days one person actually reads this
-mailbox, in plain words such as "every evening and most weekends, Eastern time". It has to be a
-commitment one person can keep, because it is one person.]]**. It is not monitored overnight, and
-there is nobody covering it when that person is away. **If someone is in danger now, call 911 —
-do not email us and wait for a reply.**
+**By email** — **wevolunteer.platform@gmail.com**. We review safety reports as soon as
+reasonably possible. It is read by one person, so it is not monitored around the clock and there
+is nobody covering it when that person is unavailable — we would rather tell you that than
+publish hours we cannot hold to.
+
+**Urgent safety concerns should go to emergency services or the resources below, not to us.**
+**If someone is in danger now, call 911 — do not email us and wait for a reply.**
 
 **Emergencies** — call 911. Do not wait for us.
 
