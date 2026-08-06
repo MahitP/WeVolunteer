@@ -42,6 +42,33 @@ repository risk. They are local debris, not release debris.
 are inside `.claude/worktrees/`, which is ignored and absent from a CI checkout —
 so the CI guard against nested lockfiles is satisfied.
 
+### Branch topology (consolidated after the audit)
+
+`main` was 61 commits behind the release branch and every feature branch was
+unmerged, so "which branch is the truth" had no answer. `fix/v1.2c-review-findings`
+turned out to contain `main` in full — `git rev-list --count HEAD..main` was **0** —
+so `main` was fast-forwarded onto it with `--ff-only`. No merge commit, no
+conflict, nothing rewritten.
+
+| Branch | Disposition |
+|---|---|
+| `main` | **The source of truth.** Contains all finalized work. |
+| `fix/v1.2c-review-findings` | Kept. Fully contained in `main`, but tracks `origin` with unpushed commits, so deleting it would strand the remote copy. |
+| `feature/error-dashboard` | Deleted — 0 unique commits vs `main`. |
+| `feature/error-experience` | Deleted — 0 unique commits vs `main`. |
+| `feature/v1.2c-documentation` | Local copy deleted — 0 unique commits; `origin`'s copy remains as the record. |
+| `refine/error-experience-visual-polish` | Deleted — 0 unique commits vs `main`. |
+| `claude/admiring-mayer-6a892f` | **Kept.** Its one commit (dead OAuth harness deletion) was cherry-picked; content verified absent from `main`'s tree. |
+| `claude/xenodochial-heyrovsky-66b8d2` | **Kept.** Its one commit (brace-expansion advisory) was cherry-picked; lockfile verified identical apart from the version stamp, where `main`'s 1.2.0 is correct and the branch's stale 1.1.0 is not. |
+
+Every deletion used `git branch -d`, never `-D`, so git itself refused anything
+it could not confirm was merged. The two `claude/*` branches are kept precisely
+because it could not: cherry-picking changes the SHA, so their *content* is
+verified present in `main` while git still reports them unmerged. Force-deleting
+on the strength of a content check is the one step in this cleanup that is not
+reversible, so it is left for the owner. Tip SHAs of all eight pre-cleanup
+branches are recorded in the cleanup commit message.
+
 **Version consistency:** root and `server/package.json` both `1.2.0`. `/health`
 reads from `server/package.json`; the two do not drift.
 
@@ -172,11 +199,14 @@ high  brace-expansion                  GHSA-rgw5-rvv9-x895
   `>=7.12.0 <8.3.0`, current is `7.18.1`, and npm's suggested remediation is a
   downgrade to `7.11.0` (flagged semver-major). Accepted, and worth tracking for
   the 8.x upgrade rather than acting on now.
-- **brace-expansion — DoS via unbounded intermediate arrays.** Reached only
-  through `nodemon` (`nodemon → minimatch → brace-expansion`), a
-  `devDependency`. Absent from a production install
-  (`npm ci --omit=dev`). Not a production risk. Fixable in-range whenever the dev
-  toolchain is next touched.
+- **brace-expansion — DoS via unbounded intermediate arrays. FIXED.** Reached
+  only through `nodemon` (`nodemon → minimatch → brace-expansion`), a
+  `devDependency` absent from a production install (`npm ci --omit=dev`), so it
+  was never a production risk. Cleared anyway: 5.0.8 → 5.0.9, which also carried
+  `react-router`/`react-router-dom` 7.18.1 → 7.18.2 as an in-range patch bump.
+  `npm audit` now reports 2 highs rather than 3, both the react-router entry
+  above. Taken as its own commit with its own four gates, because editing
+  `package-lock.json` invalidates every gate already run against it.
 
 ---
 
