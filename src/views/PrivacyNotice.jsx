@@ -67,10 +67,10 @@ export default function PrivacyNotice() {
   const owner = PRIVACY_OWNER || SCHOOL_NAME;
 
   return (
-    <main className="content stack-lg" aria-labelledby="privacy-title">
+    <main className="content legal-page stack-lg" aria-labelledby="privacy-title">
       <div className="stack-sm">
-        <h1 id="privacy-title">Privacy notice</h1>
-        <p className="small dim">
+        <h1 id="privacy-title" className="legal-title">Privacy notice</h1>
+        <p className="legal-meta">
           How {APP_NAME} handles information about the people who use it.
         </p>
       </div>

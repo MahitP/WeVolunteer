@@ -6839,3 +6839,140 @@ input:disabled + .premium-slider {
    it needs air below it as well as above — the shared `.formsection-note` margin
    is tuned for a note that opens a section. */
 .signup-guardian { margin-top: var(--s4); margin-bottom: var(--s4); }
+
+/* ==========================================================================
+   Legal pages — the page container the public routes never had
+
+   ── The defect ──
+
+   `/legal`, `/legal/:slug`, `/privacy` and `/appeal/:token` are PUBLIC routes,
+   and public routes render bare: App.jsx returns them without the signed-in
+   shell, so the `.content` class on their <main> resolves to nothing but
+   `min-width: 0; display: flex; flex-direction: column`. No padding, no measure.
+
+   Measured on a 1280px viewport before this existed:
+
+       main               1270px
+       h1                 1270px
+       .policy-toc        1270px
+       .policy-body        643px   ← its own 68ch cap, working correctly
+       back link top          0px  ← flush against the viewport edge
+
+   So a document page had a properly measured column of text introduced by a
+   title and a contents card almost twice its width, with nothing between the
+   first link and the top of the screen. The Legal Center was worse: every card
+   and every summary line ran the full 1270px, which is roughly 140 characters
+   per line against a comfortable maximum of about 75.
+
+   The readers this hits are the ones with most at stake — somebody deciding
+   whether to sign up and reading the Terms from the consent block, a suspended
+   student reading the Community Guidelines, anyone reading the Privacy Policy.
+   All of them are signed out by definition, which is precisely the case that
+   had no container.
+
+   Presentation only. No document text, no version, no hash, no promise changes.
+   ========================================================================== */
+
+.legal-page {
+  /* Wide enough for the contents card and the document title to sit in the same
+     column as the prose they introduce, narrow enough that nothing runs past a
+     readable measure. `.policy-body` keeps its own documented 68ch cap and comes
+     out slightly narrower still, which reads as a deliberate inset rather than
+     as a page that forgot to stop. */
+  max-width: 44rem;
+  width: 100%;
+  margin-inline: auto;
+  /* The safe-area insets matter here for the same reason they do on `.auth`:
+     these pages are read on phones, in landscape, on notched devices. */
+  padding:
+    max(var(--s8), env(safe-area-inset-top))
+    max(var(--s5), env(safe-area-inset-right))
+    var(--s16)
+    max(var(--s5), env(safe-area-inset-left));
+}
+/* Generous bottom padding is deliberate: a policy ends with contact details, and
+   a document whose last line sits on the viewport edge reads as truncated — the
+   one impression a legal page must never give. */
+
+@media (max-width: 40rem) {
+  .legal-page {
+    padding:
+      max(var(--s6), env(safe-area-inset-top))
+      max(var(--s4), env(safe-area-inset-right))
+      var(--s12)
+      max(var(--s4), env(safe-area-inset-left));
+  }
+}
+
+/* The contents list is navigation, not prose, so it keeps the UI font — but it
+   should not out-shout the document it introduces. Quieter than a card on the
+   page background: it reads as an aside. */
+.legal-page .policy-toc { background: var(--surface-2); }
+
+/* A document title is the one place on these pages where the display face earns
+   its keep, and it should not be the same size as a dashboard heading. */
+.legal-title {
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+/* The version / effective-date line directly under the title. It is evidence
+   rather than decoration — an acceptance record naming v2.1 is worth something
+   only if the reader can see which version this is — so it stays legible instead
+   of shrinking into the furniture. */
+.legal-meta {
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  margin: 0;
+}
+
+/* ── The contents list: real tap targets, and no wall of underlines ─────────
+ *
+ * Two measured problems with `.policy-toc-list` as it stood.
+ *
+ * 1. TOUCH TARGETS. The Terms of Service contents list is 25 links and each was
+ *    18px tall, stacked 8px apart. WCAG 2.5.5 and both platform guidelines put
+ *    the minimum at 44px, and the failure mode here is specific: a student on a
+ *    phone taps and lands on the wrong section of a document they are being held
+ *    to. The links are now block-level with their own padding, so the whole row
+ *    is the target and the text no longer has to be hit exactly.
+ *
+ *    The 44px floor is scoped to the mobile breakpoint, matching the reasoning in
+ *    the existing touch-target block: a mouse does not need it, and applying it
+ *    on desktop would stretch a 25-item list over two extra screens.
+ *
+ * 2. UNDERLINES. `.policy-link` underlines every link, which is correct inside
+ *    prose — WCAG 1.4.1 means colour alone must not be what distinguishes a link
+ *    from the text around it. In a contents list there IS no text around it:
+ *    every item is a link, so the underline distinguishes nothing and 25 of them
+ *    turn the card into visual noise. It returns on hover and on focus, so the
+ *    affordance is still explicit the moment anybody interacts.
+ *
+ * Scoped to `.policy-toc-list` so links in the document body keep their
+ *    underline unchanged.
+ */
+.policy-toc-list .policy-link {
+  display: block;
+  padding: var(--s1) var(--s2);
+  margin-inline: calc(var(--s2) * -1);
+  border-radius: var(--r-sm);
+  text-decoration: none;
+  color: var(--ink);
+}
+.policy-toc-list .policy-link:hover {
+  text-decoration: underline;
+  background: var(--surface-hover);
+  color: var(--brand);
+}
+.policy-toc-list .policy-link:focus-visible { text-decoration: underline; }
+/* The list no longer needs its own gap now that each row carries padding —
+   doubling both produces a contents list taller than the section it indexes. */
+.legal-page .policy-toc-list { gap: 0; }
+
+@media (max-width: 700px) {
+  .policy-toc-list .policy-link {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}

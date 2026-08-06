@@ -61,7 +61,7 @@ export default function LegalDocument() {
   );
 
   return (
-    <main className="content stack-lg" aria-labelledby="policy-title">
+    <main className="content legal-page stack-lg" aria-labelledby="policy-title">
       <Link className="auth-back" to="/legal">
         <ArrowLeft size={16} aria-hidden="true" /> All documents
       </Link>
@@ -106,8 +106,12 @@ export default function LegalDocument() {
       {doc && (
         <>
           <div className="stack-sm">
-            <h1 id="policy-title">{doc.title}</h1>
-            <p className="small dim">
+            <h1 id="policy-title" className="legal-title">{doc.title}</h1>
+            {/* Evidence, not furniture. An acceptance record saying "agreed to
+                terms-of-service v2.1" is only worth something if the reader can
+                see which version they are looking at, so this stays legible
+                rather than shrinking to `.small dim`. */}
+            <p className="legal-meta">
               Version {doc.version}
               {formatDate(doc.effectiveAt) && ` · in effect since ${formatDate(doc.effectiveAt)}`}
               {doc.consentType === 'agree' && ' · you agreed to this when you signed up'}
