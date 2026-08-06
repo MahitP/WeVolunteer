@@ -50,6 +50,42 @@ export const RETENTION = {
   auditDays: 365,
   /** Anonymised account shells: 3 years after deletion, then the row goes. */
   deletedAccountDays: 3 * 365,
+  /**
+   * Applications: 3 years after the EVENT, not after the application.
+   *
+   * The Privacy Policy has published this period since v2.0 and nothing enforced it.
+   * The only `DELETE FROM applications` statements in the codebase were the event and
+   * slot cascades in `eventRoutes.js`, so an application to an event from five years
+   * ago was retained for ever — in a table whose own preamble says "these periods are
+   * enforced by a job that runs every day".
+   *
+   * ── Which timestamp controls it ──
+   *
+   * The end of the event's last slot, with `applications.applied_at` as the fallback
+   * for an event that has no slots. Three candidates, and the choice matters:
+   *
+   *   - `applied_at` alone is wrong. A student who applies to an event two years out
+   *     would have their application deleted before the event happened, taking the
+   *     organizer's roster with it. The policy says "after the event".
+   *   - `events.status = 'completed'` depends on an organizer remembering to set it.
+   *     An abandoned event never completes, so its applications would be kept for
+   *     ever — the least privacy-preserving option available.
+   *   - `MAX(slots.end_datetime)` is derived from data rather than from anyone's
+   *     diligence, cannot be forgotten, means literally "after the event", and
+   *     deletes at the earliest moment the published policy allows.
+   *
+   * The fallback exists for the same privacy reason: an event with no slots never
+   * happened, and without one its applications would have no cutoff at all.
+   *
+   * ── What this cannot damage ──
+   *
+   * `attendance` has no foreign key to `applications` — it keys on
+   * (event_id, slot_id, user_id) — so credited hours and certificates are untouched
+   * by construction, and `assertPreservedTablesUntouched` still proves it after every
+   * sweep. `application_conflicts` cascades from `applications`, which is correct: a
+   * scheduling conflict about a deleted application describes nothing.
+   */
+  applicationDays: 3 * 365,
 };
 
 const DAY_MS = 86400000;
@@ -123,6 +159,22 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
   const messageCutoff = cutoff(now, RETENTION.messageDays);
   const auditCutoff = cutoff(now, RETENTION.auditDays);
   const deletedCutoff = cutoff(now, RETENTION.deletedAccountDays);
+  const applicationCutoff = cutoff(now, RETENTION.applicationDays);
+
+  /**
+   * An application is aged out when the event it was for ended past the cutoff.
+   *
+   * `COALESCE(MAX(s.end_datetime), a.applied_at)` is the whole decision: the event's
+   * last slot when there is one, the application's own timestamp when there is not.
+   * Written once and shared by the count and the delete so the dry run can never
+   * report a different set from the one the sweep removes.
+   */
+  const AGED_APPLICATION = `
+    COALESCE(
+      (SELECT MAX(s.end_datetime) FROM slots s WHERE s.event_id = a.event_id),
+      a.applied_at
+    ) < ?
+  `;
 
   const countable = {
     messages: db.prepare(
@@ -135,6 +187,9 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
       SELECT COUNT(*) AS c FROM users
       WHERE account_status = 'deleted' AND deleted_at IS NOT NULL AND deleted_at < ?
     `).get(deletedCutoff).c,
+    applications: db.prepare(`
+      SELECT COUNT(*) AS c FROM applications a WHERE ${AGED_APPLICATION}
+    `).get(applicationCutoff).c,
   };
 
   if (dryRun) return { ...countable, dryRun: true };
@@ -163,6 +218,26 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
     `).run(messageCutoff);
 
     db.prepare('DELETE FROM admin_audit_logs WHERE created_at < ?').run(auditCutoff);
+
+    /**
+     * Applications, aged out with their event.
+     *
+     * `attendance` is deliberately NOT touched — it has no foreign key to this table
+     * and it is the credited service record, which is retained indefinitely.
+     * `application_conflicts` cascades and should: it describes a clash between two
+     * applications, and it is meaningless once one of them is gone.
+     *
+     * No evidence hold is needed here. `application` is not one of
+     * `REPORT_TARGET_TYPES`, so a report can never name one, and nothing in
+     * `report_evidence` references this table. If a future release lets a report
+     * target an application, this DELETE needs the same treatment
+     * `RETAINABLE_MESSAGE_PREDICATE` gives messages — and the assertion below is
+     * what would catch its absence.
+     */
+    db.prepare(`
+      DELETE FROM applications
+       WHERE id IN (SELECT a.id FROM applications a WHERE ${AGED_APPLICATION})
+    `).run(applicationCutoff);
 
     /**
      * Anonymised shells go last, and only after their dependent rows.
@@ -359,11 +434,12 @@ export function startRetentionWorker(db) {
   const run = () => {
     try {
       const result = sweep(db);
-      const removed = result.messages + result.auditLogs + (result.purgedAccounts || 0);
+      const removed = result.messages + result.auditLogs + (result.applications || 0)
+        + (result.purgedAccounts || 0);
       if (removed > 0) {
         console.log(
           `[Retention] messages=${result.messages} auditLogs=${result.auditLogs} `
-          + `purgedAccounts=${result.purgedAccounts}`
+          + `applications=${result.applications} purgedAccounts=${result.purgedAccounts}`
         );
         /**
          * Deliberately NOT written to admin_audit_logs.
