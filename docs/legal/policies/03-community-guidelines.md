@@ -118,14 +118,13 @@ Organizers who credit hours that were not worked lose their accounts.
 
 ## Reporting
 
-Use the **Report** button on any conversation, comment, or event. Or email
-**wevolunteer.platform@gmail.com**.
+Use the **Report** button on any conversation, comment, or event to submit a report
+securely to our moderation team.
 
 **We never tell the person you reported who reported them.** Your name is attached to the
 report so we can ask you a follow-up question — an administrator can see it, and nobody else
-can. If you would rather we did not know either, email the address above from an account that
-is not yours, or call the hotlines in the Youth Safety Guidelines, which take anonymous
-reports.
+can. If you would rather we did not know either, call the hotlines in the Youth Safety 
+Guidelines, which take anonymous reports.
 
 You will not get in trouble for reporting something that turns out to be nothing — we would
 far rather look.
@@ -152,11 +151,5 @@ them.
 
 ## If you think we got it wrong
 
-Email **wevolunteer.platform@gmail.com** and say what happened and why you disagree. We reply
-within **5 business days** with the outcome and the reason. If we were wrong, we say so and
-undo it.
-
-> **Honest note, and it stays in the published version:** WeVolunteer is a small team. We
-> cannot always promise that a different person reviews your appeal than the one who made the
-> original decision. We will tell you who reviewed it. We would rather say that than promise an
-> independence we cannot deliver.
+Submit an appeal using the link provided in your suspension notice. We will notify you
+when a decision is made. Your appeal will be reviewed by a different administrator.
