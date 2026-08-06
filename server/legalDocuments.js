@@ -124,27 +124,27 @@ export const POLICY_DIR = path.join(HERE, '..', 'docs', 'legal', 'policies');
 export const LEGAL_DOCUMENTS = [
   {
     slug: 'terms-of-service',
-    version: '2.0',
+    version: '2.1',
     title: 'Terms of Service',
     consentType: 'agree',
     scope: 'signup',
     summary: 'The agreement between you and WeVolunteer: what you may do here, what we owe you, and how an account ends.',
     effectiveAt: '2026-08-05',
     file: '02-terms-of-service.md',
-    contentHash: '96aa53dad01787a84b017f6e177d90ea2f7859f87102f5bcec7e8262dfdbf64c',
+    contentHash: 'a45b6fe830900c33915d6be48e10f9ed5f5f5e28c00a2de92bfb72c38de43e21',
     /** Presented with, and accepted by, the same control as the Terms. */
     bundledWith: null,
   },
   {
     slug: 'community-guidelines',
-    version: '2.1',
+    version: '2.2',
     title: 'Community Guidelines',
     consentType: 'agree',
     scope: 'signup',
     summary: 'How people are expected to behave here, what is not allowed, and what happens when someone breaks the rules.',
     effectiveAt: '2026-08-05',
     file: '03-community-guidelines.md',
-    contentHash: '88375d5406dbb96a73701b51e6b7b1b436b1cd684050ee73787319b1a60851cc',
+    contentHash: '1cfff36cf7cb5441a61143209f9db957c9d83217011970a547d508611694a107',
     bundledWith: 'terms-of-service',
   },
   {

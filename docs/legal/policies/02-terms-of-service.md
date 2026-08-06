@@ -305,14 +305,9 @@ happened before, and whether anyone was put at risk. The ladder of consequences 
 the [Community Guidelines](03-community-guidelines.md), and anything on the "never" list there
 skips it.
 
-**Appeals.** If you think we got it wrong, email wevolunteer.platform@gmail.com saying what
-happened and why you disagree. We reply within **5 business days** with the outcome and the
-reason. If we were wrong, we say so and we undo it.
-
-We will be straight about the limit of that: WeVolunteer is one person. We cannot always
-promise that a different person reviews your appeal than the one who made the original
-decision. We will tell you who reviewed it. We would rather say that than promise an
-independence we cannot deliver.
+**Appeals.** If you think we got it wrong, you can submit an appeal directly through the
+platform. Your appeal will always be reviewed by a different administrator than the one who
+issued the original decision. If we were wrong, we say so and we undo it.
 
 **Closing your own account.** You can do it whenever you like, from Settings. See the
 [Data Deletion Policy](04-data-deletion-policy.md) for exactly what happens — including the
