@@ -175,7 +175,26 @@ export const SIGNED_OUT_ROUTES = [
  */
 export const PUBLIC_ROUTES = [
   { path: '/verify/:code', element: <CertificateVerification /> },
-  { path: '/privacy', element: <PrivacyNotice /> },
+  /**
+   * `/privacy` redirects to the registry document rather than rendering its own page.
+   *
+   * There were two privacy pages. `/legal/privacy-policy` serves the published
+   * document out of `server/legalDocuments.js`, hash-verified on every read and
+   * carrying the version an acceptance record points at. `/privacy` rendered
+   * `PrivacyNotice.jsx`, a hand-written page assembled from `src/config.js` values
+   * that predates the registry — and the Privacy Policy's own specification block
+   * says it supersedes that view as the source of truth.
+   *
+   * The consequence was not cosmetic. `PRIVACY_URL` defaulted to `/privacy`, and
+   * that is the link inside the signup consent block, so the person being asked to
+   * acknowledge how their information is handled was sent to the page that is NOT
+   * the document their acceptance is recorded against.
+   *
+   * Kept as a redirect rather than deleted because it is a published URL — it is
+   * the historical value of `PRIVACY_URL` and may exist in an email or a bookmark —
+   * and `replace` so it does not trap the back button.
+   */
+  { path: '/privacy', element: <Navigate to="/legal/privacy-policy" replace /> },
   /**
    * The Legal Center, public for the same reason and more sharply.
    *

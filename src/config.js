@@ -51,8 +51,20 @@ export const ENABLE_LEADERBOARD = import.meta.env.VITE_ENABLE_LEADERBOARD !== 'f
  * this makes the link resolve to something real in every build.
  *
  * Still overridable for a deployment that publishes its own notice elsewhere.
+ *
+ * ── Now points at the registry document, not the built-in notice ──
+ *
+ * This is the link inside the signup consent block, so it is what a student opens
+ * while being asked to acknowledge how their information is handled. It defaulted
+ * to `/privacy`, the hand-written page built from the values below — which is not
+ * the document their acceptance is recorded against. `/legal/privacy-policy`
+ * serves the published Privacy Policy out of `server/legalDocuments.js`,
+ * hash-verified on every read and carrying the version stored with the acceptance.
+ *
+ * The consent link and the consent record now name the same document. `/privacy`
+ * still resolves — it redirects there (see `src/routes/index.jsx`).
  */
-export const PRIVACY_URL = import.meta.env.VITE_PRIVACY_URL || '/privacy';
+export const PRIVACY_URL = import.meta.env.VITE_PRIVACY_URL || '/legal/privacy-policy';
 
 /**
  * The three facts the built-in privacy notice cannot know, and must not invent.
