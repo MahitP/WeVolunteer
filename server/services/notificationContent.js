@@ -40,6 +40,33 @@ export const MANDATORY_NOTICE_EVENTS = new Set([
   'APPEAL_DECISION_STANDS',
   'APPEAL_DECISION_REVERSED',
   'APPEAL_REOPENED',
+  /**
+   * The urgent safety-report alert.
+   *
+   * `reportService.js` dispatches this to every moderator when a report's DERIVED
+   * priority is `urgent` — which a student reporting an adult always is, whatever
+   * category they picked. Its own comment calls this notification "the only thing
+   * standing between that promise and a queue nobody happened to refresh".
+   *
+   * It was not in this set, so `dispatch()` fell through to the ordinary preference
+   * path and computed
+   * `emailEnabled = user.email_opt_out === 1 ? false : getPref('email')`. A
+   * moderator who had turned email off — globally, or just for this event's
+   * category — received nothing. On a platform whose entire moderator population is
+   * one person, that made a user-preference toggle the only thing between a
+   * child-safety report and an unread queue.
+   *
+   * Every other entry here is a notice the recipient must receive whatever their
+   * preferences say: being suspended, being reinstated, an appeal outcome. A report
+   * that may CAUSE a suspension is at least as consequential as the suspension
+   * notice that follows it.
+   *
+   * Deliberately scoped to the urgent path only. Normal-priority reports still
+   * dispatch nothing at all (`reportService.js`), because an alert that fires for
+   * everything is an alert people learn to close — and
+   * `reportService.alerting.test.js` pins both halves of that.
+   */
+  'SYSTEM_ALERT',
 ]);
 
 export const isMandatoryNotice = (event) => MANDATORY_NOTICE_EVENTS.has(event);
