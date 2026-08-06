@@ -20,6 +20,7 @@ import { api } from '../utils/api';
 import { formatHours, formatDay, eventPermissions } from '../utils/helpers';
 import { BarChart } from '../components/BarChart';
 import ResolutionModal from '../components/ResolutionModal';
+import ReportDetail from '../components/moderation/ReportDetail';
 import { categoryLabel } from '../moderation';
 
 /**
@@ -38,7 +39,7 @@ const STATUS_TAG = {
   dismissed: 'tag-ok',
 };
 
-export default function AdminDashboard({ addToast }) {
+export default function AdminDashboard({ addToast, user }) {
   const [pendingOrganizers, setPendingOrganizers] = useState([]);
   const [events, setEvents] = useState([]);
   const [totals, setTotals] = useState(null);
@@ -49,6 +50,8 @@ export default function AdminDashboard({ addToast }) {
   // A deletion refused because the event is under a live safety review.
   const [heldReason, setHeldReason] = useState(null);
   const [resolvingReport, setResolvingReport] = useState(null); // { id, status }
+  // The report whose full record and preserved evidence are open, by id.
+  const [openReportId, setOpenReportId] = useState(null);
 
   const loadData = async () => {
     try {
@@ -63,7 +66,7 @@ export default function AdminDashboard({ addToast }) {
       setTotals(stats);
       setReports(rpts);
     } catch (err) {
-      addToast(`Could not load the review queue: ${err.message}`, 'error');
+      addToast(`Could not load the Moderation Center: ${err.message}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -169,8 +172,25 @@ export default function AdminDashboard({ addToast }) {
 
   return (
     <div className="stack-lg">
+      {/* Declared BEFORE ResolutionModal so that when a moderator resolves from
+          inside the detail view, the resolution dialog is the later element and
+          therefore the one on top. `Modal` supports a stacked overlay for exactly
+          this pair — see `.modal-overlay-stacked`. */}
+      {openReportId && (
+        <ReportDetail
+          reportId={openReportId}
+          user={user}
+          addToast={addToast}
+          onClose={() => setOpenReportId(null)}
+          /* An evidence read appends to the report's history, and the queue shows
+             derived state; reloading keeps the list honest about what just
+             happened. */
+          onChanged={loadData}
+        />
+      )}
+
       {resolvingReport && (
-        <ResolutionModal 
+        <ResolutionModal
           report={resolvingReport}
           onClose={() => setResolvingReport(null)}
           onSubmit={submitResolution}
@@ -352,10 +372,15 @@ export default function AdminDashboard({ addToast }) {
         )}
       </section>
 
-      {/* ── Moderation Queue ── */}
+      {/* ── Reports ──
+          Titled "Reports" rather than "Moderation queue": the page itself is the
+          Moderation Center, and a section repeating the page's own name inside it
+          told the reader nothing while making the two sound like different places.
+          The other section here is "Organizer requests", which is also moderation
+          — what distinguishes this one is that it holds reports. */}
       <section>
         <div className="section-head">
-          <h2>Moderation queue</h2>
+          <h2>Reports</h2>
           {reports.filter(r => r.status === 'open').length > 0 && (
             <span className="section-action tag tag-danger">{reports.filter(r => r.status === 'open').length} waiting</span>
           )}
@@ -478,7 +503,22 @@ export default function AdminDashboard({ addToast }) {
                       picked a report up it lost its buttons: `reviewing` and
                       `escalated` reports could be created and then never closed
                       from the product at all — and an escalated report is by
-                      definition the one somebody is actively dealing with. */}
+                      definition the one somebody is actively dealing with.
+
+                      "Open" sits OUTSIDE that gate, deliberately: a resolved
+                      report is exactly the one somebody needs to read in full,
+                      because an appeal is reviewed against the decision recorded
+                      on it. Gating the record behind "still actionable" would hide
+                      the evidence for every case that has been decided — which is
+                      every case an appeal can be about. */}
+                  <div className="row row-wrap" style={{ gap: 'var(--s2)' }}>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setOpenReportId(report.id)}
+                    >
+                      Open{report.evidence_count > 0 ? ' · evidence' : ''}
+                    </button>
+                  </div>
                   {LIVE_STATUSES.has(report.status) && (
                     <div className="row row-wrap" style={{ gap: 'var(--s2)' }}>
                       {report.status === 'open' && (
