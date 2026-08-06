@@ -5766,6 +5766,18 @@ input:disabled + .premium-slider {
   max-width: 44ch;
 }
 
+/* The factual half of a permission refusal: which feature, why, who can grant it.
+   Quieter and smaller than `.err-body`, because the themed body is the sentence
+   that acknowledges the situation and this is the one somebody copies into an
+   email asking for access. Same measure, so the two read as one column. */
+.err-detail {
+  font-size: 0.9375rem;
+  line-height: 1.58;
+  color: var(--ink-3);
+  margin: var(--s3) 0 0;
+  max-width: 44ch;
+}
+
 .err-actions {
   display: flex;
   flex-wrap: wrap;
