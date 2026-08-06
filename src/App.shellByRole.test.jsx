@@ -90,7 +90,7 @@ const sidebarLabels = () =>
  * before `/events` — so it is guarded instead.
  *
  * `/errors` shipped in NAV with no branch in that chain: the page rendered
- * correctly, titled "Review queue", with the wrong rail item highlighted. No
+ * correctly, titled "Moderation Center", with the wrong rail item highlighted. No
  * existing test noticed, because every one of them asserted the route or the
  * capability rather than what the shell said the reader was looking at.
  */
@@ -123,7 +123,7 @@ describe('navigation, per role', () => {
   it.each([
     ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'My profile']],
     ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'New event', 'Notifications', 'My profile']],
-    ['admin', ['Review queue', 'Opportunities', 'Notifications', 'Appeals']]
+    ['admin', ['Moderation Center', 'Opportunities', 'Notifications', 'Appeals']]
   ])('%s is unchanged by the conversion', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
   });
@@ -131,7 +131,7 @@ describe('navigation, per role', () => {
   it('super_admin gets a populated rail, not an empty shell', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
-      'Review queue', 'Opportunities', 'Calendar', 'Messages', 'New event',
+      'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'New event',
       'Notifications', 'Errors', 'Appeals', 'My profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
@@ -146,7 +146,7 @@ describe('navigation, per role', () => {
    */
   it('adds Errors without disturbing the mobile primary row', () => {
     const labels = navItemsFor(USER('super_admin')).map(n => n.label);
-    expect(labels.slice(0, 4)).toEqual(['Review queue', 'Opportunities', 'Calendar', 'Messages']);
+    expect(labels.slice(0, 4)).toEqual(['Moderation Center', 'Opportunities', 'Calendar', 'Messages']);
     expect(labels.indexOf('Errors')).toBeGreaterThan(3);
   });
 
@@ -178,7 +178,7 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
-      'Review queue', 'Opportunities', 'Calendar', 'Messages', 'New event',
+      'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'New event',
       'Notifications', 'Errors', 'Appeals', 'My profile'
     ]);
   });
@@ -187,7 +187,7 @@ describe('navigation, per role', () => {
     signedInAs(USER('admin'));
     renderAt('/');
     await screen.findByTestId('admin-dash');
-    expect(sidebarLabels()).toEqual(['Review queue', 'Opportunities', 'Notifications', 'Appeals']);
+    expect(sidebarLabels()).toEqual(['Moderation Center', 'Opportunities', 'Notifications', 'Appeals']);
   });
 });
 
@@ -298,8 +298,8 @@ describe('page titles', () => {
   it.each([
     ['student', 'Dashboard'],
     ['organizer', 'Dashboard'],
-    ['admin', 'Review queue'],
-    ['super_admin', 'Review queue'],
+    ['admin', 'Moderation Center'],
+    ['super_admin', 'Moderation Center'],
     ['partner', 'Dashboard']
   ])('%s reads "%s" on the dashboard', async (role, title) => {
     signedInAs(USER(role));

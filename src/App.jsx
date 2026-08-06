@@ -117,7 +117,7 @@ const personaFor = (user) =>
  * entry, because it has no dashboard to send anyone to.
  */
 const DASHBOARD_NAV = {
-  staff: { label: 'Review queue', icon: ShieldCheck },
+  staff: { label: 'Moderation Center', icon: ShieldCheck },
   host: { label: 'Dashboard', icon: LayoutDashboard },
   volunteer: { label: 'Dashboard', icon: LayoutDashboard },
 };
@@ -209,7 +209,7 @@ for (const entry of NAV) {
  * So it stays hand-written — but it is hoisted out of the component, exported,
  * and covered by a test asserting every NAV path resolves to its own id.
  * `/errors` was added to NAV without a branch here, and the result was a page
- * titled "Review queue" with the wrong rail item highlighted: silent, and
+ * titled "Moderation Center" with the wrong rail item highlighted: silent, and
  * invisible to every existing test.
  */
 export function tabForPath(pathname) {
@@ -265,7 +265,7 @@ const PAGE_META = {
     profile: { title: 'My profile', sub: 'Your public track record and organizer status' }
   },
   staff: {
-    dashboard: { title: 'Review queue', sub: 'Approve organizers and moderate events' },
+    dashboard: { title: 'Moderation Center', sub: 'Approve organizers and moderate events' },
     browse: { title: 'All events', sub: 'Everything posted across the district' },
     notifications: { title: 'Notifications', sub: 'Platform activity' },
     errors: { title: 'Errors', sub: 'Crashes and faults reported by browsers, the server, and background jobs' },
