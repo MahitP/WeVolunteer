@@ -31,8 +31,15 @@ process · governing law and venue · contact.
 - **Governing law and venue** — New Jersey law, Middlesex County venue (the operator is in
   South Brunswick, Middlesex County). **Needs owner confirmation** before publication.
 
-**Still open — see the `[[TODO: ...]]` markers in the draft.** The liability cap figure, the
-postal address, the policy-archive URL, and counsel's sign-off on the no-arbitration choice.
+**Resolved for the v1.0 release.** The liability cap is $100, with the reasoning kept in the text
+(the service is free, so "fees paid" would be a disguised zero, and a modest cap is likelier to be
+enforced than an aggressive one) — counsel should confirm the figure, but the section is
+publishable with it and was not publishable blank. The postal address is deliberately NOT printed:
+service of paper correspondence is arranged on request, because the only address that exists today
+is residential and publishing it would expose the person who suspends accounts to the people whose
+accounts get suspended. The archive promise is resolved by this being v1.0. Counsel should still
+confirm the no-arbitration choice and the New Jersey venue; that is tracked outside the document
+rather than printed in it.
 
 > **This is still the one document in the set that most benefits from a lawyer reading it
 > before it goes live.** The draft below is complete and internally consistent, and the three
@@ -56,7 +63,7 @@ a fourteen-year-old. §10 of `../00-COMPLIANCE-AND-RISK.md` should be read along
 
 # WeVolunteer Terms of Service
 
-**Version 2.0 · Last updated 2026-08-05**
+**Version 1.0 · Last updated 2026-08-06**
 
 > **THE OPERATOR — the only place in this document that names the legal entity.**
 > WeVolunteer is operated by **Mahit Pulavarthi, a sole proprietor doing business as
@@ -354,9 +361,9 @@ Subject to the section above, and to the extent New Jersey law allows:
 - We are not liable for what a **third party** does with information you chose to give it —
   including anyone you hand a certificate code to.
 - For everything else, taken together, our total liability to you is limited to
-  **[[TODO: liability cap — owner and counsel to set a figure. See the note below; the drafting
-  recommendation is a small, honest number (for example $100) rather than "fees paid," since
-  the service is free and "fees paid" would read as zero.]]**
+  **one hundred US dollars ($100)**. WeVolunteer is free, so a cap of "the fees you paid" would
+  be a cap of nothing; a small real number is an honest limit rather than a disguised zero, and
+  a modest cap is more likely to be enforced than an aggressive one.
 
 ### If you are under 18
 
@@ -394,10 +401,11 @@ A change that leaves you worse off — new collection, new sharing, a right take
 retention period — gets a new major version and we ask you to accept it again. A clarification
 gets a minor version and notice only.
 
-Old versions stay available at
-**[[TODO: policy archive URL — depends on the public URL decision. Until this is a real link,
-the archive commitment in this section, in the Privacy Policy, and in the Cookie Notice is
-unkeepable.]]**
+**This is version 1.0 — the first published version, so there are no earlier ones yet.** When we
+replace it we keep the version it replaced, and you can email
+**wevolunteer.platform@gmail.com** for any previous version and the dates it applied. Every
+version is stored with a content fingerprint, so a copy you receive can be checked against the
+one your account accepted.
 
 ## 14. If we disagree
 
@@ -412,9 +420,6 @@ We would much rather fix a problem than argue about one, so:
 **There is no arbitration clause in these terms and no class-action waiver.** That is a
 deliberate choice: forcing minors and their families into private arbitration over a free
 service is not something we are willing to do, and courts increasingly disfavour it.
-[[TODO: counsel to confirm the no-arbitration, no-class-action-waiver choice, and confirm New
-Jersey law and Middlesex County venue in section 15, before publication.]]
-
 **Step 1 is not a precondition for anything that matters.** Nothing in this section stops you,
 or requires you to wait, before calling 911, reporting suspected child abuse to DCP&P at
 1-877-NJ-ABUSE, telling your school, or contacting the New Jersey Division of Consumer Affairs,
@@ -441,9 +446,14 @@ does not take them away from you.
 
 ## 17. Contact
 
-The operator named at the top of this document, at:
+The operator named at the top of this document, at
+**wevolunteer.platform@gmail.com**, which that person reads directly.
 
-[[TODO: postal address — required on a published ToS and for regulator and legal correspondence.
-Owner to supply the address to print; a home address may not be the right answer, so this may
-need a mail-forwarding or registered-agent decision first.]]
+**If you need to send legal or regulatory correspondence on paper**, email that address and we
+will give you a postal address for service. We do not print one here, and the reason is worth
+stating: WeVolunteer is run by one individual rather than a company, so the only postal address
+that exists today is a home address. Publishing the home address of the person who suspends
+accounts, to the people whose accounts get suspended, is not a risk we are willing to take —
+and it is not necessary, because service can be arranged on request. If the operator later
+becomes an LLC, a business address will appear here instead.
 wevolunteer.platform@gmail.com

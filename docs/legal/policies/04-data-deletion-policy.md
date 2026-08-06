@@ -44,7 +44,7 @@ anonymisation (re-audit Q9 — the "When it happens" section below currently pro
 
 # What happens when you delete your account
 
-**Version 1.0 · Last updated 2026-08-05**
+**Version 1.0 · Last updated 2026-08-06**
 
 Deleting your WeVolunteer account is permanent. This page explains exactly what goes and what
 stays, because some things stay, and you should know which before you decide — not after.
@@ -121,19 +121,15 @@ usually years later, for a college or a job.
 We are telling you this plainly rather than burying it, because it is the one part of deleting
 your account that is genuinely permanent and genuinely public.
 
-#### Choose what happens to your certificates
+#### There is no way to switch a certificate off
 
-[[NOT YET IMPLEMENTED — see R-02. Remove this section until the code supports it.]]
+We would like to offer you a choice here — keep your certificates verifiable, or void them so
+your name comes off and the codes stop working. **That choice does not exist yet, and we cannot
+promise a date for it.**
 
-When you delete your account you can choose:
-
-- **Keep them verifiable** — your name stays on your certificates so schools can still check
-  them. Choose this if you have used, or might use, these hours for anything.
-- **Void them** — your name is removed and the certificates stop working. Anyone who checks
-  one is told it has been withdrawn. Choose this if you would rather not be findable.
-
-**Voiding cannot be undone**, and any certificate you already handed to a school will stop
-verifying.
+So the position today is the one described above, and it is the reason this page asks you to read
+before you delete rather than after: a certificate you have already earned keeps your full name
+on it, and deleting your account does not change that.
 
 ### Messages you sent
 

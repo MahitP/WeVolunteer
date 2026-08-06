@@ -44,7 +44,7 @@ listed three causes; there are two.
 
 # Certificate verification
 
-**Version 1.0 · Last updated 2026-08-05**
+**Version 1.0 · Last updated 2026-08-06**
 
 WeVolunteer issues a certificate when a student completes a volunteer event. Each certificate
 has a code on it. Anyone holding that code can check the certificate is real.
@@ -56,10 +56,8 @@ are on them.
 
 ### How to verify
 
-Go to **[[TODO: public URL — the address WeVolunteer is served from in production, the value
-`APP_URL` will hold. This is printed on every certificate, so it has to be decided before the
-first certificate is issued, not before this document publishes.]]/verify** and enter the code
-printed on the certificate. It looks like `WEV-4K2P-9XQF`.
+Go to the **Verify a certificate** page on WeVolunteer — the address is printed on the
+certificate itself, next to the code — and enter the code printed on the certificate. It looks like `WEV-4K2P-9XQF`.
 
 You do not need an account and you do not need to sign in.
 
@@ -153,10 +151,8 @@ something years later. We would rather it still work.
 The cost of that choice is the sentence above: **your name stays on it, permanently, and
 deleting your account does not remove it.**
 
-[[NOT YET BUILT — P0/P1, re-audit R-02. Once the void option ships, add:
-"When you delete your account you can choose to void your certificates instead. Voiding removes
-your name and stops the codes working — permanently, and including any certificate you already
-gave to a school. It is the trade: verifiability for erasure, and it is yours to make."]]
+There is no option to void a certificate. We would like to add one, and cannot promise a date,
+so the sentence above is the whole of the current position rather than a summary of it.
 
 See the [Data Deletion Policy](04-data-deletion-policy.md).
 

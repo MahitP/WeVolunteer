@@ -11,10 +11,8 @@ let their students take part, and anyone comparing WeVolunteer against ed-tech t
 **Required sections.** The claim · what is actually stored and why · what is not used · why
 there is no cookie banner · third-party storage · changes.
 
-**Decisions required.** One placeholder remains — the policy-archive URL, shared with the Terms
-and the Privacy Policy. Everything else is resolved: the error-diagnostics retention figures are
-now the real ones from `sweepErrors` in `server/errorReporter.js` (30 / 30 / 180 / 7 days), not
-the rounded "90 days" the Privacy Policy previously published.
+**Resolved.** The policy-archive placeholder is gone: this is v1.0, so there are no superseded
+versions yet, and the draft says that instead of promising a URL that does not resolve.
 
 **Why write it when there are no trackers?** Three reasons. It is a **procurement asset** —
 school and nonprofit reviewers ask this question and a written answer shortens the review. It is a
@@ -33,7 +31,7 @@ recommended in the handoff spec.
 
 # Cookies and tracking
 
-**Version 1.0 · Last updated 2026-08-05**
+**Version 1.0 · Last updated 2026-08-06**
 
 **Short version: WeVolunteer does not track you.** No advertising cookies, no analytics
 services, no pixels, no fingerprinting, no third-party scripts of any kind.
@@ -197,7 +195,8 @@ clearing your browser storage.
 
 If we ever add anything that stores data on your device, we will update this page **before**
 it ships and tell you in the app. Previous versions are kept at
-**[[TODO: policy archive URL — depends on the public URL decision. The same TODO appears in the
-Terms of Service and the Privacy Policy; all three must resolve to the same real link.]]**
+**This is version 1.0 — the first published version, so there are no earlier ones yet.** When we
+replace it we keep the version it replaced; email **wevolunteer.platform@gmail.com** for any
+previous version and the dates it applied.
 
 Questions: **wevolunteer.platform@gmail.com**

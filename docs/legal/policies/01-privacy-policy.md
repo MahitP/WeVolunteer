@@ -42,8 +42,11 @@ reading level.
   otherwise.
 - **Contact** — wevolunteer.platform@gmail.com, monitored by the operator.
 
-**Still open — see the `[[TODO: ...]]` markers in the draft.** The email-sending provider, the
-hosting provider, and the policy-archive URL.
+**Still open — one item, marked in the draft as blocking publication.** The production hosting
+provider and the country the database sits in. The email-sending provider is resolved: `SMTP_HOST`
+is Gmail, so it is Google, and the row merges with the existing Google entry. The policy-archive
+promise is resolved by this being v1.0 — there are no superseded versions yet, so the draft says
+so and offers previous versions on request once there are any.
 
 **Relationship to existing code.** This supersedes `src/views/PrivacyNotice.jsx` as the
 *source of truth*, but that page's architecture is correct and should be kept: factual
@@ -58,7 +61,7 @@ no district-specific facts — that branch is gone.
 
 # Privacy at WeVolunteer
 
-**Version 2.0 · Last updated 2026-08-05** · Applies to WeVolunteer version 1.2 and later
+**Version 1.0 · Last updated 2026-08-06** · Applies to WeVolunteer version 1.2 and later
 
 > **THE OPERATOR — the only place in this document that names the legal entity.**
 > WeVolunteer is operated by **Mahit Pulavarthi, a sole proprietor doing business as
@@ -217,18 +220,34 @@ it was about, and the event it happened at. What survives is the report itself, 
 name as it was at the time, and a copy of the messages that were saved with it — not your profile,
 which is still removed and scrambled.
 
-**We have not yet set an end date for safety reports, and we should.** "Indefinitely" is the
-honest description of what the software does today, not a considered retention period, and we are
-taking legal advice on what the right one is — the answer is tied to how long a person who was a
-minor at the time keeps the right to bring a claim in New Jersey, which is a long time. We will
-publish the period here when we have it.
+**Why safety reports have no end date, and why that is a decision rather than an oversight.**
+
+Two things drive it. The first is the claim window: New Jersey gives someone who was a minor at
+the time a very long time to bring a claim, and for claims about child sexual abuse it is longer
+still. A report deleted inside that window destroys the record that protects the student who
+filed it at least as much as it protects us.
+
+The second is that safety evidence has to be unchangeable to be worth anything. The database
+physically refuses to delete a report or to edit the messages saved with it — not "we have a
+policy against it", but a rule the database enforces on every attempt, including ours. We
+considered blanking the saved messages after a number of years and decided against it, because
+the only way to do that is to make frozen evidence editable, and the party most motivated to
+change a safety record is the party it is about.
+
+So the report itself is kept for good, and we would rather say that plainly than publish a
+number we would not honour. **What is kept is deliberately small:** what was reported, what we
+decided, when, and the names as they were at the time. It is not your profile — a deleted
+account is still anonymised and still removed on the schedule above — and it is not the whole
+conversation. Everything in a reported thread that was not saved as evidence goes back on the
+ordinary three-year clock once the report is closed.
 
 Everything else has an end date.
 
-**There is currently no way to make your certificates stop being verifiable.** We are building an
-option to void them when you delete your account — removing your name and stopping the codes working —
-but **it does not exist yet**, so the only accurate thing we can tell you today is that a
-certificate you have earned keeps your full name on it, permanently. The
+**There is currently no way to make your certificates stop being verifiable.** We would like to
+add an option to void them when you delete your account — removing your name and stopping the
+codes working — but **it does not exist, and we cannot promise a date**, so the only accurate
+thing we can tell you today is that a certificate you have earned keeps your full name on it,
+permanently. The
 [Data Deletion Policy](04-data-deletion-policy.md) explains exactly what that means. Please read
 it before you delete, not after.
 
@@ -309,12 +328,12 @@ WeVolunteer runs on a small number of outside services. Here is all of them:
 
 | Service | What it receives | What it is for |
 |---|---|---|
-| **[[TODO: email-sending provider — name the SMTP service configured in `SMTP_*` for production. This row cannot publish as a placeholder: a named subprocessor list is the point of the table.]]** | Your email address and the message | Sending you notification and security emails |
+| **Google** (Gmail, for outgoing mail) | Your email address and the message | Sending you notification and security emails. This is the same account as the contact address on this page |
 | **Google** (only if you sign in with Google) | Your email address and basic profile | Signing you in. We ask Google for nothing else |
 | **OpenStreetMap / Nominatim** | Event location text | Turning an event address into map coordinates. **Never anything about you** |
 | **Open-Meteo** | Event coordinates | The weather forecast on an event page. **Never anything about you** |
 | **CARTO** | **Your IP address**, when a map is shown | Loading the map images. It does not receive your name or account — see below |
-| **[[TODO: hosting provider — name the company that hosts the server and stores the SQLite database in production, and state whether the data stays in the United States.]]** | Stores the database | Running the service |
+| **[[OWNER DECISION — BLOCKS PUBLICATION: name the company that hosts the production server, and the country the database sits in. This table is a complete list of everyone who receives your information, so it cannot be published with a gap in it.]]** | Stores the database | Running the service |
 
 Two of these are contacted by our servers, so they never see your device.
 
@@ -357,10 +376,13 @@ between, and you should not wait to hear it from one.
 
 If we change something that matters, we will tell you in the app before it takes effect —
 not by quietly editing this page. The "last updated" date at the top always reflects the
-current version, and previous versions are kept at
-**[[TODO: policy archive URL — depends on the public URL decision. The same TODO appears in the
-Terms of Service and the Cookie Notice; all three must resolve to the same real link, because
-this is a promise to keep superseded versions readable.]]**
+current version.
+
+**This is version 1.0 — the first published version, so there are no earlier ones yet.** When we
+replace it we keep the version it replaced, and you can email
+**wevolunteer.platform@gmail.com** for any previous version and the dates it applied. Every
+version is stored with a content fingerprint, so a copy you receive can be checked against the
+one your account accepted.
 
 ## Contact
 

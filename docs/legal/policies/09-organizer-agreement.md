@@ -46,7 +46,7 @@ no legal effect.
 
 # WeVolunteer Organizer Agreement
 
-**Version 1.0 · 2026-08-05**
+**Version 1.0 · Last updated 2026-08-06**
 
 You are applying to post volunteer events for students. Most of those students are minors.
 This agreement sets out what you may do with what you learn about them.
