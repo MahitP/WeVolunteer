@@ -302,16 +302,46 @@ describe('signed-out and public routes', () => {
    * perfectly declared. The check is derived from the table now, and asserting
    * BOTH public routes here is what keeps it derived.
    */
-  it('renders the privacy notice to a signed-out visitor', async () => {
+  /**
+   * `/privacy` now REDIRECTS to the registry document rather than rendering its own
+   * page, and these two tests changed with it.
+   *
+   * There were two privacy pages: `/legal/privacy-policy`, which serves the
+   * published document out of `server/legalDocuments.js` hash-verified on every
+   * read, and `/privacy`, a hand-written page built from `src/config.js` values that
+   * predates the registry. `PRIVACY_URL` defaulted to the second one, and that is
+   * the link inside the signup consent block — so the person being asked to
+   * acknowledge how their information is handled was sent to the page that is NOT
+   * the document their acceptance is recorded against.
+   *
+   * The route is kept as a redirect rather than removed because it is a published
+   * URL that may exist in a bookmark or an email. What is asserted here is that it
+   * still resolves, and that it lands on the registry document — for a signed-out
+   * visitor as well as a signed-in one, since the consent block is read by somebody
+   * who has no account yet.
+   */
+  it('redirects a signed-out visitor from /privacy to the registry document', async () => {
     api.getMe.mockResolvedValue(null);
-    renderAt('/privacy');
-    expect(await screen.findByTestId('privacy')).toBeInTheDocument();
+    render(
+      <MemoryRouter initialEntries={['/privacy']}>
+        <App />
+        <LocationProbe />
+      </MemoryRouter>
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('where').dataset.path).toBe('/legal/privacy-policy'));
   });
 
-  it('renders the privacy notice to a signed-in user too', async () => {
+  it('redirects a signed-in user from /privacy too', async () => {
     signedInAs(USER('student'));
-    renderAt('/privacy');
-    expect(await screen.findByTestId('privacy')).toBeInTheDocument();
+    render(
+      <MemoryRouter initialEntries={['/privacy']}>
+        <App />
+        <LocationProbe />
+      </MemoryRouter>
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('where').dataset.path).toBe('/legal/privacy-policy'));
   });
 });
 
