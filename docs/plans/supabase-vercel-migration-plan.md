@@ -19,9 +19,9 @@ asynchronous. That is not a deployment change; it is a port. Recommendation is
 | Fact | Measurement |
 |---|---|
 | Database driver | `node:sqlite` (`DatabaseSync`), a local file |
-| Files reaching the database layer | **65** |
-| `PRAGMA` statements | **93** across `server/` and `server/migrations/` |
-| Versioned migrations | **16**, plus the `addColumnIfMissing` additive path |
+| Files reaching the database layer | **64** (files containing `db.prepare(` or `db.exec(`; 27 import `db.js` directly) |
+| `PRAGMA` statements | **109** across `server/` and `server/migrations/` |
+| Versioned migrations | **18**, plus the `addColumnIfMissing` additive path |
 | In-process background workers | 3 — `notificationWorker`, `exportWorker`, `retentionWorker` |
 | In-process schedulers | 1 — `autoSelectScheduler` |
 | Realtime | `socket.io` 4.8 server (`realtime/socketServer.js`) |
@@ -64,11 +64,24 @@ This is the reason a "swap the driver" framing is wrong.
 
 ### 2.2 The migration registry is SQLite-specific
 
-Sixteen migrations, checksum-verified on every boot, written against SQLite
-semantics. `001_authz_roles.js` is a full table rebuild that exists because
-SQLite cannot drop a column — carrying six documented safety guards including a
-`PRAGMA foreign_keys` assertion that only means anything in SQLite. In Postgres
-that migration is `ALTER TABLE … DROP COLUMN` and the guards are moot.
+Eighteen migrations, checksum-verified on every boot, written against SQLite
+semantics. **Two** of them are full table rebuilds that exist only because SQLite
+cannot alter a constraint in place, and both carry the six documented safety guards
+including a `PRAGMA foreign_keys` assertion that means nothing outside SQLite:
+
+- `001_authz_roles.js` — rebuilds `users` to widen a CHECK. In Postgres this is
+  `ALTER TABLE … DROP CONSTRAINT` / `ADD CONSTRAINT`.
+- `018_admin_conversations.js` — rebuilds `conversations` to DROP NOT NULL from
+  three columns so an administrator's thread can exist. In Postgres this is three
+  `ALTER COLUMN … DROP NOT NULL` statements and the entire rebuild disappears,
+  guards included.
+
+018 also adds a partial unique index over an expression
+(`COALESCE(student_id, organizer_id)` WHERE `kind IN (…)`). Postgres supports both
+partial and expression indexes, so that one ports directly — worth noting because it
+is the only constraint in the schema that a naïve `CREATE TABLE` translation would
+silently drop, and dropping it means an administrator can hold two duplicate threads
+with the same person.
 
 They cannot be replayed against Postgres. A port needs a single baseline schema
 generated from the current one, with `schema_migrations` restarted — and the
