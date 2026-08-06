@@ -1,5 +1,7 @@
 import express from 'express';
 import { authenticateToken, inTransaction } from '../utils.js';
+import { reportLimiter } from '../reportLimiter.js';
+import { createReport } from '../reportService.js';
 import { can, requireCap } from '../authz.js';
 import { isBlockedBetween, block, unblock } from '../blocking.js';
 import { notificationService } from '../services/notificationService.js';
@@ -325,84 +327,58 @@ router.get('/api/messages/search', authenticateToken, (req, res) => {
   }
 });
 
-router.post('/api/messages/conversations/:id/report', authenticateToken, (req, res) => {
-  try {
-    const conversation = getConversation(req.params.id);
-    if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
-    if (!isConversationParticipant(conversation.id, req.user.id)) {
-      return res.status(404).json({ error: 'Conversation not found' });
-    }
-    const reason = String(req.body.reason || '');
-    if (!['inappropriate', 'spam', 'safety', 'other'].includes(reason)) {
-      return res.status(400).json({ error: 'Choose a report reason' });
-    }
-    const messageIds = Array.isArray(req.body.messageIds) ? req.body.messageIds.slice(0, 20) : [];
-    const details = String(req.body.details || '').trim().slice(0, 1000);
-    const reportId = newId('msg-report');
-    const now = new Date().toISOString();
+router.post('/api/messages/conversations/:id/report', authenticateToken, reportLimiter, (req, res) => {
+  const reason = String(req.body.reason || '');
+  const details = String(req.body.details || '').trim();
 
-    /**
-     * The context a moderator needs, captured now rather than joined later.
-     *
-     * Everything on the other side of those joins is destructible by the person
-     * the report is about: the conversation cascades from the event, the event
-     * is the organizer's own to delete, and the users rows are anonymised on
-     * account deletion and hard-purged three years later. Migration 011 severed
-     * the cascades so the report survives; these columns are what make the
-     * surviving row still legible. A report that reads "someone reported
-     * something about someone" is not evidence of anything.
-     *
-     * The reported party is whichever participant is not the reporter. Read from
-     * the conversation rather than accepted from the client for the obvious
-     * reason.
-     */
-    const otherPartyId = conversation.student_id === req.user.id
-      ? conversation.organizer_id
-      : conversation.student_id;
-    const otherParty = db.prepare('SELECT name, role FROM users WHERE id = ?').get(otherPartyId);
-    const event = db.prepare('SELECT id, title FROM events WHERE id = ?').get(conversation.event_id);
+  const legacyToCategory = {
+    safety: 'something_feels_wrong',
+    inappropriate: 'bullying_or_harassment',
+    spam: 'spam_or_advertising',
+    other: 'other'
+  };
+  const category = legacyToCategory[reason] || reason;
 
-    inTransaction(() => {
-      db.prepare(`
-        INSERT INTO conversation_reports (
-          id, reporter_id, reporter_name_snapshot, conversation_id,
-          reported_user_id, reported_name_snapshot, reported_role_snapshot,
-          event_id_snapshot, event_title_snapshot,
-          reason, details, snapshot_created_at, created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        reportId, req.user.id, req.user.name ?? null, conversation.id,
-        otherPartyId ?? null, otherParty?.name ?? null, otherParty?.role ?? null,
-        conversation.event_id ?? null, event?.title ?? null,
-        reason, details || null, now, now
-      );
+  const result = createReport({
+    reporter: req.user,
+    targetType: 'conversation',
+    targetId: req.params.id,
+    category,
+    description: details
+  });
 
-      const snapshotRows = messageIds.length > 0
-        ? messageIds.map(id => db.prepare(`
-            SELECT id, sender_id, body, created_at FROM messages
-            WHERE id = ? AND conversation_id = ?
-          `).get(id, conversation.id)).filter(Boolean)
-        : db.prepare(`
-            SELECT id, sender_id, body, created_at FROM messages
-            WHERE conversation_id = ?
-            ORDER BY created_at DESC LIMIT 10
-          `).all(conversation.id).reverse();
-
-      const insert = db.prepare(`
-        INSERT INTO conversation_report_messages (report_id, message_id, sender_id, body, created_at)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-      for (const msg of snapshotRows) {
-        insert.run(reportId, msg.id, msg.sender_id, msg.body, msg.created_at);
-      }
-    });
-
-    res.status(201).json({ success: true, reportId });
-  } catch (err) {
-    console.error('Conversation report error:', err);
-    res.status(500).json({ error: 'Failed to submit report' });
+  if (!result.ok) {
+    return res.status(result.status || 400).json({ error: result.error, code: result.code });
   }
+
+  res.status(201).json({ success: true, reportId: result.reportId, duplicate: result.duplicate });
+});
+
+router.post('/api/messages/:id/report', authenticateToken, reportLimiter, (req, res) => {
+  const reason = String(req.body.reason || '');
+  const details = String(req.body.details || '').trim();
+
+  const legacyToCategory = {
+    safety: 'something_feels_wrong',
+    inappropriate: 'bullying_or_harassment',
+    spam: 'spam_or_advertising',
+    other: 'other'
+  };
+  const category = legacyToCategory[reason] || reason;
+
+  const result = createReport({
+    reporter: req.user,
+    targetType: 'message',
+    targetId: req.params.id,
+    category,
+    description: details
+  });
+
+  if (!result.ok) {
+    return res.status(result.status || 400).json({ error: result.error, code: result.code });
+  }
+
+  res.status(201).json({ success: true, reportId: result.reportId, duplicate: result.duplicate });
 });
 
 router.get('/api/messages/users/search', authenticateToken, (req, res) => {

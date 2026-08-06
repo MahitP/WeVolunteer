@@ -148,11 +148,11 @@ describe('evidence under a live report cannot be destroyed by the reported party
   async function evidenceCounts(conversationId) {
     const db = await openDb();
     const reports = db.prepare(
-      'SELECT COUNT(*) c FROM conversation_reports WHERE conversation_id = ?'
+      "SELECT COUNT(*) c FROM reports WHERE target_type = 'conversation' AND target_id = ?"
     ).get(conversationId).c;
     const snapshots = db.prepare(`
-      SELECT COUNT(*) c FROM conversation_report_messages
-      WHERE report_id IN (SELECT id FROM conversation_reports WHERE conversation_id = ?)
+      SELECT COUNT(*) c FROM report_evidence
+      WHERE report_id IN (SELECT id FROM reports WHERE target_type = 'conversation' AND target_id = ?)
     `).get(conversationId).c;
     db.close();
     return { reports, snapshots };
@@ -160,8 +160,8 @@ describe('evidence under a live report cannot be destroyed by the reported party
 
   async function resolveReport(reportId) {
     const admin = await session('admin@example.gov');
-    const res = await srv.call('PATCH', `/api/admin/reports/conversation/${reportId}`,
-      { status: 'resolved' }, admin);
+    const res = await srv.call('PATCH', `/api/admin/reports/${reportId}`,
+      { status: 'resolved', resolution: 'account_suspended', resolutionNote: 'This is a long enough note to pass.' }, admin);
     expect(res.status, `could not resolve report (${JSON.stringify(res.body)})`).toBe(200);
   }
 
@@ -302,14 +302,14 @@ describe('evidence under a live report cannot be destroyed by the reported party
     await srv.call('DELETE', `/api/events/${eventId}`, undefined, organizer);
 
     const db = await openDb();
-    const row = db.prepare('SELECT * FROM conversation_reports WHERE id = ?').get(reportId);
+    const row = db.prepare('SELECT * FROM reports WHERE id = ?').get(reportId);
     db.close();
 
     expect(row.reporter_name_snapshot, 'who filed it').toBeTruthy();
-    expect(row.reported_name_snapshot, 'who it was about').toBeTruthy();
-    expect(row.reported_role_snapshot, 'and what they were to the reporter').toBe('organizer');
-    expect(row.event_title_snapshot, 'and where it happened').toMatch(/Pre-event window/);
-    expect(row.details, 'and what the student actually said')
+    expect(row.target_author_name_snapshot, 'who it was about').toBeTruthy();
+    expect(row.target_role_snapshot, 'and what they were to the reporter').toBe('organizer');
+    expect(row.target_name_snapshot, 'and where it happened').toMatch(/Pre-event window/);
+    expect(row.description, 'and what the student actually said')
       .toMatch(/off the platform/);
   });
 });
@@ -331,10 +331,12 @@ describe('a safety record survives the deletion of the people in it', () => {
     `).run(now);
     db.prepare(`
       INSERT INTO reports (id, reporter_id, reporter_name_snapshot, target_type, target_id,
-                           target_body_snapshot, reason, status, created_at)
+                           target_body_snapshot, category, description, status, priority,
+                           created_at, updated_at)
       VALUES ('rep-purge-1', 'u-purge-reporter', 'Purge Reporter', 'comment', 'cmt-gone',
-              'the comment that was reported', 'it was abusive', 'resolved', ?)
-    `).run(now);
+              'the comment that was reported', 'bullying_or_harassment', 'it was abusive',
+              'resolved', 'normal', ?, ?)
+    `).run(now, now);
 
     // The cascade under test. Before migration 011 this deleted the report.
     db.prepare("DELETE FROM users WHERE id = 'u-purge-reporter'").run();
@@ -361,9 +363,10 @@ describe('a safety record survives the deletion of the people in it', () => {
     `).run(longAgo, longAgo);
     db.prepare(`
       INSERT INTO reports (id, reporter_id, reporter_name_snapshot, target_type, target_id,
-                           reason, status, created_at)
-      VALUES ('rep-held-1', 'u-held', 'Held Shell', 'comment', 'cmt-x', 'still being looked at', 'open', ?)
-    `).run(longAgo);
+                           category, description, status, priority, created_at, updated_at)
+      VALUES ('rep-held-1', 'u-held', 'Held Shell', 'comment', 'cmt-x', 'bullying_or_harassment',
+              'still being looked at', 'open', 'normal', ?, ?)
+    `).run(longAgo, longAgo);
 
     const result = sweep(db, { now: new Date() });
 
@@ -484,7 +487,7 @@ describe('a moderator can still read what was preserved', () => {
       { reason: 'safety', details: 'He told me to keep it secret.' }, student);
     const reportId = filed.body.reportId;
 
-    const queue = await srv.call('GET', '/api/admin/reports/conversation', undefined, admin);
+    const queue = await srv.call('GET', '/api/admin/reports', undefined, admin);
     expect(queue.status).toBe(200);
     const listedReport = queue.body.find(r => r.id === reportId);
     expect(listedReport, 'a filed conversation report must reach the moderation queue').toBeTruthy();
@@ -494,7 +497,7 @@ describe('a moderator can still read what was preserved', () => {
       'a list view is scanned with other people at the desk; disclosures are not list content'
     ).not.toContain('tell your parents');
 
-    const evidence = await srv.call('GET', `/api/admin/reports/conversation/${reportId}/evidence`,
+    const evidence = await srv.call('GET', `/api/admin/reports/${reportId}/evidence`,
       undefined, admin);
     expect(evidence.status).toBe(200);
     expect(evidence.body.messages.map(m => m.body).join(' ')).toContain('tell your parents');
@@ -510,7 +513,7 @@ describe('a moderator can still read what was preserved', () => {
 
   it('refuses a student who asks for the evidence route directly', async () => {
     const student = await session('colin.carbin29@outlook.com');
-    const res = await srv.call('GET', '/api/admin/reports/conversation/anything/evidence',
+    const res = await srv.call('GET', '/api/admin/reports/anything/evidence',
       undefined, student);
     expect(res.status).toBe(403);
   });

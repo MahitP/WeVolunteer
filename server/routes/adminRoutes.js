@@ -1,6 +1,7 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
 import { db } from '../db.js';
@@ -8,7 +9,12 @@ import { notificationService } from '../services/notificationService.js';
 import { getMailHealth } from '../email.js';
 import { getQueueHealth } from '../workers/notificationWorker.js';
 import { requireCap, can, principalFor } from '../authz.js';
+import { grantsFor } from '../userCapabilities.js';
 import { recordAudit } from '../auditLog.js';
+import {
+  REPORT_PRIORITIES, REPORT_RESOLUTIONS, REPORT_STATUSES, REPORT_TARGET_TYPES,
+  LIVE_REPORT_STATUSES, CATEGORY_VALUES, isValidCategory, normalizeTargetType,
+} from '../moderation.js';
 
 const router = express.Router();
 
@@ -204,9 +210,134 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
 
 // A26. Fetch Auto Select Runs (Organizer & Admin only)
 
+/**
+ * The live row behind a report, for every target type there is.
+ *
+ * The version this replaces looked the target up in `events` for an event and in
+ * `event_comments` for *everything else*. Five of the seven target types
+ * therefore found nothing, had no `target_body_snapshot` either — a conversation
+ * report snapshots its bodies into `report_evidence`, not onto the report row —
+ * and were flagged as missing, so the queue told the moderator
+ * "No copy of this was kept" about reports holding hundreds of preserved
+ * messages. That sentence was false about the report type this whole release
+ * exists to make visible.
+ *
+ * Returns `null` when the target genuinely no longer exists, which is a real and
+ * expected state: the point of the snapshots is that a report outlives the thing
+ * it is about.
+ */
+function liveTarget(db, report) {
+  const one = (sql) => db.prepare(sql).get(report.target_id) ?? null;
+  switch (report.target_type) {
+    case 'event':
+      return one('SELECT title AS text FROM events WHERE id = ?');
+    case 'comment':
+      return one('SELECT body AS text FROM event_comments WHERE id = ?');
+    case 'announcement':
+      return one('SELECT body AS text FROM event_announcements WHERE id = ?');
+    case 'message':
+      return one('SELECT body AS text FROM messages WHERE id = ?');
+    case 'conversation':
+      // A conversation has no body of its own; its content is the evidence rows.
+      return one("SELECT 'Conversation' AS text FROM conversations WHERE id = ?");
+    case 'user':
+      return one('SELECT name AS text FROM users WHERE id = ?');
+    case 'certificate':
+      // Deliberately never looked up: the code is a bearer credential and the
+      // report endpoint refuses to be an oracle for it, so the queue does not
+      // become one either. The snapshot is the whole record.
+      return null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Statuses a moderator may ask for, and what they get if they ask for nothing.
+ *
+ * The default is the live band, because that is the work. Closed reports are
+ * reachable — `?status=resolved,dismissed`, or `all` — because a moderator has to
+ * be able to find a decision they made last month, and a queue that can only show
+ * open work makes the archive unreadable.
+ */
+const QUEUE_DEFAULT_STATUSES = LIVE_REPORT_STATUSES;
+
 // A3. Get All Reports
 router.get('/api/admin/reports', authenticateToken, requireCap('report.resolve'), (req, res) => {
   try {
+    /* ── Filters ──────────────────────────────────────────────────────────────
+     *
+     * Every filter is validated against a closed set and refused with a 400
+     * naming the legal values, rather than silently dropped. A mistyped
+     * `?status=reviewed` that quietly returns everything, or quietly returns
+     * nothing, is a moderator looking at a queue that is not the queue they asked
+     * for — and on this surface "I saw no open reports" is the wrong thing to be
+     * wrong about.
+     */
+    const parseCsv = (raw) => String(raw).split(',').map(s => s.trim()).filter(Boolean);
+
+    let statuses = QUEUE_DEFAULT_STATUSES;
+    if (req.query.status !== undefined) {
+      if (String(req.query.status) === 'all') {
+        statuses = REPORT_STATUSES;
+      } else {
+        statuses = parseCsv(req.query.status);
+        const unknown = statuses.filter(s => !REPORT_STATUSES.includes(s));
+        if (statuses.length === 0 || unknown.length > 0) {
+          return res.status(400).json({
+            error: `Unknown status ${unknown.join(', ') || '(none given)'}`,
+            code: 'invalid_status_filter', allowed: [...REPORT_STATUSES, 'all'],
+          });
+        }
+      }
+    }
+
+    const where = [`r.status IN (${statuses.map(() => '?').join(', ')})`];
+    const params = [...statuses];
+
+    if (req.query.priority !== undefined) {
+      if (!REPORT_PRIORITIES.includes(String(req.query.priority))) {
+        return res.status(400).json({
+          error: 'Unknown priority', code: 'invalid_priority_filter', allowed: REPORT_PRIORITIES,
+        });
+      }
+      where.push('r.priority = ?');
+      params.push(String(req.query.priority));
+    }
+
+    if (req.query.category !== undefined) {
+      if (!isValidCategory(String(req.query.category))) {
+        return res.status(400).json({
+          error: 'Unknown category', code: 'invalid_category_filter', allowed: CATEGORY_VALUES,
+        });
+      }
+      where.push('r.category = ?');
+      params.push(String(req.query.category));
+    }
+
+    if (req.query.targetType !== undefined) {
+      // `organizer` is an alias the client may still speak; it is stored as `user`.
+      const targetType = normalizeTargetType(String(req.query.targetType));
+      if (!targetType) {
+        return res.status(400).json({
+          error: 'Unknown target type', code: 'invalid_target_type_filter',
+          allowed: REPORT_TARGET_TYPES,
+        });
+      }
+      where.push('r.target_type = ?');
+      params.push(targetType);
+    }
+
+    if (req.query.assignee !== undefined) {
+      const assignee = String(req.query.assignee);
+      if (assignee === 'unassigned') {
+        where.push('r.assigned_to IS NULL');
+      } else {
+        where.push('r.assigned_to = ?');
+        params.push(assignee === 'me' ? req.user.id : assignee);
+      }
+    }
+
     /**
      * LEFT JOIN, not JOIN, and this is load-bearing.
      *
@@ -215,44 +346,108 @@ router.get('/api/admin/reports', authenticateToken, requireCap('report.resolve')
      * shell destroyed their safety report. With the cascade severed to SET NULL,
      * an inner join would make those reports vanish from this queue instead:
      * the quietest possible failure, and the one a moderator cannot notice,
-     * because nothing renders to tell them anything is missing.
+     * because nothing renders to tell them anything is missing. The same applies
+     * to the assignee and resolver joins below.
      *
      * `reporter_name_snapshot` is taken at report time and is what the queue
      * falls back to. The final literal covers reports filed before the snapshot
      * column existed.
+     *
+     * ── Ordering ──
+     *
+     * Urgent before normal, then oldest first. Oldest first is the opposite of
+     * what a feed does, and deliberately: newest-first starves the oldest
+     * unanswered report, which is by construction the one most likely to be a
+     * real harm nobody answered — and "reaches a human within one business day"
+     * is a promise about the oldest item, not the newest. Live statuses sort
+     * above closed ones so that working the queue never means scrolling past
+     * finished work; `reviewing` and `escalated` are live and used to sort BELOW
+     * resolved reports, so picking a report up pushed it out of sight.
      */
+    const liveList = LIVE_REPORT_STATUSES.map(() => '?').join(', ');
     const reports = db.prepare(`
       SELECT r.*,
-             COALESCE(u.name, r.reporter_name_snapshot, 'Account since deleted') as reporter_name,
-             u.email as reporter_email
-      FROM reports r
-      LEFT JOIN users u ON r.reporter_id = u.id
-      ORDER BY
-        CASE WHEN r.status = 'open' THEN 1 ELSE 2 END,
-        r.created_at DESC
-    `).all();
+             COALESCE(u.name, r.reporter_name_snapshot, 'Account since deleted') AS reporter_name,
+             u.email AS reporter_email,
+             a.name AS assigned_to_name,
+             rb.name AS resolved_by_name,
+             (SELECT COUNT(*) FROM report_evidence WHERE report_id = r.id) AS evidence_count
+        FROM reports r
+        LEFT JOIN users u  ON u.id  = r.reporter_id
+        LEFT JOIN users a  ON a.id  = r.assigned_to
+        LEFT JOIN users rb ON rb.id = r.resolved_by
+       WHERE ${where.join(' AND ')}
+       ORDER BY
+         CASE WHEN r.status IN (${liveList}) THEN 0 ELSE 1 END,
+         CASE WHEN r.priority = 'urgent' THEN 0 ELSE 1 END,
+         r.created_at ASC
+    `).all(...params, ...LIVE_REPORT_STATUSES);
 
     /**
-     * Enrich from the live row, and fall back to the snapshot taken at report
-     * time rather than to the words 'Deleted Comment'.
+     * What the moderator sees for the target, in three honestly-distinguished
+     * states. A decision can turn on which one they are reading, so the queue
+     * says which it is rather than rendering all three the same way.
      *
-     * That string was the visible symptom of a real hole: the author of a
-     * reported comment could delete it and leave the moderator holding a report
-     * about nothing. The hold added in this release stops that while a report is
-     * live, and the snapshot is what survives once it is resolved.
+     *   live      — the content still exists and this is it
+     *   snapshot  — the original is gone; this is the copy taken when the report
+     *               was filed, which is why the copy is taken
+     *   missing   — genuinely nothing was preserved (pre-snapshot reports only)
+     *
+     * `target_name_snapshot` is what identifies a target with no body of its own:
+     * a conversation, a person, a certificate. Without it those reports render as
+     * an unlabelled row, which is the same blank cell a moderator reads as
+     * "nothing wrong here".
      */
     for (const report of reports) {
-      const live = report.target_type === 'event'
-        ? db.prepare('SELECT title AS text FROM events WHERE id = ?').get(report.target_id)
-        : db.prepare('SELECT body AS text FROM event_comments WHERE id = ?').get(report.target_id);
+      const live = liveTarget(db, report);
+      const body = live?.text ?? report.target_body_snapshot ?? null;
 
-      report.target_title = live?.text ?? report.target_body_snapshot ?? null;
-      // The moderator is told which of the two they are reading. A snapshot and
-      // a live row are different kinds of evidence and a decision may turn on it.
+      report.target_label = report.target_name_snapshot
+        ?? (report.target_type === 'certificate' ? `Certificate ${report.target_id}` : null);
+      report.target_title = body;
       report.target_is_snapshot = !live && report.target_body_snapshot != null;
-      report.target_missing = !live && report.target_body_snapshot == null;
+      /**
+       * Only ever true when there is genuinely nothing to show. A report with
+       * preserved evidence is never "missing", whatever happened to the live row
+       * — the evidence IS the record, and saying otherwise talks a moderator out
+       * of opening it.
+       */
+      report.target_missing = !live
+        && report.target_body_snapshot == null
+        && report.target_name_snapshot == null
+        && report.evidence_count === 0;
+      report.target_exists = Boolean(live);
     }
 
+    /**
+     * The counts are the whole dashboard for a one-person team: how much is
+     * waiting, how much of it is urgent, and how much is mine. Computed over the
+     * whole table rather than the filtered page, because their job is to tell a
+     * moderator what a filter is currently hiding from them.
+     */
+    const counts = db.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END)                          AS open,
+        SUM(CASE WHEN status = 'reviewing' THEN 1 ELSE 0 END)                     AS reviewing,
+        SUM(CASE WHEN status = 'escalated' THEN 1 ELSE 0 END)                     AS escalated,
+        SUM(CASE WHEN status IN (${liveList}) AND priority = 'urgent' THEN 1 ELSE 0 END) AS urgentLive,
+        SUM(CASE WHEN status IN (${liveList}) AND assigned_to = ? THEN 1 ELSE 0 END)     AS assignedToMe
+      FROM reports
+    `).get(...LIVE_REPORT_STATUSES, ...LIVE_REPORT_STATUSES, req.user.id);
+
+    /**
+     * An array, still, because that is what the shipped dashboard reads and a
+     * response shape change is not something to bundle with a table rebuild. The
+     * counts ride alongside as a header so a client that wants them can have them
+     * without either side guessing.
+     */
+    res.set('X-Report-Counts', JSON.stringify({
+      open: counts.open ?? 0,
+      reviewing: counts.reviewing ?? 0,
+      escalated: counts.escalated ?? 0,
+      urgentLive: counts.urgentLive ?? 0,
+      assignedToMe: counts.assignedToMe ?? 0,
+    }));
     res.json(reports);
   } catch (err) {
     console.error('Fetch reports error:', err);
@@ -260,158 +455,414 @@ router.get('/api/admin/reports', authenticateToken, requireCap('report.resolve')
   }
 });
 
+/**
+ * Which status a report may move to from where.
+ *
+ * Written down rather than left to "any value in the enum", because two of the
+ * transitions a permissive route allows are ones a moderation record must not
+ * contain. Resolving an already-resolved report overwrites the first decision's
+ * resolution, note, actor and timestamp with a second one and leaves no sign the
+ * first existed — the append-only history is what makes that recoverable, but a
+ * decision that quietly replaces another is not a thing the route should let
+ * happen in the first place. And `resolved -> dismissed` skips the reopen, so a
+ * report changes outcome without ever having been open for reconsideration.
+ *
+ * Reopening IS allowed, from either terminal state, because a moderator who
+ * learns something new must be able to act on it. It is a real decision with its
+ * own history row, and it clears the previous resolution rather than leaving a
+ * report that reads as open and resolved at the same time.
+ */
+const REPORT_TRANSITIONS = Object.freeze({
+  open: ['reviewing', 'escalated', 'resolved', 'dismissed'],
+  reviewing: ['open', 'escalated', 'resolved', 'dismissed'],
+  escalated: ['open', 'reviewing', 'resolved', 'dismissed'],
+  resolved: ['open', 'reviewing'],
+  dismissed: ['open', 'reviewing'],
+});
+
+const CLOSING_STATUSES = ['resolved', 'dismissed'];
+const REOPENING_STATUSES = ['open', 'reviewing'];
+
+/**
+ * Same threshold as `MIN_SUSPENSION_REASON`, and for the same reason: the note
+ * is what an appeal is reviewed against, and "ok" is not something a decision can
+ * be reviewed against a year later.
+ */
+const MIN_RESOLUTION_NOTE = 20;
+
+/**
+ * Is this moderator a party to the report they are trying to act on?
+ *
+ * Three ways to be involved, and the third is easy to miss: a report whose
+ * `target_type` is `user` names its subject in `target_id`, not in
+ * `target_author_id`, so a check that reads only the author column misses every
+ * report filed directly against a person — which is the shape a report about a
+ * moderator almost always takes.
+ */
+function isPartyToReport(report, userId) {
+  return report.reporter_id === userId
+    || report.target_author_id === userId
+    || (report.target_type === 'user' && report.target_id === userId);
+}
+
+/**
+ * Who a report is about, for the audit row.
+ *
+ * `target_user_id` on `admin_audit_logs` is a foreign key to `users`, so it can
+ * only ever be a person: an event or a certificate has no row to point at. The
+ * reported party is preferred over the reporter because "whose case was this"
+ * is the question the trail has to answer later.
+ */
+function auditSubject(report) {
+  if (report.target_type === 'user') return report.target_id ?? report.reporter_id ?? null;
+  return report.target_author_id ?? report.reporter_id ?? null;
+}
+
 // A4. Update Report Status
 router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.resolve'), (req, res) => {
-  const { status } = req.body;
-  if (!['open', 'resolved', 'dismissed'].includes(status)) {
-    return res.status(400).json({ error: 'Invalid status' });
+  const body = (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) ? req.body : {};
+  const { status, priority, assignedTo, resolution, resolutionNote } = body;
+
+  /* ── Shape, before anything is read or written ────────────────────────────
+   *
+   * Every one of these was reachable as a 500 before: an unknown `resolution`
+   * reached the table's CHECK constraint, a non-string `resolutionNote` reached
+   * `node:sqlite`'s parameter binding, and an `assignedTo` naming nobody reached
+   * the foreign key. A malformed request is the client's mistake and must be
+   * answered as one — the same rule `routes.malformed.test.js` exists to hold.
+   */
+  if (status !== undefined && !REPORT_STATUSES.includes(status)) {
+    return res.status(400).json({
+      error: 'Invalid status', code: 'invalid_status', allowed: REPORT_STATUSES,
+    });
   }
-  
-  try {
+  if (priority !== undefined && !REPORT_PRIORITIES.includes(priority)) {
+    return res.status(400).json({
+      error: 'Invalid priority', code: 'invalid_priority', allowed: REPORT_PRIORITIES,
+    });
+  }
+  if (resolution !== undefined && resolution !== null && !REPORT_RESOLUTIONS.includes(resolution)) {
+    return res.status(400).json({
+      error: 'Invalid resolution', code: 'invalid_resolution', allowed: REPORT_RESOLUTIONS,
+    });
+  }
+  /**
+   * `assignedTo` is `null` (unassign), `'me'`, or a user id. A non-string
+   * anything else is refused here rather than bound into the UPDATE.
+   */
+  if (assignedTo !== undefined && assignedTo !== null && typeof assignedTo !== 'string') {
+    return res.status(400).json({ error: 'Invalid assignee', code: 'invalid_assignee' });
+  }
+
+  const closing = CLOSING_STATUSES.includes(status);
+  if (closing) {
+    if (!resolution) {
+      return res.status(400).json({
+        error: 'Choose what was done about this report.',
+        code: 'resolution_required', allowed: REPORT_RESOLUTIONS,
+      });
+    }
     /**
-     * Read the report BEFORE updating it, so the audit row can name who filed it
-     * and what it was about. Afterwards that context is still in the row, but
-     * fetching it first also gives the 404 without a wasted write.
+     * `typeof` first, and this is the bug that made the rule optional.
+     *
+     * The check used to be `!resolutionNote || resolutionNote.length < 20`. A
+     * number has no `.length`, so `undefined < 20` is false and the guard passed:
+     * `resolutionNote: 1` closed a report with a note of "1.0". The one field an
+     * appeal is reviewed against could be filled with a single digit by any
+     * client sending JSON rather than a form.
      */
-    const report = db.prepare('SELECT id, reporter_id, target_type, target_id, status FROM reports WHERE id = ?')
-      .get(req.params.id);
+    if (typeof resolutionNote !== 'string' || resolutionNote.trim().length < MIN_RESOLUTION_NOTE) {
+      return res.status(400).json({
+        error: `Say what was decided and why, in at least ${MIN_RESOLUTION_NOTE} characters. `
+          + 'This is what an appeal is reviewed against.',
+        code: 'resolution_note_required',
+      });
+    }
+  }
+
+  try {
+    const report = db.prepare(`
+      SELECT id, reporter_id, target_author_id, target_type, target_id, status, priority, assigned_to
+        FROM reports WHERE id = ?
+    `).get(req.params.id);
     if (!report) {
       return res.status(404).json({ error: 'Report not found' });
     }
 
-    db.prepare('UPDATE reports SET status = ? WHERE id = ?').run(status, req.params.id);
-
-    /**
-     * Moderation decisions are audited.
+    /* ── Conflict of interest ─────────────────────────────────────────────────
      *
-     * This was the one admin mutation that wrote no audit row — approvals and
-     * denials both did. So an administrator could mark a report resolved or
-     * dismissed and leave no record of who decided, or when. On a platform where
-     * a report may be a student raising a safety concern, "who closed this" is a
-     * question the district will ask and nobody could answer.
+     * A moderator resolving a report about themselves is the one self-dealing
+     * move this surface makes available, and it is available to every account
+     * holding `report.resolve`. Reading is deliberately still allowed: a
+     * moderator has to be able to see what was said about them. It is deciding
+     * it — resolving, dismissing, reprioritising, or quietly assigning it to
+     * themselves — that they may not do.
      *
-     * `target_user_id` is the REPORTER, not the reported event: the column is a
-     * foreign key to users, and the reporter is the person the follow-up concerns.
-     * What was reported is recorded in `details`.
+     * ── Why there is an escalation path, and why it does not end in a deadlock ──
+     *
+     * The Trust & Safety specification stops at "escalates to a principal holding
+     * `admin.create`, and when the super_admin is themselves the subject there is
+     * no on-platform path". That is defensible on a platform with a moderation
+     * department. This one is sized for one to two people, and the failure it
+     * produces is concrete: a report naming the only administrator can never
+     * leave `open`, so it holds a delete hold on that person's events and a
+     * retention hold on every account party to it, for ever, with no route short
+     * of someone editing the database by hand. A safety mechanism that cannot be
+     * discharged stops being a safety mechanism and becomes a lock.
+     *
+     * So the most privileged principal may act on a report about themselves, and
+     * the price is that it is recorded as exactly that: a `self_review` row in
+     * the append-only history and a distinct audit action, both naming them. The
+     * mitigation for a self-review is that everyone can see it was one — which is
+     * the same trade the Community Guidelines already publishes when it declines
+     * to promise an independent reviewer. An unreviewable report helps nobody;
+     * a visibly self-reviewed one at least leaves the district something to ask
+     * about.
+     *
+     * Ordered most-privileged-first and ending in an explicit deny, per
+     * `server/authz.js`: `can()` answers true for every capability a super_admin
+     * asks about, so a chain of `else if (can(...))` is NOT mutually exclusive
+     * and a bare `else` would be reached by nobody.
      */
-    recordAudit(db, {
-      adminId: req.user.id,
-      action: 'MODERATE_REPORT',
-      targetUserId: report.reporter_id,
-      details: `Report ${report.id} (${report.target_type} ${report.target_id}) `
-        + `marked ${status} (was ${report.status})`
+    const involved = isPartyToReport(report, req.user.id);
+    const wantsToAct = status !== undefined || priority !== undefined
+      || resolution !== undefined || assignedTo !== undefined;
+    let selfReview = false;
+
+    if (involved && wantsToAct) {
+      if (can(req.principal, 'admin.create')) {
+        selfReview = true;                                    // allowed, and recorded as such
+      } else if (can(req.principal, 'report.resolve')) {
+        return res.status(403).json({
+          error: 'You are named in this report, so you cannot decide it. '
+            + 'A super administrator can, and their decision is recorded as a self-review.',
+          code: 'conflict_of_interest',
+        });
+      } else {
+        return res.status(403).json({ error: 'Forbidden', code: 'conflict_of_interest' });
+      }
+    }
+
+    /* ── Transition legality ──────────────────────────────────────────────── */
+    const changingStatus = status !== undefined && status !== report.status;
+    if (status !== undefined && !changingStatus && CLOSING_STATUSES.includes(status)) {
+      // Re-resolving an already-resolved report replaces the first decision's
+      // note, actor and timestamp with no sign the first existed.
+      return res.status(409).json({
+        error: `This report is already ${report.status}. Reopen it before deciding it again.`,
+        code: 'already_closed',
+      });
+    }
+    if (changingStatus && !REPORT_TRANSITIONS[report.status].includes(status)) {
+      return res.status(409).json({
+        error: `A ${report.status} report cannot move straight to ${status}.`,
+        code: 'invalid_transition',
+        allowed: REPORT_TRANSITIONS[report.status],
+      });
+    }
+
+    /* ── Assignment ───────────────────────────────────────────────────────── */
+    let nextAssignee;                       // undefined = leave alone
+    if (assignedTo !== undefined) {
+      if (assignedTo === null) {
+        nextAssignee = null;
+      } else {
+        const candidateId = assignedTo === 'me' ? req.user.id : assignedTo;
+        const candidate = db.prepare(
+          "SELECT id, role FROM users WHERE id = ? AND deleted_at IS NULL AND account_status = 'active'"
+        ).get(candidateId);
+        if (!candidate) {
+          return res.status(400).json({ error: 'That moderator does not exist.', code: 'unknown_assignee' });
+        }
+        /**
+         * Asked as a capability, never as a role comparison — Guard 1 fails the
+         * build on the latter, and the point stands on its own: `report.resolve`
+         * is grantable per-user precisely so a triage-only helper can exist, and
+         * a role check would refuse to assign work to exactly that person.
+         */
+        const candidatePrincipal = principalFor(candidate, { grants: grantsFor(db, candidate.id) });
+        if (!can(candidatePrincipal, 'report.resolve')) {
+          return res.status(400).json({
+            error: 'That person cannot work reports, so nothing would reach them.',
+            code: 'assignee_cannot_moderate',
+          });
+        }
+        // Assigning a report to yourself when you are named in it is the quiet
+        // version of deciding it, and is refused above by the same rule.
+        nextAssignee = candidate.id;
+      }
+    }
+
+    const now = new Date().toISOString();
+    const reopening = changingStatus
+      && REOPENING_STATUSES.includes(status)
+      && CLOSING_STATUSES.includes(report.status);
+
+    /* ── One transaction ──────────────────────────────────────────────────────
+     *
+     * The row, its history and its audit row move together or not at all. They
+     * did not before: the UPDATE ran first and on its own, so a failure in the
+     * history write left a report whose status had changed with nothing
+     * recording who changed it — which is the one state the append-only trail
+     * exists to make impossible.
+     */
+    const changes = [];
+    inTransaction(() => {
+      const sets = ['updated_at = ?'];
+      const params = [now];
+
+      if (changingStatus) {
+        sets.push('status = ?'); params.push(status);
+        changes.push({ action: 'status_changed', from: report.status, to: status });
+      }
+      if (priority !== undefined && priority !== report.priority) {
+        sets.push('priority = ?'); params.push(priority);
+        changes.push({ action: 'prioritised', fromPriority: report.priority, toPriority: priority });
+      }
+      if (nextAssignee !== undefined && nextAssignee !== report.assigned_to) {
+        sets.push('assigned_to = ?', 'assigned_at = ?');
+        params.push(nextAssignee, nextAssignee === null ? null : now);
+        changes.push({ action: nextAssignee === null ? 'unassigned' : 'assigned' });
+      }
+
+      if (closing) {
+        sets.push('resolution = ?', 'resolution_note = ?', 'resolved_by = ?', 'resolved_at = ?');
+        params.push(resolution, resolutionNote.trim(), req.user.id, now);
+        changes.push({ action: 'resolved', toResolution: resolution });
+      }
+
+      /**
+       * Reopening clears the decision it reverses.
+       *
+       * Left in place, a reopened report reads as open AND resolved by a named
+       * person at a named time, and the next moderator to pick it up sees a
+       * decision that has been withdrawn. The withdrawn decision is not lost —
+       * it is in `moderation_actions`, which is where a superseded decision
+       * belongs.
+       */
+      if (reopening) {
+        sets.push('resolution = NULL', 'resolution_note = NULL', 'resolved_by = NULL', 'resolved_at = NULL');
+        changes.push({ action: 'reopened' });
+      }
+
+      if (changes.length === 0) return;      // nothing asked for; nothing recorded
+
+      params.push(report.id);
+      db.prepare(`UPDATE reports SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+
+      /**
+       * One history row per field changed, not one blob.
+       *
+       * Assigning, reprioritising and resolving are three decisions and read as
+       * three lines a year later. `actor_id` is always populated here — an
+       * anonymous history row says somebody changed this without saying who,
+       * which is the single question this table exists to answer.
+       */
+      const insertAction = db.prepare(`
+        INSERT INTO moderation_actions
+          (id, report_id, actor_id, action, old_status, new_status,
+           old_priority, new_priority, old_resolution, new_resolution, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const c of changes) {
+        insertAction.run(
+          `act_${crypto.randomUUID()}`, report.id, req.user.id, c.action,
+          c.from ?? null, c.to ?? null,
+          c.fromPriority ?? null, c.toPriority ?? null,
+          null, c.toResolution ?? null, now,
+        );
+      }
+      if (selfReview) {
+        insertAction.run(
+          `act_${crypto.randomUUID()}`, report.id, req.user.id, 'self_review',
+          null, null, null, null, null, null, now,
+        );
+      }
+
+      /**
+       * The administrative trail, alongside the report-scoped one.
+       *
+       * Deliberately structural only: which report, what changed, and — when it
+       * happened — that the actor was named in it. The resolution note is NOT
+       * copied here. It is moderator-authored text about a student's report and
+       * frequently quotes it, `admin_audit_logs` is read for operational
+       * questions rather than case ones, and the note already lives in two
+       * places that are retained longer than this table is.
+       */
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: selfReview ? 'MODERATE_REPORT_SELF_REVIEW' : 'MODERATE_REPORT',
+        targetUserId: auditSubject(report),
+        details: `Report ${report.id} (${report.target_type}): `
+          + changes.map(c => c.action).join(', ')
+          + (changingStatus ? ` [${report.status} -> ${status}]` : '')
+          + (closing ? ` resolution=${resolution}` : '')
+          + (selfReview ? ' — SELF-REVIEW: the actor is named in this report' : ''),
+      });
     });
 
-    res.json({ success: true, message: 'Report updated' });
+    res.json({
+      success: true,
+      message: changes.length === 0 ? 'Nothing to change' : 'Report updated',
+      changed: changes.map(c => c.action),
+      selfReview,
+    });
   } catch (err) {
     console.error('Update report error:', err);
     res.status(500).json({ error: 'Failed to update report' });
   }
 });
 
-/* ── Conversation reports ──────────────────────────────────────────────────
- *
- * Why these three routes are in a release about evidence preservation.
- *
- * `conversation_reports` has been write-only since it was created: two INSERTs
- * in messageRoutes.js and no reader anywhere in server/. The most
- * safety-critical report type on the platform — the one the Youth Safety
- * Guidelines point every student at — landed in a table nobody could open.
- *
- * That was survivable while nothing depended on the status column. It stopped
- * being survivable in this release: the delete holds and the retention hold are
- * scoped to reports that are open or being reviewed, and nothing in the product
- * could move a conversation report out of 'open'. A hold with no key is not a
- * safety mechanism, it is a permanent lock on an organizer's events and on a
- * deleted account's shell.
- *
- * So this is the minimum that makes the holds releasable and the preserved
- * evidence readable, and deliberately nothing more. Assignment, notes,
- * categories, priority, cursor pagination and the fold into the main `reports`
- * queue are specified in docs/specs/2026-08-05-trust-and-safety-mvp.md and
- * belong to the moderation-queue release. Ids are preserved by that fold, so
- * these paths survive it.
- */
-
-router.get('/api/admin/reports/conversation', authenticateToken, requireCap('report.resolve'), (req, res) => {
-  try {
-    /**
-     * Every displayed name comes from the snapshot first and the live row only
-     * as a refinement, which is the opposite of the usual instinct. The live
-     * row is the destructible one: accounts anonymise on deletion, and the
-     * event a conversation hung from is the reported organizer's own to delete.
-     * The snapshot is what the report actually said at the time it was filed.
-     */
-    const reports = db.prepare(`
-      SELECT cr.id, cr.conversation_id, cr.reason, cr.details, cr.status, cr.created_at,
-             COALESCE(cr.reporter_name_snapshot, ru.name, 'Account since deleted') AS reporter_name,
-             COALESCE(cr.reported_name_snapshot, pu.name, 'Account since deleted') AS reported_name,
-             cr.reported_role_snapshot AS reported_role,
-             COALESCE(cr.event_title_snapshot, e.title)  AS event_title,
-             (SELECT COUNT(*) FROM conversation_report_messages m WHERE m.report_id = cr.id)
-               AS evidence_count,
-             (c.id IS NOT NULL) AS conversation_still_exists
-      FROM conversation_reports cr
-      LEFT JOIN users ru        ON ru.id = cr.reporter_id
-      LEFT JOIN users pu        ON pu.id = cr.reported_user_id
-      LEFT JOIN conversations c ON c.id  = cr.conversation_id
-      LEFT JOIN events e        ON e.id  = cr.event_id_snapshot
-      ORDER BY
-        CASE WHEN cr.status IN ('open', 'reviewing') THEN 1 ELSE 2 END,
-        CASE WHEN cr.reason = 'safety' THEN 1 ELSE 2 END,
-        cr.created_at ASC
-    `).all();
-
-    /**
-     * No message bodies here, deliberately. A list view is scanned, often with
-     * somebody else at the desk; a student's disclosure is not scannable
-     * content. Bodies come only from the evidence route below, which logs the
-     * read — which is what the Youth Safety Guidelines already promise in print.
-     *
-     * Oldest first within the open band, unlike the `reports` queue above.
-     * Newest-first starves the oldest unanswered report, which is by
-     * construction the one most likely to be a real harm nobody answered.
-     */
-    res.json(reports.map(r => ({ ...r, conversation_still_exists: Boolean(r.conversation_still_exists) })));
-  } catch (err) {
-    console.error('Fetch conversation reports error:', err);
-    res.status(500).json({ error: 'Failed to fetch conversation reports' });
-  }
-});
-
-router.get('/api/admin/reports/conversation/:id/evidence', authenticateToken, requireCap('report.evidence.read'), (req, res) => {
+router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('report.evidence.read'), (req, res) => {
   try {
     const report = db.prepare(
-      'SELECT id, reporter_id, reported_user_id, status FROM conversation_reports WHERE id = ?'
+      'SELECT id, reporter_id, target_author_id, target_type, target_id, status FROM reports WHERE id = ?'
     ).get(req.params.id);
     if (!report) return res.status(404).json({ error: 'Report not found' });
 
     const messages = db.prepare(`
       SELECT m.message_id, m.sender_id, m.body, m.created_at,
-             COALESCE(u.name, 'Account since deleted') AS sender_name
-      FROM conversation_report_messages m
+             COALESCE(u.name, m.sender_name_snapshot, 'Account since deleted') AS sender_name
+      FROM report_evidence m
       LEFT JOIN users u ON u.id = m.sender_id
       WHERE m.report_id = ?
       ORDER BY m.created_at ASC
     `).all(req.params.id);
 
     /**
-     * The read is logged before the bodies leave the building.
+     * The read is logged before the bodies leave the building, to BOTH trails,
+     * and the second one is not redundant.
      *
-     * Youth Safety Guidelines: "This is the one situation in which an
+     * Youth Safety Guidelines, in print: "This is the one situation in which an
      * administrator reads private messages, and it is logged." Until this route
      * existed the sentence described something that could not happen, so it was
-     * not logged either. It can happen now, so it is.
+     * not logged either.
      *
-     * `target_user_id` is the reported party rather than the reporter: the
-     * question this row has to answer later is whose private messages were
-     * read.
+     * `admin_audit_logs` is swept at 365 days (`retentionWorker.js`). A
+     * suspension is permanent and appealable years later, and "who read this
+     * student's private messages" is exactly the question a parent or a district
+     * asks long after the year is up — at which point the audit row is gone.
+     * `moderation_actions` is report-scoped, append-only and exempt from the
+     * sweep, so the durable answer lives there. Both, in one transaction: a read
+     * that is recorded in one place and not the other is a record that disagrees
+     * with itself.
+     *
+     * `target_user_id` on the audit row is the reported party rather than the
+     * reporter, because the question this row answers later is whose private
+     * messages were read.
      */
-    recordAudit(db, {
-      adminId: req.user.id,
-      action: 'REPORT_EVIDENCE_VIEWED',
-      targetUserId: report.reported_user_id || report.reporter_id,
-      details: `Read ${messages.length} preserved message(s) for conversation report ${report.id}`
+    inTransaction(() => {
+      db.prepare(`
+        INSERT INTO moderation_actions (id, report_id, actor_id, action, created_at)
+        VALUES (?, ?, ?, 'evidence_viewed', ?)
+      `).run(`act_${crypto.randomUUID()}`, report.id, req.user.id, new Date().toISOString());
+
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'REPORT_EVIDENCE_VIEWED',
+        targetUserId: auditSubject(report),
+        details: `Read ${messages.length} preserved message(s) for report ${report.id}`,
+      });
     });
 
     res.json({ reportId: report.id, status: report.status, messages });
@@ -421,46 +872,7 @@ router.get('/api/admin/reports/conversation/:id/evidence', authenticateToken, re
   }
 });
 
-router.patch('/api/admin/reports/conversation/:id', authenticateToken, requireCap('report.resolve'), (req, res) => {
-  const { status } = req.body;
-  if (!['open', 'reviewing', 'resolved', 'dismissed'].includes(status)) {
-    return res.status(400).json({ error: 'Invalid status' });
-  }
 
-  try {
-    const report = db.prepare(
-      'SELECT id, reporter_id, reported_user_id, conversation_id, status FROM conversation_reports WHERE id = ?'
-    ).get(req.params.id);
-    if (!report) return res.status(404).json({ error: 'Report not found' });
-
-    /**
-     * Status is the only column this route may write, and migration 011's
-     * `conversation_reports_immutable` trigger is what makes that true rather
-     * than merely intended: what a report says is a record of what was said,
-     * and an UPDATE reaching `details` would abort at the database.
-     *
-     * Resolving is also what releases the delete hold on the reported event and
-     * the retention hold on a deleted party's shell — so it is a decision with
-     * consequences beyond the queue, and it is audited for that reason.
-     */
-    inTransaction(() => {
-      db.prepare('UPDATE conversation_reports SET status = ? WHERE id = ?').run(status, req.params.id);
-
-      recordAudit(db, {
-        adminId: req.user.id,
-        action: 'MODERATE_REPORT',
-        targetUserId: report.reported_user_id || report.reporter_id,
-        details: `Conversation report ${report.id} marked ${status} (was ${report.status}); `
-          + `releases evidence holds on the reported conversation when not open/reviewing`
-      });
-    });
-
-    res.json({ success: true, message: 'Report updated' });
-  } catch (err) {
-    console.error('Update conversation report error:', err);
-    res.status(500).json({ error: 'Failed to update report' });
-  }
-});
 
 // A5. Export Data to CSV
 router.get('/api/admin/reports/export', authenticateToken, requireCap('report.resolve'), (req, res) => {
@@ -790,6 +1202,20 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
         targetUserId: targetId,
         details: `Suspended: ${reason}`
       });
+
+      /**
+       * A MANDATORY notice: delivered whatever the account's email preference
+       * says, and it THROWS rather than returning null if it cannot be enqueued.
+       *
+       * That is deliberate and it is why this call is inside the transaction. A
+       * suspension whose notice could not be created is a person locked out with
+       * no reason given and no appeal link in existence — the dispatch failure
+       * used to be swallowed and the suspension committed anyway. Rolling back
+       * makes it a clean, retryable failure instead of a silent one.
+       */
+      notificationService.dispatch(
+        'ACCOUNT_SUSPENDED', { reason }, targetId
+      );
     });
   } catch (err) {
     console.error('Failed to suspend account:', err);
@@ -860,6 +1286,17 @@ router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('use
         targetUserId: targetId,
         details: note ? `Reinstated: ${note}` : 'Reinstated'
       });
+
+      /**
+       * The good-news half of the enforcement class.
+       *
+       * Nothing told a reinstated person anything, and they cannot discover it
+       * by signing in because they have no reason to try. The override that
+       * delivers a suspension notice past an email preference is only defensible
+       * if it delivers this one too — an override used for bad news and not good
+       * news is the version that looks self-serving in hindsight.
+       */
+      notificationService.dispatch('ACCOUNT_REINSTATED', { reason: note || null }, targetId);
     });
   } catch (err) {
     console.error('Failed to unsuspend account:', err);

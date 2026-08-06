@@ -28,6 +28,7 @@ import oauthRoutes from './routes/oauthRoutes.js';
 import reauthRoutes from './routes/reauthRoutes.js';
 import errorRoutes from './routes/errorRoutes.js';
 import legalRoutes from './routes/legalRoutes.js';
+import reportRoutes from './routes/reportRoutes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -274,7 +275,7 @@ app.use(cookieParser());
  * of the API, carries `code: 'rate_limited'` so a caller can branch on it, and
  * states the wait in minutes derived from the limiter's own window.
  */
-function limitHandler(message) {
+export function limitHandler(message) {
   return (req, res) => {
     const resetAt = req.rateLimit?.resetTime;
     const minutes = resetAt
@@ -447,7 +448,7 @@ export const reauthLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  handler: limitHandler('Too many failed verification attempts from this device.'),
+  handler: limitHandler('Too many verification attempts.'),
 });
 
 /**
@@ -578,6 +579,7 @@ app.use(messageRoutes);
 app.use(privacyRoutes);
 app.use(errorRoutes);
 app.use(legalRoutes);
+app.use(reportRoutes);
 
 
 // Read once at import rather than per request. Derived from package.json so it

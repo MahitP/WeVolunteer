@@ -108,7 +108,9 @@ const SAMPLE = {
   senderName: 'Jacquelyn Katzenback',
   title: 'Operational alert',
   body: 'Something happened that you should know about.',
-  link: '/settings?section=privacy'
+  link: '/settings?section=privacy',
+  reason: 'Violation of Community Guidelines',
+  token: 'mock-token-12345'
 };
 
 const ALL_PRIORITIES = Object.values(NOTIFICATION_PRIORITY);

@@ -90,7 +90,7 @@ describe('malformed input returns 400, not 500', () => {
 
   it('still accepts a well-formed report', async () => {
     const res = await srv.call('POST', '/api/reports',
-      { targetType: 'event', targetId: 'event-softball', reason: 'legitimate concern' }, studentToken);
+      { targetType: 'event', targetId: 'event-softball', reason: 'other', details: 'legitimate text' }, studentToken);
     expect(res.status).toBe(200);
   });
 });

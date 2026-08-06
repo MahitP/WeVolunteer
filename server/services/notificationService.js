@@ -1,5 +1,5 @@
 import { db } from '../db.js';
-import { EVENT_CATEGORIES, getInAppContent } from './notificationContent.js';
+import { EVENT_CATEGORIES, getInAppContent, isMandatoryNotice } from './notificationContent.js';
 import { emitToUser } from '../realtime/events.js';
 
 class NotificationService {
@@ -39,12 +39,29 @@ class NotificationService {
         return row ? row.enabled === 1 : true; // default true
       };
 
-      const inAppEnabled = getPref('inapp');
+      /**
+       * The enforcement class ignores both preference checks.
+       *
+       * A suspended account cannot read an in-app notification at all — it is
+       * refused at `authenticateToken` before `req.user` exists — so email is
+       * the only channel that reaches the person being told they are suspended.
+       * Honouring a notification preference to the point of denying a minor any
+       * knowledge of the sanction against them, or of their right to appeal it,
+       * is not privacy-protective; it is a failure to serve notice. See
+       * MANDATORY_NOTICE_EVENTS in notificationContent.js for the full reasoning
+       * and the published statement this makes the code match.
+       *
+       * The in-app row is still written for these. It is unreadable while the
+       * suspension is live, and it is exactly what the person finds waiting the
+       * moment they are reinstated.
+       */
+      const mandatory = isMandatoryNotice(event);
+      const inAppEnabled = mandatory || getPref('inapp');
       // If global email_opt_out is 1, force email to false.
-      const emailEnabled = user.email_opt_out === 1 ? false : getPref('email');
-      
+      const emailEnabled = mandatory || (user.email_opt_out === 1 ? false : getPref('email'));
+
       const inAppContent = getInAppContent(event, payload);
-      
+
       if (inAppEnabled) {
         this._insertInApp(userId, inAppContent, dedupeKey);
       }
@@ -52,10 +69,29 @@ class NotificationService {
       if (emailEnabled) {
         this._insertEmailJob(event, payload, userId, dedupeKey);
       }
-      
+
       return true;
     } catch (e) {
       if (String(e.message).includes('UNIQUE')) return null; // Dedupe catch
+      /**
+       * An enforcement notice that cannot be enqueued must not fail silently.
+       *
+       * This catch used to swallow everything and return null. `dispatch` is
+       * called INSIDE the suspension transaction, so a swallowed failure meant a
+       * student could be suspended with no notice, no appeal link and no error
+       * anywhere — the suspension committed regardless. Rethrowing rolls the
+       * suspension back so it can be retried, which is the same argument the
+       * suspend route already makes for keeping its audit row in the
+       * transaction: recorded-but-not-enforced and enforced-but-not-recorded are
+       * both worse than a clean failure.
+       *
+       * Everything else keeps the old best-effort behaviour: a missed event
+       * reminder must never fail the operation that triggered it.
+       */
+      if (isMandatoryNotice(event)) {
+        console.error(`Failed to dispatch MANDATORY notice ${event} to ${userId}:`, e);
+        throw e;
+      }
       console.error(`Failed to dispatch notification ${event}:`, e);
       return null;
     }

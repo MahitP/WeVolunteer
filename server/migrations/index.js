@@ -20,10 +20,23 @@ import dateOfBirth from './008_date_of_birth.js';
 import userBlocks from './009_user_blocks.js';
 import graduationYear from './010_graduation_year.js';
 import evidencePreservation from './011_evidence_preservation.js';
+import unifiedReports from './012_unified_reports.js';
+import reportEvidenceAndFold from './013_report_evidence_and_fold.js';
+import appeals from './014_appeals.js';
+import appealsIntegrity from './015_appeals_integrity.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
   legalConsent, dateOfBirth, userBlocks, graduationYear, evidencePreservation,
+  // 012 rebuilds `reports` and MUST run while it is childless; 013 is what gives
+  // it a child (`report_evidence`). Reordering these two makes the rebuild
+  // destructive.
+  unifiedReports, reportEvidenceAndFold, appeals,
+  // 015 splits the appellant's statement out of `reasoning` and freezes it, so it
+  // MUST run after 014 has created the table it alters — and its backfill only
+  // recovers statements from appeals not yet decided, so the longer it is
+  // deferred the more of them are already overwritten.
+  appealsIntegrity,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

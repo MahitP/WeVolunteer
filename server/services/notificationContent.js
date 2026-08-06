@@ -1,3 +1,49 @@
+/**
+ * The published fallback channel, named in the Community Guidelines and the
+ * Privacy Policy. One definition, because a student locked out of their account
+ * has nothing else and a typo here is a dead end.
+ */
+export const SUPPORT_EMAIL = 'wevolunteer.platform@gmail.com';
+
+/**
+ * Notices that are served, not sent — the enforcement class.
+ *
+ * `dispatch` consults `users.email_opt_out` and the per-category notification
+ * preference before enqueuing mail. For everything in this set it must not,
+ * and the reason is not a product preference:
+ *
+ *   - A suspended account is refused at `authenticateToken` (utils.js) before
+ *     `req.user` exists, so it can never read `GET /api/notifications`. Email is
+ *     the ONLY channel that reaches a suspended person. An audit reproduced a
+ *     student with `email_opt_out = 1` being suspended and receiving zero email
+ *     jobs — an appeal token existed in the database that they had no way to
+ *     learn about. That is a permanent lockout with no appeal channel.
+ *   - These carry no promotional content. They are transactional messages about
+ *     the recipient's own account standing, which is what makes suppressing them
+ *     a failure to serve notice rather than an honoured preference.
+ *   - `docs/legal/policies/01-privacy-policy.md` already publishes "Security
+ *     emails cannot be switched off." This set makes the code match a statement
+ *     the product has been making to users all along; it is not a new override.
+ *
+ * Deliberately a closed literal set rather than an `ignoreOptOut` flag any
+ * caller may pass — a flag becomes an override for anything within two
+ * releases. Adding a member is a reviewed change, and
+ * `notificationContent.coverage.test.js` asserts every member has content.
+ *
+ * The reciprocal duty is the point: the override is only defensible because the
+ * notice is genuinely necessary, which obliges the same treatment for the GOOD
+ * news. Reinstatement and a granted appeal are in this set for that reason.
+ */
+export const MANDATORY_NOTICE_EVENTS = new Set([
+  'ACCOUNT_SUSPENDED',
+  'ACCOUNT_REINSTATED',
+  'APPEAL_DECISION_STANDS',
+  'APPEAL_DECISION_REVERSED',
+  'APPEAL_REOPENED',
+]);
+
+export const isMandatoryNotice = (event) => MANDATORY_NOTICE_EVENTS.has(event);
+
 export const EVENT_CATEGORIES = {
   // APPLICATION
   APPLICATION_SUBMITTED: 'APPLICATION',
@@ -51,6 +97,11 @@ export const EVENT_CATEGORIES = {
   PASSWORD_CHANGED: 'ACCOUNT',
   PASSWORD_RESET: 'ACCOUNT',
   EMAIL_VERIFIED: 'ACCOUNT',
+  ACCOUNT_SUSPENDED: 'ACCOUNT',
+  ACCOUNT_REINSTATED: 'ACCOUNT',
+  APPEAL_DECISION_STANDS: 'ACCOUNT',
+  APPEAL_DECISION_REVERSED: 'ACCOUNT',
+  APPEAL_REOPENED: 'ACCOUNT',
 
   // SYSTEM
   MAINTENANCE_NOTICE: 'SYSTEM',
@@ -231,6 +282,133 @@ export function getInAppContent(event, payload) {
         title: 'Account Approved!',
         body: 'Your organizer account has been verified. You can now post events.',
         link: '/profile'
+      };
+    /**
+     * The link was `/appeal?token=…`. The only client route is `/appeal/:token`,
+     * and `isPublicPath` matches segment-for-segment — so `/appeal` (one segment)
+     * never matched, fell through to the signed-out catch-all, and every appeal
+     * link this product has ever sent led to a 404. The email CTA is built from
+     * this same string (notificationWorker.js), so the mail was dead too.
+     *
+     * `/appeal/${token}` is the single canonical form: client route, server SPA
+     * allowlist (clientRoutes.js) and this link now all agree.
+     */
+    case 'ACCOUNT_SUSPENDED':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.CRITICAL,
+        title: 'Your WeVolunteer account is suspended',
+        body:
+          "You can't sign in to WeVolunteer right now. Here's why:\n\n"
+          + `${payload.reason}\n\n`
+          + 'Your volunteer hours, your attendance record and your certificates are all safe. '
+          + "Nothing has been deleted, and any certificate code you've already shared still works.\n\n"
+          + 'If you think we got this wrong, or there is something we did not know, you can appeal. '
+          + `Use the button below${payload.appealDeadline ? ` by ${payload.appealDeadline}` : ''}. `
+          + 'An administrator reads every appeal, and we reply within 5 school days with what we '
+          + 'decided, why, and who reviewed it.\n\n'
+          + `If the link stops working, email ${SUPPORT_EMAIL} from this address.`,
+        ctaText: 'Appeal this decision',
+        link: `/appeal/${payload.token}`
+      };
+
+    /**
+     * The good news half of the enforcement class.
+     *
+     * Nothing told a reinstated student anything, and they cannot discover it by
+     * signing in — they have no reason to try. The Privacy Policy commits to
+     * telling a student when an account change is made on their behalf.
+     */
+    case 'ACCOUNT_REINSTATED':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.CRITICAL,
+        title: 'Your WeVolunteer account is back',
+        body:
+          'Your account works again — you can sign in now.\n\n'
+          + (payload.reason ? `${payload.reason}\n\n` : '')
+          + 'Your hours, attendance and certificates were kept the whole time.',
+        ctaText: 'Sign in',
+        link: '/login'
+      };
+
+    case 'APPEAL_DECISION_STANDS':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.CRITICAL,
+        title: 'We looked at your appeal',
+        body:
+          'Thank you for writing to us. An administrator read your appeal, and we are keeping '
+          + 'the suspension in place.\n\n'
+          + `Here is why:\n\n${payload.reasoning}\n\n`
+          + `Reviewed by ${payload.reviewerName}.\n\n`
+          + 'Your hours and certificates are still safe. If you think this is still wrong, email '
+          + `${SUPPORT_EMAIL} from the address on your account.`,
+        ctaText: 'See the decision',
+        // The same link they filed through. The token route serves the outcome
+        // after the token is spent, which is the only way a still-suspended
+        // person can read it — they cannot sign in to find it anywhere else.
+        link: payload.token ? `/appeal/${payload.token}` : '/login'
+      };
+
+    /**
+     * Two versions, because the account is not always back yet.
+     *
+     * Reversing an appeal does not lift a suspension: reinstatement is a
+     * separate action behind `user.suspend`, which the reviewer may not even
+     * hold (`appeal.review` is separately grantable so a triage-only helper can
+     * exist). This notice used to say "your account is back… you can sign in
+     * now" with a Sign in button, unconditionally — so a student whose appeal
+     * succeeded was sent to a login screen that refuses a suspended account,
+     * with no explanation, having just been told in a CRITICAL notice that they
+     * were fine. Telling somebody they are unlocked when they are not is worse
+     * than telling them nothing.
+     *
+     * When the account is genuinely restored, the `ACCOUNT_REINSTATED` notice is
+     * what says so — and it already exists, so the second version below promises
+     * a message rather than inventing one.
+     */
+    case 'APPEAL_DECISION_REVERSED':
+      return payload.stillSuspended
+        ? {
+          kind,
+          priority: NOTIFICATION_PRIORITY.CRITICAL,
+          title: 'Your appeal worked',
+          body:
+            'We looked at your appeal and we got this wrong. Sorry.\n\n'
+            + `Here is what we found:\n\n${payload.reasoning}\n\n`
+            + `Reviewed by ${payload.reviewerName}.\n\n`
+            + 'Your account is still switched off while an administrator turns it back on. '
+            + 'We will send you another message the moment it works again — you do not need '
+            + 'to do anything.',
+          ctaText: null,
+          link: null
+        }
+        : {
+          kind,
+          priority: NOTIFICATION_PRIORITY.CRITICAL,
+          title: 'Your appeal worked — your account is back',
+          body:
+            'We looked at your appeal and we got this wrong. Sorry.\n\n'
+            + `Here is what we found:\n\n${payload.reasoning}\n\n`
+            + `Reviewed by ${payload.reviewerName}.\n\n`
+            + 'Your account works again — you can sign in now.',
+          ctaText: 'Sign in',
+          link: '/login'
+        };
+
+    case 'APPEAL_REOPENED':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.CRITICAL,
+        title: 'We are looking at your appeal again',
+        body:
+          'We had told you the outcome of your appeal. An administrator has reopened it, so that '
+          + 'decision is not final after all.\n\n'
+          + `Why:\n\n${payload.reason}\n\n`
+          + 'We will write again with the new outcome within 5 school days.',
+        ctaText: 'See your appeal',
+        link: payload.token ? `/appeal/${payload.token}` : '/login'
       };
     case 'REMOVED_FROM_EVENT':
       return {

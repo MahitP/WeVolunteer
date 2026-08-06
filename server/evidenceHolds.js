@@ -1,27 +1,47 @@
 /**
  * One definition of "something under investigation is attached to this".
  *
- * ── Why this is a module and not four inline queries ──
+ * ── Why this is a module and not five inline queries ──
  *
- * Four places have to answer the same question — the event delete, the comment
- * delete, the retention sweep's message pass, and the retention sweep's account
- * purge. A second copy of this logic is a second way to destroy evidence, and it
- * would be the copy nobody remembered to update. The same reasoning
- * `sensitiveActions.js` gives for one definition of the challenge header.
+ * Five places have to answer the same question — the event delete, the comment
+ * delete, the retention sweep's message pass, the retention sweep's account
+ * purge, and the moderation queue. A second copy of this logic is a second way
+ * to destroy evidence, and it would be the copy nobody remembered to update.
+ * The same reasoning `sensitiveActions.js` gives for one definition of the
+ * challenge header.
  *
  * ── What "live" means, and why the hold is not permanent ──
  *
  * A hold that never lifts is not a safety mechanism, it is a way to pin an
  * organizer's calendar in place forever: any event that ever attracted a report
  * could never be deleted again, and any account that ever filed one could never
- * finish deleting. So the hold is scoped to reports that are still open or being
- * reviewed. Resolving or dismissing a report releases it.
+ * finish deleting. So the hold is scoped to reports that are still being worked
+ * — open, being reviewed, or escalated. Resolving or dismissing releases it.
+ *
+ * `escalated` counts as live, and that is the whole reason it is a status rather
+ * than a priority: a report that has left the queue for a phone call to DCP&P is
+ * the last thing whose evidence should become deletable.
  *
  * That bound is an event rather than a clock, deliberately, and it matches the
  * shape the Privacy Policy already publishes for messages — "3 years, longer if
  * the conversation has been reported". A number here would be a number nobody
  * could justify; "until somebody has dealt with it" is a commitment the
  * moderation queue can actually discharge.
+ *
+ * ── Why every query reads `reports` and none reads `conversation_reports` ──
+ *
+ * Migration 013 folded the legacy table into the unified one. After the fold
+ * there are two rows for the same report: the frozen legacy one and the live
+ * unified one. Reading the legacy row's status would mean that resolving a
+ * report in the queue left the legacy copy saying `'open'` for ever, and the
+ * hold would never release — turning this module from a safety mechanism into a
+ * permanent lock.
+ *
+ * That is safe only because the fold is exhaustive, and 013 asserts it rather
+ * than assuming it: if even one legacy report failed to fold, the migration
+ * fails. A legacy report left behind would be a live investigation with no
+ * delete hold, which is silent, and silent is the failure mode PR-1 existed to
+ * end.
  *
  * ── What this module does NOT do ──
  *
@@ -36,14 +56,16 @@
 /**
  * Report statuses that still hold evidence.
  *
- * `reports.status` has no 'reviewing' value today and `conversation_reports`
- * does; naming both here means the two tables can share every query below, and
- * means the widening of `reports.status` that the trust & safety spec specifies
- * needs no change to this file.
+ * Kept in step with `REPORT_STATUSES` in server/moderation.js — that module owns
+ * the taxonomy, this one owns what the taxonomy means for deletion. They are
+ * asserted equal in `server/moderation.test.js` so the two cannot drift.
  */
-export const LIVE_REPORT_STATUSES = ['open', 'reviewing'];
+export const LIVE_REPORT_STATUSES = ['open', 'reviewing', 'escalated'];
 
 const LIVE = LIVE_REPORT_STATUSES.map(s => `'${s}'`).join(', ');
+
+export const LIVE_APPEAL_STATUSES = ['open', 'reviewing'];
+const LIVE_APPEALS = LIVE_APPEAL_STATUSES.map(s => `'${s}'`).join(', ');
 
 /**
  * The refusal an organizer or administrator sees.
@@ -75,32 +97,48 @@ export const COMMENT_HELD_MESSAGE =
 /**
  * Is any evidence attached to this event?
  *
- * Three surfaces, because `DELETE /api/events/:id` destroys all three: the event
- * row itself, every comment on it, and — by cascade through `conversations` —
- * every reported conversation held under it.
+ * Four surfaces, because `DELETE /api/events/:id` destroys all of them: the
+ * event row itself, every comment on it, and — by cascade through
+ * `conversations` — every reported conversation and every reported message held
+ * under it.
  *
- * Returns `true`/`false` rather than a count. A count would be a disclosure: how
- * many people reported you is information the subject of a report does not get.
+ * `event_id_snapshot` is what makes the last two cheap and, more importantly,
+ * what makes them still work after the conversation has been destroyed by some
+ * other route: the report remembers which event it happened at even when the
+ * join no longer resolves.
+ *
+ * Returns a boolean, never a count. How many people reported you is information
+ * the subject of a report does not get.
  */
 export function eventHasLiveReport(db, eventId) {
   const row = db.prepare(`
     SELECT 1 AS held
     WHERE EXISTS (
-      SELECT 1 FROM conversation_reports cr
-      LEFT JOIN conversations c ON c.id = cr.conversation_id
-      WHERE cr.status IN (${LIVE})
-        AND (c.event_id = :eventId OR cr.event_id_snapshot = :eventId)
-    )
-    OR EXISTS (
       SELECT 1 FROM reports r
       WHERE r.status IN (${LIVE})
-        AND r.target_type = 'event' AND r.target_id = :eventId
+        AND (
+          (r.target_type = 'event' AND r.target_id = :eventId)
+          OR r.event_id_snapshot = :eventId
+          OR (r.target_type = 'comment'
+              AND r.target_id IN (SELECT id FROM event_comments WHERE event_id = :eventId))
+          OR (r.target_type IN ('conversation', 'message')
+              AND r.conversation_id_snapshot IN
+                  (SELECT id FROM conversations WHERE event_id = :eventId))
+        )
     )
     OR EXISTS (
-      SELECT 1 FROM reports r
-      WHERE r.status IN (${LIVE})
-        AND r.target_type = 'comment'
-        AND r.target_id IN (SELECT id FROM event_comments WHERE event_id = :eventId)
+      SELECT 1 FROM appeals a
+      JOIN reports r ON a.report_id = r.id
+      WHERE a.status IN (${LIVE_APPEALS})
+        AND (
+          (r.target_type = 'event' AND r.target_id = :eventId)
+          OR r.event_id_snapshot = :eventId
+          OR (r.target_type = 'comment'
+              AND r.target_id IN (SELECT id FROM event_comments WHERE event_id = :eventId))
+          OR (r.target_type IN ('conversation', 'message')
+              AND r.conversation_id_snapshot IN
+                  (SELECT id FROM conversations WHERE event_id = :eventId))
+        )
     )
   `).get({ eventId });
   return Boolean(row);
@@ -111,8 +149,12 @@ export function commentHasLiveReport(db, commentId) {
   const row = db.prepare(`
     SELECT 1 AS held FROM reports
     WHERE status IN (${LIVE}) AND target_type = 'comment' AND target_id = ?
+    UNION
+    SELECT 1 AS held FROM appeals a
+    JOIN reports r ON a.report_id = r.id
+    WHERE a.status IN (${LIVE_APPEALS}) AND r.target_type = 'comment' AND r.target_id = ?
     LIMIT 1
-  `).get(commentId);
+  `).get(commentId, commentId);
   return Boolean(row);
 }
 
@@ -120,42 +162,46 @@ export function commentHasLiveReport(db, commentId) {
  * Is this account a party to a live report, in either direction?
  *
  * Both directions matter and the reporter side is the one that is easy to miss.
- * `conversation_reports.reporter_id` used to be ON DELETE CASCADE, so purging a
- * reporting student's anonymised shell destroyed their own safety report — a
- * victim's privacy right silently erasing the record of what was done to them.
- * Migration 011 severed that cascade so the report now survives the purge; this
- * check is the second half, holding the shell itself while a report is live so
- * the surrounding conversation and its un-snapshotted messages stay reviewable.
+ * `reports.reporter_id` used to be ON DELETE CASCADE, so purging a reporting
+ * student's anonymised shell destroyed their own safety report — a victim's
+ * privacy right silently erasing the record of what was done to them. Migration
+ * 011 severed that cascade so the report now survives the purge; this check is
+ * the second half, holding the shell itself while a report is live so the
+ * surrounding conversation and its un-snapshotted messages stay reviewable.
+ *
+ * The organizer clauses exist because `events.organizer_id` is ON DELETE
+ * CASCADE: purging an organizer's shell deletes every event they ran and takes
+ * its comments, announcements and conversations with it.
  */
 export function userIsPartyToLiveReport(db, userId) {
   const row = db.prepare(`
     SELECT 1 AS held
     WHERE EXISTS (
-      SELECT 1 FROM conversation_reports
-      WHERE status IN (${LIVE}) AND (reporter_id = :userId OR reported_user_id = :userId)
-    )
-    OR EXISTS (
-      SELECT 1 FROM reports WHERE status IN (${LIVE}) AND reporter_id = :userId
-    )
-    OR EXISTS (
-      SELECT 1 FROM conversation_reports cr
-      JOIN conversations c ON c.id = cr.conversation_id
-      WHERE cr.status IN (${LIVE}) AND (c.student_id = :userId OR c.organizer_id = :userId)
-    )
-    OR EXISTS (
-      -- Organizer of an event under a live report. events.organizer_id is
-      -- ON DELETE CASCADE, so purging this shell deletes the event and takes
-      -- its comments, announcements and conversations down with it.
-      SELECT 1 FROM reports r
-      JOIN events e ON e.id = r.target_id
-      WHERE r.status IN (${LIVE}) AND r.target_type = 'event' AND e.organizer_id = :userId
+      SELECT 1 FROM reports
+      WHERE status IN (${LIVE})
+        AND (reporter_id = :userId OR target_author_id = :userId
+             OR (target_type = 'user' AND target_id = :userId))
     )
     OR EXISTS (
       SELECT 1 FROM reports r
-      JOIN event_comments ec ON ec.id = r.target_id
-      JOIN events e ON e.id = ec.event_id
-      WHERE r.status IN (${LIVE}) AND r.target_type = 'comment'
-        AND (ec.user_id = :userId OR e.organizer_id = :userId)
+      JOIN conversations c ON c.id = r.conversation_id_snapshot
+      WHERE r.status IN (${LIVE}) AND (c.student_id = :userId OR c.organizer_id = :userId)
+    )
+    OR EXISTS (
+      SELECT 1 FROM reports r
+      JOIN events e ON e.id = r.event_id_snapshot
+      WHERE r.status IN (${LIVE}) AND e.organizer_id = :userId
+    )
+    OR EXISTS (
+      SELECT 1 FROM appeals a
+      WHERE a.status IN (${LIVE_APPEALS}) AND a.user_id = :userId
+    )
+    OR EXISTS (
+      SELECT 1 FROM appeals a
+      JOIN reports r ON a.report_id = r.id
+      WHERE a.status IN (${LIVE_APPEALS})
+        AND (r.reporter_id = :userId OR r.target_author_id = :userId
+             OR (r.target_type = 'user' AND r.target_id = :userId))
     )
   `).get({ userId });
   return Boolean(row);
@@ -164,31 +210,69 @@ export function userIsPartyToLiveReport(db, userId) {
 /**
  * SQL predicate: true for a message the retention sweep may delete.
  *
- * Interpolated into `retentionWorker.js`'s DELETE. Two clauses, closing two
- * separate holes in the single clause it replaces:
+ * Interpolated into `retentionWorker.js`'s DELETE. Four clauses, closing four
+ * separate ways a live investigation could have its evidence swept out from
+ * under it:
  *
- *   1. The snapshot is CAPPED — at most 20 caller-named ids, or the last 10
- *      messages when none are named (`messageRoutes.js`). Exempting only
- *      snapshotted ids therefore sweeps message 11 of a reported conversation
- *      while the investigation is still open. The second clause exempts the
- *      whole thread instead.
- *   2. A conversation reported and then swept leaves a moderator reading ten
- *      messages with no idea that four hundred are missing.
+ *   1. `report_evidence` — the unified snapshot. Frozen bodies are the record;
+ *      the live message is the copy, but deleting the copy while the report is
+ *      open loses the surrounding thread.
+ *   2. `conversation_report_messages` — the LEGACY snapshot. Still named
+ *      explicitly even though 013 copied every row into `report_evidence`,
+ *      because dropping it from the predicate on the strength of "the fold
+ *      covered it" would silently un-exempt every legacy snapshot the moment the
+ *      fold turned out to have missed one.
+ *   3. A message that is itself the target of a live report.
+ *   4. Every message in a conversation under a live report — because the
+ *      snapshot is bounded (ten either side of a reported message, five hundred
+ *      for a thread) and message 501 is still evidence while somebody is
+ *      reading it.
  *
  * The exemption is bounded by the report being live, not by a new retention
  * period: once a report is resolved the ordinary three-year clock applies again
- * to everything except the frozen snapshot, which is the record and is never
- * swept. That keeps the published "3 years — longer if the conversation has been
- * reported" true without inventing a second indefinite class of data, which the
- * amended COPPA Rule would not tolerate on a platform of minors.
+ * to everything except the frozen snapshot, which is never swept. That keeps the
+ * published "3 years — longer if the conversation has been reported" true
+ * without inventing a second indefinite class of data, which the amended COPPA
+ * Rule would not tolerate on a platform of minors.
  *
  * String-interpolated rather than parameterised because it is a fragment of a
  * prepared statement, not a value. Everything interpolated is a literal defined
  * in this file — never a caller's input.
  */
 export const RETAINABLE_MESSAGE_PREDICATE = `
-  id NOT IN (SELECT message_id FROM conversation_report_messages)
+  id NOT IN (
+    SELECT re.message_id FROM report_evidence re 
+    JOIN reports r ON r.id = re.report_id 
+    WHERE r.status IN (${LIVE})
+  )
+  AND id NOT IN (
+    SELECT crm.message_id FROM conversation_report_messages crm
+    JOIN conversation_reports cr ON cr.id = crm.report_id
+    WHERE cr.status IN (${LIVE})
+  )
+  AND id NOT IN (
+    SELECT target_id FROM reports
+    WHERE target_type = 'message' AND status IN (${LIVE})
+  )
   AND conversation_id NOT IN (
-    SELECT conversation_id FROM conversation_reports WHERE status IN (${LIVE})
+    SELECT conversation_id_snapshot FROM reports
+    WHERE conversation_id_snapshot IS NOT NULL AND status IN (${LIVE})
+  )
+  AND id NOT IN (
+    SELECT re.message_id FROM report_evidence re 
+    JOIN reports r ON r.id = re.report_id 
+    JOIN appeals a ON a.report_id = r.id
+    WHERE a.status IN (${LIVE_APPEALS})
+  )
+  AND id NOT IN (
+    SELECT crm.message_id FROM conversation_report_messages crm
+    JOIN conversation_reports cr ON cr.id = crm.report_id
+    JOIN appeals a ON a.report_id = cr.id
+    WHERE a.status IN (${LIVE_APPEALS})
+  )
+  AND conversation_id NOT IN (
+    SELECT conversation_id_snapshot FROM reports r
+    JOIN appeals a ON a.report_id = r.id
+    WHERE r.conversation_id_snapshot IS NOT NULL AND a.status IN (${LIVE_APPEALS})
   )
 `;

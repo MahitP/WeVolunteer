@@ -456,7 +456,7 @@ describe('authorization hygiene', () => {
       // is set from the ?type= query parameter and decides which overlay to draw;
       // nothing about the viewer. That the pin keeps moving is the guard working
       // — it forces the re-read.
-      'src/App.jsx:849': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      'src/App.jsx:853': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
       'src/components/EventComments.jsx:112': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
       'src/components/EventComments.jsx:113': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
       'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
@@ -616,6 +616,8 @@ describe('authorization hygiene', () => {
       // drifts the moment that's true and was a source of confusion in
       // review — read the per-route reason for exactly what protects it. ──
       'GET /api/auth/me': { category: CATEGORY.SELF_ONLY, reason: 'reads only the caller\'s own row (req.user.id)' },
+      'POST /api/appeals': { category: CATEGORY.SELF_ONLY, reason: 'creates an appeal for the caller\'s own account; a supplied reportId is verified to be ABOUT the caller before it is stored, and an unowned or unknown id gets the same 404 so the route cannot be walked for report ids' },
+      'GET /api/appeals/mine': { category: CATEGORY.SELF_ONLY, reason: 'fetches appeals for the caller\'s own account' },
       'POST /api/auth/logout': { category: CATEGORY.SELF_ONLY, reason: 'revokes only the caller\'s current session' },
       'POST /api/auth/sign-out-others': { category: CATEGORY.SELF_ONLY, reason: 'bumps only the caller\'s own token_version' },
       'DELETE /api/auth/account': { category: CATEGORY.SELF_ONLY, reason: 'deletes only the caller\'s own account (active-events check is scoped to organizer_id = caller)' },
@@ -725,6 +727,7 @@ describe('authorization hygiene', () => {
       'POST /api/events/:id/comments': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may post a comment on any event; no ownership/capability distinction by design' },
       'GET /api/leaderboard': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'requires login only to prevent public scraping of opted-in student stats (in-file comment); no role distinction' },
       'POST /api/reports': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may file a report against any event/comment; no capability distinction by design (abuse-reporting entry point)' },
+      'POST /api/messages/:id/report': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may file a report against any message; no capability distinction by design (abuse-reporting entry point)' },
     };
 
     const validCategories = new Set(Object.values(CATEGORY));

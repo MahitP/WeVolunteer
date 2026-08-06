@@ -629,9 +629,17 @@ export const api = {
   verifyCertificate: async (code) => apiFetch(`/api/certificates/verify/${encodeURIComponent(code)}`),
 
   // ── Moderation ─────────────────────────────────
-  submitReport: async ({ targetType, targetId, reason }) => apiFetch('/api/reports', {
+  submitReport: async ({ targetType, targetId, reason, details }) => apiFetch('/api/reports', {
     method: 'POST',
-    body: JSON.stringify({ targetType, targetId, reason })
+    body: JSON.stringify({ targetType, targetId, reason, details })
+  }),
+  reportConversation: async (conversationId, reason, details) => apiFetch(`/api/messages/conversations/${conversationId}/report`, {
+    method: 'POST',
+    body: JSON.stringify({ reason, details })
+  }),
+  reportMessage: async (messageId, reason, details) => apiFetch(`/api/messages/${messageId}/report`, {
+    method: 'POST',
+    body: JSON.stringify({ reason, details })
   }),
 
   // ── V2: Profile ────────────────────────────────
