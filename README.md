@@ -297,12 +297,12 @@ application**:
   attack surface the advisory describes is not instantiated.
 
 `npm audit fix --force` resolves it by **downgrading** to `react-router-dom@7.11.0`.
-That is a step backwards: 7.18.1 is the current release, and the downgrade is
+That is a step backwards: 7.18.2 is the current release, and the downgrade is
 flagged by npm as a breaking change. The dependency is deliberately left at the
 latest version rather than moved to an older one to silence a finding that does
 not apply.
 
-This will be revisited when a patched release above 7.18.1 is published.
+This will be revisited when a patched release above 7.18.2 is published.
 
 ---
 
