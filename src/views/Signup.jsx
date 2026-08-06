@@ -22,32 +22,98 @@ const PASSWORD_RULES = [
 ];
 
 /**
- * "Class of ____", mirroring server/accountValidation.js.
+ * Grade level and class year, mirroring server/accountValidation.js.
  *
- * Duplicated for the same reason PASSWORD_RULES is: the option list has to be
+ * Duplicated for the same reason PASSWORD_RULES is: the options have to be
  * computed synchronously to render, and `accountValidation.js` cannot come into
  * the bundle — it imports bcryptjs and the server config. `src/authz.js`'s
  * re-export trick is not available here for that reason.
  *
- * Drift here is a cosmetic bug and never an eligibility one, because the server
- * recomputes the grade from the class year it receives and ignores the `grade`
- * in the payload entirely. The list is computed from the clock rather than
- * written down for the same reason it is on the server: a literal range is right
- * for one school year and then starts offering years that have already
- * graduated.
+ * ── Drift here USED to be cosmetic. It is not any more. ──
+ *
+ * This comment previously said drift "is a cosmetic bug and never an eligibility
+ * one, because the server recomputes the grade from the class year it receives".
+ * That reasoning was sound while the control was a `<select>` whose option VALUES
+ * were the class years themselves — the user picked a year directly, so the
+ * client had no arithmetic to get wrong.
+ *
+ * The picker now asks for a grade and converts (see `classYearForGrade`), so the
+ * client computes the year that is sent. The server still refuses a year outside
+ * the eligible range, but a wrong year INSIDE that range is a valid year for a
+ * different grade — so a bug here would silently register a ninth grader as a
+ * senior, which is precisely the outcome the server's own comment describes as
+ * the thing to prevent. `Signup.grade.test.js` pins the conversion in both
+ * directions for that reason.
+ *
+ * The range is computed from the clock rather than written down for the same
+ * reason it is on the server: a literal range is right for one school year and
+ * then starts offering years that have already graduated.
  */
-const HS_GRADES = ['9', '10', '11', '12'];
+export const HS_GRADES = ['9', '10', '11', '12'];
 const ORDINAL = { 9: '9th', 10: '10th', 11: '11th', 12: '12th' };
 
 /** The calendar year the school year in progress ends in — July is the boundary. */
-const schoolYearEndYear = (now = new Date()) =>
+export const schoolYearEndYear = (now = new Date()) =>
   now.getUTCMonth() <= 5 ? now.getUTCFullYear() : now.getUTCFullYear() + 1;
 
-/** Eligible class years, seniors first. */
-const CLASS_YEARS = HS_GRADES.map((_, i) => schoolYearEndYear() + i);
-
-const gradeForClassYear = (year) =>
+export const gradeForClassYear = (year) =>
   HS_GRADES[HS_GRADES.length - 1 - (Number(year) - schoolYearEndYear())] ?? '';
+
+/**
+ * The inverse, so the form can ask for a GRADE while still holding a class year.
+ *
+ * The question a student can answer without arithmetic is "what grade are you
+ * in"; the durable fact is the class year, and the server treats the year as the
+ * source of truth and recomputes grade from it (accountValidation.js). Those two
+ * statements are only compatible if something converts between them, and this is
+ * it: the picker sets a grade, this turns it into the year that goes in state and
+ * on the wire.
+ *
+ * The payload is therefore byte-for-byte what it was before the picker changed —
+ * `graduationYear` plus a derived `grade` — so nothing about the stored record
+ * moves. Returns '' for a non-student answer, which is what sends no year at all.
+ */
+export const classYearForGrade = (grade) => {
+  const i = HS_GRADES.indexOf(String(grade));
+  return i === -1 ? '' : String(schoolYearEndYear() + (HS_GRADES.length - 1 - i));
+};
+
+/**
+ * The three steps, named once.
+ *
+ * Signup has always had three and nothing on screen said so, so step 1 looked
+ * like the whole form and its length read as the total cost of signing up.
+ */
+const STEPS = ['Your details', 'Sign-in method', 'Confirm email'];
+
+/** The rail. An ordered list, so it is announced as "3 items" with a position. */
+function StepRail({ current }) {
+  return (
+    <ol className="signup-steps">
+      {STEPS.map((label, i) => {
+        const n = i + 1;
+        const state = n < current ? 'done' : n === current ? 'current' : 'todo';
+        return (
+          <li
+            key={label}
+            className="signup-step"
+            data-state={state}
+            aria-current={state === 'current' ? 'step' : undefined}
+          >
+            <span className="signup-step-dot" aria-hidden="true">{n}</span>
+            <span className="signup-step-label">{label}</span>
+            {/* The dot is decorative; state has to reach a screen reader as text
+                rather than as a filled circle. */}
+            <span className="sr-only">
+              {`Step ${n} of ${STEPS.length}: ${label}`}
+              {state === 'done' ? ' — done' : state === 'current' ? ' — current' : ''}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 /** Matches the old `grade: '10'` default: a sophomore is the median applicant. */
 const DEFAULT_CLASS_YEAR = String(schoolYearEndYear() + 2);
@@ -323,7 +389,7 @@ export default function Signup({ onSignupSuccess, addToast }) {
   const isStudent = form.role === 'student';
 
   const apiError = errors.api && (
-    <div className="alert alert-danger" role="alert" tabIndex={-1} ref={errorRef} style={{ marginBottom: 'var(--s4)' }}>
+    <div className="alert alert-danger alert-spaced" role="alert" tabIndex={-1} ref={errorRef}>
       <AlertCircle size={16} aria-hidden="true" />
       <span>{errors.api}</span>
     </div>
@@ -334,6 +400,7 @@ export default function Signup({ onSignupSuccess, addToast }) {
     return (
       <div className="auth">
         <main className="auth-form auth-form-narrow auth-centered" aria-labelledby="check-heading">
+          <StepRail current={3} />
           <div className="auth-icon" aria-hidden="true"><Mail size={26} /></div>
           <h1 id="check-heading" className="auth-title">Confirm your email</h1>
           <p className="auth-subtitle">
@@ -378,6 +445,8 @@ export default function Signup({ onSignupSuccess, addToast }) {
           <button className="auth-back" onClick={() => { setStep(1); setErrors({}); }}>
             <ArrowLeft size={16} aria-hidden="true" /> Edit your details
           </button>
+
+          <StepRail current={2} />
 
           <div className="auth-head">
             <h1 id="method-heading" className="auth-title">How will you sign in?</h1>
@@ -534,6 +603,11 @@ export default function Signup({ onSignupSuccess, addToast }) {
           <ArrowLeft size={16} aria-hidden="true" /> Back
         </button>
 
+        {/* A provider signup finishes here rather than continuing to step 2, so
+            showing it a three-step rail would promise two steps that never
+            come. */}
+        {!oauthSignup && <StepRail current={1} />}
+
         <div className="auth-head">
           <h1 id="signup-heading" className="auth-title">Create your account</h1>
           <p className="auth-subtitle">
@@ -545,46 +619,59 @@ export default function Signup({ onSignupSuccess, addToast }) {
 
         {apiError}
 
-        <form onSubmit={handleDetailsSubmit} className="stack-md" noValidate>
-          {/* A radio group needs a fieldset and legend to be announced as a
-              group; a <span className="label"> is read as loose text, so a
-              screen-reader user hears two unrelated options. */}
-          <fieldset className="field" style={{ border: 'none', padding: 0, margin: 0 }}>
-            <legend className="label">I'm signing up as</legend>
-            <div className="stack-sm">
-              <label className="check" data-checked={isStudent ? 'true' : 'false'}>
-                <input type="radio" name="role" value="student" checked={isStudent} onChange={() => set('role', 'student')} />
-                <span>
-                  <span className="check-title">A volunteer</span>
-                  <span className="check-desc">Find shifts and track your service hours.</span>
-                </span>
-              </label>
-              <label className="check" data-checked={!isStudent ? 'true' : 'false'}>
-                <input type="radio" name="role" value="organizer" checked={!isStudent} onChange={() => set('role', 'organizer')} />
-                <span>
-                  <span className="check-title">An organizer</span>
-                  <span className="check-desc">Post events and manage volunteers. A school administrator approves this before you can post.</span>
-                </span>
-              </label>
-            </div>
-          </fieldset>
+        <form onSubmit={handleDetailsSubmit} noValidate>
+          {/*
+            Four groups, in order of increasing commitment: who you are, where
+            you study, how you appear, what you agree to.
 
-          <div className="field">
-            <label htmlFor="su-name">Full name</label>
-            <input
-              id="su-name"
-              name="name"
-              className="input input-lg"
-              autoComplete="name"
-              autoCapitalize="words"
-              value={form.name}
-              placeholder="Alex Rivera"
-              aria-invalid={!!errors.name}
-              onChange={e => set('name', e.target.value)}
-              required
-            />
-            {errors.name && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.name}</span>}
-          </div>
+            The form used to be fourteen controls in one column at a uniform
+            rhythm, so the consent block — the only part of this page that is a
+            legal act — sat at exactly the same visual weight as the optional
+            skills field. Grouping is what fixes that, and it costs nothing
+            behaviourally: no state, no validation and no payload changes below.
+          */}
+          <div className="formsection">
+            <span className="formsection-eyebrow">Who you are</span>
+
+            {/* A radio group needs a fieldset and legend to be announced as a
+                group; a <span className="label"> is read as loose text, so a
+                screen-reader user hears two unrelated options. */}
+            <fieldset className="field fieldset-plain">
+              <legend className="label">I'm signing up as</legend>
+              <div className="stack-sm">
+                <label className="check" data-checked={isStudent ? 'true' : 'false'}>
+                  <input type="radio" name="role" value="student" checked={isStudent} onChange={() => set('role', 'student')} />
+                  <span>
+                    <span className="check-title">A volunteer</span>
+                    <span className="check-desc">Find shifts and track your service hours.</span>
+                  </span>
+                </label>
+                <label className="check" data-checked={!isStudent ? 'true' : 'false'}>
+                  <input type="radio" name="role" value="organizer" checked={!isStudent} onChange={() => set('role', 'organizer')} />
+                  <span>
+                    <span className="check-title">An organizer</span>
+                    <span className="check-desc">Post events and manage volunteers. A school administrator approves this before you can post.</span>
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+
+            <div className="field">
+              <label htmlFor="su-name">Full name</label>
+              <input
+                id="su-name"
+                name="name"
+                className="input input-lg"
+                autoComplete="name"
+                autoCapitalize="words"
+                value={form.name}
+                placeholder="Alex Rivera"
+                aria-invalid={!!errors.name}
+                onChange={e => set('name', e.target.value)}
+                required
+              />
+              {errors.name && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.name}</span>}
+            </div>
 
           <div className="field">
             <label htmlFor="su-username">Username</label>
@@ -623,54 +710,86 @@ export default function Signup({ onSignupSuccess, addToast }) {
                 a server-side username rejection was invisible on this field. */}
             {errors.username && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.username}</span>}
           </div>
+          </div>
 
-          <div className="field-row">
+          <div className="formsection">
+            <span className="formsection-eyebrow">{isStudent ? 'Where you study' : 'Your organization'}</span>
+
             {isStudent && (
               /*
-                Class of ____ — and the only grade-level control on this form.
+                The grade picker.
 
-                There were two fields here (grade, and nothing else) and now
-                there is one, because grade level and graduation year are the
-                same fact and only one of them stays true. A grade is wrong from
-                the following August: nothing in the product advances it. The
-                class year never changes, and the grade is derived from it — the
-                option label shows that derivation rather than hiding it, so
-                nobody has to guess which year "Class of 2029" means today.
+                This asks for a GRADE and stores a CLASS YEAR, and the split is
+                deliberate. Grade level and graduation year are the same fact
+                expressed two ways, and only one of them stays true: a stored
+                grade is wrong every August because nothing in the product
+                advances it, while "class of 2029" is as true in 2031 as the day
+                it was typed. So the class year remains the record, and the
+                server recomputes grade from it (accountValidation.js).
 
-                "Not in high school" is what the old `Adult` option was for: a
-                parent or adult volunteering. It sends no class year at all,
-                rather than a placeholder one.
+                What changed is only the question. It used to be a select of five
+                options reading "Class of 2029 — 9th grade" under a label reading
+                "Class of" — a sentence fragment above a string that asks a
+                fourteen-year-old to do arithmetic about their own year. A
+                student knows their grade without converting anything, so that is
+                what the form asks; `classYearForGrade` does the conversion.
 
-                Enforced server-side (accountValidation.js), which recomputes the
-                grade from whichever year arrives and refuses one outside the
-                eligible range.
+                The payload is unchanged: still `graduationYear` plus a derived
+                `grade`, so nothing about the stored record moves.
+
+                Real radios, visually hidden behind chips, so arrow-key
+                navigation and group semantics come from the platform instead of
+                being reimplemented. "Not in high school" is what the old `Adult`
+                option was for — a parent or adult volunteering — and still sends
+                no class year at all rather than a placeholder one.
               */
-              <div className="field" style={{ flex: 1 }}>
-                <label htmlFor="su-grad-year">Class of</label>
-                <select
-                  id="su-grad-year"
-                  name="graduationYear"
-                  className="select input-lg"
-                  value={form.graduationYear}
-                  onChange={e => set('graduationYear', e.target.value)}
-                  aria-invalid={!!errors.graduationYear}
-                  aria-describedby="su-grad-year-hint"
-                >
-                  {CLASS_YEARS.map(y => (
-                    <option key={y} value={String(y)}>
-                      Class of {y} — {ORDINAL[gradeForClassYear(y)]} grade
-                    </option>
-                  ))}
-                  <option value="">Not in high school</option>
-                </select>
-                <span id="su-grad-year-hint" className="field-hint">
-                  The year you expect to graduate. We keep this instead of your grade so it
-                  stays right every September.
+              <fieldset className="field fieldset-plain">
+                <legend className="label">What grade are you in?</legend>
+                <div className="gradepick">
+                  {HS_GRADES.map(g => {
+                    const checked = gradeForClassYear(form.graduationYear) === g;
+                    return (
+                      <label key={g} className="gradepick-option" data-checked={checked ? 'true' : 'false'}>
+                        <input
+                          type="radio"
+                          name="grade"
+                          className="sr-only"
+                          value={g}
+                          checked={checked}
+                          onChange={() => set('graduationYear', classYearForGrade(g))}
+                        />
+                        <span aria-hidden="true">{ORDINAL[g]}</span>
+                        {/* The chip reads "9th"; a screen reader should hear the
+                            whole question's answer, not an ordinal on its own. */}
+                        <span className="sr-only">{ORDINAL[g]} grade</span>
+                      </label>
+                    );
+                  })}
+                  <label
+                    className="gradepick-option gradepick-wide"
+                    data-checked={!form.graduationYear ? 'true' : 'false'}
+                  >
+                    <input
+                      type="radio"
+                      name="grade"
+                      className="sr-only"
+                      value=""
+                      checked={!form.graduationYear}
+                      onChange={() => set('graduationYear', '')}
+                    />
+                    <span>Not in high school</span>
+                  </label>
+                </div>
+                <span className="field-hint">
+                  {form.graduationYear
+                    ? `You'll be recorded as the class of ${form.graduationYear}, so this stays right every September.`
+                    : 'Adults and volunteers outside high school can pick this.'}
                 </span>
                 {errors.graduationYear && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.graduationYear}</span>}
-              </div>
+              </fieldset>
             )}
-            <div className="field" style={{ flex: 2 }}>
+
+            <div className="field">
               <label htmlFor="su-school">{isStudent ? 'School' : 'Organization'} <span className="dim">(optional)</span></label>
               <input
                 id="su-school"
@@ -684,7 +803,10 @@ export default function Signup({ onSignupSuccess, addToast }) {
             </div>
           </div>
 
-          <fieldset className="field" style={{ border: 'none', padding: 0, margin: 0 }}>
+          <div className="formsection">
+            <span className="formsection-eyebrow">How you appear</span>
+
+          <fieldset className="field fieldset-plain">
             <legend className="label">Pick an avatar</legend>
             <div className="choicegrid">
               {AVATARS.map(av => (
@@ -723,17 +845,26 @@ export default function Signup({ onSignupSuccess, addToast }) {
             asking, because a screen that announces "you must be 13" teaches a
             child which answer to give. The server refuses under-13 and returns
             `code: 'under_minimum_age'`; it never echoes the computed age back.
+            The hint below is unchanged for that reason: it says why we ask
+            without naming the threshold.
 
             `max` stops the date picker offering the future; it is a
             convenience, not the check.
+
+            Sizing: this was the one control on the form still using `.input`
+            while every sibling used `.input-lg`, so it rendered visibly shorter
+            than everything around it. It now matches, and `.field-dob` caps the
+            measure — a date input stretched to the full form width reads as a
+            text field that is mostly empty. The cap is lifted below 480px, where
+            the native picker needs the room.
           */}
-          <div className="field">
+          <div className="field field-dob">
             <label htmlFor="su-dob">Date of birth</label>
             <input
               id="su-dob"
               name="dateOfBirth"
               type="date"
-              className="input"
+              className="input input-lg"
               value={form.dateOfBirth}
               max={new Date().toISOString().slice(0, 10)}
               onChange={e => set('dateOfBirth', e.target.value)}
@@ -744,6 +875,7 @@ export default function Signup({ onSignupSuccess, addToast }) {
               We ask because WeVolunteer is for students in grade 9 and up.
             </span>
             {errors.dateOfBirth && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.dateOfBirth}</span>}
+          </div>
           </div>
 
           {/*
@@ -763,71 +895,86 @@ export default function Signup({ onSignupSuccess, addToast }) {
             Links open in a new tab so opening the Terms cannot cost the user
             the form they have half-filled.
           */}
-          <div className="stack-sm" style={{ marginTop: 'var(--s4)' }}>
-            <p className="small dim">
+          <div className="formsection">
+            <span className="formsection-eyebrow">What you agree to</span>
+            <p className="formsection-note">
               We store your name, email, and grade so organizers know who is volunteering.
               Your profile is private unless you change it, and you can download or delete
               everything later.
             </p>
 
-            <div className="field row">
-              <input
-                id="su-terms"
-                type="checkbox"
-                checked={form.termsAccepted}
-                onChange={e => set('termsAccepted', e.target.checked)}
-                aria-invalid={!!errors.termsAccepted}
-                aria-describedby="su-terms-links"
-                style={{ width: 20, height: 20, marginTop: 4 }}
-              />
-              <div className="stack-xs" style={{ flex: 1 }}>
-                <label htmlFor="su-terms" style={{ cursor: 'pointer' }}>
-                  I agree to the Terms of Service and to follow the Community Guidelines.
-                </label>
-                {/* The registry's canonical slugs. These were `/legal/terms` and
-                    `/legal/guidelines` — short aliases that were never declared as
-                    routes, so both answered 404 from inside the consent block. A
-                    "read the Terms" link pointing at nothing is not a broken link,
-                    it is a misrepresentation about the availability of the terms,
-                    and this is the one place in the app where that is being
-                    asserted. App.routeTable.test.jsx now fails the build on any
-                    internal href that does not resolve. */}
-                <span id="su-terms-links" className="small dim">
-                  <a className="auth-link" href="/legal/terms-of-service" target="_blank" rel="noopener noreferrer">Read the Terms</a>
-                  {' · '}
-                  <a className="auth-link" href="/legal/community-guidelines" target="_blank" rel="noopener noreferrer">Read the Guidelines</a>
-                </span>
-                {errors.termsAccepted && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.termsAccepted}</span>}
+            <div className="stack-sm">
+              {/*
+                Both consent controls are a designed component now, not a
+                browser-default checkbox sized by an inline style. The box is a
+                real `<input type="checkbox">` with `appearance: none`, so the
+                space key, `:checked` and the global focus ring all still come
+                from the platform — a hidden input with a painted stand-in beside
+                it has to reimplement each of those and usually gets focus wrong.
+
+                `htmlFor` makes the entire sentence the hit area. The links stay
+                OUTSIDE the label deliberately: an anchor inside a label is a
+                trap, because clicking it both follows the link and toggles the
+                box — so a student who wanted to read the Terms would silently
+                agree to them instead.
+              */}
+              <div className="consent" data-checked={form.termsAccepted ? 'true' : 'false'}>
+                <input
+                  id="su-terms"
+                  type="checkbox"
+                  className="consent-input"
+                  checked={form.termsAccepted}
+                  onChange={e => set('termsAccepted', e.target.checked)}
+                  aria-invalid={!!errors.termsAccepted}
+                  aria-describedby="su-terms-links"
+                />
+                <div className="consent-body">
+                  <label htmlFor="su-terms" className="consent-label">
+                    I agree to the Terms of Service and to follow the Community Guidelines.
+                  </label>
+                  {/* The registry's canonical slugs. These were `/legal/terms` and
+                      `/legal/guidelines` — short aliases that were never declared as
+                      routes, so both answered 404 from inside the consent block. A
+                      "read the Terms" link pointing at nothing is not a broken link,
+                      it is a misrepresentation about the availability of the terms,
+                      and this is the one place in the app where that is being
+                      asserted. App.routeTable.test.jsx now fails the build on any
+                      internal href that does not resolve. */}
+                  <span id="su-terms-links" className="consent-links">
+                    <a className="auth-link" href="/legal/terms-of-service" target="_blank" rel="noopener noreferrer">Read the Terms</a>
+                    {' · '}
+                    <a className="auth-link" href="/legal/community-guidelines" target="_blank" rel="noopener noreferrer">Read the Guidelines</a>
+                  </span>
+                  {errors.termsAccepted && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.termsAccepted}</span>}
+                </div>
+              </div>
+
+              <div className="consent" data-checked={form.privacyAcknowledged ? 'true' : 'false'}>
+                <input
+                  id="su-privacy"
+                  type="checkbox"
+                  className="consent-input"
+                  checked={form.privacyAcknowledged}
+                  onChange={e => set('privacyAcknowledged', e.target.checked)}
+                  aria-invalid={!!errors.privacyAcknowledged}
+                  aria-describedby="su-privacy-links"
+                />
+                <div className="consent-body">
+                  <label htmlFor="su-privacy" className="consent-label">
+                    I&rsquo;ve seen how WeVolunteer handles my information.
+                  </label>
+                  <span id="su-privacy-links" className="consent-links">
+                    <a className="auth-link" href={PRIVACY_URL} target="_blank" rel="noopener noreferrer">Read the Privacy Policy</a>
+                  </span>
+                  {errors.privacyAcknowledged && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.privacyAcknowledged}</span>}
+                </div>
               </div>
             </div>
 
-            <div className="field row">
-              <input
-                id="su-privacy"
-                type="checkbox"
-                checked={form.privacyAcknowledged}
-                onChange={e => set('privacyAcknowledged', e.target.checked)}
-                aria-invalid={!!errors.privacyAcknowledged}
-                aria-describedby="su-privacy-links"
-                style={{ width: 20, height: 20, marginTop: 4 }}
-              />
-              <div className="stack-xs" style={{ flex: 1 }}>
-                <label htmlFor="su-privacy" style={{ cursor: 'pointer' }}>
-                  I&rsquo;ve seen how WeVolunteer handles my information.
-                </label>
-                <span id="su-privacy-links" className="small dim">
-                  <a className="auth-link" href={PRIVACY_URL} target="_blank" rel="noopener noreferrer">Read the Privacy Policy</a>
-                </span>
-                {errors.privacyAcknowledged && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.privacyAcknowledged}</span>}
-              </div>
-            </div>
-
-            <p className="small dim">
+            <p className="formsection-note signup-guardian">
               Under 18? Please go through this with a parent or guardian.
             </p>
-          </div>
 
-          <div style={{ marginTop: 'var(--s4)' }}>
             <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={loading || !!detailsBlocker}>
               {oauthSignup ? (loading ? 'Creating your account…' : 'Create account') : 'Continue'}
             </button>

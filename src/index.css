@@ -6535,3 +6535,307 @@ input:disabled + .premium-slider {
   color: inherit;
 }
 .oa-banner:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* ==========================================================================
+   Signup — grouped sections, a real checkbox, and a compact grade picker
+
+   ── What was wrong ──
+
+   The form asked for fourteen things in one undifferentiated column at a
+   uniform rhythm, so nothing looked more or less important than anything
+   else and the page read as a government form rather than a product. It
+   also carried ten inline `style={{…}}` blocks — the last holdout from the
+   migration that removed 576 of them elsewhere — which is why its
+   checkboxes were raw browser defaults sized by hand while the radio group
+   beside them got the designed `.check` card. Two controls that ask the
+   same kind of question should not look like they came from different
+   applications.
+
+   Everything below reuses existing tokens. No new colour, no new typeface,
+   no new radius. The work is hierarchy and component consistency, not a new
+   visual language — Login, Welcome and Reset share this vocabulary and must
+   keep matching it.
+   ========================================================================== */
+
+/* — The step rail ————————————————————————————————————————————————————————
+
+   Signup has always been three steps (details → how you sign in → confirm
+   your address) and nothing on screen said so, so step 1 looked like the
+   whole form and its length read as the total cost of signing up. Numbering
+   is used here because this genuinely IS a sequence — the one case where a
+   numbered marker carries information rather than decorating.
+
+   An <ol> with aria-current on the active item, so it is announced as a list
+   of three with a position rather than as loose text. */
+.signup-steps {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s6);
+  padding: 0;
+  list-style: none;
+}
+.signup-step {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 0.75rem;
+  color: var(--ink-3);
+  min-width: 0;
+}
+/* The connector between steps. A flexible rule rather than a fixed width, so
+   three steps distribute across the form at any width. */
+.signup-step + .signup-step::before {
+  content: '';
+  flex: 1 1 auto;
+  min-width: var(--s3);
+  height: 1px;
+  background: var(--rule);
+}
+.signup-step-dot {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.signup-step-label { white-space: nowrap; }
+/* Done: filled, because a completed step is a reassurance and should read as
+   solid rather than as another thing to do. */
+.signup-step[data-state='done'] .signup-step-dot {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--ink-inv);
+}
+.signup-step[data-state='current'] .signup-step-dot {
+  border-color: var(--brand);
+  color: var(--brand-ink);
+  background: var(--brand-tint);
+}
+.signup-step[data-state='current'] {
+  color: var(--ink);
+  font-weight: 600;
+}
+/* The labels are the first thing to go on a narrow phone; the numbered dots
+   and the connectors still communicate position. */
+@media (max-width: 420px) {
+  .signup-step-label { display: none; }
+  .signup-step + .signup-step::before { min-width: var(--s2); }
+}
+
+/* — Grouped sections ——————————————————————————————————————————————————————
+
+   The eyebrow + hairline pair is the only structural device added, and it
+   encodes a real order of increasing commitment: who you are, then where you
+   study, then how you appear, then what you agree to. Without it the consent
+   block in particular sat at the same visual weight as the optional skills
+   field, which understates what it is. */
+.formsection + .formsection {
+  margin-top: var(--s8);
+  padding-top: var(--s6);
+  border-top: 1px solid var(--rule);
+}
+.formsection-eyebrow {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  /* Measured at var(--s1): 4px between the eyebrow and the first field label,
+     which read as one two-line heading rather than a label under a section
+     marker. 12px separates them without opening a gap the hairline has to
+     bridge. */
+  margin-bottom: var(--s3);
+}
+.formsection-note {
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  margin: 0 0 var(--s4);
+  line-height: 1.5;
+}
+/* A fieldset carries the grouping for assistive technology; it must not carry
+   the browser's default border and inset padding. This replaces
+   `style={{ border: 'none', padding: 0, margin: 0 }}` at three call sites. */
+.fieldset-plain {
+  border: none;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+/* — The consent checkbox ——————————————————————————————————————————————————
+
+   `appearance: none` on the real input rather than a hidden input with a
+   decorative box beside it. The control stays a real focusable checkbox, so
+   keyboard operation, the space key, `:checked`, and the global
+   `:focus-visible` ring all come for free — a visually-hidden input with a
+   painted stand-in has to reimplement each of those and usually gets focus
+   wrong.
+
+   22px, not the 16px `.check` uses: this is the most consequential control on
+   the page and the only one that is a legal act. Border is `--input-border`
+   rather than `--rule-strong` deliberately — this is the visual boundary of a
+   UI component, which WCAG §1.4.11 puts at 3:1, and `--input-border` is the
+   token tuned for exactly that (see inputContrast.test.js). */
+.consent {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.consent[data-checked='true'] {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+}
+.consent-input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  border: 2px solid var(--input-border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  cursor: pointer;
+  position: relative;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.consent-input:hover { border-color: var(--brand); }
+.consent-input:checked {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+/* Drawn with borders rather than a glyph font or an inline SVG: it scales with
+   the box, needs no extra element in the markup, and cannot be affected by the
+   icon library changing. */
+.consent-input:checked::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 6px;
+  height: 11px;
+  border: solid var(--ink-inv);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.consent-input[aria-invalid='true'] { border-color: var(--danger); }
+.consent-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  min-width: 0;
+  flex: 1;
+}
+/* The whole sentence is the hit area, via `htmlFor`. The links live OUTSIDE
+   this label on purpose: an anchor inside a label is a trap — clicking it
+   toggles the checkbox as well as following the link, so a student who wanted
+   to read the Terms silently agrees to them instead. */
+.consent-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.45;
+  cursor: pointer;
+  color: var(--ink);
+}
+.consent-links { font-size: 0.75rem; color: var(--ink-3); }
+/* Comfortably past the 44px minimum on a phone, where this is a primary tap
+   target. Scoped to the breakpoint for the reason the existing touch-target
+   block gives: a mouse does not need it and it would loosen desktop spacing. */
+@media (max-width: 700px) {
+  .consent { padding: var(--s4); min-height: 44px; }
+}
+
+/* — The grade picker ——————————————————————————————————————————————————————
+
+   Was a <select> of five options reading "Class of 2029 — 9th grade", under a
+   label reading "Class of" — a sentence fragment over a string that asks a
+   student to do arithmetic about their own year. A student knows their grade;
+   the graduation year is the storage format, not the question.
+
+   So the question is now "What grade are you in?" and the control is four
+   chips. Real radios, visually hidden, so arrow-key navigation and group
+   semantics come from the platform rather than from JavaScript. The class year
+   is still what the form holds and still what the payload carries — this
+   changes the question, not the record. */
+.gradepick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+.gradepick-option {
+  display: grid;
+  place-items: center;
+  min-width: 56px;
+  min-height: 44px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--input-border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast);
+}
+.gradepick-option:hover { border-color: var(--brand); }
+.gradepick-option[data-checked='true'] {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--ink-inv);
+}
+/* The radio is visually hidden, so the ring has to be drawn on the label that
+   stands in for it — otherwise keyboard focus on this control is invisible,
+   which is a WCAG 2.4.7 failure.
+
+   `:focus-within`, NOT `:has(input:focus-visible)`. The `:has` form was written
+   first and measured: with the radio focused, `getComputedStyle(chip).boxShadow`
+   stayed `none`, so the ring never appeared at all. `:focus-within` was verified
+   to match under the same conditions.
+
+   The cost is that the ring also shows after a mouse click, since a click focuses
+   the radio. That is ordinary behaviour for a segmented control and the right
+   side of the trade: a ring a mouse user did not need is a cosmetic nit, while a
+   keyboard user who cannot see where they are is locked out of the control. */
+.gradepick-option:focus-within { box-shadow: var(--focus); }
+/* "Not in high school" is a different kind of answer from a grade number, so it
+   is a wider chip on its own rather than a fifth number. */
+.gradepick-wide {
+  font-weight: 500;
+  font-size: 0.875rem;
+  flex: 1 1 auto;
+  min-width: 10rem;
+}
+
+/* — Field sizing helpers —————————————————————————————————————————————————
+
+   Replacing `style={{ flex: 1 }}` / `style={{ flex: 2 }}` on the paired row,
+   and giving date of birth a sensible measure. A date input stretched to the
+   full form width looks like a text field that is mostly empty, and it was
+   also the one control on the form still using `.input` while every sibling
+   used `.input-lg`, so it sat visibly shorter than everything around it. */
+.field-grow-1 { flex: 1 1 0; min-width: 0; }
+.field-grow-2 { flex: 2 1 0; min-width: 0; }
+.field-dob .input { max-width: 12rem; }
+@media (max-width: 480px) {
+  .field-dob .input { max-width: none; }
+}
+/* The API error sits above the form and needs to be separated from it. Was
+   `style={{ marginBottom: 'var(--s4)' }}`. */
+.alert-spaced { margin-bottom: var(--s4); }
+/* The guardian line closes the consent block and precedes the submit button, so
+   it needs air below it as well as above — the shared `.formsection-note` margin
+   is tuned for a note that opens a section. */
+.signup-guardian { margin-top: var(--s4); margin-bottom: var(--s4); }
