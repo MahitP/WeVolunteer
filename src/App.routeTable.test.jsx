@@ -82,7 +82,29 @@ function LocationProbe() {
 // whenever the active tab changes (i.e. after every redirect).
 Element.prototype.scrollTo = () => {};
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+
+  /**
+   * `vi.mock('./utils/api')` automocks every export to a `vi.fn()` returning
+   * `undefined`, and the two `/privacy` redirect tests land on the REAL
+   * LegalDocument (it is deliberately not stubbed — the assertion is that the
+   * redirect resolves to the registry document). Its mount effect runs
+   * `api.fetchLegalDocument(slug).then(…)`, which threw
+   *
+   *     TypeError: Cannot read properties of undefined (reading 'then')
+   *
+   * from inside a React passive effect, i.e. outside any test's control. Vitest
+   * surfaced it as an unhandled error and warned that the run "might cause false
+   * positive tests" — the suite reported green with two live exceptions in it.
+   *
+   * A promise that never settles is the honest stand-in: these tests assert on
+   * the router's location, never on the document, so "still loading" is exactly
+   * the state they mean. Resolving instead would land a state update after the
+   * assertions and trade the unhandled error for an act() warning.
+   */
+  api.fetchLegalDocument.mockReturnValue(new Promise(() => {}));
+});
 
 describe('authenticated route table', () => {
   /**
