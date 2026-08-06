@@ -947,6 +947,44 @@ router.get('/api/admin/reports/:id', authenticateToken, requireCap('report.resol
     describeTarget(report);
 
     /**
+     * Who this report is ABOUT, resolved to a person or to nothing.
+     *
+     * The moderator's next action is frequently against a person — a warning, a
+     * suspension — and the report row does not name one in a single place:
+     * `target_type = 'user'` puts them in `target_id`, everything else puts the
+     * author of the reported content in `target_author_id`. `auditSubject` already
+     * encodes that rule for the audit trail; this is the same rule, resolved to a
+     * name so the client does not have to re-derive it and get it wrong the way a
+     * check reading only `target_author_id` would (it misses every report filed
+     * directly against a person, which is the shape a report about an adult almost
+     * always takes).
+     *
+     * Deliberately NOT falling back to the reporter, unlike `auditSubject`. That
+     * fallback exists so an audit row always has a foreign key; here it would
+     * offer a moderator a "warn this person" button pointed at the child who filed
+     * the report.
+     */
+    const subjectId = report.target_type === 'user'
+      ? report.target_id
+      : report.target_author_id;
+
+    const subject = subjectId
+      ? db.prepare(
+        'SELECT id, name, role, account_status, suspended_until FROM users WHERE id = ? AND account_status != \'deleted\''
+      ).get(subjectId)
+      : null;
+
+    report.subject = subject
+      ? {
+        id: subject.id,
+        name: subject.name,
+        role: subject.role,
+        accountStatus: subject.account_status,
+        suspendedUntil: subject.suspended_until ?? null,
+      }
+      : null;
+
+    /**
      * Oldest first, so the timeline reads top-to-bottom in the order things
      * happened. `rowid` breaks ties because one PATCH writes several rows with
      * an identical `created_at` — status, priority and assignment change in one
@@ -1606,6 +1644,99 @@ router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('use
   }
 
   res.json({ success: true, userId: targetId, status: 'active' });
+});
+
+/**
+ * Issues a formal warning: the enforcement step below suspension.
+ *
+ * ── Why this route had to exist ──
+ *
+ * `REPORT_RESOLUTIONS` has offered `warning_issued` since v1.2 and
+ * `ResolutionModal` has offered "Warning issued to the person reported" in its
+ * dropdown. Neither did anything to the person. A moderator could close a report
+ * saying they had warned somebody, and that somebody was never told — so the
+ * platform's own record said a warning had been issued while the only party it
+ * concerned had no idea. That is worse than having no warning at all, because the
+ * label counts against them if it happens again.
+ *
+ * ── What it deliberately does not do ──
+ *
+ * It changes nothing about the account. No status, no capability, no access. A
+ * warning that quietly restricted something would be a suspension wearing a
+ * gentler word, and the person is being told explicitly that nothing has been
+ * taken away — that promise has to be true.
+ *
+ * ── Why there is no `already_warned` conflict ──
+ *
+ * Unlike suspension, a second warning is a real and meaningful act: it is the
+ * escalation. Refusing one because a previous warning exists would make the
+ * second incident unrecordable.
+ */
+router.post('/api/admin/users/:id/warn', authenticateToken, requireCap('user.warn'), (req, res) => {
+  const targetId = req.params.id;
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+
+  /**
+   * Same floor as a suspension reason, and for the same reason: this text is what
+   * the person is shown, verbatim, and it is what a later escalation is justified
+   * against. "stop" is not something anybody can act on or contest.
+   */
+  if (reason.length < MIN_SUSPENSION_REASON) {
+    return res.status(400).json({
+      error: `A reason of at least ${MIN_SUSPENSION_REASON} characters is required. `
+        + 'The person is shown these words, and it is what a later suspension would be justified against.',
+      code: 'reason_required',
+    });
+  }
+
+  const target = db.prepare(
+    'SELECT id, name, role, account_status FROM users WHERE id = ?'
+  ).get(targetId);
+
+  /**
+   * The same target rules as suspension, reused rather than restated.
+   *
+   * A warning is a lesser act, but every reason those refusals exist applies
+   * unchanged: warning your own account is meaningless, a deleted account cannot
+   * read it, and an ordinary admin formally warning the platform owner — or
+   * another administrator — is the same privilege-escalation shape, just quieter.
+   * Its messages say "suspend"; that is a wording cost worth paying to keep one
+   * definition of who may be acted upon.
+   */
+  const refusal = suspensionTargetError(req.principal, req.user.id, target);
+  if (refusal) return res.status(refusal.status).json({ error: refusal.error });
+
+  try {
+    inTransaction(() => {
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'ACCOUNT_WARNED',
+        targetUserId: targetId,
+        details: `Warned: ${reason}`,
+      });
+
+      /**
+       * Inside the transaction, and it THROWS rather than returning null if the
+       * notice cannot be enqueued — the same rule the suspension path follows.
+       *
+       * A warning recorded in the audit log but never delivered is precisely the
+       * defect this route was written to fix, so committing the record while
+       * losing the notice would reintroduce it one layer down. Rolling back makes
+       * it a clean, retryable failure.
+       */
+      notificationService.dispatch('ACCOUNT_WARNED', { reason }, targetId);
+    });
+  } catch (err) {
+    console.error('Failed to warn account:', err);
+    return res.status(500).json({ error: 'Failed to issue the warning' });
+  }
+
+  res.json({
+    success: true,
+    userId: targetId,
+    warned: true,
+    message: `${target.name} has been warned and told why. Their access is unchanged.`,
+  });
 });
 
 router.post('/api/admin/users/:id/appeal-token', authenticateToken, requireCap('user.suspend'), (req, res) => {

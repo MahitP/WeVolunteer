@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Lock, ShieldAlert } from 'lucide-react';
 import Modal, { ModalHead } from '../Modal';
+import SubjectActions from './SubjectActions';
 import { api } from '../../utils/api';
 import { can } from '../../authz';
 import { categoryLabel } from '../../moderation';
@@ -289,6 +290,22 @@ export default function ReportDetail({ reportId, user, onClose, onChanged, addTo
                 </p>
               )}
             </div>
+
+            {/* ── Acting on the person ──
+                Below the evidence on purpose: the decision to warn or suspend
+                somebody should be reachable after reading what they are supposed
+                to have done, not before it. */}
+            <SubjectActions
+              subject={report.subject}
+              user={user}
+              addToast={addToast}
+              onDone={async () => {
+                // The suspension or warning is now on the record; refetch so the
+                // timeline and the subject's status both reflect it.
+                try { setDetail(await api.fetchReport(reportId)); } catch { /* non-fatal */ }
+                onChanged?.();
+              }}
+            />
 
             {/* ── What has been done, in order ── */}
             <div className="stack-xs">

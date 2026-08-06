@@ -684,6 +684,27 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
+
+  /**
+   * Actions against the PERSON a report is about, as opposed to the report.
+   *
+   * Separate endpoints and separate capabilities (`user.warn`, `user.suspend`),
+   * because they are separate decisions: a warning changes nothing about the
+   * account, a suspension ends every session it holds. `until` is optional on
+   * suspend — omitted means no end date, which is what every suspension meant
+   * before deadlines existed.
+   */
+  warnUser: async (userId, reason) =>
+    apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/warn`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+
+  suspendUser: async (userId, { reason, until = null } = {}) =>
+    apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/suspend`, {
+      method: 'POST',
+      body: JSON.stringify(until ? { reason, until } : { reason }),
+    }),
   duplicateEvent: async (eventId) => apiFetch(`/api/events/${eventId}/duplicate`, { method: 'POST' }),
   fetchAutoSelectRuns: async (eventId) => apiFetch(`/api/events/${eventId}/auto-select/runs`),
   runAutoSelect: async (eventId, reason = '') => apiFetch(`/api/events/${eventId}/auto-select/run`, { 

@@ -36,6 +36,13 @@ export const SUPPORT_EMAIL = 'wevolunteer.platform@gmail.com';
  */
 export const MANDATORY_NOTICE_EVENTS = new Set([
   'ACCOUNT_SUSPENDED',
+  /**
+   * A formal warning is a mandatory notice for the same reason a suspension is:
+   * it is an enforcement action recorded against the person, it is the step that
+   * precedes suspension, and it is worthless — worse than worthless — if they do
+   * not receive it. A warning nobody read still counts against them next time.
+   */
+  'ACCOUNT_WARNED',
   'ACCOUNT_REINSTATED',
   'APPEAL_DECISION_STANDS',
   'APPEAL_DECISION_REVERSED',
@@ -125,6 +132,7 @@ export const EVENT_CATEGORIES = {
   PASSWORD_RESET: 'ACCOUNT',
   EMAIL_VERIFIED: 'ACCOUNT',
   ACCOUNT_SUSPENDED: 'ACCOUNT',
+  ACCOUNT_WARNED: 'ACCOUNT',
   ACCOUNT_REINSTATED: 'ACCOUNT',
   APPEAL_DECISION_STANDS: 'ACCOUNT',
   APPEAL_DECISION_REVERSED: 'ACCOUNT',
@@ -363,6 +371,44 @@ export function getInAppContent(event, payload) {
         link: `/appeal/${payload.token}`
       };
     }
+
+    /**
+     * A formal warning.
+     *
+     * ── What this is careful about ──
+     *
+     * The recipient is frequently a teenager who is about to feel accused, and the
+     * two failure modes are opposite: wording so soft they do not realise anything
+     * has been recorded, or so severe they think they have been thrown off the
+     * platform. So it says exactly three things — what was decided, that nothing
+     * has been taken away, and what happens next.
+     *
+     * It deliberately does NOT carry an appeal link. Appeal tokens are minted for
+     * suspensions (`appeal_tokens`, migration 014) and a warning is not a loss of
+     * access to restore; issuing one here would create a token that the appeal
+     * routes — which require `account_status = 'suspended'` — would refuse, i.e. a
+     * button that reliably fails. The support address is offered instead, which is
+     * a route a human actually answers.
+     */
+    case 'ACCOUNT_WARNED':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.CRITICAL,
+        title: 'A note about your WeVolunteer account',
+        body:
+          'An administrator has recorded a formal warning on your account. '
+          + "Here's what it says:\n\n"
+          + `${payload.reason}\n\n`
+          + 'Nothing has been removed. You can still sign in, sign up for shifts, and '
+          + 'your hours, attendance and certificates are untouched.\n\n'
+          + 'This is on your record, and it is taken into account if something similar '
+          + 'happens again — which is why we are telling you rather than only writing it '
+          + 'down.\n\n'
+          + `If you think this is wrong, or there is something we did not know, email ${SUPPORT_EMAIL} `
+          + 'from this address and a person will read it.',
+        ctaText: 'Community Guidelines',
+        link: '/legal/community-guidelines'
+      };
 
     /**
      * The good news half of the enforcement class.
