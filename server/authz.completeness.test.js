@@ -289,7 +289,13 @@ describe('authorization hygiene', () => {
       // mock-inclusive enablement map. Re-read again: unchanged, and still the
       // same `verified` decision — nothing about it became an authorization
       // check.
-      './routes/oauthRoutes.js:561',
+      //
+      // Moved to :584 when that same endpoint gained the `state` field
+      // (available | misconfigured | coming_soon) and the comment explaining why
+      // a credential-less provider must not read as "coming soon". Re-read a
+      // fifth time: still the new-signup `verified` flag, still a fact about the
+      // row being written rather than about what its holder may do.
+      './routes/oauthRoutes.js:584',
     ]);
     const consumedExceptions = new Set();
 
