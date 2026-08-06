@@ -94,8 +94,21 @@ router.get('/api/appeals/token/:token', (req, res) => {
    * So the live name wins and the snapshot is the fallback for when the account
    * is gone. `appeal_events` keeps every reviewer either way; nothing is lost.
    */
+  /**
+   * The suspension snapshots are SELECTed here, and that is the whole point of
+   * them.
+   *
+   * They were not, and the `?? appeal?.suspension_reason_snapshot` fallback below
+   * therefore read `undefined` on every request. `POST /unsuspend` NULLs the live
+   * `suspension_reason` and `suspended_at`, so the moment an appeal succeeded —
+   * or a suspension was lifted while the appeal was still open — the reinstated
+   * student opening their link was told they had been suspended for nothing, with
+   * no date. Migration 015 froze these columns for exactly this reader; nothing
+   * was reading them.
+   */
   const appeal = db.prepare(`
     SELECT a.id, a.status, a.decision, a.reasoning, a.created_at, a.decided_at,
+           a.suspension_reason_snapshot, a.suspended_at_snapshot,
            COALESCE(u.name, a.reviewer_name_snapshot) AS reviewer_name_snapshot
       FROM appeals a
       LEFT JOIN users u ON u.id = a.reviewer_id
@@ -119,8 +132,10 @@ router.get('/api/appeals/token/:token', (req, res) => {
   res.json({
     subject: 'suspension',
     accountStatus: user.account_status,
+    // Live column first (it is the current truth while the suspension is in
+    // force), snapshot second (it is the only truth once it has been lifted).
     suspensionReason: user.suspension_reason ?? appeal?.suspension_reason_snapshot ?? null,
-    suspendedAt: user.suspended_at ?? null,
+    suspendedAt: user.suspended_at ?? appeal?.suspended_at_snapshot ?? null,
     expiresAt: row.expires_at,
     alreadyFiled,
     appeal: appeal && alreadyFiled ? {
