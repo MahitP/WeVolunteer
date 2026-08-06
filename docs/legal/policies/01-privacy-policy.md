@@ -61,7 +61,7 @@ no district-specific facts — that branch is gone.
 
 # Privacy at WeVolunteer
 
-**Version 1.0 · Last updated 2026-08-06** · Applies to WeVolunteer version 1.2 and later
+**Version 1.1 · Last updated 2026-08-06** · Applies to WeVolunteer version 1.2 and later
 
 > **THE OPERATOR — the only place in this document that names the legal entity.**
 > WeVolunteer is operated by **Mahit Pulavarthi, a sole proprietor doing business as
@@ -333,7 +333,13 @@ WeVolunteer runs on a small number of outside services. Here is all of them:
 | **OpenStreetMap / Nominatim** | Event location text | Turning an event address into map coordinates. **Never anything about you** |
 | **Open-Meteo** | Event coordinates | The weather forecast on an event page. **Never anything about you** |
 | **CARTO** | **Your IP address**, when a map is shown | Loading the map images. It does not receive your name or account — see below |
-| **[[OWNER DECISION — BLOCKS PUBLICATION: name the company that hosts the production server, and the country the database sits in. This table is a complete list of everyone who receives your information, so it cannot be published with a gap in it.]]** | Stores the database | Running the service |
+| **Our hosting provider** — not yet chosen. See the note below this table | Stores the database | Running the service |
+
+**About the hosting provider.** WeVolunteer has not launched yet and the company that will host
+the production server has not been chosen. We are not going to name one here before it is true.
+When it is chosen we will name it in this table, say which country the database is in, and update
+the date at the top of this page. If you are reading this and that row still says "not yet
+chosen", it means the service is not yet running anywhere that holds your information.
 
 Two of these are contacted by our servers, so they never see your device.
 
