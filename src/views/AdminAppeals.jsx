@@ -51,7 +51,7 @@ export default function AdminAppeals() {
 
   const fetchAppeals = useCallback(async () => {
     try {
-      const { appeals: rows } = await api.get('/api/admin/appeals');
+      const { appeals: rows } = await api.fetchAdminAppeals();
       setAppeals(rows);
       setError(null);
     } catch (err) {
@@ -194,7 +194,7 @@ function AppealDetail({ id, onBack }) {
 
   const load = useCallback(() => {
     setLoading(true);
-    api.get(`/api/admin/appeals/${id}`)
+    api.fetchAdminAppeal(id)
       .then(setDetail)
       .catch(err => setError(err.message || 'Failed to load this appeal.'))
       .finally(() => setLoading(false));
@@ -206,7 +206,7 @@ function AppealDetail({ id, onBack }) {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await api.patch(`/api/admin/appeals/${id}`, { decision, reasoning });
+      const res = await api.decideAppeal(id, { decision, reasoning });
       setOutcome(res);
     } catch (err) {
       setSubmitError(err.message || 'Could not record that decision.');
@@ -219,9 +219,10 @@ function AppealDetail({ id, onBack }) {
   const applyRemedy = async () => {
     setSubmitting(true);
     try {
-      await api.post(`/api/admin/users/${outcome.remedy.userId}/unsuspend`, {
-        reason: 'Appeal upheld — suspension reversed on review.',
-      });
+      await api.unsuspendUser(
+        outcome.remedy.userId,
+        'Appeal upheld — suspension reversed on review.'
+      );
       setRemedyDone(true);
     } catch (err) {
       setSubmitError(err.message || 'Could not reinstate that account.');

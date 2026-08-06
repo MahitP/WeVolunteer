@@ -790,6 +790,88 @@ export const api = {
   // link the only person who needs it cannot follow.
 
   /** The published catalogue: slug, title, version, effective date, scope. */
+  /* ── Endpoints whose client wrapper was never written ────────────────────────
+   *
+   * Four features called methods that do not exist on this object and threw
+   * `api.X is not a function` the first time the code path ran. `apiContract.test.js`
+   * is the guard that makes that a build failure instead of a runtime surprise; these
+   * are the wrappers it was missing.
+   *
+   * Named per endpoint, matching every other method in this file, rather than adding
+   * generic HTTP verbs — the views were written against verbs that never existed, and
+   * introducing them now would create a second calling convention alongside this one.
+   */
+
+  /**
+   * Place search for the event location picker (`LocationPicker.jsx`).
+   *
+   * The whole feature was dead: `api.geocodeSearch` was never defined, so typing in
+   * the search box threw on the first keystroke that triggered a lookup.
+   */
+  geocodeSearch: async (query, signal) =>
+    apiFetch(`/api/geocode?q=${encodeURIComponent(query)}`, { signal }),
+
+  /**
+   * Forecast for an event's coordinates and start time (`WeatherSummary.jsx`).
+   *
+   * Same defect. `signal` is threaded because the component aborts in-flight requests
+   * when the event or date changes, and dropping it would let a stale forecast land
+   * after a newer one.
+   */
+  getWeather: async (lat, lon, datetime, signal) =>
+    apiFetch(
+      `/api/weather?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`
+      + `&datetime=${encodeURIComponent(datetime)}`,
+      { signal }
+    ),
+
+  /**
+   * The appeal form a suspended student reaches from their emailed link.
+   *
+   * `Appeal.jsx` called `api.fetch(...)`, which has never existed — so the one
+   * surface a suspended account can reach threw on load AND on submit. A student
+   * could not read why they were suspended or file an appeal at all, which is the
+   * most consequential of the four because it is the only channel that population
+   * has.
+   *
+   * Token-addressed and unauthenticated by design (see `appealsRoutes.js`), so no
+   * session is involved.
+   */
+  fetchAppealByToken: async (token) =>
+    apiFetch(`/api/appeals/token/${encodeURIComponent(token)}`),
+
+  submitAppealByToken: async (token, statement) =>
+    apiFetch(`/api/appeals/token/${encodeURIComponent(token)}`, {
+      method: 'POST',
+      body: JSON.stringify({ statement }),
+    }),
+
+  /* ── The moderator-facing appeals queue (`AdminAppeals.jsx`) ─────────────────── */
+
+  fetchAdminAppeals: async () => apiFetch('/api/admin/appeals'),
+
+  fetchAdminAppeal: async (id) =>
+    apiFetch(`/api/admin/appeals/${encodeURIComponent(id)}`),
+
+  decideAppeal: async (id, { decision, reasoning, overrideReason }) =>
+    apiFetch(`/api/admin/appeals/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ decision, reasoning, ...(overrideReason && { overrideReason }) }),
+    }),
+
+  /**
+   * Reinstating an account after a reversed appeal.
+   *
+   * Deliberately a separate call rather than a side effect of the decision: the
+   * server keeps them apart so reinstatement carries its own audit row and its own
+   * refusals, and the decision response returns the remedy for the UI to offer.
+   */
+  unsuspendUser: async (userId, reason) =>
+    apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/unsuspend`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+
   fetchLegalDocuments: async () => apiFetch('/api/legal/documents'),
 
   /** One document and its Markdown source, verified against its pinned hash. */

@@ -57,7 +57,7 @@ export default function Appeal() {
 
   useEffect(() => {
     let cancelled = false;
-    api.fetch(`/api/appeals/token/${token}`)
+    api.fetchAppealByToken(token)
       .then((data) => { if (!cancelled) { setInfo(data); setLoading(false); } })
       .catch(() => { if (!cancelled) { setError(true); setLoading(false); } });
     return () => { cancelled = true; };
@@ -75,10 +75,7 @@ export default function Appeal() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await api.fetch(`/api/appeals/token/${token}`, {
-        method: 'POST',
-        body: JSON.stringify({ statement: trimmed }),
-      });
+      await api.submitAppealByToken(token, trimmed);
       setSubmitted(true);
     } catch (err) {
       setSubmitError(err.message || 'We could not send that. Please try again in a moment.');
