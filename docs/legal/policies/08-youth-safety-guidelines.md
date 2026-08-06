@@ -18,8 +18,13 @@ wevolunteer.platform@gmail.com. The operator is a sole proprietor, so "we" is on
 draft does not imply a safety team. **No guardian consent step exists and none is being built** —
 the "For parents and guardians" section says so rather than letting a reader assume it.
 
-**Still open:** the monitored hours for the report inbox — the one `[[TODO: ...]]` left in this
-document, and the thing the "within one business day" promise rests on.
+**Still open — one item, marked in the draft as blocking publication.** The hours one person can
+commit to reading the safety inbox. It has to be a commitment one person can keep, because it is
+one person. The "within one business day" promise it used to gate has been removed rather than
+published against a blank: the draft now says a safety report is sent to us the moment it is filed
+(which is true — `SYSTEM_ALERT` is a mandatory notice and cannot be silenced by a preference), that
+everything else is a target rather than a guarantee, and that the 24-hour hotlines are the right
+route for anything urgent.
 
 > **Needs counsel review** on the mandated-reporter procedure specifically. New Jersey is a
 > universal mandated-reporter state (N.J.S.A. 9:6-8.10): *any person* with reasonable cause to
@@ -48,7 +53,7 @@ document, and the thing the "within one business day" promise rests on.
 
 # Staying safe on WeVolunteer
 
-**Version 1.1 · Last updated 2026-08-05**
+**Version 1.0 · Last updated 2026-08-06**
 
 WeVolunteer connects students with adults who run volunteer events. That is the point of it,
 and it is also the thing we have to be most careful about. This page explains the rules,
@@ -195,11 +200,12 @@ can ask us for at any time.
 **In the app** — every conversation, comment, and event page has a **Report** button. This is
 the fastest route and it tells us exactly what you are reporting.
 
-**By email** — **wevolunteer.platform@gmail.com**, monitored
-**[[TODO: monitored hours for the safety inbox — the actual hours and days one person reads this
-mailbox, in plain words ("weekdays, 8am to 9pm Eastern"). It has to be a commitment that can be
-kept by one person, because it is one person. This gates the "within one business day" promise
-below: do not publish that promise with this blank, and do not publish hours you cannot hold.]]**
+**By email** — **wevolunteer.platform@gmail.com**, read by one person, usually
+**[[OWNER DECISION — BLOCKS PUBLICATION: the hours and days one person actually reads this
+mailbox, in plain words such as "every evening and most weekends, Eastern time". It has to be a
+commitment one person can keep, because it is one person.]]**. It is not monitored overnight, and
+there is nobody covering it when that person is away. **If someone is in danger now, call 911 —
+do not email us and wait for a reply.**
 
 **Emergencies** — call 911. Do not wait for us.
 
@@ -221,7 +227,10 @@ You will not get in trouble for reporting something that turns out to be nothing
 
 ## What happens after you report
 
-1. **It reaches a human within one business day.** Reports are not triaged by software.
+1. **It reaches a human.** Software sorts reports by how serious the reason you picked is, and
+   anything a student reports about an adult is treated as urgent whatever reason they chose —
+   that sorting decides how quickly we are told, and it is the only thing software decides. No
+   software closes a report, decides what happened, or acts on an account.
 2. **We look at what was reported** — including the messages in a reported conversation. This
    is the one situation in which an administrator reads private messages, and it is logged.
 3. **We act.** Depending on what we find: a warning, removing content, suspending an account,

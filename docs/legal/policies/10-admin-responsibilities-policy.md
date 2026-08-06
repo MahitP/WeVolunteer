@@ -18,9 +18,11 @@ WeVolunteer — so every administrator answers to that person and to nobody else
 district layer and no school administrator layer, which is exactly why the written rule below is
 load-bearing.
 
-**Still open — see the `[[TODO: ...]]` markers in the draft.** Who signs off on granting and
-reviewing administrator accounts, where the administrator register lives, and the access-review
-cadence. Three operational decisions, no engineering.
+**Resolved.** The approver is the platform operator, who is the only person holding
+`admin.create`. The register lives at `docs/operations/administrator-register.md` in the source
+repository — deliberately outside the application's own database, so that a database which is
+broken, restored from an old backup, or tampered with is not also the only record of who had
+access to it. The access review is quarterly, and immediately whenever anyone's role changes.
 
 **Guardian contact.** WeVolunteer holds no guardian contact details and nothing collects any. Two
 places in this document implied an administrator could notify a guardian; both now say what is
@@ -42,6 +44,8 @@ granting super-only capabilities (`userCapabilities.js`).
 
 # Administrator responsibilities
 
+**Version 1.0 · Last updated 2026-08-06**
+
 You have been given an administrator account on WeVolunteer. You can see almost everything in
 it, including information about children.
 
@@ -50,18 +54,20 @@ This document is what you agree to in exchange.
 ## Who may hold this role
 
 Administrator accounts are granted only to **WeVolunteer's named operators**, by
-**[[TODO: approver — name the person (by role, not just "the owner") who authorises a new
-administrator account and who is accountable for the register. For a sole proprietorship this is
-almost certainly the owner; it needs to be written down and stated here so that "who let this
-person in?" has an answer.]]**, and only where the person's job actually requires it. There is no
+**the platform operator**, who is the only person able to do it — granting an administrator
+account requires the `admin.create` capability, and only the operator holds it. The operator is
+also accountable for the register below. So the answer to "who let this person in?" is always the
+same one person, and only where that person's job actually requires it. There is no
 district and no school administrator layer — everyone with this access answers to WeVolunteer
 alone, which is exactly why the rules below are written down.
 
 There is a **register of current administrators** at
-**[[TODO: register location — where the list of current administrators lives, and who can read
-it. It must be somewhere durable and outside the application's own database, so that a
-compromised or broken database does not also destroy the record of who had access.]]**. If you
-are not on it, you should not have the access.
+**`docs/operations/administrator-register.md` in the WeVolunteer source repository**, which
+anyone with access to the repository can read. It is deliberately kept there rather than in the
+application's own database: a database that is broken, restored from an old backup, or tampered
+with must not also be the only record of who had access to it. The repository is version
+controlled, so every addition and removal keeps its own date and author. If you are not on it,
+you should not have the access.
 
 ## The core rule
 
@@ -153,9 +159,7 @@ match your tasks, you will be asked about it. That is the system working, not an
 
 The approver named under **Who may hold this role** reviews the administrator register and a
 sample of the audit log every
-**[[TODO: access-review cadence — how often the register and an audit-log sample are reviewed.
-Recommended: quarterly, and immediately whenever someone's role changes. Say a period you will
-actually keep; a published cadence you miss is worse than a longer one you hit.]]**, and:
+**quarter, and immediately whenever anyone's role changes**, and:
 
 - removes accounts for people who have changed roles or left
 - checks that granted capabilities still match actual jobs

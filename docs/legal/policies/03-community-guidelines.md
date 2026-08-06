@@ -32,7 +32,7 @@ to absorb that. This document is the standard.
 
 # Community Guidelines
 
-**Version 2.1 · Last updated 2026-08-05** · Part of the
+**Version 1.0 · Last updated 2026-08-06** · Part of the
 [Terms of Service](02-terms-of-service.md), and accepted with them
 
 WeVolunteer is a small community of students and the adults who organise volunteer work. It
@@ -118,8 +118,8 @@ Organizers who credit hours that were not worked lose their accounts.
 
 ## Reporting
 
-Use the **Report** button on any conversation, comment, or event to submit a report
-securely to our moderation team.
+Use the **Report** button on any conversation, comment, or event to send us a report
+securely. It goes to the WeVolunteer administrators — right now, that is one person.
 
 **We never tell the person you reported who reported them.** Your name is attached to the
 report so we can ask you a follow-up question — an administrator can see it, and nobody else
@@ -134,14 +134,18 @@ far rather look.
 | Step | What happens |
 |---|---|
 | 1 | We remove the content and tell you why |
-| 2 | A warning on your account |
-| 3 | Suspension — you cannot sign in, for a stated period |
+| 2 | We tell you what was wrong and that it must not happen again |
+| 3 | Suspension — you cannot sign in. It does not expire on its own: it lasts until an administrator lifts it, and you can appeal it |
 | 4 | Your account is removed |
 
 We skip straight to step 4 for anything in the "never" list.
 
-**Our response times:** a report reaches a human within **one business day**. Anything flagged
-as a safety concern is looked at **the same day**.
+**Our response times.** A report about a student's safety is sent to us the moment you file it,
+and we aim to look at those the same day. Everything else we aim to reach within a few days.
+WeVolunteer is run by one person, so these are targets rather than guarantees — and that is
+exactly why, for anything urgent, the hotlines in the
+[Youth Safety Guidelines](08-youth-safety-guidelines.md) are the right call rather than us. They
+are staffed around the clock. We are not.
 
 **We tell you** — the account holder — what happened and why, at the email address on your
 account. **We do not automatically tell your parent or guardian**, because we do not ask for
@@ -152,4 +156,14 @@ them.
 ## If you think we got it wrong
 
 Submit an appeal using the link provided in your suspension notice. We will notify you
-when a decision is made. Your appeal will be reviewed by a different administrator.
+when a decision is made.
+
+**An appeal is never decided by the administrator who suspended you.** That is enforced by the
+software, not promised by us — it refuses the decision outright, and no level of privilege
+overrides it. Independent review is the goal and the rule that protects it is already in place.
+
+Being straight with you about the limit of that: WeVolunteer currently has **one**
+administrator. So if they are the person who suspended you, there is no second administrator
+inside the app who can decide your appeal. If that is your situation we will tell you rather
+than leave your appeal sitting open, and we will find someone independent outside the platform
+to look at it. When a second administrator exists this paragraph gets shorter.

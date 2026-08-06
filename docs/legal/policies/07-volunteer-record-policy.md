@@ -35,7 +35,7 @@ than an internal convention, and gives a student a route when a record is wrong.
 
 # How volunteer records work
 
-**Version 1.0 · Last updated 2026-08-05**
+**Version 1.0 · Last updated 2026-08-06**
 
 Your volunteer record is the list of events you attended and the hours you were credited. It
 may matter for graduation, scholarships, or college applications, so this page explains exactly
@@ -104,7 +104,7 @@ forgotten confirmation and take a minute.
 **Step 2 — If that does not work**, email **wevolunteer.platform@gmail.com** with the event, the date, and
 what you think is wrong. We will look at the recorded attendance and the ledger.
 
-**Step 3 — We respond within 5 business days** and tell you what we found, whether we changed
+**Step 3 — We respond within 10 business days** and tell you what we found, whether we changed
 anything, and why.
 
 If we correct a record, the correction is logged. We do not silently edit history.

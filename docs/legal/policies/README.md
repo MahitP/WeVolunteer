@@ -5,19 +5,22 @@ sections, and the decisions WeVolunteer must make — followed by the **draft** 
 
 ## Conventions used in every draft
 
-**`[[TODO: ...]]` means a fact nobody has supplied yet.** This follows the rule already
-enforced in `src/config.js`: placeholder legal text is worse than no legal text, because it
-manufactures the appearance of a reviewed policy. Every one must be filled by a named human
-before publication, and the publication checklist refuses to pass while any remain. Each marker
-states the decision it is waiting on, so `grep -rn "\[\[" docs/legal/policies/` is the
-publication-blocker list.
+**`[[OWNER DECISION — BLOCKS PUBLICATION: ...]]` means a fact nobody has supplied yet.** This
+follows the rule already enforced in `src/config.js`: placeholder legal text is worse than no
+legal text, because it manufactures the appearance of a reviewed policy. Each marker states the
+decision it is waiting on, so `grep -rn "\[\[" docs/legal/policies/` is the publication-blocker
+list. **Two remain**, both needing a fact that is not in the repository: the production hosting
+provider (01) and the monitored hours for the safety inbox (08).
 
-Two markers are a different thing and are meant to stay: the `[[NOT YET IMPLEMENTED]]` block in
-[04](04-data-deletion-policy.md) and the `[[NOT YET BUILT]]` block in
-[06](06-certificate-verification-policy.md). Both hold drafted text for **certificate voiding**,
-which is scheduled later in this programme. They block publication of those two documents on
-purpose, and whoever ships voiding removes both in the same pull request and updates the Privacy
-Policy paragraph that currently says plainly that no such option exists.
+**The two `[[NOT YET IMPLEMENTED]]` / `[[NOT YET BUILT]]` blocks are gone, and how they went is
+worth recording.** Both held drafted text for certificate voiding, a feature that is not built.
+The one in [04](04-data-deletion-policy.md) had a problem the marker did not describe: the
+drafted text sat in the published body under a real heading, so the Data Deletion Policy told a
+student choosing whether to delete their account that they could void their certificates — while
+the Privacy Policy in the same set said plainly that no such option exists. A reader hit the
+false version at the exact moment of deciding. Both blocks are replaced with the true position.
+Whoever ships voiding adds the option to all three documents together; nothing is now holding
+drafted text in a published body waiting for them.
 
 **The operator is named in exactly one marked block per document.** Every document that has to
 identify the legal entity carries a single blockquote beginning **THE OPERATOR**, and says "we"
@@ -41,16 +44,16 @@ contact and retention periods are filled in.
 
 | # | Document | Audience | Status |
 |---|---|---|---|
-| 1 | [Privacy Policy](01-privacy-policy.md) | Students, guardians | **Blocked on vendor names** — three `[[TODO]]`s: SMTP provider, hosting provider, archive URL. Text is complete; controller, age, retention and the no-guardian-consent disclosure are all resolved |
-| 2 | [Terms of Service](02-terms-of-service.md) | All users | **Blocked on four decisions** — liability cap, postal address, archive URL, counsel sign-off. Structurally complete: acceptable use, split student/organizer responsibilities, IP, appeals, dispute process, NJ law and Middlesex County venue |
-| 3 | [Community Guidelines](03-community-guidelines.md) | Students, organizers | **Ready** — enforcement ladder is real; the unkeepable guardian-notification promise is gone |
-| 4 | [Data Deletion Policy](04-data-deletion-policy.md) | Students, guardians | **Blocked until certificate voiding ships** — deliberately, by the `[[NOT YET IMPLEMENTED]]` marker. Everything else is publishable |
-| 5 | [Cookie and Tracking Notice](05-cookie-and-tracking-notice.md) | All | **Blocked on the archive URL only** — diagnostics retention now states the real code values |
-| 6 | [Certificate Verification Policy](06-certificate-verification-policy.md) | Verifiers, students | **Blocked on the public URL**, and on certificate voiding by the same deliberate marker as 04 |
+| 1 | [Privacy Policy](01-privacy-policy.md) | Students, guardians | **Blocked on one item** — the hosting provider. SMTP is resolved (Gmail, so Google); the archive promise is resolved by this being v1.0; the applications retention period it publishes is now enforced in `retentionWorker.js`; safety-report retention is now a stated decision rather than a pending one |
+| 2 | [Terms of Service](02-terms-of-service.md) | All users | **Ready, pending counsel confirmation** — liability cap set at $100 with its reasoning in the text; no postal address printed, service arranged on request instead, and the draft says why; archive resolved by v1.0. Counsel should still confirm the cap, the no-arbitration choice and the NJ venue |
+| 3 | [Community Guidelines](03-community-guidelines.md) | Students, organizers | **Ready** — enforcement ladder now describes what exists (no expiring suspensions, no warning record), "moderation team" is one person, response times are targets rather than guarantees, and the one-administrator limit on appeals is disclosed |
+| 4 | [Data Deletion Policy](04-data-deletion-policy.md) | Students, guardians | **Ready** — the unimplemented certificate-voiding section is removed. It had been contradicting the Privacy Policy on the page a student reads while deciding to delete |
+| 5 | [Cookie and Tracking Notice](05-cookie-and-tracking-notice.md) | All | **Ready** — archive resolved by v1.0; diagnostics retention states the real code values |
+| 6 | [Certificate Verification Policy](06-certificate-verification-policy.md) | Verifiers, students | **Ready** — verification points at the page rather than a URL that does not resolve yet; the voiding block is replaced with the true position |
 | 7 | [Volunteer Record Policy](07-volunteer-record-policy.md) | Students, schools | **Ready** |
-| 8 | [Youth Safety Guidelines](08-youth-safety-guidelines.md) | Everyone | **Blocked on monitored hours** — one `[[TODO]]`, and it gates the "within one business day" promise. Still wants counsel on the mandated-reporter wording |
+| 8 | [Youth Safety Guidelines](08-youth-safety-guidelines.md) | Everyone | **Blocked on monitored hours** — one marker. The "one business day" promise it gated is removed rather than published against a blank, and "reports are not triaged by software" is corrected: software does derive priority. Still wants counsel on the mandated-reporter wording |
 | 9 | [Organizer Agreement](09-organizer-agreement.md) | Organizers | **Blocked on the product change** — the text is complete and the counterparty is named, but nothing records acceptance, so it binds nobody |
-| 10 | [Admin Responsibilities Policy](10-admin-responsibilities-policy.md) | Admins | **Blocked on three operational decisions** — approver, register location, review cadence |
+| 10 | [Admin Responsibilities Policy](10-admin-responsibilities-policy.md) | Admins | **Ready** — approver is the operator (sole holder of `admin.create`); the register is `docs/operations/administrator-register.md`, deliberately outside the app database; review is quarterly |
 
 ## What changed on 2026-08-05
 

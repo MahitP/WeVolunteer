@@ -89,62 +89,86 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const POLICY_DIR = path.join(HERE, '..', 'docs', 'legal', 'policies');
 
 /**
- * ── v2.0, 2026-08-05 — the three signup documents, MAJOR ──
+ * ── v1.0, 2026-08-06 — the initial public release. All ten documents. ──
  *
- * MAJOR, so every existing acceptance is stale and re-consent is required. Three
- * independent reasons, any one of which would be enough:
+ * Every document is v1.0 and every one carries the same effective date, because
+ * this is the first version any user will ever be shown.
  *
- *   - **The counterparty is now named.** v1.1 shipped with a literal
- *     `[[LEGAL_ENTITY_NAME]]` in the text. A reader could not tell who they were
- *     contracting with, which is not a detail — it is the identity of the other
- *     party. It is now "Mahit Pulavarthi, a sole proprietor doing business as
- *     WeVolunteer".
- *   - **The Terms gained obligations and a liability cap.** New organizer
- *     duties, an intellectual-property section, a dispute process, a governing
- *     law and venue clause, and a limit on recoverable loss. A reader of v1.1 is
- *     unambiguously worse off in at least one respect, which is the test.
- *   - **The Privacy Policy corrected a retention period and withdrew a stated
- *     option.** It had published error-diagnostics retention as 90 days when the
- *     code sweeps at 30/30/180/7, and it had described certificate voiding at
- *     deletion as available when it is not built. A policy describing a right the
- *     software does not offer is the version worth invalidating.
+ * ── Why the pre-launch draft numbering was reset rather than continued ──
  *
- * The other seven documents are registered here for the first time, at v1.0.
- * They have never been published, so there is no prior version for a reader to be
- * worse off than.
+ * These documents reached 2.1, 2.2 and 3.0 during drafting, and each of those
+ * bumps was correctly classified at the time. None of them was ever published.
+ * WeVolunteer has not launched, `legal_acceptances` holds no row belonging to a
+ * real person, and no human has agreed to any version of anything here.
  *
- * ── The previous entry, kept for the version history ──
+ * A version number in this registry exists for exactly one purpose: to answer
+ * "what did this person agree to, and when". Numbers that describe revisions of
+ * an unpublished draft answer that question about nobody. Worse, they answer it
+ * misleadingly — shipping a Terms of Service at v2.1 tells the first reader they
+ * are looking at the second major revision of a contract, and invites the
+ * question of what the first one said and who accepted it. Nobody accepted it,
+ * and there is no archive of it to show them, because there is nothing to
+ * archive.
  *
- * v1.1 was classified MINOR: the Terms and Community Guidelines lost an internal
- * editorial block that had marked enforcement powers as unbuilt (suspension and
- * blocking shipped, so the user-facing text described real behaviour and did not
- * change), and the Privacy Policy gained its under-13 section — a disclosure of a
- * protection that already existed rather than a new practice.
+ * So the drafting history stops being version history and becomes what it always
+ * was: git history. It is preserved there in full, with the reasoning for every
+ * change, which is a better record than a version string could carry anyway.
+ *
+ * ── The rule this does NOT change ──
+ *
+ * MAJOR.MINOR and its consequences apply from this release forward, unchanged.
+ * The next change to a signup document is judged against v1.0 by the ordinary
+ * test — would a reasonable reader of v1.0 be surprised or worse off — and a
+ * MAJOR bump from here re-consents real users who really did accept something.
+ * This reset is available exactly once, because it depends on there being no
+ * acceptance to invalidate. It must not be repeated after launch, and the
+ * absence of a second reset is the whole point of having the rule.
+ *
+ * ── What changed in the documents themselves for this release ──
+ *
+ * Corrections, not new terms. Four documents had printed a version string in
+ * their body that disagreed with the one recorded here, so a reader saw two
+ * different answers on one page. The Data Deletion Policy published a section
+ * offering a choice about certificates that the software does not implement —
+ * contradicting the Privacy Policy in the same set — and it is removed. The
+ * Community Guidelines described suspensions as lasting "for a stated period"
+ * when nothing expires one, promised a review by "a different administrator"
+ * without saying what happens when there is only one, and called a single person
+ * a "moderation team". The Youth Safety Guidelines claimed reports are "not
+ * triaged by software" when software derives their priority. The Privacy Policy
+ * published an applications retention period nothing enforced — now enforced in
+ * `retentionWorker.js` rather than weakened — and said safety-report retention
+ * was awaiting a decision, which it no longer is.
+ *
+ * Two placeholders remain, both marked in the published text as blocking
+ * publication, because neither can be answered from the repository: the
+ * production hosting provider, and the hours one person can commit to reading
+ * the safety inbox.
  */
 export const LEGAL_DOCUMENTS = [
   {
     slug: 'terms-of-service',
-    version: '2.1',
+    version: '1.0',
     title: 'Terms of Service',
     consentType: 'agree',
     scope: 'signup',
     summary: 'The agreement between you and WeVolunteer: what you may do here, what we owe you, and how an account ends.',
-    effectiveAt: '2026-08-05',
+    effectiveAt: '2026-08-06',
     file: '02-terms-of-service.md',
-    contentHash: 'a45b6fe830900c33915d6be48e10f9ed5f5f5e28c00a2de92bfb72c38de43e21',
+    contentHash: '52f852c6c9cf9241b9e6ccfe259878ac62683063e9e16b0834cf14561a662118',
     /** Presented with, and accepted by, the same control as the Terms. */
     bundledWith: null,
   },
   {
     slug: 'community-guidelines',
-    version: '2.2',
+    version: '1.0',
     title: 'Community Guidelines',
     consentType: 'agree',
     scope: 'signup',
     summary: 'How people are expected to behave here, what is not allowed, and what happens when someone breaks the rules.',
-    effectiveAt: '2026-08-05',
+    effectiveAt: '2026-08-06',
     file: '03-community-guidelines.md',
-    contentHash: '1cfff36cf7cb5441a61143209f9db957c9d83217011970a547d508611694a107',
+    contentHash: '632c21160309e04e4eafcca28637564c42ac3407850ca7a4a3276846854c29a3',
     bundledWith: 'terms-of-service',
   },
   {
@@ -157,14 +181,14 @@ export const LEGAL_DOCUMENTS = [
      * exactly the kind of statement someone decides whether to sign up on.
      */
     slug: 'privacy-policy',
-    version: '3.0',
+    version: '1.0',
     title: 'Privacy Policy',
     consentType: 'acknowledge',
     scope: 'signup',
     summary: 'What we collect, why, who can see it, how long we keep it, and how to get it back or have it deleted.',
-    effectiveAt: '2026-08-05',
+    effectiveAt: '2026-08-06',
     file: '01-privacy-policy.md',
-    contentHash: '717282f9ed4e62dede535ecae3541c037f09c906c048a8fac57fee1bf93d33ec',
+    contentHash: '834dfa1d6eb5ad6f030be2d9c812d370a491639b12476cace50ffbbfce467886',
     bundledWith: null,
   },
   {
@@ -174,21 +198,21 @@ export const LEGAL_DOCUMENTS = [
     consentType: 'agree',
     scope: 'organizer-onboarding',
     summary: 'The undertakings an organizer makes before receiving students\' contact details: protect it, use it only for the event, record attendance honestly.',
-    effectiveAt: '2026-08-05',
+    effectiveAt: '2026-08-06',
     file: '09-organizer-agreement.md',
-    contentHash: '3267acbae5de9732bc44ec6843565d13755dc8bda11ffd2e993b724046e3d60c',
+    contentHash: 'bb23c0e1dc527687cdce656f1434144d227c5a701b6ff84c06e7b30df93b9939',
     bundledWith: null,
   },
   {
     slug: 'youth-safety-guidelines',
-    version: '1.1',
+    version: '1.0',
     title: 'Youth Safety Guidelines',
     consentType: 'notice',
     scope: 'notice',
     summary: 'How to stay safe volunteering, what an adult here should never ask you for, and how to report it when they do.',
-    effectiveAt: '2026-08-05',
+    effectiveAt: '2026-08-06',
     file: '08-youth-safety-guidelines.md',
-    contentHash: 'f0a01025c6d875a037b7c7875be754324742777beba5ad5cb97c2b57d8892656',
+    contentHash: 'ed180022a0b34632662e08bd883740147c022a49f72e057d3d16c9a16dbdaa1d',
     bundledWith: null,
   },
   {
@@ -198,9 +222,9 @@ export const LEGAL_DOCUMENTS = [
     consentType: 'notice',
     scope: 'notice',
     summary: 'What a WeVolunteer certificate proves, what it does not, and how anyone can check whether one is real.',
-    effectiveAt: '2026-08-05',
+    effectiveAt: '2026-08-06',
     file: '06-certificate-verification-policy.md',
-    contentHash: '30aa3b6b09a022b63697092794c69a1748b99b89d0461de67d2caf95861a3e4d',
+    contentHash: '7f9275d8f409c96817eb7ca107378772756bc4eac508ceee74e7208e18b0e4e3',
     bundledWith: null,
   },
   {
@@ -210,9 +234,9 @@ export const LEGAL_DOCUMENTS = [
     consentType: 'notice',
     scope: 'notice',
     summary: 'How your service hours are recorded, why a confirmed hour is never re-priced, and what happens if a record is wrong.',
-    effectiveAt: '2026-08-05',
+    effectiveAt: '2026-08-06',
     file: '07-volunteer-record-policy.md',
-    contentHash: '50fba883942d0aee6a98aa4d903547aab60b7722e7d288b1845ea9ab8e3eb092',
+    contentHash: '21bf073b6ea1ad6f6020cdcc583f9842c2fc35d99efd6b26df0985cb887bffaf',
     bundledWith: null,
   },
   {
@@ -226,14 +250,14 @@ export const LEGAL_DOCUMENTS = [
      * published promise, at the exact moment a student decides to press delete.
      */
     slug: 'data-deletion-policy',
-    version: '2.0',
+    version: '1.0',
     title: 'Data Deletion Policy',
     consentType: 'notice',
     scope: 'notice',
     summary: 'What deleting your account removes, what survives and why, and how to ask for something to be erased.',
-    effectiveAt: '2026-08-05',
+    effectiveAt: '2026-08-06',
     file: '04-data-deletion-policy.md',
-    contentHash: '3a5a984454ae36e26116bcf163012cc1df7477d552b0409c19ee98d584749c9e',
+    contentHash: 'a8064397ac6d1af7eb2c198839ea6d13c1fe482000c26716faa331ebeb06949b',
     bundledWith: null,
   },
   {
@@ -243,9 +267,9 @@ export const LEGAL_DOCUMENTS = [
     consentType: 'notice',
     scope: 'notice',
     summary: 'The cookies this site sets, all of which are needed to keep you signed in. No advertising or analytics trackers.',
-    effectiveAt: '2026-08-05',
+    effectiveAt: '2026-08-06',
     file: '05-cookie-and-tracking-notice.md',
-    contentHash: 'efe5466cdd8cbf3bedb8f1b4d9e2ccc9ee965a0de8f9079408cf8f8723ab3ddb',
+    contentHash: '3360eb226f9221f53648e039874fbd7ec17f099d44a1072f8b19cdab72968b31',
     bundledWith: null,
   },
   {
@@ -255,9 +279,9 @@ export const LEGAL_DOCUMENTS = [
     consentType: 'notice',
     scope: 'notice',
     summary: 'What administrators may do, what is logged when they do it, and the limits on looking at a student\'s record.',
-    effectiveAt: '2026-08-05',
+    effectiveAt: '2026-08-06',
     file: '10-admin-responsibilities-policy.md',
-    contentHash: '1c57c1a9e0ea44876992288861257753b90f760cbe15e93e95da632565830ee2',
+    contentHash: 'b7e86de2eeb5295e865dd7d27d89f6616f74df7ba0a26e2f30bb63c90fffbf57',
     bundledWith: null,
   },
 ];
