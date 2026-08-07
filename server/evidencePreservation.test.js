@@ -497,8 +497,7 @@ describe('a moderator can still read what was preserved', () => {
       'a list view is scanned with other people at the desk; disclosures are not list content'
     ).not.toContain('tell your parents');
 
-    const evidence = await srv.call('GET', `/api/admin/reports/${reportId}/evidence`,
-      undefined, admin);
+    const evidence = await srv.readEvidence(admin, reportId);
     expect(evidence.status).toBe(200);
     expect(evidence.body.messages.map(m => m.body).join(' ')).toContain('tell your parents');
 

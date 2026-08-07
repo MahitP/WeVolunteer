@@ -48,6 +48,37 @@ export const SENSITIVE_ACTIONS = {
    * are doing the former.
    */
   'data.download':    { label: 'download your data archive',     methods: ['password', 'oauth'], bindsParams: ['jobId'] },
+  /**
+   * Reading the private message bodies a safety report preserved.
+   *
+   * ── Why this belongs here, and why it was the glaring omission ──
+   *
+   * Every other action in this registry is about the ACTOR's own account:
+   * deleting it, changing its password or address, connecting a provider,
+   * exporting its data. This one is about somebody else's private messages, and
+   * that somebody is usually a minor. Downloading your own data archive required
+   * a fresh verification; reading a child's messages required a session.
+   *
+   * The read was already logged twice and to two trails, one of them exempt from
+   * retention — the accountability was in place. What was missing was the moment
+   * of deliberation: a step-up turns an idle click on "Show the messages" into an
+   * act somebody has to mean.
+   *
+   * ── Binds `reportId` ──
+   *
+   * So one verification opens one report's evidence and not the queue. Without
+   * the binding, a moderator who verified to read one report would hold a
+   * five-minute key to every child's messages on the platform, which is a
+   * strictly worse position than the one this replaced.
+   *
+   * ── The friction is real and is the point ──
+   *
+   * Five minutes, one report. During an active incident that is one password
+   * entry before reading the thing that decides whether to suspend somebody. The
+   * alternative was that the most invasive read on the platform was also the
+   * cheapest.
+   */
+  'report.evidence':  { label: 'read the messages this report preserved', methods: ['password', 'oauth'], bindsParams: ['reportId'] },
   'admin.promote':    { label: 'promote an administrator',       methods: ['password', 'oauth'], bindsParams: ['targetUserId'] },
   'admin.revoke':     { label: 'revoke an administrator',        methods: ['password', 'oauth'], bindsParams: ['targetUserId'] },
 };

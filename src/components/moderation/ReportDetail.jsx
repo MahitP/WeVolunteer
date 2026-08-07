@@ -6,6 +6,8 @@ import { api } from '../../utils/api';
 import { can } from '../../authz';
 import { categoryLabel } from '../../moderation';
 import { formatDay } from '../../utils/helpers';
+import { useStepUp } from '../auth/useStepUp';
+import { STEP_UP } from '../../utils/stepUp';
 
 /**
  * One report, everything recorded about it, and the evidence behind it.
@@ -90,6 +92,12 @@ export default function ReportDetail({ reportId, user, onClose, onChanged, addTo
   const [evidenceError, setEvidenceError] = useState(null);
   const [loadingEvidence, setLoadingEvidence] = useState(false);
 
+  /**
+   * The step-up for opening evidence. `modal` has to be rendered, or the prompt
+   * the server asks for never appears and the read looks like a silent failure.
+   */
+  const { run, modal: stepUpModal } = useStepUp();
+
   const mayReadEvidence = can(user, 'report.evidence.read');
 
   useEffect(() => {
@@ -105,11 +113,23 @@ export default function ReportDetail({ reportId, user, onClose, onChanged, addTo
     return () => { live = false; };
   }, [reportId]);
 
+  /**
+   * Behind a step-up, added in the v1.2c privacy review.
+   *
+   * The read was already logged to two trails; what was missing was the moment
+   * of deliberation. `run()` attempts the call first and only prompts if the
+   * server asks, so a moderator who verified for this report seconds ago is not
+   * asked twice — the grant is bound to this `reportId` and lasts five minutes.
+   */
   const openEvidence = async () => {
     setLoadingEvidence(true);
     setEvidenceError(null);
     try {
-      const data = await api.fetchReportEvidence(reportId);
+      const data = await run(
+        STEP_UP.REPORT_EVIDENCE,
+        { reportId },
+        (headers) => api.fetchReportEvidence(reportId, headers)
+      );
       setEvidence(data.messages || []);
       // The read is now on the record, so the timeline the moderator is looking
       // at is out of date by exactly one row. Refetching keeps the screen honest
@@ -131,6 +151,10 @@ export default function ReportDetail({ reportId, user, onClose, onChanged, addTo
 
   return (
     <Modal onClose={onClose} label="Report detail" size="lg" className="modal-report">
+      {/* Rendered inside the report modal so the verification prompt appears over
+          the thing it is about. Without it the server's 403 has nowhere to ask
+          and opening the evidence fails silently. */}
+      {stepUpModal}
       <ModalHead
         title={report ? `Report — ${categoryLabel(report.category)}` : 'Report'}
         description="Everything recorded about this report, and the evidence preserved with it."

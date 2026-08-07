@@ -817,7 +817,7 @@ describe('reading preserved evidence', () => {
       "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'"
     ).get().c;
 
-    const res = await srv.call('GET', `/api/admin/reports/${reportId}/evidence`, undefined, await adminToken());
+    const res = await srv.readEvidence(await adminToken(), reportId);
     expect(res.status).toBe(200);
     expect(res.body.messages.length).toBe(3);
     expect(res.body.messages[0].body).toContain('evidence body');
@@ -830,7 +830,7 @@ describe('reading preserved evidence', () => {
   });
 
   it('404s an evidence read for a report that does not exist', async () => {
-    const res = await srv.call('GET', '/api/admin/reports/rep_nope/evidence', undefined, await adminToken());
+    const res = await srv.readEvidence(await adminToken(), 'rep_nope');
     expect(res.status).toBe(404);
   });
 
@@ -846,7 +846,7 @@ describe('reading preserved evidence', () => {
    */
   it('carries the capture time so the viewer can say when the copy was frozen', async () => {
     const reportId = await reportedConversation('conv_evidence_captured');
-    const res = await srv.call('GET', `/api/admin/reports/${reportId}/evidence`, undefined, await adminToken());
+    const res = await srv.readEvidence(await adminToken(), reportId);
 
     expect(res.status).toBe(200);
     for (const message of res.body.messages) {
@@ -865,7 +865,7 @@ describe('reading preserved evidence', () => {
    */
   it('records the evidence read on the durable report history too', async () => {
     const reportId = await reportedConversation('conv_evidence_history');
-    await srv.call('GET', `/api/admin/reports/${reportId}/evidence`, undefined, await adminToken());
+    await srv.readEvidence(await adminToken(), reportId);
     expect(historyFor(reportId).some(h => h.action === 'evidence_viewed')).toBe(true);
   });
 });
@@ -1002,7 +1002,7 @@ describe('report detail', () => {
    */
   it('shows an evidence read in the timeline', async () => {
     const reportId = await fileReport();
-    await srv.call('GET', `/api/admin/reports/${reportId}/evidence`, undefined, await adminToken());
+    await srv.readEvidence(await adminToken(), reportId);
 
     const res = await srv.call('GET', `/api/admin/reports/${reportId}`, undefined, await adminToken());
     expect(res.body.history.some(h => h.action === 'evidence_viewed')).toBe(true);
