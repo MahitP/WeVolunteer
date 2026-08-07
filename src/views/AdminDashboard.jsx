@@ -208,170 +208,19 @@ export default function AdminDashboard({ addToast, user }) {
         </div>
       )}
 
-      {/* ── Platform totals ── */}
-      {totals && (
-        <section className="stats">
-          <div className="stat">
-            <div className="stat-label">Students</div>
-            <div className="stat-value">{totals.students}</div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Organizers</div>
-            <div className="stat-value">{totals.organizers}</div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Events posted</div>
-            <div className="stat-value">{totals.events}</div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Hours credited</div>
-            <div className="stat-value accent">{formatHours(totals.hours)}</div>
-          </div>
-        </section>
-      )}
+      /* ── Moderation comes first ──
 
-      {/* ── Programme health ──
-          Rates rather than raw counts: these are the numbers that tell staff
-          whether volunteering is actually working, not just happening. */}
-      {totals && (
-        <section>
-          <div className="section-head"><h2>Programme health</h2></div>
-          <div className="grid grid-3">
-            <RateCard
-              label="Show-up rate"
-              value={totals.attendanceRate}
-              note="Confirmed volunteers who attended"
-              good={(v) => v >= 80}
-            />
-            <RateCard
-              label="Events completed"
-              value={totals.completionRate}
-              note="Finished rather than cancelled"
-              good={(v) => v >= 80}
-            />
-            <RateCard
-              label="Students volunteering"
-              value={totals.participationRate}
-              note={`${totals.activeVolunteers} of ${totals.students} have served`}
-              good={(v) => v >= 40}
-            />
-          </div>
-        </section>
-      )}
+         These two sections used to sit fifth and fourth on this page, below
+         Programme health, Participation and Most active organizers. On a
+         720px viewport that put the safety queue 1,082px down — a moderator
+         had to scroll past a page and a half of charts to reach the only
+         thing here that is time-sensitive, and the "N waiting" count that
+         exists to raise the alarm was below the fold with it.
 
-      {/* ── Participation over time ── */}
-      {totals?.monthlyHours?.length > 0 && (
-        <section>
-          <div className="section-head"><h2>Participation</h2></div>
-          <div className="grid grid-2">
-            <div className="card card-pad">
-              <div className="eyebrow" style={{ marginBottom: 'var(--s3)' }}>Hours credited by month</div>
-              <BarChart
-                data={totals.monthlyHours} valueKey="hours" labelKey="month" highlightLast
-                caption="Hours credited by month" unit="Hours" periodLabel="Month"
-              />
-            </div>
-            <div className="card card-pad">
-              <div className="eyebrow" style={{ marginBottom: 'var(--s3)' }}>Volunteers active by month</div>
-              {/*
-                The caption is not decoration. The visual half of the chart is
-                aria-hidden, so this is the only description a screen-reader user
-                receives — and until BarChart took a prop it was hardcoded to
-                "Hours by period", which announced this count of PEOPLE as hours.
-              */}
-              <BarChart
-                data={totals.monthlyHours} valueKey="volunteers" labelKey="month" highlightLast
-                caption="Volunteers active by month" unit="Volunteers" periodLabel="Month"
-                emptyText="No volunteers recorded yet"
-              />
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ── Who is carrying the programme ── */}
-      {totals?.topOrganizers?.length > 0 && (
-        <section>
-          <div className="section-head"><h2>Most active organizers</h2></div>
-          <div className="list">
-            {totals.topOrganizers.map((o, i) => (
-              <div key={o.id} className="list-row">
-                <span className="rank">{i + 1}</span>
-                <span className="avatar sm">{o.avatar || '👤'}</span>
-                <span className="truncate" style={{ flex: 1 }}>
-                  <span className="person-name truncate row" style={{ gap: 5 }}>
-                    {o.name}
-                    {o.verified && <ShieldCheck size={12} style={{ color: 'var(--ok)' }} />}
-                  </span>
-                  <span className="person-meta">
-                    {o.events} event{o.events !== 1 ? 's' : ''} hosted
-                  </span>
-                </span>
-                <span className="hourspill">{formatHours(o.hours)} <span>credited</span></span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* ── Approval queue: the admin's actual job ── */}
-      <section>
-        <div className="section-head">
-          <h2>Organizer requests</h2>
-          {pendingOrganizers.length > 0 && (
-            <span className="section-action tag tag-warn">{pendingOrganizers.length} waiting</span>
-          )}
-        </div>
-
-        {pendingOrganizers.length === 0 ? (
-          <EmptyState 
-            icon={ShieldCheck} 
-            title="Nothing to review" 
-            message="New organizer requests will appear here for approval." 
-          />
-        ) : (
-          <div className="stack">
-            {pendingOrganizers.map(org => (
-              <div key={org.id} className="card card-pad">
-                <div className="row-between row-wrap" style={{ gap: 'var(--s4)', alignItems: 'flex-start' }}>
-                  <div className="row" style={{ alignItems: 'flex-start', gap: 'var(--s4)', minWidth: 0 }}>
-                    <span className="avatar lg">{org.avatar || '👤'}</span>
-                    <div style={{ minWidth: 0 }}>
-                      <div className="strong">{org.name}</div>
-                      <div className="small muted">{org.email}</div>
-                      <div className="small" style={{ marginTop: 6 }}>
-                        <span className="dim">Affiliation </span>
-                        <span className="strong">{org.school || 'Not provided'}</span>
-                      </div>
-                      {org.bio && (
-                        <p className="small muted" style={{
-                          marginTop: 'var(--s3)', paddingLeft: 'var(--s3)',
-                          borderLeft: '2px solid var(--rule)', maxWidth: '58ch'
-                        }}>
-                          {org.bio}
-                        </p>
-                      )}
-                      <div className="small dim" style={{ marginTop: 'var(--s3)' }}>
-                        Requested {formatDay(org.createdAt)}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="row" style={{ gap: 'var(--s2)' }}>
-                    <button className="btn btn-danger btn-sm" disabled={busyId === org.id} onClick={() => deny(org)}>
-                      <UserX size={14} /> Deny
-                    </button>
-                    <button className="btn btn-primary btn-sm" disabled={busyId === org.id} onClick={() => approve(org)}>
-                      <UserCheck size={14} /> Approve
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
+         The page is called the Moderation Center. Reports lead, then the
+         approval queue; the analytics that describe how the programme is
+         going follow, because they are read deliberately rather than
+         urgently. */
       {/* ── Reports ──
           Titled "Reports" rather than "Moderation queue": the page itself is the
           Moderation Center, and a section repeating the page's own name inside it
@@ -552,6 +401,172 @@ export default function AdminDashboard({ addToast, user }) {
           </div>
         )}
       </section>
+
+      {/* ── Approval queue: the admin's actual job ── */}
+      <section>
+        <div className="section-head">
+          <h2>Organizer requests</h2>
+          {pendingOrganizers.length > 0 && (
+            <span className="section-action tag tag-warn">{pendingOrganizers.length} waiting</span>
+          )}
+        </div>
+
+        {pendingOrganizers.length === 0 ? (
+          <EmptyState 
+            icon={ShieldCheck} 
+            title="Nothing to review" 
+            message="New organizer requests will appear here for approval." 
+          />
+        ) : (
+          <div className="stack">
+            {pendingOrganizers.map(org => (
+              <div key={org.id} className="card card-pad">
+                <div className="row-between row-wrap" style={{ gap: 'var(--s4)', alignItems: 'flex-start' }}>
+                  <div className="row" style={{ alignItems: 'flex-start', gap: 'var(--s4)', minWidth: 0 }}>
+                    <span className="avatar lg">{org.avatar || '👤'}</span>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="strong">{org.name}</div>
+                      <div className="small muted">{org.email}</div>
+                      <div className="small" style={{ marginTop: 6 }}>
+                        <span className="dim">Affiliation </span>
+                        <span className="strong">{org.school || 'Not provided'}</span>
+                      </div>
+                      {org.bio && (
+                        <p className="small muted" style={{
+                          marginTop: 'var(--s3)', paddingLeft: 'var(--s3)',
+                          borderLeft: '2px solid var(--rule)', maxWidth: '58ch'
+                        }}>
+                          {org.bio}
+                        </p>
+                      )}
+                      <div className="small dim" style={{ marginTop: 'var(--s3)' }}>
+                        Requested {formatDay(org.createdAt)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="row" style={{ gap: 'var(--s2)' }}>
+                    <button className="btn btn-danger btn-sm" disabled={busyId === org.id} onClick={() => deny(org)}>
+                      <UserX size={14} /> Deny
+                    </button>
+                    <button className="btn btn-primary btn-sm" disabled={busyId === org.id} onClick={() => approve(org)}>
+                      <UserCheck size={14} /> Approve
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ── Platform totals ── */}
+      {totals && (
+        <section className="stats">
+          <div className="stat">
+            <div className="stat-label">Students</div>
+            <div className="stat-value">{totals.students}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Organizers</div>
+            <div className="stat-value">{totals.organizers}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Events posted</div>
+            <div className="stat-value">{totals.events}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Hours credited</div>
+            <div className="stat-value accent">{formatHours(totals.hours)}</div>
+          </div>
+        </section>
+      )}
+
+      {/* ── Programme health ──
+          Rates rather than raw counts: these are the numbers that tell staff
+          whether volunteering is actually working, not just happening. */}
+      {totals && (
+        <section>
+          <div className="section-head"><h2>Programme health</h2></div>
+          <div className="grid grid-3">
+            <RateCard
+              label="Show-up rate"
+              value={totals.attendanceRate}
+              note="Confirmed volunteers who attended"
+              good={(v) => v >= 80}
+            />
+            <RateCard
+              label="Events completed"
+              value={totals.completionRate}
+              note="Finished rather than cancelled"
+              good={(v) => v >= 80}
+            />
+            <RateCard
+              label="Students volunteering"
+              value={totals.participationRate}
+              note={`${totals.activeVolunteers} of ${totals.students} have served`}
+              good={(v) => v >= 40}
+            />
+          </div>
+        </section>
+      )}
+
+      {/* ── Participation over time ── */}
+      {totals?.monthlyHours?.length > 0 && (
+        <section>
+          <div className="section-head"><h2>Participation</h2></div>
+          <div className="grid grid-2">
+            <div className="card card-pad">
+              <div className="eyebrow" style={{ marginBottom: 'var(--s3)' }}>Hours credited by month</div>
+              <BarChart
+                data={totals.monthlyHours} valueKey="hours" labelKey="month" highlightLast
+                caption="Hours credited by month" unit="Hours" periodLabel="Month"
+              />
+            </div>
+            <div className="card card-pad">
+              <div className="eyebrow" style={{ marginBottom: 'var(--s3)' }}>Volunteers active by month</div>
+              {/*
+                The caption is not decoration. The visual half of the chart is
+                aria-hidden, so this is the only description a screen-reader user
+                receives — and until BarChart took a prop it was hardcoded to
+                "Hours by period", which announced this count of PEOPLE as hours.
+              */}
+              <BarChart
+                data={totals.monthlyHours} valueKey="volunteers" labelKey="month" highlightLast
+                caption="Volunteers active by month" unit="Volunteers" periodLabel="Month"
+                emptyText="No volunteers recorded yet"
+              />
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ── Who is carrying the programme ── */}
+      {totals?.topOrganizers?.length > 0 && (
+        <section>
+          <div className="section-head"><h2>Most active organizers</h2></div>
+          <div className="list">
+            {totals.topOrganizers.map((o, i) => (
+              <div key={o.id} className="list-row">
+                <span className="rank">{i + 1}</span>
+                <span className="avatar sm">{o.avatar || '👤'}</span>
+                <span className="truncate" style={{ flex: 1 }}>
+                  <span className="person-name truncate row" style={{ gap: 5 }}>
+                    {o.name}
+                    {o.verified && <ShieldCheck size={12} style={{ color: 'var(--ok)' }} />}
+                  </span>
+                  <span className="person-meta">
+                    {o.events} event{o.events !== 1 ? 's' : ''} hosted
+                  </span>
+                </span>
+                <span className="hourspill">{formatHours(o.hours)} <span>credited</span></span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+
 
       {/* ── All events ── */}
       <section>
