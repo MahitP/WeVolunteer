@@ -50,7 +50,7 @@ preference.
 | Class | Count |
 |---|---:|
 | Sections validated as accurate | 11 areas |
-| **Conflicts requiring amendment** | **12** |
+| **Conflicts requiring amendment** | **11** (C-01 withdrawn — see §4) |
 | Stale assumptions | 4 |
 | Missing architecture details | 5 |
 | Contradictions **within the repository** (not spec-vs-code) | 4 |
@@ -97,7 +97,32 @@ source of truth wins and why**, and the proposed correction. Nothing has been ch
 
 ---
 
-### C-01 — Retention classes are specified for 45 tables; only 4 periods are enforced
+### C-01 — ~~Retention classes are specified for 45 tables; only 4 periods are enforced~~ **— WITHDRAWN**
+
+> **CORRECTION, 2026-08-06.** This finding is **wrong** and is withdrawn. See
+> `RETENTION_ENFORCEMENT_PLAN.md` §0.
+>
+> C-01 compared Appendix C's table-level retention *classes* against the retention worker
+> and concluded that a table with no sweep was a promise unmet. It never read the published
+> policy to establish **which promises exist**. Having now read all ten:
+>
+> - **Every published retention promise is enforced.** All ten, verified against the code.
+> - Three of the five tables named below carry **no published promise at all**.
+> - `event_comments` is promised on an **event-lifetime** basis, not an age basis — a sweep
+>   would violate the policy, not enforce it.
+> - `data_export_jobs` **is** swept, by the export worker, which this finding did not check.
+>
+> **The claim that LR-20 "cannot currently pass" is withdrawn. LR-20 passes.**
+>
+> What survives is much narrower: Appendix C assigns retention classes to internal tables
+> that have no published promise and no sweep. That is a documentation imprecision.
+> **Severity moves from high/blocks-launch to low/documentation-only.** Amendment A-03 is
+> superseded by `RETENTION_ENFORCEMENT_PLAN.md` §6 D-03.
+>
+> The original text is retained below, struck through in effect, so the error and its
+> correction are both on the record.
+
+
 
 **Specification claims.** Appendix C assigns a retention class to every one of the 45
 tables, including `AGED-1095d` for `event_comments`, `event_announcements`,
@@ -546,7 +571,7 @@ In priority order. None has been applied.
 |---|---|---|---|
 | A-01 | Restore `ACCOUNT_SUSPENDED` coverage and **rewrite the coverage guard to derive from the registry** | Code + Appendix E | Nothing — do first, it is small and it is a live regression |
 | A-02 | Narrow the dedupe catch and evaluate mandatory status first | Code + Volume III §3.6.5 | Nothing |
-| A-03 | Split Appendix C retention into **enforced** and **declared**, and reconcile against the published policy | Appendix C + Volume V LR-20 | Launch (LR-20 currently fails) |
+| ~~A-03~~ | ~~Split Appendix C retention…~~ **SUPERSEDED** by `RETENTION_ENFORCEMENT_PLAN.md` §6 D-03. LR-20 passes; this is documentation-only | Appendix C | Nothing |
 | A-04 | Remove the two notification kinds from Appendix D; add the notification registry as its own section | Appendix D | Nothing |
 | A-05 | Replace Appendix A §A.5.2 with the three-category breakdown; amend INV-005's description | Appendix A + Volume II §2.3.5 | Phase 1 graph accuracy |
 | A-06 | Correct Volume II §2.2.5 to the actual allowlist, with the abuse reasoning, and require the wall to signpost deletion | Volume II + code (copy) | Nothing |
@@ -597,7 +622,7 @@ apply it to itself.
    integrity gain available.
 3. **A-12** — required before the Phase 1 dependency graph can be relied upon, because
    the graph's "tests required" column assumes the guard inventory is known.
-4. **A-03** — required before launch. It is a published-policy conflict, not a
-   documentation defect: LR-20 cannot currently pass.
+4. ~~**A-03**~~ — **withdrawn.** The retention audit found all ten published promises
+   enforced; LR-20 passes. See `RETENTION_ENFORCEMENT_PLAN.md`.
 
 Everything else is documentation correction and can proceed in parallel.
