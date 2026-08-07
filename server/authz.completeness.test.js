@@ -754,6 +754,20 @@ describe('authorization hygiene', () => {
 
       // ── OPEN_TO_AUTHENTICATED — intentionally open to every authenticated
       // role; no capability distinction exists or is wanted. ──
+      /**
+       * The one route an invited administrator can reach BEFORE they hold any
+       * capability, which is the whole point of it: `admin.create` is what
+       * creates the invitation, and requiring it to accept one would mean only
+       * existing owners could ever become administrators.
+       *
+       * Not ungated in substance. The token is the authority, and
+       * `resolveInvitation` requires that the signed-in account's address matches
+       * the invitation AND is verified (IV-6, IV-7) — so a forwarded mail confers
+       * nothing. Every failure answers identically (§4.3.5), because a live
+       * invitation is administrator authority awaiting collection and
+       * distinguishing the refusals is a probe for one.
+       */
+      'POST /api/auth/accept-invitation': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'redeems an invitation token; the caller holds no capability yet by definition, and authority comes from the token plus a VERIFIED address match rather than from a role' },
       'GET /api/events': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'public browse listing; every role\'s CAPABILITIES entry includes event.view, so no role is ever denied' },
       'GET /api/organizers/:id/profile': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'an organizer\'s public-facing hosting record (events hosted, volunteers helped, hours awarded) — no PII beyond what the profile already publishes, and no role has ever been denied it; previously carried requireCap(\'event.view\'), a capability all five roles hold, which read as a gate while discriminating against nobody' },
       'GET /api/events/:eventId/slots/:slotId/ics': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may download; title/description/location are no more sensitive than GET /api/events already returns to everyone' },

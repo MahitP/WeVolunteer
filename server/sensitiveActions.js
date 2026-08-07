@@ -79,6 +79,15 @@ export const SENSITIVE_ACTIONS = {
    * cheapest.
    */
   'report.evidence':  { label: 'read the messages this report preserved', methods: ['password', 'oauth'], bindsParams: ['reportId'] },
+  /**
+   * Inviting an administrator (IV-1).
+   *
+   * A pending invitation is administrator authority awaiting collection, so
+   * creating one is at least as consequential as promoting an existing account —
+   * and unlike a promotion it can be sent to somebody the platform has never
+   * seen. Binds `email` so one verification invites one person.
+   */
+  'admin.invite':     { label: 'invite an administrator',         methods: ['password', 'oauth'], bindsParams: ['email'] },
   'admin.promote':    { label: 'promote an administrator',       methods: ['password', 'oauth'], bindsParams: ['targetUserId'] },
   'admin.revoke':     { label: 'revoke an administrator',        methods: ['password', 'oauth'], bindsParams: ['targetUserId'] },
 };
