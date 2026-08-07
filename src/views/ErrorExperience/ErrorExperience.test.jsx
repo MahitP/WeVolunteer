@@ -111,21 +111,50 @@ describe('weight matches severity', () => {
    * Both are takeovers for the same reason: the shell is no help with either.
    * A dead URL is not something the navigation can fix, and an expired session
    * has no shell to sit in — the reader is signed out.
+   *
+   * `403` joined last, and it joined because the code had already moved without
+   * this table — see the test below.
    */
   it('gives the whole screen to the failures that deserve it, and no others', () => {
     const immersive = KINDS.filter((k) => weightFor(k) === 'immersive');
     expect([...immersive].sort()).toEqual(
-      ['404', '500', 'chunk', 'crash', 'expired', 'maintenance', 'offline']
+      ['403', '404', '500', 'chunk', 'crash', 'expired', 'maintenance', 'offline']
     );
   });
 
   /**
-   * A permission refusal renders inside the authenticated shell, beside a nav,
-   * a bell and a sign-out that all still work. It is the one kind that must not
-   * reserve the viewport.
+   * The drift this test exists to stop happening again.
+   *
+   * `App.jsx` returns `<ErrorExperience kind="403" />` BEFORE it builds the
+   * shell — the same early return the 404 takes, added when the refusal was
+   * deliberately promoted to a takeover ("it reads as a page that failed to
+   * load rather than a decision, and it leaves the nav for a section the reader
+   * has just been told they cannot open").
+   *
+   * `WEIGHTS` was never updated with it, so for a while the 403 rendered at the
+   * top level wearing the sizing meant for a card inside a shell: `min-height:
+   * 0` and a 0.64× scene on an empty viewport, which put the whole composition
+   * in the top-left corner above about 55% dead space, with a visible seam where
+   * the clipped background wash ended.
+   *
+   * Pinning it to the 404 rather than to the literal string is the point. These
+   * two are the same situation — a URL this reader cannot be shown, decided
+   * before the shell exists — so if one is ever re-tiered the other has to move
+   * with it, and this fails until it does.
    */
-  it('keeps a permission refusal out of the viewport-owning tier', () => {
-    expect(weightFor('403')).toBe('medium');
+  it('sizes a refusal exactly like the 404, because both are decided before the shell', () => {
+    expect(weightFor('403')).toBe(weightFor('404'));
+    expect(weightFor('403')).toBe('immersive');
+  });
+
+  /**
+   * Every kind is a takeover today. That is a real statement about the product —
+   * there is no failure this app renders as a card in a working shell — and it
+   * is worth failing on, because adding a non-takeover kind means writing the
+   * CSS for it, which no longer exists.
+   */
+  it('has no kind that renders inside a shell', () => {
+    expect(KINDS.filter((k) => weightFor(k) !== 'immersive')).toEqual([]);
   });
 
   /**

@@ -5658,8 +5658,12 @@ input:disabled + .premium-slider {
      than replacing it, which is what keeps the per-theme proportions after the
      layout grows or shrinks. */
   --err-scene-max: 27rem;
-  /* Defaults for `page` weight. `immersive` and `medium` override the four
-     below and nothing else — see the weight block after the copy rules. */
+  /* Fallback geometry only. Every registered kind is `immersive` and overrides
+     all four of these; `weightFor` also returns `immersive` for anything
+     unregistered, so in practice nothing reaches them. They stay as a sane floor
+     rather than leaving the element with no height at all if a future weight is
+     added and its rules are forgotten — which is the exact failure that put the
+     403 in the top-left corner. */
   min-height: 78vh;
   padding: var(--s8) var(--s6);
   max-width: var(--content-max);
@@ -5835,25 +5839,19 @@ input:disabled + .premium-slider {
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.3fr);
 }
 
-/* medium — the reader is fine, the app is fine, this one door is closed. The
-   shell around it still works and has to stay visible, so this reserves only
-   what it needs. */
-.err[data-error-weight='medium'] {
-  min-height: 0;
-  padding: var(--s6) 0;
-  gap: clamp(var(--s4), 3vw, var(--s8));
-  align-items: center;
-}
-.err[data-error-weight='medium'] .err-title { font-size: clamp(1.5rem, 2.6vw, 2rem); }
-.err[data-error-weight='medium'] .err-body { font-size: 1rem; }
-/* Scaled, not replaced: a flat ceiling here would undo the per-theme
-   proportions above and put the portrait badge and the wide booth row at the
-   same height again. */
-.err[data-error-weight='medium'] .err-scene {
-  max-height: calc(var(--err-scene-max) * 0.64);
-}
-/* The wash is sized for a full page; at this scale it reads as a smudge. */
-.err[data-error-weight='medium']::before { opacity: 0.28; }
+/* `medium` used to live here — a contained composition for a failure the shell
+   could still be useful around. It has been deleted, not left unused.
+
+   Its only member was the 403, and `App.jsx` had already promoted the refusal to
+   a takeover without `WEIGHTS` being updated to match. So the refusal was
+   rendering at the top level, owning the viewport, wearing sizing written for a
+   card inside a shell: `min-height: 0` and a 0.64× scene meant the whole
+   composition sat in the top-left corner above roughly 55% dead space, with a
+   visible seam where the clipped wash ended.
+
+   Every kind is `immersive` now. Rules kept "in case" are how that drift
+   happened in the first place — a non-takeover kind means writing this block
+   again, on purpose, for a reason. */
 
 /* At immersive weight the headline is the composition, not a label on it.
    The measure is widened with it: the base 16ch is set for a 2rem headline and
@@ -5896,8 +5894,7 @@ input:disabled + .premium-slider {
    the glow needs to be perceptible against the pale background. A gentle boost
    gives the page its "not plain white" character without flooding it with
    colour. */
-[data-theme='dark'] .err[data-error-weight='immersive']::before,
-[data-theme='dark'] .err[data-error-weight='medium']::before {
+[data-theme='dark'] .err[data-error-weight='immersive']::before {
   opacity: 1;
   background:
     radial-gradient(46% 54% at 76% 30%, var(--brand-soft), transparent 68%),
@@ -6239,6 +6236,46 @@ input:disabled + .premium-slider {
   .err-body { font-size: 1rem; }
   .err-actions { width: 100%; flex-direction: column; align-items: stretch; }
   .err-panel { flex-direction: column; gap: var(--s3); padding: var(--s4); }
+}
+
+/* ── Short viewports: a phone held sideways ──
+
+   The stack above keys on WIDTH alone, and a landscape phone is the one shape
+   that makes that wrong. At 812×375 it is narrow enough to stack and nowhere
+   near tall enough to hold the result: artwork band plus copy came to 795px in
+   a 375px viewport, which put the only way out 396px below the fold and made
+   the page scroll. That is precisely the failure the `dvh` note further up
+   guards against on portrait phones, arriving through the other axis.
+
+   Side by side is not a compromise here — it is the layout that fits. Two
+   columns is what a short, wide screen has room for, so the stack is undone,
+   the scene is bounded by HEIGHT rather than width (the opposite of the rule
+   when stacked, and for the same underlying reason: constrain the axis that is
+   scarce), and the type steps down one rung.
+
+   Last in the section so it wins the specificity tie with the two queries above,
+   both of which also select `.err[data-error-weight]`. */
+@media (max-height: 30rem) and (min-width: 30rem) {
+  .err[data-error-weight] {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    align-items: center;
+    align-content: center;
+    gap: clamp(var(--s3), 3vw, var(--s6));
+    padding: var(--s4) clamp(var(--s4), 5vw, var(--s8));
+  }
+  /* Back beside the copy rather than above it. */
+  .err-stage { order: 0; }
+  .err[data-error-weight] .err-scene { max-width: none; max-height: 74dvh; }
+  .err[data-error-weight] .err-title {
+    font-size: clamp(1.3rem, 3.6vw, 1.9rem);
+    max-width: 22ch;
+  }
+  .err[data-error-weight] .err-body { font-size: 0.9375rem; }
+  .err[data-error-weight] .err-copy { gap: var(--s2); }
+  /* The mark is the first thing to go: it is branding, and a way out matters
+     more than a logo on a screen this short. */
+  .err-mark { display: none; }
+  .err-actions { flex-direction: row; width: auto; align-items: center; }
 }
 
 /* ── Error triage ───────────────────────────────────────────────────────────
