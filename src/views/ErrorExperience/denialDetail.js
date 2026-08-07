@@ -48,6 +48,7 @@ const FEATURE_NAMES = Object.freeze({
   'appeal.review': 'the appeals queue',
   'report.resolve': 'the Moderation Center',
   'audit.read': 'the Audit Explorer',
+  'analytics.impact': 'the community impact figures',
   'admin.create': 'the Administrator Roster',
 });
 

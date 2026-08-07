@@ -81,6 +81,22 @@ export const CAPABILITIES = {
     // whose role is not 'student'), so this stays a student-only capability
     // rather than being widened to organizer as well.
     'stats.self',
+    /**
+     * The community impact figures (`GET /api/impact`).
+     *
+     * Held by EVERY role, which makes it look like it is not a gate at all. It
+     * is a gate — it is just one whose answer is currently yes for everyone
+     * signed in, and naming it is what makes that a decision rather than an
+     * omission. `authz.completeness.test.js` guard 2 requires every
+     * authenticated route to carry a capability or a reviewed justification, and
+     * "aggregate, suppressed, identifies nobody" is a justification that belongs
+     * in a capability name rather than in an exemption list.
+     *
+     * It also makes the question a one-line change if the answer stops being
+     * yes: publishing these figures to unauthenticated visitors, or withholding
+     * them from a role, both become edits to this table rather than to a route.
+     */
+    'analytics.impact',
   ],
   organizer: [
     'event.view', 'event.create', 'event.edit.own', 'applicant.review',
@@ -89,6 +105,7 @@ export const CAPABILITIES = {
     'geocode.use',
     // An organizer reading statistics for the events they run (Task 7d).
     'analytics.own_events',
+    'analytics.impact',
   ],
   admin: [
     'event.view', 'event.moderate', 'organizer.approve', 'user.suspend',
@@ -173,6 +190,7 @@ export const CAPABILITIES = {
     // every application and every event, but not one organizer's own stats
     // page. `analytics.own_events` closes that gap.
     'analytics.own_events',
+    'analytics.impact',
   ],
   super_admin: ['*'],
   // `event.view` and `geocode.use`: neither route these gate (GET
@@ -181,7 +199,7 @@ export const CAPABILITIES = {
   // 'admin'/'organizer', so partner already passes both. Granting the
   // capabilities keeps that unchanged now that the routes ask `can()` instead
   // of comparing role strings.
-  partner: ['analytics.public', 'event.view', 'geocode.use'],
+  partner: ['analytics.public', 'analytics.impact', 'event.view', 'geocode.use'],
 };
 
 /**

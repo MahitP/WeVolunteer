@@ -263,7 +263,19 @@ describe('the Organizer Agreement', () => {
        * otherwise, which is the safe default for this list.
        */
       const { CAPABILITIES } = await import('./authz.js');
-      const ALLOWED_WHILE_UNACCEPTED = ['event.view', 'self.read', 'self.write', 'geocode.use'];
+      /**
+       * `analytics.impact` joins the escape hatch rather than the withheld set.
+       *
+       * The withheld list exists to stop an organizer who has not signed the
+       * agreement reaching a student or a student's record. The impact figures
+       * reach neither: they are platform-wide aggregates with every small bucket
+       * suppressed, and they name nobody — the same class of thing as
+       * `event.view`. Withholding them would hide a page about the community
+       * from somebody who is part of it, for a reason that does not apply.
+       */
+      const ALLOWED_WHILE_UNACCEPTED = [
+        'event.view', 'self.read', 'self.write', 'geocode.use', 'analytics.impact',
+      ];
 
       const unclassified = CAPABILITIES.organizer.filter(
         cap => !ORGANIZER_GATED_CAPABILITIES.includes(cap) && !ALLOWED_WHILE_UNACCEPTED.includes(cap)

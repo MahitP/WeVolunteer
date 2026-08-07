@@ -50,6 +50,7 @@ const OrganizerAgreement = React.lazy(() => import('../views/legal/OrganizerAgre
 const Appeal = React.lazy(() => import('../views/Appeal'));
 const AdminAppeals = React.lazy(() => import('../views/AdminAppeals'));
 const AdminAuditExplorer = React.lazy(() => import('../views/AdminAuditExplorer'));
+const ImpactDashboard = React.lazy(() => import('../views/ImpactDashboard.jsx'));
 const AdminRoster = React.lazy(() => import('../views/AdminRoster'));
 
 /**
@@ -129,6 +130,7 @@ export const APP_ROUTES = [
      the nav entry that points at it is hidden by the same capability. */
   { path: '/errors', element: <ErrorDashboard />, requiredCap: 'error.read' },
   { path: '/admin/appeals', element: <AdminAppeals />, requiredCap: 'appeal.review' },
+  { path: '/impact', element: <ImpactDashboard />, requiredCap: 'analytics.impact' },
   { path: '/admin/audit-logs', element: <AdminAuditExplorer />, requiredCap: 'audit.read' },
   { path: '/admin/roster', element: <AdminRoster />, requiredCap: 'admin.create' },
 ];

@@ -28,6 +28,7 @@ import oauthRoutes from './routes/oauthRoutes.js';
 import reauthRoutes from './routes/reauthRoutes.js';
 import errorRoutes from './routes/errorRoutes.js';
 import legalRoutes from './routes/legalRoutes.js';
+import impactRoutes from './routes/impactRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import appealsRoutes from './routes/appealsRoutes.js';
 const __filename = fileURLToPath(import.meta.url);
@@ -605,6 +606,7 @@ app.use(messageRoutes);
 app.use(privacyRoutes);
 app.use(errorRoutes);
 app.use(legalRoutes);
+app.use(impactRoutes);
 app.use(reportRoutes);
 /**
  * Reading the appeal form must not spend the budget for filing it.

@@ -74,6 +74,7 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/events/:id/edit',
   '/checkin/:eventId',
   '/calendar',
+  '/impact',
   '/notifications',
   '/messages',
   '/portfolio',
