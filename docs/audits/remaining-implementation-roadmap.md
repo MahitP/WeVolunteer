@@ -6,10 +6,12 @@ Priority is by consequence, not by effort. Original-plan references point at
 
 ---
 
-## Status — updated 2026-08-07, commit `9da6026`
+## Status — updated 2026-08-07, commit `c57acd1`
 
-**All of P0 is done, and P1-2 and P1-3 with it.** The suite is green at **3,274 tests**,
-lint exit 0, build exit 0, working tree clean.
+**All of P0 is done, and P1-2 and P1-3 with it. M1c is complete; M2's roster works.**
+The suite is green at **3,283 tests** (204 files), lint exit 0, build exit 0, working tree
+clean. Boundaries were additionally verified over HTTP against the running server, not only
+in tests.
 
 | Item | Status |
 |---|---|
@@ -23,11 +25,22 @@ lint exit 0, build exit 0, working tree clean.
 | **P1-4 pending administrator invitations** | **← next** |
 | P1-5 run the ownership bootstrap | Waits on owner identities (Q2) |
 
-Three defects were found and fixed beyond the audit's original list: revocation left
-per-user capability grants in place (so a demoted administrator kept
-`report.evidence.read`), `ACCOUNT_SUSPENDED` had been silently recategorised from
-`ACCOUNT` to `SYSTEM`, and a promotion test's static `db.js` import bound the suite to the
-real database.
+### Defects found beyond the audit's original list
+
+All seven were found by running or testing the thing, not by reading it.
+
+| # | Defect | How it surfaced |
+|---|---|---|
+| 1 | **Promotion and revocation could never succeed.** The roster opened its step-up challenge with `{ id }`; the registry binds `targetUserId`. A missing key hashes as absent, so the grant could never be spent — the owner re-enters their password, then the action fails | Writing the first client test for the screen |
+| 2 | **Revocation left per-user capability grants intact**, so a demoted administrator kept anything granted — including `report.evidence.read`, the ability to read students' private messages | A test asserted it; the handler did not do it |
+| 3 | `routes.adminPromotion.test.js` imported `db.js` statically, binding the suite to the **real database**. The file had been failing at collection, so its five assertions had never run | `testServer.js`'s path assertion refused to start |
+| 4 | **The dev server would not boot** — editing migrations 020/021 invalidated their checksums | Running the app |
+| 5 | The Audit Explorer issued **one request per keystroke**, each a `LIKE '%…%'` on an unindexed column | Client test |
+| 6 | Every Explorer failure rendered as **"Access Denied"** — on a screen only the owner can reach | Client test |
+| 7 | `ACCOUNT_SUSPENDED` had been silently recategorised from `ACCOUNT` to `SYSTEM`, filing a lockout notice away from the filter a locked-out student would use | Reading the diff |
+
+Items 1, 2 and 3 compounded: the test agreed with the bug in 1, and could not have caught
+2, because it was never running at all.
 
 ---
 

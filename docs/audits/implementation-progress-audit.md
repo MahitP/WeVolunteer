@@ -6,6 +6,15 @@ and error messages are copied from actual runs, not from commit messages.
 
 ---
 
+> **This document records the state at recovery (HEAD `eece3bf`). It is deliberately not
+> rewritten as work proceeds** — the point of an audit is what was found, not what is true
+> now. For current status see
+> [`remaining-implementation-roadmap.md`](remaining-implementation-roadmap.md), which is
+> the living document. As of `c57acd1`: all P0 items closed, M1c complete, 3,283 tests
+> green, lint and build clean.
+
+---
+
 ## 0. Summary
 
 | | |
