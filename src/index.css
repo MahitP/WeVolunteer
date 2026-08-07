@@ -7225,6 +7225,27 @@ input:disabled + .premium-slider {
   gap: var(--s3);
 }
 
+/* A page shown to somebody with no account and no shell around them — the public
+   community figures today. Written as two rules rather than the inline styles
+   the certificate page uses, because a second public page is exactly when that
+   pattern stops being a one-off. `min-height: 100dvh` rather than `100vh`: on a
+   phone `vh` counts the space behind the browser's own chrome, which pushes the
+   footer link below the fold on the viewport where this page is most often
+   opened — a link in a text message. */
+.public-page {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--surface-2);
+}
+
+.public-main {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  padding: var(--s6) var(--s4);
+}
+
 .impact-figure {
   display: grid;
   gap: var(--s1);

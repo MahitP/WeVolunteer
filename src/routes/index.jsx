@@ -39,6 +39,7 @@ const OrganizerProfile = React.lazy(() => import('../views/OrganizerProfile'));
 const ResetPassword = React.lazy(() => import('../views/ResetPassword'));
 const OAuthCallback = React.lazy(() => import('../views/OAuthCallback'));
 const CertificateVerification = React.lazy(() => import('../views/CertificateVerification'));
+const PublicImpact = React.lazy(() => import('../views/PublicImpact'));
 const VolunteerPortfolio = React.lazy(() => import('../views/VolunteerPortfolio'));
 const CheckInView = React.lazy(() => import('../views/CheckInView'));
 const Messages = React.lazy(() => import('../views/Messages'));
@@ -180,6 +181,11 @@ export const SIGNED_OUT_ROUTES = [
  */
 export const PUBLIC_ROUTES = [
   { path: '/verify/:code', element: <CertificateVerification /> },
+  /* The community figures, readable without an account — three of the four
+     reasons they exist (marketing, grant applications, community trust) are about
+     people who will never make one. The server builds a separate, smaller payload
+     for this route; see server/impact.js. */
+  { path: '/community', element: <PublicImpact /> },
   /**
    * `/privacy` redirects to the registry document rather than rendering its own page.
    *

@@ -243,3 +243,85 @@ export function buildImpact(db) {
     geography: geography(db),
   };
 }
+
+/**
+ * The figures anybody may see, without an account.
+ *
+ * ── Why a separate builder rather than a filtered `buildImpact` ──
+ *
+ * Because the two answer different questions and have different threat models,
+ * and a shared shape with a `public` flag is how the wrong field eventually ships
+ * to the wrong audience. `buildImpact` is read by somebody the platform can
+ * name — a student, an organizer, an administrator. This is read by anybody at
+ * all, including somebody who already knows things about a specific school and is
+ * looking for one more number to line them up against.
+ *
+ * So this is an allowlist expressed as code: it names the fields it emits, and a
+ * new breakdown added to `buildImpact` cannot leak into it by inheritance.
+ *
+ * ── What is deliberately NOT here ──
+ *
+ *   - **Categories, months, geography.** Every one is a breakdown, and a
+ *     breakdown is a way of asking about a smaller group. They are the parts a
+ *     grant reader least needs and the parts that carry the correlation risk.
+ *   - **Average and median hours per volunteer.** These are whole-population
+ *     aggregates and look harmless, and they are still left out: published
+ *     alongside the cohort size and the total, each additional statistic is
+ *     another equation, and a small cohort is a small system of equations. The
+ *     four totals and the returning rate carry what marketing and a grant
+ *     application actually need.
+ *   - **Any filter.** `/api/public/impact` takes no parameters at all. A date
+ *     range is a way to ask about smaller and smaller groups until a figure
+ *     describes one person.
+ *
+ * ── The floor ──
+ *
+ * A total over the whole population identifies nobody, which is the argument for
+ * publishing these four without suppression. It stops being quite true when the
+ * population is four people at a named school. Below `MIN_BUCKET` volunteers the
+ * response says so rather than publishing the number — and says so explicitly
+ * rather than returning zeros, because zeros read as "this platform does
+ * nothing" and that is a different, false, claim.
+ */
+export function buildPublicImpact(db) {
+  const totals = community(db);
+  const { returningRate, cohort } = volunteers(db);
+
+  /**
+   * Every figure carries the sentence that says what it counts.
+   *
+   * "318 hours" invites "hours of what, claimed by whom", and a public page that
+   * leaves that unanswered is one a grant reader stops quoting. These travel in
+   * the payload rather than living in the client so the definition cannot drift
+   * from the query that produced the number.
+   */
+  const definitions = {
+    totalVolunteers: 'People who were marked present at at least one shift. Sign-ups are not counted.',
+    totalHours: 'Hours credited after an organizer confirmed attendance. Scheduled hours are not counted.',
+    eventsCompleted: 'Events where at least one volunteer was marked present.',
+    organizationsSupported: 'Organizations that hosted at least one of those events.',
+    returningRate: 'Share of volunteers who came back for a second, different event.',
+  };
+
+  if (totals.totalVolunteers < MIN_BUCKET) {
+    return {
+      generatedAt: new Date().toISOString(),
+      available: false,
+      minBucket: MIN_BUCKET,
+      reason: `Published once ${MIN_BUCKET} volunteers have taken part. Below that, a figure `
+        + 'about this community is close enough to a figure about a particular person.',
+      community: null,
+      participation: null,
+      definitions,
+    };
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    available: true,
+    minBucket: MIN_BUCKET,
+    community: totals,
+    participation: { returningRate, cohort },
+    definitions,
+  };
+}

@@ -927,6 +927,11 @@ export const api = {
    */
   fetchImpact: async () => apiFetch('/api/impact'),
 
+  /* The public figures. A separate endpoint rather than a parameter on the one
+     above: it answers to anybody at all and emits a deliberately smaller payload.
+     See server/impact.js's buildPublicImpact for what it leaves out and why. */
+  fetchPublicImpact: async () => apiFetch('/api/public/impact'),
+
   /* ── Administrator invitations (§4.3) ─────────────────────────────────────
      The token is never returned by any of these. It is emailed to the invited
      address and exists nowhere else, because an inviter holding it could accept

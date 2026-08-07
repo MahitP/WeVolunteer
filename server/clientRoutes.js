@@ -75,6 +75,12 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/checkin/:eventId',
   '/calendar',
   '/impact',
+  /* The public community figures. A literal path carrying no parameter, so it
+     says nothing about who was reading it — and this is the one page in the
+     product a person with no account can reach on purpose, so a crash here is
+     the crash least likely to be reported by the person who hit it. It has to
+     name itself in the error record. */
+  '/community',
   '/notifications',
   '/messages',
   '/portfolio',

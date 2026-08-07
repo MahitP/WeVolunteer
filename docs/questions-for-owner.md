@@ -89,7 +89,24 @@ real taxonomy. No migration was written.
 
 ---
 
-## Q-3 · Should the Impact Dashboard have a public view?
+## Q-3 · ~~Should the Impact Dashboard have a public view?~~ — BUILT 2026-08-07
+
+**Answered by the mission brief's "Public Community Metrics", and built as recommended.**
+`GET /api/public/impact` and `/community` are live, unauthenticated, and linked from the sign-in
+page. They publish the four community totals plus the returning rate, and nothing else — no
+category, month, place or per-volunteer breakdown, and no filters at all.
+
+Two things went further than the recommendation below. The public payload is built by its own
+function that NAMES the fields it emits, rather than filtering the private one, so a breakdown
+added to the dashboard later cannot arrive here by inheritance. And the five-volunteer floor is
+applied to the totals themselves: a total over a whole population identifies nobody, which is the
+argument for publishing them, and that argument weakens when the population is four people at a
+named school. Below the floor the page says it is not published yet rather than showing zeros —
+"0 volunteers" is a different claim, and a false one.
+
+Original analysis kept below for the record.
+
+### Original
 
 **Question.** It is behind sign-in (`analytics.impact`, held by every role). Three of its four
 stated purposes — marketing, grants, community trust — are about people without accounts.
