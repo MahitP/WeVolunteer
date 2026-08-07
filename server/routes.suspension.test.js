@@ -13,9 +13,16 @@ import { startTestServer } from './testServer.js';
  * not remove the person. These tests exist so that stays fixed.
  *
  * The assertion that matters most is not "the status column changed" — it is
- * **an existing session dies**. Setting the status alone would block the next
- * sign-in and leave every already-issued cookie working for up to seven days,
- * which on a safety suspension is the entire window that mattered.
+ * **an existing session reaches no data**. Setting the status alone would block
+ * the next sign-in and leave every already-issued cookie working for up to seven
+ * days, which on a safety suspension is the entire window that mattered.
+ *
+ * That guarantee used to be delivered by invalidating sessions. It is now
+ * delivered by `authenticateToken` re-reading `account_status` from the database
+ * on every request and refusing everything outside the four routes in
+ * `suspendedAccess.js` — which is stronger, because it does not depend on a
+ * cookie expiring, and it leaves the session alive so the suspension screen can
+ * explain itself on the device the person is already holding.
  */
 
 let srv;
@@ -74,32 +81,69 @@ describe('POST /api/admin/users/:id/suspend', () => {
     expect(row.suspended_at).toBeTruthy();
   });
 
-  it('ENDS AN EXISTING SESSION — the half that actually protects anyone', async () => {
-    // A live, working session before suspension.
+  /**
+   * CONFINES an existing session, rather than ending it.
+   *
+   * This test used to assert the opposite, and its message said why: "if this is
+   * 200, suspension only blocks the next sign-in and a suspended user keeps full
+   * access for up to seven days". That was true when it was written — the only
+   * thing stopping a live cookie was invalidating it.
+   *
+   * It is not how the protection works now. `authenticateToken` re-reads
+   * `account_status` from the DATABASE on every request and refuses everything
+   * outside the four routes in `suspendedAccess.js`, so the guarantee moved from
+   * "the token stops working" to "the token reaches almost nothing" — which is
+   * strictly stronger, because it does not depend on a cookie expiring.
+   *
+   * So the assertion moved with it. `/api/auth/me` answering 200 is now
+   * deliberate: it is the request that carries the suspension notice to the wall.
+   * What must not answer 200 is anything else, and that is what is checked here.
+   */
+  it('CONFINES an existing session — the half that actually protects anyone', async () => {
     const victimToken = await srv.login('priya.patel.nhs@outlook.com');
-    const before = await srv.call('GET', '/api/auth/me', undefined, victimToken);
-    expect(before.status, 'precondition: the session works').toBe(200);
+    expect(
+      (await srv.call('GET', '/api/auth/me', undefined, victimToken)).status,
+      'precondition: the session works'
+    ).toBe(200);
 
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
       { reason: GOOD_REASON }, adminToken);
 
-    const after = await srv.call('GET', '/api/auth/me', undefined, victimToken);
-    expect(
-      after.status,
-      'the cookie issued before suspension must stop working immediately. If this is 200, '
-      + 'suspension only blocks the next sign-in and a suspended user keeps full access for '
-      + 'up to seven days — which is the whole window a safety suspension exists to close.'
-    ).not.toBe(200);
-    expect([401, 403]).toContain(after.status);
+    /* The part that protects anyone: a cookie minted before the suspension
+       reaches no platform data afterwards. If THIS is 200, a suspended user
+       keeps full access until their token expires. */
+    for (const path of ['/api/events', '/api/applications', '/api/notifications']) {
+      const res = await srv.call('GET', path, undefined, victimToken);
+      expect(res.status, `${path} was still reachable on a pre-suspension cookie`).toBe(403);
+      expect(res.body.code).toBe('account_suspended');
+    }
+
+    /* And the part that explains it: the same cookie can still read the notice. */
+    const me = await srv.call('GET', '/api/auth/me', undefined, victimToken);
+    expect(me.status).toBe(200);
+    expect(me.body.suspension).toMatchObject({ indefinite: true });
   });
 
-  it('bumps token_version so every device is signed out, not just one', async () => {
+  /**
+   * Does NOT bump `token_version`, and that is the change this asserts.
+   *
+   * Bumping signed every device out, so a suspended student's next click was
+   * "Session expired, please sign in again" — they re-entered a password to
+   * discover they were locked out. That is the silent ejection the suspension
+   * wall exists to replace, with an extra step in front of it, handed to the
+   * person least able to work out what happened.
+   *
+   * It bought nothing, because the gate reads the row rather than the token. The
+   * test above is the evidence: every device is refused on its next request
+   * whether or not its cookie was invalidated.
+   */
+  it('does not sign the account out, because the gate does not need it', async () => {
     const before = db.prepare('SELECT token_version FROM users WHERE id = ?').get('user-student-3');
     await srv.call('POST', '/api/admin/users/user-student-3/suspend',
       { reason: GOOD_REASON }, adminToken);
     const after = db.prepare('SELECT token_version FROM users WHERE id = ?').get('user-student-3');
 
-    expect(after.token_version).toBe(before.token_version + 1);
+    expect(after.token_version).toBe(before.token_version);
   });
 
   /**
@@ -454,9 +498,11 @@ describe('timed suspension', () => {
     await srv.call('POST', '/api/admin/users/user-student-3/suspend',
       { reason: GOOD_REASON, until: inDays(3) }, adminToken);
 
-    // The suspension bumped token_version, so the old cookie is dead regardless.
-    const during = await srv.call('GET', '/api/auth/me', undefined, victim);
-    expect([401, 403]).toContain(during.status);
+    /* The cookie survives — suspension no longer invalidates sessions — so what
+       is asserted is that it reaches no data while the suspension is in force. */
+    const during = await srv.call('GET', '/api/events', undefined, victim);
+    expect(during.status).toBe(403);
+    expect(during.body.code).toBe('account_suspended');
 
     expireNow('user-student-3');
     const after = await srv.call('POST', '/api/auth/login',

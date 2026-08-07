@@ -1483,6 +1483,34 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
        * one — which is the sort of self-contradicting record that gets a decision
        * overturned on appeal for the wrong reason.
        */
+      /**
+       * ── `token_version` is deliberately NOT bumped ──
+       *
+       * It was, and that quietly undid the suspension screen.
+       *
+       * Bumping invalidates every session the account has, so a suspended
+       * student's next click was "Session expired, please sign in again". They
+       * then re-entered a password to discover they were locked out — the silent
+       * ejection the wall was built to replace, with an extra step in front of
+       * it. The person least able to work out what had happened was handed the
+       * least information.
+       *
+       * It bought nothing. Enforcement is decided per request from the DATABASE:
+       * `authenticateToken` re-reads `account_status` and `suspended_until` on
+       * every call and refuses everything outside the four allowlisted routes
+       * (`suspendedAccess.js`). The token carries no authority the row does not
+       * confirm — `role` on the JWT is ignored, the principal is built from the
+       * row — so a live cookie for a suspended account can reach exactly what a
+       * freshly minted one can: the suspension notice, an appeal, and sign-out.
+       *
+       * Every open session on every device is therefore refused on its very next
+       * request, whether or not it was invalidated. Keeping them alive is what
+       * lets the wall explain itself on the device the person is already holding.
+       *
+       * Unsuspension deliberately does not bump either, and now for a matching
+       * reason: access returns on the same session, with no second sign-in to
+       * discover it.
+       */
       db.prepare(`
         UPDATE users
         SET account_status = 'suspended',
@@ -1490,8 +1518,7 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
             suspended_until = ?,
             suspension_lifted_at = NULL,
             suspension_reason = ?,
-            suspended_by = ?,
-            token_version = token_version + 1
+            suspended_by = ?
         WHERE id = ?
       `).run(now, until, reason, req.user.id, targetId);
 

@@ -176,6 +176,84 @@ describe('a suspended session', () => {
     expect(res.status).toBe(200);
   });
 
+  /* ── A session that was already open ──────────────────────────────────── */
+
+  /**
+   * Suspension does not sign anybody out.
+   *
+   * This is the behaviour the whole feature exists for. Enforcement is decided
+   * per request from the DATABASE — `authenticateToken` re-reads the row every
+   * time — so killing the session buys no security and costs the person the only
+   * thing this screen was built to give them: an explanation.
+   *
+   * With sessions destroyed, a suspended student's next click is "Session
+   * expired, please sign in again". They then re-enter a password to discover
+   * they are locked out, which is the silent-ejection experience the suspension
+   * wall replaced, with an extra step bolted on.
+   */
+  it('does not sign out a session that was already open', async () => {
+    /* Reset explicitly. An earlier case in this file may have left this account
+       suspended, in which case the suspend below answers 409, changes nothing,
+       and the assertions pass without exercising anything. */
+    unsuspend('user-student-3');
+    const live = await srv.login('emiller2027@gmail.com');
+    expect((await srv.call('GET', '/api/auth/me', undefined, live)).status).toBe(200);
+
+    await srv.call('POST', '/api/admin/users/user-student-3/suspend',
+      { reason: 'Messaging a student after being asked to stop' }, admin);
+
+    const me = await srv.call('GET', '/api/auth/me', undefined, live);
+    expect(
+      me.status,
+      'the existing session must survive so the wall can explain itself; a 401 '
+      + 'here means the person is ejected and has to sign in to find out why'
+    ).toBe(200);
+    expect(me.body.suspension).toMatchObject({ indefinite: true });
+
+    /* And it reaches nothing, which is what makes keeping it safe. */
+    const blocked = await srv.call('GET', '/api/events', undefined, live);
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.code).toBe('account_suspended');
+  });
+
+  /**
+   * Every device, immediately, without needing the sessions invalidated.
+   *
+   * The gate reads the row rather than the token, so a second browser that never
+   * saw the suspension happen is refused on its very next request.
+   */
+  it('applies to every open session at once, not just the active one', async () => {
+    unsuspend('user-student-3');
+    const phone = await srv.login('emiller2027@gmail.com');
+    const laptop = await srv.login('emiller2027@gmail.com');
+
+    await srv.call('POST', '/api/admin/users/user-student-3/suspend',
+      { reason: 'Messaging a student after being asked to stop' }, admin);
+
+    for (const [label, token] of [['phone', phone], ['laptop', laptop]]) {
+      const res = await srv.call('GET', '/api/events', undefined, token);
+      expect(res.status, `${label} still had access`).toBe(403);
+      expect(res.body.code).toBe('account_suspended');
+    }
+  });
+
+  /** And access returns on the same session when the suspension is lifted. */
+  it('restores the same session on unsuspension, with no new sign-in', async () => {
+    unsuspend('user-student-3');
+    const live = await srv.login('emiller2027@gmail.com');
+    await srv.call('POST', '/api/admin/users/user-student-3/suspend',
+      { reason: 'Messaging a student after being asked to stop' }, admin);
+    expect((await srv.call('GET', '/api/events', undefined, live)).status).toBe(403);
+
+    await srv.call('POST', '/api/admin/users/user-student-3/unsuspend',
+      { reason: 'Resolved after review' }, admin);
+
+    const res = await srv.call('GET', '/api/events', undefined, live);
+    expect(res.status).toBe(200);
+    const me = await srv.call('GET', '/api/auth/me', undefined, live);
+    expect(me.body.suspension).toBeNull();
+  });
+
   /* ── Expiry still releases ────────────────────────────────────────────── */
 
   /**
