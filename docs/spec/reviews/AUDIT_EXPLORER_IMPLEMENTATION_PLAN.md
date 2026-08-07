@@ -33,9 +33,54 @@ boundary.
 
 | Effect | Consequence |
 |---|---|
-| Administrators lose `audit.read` | They currently cannot use it for anything — it gates one unrelated status endpoint — so nothing they do today breaks |
+| ~~Administrators lose `audit.read`~~ | ~~They currently cannot use it for anything — it gates one unrelated status endpoint — so nothing they do today breaks~~ **← WRONG. Corrected in §1.1a.** |
 | The capability becomes **ungrantable** | Super-only capabilities are refused before grants are consulted. The triage-helper concern in the design's §3.2 disappears entirely |
 | `/api/admin/system/status` loses its administrator access | **This is a real regression** and must be handled — see §1.2 |
+
+### 1.1a CORRECTION (2026-08-06) — `audit.read` has three uses, not one
+
+**The struck row above was wrong, and it was the row this plan's safety rested on.**
+Verification before implementation found **three** production uses of `audit.read`:
+
+| # | Location | What it gates | In the original plan? |
+|---|---|---|---|
+| 1 | `server/routes/adminRoutes.js:1207` | `GET /api/admin/system/status` | Yes — §1.2 |
+| 2 | `server/routes/userRoutes.js:39` | `canSeeContact` — **contact PII** on `GET /api/users/:id/profile` | **No** |
+| 3 | `server/routes/applicationRoutes.js:45` | The **unscoped branch** of `GET /api/applications` | **No** |
+
+**Use 3 is the dangerous one.** The handler is a capability cascade; an administrator
+matches the `audit.read` branch to receive *all* applications. Remove the capability and
+they hold neither `applicant.review` nor `application.withdraw`, so they fall through to
+the terminal explicit-deny branch, which sets `rows = []`.
+
+**The response is HTTP 200 with an empty array.** The authorization matrix asserts
+`admin: 'allow'` for this route — and `allow` is a *status* assertion, which a 200 with
+zero rows satisfies. The regression would pass the matrix, pass lint, pass the build, and
+be visible only to an administrator wondering where every application went. This is the
+exact failure class Volume II §2.4.5 names: a content defect no status assertion can
+detect. The specification warned about it; this plan then walked into it.
+
+**Corrected scope — four coordinated changes in one commit, not two:**
+
+| # | Change | Replacement gate |
+|---|---|---|
+| 1 | `audit.read` → `SUPER_ONLY`, **and removed from the `admin` role array** | — |
+| 2 | `GET /api/admin/system/status` | `analytics.school` (unchanged from §1.2) |
+| 3 | `GET /api/applications` unscoped branch | `event.moderate` |
+| 4 | `canSeeContact` on `GET /api/users/:id/profile` | `event.moderate` |
+
+Change 1's second clause matters mechanically: the role array is consulted **before** the
+`SUPER_ONLY` test, so adding the capability to `SUPER_ONLY` while leaving it in `admin` is
+a no-op except for grantability.
+
+**Three tests are now mandatory**, because the existing suite cannot see two of these:
+
+- An administrator receives a **non-empty** application list — a **content** assertion.
+- An administrator sees contact fields on a student profile.
+- An administrator still reaches system status.
+
+**Without those three, this change is not safe to make.** Full analysis:
+`docs/spec/reviews/m1/CURRENT_STATE_REPORT.md` §2.
 
 ### 1.2 The status endpoint must be re-gated
 
