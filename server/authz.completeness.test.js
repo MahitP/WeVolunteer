@@ -495,7 +495,10 @@ describe('authorization hygiene', () => {
          still `viewingProfile.type === 'organizer'`, the same view discriminator
          described below. Mechanically bumping a line number without looking is
          how an exemption outlives the code that earned it. */
-      'src/App.jsx:954': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      /* 954 → 1008 when the rail gained groups and the create entry left it.
+         Re-read at the new line: still `viewingProfile.type === 'organizer'`,
+         the `?type=` view discriminator described below. */
+      'src/App.jsx:1008': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
       'src/components/EventComments.jsx:112': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
       'src/components/EventComments.jsx:113': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
       'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
@@ -525,7 +528,15 @@ describe('authorization hygiene', () => {
       'src/components/EventModal.jsx:68': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isAdmin` gates the moderation surface; wants can(event.moderate)' },
       'src/components/EventModal.jsx:90': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates apply/withdraw inside the modal; wants can(event.apply)' },
       'src/components/EventModal.jsx:337': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply)' },
-      'src/views/BrowseEvents.jsx:44': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates favourites and apply CTAs on the browse list; wants can(event.apply)' },
+      /* 44 → 46 when this file gained the `can`/`Link` imports for the Create
+         event button. Re-read: still `currentUser?.role === 'student'`, still
+         the same UX gate. NOT converted while here, deliberately — `isStudent`
+         also gates the credited-hours summary and favourites, and a bare
+         `can(user, 'event.apply')` is TRUE for super_admin through the wildcard,
+         which would show the platform owner a volunteer's hours line reading
+         zero. The conversion needs a most-privileged-first cascade, which is a
+         real change and not a drive-by. */
+      'src/views/BrowseEvents.jsx:46': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates favourites and apply CTAs on the browse list; wants can(event.apply)' },
       'src/views/CalendarView.jsx:55': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isOrganizer` picks hosted-events entries over applied-shift entries; wants a can(event.create) cascade, most-privileged-first' },
       'src/views/Messages.jsx:95': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'decides which side of a conversation is the student when resolving it; wants can(event.apply), and the server re-derives it anyway' },
     };

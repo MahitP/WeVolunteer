@@ -122,7 +122,7 @@ describe('navigation, per role', () => {
    */
   it.each([
     ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Community impact', 'My profile']],
-    ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'New event', 'Notifications', 'Community impact', 'My profile']],
+    ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Community impact', 'My profile']],
     /**
      * Admin GAINED `Messages`, and this pin was updated deliberately rather than
      * relaxed.
@@ -162,7 +162,7 @@ describe('navigation, per role', () => {
   it('super_admin gets a populated rail, not an empty shell', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
-      'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'New event',
+      'Moderation Center', 'Opportunities', 'Calendar', 'Messages',
       'Notifications', 'Errors', 'Appeals', 'Community impact', 'Audit Explorer', 'Admin Roster', 'My profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
@@ -199,9 +199,24 @@ describe('navigation, per role', () => {
     expect(navItemsFor(USER('partner')).map(n => n.label)).toEqual(['Opportunities', 'Community impact']);
   });
 
-  it('an unverified organizer still loses New event', () => {
-    expect(navItemsFor(USER('organizer', { verified: false })).map(n => n.label))
-      .not.toContain('New event');
+  /**
+   * "New event" is no longer a nav entry at all — it is a primary button on
+   * Opportunities, where an organizer already is when they want to post a shift.
+   *
+   * These two cases are kept as a NEGATIVE pin rather than deleted, because the
+   * property they defend is still real: the create affordance must not reappear
+   * in the rail without somebody deciding to put it there. The POSITIVE half of
+   * the coverage they used to carry — that an unverified organizer, and an
+   * organizer with `event.create` withheld, are not offered the action — moved to
+   * `src/views/BrowseEvents.createAction.test.jsx`, which is where the affordance
+   * now lives. Deleting these without moving that would have quietly dropped the
+   * only tests that a suspended-in-all-but-name organizer cannot post.
+   */
+  it('does not offer event creation from the rail, for anybody', () => {
+    for (const role of ['student', 'organizer', 'admin', 'super_admin']) {
+      expect(navItemsFor(USER(role)).map(n => n.label), `${role} rail`)
+        .not.toContain('New event');
+    }
   });
 
   it('renders the resolved entries into the sidebar', async () => {
@@ -209,7 +224,7 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
-      'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'New event',
+      'Moderation Center', 'Opportunities', 'Calendar', 'Messages',
       'Notifications', 'Errors', 'Appeals', 'Community impact', 'Audit Explorer', 'Admin Roster', 'My profile'
     ]);
   });
@@ -301,7 +316,10 @@ describe('the `/` dashboard, per role', () => {
       withheld: ['event.create', 'message.send'],
     })).map(n => n.label);
 
-    expect(labels).not.toContain('New event');
+    /* `New event` is no longer in the rail for anybody, so asserting its absence
+       here would prove nothing about the withheld set. The equivalent assertion —
+       that a withheld `event.create` also removes the Create event BUTTON — lives
+       in `BrowseEvents.createAction.test.jsx`, which is where the affordance is. */
     expect(labels).not.toContain('Messages');
     expect(labels).toContain('Opportunities');
   });
