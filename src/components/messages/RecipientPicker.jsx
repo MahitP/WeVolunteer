@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../../utils/api';
 import { Search, User } from 'lucide-react';
 import Modal, { ModalHead } from '../Modal';
+import { recipientCopyFor } from './recipientCopy';
 
 /**
  * Pick who to start a conversation with.
@@ -27,7 +28,22 @@ import Modal, { ModalHead } from '../Modal';
  * The list styling stays inline: these are one-off rows, and moving them to
  * index.css would be unrelated churn.
  */
-export default function RecipientPicker({ onSelect, onClose }) {
+export default function RecipientPicker({ onSelect, onClose, user }) {
+  /**
+   * Every sentence in this dialog is role-aware.
+   *
+   * One line used to be shown to everybody — "You can message the organizer of
+   * an event you have applied to" — which is true of a student and of nobody
+   * else. See recipientCopy.js for what each account actually reaches, and why
+   * an administrator is pointed at the Moderation Center instead.
+   *
+   * `user` arrives as a prop rather than from `useSession()`. A dialog that
+   * reaches for global context cannot be rendered on its own, and this one is:
+   * `dialogSemantics.test.jsx` mounts it bare to check its dialog behaviour, and
+   * a context read broke all seven of those assertions at once. `recipientCopyFor`
+   * handles a missing user, so the dialog still renders without one.
+   */
+  const copy = recipientCopyFor(user);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -64,7 +80,7 @@ export default function RecipientPicker({ onSelect, onClose }) {
     <Modal onClose={onClose} label="New message" className="recipient-picker">
       <ModalHead
         title="New message"
-        description="You can message the organizer of an event you have applied to."
+        description={copy.description}
         onClose={onClose}
       />
 
@@ -78,7 +94,7 @@ export default function RecipientPicker({ onSelect, onClose }) {
             id="recipient-search"
             type="text"
             className="input recipient-search-input"
-            placeholder="Search for a volunteer or organizer…"
+            placeholder={copy.placeholder}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
@@ -93,7 +109,9 @@ export default function RecipientPicker({ onSelect, onClose }) {
           {!loading && error && <p className="small recipient-note recipient-error">{error}</p>}
 
           {!loading && !error && searched && results.length === 0 && (
-            <p className="small dim recipient-note">No one found for “{query}”.</p>
+            <p className="small dim recipient-note">
+              No one found for “{query}”. {copy.empty}
+            </p>
           )}
 
           {!loading && !error && results.map((u) => (
