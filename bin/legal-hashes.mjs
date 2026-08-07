@@ -18,7 +18,7 @@
  * Mirrors bin/migration-checksums.mjs, which exists for the same reason and
  * solves the same problem for the migration registry.
  */
-import { LEGAL_DOCUMENTS, hashPolicyFile } from '../server/legalDocuments.js';
+import { LEGAL_DOCUMENTS, hashPolicyFile, LEGAL_HASHES_ENFORCED } from '../server/legalDocuments.js';
 
 let drifted = 0;
 
@@ -35,14 +35,34 @@ for (const doc of LEGAL_DOCUMENTS) {
 }
 
 if (drifted > 0) {
+  if (LEGAL_HASHES_ENFORCED) {
+    console.log(
+      `${drifted} document(s) differ from their pinned hash.\n`
+      + 'If the change is intentional, bump the version in server/legalDocuments.js\n'
+      + 'and replace contentHash with the "actual" value above. Do NOT update the\n'
+      + 'hash while leaving the version alone: that silently rewrites what existing\n'
+      + 'users are recorded as having agreed to.\n'
+    );
+    process.exit(1);
+  }
+
+  /**
+   * Advisory before launch — see LEGAL_HASHES_ENFORCED in legalDocuments.js.
+   *
+   * Still printed, and still printed as DRIFT above, because this command exists
+   * to answer "what has moved". Exit 0 because nothing is wrong: the whole point
+   * of the owner's decision is that editing a policy file mid-draft is not a
+   * failure, and a non-zero exit here would keep failing whatever CI step runs it.
+   */
   console.log(
     `${drifted} document(s) differ from their pinned hash.\n`
-    + 'If the change is intentional, bump the version in server/legalDocuments.js\n'
-    + 'and replace contentHash with the "actual" value above. Do NOT update the\n'
-    + 'hash while leaving the version alone: that silently rewrites what existing\n'
-    + 'users are recorded as having agreed to.\n'
+    + 'Not an error before launch: hashes are advisory (LEGAL_HASHES_ENFORCED is\n'
+    + 'false in server/legalDocuments.js). The server serves the files as written\n'
+    + 'and records what it actually published.\n\n'
+    + 'At launch, paste the "actual" values above into LEGAL_DOCUMENTS and set\n'
+    + 'LEGAL_HASHES_ENFORCED to true.\n'
   );
-  process.exit(1);
+  process.exit(0);
 }
 
 console.log('All documents match their pinned hashes.\n');

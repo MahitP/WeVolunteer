@@ -1,5 +1,8 @@
 import crypto from 'node:crypto';
-import { LEGAL_DOCUMENTS, SIGNUP_DOCUMENTS, CONSENT_CONTROLS, documentBySlug } from './legalDocuments.js';
+import {
+  LEGAL_DOCUMENTS, SIGNUP_DOCUMENTS, CONSENT_CONTROLS, documentBySlug,
+  publishedHash, LEGAL_HASHES_ENFORCED,
+} from './legalDocuments.js';
 
 /**
  * Recording and enforcing consent.
@@ -157,7 +160,7 @@ export function recordAcceptances(db, { userId, method, context = null, req = nu
       userId,
       doc.slug,
       doc.version,
-      doc.contentHash,
+      publishedHash(doc),
       at,
       method,
       context,
@@ -198,17 +201,41 @@ export function syncLegalDocuments(db, { now = null } = {}) {
     const key = `${doc.slug}@${doc.version}`;
     const row = bySlugVersion.get(key);
 
+    const hash = publishedHash(doc);
+
     if (!row) {
-      insert.run(doc.slug, doc.version, doc.title, doc.consentType, doc.contentHash, at, at);
+      insert.run(doc.slug, doc.version, doc.title, doc.consentType, hash, at, at);
       continue;
     }
 
-    if (row.content_hash !== doc.contentHash) {
-      throw new Error(
-        `legal_documents: ${key} is already published with a different content hash. `
-        + 'A published version is immutable — its hash is what the acceptance records point at, '
-        + 'so changing it retroactively rewrites what users are recorded as having agreed to. '
-        + 'Bump the version in server/legalDocuments.js instead.'
+    if (row.content_hash !== hash) {
+      if (LEGAL_HASHES_ENFORCED) {
+        throw new Error(
+          `legal_documents: ${key} is already published with a different content hash. `
+          + 'A published version is immutable — its hash is what the acceptance records point at, '
+          + 'so changing it retroactively rewrites what users are recorded as having agreed to. '
+          + 'Bump the version in server/legalDocuments.js instead.'
+        );
+      }
+
+      /**
+       * Advisory before launch — see LEGAL_HASHES_ENFORCED in legalDocuments.js.
+       *
+       * The row is UPDATED rather than left alone. Leaving it would make
+       * `legal_documents` describe text that no longer exists, and every
+       * acceptance recorded from here on would copy that stale hash — so the
+       * table would drift further from the files with each signup, and flipping
+       * enforcement back on at launch would then fail against a database nobody
+       * could reconcile. Moving it forward keeps one answer to "what is
+       * published right now", which is the only claim this table can honestly
+       * make while the text is allowed to change.
+       */
+      db.prepare(
+        'UPDATE legal_documents SET content_hash = ?, published_at = ? WHERE slug = ? AND version = ?'
+      ).run(hash, at, doc.slug, doc.version);
+
+      console.warn(
+        `[legal] ${key} text changed; updated its recorded hash (pre-launch; hashes advisory).`
       );
     }
   }

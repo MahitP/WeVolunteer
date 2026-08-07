@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { startTestServer } from './testServer.js';
 import { ipPrefix, uaFamily, assertConsent, ConsentMissing, slugToKey } from './consent.js';
-import { LEGAL_DOCUMENTS, SIGNUP_DOCUMENTS, CONSENT_CONTROLS, hashPolicyFile, requiredConsentKeys } from './legalDocuments.js';
+import { LEGAL_DOCUMENTS, SIGNUP_DOCUMENTS, CONSENT_CONTROLS, hashPolicyFile, requiredConsentKeys, publishedHash, LEGAL_HASHES_ENFORCED } from './legalDocuments.js';
 
 /**
  * Consent: recorded, enforced server-side, and pinned to document content.
@@ -112,12 +112,20 @@ describe('assertConsent', () => {
 });
 
 describe('the document registry', () => {
-  it('pins a content hash that matches the published file', () => {
-    // The evidentiary value of an acceptance is the CONTENT it points at. If a
-    // published document changes without a version bump, every acceptance row
-    // for that version now describes text nobody agreed to. This turns that
-    // into a build failure. Run `node bin/legal-hashes.mjs` after a legitimate
-    // document change, then bump the version.
+  /**
+   * The pinned constant is authoritative only once enforcement is on.
+   *
+   * The evidentiary value of an acceptance is the CONTENT it points at, so after
+   * launch a published document changing without a version bump means every
+   * acceptance row for that version describes text nobody agreed to — a build
+   * failure, correctly.
+   *
+   * Before launch the documents are still being drafted and there are no
+   * acceptance rows to protect, so this is skipped rather than deleted: the owner
+   * decided (see LEGAL_HASHES_ENFORCED) not to pay the edit-rehash-repaste ritual
+   * until it buys something. Deleting the case would mean nothing re-arms it.
+   */
+  it.skipIf(!LEGAL_HASHES_ENFORCED)('pins a content hash that matches the published file', () => {
     for (const doc of LEGAL_DOCUMENTS) {
       expect(
         hashPolicyFile(doc.file),
@@ -125,6 +133,20 @@ describe('the document registry', () => {
         + 'If the change is intentional, bump the version in server/legalDocuments.js and '
         + 'refresh the hash with `node bin/legal-hashes.mjs`.'
       ).toBe(doc.contentHash);
+    }
+  });
+
+  /**
+   * What is true in BOTH modes: every pinned value is a real sha256.
+   *
+   * Cheap, and it catches the thing skipping the case above could otherwise let
+   * through — a constant left as a placeholder, `''` or `'TODO'`, which would
+   * then be pasted into `legal_documents` and quietly become the recorded hash of
+   * a real published document.
+   */
+  it('gives every document a well-formed pinned hash', () => {
+    for (const doc of LEGAL_DOCUMENTS) {
+      expect(doc.contentHash, `${doc.slug} has no usable pinned hash`).toMatch(/^[0-9a-f]{64}$/);
     }
   });
 
@@ -258,7 +280,9 @@ describe('signup enforces and records consent', () => {
       const row = rows.find(r => r.document_slug === doc.slug);
       expect(row, `no acceptance recorded for ${doc.slug}`).toBeTruthy();
       expect(row.version).toBe(doc.version);
-      expect(row.content_hash).toBe(doc.contentHash);
+      /* What was actually published — the pinned constant while enforced, the live
+   file hash before launch. See publishedHash(). */
+      expect(row.content_hash).toBe(publishedHash(doc));
       expect(row.method).toBe('signup');
       expect(row.context).toBe('password');
       expect(row.accepted_at).toBeTruthy();
@@ -344,22 +368,61 @@ describe('signup enforces and records consent', () => {
       const row = db.prepare('SELECT * FROM legal_documents WHERE slug = ? AND version = ?')
         .get(doc.slug, doc.version);
       expect(row, `${doc.slug} v${doc.version} was not published`).toBeTruthy();
-      expect(row.content_hash).toBe(doc.contentHash);
+      /* What was actually published — the pinned constant while enforced, the live
+   file hash before launch. See publishedHash(). */
+      expect(row.content_hash).toBe(publishedHash(doc));
       expect(row.consent_type).toBe(doc.consentType);
     }
   });
 
-  it('refuses to republish a version whose content changed', async () => {
-    // A published version is immutable — its hash is what acceptance rows point
-    // at. Silently updating it would rewrite what users are recorded as having
-    // agreed to.
+  /**
+   * Before launch: the row is brought back into line rather than refused.
+   *
+   * See `LEGAL_HASHES_ENFORCED` in legalDocuments.js for the owner's reasoning.
+   * The assertion that matters is that the hash MOVES — a mode that stopped
+   * checking and also stopped recording would leave the table describing text
+   * that no longer exists, which is worse than either enforcing or ignoring.
+   */
+  it('brings a drifted published version back into line before launch', async () => {
     const { syncLegalDocuments } = await import('./consent.js');
     const doc = LEGAL_DOCUMENTS[0];
 
     db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
       .run('deadbeef', doc.slug, doc.version);
 
-    expect(() => syncLegalDocuments(db)).toThrow(/immutable|different content hash/i);
+    expect(() => syncLegalDocuments(db)).not.toThrow();
+
+    expect(db.prepare('SELECT content_hash FROM legal_documents WHERE slug = ? AND version = ?')
+      .get(doc.slug, doc.version).content_hash).not.toBe('deadbeef');
+  });
+
+  /**
+   * With enforcement on — what ships at launch — it still refuses.
+   *
+   * A published version is immutable once anybody has accepted it: its hash is
+   * what the acceptance rows point at, so silently updating it rewrites what
+   * users are recorded as having agreed to. Exercised through a forced-true
+   * re-import rather than assumed, because a switch nobody has pulled is a switch
+   * that does not work.
+   */
+  it('refuses to republish a version whose content changed, once enforced', async () => {
+    const doc = LEGAL_DOCUMENTS[0];
+
+    vi.resetModules();
+    const real = await import('./legalDocuments.js');
+    vi.doMock('./legalDocuments.js', () => ({ ...real, LEGAL_HASHES_ENFORCED: true }));
+
+    try {
+      const { syncLegalDocuments } = await import('./consent.js');
+
+      db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
+        .run('deadbeef', doc.slug, doc.version);
+
+      expect(() => syncLegalDocuments(db)).toThrow(/immutable|different content hash/i);
+    } finally {
+      vi.doUnmock('./legalDocuments.js');
+      vi.resetModules();
+    }
 
     db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
       .run(doc.contentHash, doc.slug, doc.version);

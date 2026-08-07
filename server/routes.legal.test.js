@@ -98,19 +98,24 @@ describe('legal document endpoints', () => {
       expect(res.body.contentHash).toMatch(/^[0-9a-f]{64}$/);
     });
 
-    it('serves text matching the hash pinned in the registry', async () => {
+    it('serves text matching the hash it reports for that document', async () => {
       /**
        * The one property the Legal Center exists to hold. An acceptance row says
-       * "agreed to v2.0, hash e6b3…"; if this endpoint can serve different bytes
-       * under that version, the record proves nothing.
+       * "agreed to v1.0, hash e6b3…"; if this endpoint can serve bytes that do not
+       * match the hash it reports alongside them, the record proves nothing.
+       *
+       * Compared against the hash in the RESPONSE rather than the pinned constant.
+       * Before launch the constant is allowed to lag the file (see
+       * LEGAL_HASHES_ENFORCED); what must never differ is the text a reader is
+       * shown and the fingerprint shown next to it.
        */
       const { createHash } = await import('node:crypto');
       for (const doc of LEGAL_DOCUMENTS) {
         const res = await srv.call('GET', `/api/legal/documents/${doc.slug}`);
         expect(res.status, `${doc.slug} did not serve`).toBe(200);
         const served = createHash('sha256').update(res.body.markdown).digest('hex');
-        expect(served, `${doc.slug}: served text does not match its pinned hash`)
-          .toBe(doc.contentHash);
+        expect(served, `${doc.slug}: the served text does not match the fingerprint served with it`)
+          .toBe(res.body.contentHash);
       }
     });
 

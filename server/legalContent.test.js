@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { LEGAL_DOCUMENTS, POLICY_DIR, publishedBody, PolicyStructureError } from './legalDocuments.js';
+import { LEGAL_DOCUMENTS, POLICY_DIR, publishedBody, PolicyStructureError, hashPolicyFile } from './legalDocuments.js';
 import { policyContent, verifyPolicyFiles, resetPolicyCache, PolicyContentError } from './legalContent.js';
 
 /**
@@ -29,10 +29,19 @@ describe('policy content verification', () => {
     }
   });
 
-  it('serves text whose hash equals the pinned constant', () => {
+  /**
+   * Served text is the text on disk — the property that holds in both modes.
+   *
+   * It used to compare against the pinned constant, which before launch is
+   * allowed to be stale. What must never happen either way is this module
+   * serving something that is not the published body of the file: a truncated
+   * read, a cached leftover from another slug, or the drafting notes above the
+   * `## Draft` marker.
+   */
+  it('serves exactly the published body of the file on disk', () => {
     for (const doc of LEGAL_DOCUMENTS) {
       const actual = createHash('sha256').update(policyContent(doc.slug)).digest('hex');
-      expect(actual, `${doc.slug} drifted from its pinned hash`).toBe(doc.contentHash);
+      expect(actual, `${doc.slug} is not serving its own file`).toBe(hashPolicyFile(doc.file));
     }
   });
 
@@ -159,7 +168,7 @@ describe('policy content verification', () => {
         ).not.toBe(wholeHash);
 
         const bodyHash = createHash('sha256').update(publishedBody(whole)).digest('hex');
-        expect(doc.contentHash, `${doc.slug}: pinned hash is not the published body's`).toBe(bodyHash);
+        expect(hashPolicyFile(doc.file), `${doc.slug}: the file hash is not the published body's`).toBe(bodyHash);
       }
     });
   });

@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { LEGAL_DOCUMENTS, POLICY_DIR, hashPolicyFile, publishedBody, PolicyStructureError } from './legalDocuments.js';
+import {
+  LEGAL_DOCUMENTS, POLICY_DIR, hashPolicyFile, publishedBody, PolicyStructureError,
+  LEGAL_HASHES_ENFORCED,
+} from './legalDocuments.js';
 
 /**
  * Reads published policy text off disk so the API can serve it.
@@ -43,6 +46,9 @@ import { LEGAL_DOCUMENTS, POLICY_DIR, hashPolicyFile, publishedBody, PolicyStruc
 
 /** slug -> verified Markdown source. */
 const cache = new Map();
+
+/** Slugs already warned about for hash drift — see the advisory branch below. */
+const warnedDrift = new Set();
 
 /** Thrown when a policy file is missing or does not match its pinned hash. */
 export class PolicyContentError extends Error {
@@ -96,12 +102,31 @@ export function policyContent(slug) {
 
   const actual = hashPolicyFile(doc.file);
   if (actual !== doc.contentHash) {
-    throw new PolicyContentError(
-      `Policy file for ${slug} does not match its pinned hash. `
-      + `Expected ${doc.contentHash}, read ${actual}. `
-      + 'Refusing to serve text that differs from what acceptance records point at. '
-      + 'Run node bin/legal-hashes.mjs and bump the version if the change is intentional.'
-    );
+    const detail = `Policy file for ${slug} does not match its pinned hash. `
+      + `Expected ${doc.contentHash}, read ${actual}.`;
+
+    if (LEGAL_HASHES_ENFORCED) {
+      throw new PolicyContentError(
+        `${detail} `
+        + 'Refusing to serve text that differs from what acceptance records point at. '
+        + 'Run node bin/legal-hashes.mjs and bump the version if the change is intentional.'
+      );
+    }
+
+    /**
+     * Advisory before launch — the owner's decision, recorded at
+     * LEGAL_HASHES_ENFORCED in legalDocuments.js.
+     *
+     * Warned rather than silent, and warned ONCE per slug rather than on every
+     * read: the drift is expected while the documents are being drafted, so a
+     * line per request would be noise that trains everybody to ignore the
+     * channel this will use again when it matters. Once per process is enough to
+     * answer "did I forget to refresh the constants?".
+     */
+    if (!warnedDrift.has(slug)) {
+      warnedDrift.add(slug);
+      console.warn(`[legal] ${detail} Serving the file as written (pre-launch; hashes advisory).`);
+    }
   }
 
   cache.set(slug, body);
@@ -143,4 +168,8 @@ export function verifyPolicyFiles() {
 /** Drops the cache. Tests only — the documents cannot change in production. */
 export function resetPolicyCache() {
   cache.clear();
+  /* The drift warning is once-per-process, which in a test file means the second
+     case would see no warning from the first case's edit. Cleared with the cache
+     so each test starts from the same state. */
+  warnedDrift.clear();
 }

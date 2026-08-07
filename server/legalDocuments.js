@@ -418,3 +418,71 @@ export function hashPolicyFile(file) {
 export function requiredConsentKeys() {
   return CONSENT_CONTROLS.map(c => c.key);
 }
+
+/**
+ * Whether a published document's text is pinned to its recorded hash.
+ *
+ * ── Owner decision, 2026-08-07: not before launch ──
+ *
+ * The enforcement below is correct and stays in the codebase, because after
+ * launch it is the thing that makes an acceptance record mean something: a user
+ * agreed to a specific text, and nobody gets to change that text underneath the
+ * record afterwards.
+ *
+ * Before launch it costs more than it protects. The documents are still being
+ * drafted, there are no real acceptance records to protect, and every wording fix
+ * — a typo, a clarified sentence — meant editing a policy file, running
+ * `bin/legal-hashes.mjs`, pasting a new constant, and rebooting a server that had
+ * refused to start in the meantime. The owner's instruction is to stop paying
+ * that until there is something to protect, and to keep every document at
+ * version 1.0 until release.
+ *
+ * ── What changes, and what deliberately does not ──
+ *
+ * Advisory mode relaxes exactly one comparison: file text against recorded hash.
+ * It does NOT relax:
+ *
+ *   - a missing policy file, or one that has lost its `## Draft` marker. Those
+ *     still throw and still stop a production boot, because they mean the
+ *     document cannot be shown at all — which is a different failure from the
+ *     document having been edited.
+ *   - the ORGANIZER AGREEMENT version gate. That is keyed on `(slug, version)`,
+ *     not on the hash, and bumping a version still re-withholds eleven
+ *     capabilities until the organizer re-accepts. Versions stay at 1.0, so
+ *     nothing moves — but the mechanism is untouched and still works.
+ *
+ * ── Flipping it back ──
+ *
+ * Set this to `true` at launch. Run `node bin/migration-checksums.mjs`'s sibling,
+ * `node bin/legal-hashes.mjs`, paste the printed constants into LEGAL_DOCUMENTS,
+ * and the enforcement is live again with no other change. Everything that reads
+ * a hash keeps reading one the whole time; the difference is only whether a
+ * mismatch is fatal.
+ */
+export const LEGAL_HASHES_ENFORCED = false;
+
+/**
+ * The hash to RECORD for a document — what was actually published.
+ *
+ * Enforced, this is the pinned constant, and it is equal to the file's hash by
+ * definition because the check would have thrown otherwise.
+ *
+ * Advisory, it is the live file hash. That distinction is the whole reason this
+ * function exists rather than each caller reaching for `doc.contentHash`: while
+ * the text is allowed to move, a stored hash copied from a stale constant is a
+ * record that claims somebody agreed to bytes they never saw. Recording what was
+ * really served keeps `legal_documents` and `legal_acceptances` honest even in
+ * the mode that stops checking them.
+ *
+ * Falls back to the pinned constant if the file cannot be read, so a caller in a
+ * half-installed checkout gets a value rather than an exception — the missing
+ * file is reported by `policyContent`, which is where that failure belongs.
+ */
+export function publishedHash(doc) {
+  if (LEGAL_HASHES_ENFORCED) return doc.contentHash;
+  try {
+    return hashPolicyFile(doc.file);
+  } catch {
+    return doc.contentHash;
+  }
+}

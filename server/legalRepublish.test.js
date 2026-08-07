@@ -157,7 +157,19 @@ describe('booting a second time against the same database', () => {
    * serving policy text nobody agreed to. If this test ever passes by booting
    * cleanly, the immutability rule has been quietly removed.
    */
-  it('still refuses an edited published version once 016 has already run', async () => {
+  /**
+   * Before launch the same edit is absorbed rather than refused, and the recorded
+   * hash moves forward.
+   *
+   * This is the owner's decision recorded at `LEGAL_HASHES_ENFORCED` — the
+   * documents are still being drafted and there are no acceptance records to
+   * protect. The property being asserted is not "it no longer checks"; it is that
+   * the row is UPDATED. Leaving it stale would make `legal_documents` describe
+   * text that no longer exists, every later acceptance would copy that stale
+   * hash, and flipping enforcement on at launch would then fail against a
+   * database nobody could reconcile.
+   */
+  it('absorbs an edited published version before launch, moving the recorded hash', async () => {
     let db = await boot();
     expect(
       db.prepare('SELECT COUNT(*) AS c FROM schema_migrations WHERE version = 16').get().c,
@@ -168,7 +180,44 @@ describe('booting a second time against the same database', () => {
     db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
       .run('a'.repeat(64), target.slug, target.version);
 
-    await expect(boot()).rejects.toThrow(/already published with a different content hash/i);
+    db = await boot();
+
+    const after = db.prepare('SELECT content_hash FROM legal_documents WHERE slug = ? AND version = ?')
+      .get(target.slug, target.version);
+    expect(after.content_hash).not.toBe('a'.repeat(64));
+    expect(after.content_hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  /**
+   * And with enforcement ON — which is what ships at launch — it still refuses.
+   *
+   * The behaviour above is a pre-launch convenience, not a decision that this
+   * guard was unnecessary. Once real people have accepted real documents, editing
+   * a published version's text without bumping its version rewrites what they are
+   * recorded as having agreed to, and that must stay impossible.
+   *
+   * Asserted by re-importing the module graph with the constant forced true,
+   * rather than by trusting that flipping it will work. A switch nobody has
+   * pulled is a switch that does not work.
+   */
+  it('still refuses an edited published version when enforcement is on', async () => {
+    let db = await boot();
+    const target = db.prepare('SELECT slug, version FROM legal_documents LIMIT 1').get();
+    db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
+      .run('a'.repeat(64), target.slug, target.version);
+
+    vi.resetModules();
+    const real = await import('./legalDocuments.js');
+    vi.doMock('./legalDocuments.js', () => ({ ...real, LEGAL_HASHES_ENFORCED: true }));
+
+    try {
+      const dbMod = await import('./db.js');
+      expect(() => dbMod.initDatabase())
+        .toThrow(/already published with a different content hash/i);
+    } finally {
+      vi.doUnmock('./legalDocuments.js');
+      vi.resetModules();
+    }
   });
 });
 
