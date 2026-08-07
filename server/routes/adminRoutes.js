@@ -1472,16 +1472,25 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
        * used to be swallowed and the suspension committed anyway. Rolling back
        * makes it a clean, retryable failure instead of a silent one.
        */
+      /**
+       * `suspendedUntil` rides along so the notice can say when it ends.
+       *
+       * A person told only that they are suspended has no way to distinguish a
+       * week from for ever, and will either wait indefinitely for something that
+       * already lapsed or appeal something that was about to end on its own. The
+       * template falls back to the indefinite wording when it is null, so an
+       * indefinite suspension reads exactly as it did before.
+       *
+       * Kept ABOVE the call, not beside the argument it describes. This comment
+       * originally sat between `dispatch(` and `'ACCOUNT_SUSPENDED'`, which hid
+       * this dispatch from `notificationContent.coverage.test.js` — a source
+       * scanner whose pattern tolerates whitespace but not comments. The suite
+       * stayed green while the platform's most consequential mandatory notice
+       * lost its copy coverage entirely. The scanner now strips comments before
+       * matching, so this placement is no longer load-bearing, but the two-line
+       * form reads better anyway and there is no reason to go back.
+       */
       notificationService.dispatch(
-        /**
-         * `suspendedUntil` rides along so the notice can say when it ends.
-         *
-         * A person told only that they are suspended has no way to distinguish a
-         * week from for ever, and will either wait indefinitely for something that
-         * already lapsed or appeal something that was about to end on its own. The
-         * template falls back to the indefinite wording when it is null, so an
-         * indefinite suspension reads exactly as it did before.
-         */
         'ACCOUNT_SUSPENDED', { reason, token, appealDeadline, suspendedUntil: until }, targetId
       );
     });
