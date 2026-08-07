@@ -39,6 +39,13 @@ const ACTIONS = {
      invasive power on this platform, and the reason the read is double-logged. */
   REPORT_EVIDENCE_VIEWED:   ['Report evidence read', TONES.GRAVE],
   ADMIN_PROMOTED:           ['Administrator promoted', TONES.GRAVE],
+  /* Invitations. `ADMIN_INVITED` is grave because a pending invitation is
+     administrator authority awaiting collection — the offer is the consequential
+     act, not only its acceptance. Revocation is notable rather than grave: it
+     only ever removes authority. */
+  ADMIN_INVITED:            ['Administrator invited', TONES.GRAVE],
+  ADMIN_INVITE_ACCEPTED:    ['Administrator invitation accepted', TONES.GRAVE],
+  ADMIN_INVITE_REVOKED:     ['Administrator invitation revoked', TONES.NOTABLE],
   ADMIN_REVOKED:            ['Administrator revoked', TONES.GRAVE],
   OWNER_GRANTED:            ['Ownership granted', TONES.GRAVE],
   /* Promotion from the command line, distinct from `ADMIN_PROMOTED` which is the
@@ -71,6 +78,23 @@ const ACTIONS = {
   ERROR_GROUP_STATUS_CHANGED: ['Error group triaged', TONES.ROUTINE],
   USERNAME_DEDUPED:         ['Duplicate username resolved', TONES.ROUTINE],
 };
+
+/**
+ * Whether an action was given a label by hand.
+ *
+ * Exported for `src/auditLabelCoverage.test.js`, which scans the server for every
+ * action it can write and fails the build on any that reaches this file unnamed.
+ *
+ * It exists because the obvious way to write that guard does not work: comparing
+ * `auditLabel(action)` against the fallback's output produces a false positive on
+ * every good label that happens to read like the title-cased action —
+ * `ACCOUNT_DELETED` → "Account deleted" is both the fallback AND the correct
+ * label. Membership is the only question with a reliable answer, so ask it here
+ * where the table is, rather than inferring it from the outside.
+ */
+export function hasAuditLabel(action) {
+  return typeof action === 'string' && Object.hasOwn(ACTIONS, action);
+}
 
 /**
  * Sentence-cased from the stored name when the action is not in the table.
