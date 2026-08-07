@@ -105,10 +105,23 @@ describe('ownership cannot be created by anything the application runs', () => {
     ).toEqual([]);
   });
 
-  /** The removed function, by name, so it cannot quietly return. */
+  /**
+   * The removed function, by name, so it cannot quietly return.
+   *
+   * A DEFINITION or a CALL STATEMENT, not a mention. The boot guard's own error
+   * message names the function it is telling the operator about, and matching
+   * the bare name flagged `db.js` for explaining itself — the same shape of
+   * false positive as the `WHERE role =` reads above, and the same lesson: a
+   * guard that fires on the prose describing it does not survive contact with
+   * whoever has to read the failure.
+   */
   it('does not seed an owner', () => {
     const seeders = serverSources
-      .filter(([, src]) => /function\s+seedSuperAdmin|seedSuperAdmin\s*\(/.test(stripComments(src)))
+      .filter(([, src]) => {
+        const code = stripComments(src);
+        return /function\s+seedSuperAdmin\b/.test(code)
+          || /^\s*seedSuperAdmin\s*\(\s*\)\s*;/m.test(code);
+      })
       .map(([file]) => file);
     expect(seeders, 'seedSuperAdmin is back').toEqual([]);
   });

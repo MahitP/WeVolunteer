@@ -1026,22 +1026,38 @@ function seedOrganizerAcceptance() {
 function assertNoDemoOwner() {
   if (!DEMO_MODE) return;
 
-  const owners = db.prepare(
-    "SELECT id, email FROM users WHERE role = 'super_admin'"
-  ).all();
-  if (owners.length === 0) return;
+  /**
+   * The SEEDED owner specifically, not every owner.
+   *
+   * The first version of this refused to boot on any `super_admin` at all, and
+   * that was wrong in a way worth recording: a development database is exactly
+   * where the real owner accounts get bootstrapped, so the guard fought the
+   * thing it was written to protect and would have been switched off within the
+   * week.
+   *
+   * The danger was never "an owner exists". It is this particular row: the one
+   * `seedSuperAdmin()` inserted, whose password is a literal in this
+   * repository's git history and therefore known to everyone who has ever
+   * cloned it. Matched on the fixed id and address that function used, because
+   * that is the artefact — an owner created deliberately by an operator is not.
+   */
+  const seeded = db.prepare(`
+    SELECT id, email FROM users
+     WHERE role = 'super_admin'
+       AND (id = 'user-super' OR email = 'owner@wevolunteer.local')
+  `).all();
+  if (seeded.length === 0) return;
 
-  const who = owners.map(o => `${o.email} (${o.id})`).join(', ');
+  const who = seeded.map(o => `${o.email} (${o.id})`).join(', ');
   throw new Error(
-    'DEMO_MODE database contains a platform owner, which must never exist in a '
-    + `demo dataset: ${who}\n\n`
-    + 'This is almost certainly left over from the seeding function removed in '
-    + 'v1.2.0. An owner account with a seeded password is a full-control account '
-    + 'whose credentials are public.\n\n'
-    + 'Remove it, or demote it, before starting again:\n'
-    + "  UPDATE users SET role = 'student' WHERE role = 'super_admin';\n\n"
-    + 'Ownership is granted only by bin/grant-ownership.mjs or a deliberate '
-    + 'database bootstrap — never by anything the application runs.'
+    `This database contains the seeded demo owner: ${who}\n\n`
+    + 'That account was created by `seedSuperAdmin()`, removed in v1.2.0. Its\n'
+    + 'password is a string in this repository\'s git history, so it is a\n'
+    + 'full-control account whose credentials are public.\n\n'
+    + 'Delete it before starting again:\n'
+    + "  DELETE FROM users WHERE id = 'user-super';\n\n"
+    + 'Real ownership is granted by bin/bootstrap-owners.mjs or\n'
+    + 'bin/grant-ownership.mjs — never by anything the application runs.'
   );
 }
 
