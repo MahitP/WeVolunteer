@@ -26,7 +26,7 @@ import {
   VolunteerProfile, OrganizerProfile, OAuthCallback, ResetPassword
 } from './routes/index.jsx';
 import {
-  LayoutDashboard, Compass, CalendarPlus, ShieldCheck, LogOut, CalendarDays,
+  LayoutDashboard, Compass, ShieldCheck, LogOut, CalendarDays,
   UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon, Bug, Activity, Sprout
 } from 'lucide-react';
 
@@ -163,11 +163,65 @@ const SELF_PROFILE_CAPS = SELF_PROFILE.filter(p => p.view !== 'denied').map(p =>
    `requiredCapAny` (hold any one of) mirrors server/authz.js's requireCapAny,
    and is what an entry uses when two unrelated capabilities each justify it.
    `requiresVerified` is unchanged — no capability expresses "approved yet". */
+/**
+ * Named sections of the rail, in render order.
+ *
+ * ── Why the rail is grouped at all ──
+ *
+ * Flat, it reached eleven entries for the platform owner, and the ordering was
+ * historical rather than meaningful: `Errors` sat between `Notifications` and
+ * `Appeals` because that is where it happened to be added. Eleven undifferentiated
+ * rows is a list somebody reads once and thereafter scans by muscle memory, which
+ * is exactly when a rarely-used but consequential page — the audit trail — stops
+ * being noticed.
+ *
+ * ── Why THESE two groups ──
+ *
+ * They follow the capability boundary that already exists, rather than inventing
+ * a taxonomy on top of it. Everything in `platform` is SUPER_ONLY (`audit.read`,
+ * `error.read`, `admin.create`); `admin` holds what an ordinary administrator can
+ * reach. So the grouping teaches the real authority boundary instead of
+ * decorating it — an administrator seeing "Platform" absent has learned something
+ * true about their account.
+ *
+ * A group with one visible entry still renders its heading. That is deliberate:
+ * an administrator and an owner should be able to say "Administration → Appeals"
+ * to each other and both be looking at the same thing. A rail that reshapes
+ * itself by item count makes support conversations impossible.
+ */
+const NAV_GROUPS = [
+  { id: 'admin', label: 'Administration' },
+  { id: 'platform', label: 'Platform' },
+];
+
+/**
+ * ── ORDER IS LOAD-BEARING, twice over ──
+ *
+ * `navItemsFor` returns this flat and in this order, and `navItems.slice(0, 4)`
+ * is the mobile primary row. So the five everyday entries come first, then the
+ * grouped administrative ones, then `profile` last via `trailing`.
+ *
+ * `trailing` exists because `profile` is ungrouped but must not render in the
+ * ungrouped block at the TOP — "My profile" above "Administration" reads as the
+ * most important thing on the rail. It is the one entry whose position is about
+ * the shape of the page rather than about what it does.
+ */
 const NAV = [
   { id: 'browse', path: '/events', label: 'Opportunities', icon: Compass, requiredCap: 'event.view' },
   { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, requiredCapAny: ['event.apply', 'event.create'] },
   { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, requiredCap: 'message.send' },
-  { id: 'create', path: '/events/new', label: 'New event', icon: CalendarPlus, requiredCap: 'event.create', requiresVerified: true },
+  /* "New event" is deliberately NOT a nav entry.
+
+     It was one, which put the single most common organizer action behind reading
+     a twelve-item rail of mostly administrative pages — and on a phone, where the
+     rail collapses to four items plus a "More" sheet, frequently behind a tap as
+     well. It now lives as a primary button on Opportunities, which is where an
+     organizer already is when they think "I want to post a shift".
+
+     `tabForPath` still maps `/events/new` to `create`, and PAGE_META still has a
+     `create` entry: the page needs its own title and must not be reported as
+     `browse`. A path with no rail item is normal here — `/settings` has never had
+     one either. */
   { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, requiredCap: 'self.read' },
   /* Error triage. `error.read` is SUPER_ONLY, so this is invisible to every
      role but the platform owner and unreachable even with a per-user grant.

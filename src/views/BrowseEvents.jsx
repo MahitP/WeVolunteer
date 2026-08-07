@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import EventCard from '../components/EventCard';
-import { Search, Sparkles, SlidersHorizontal, CalendarX2, Star, Filter, X } from 'lucide-react';
+import { can } from '../authz';
+import { Search, Sparkles, SlidersHorizontal, CalendarX2, Star, Filter, X, Plus } from 'lucide-react';
 import { formatHours } from '../utils/helpers';
 import { api } from '../utils/api';
 import EmptyState from '../components/common/EmptyState';
@@ -166,6 +168,11 @@ export default function BrowseEvents({
   const { start, end, padTop, padBottom } = useWindowedRows({ count: filtered.length, gridRef });
   const visibleEvents = useMemo(() => filtered.slice(start, end), [filtered, start, end]);
 
+  /* Both conditions the `/events/new` route enforces, mirrored for display only.
+     `requiresVerified` has no capability of its own — no capability expresses
+     "approved yet" — so it stays a separate flag here exactly as it is in NAV. */
+  const canCreate = can(currentUser, 'event.create') && Boolean(currentUser?.verified);
+
   const hasFilters = query || category !== 'All' || !openOnly || showFavoritesOnly || advancedCount > 0;
   const clearFilters = () => {
     setQuery('');
@@ -185,6 +192,34 @@ export default function BrowseEvents({
             {total} opportunit{total === 1 ? 'y' : 'ies'} posted ·{' '}
             <span className="strong">{formatHours(currentUser?.volunteeredHours || 0)}</span> credited to you so far
           </p>
+        </div>}
+
+      {/**
+        * Posting an opportunity, where an organizer is already standing.
+        *
+        * It used to live only in the left rail as "New event", which put the
+        * single most common organizer action — the reason they have an account —
+        * behind reading a twelve-item list of mostly administrative pages. On a
+        * phone the rail collapses to four items and a "More" sheet, so it was
+        * often not on screen at all.
+        *
+        * `canCreate` repeats the two conditions the route itself enforces
+        * (`event.create`, and verified). Repeating them is deliberate: this is
+        * only what the person is SHOWN, and `/events/new` re-checks both, as does
+        * every server route behind it. A button that appears and then refuses is
+        * worse than no button, so the display condition has to match — but it is
+        * not what makes the app safe.
+        */}
+      {/* `row-between row-wrap` is the same pair the student summary above uses —
+          no new class, because this needs no layout the shell does not already
+          have, and an undefined class fails `noDanglingClasses.test.js`. */}
+      {canCreate && <div className="row-between row-wrap">
+          <p className="lead">
+            {total} opportunit{total === 1 ? 'y' : 'ies'} posted
+          </p>
+          <Link to="/events/new" className="btn btn-primary">
+            <Plus size={16} aria-hidden="true" /> Create event
+          </Link>
         </div>}
 
       {/* Suggestions come before the firehose — they're the shortest path to a
