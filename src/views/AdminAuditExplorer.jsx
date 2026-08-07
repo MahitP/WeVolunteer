@@ -72,6 +72,18 @@ export default function AdminAuditExplorer() {
   const [error, setError] = useState(null);
   const [selectedLog, setSelectedLog] = useState(null);
 
+  /**
+   * `filters` is the APPLIED query — changing it is what fetches.
+   *
+   * The search box is deliberately not part of it. Every control used to write
+   * into this object on change, and the fetch effect depends on the whole
+   * object, so typing "SEARCHABLE" was ten requests, each a
+   * `details LIKE '%…%'` against a table with no index able to serve it and
+   * which only ever grows. `searchInput` holds the text; submitting commits it.
+   *
+   * The select and the two date inputs still apply on change, and should: they
+   * are single discrete choices, so one change is one query the reader meant.
+   */
   const [filters, setFilters] = useState({
     page: 1,
     limit: 20,
@@ -80,6 +92,7 @@ export default function AdminAuditExplorer() {
     startDate: '',
     endDate: ''
   });
+  const [searchInput, setSearchInput] = useState('');
 
   const fetchLogs = useCallback(async (currentFilters) => {
     setLoading(true);
@@ -90,7 +103,18 @@ export default function AdminAuditExplorer() {
       setTotalPages(res.totalPages);
       setError(null);
     } catch (err) {
-      setError(err.message || 'Failed to load audit logs.');
+      /**
+       * Distinguished, because the two need different next actions.
+       *
+       * This screen is reachable only by the platform owner, so "Access Denied"
+       * is simultaneously the least likely explanation and the most alarming
+       * one: it tells the one person entitled to be here that they are not.
+       * A request that did not come back is a retry; a refusal is not.
+       */
+      const denied = /denied|forbidden|403/i.test(err?.message ?? '');
+      setError(denied
+        ? { title: 'Access denied', message: 'This record is restricted to the platform owner.' }
+        : { title: 'Couldn\'t load the audit trail', message: 'The request did not come back. Nothing has changed — try again.' });
     } finally {
       setLoading(false);
     }
@@ -105,9 +129,15 @@ export default function AdminAuditExplorer() {
     setFilters(prev => ({ ...prev, [name]: value, page: 1 }));
   };
 
+  /**
+   * Commits the typed text into the applied filters, which is what triggers the
+   * effect. Returning to page 1 matters: page 3 of one search is not page 3 of
+   * the next, and leaving the offset behind strands the reader on what looks
+   * like an empty result.
+   */
   const handleSearchSubmit = (e) => {
     e.preventDefault();
-    fetchLogs(filters);
+    setFilters(prev => ({ ...prev, search: searchInput, page: 1 }));
   };
 
   return (
@@ -128,8 +158,8 @@ export default function AdminAuditExplorer() {
               name="search"
               type="text"
               placeholder="Search audit trail..."
-              value={filters.search}
-              onChange={handleFilterChange}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               style={{ width: '100%' }}
             />
           </div>
@@ -177,7 +207,7 @@ export default function AdminAuditExplorer() {
       </section>
 
       {error ? (
-        <EmptyState icon={Shield} title="Access Denied" message={error} />
+        <EmptyState icon={Shield} title={error.title} message={error.message} />
       ) : loading && logs.length === 0 ? (
         <LoadingSkeleton heights={[40, 60, 60, 60, 60]} />
       ) : logs.length === 0 ? (

@@ -6,6 +6,31 @@ Priority is by consequence, not by effort. Original-plan references point at
 
 ---
 
+## Status — updated 2026-08-07, commit `9da6026`
+
+**All of P0 is done, and P1-2 and P1-3 with it.** The suite is green at **3,274 tests**,
+lint exit 0, build exit 0, working tree clean.
+
+| Item | Status |
+|---|---|
+| P0-1 `audit.read` → SUPER_ONLY, system status re-gated | ✅ Done, mutation-tested |
+| P0-2 `ROLE`/`ROLES` import — roster 500 | ✅ Done |
+| P0-3 role-string comparisons in `AdminRoster.jsx` | ✅ Done |
+| P0-4 migration 020/021 idempotency | ✅ Done, with tests |
+| ~~P1-1 Guard 1 evasion~~ | ⊘ Withdrawn — was not a real finding |
+| P1-2 stray files, corrupted JSDoc | ✅ Done |
+| P1-3 commit outstanding work | ✅ Done — `f8cc345`, `9da6026` |
+| **P1-4 pending administrator invitations** | **← next** |
+| P1-5 run the ownership bootstrap | Waits on owner identities (Q2) |
+
+Three defects were found and fixed beyond the audit's original list: revocation left
+per-user capability grants in place (so a demoted administrator kept
+`report.evidence.read`), `ACCOUNT_SUSPENDED` had been silently recategorised from
+`ACCOUNT` to `SYSTEM`, and a promotion test's static `db.js` import bound the suite to the
+real database.
+
+---
+
 ## P0 — Critical: security, data integrity, broken builds
 
 ### P0-1 · Move `audit.read` to `SUPER_ONLY` and re-gate system status
