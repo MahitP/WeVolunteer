@@ -180,7 +180,7 @@ export default function NotificationsBell({
                 </button>
               )}
               <button 
-                className="btn btn-ghost btn-sm text-muted" 
+                className="btn btn-ghost btn-sm muted" 
                 onClick={() => { setOpen(false); navigate('/settings'); }}
                 title="Notification Settings"
               >

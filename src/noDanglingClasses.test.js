@@ -197,3 +197,109 @@ describe('class names referenced in JSX that look like utilities exist in CSS', 
     expect(missing, 'referenced in JSX but defined in no stylesheet under src/').toEqual([]);
   });
 });
+
+/**
+ * The same question, asked of EVERY class name rather than only generated ones.
+ *
+ * ── Why this was added ──
+ *
+ * The guard above matches `s-[0-9a-f]{6}` — the shape the inline-style migration
+ * emitted — so it only ever saw classes from that one incident. Everything
+ * hand-written was invisible to it, and 24 dead class names had accumulated
+ * behind that blind spot.
+ *
+ * `AdminRoster.jsx` is how it was found. The whole screen was built on `.view`,
+ * `.view-head`, `.title-block`, `.view-title` and `.view-body`, none of which
+ * exist in any stylesheet, so the page rendered with no padding, no header
+ * rhythm and no spacing between its title, its primary action and its table. It
+ * looked like a slightly broken version of the rest of the product, and nothing
+ * failed.
+ *
+ * ── Why there is an allowlist rather than a clean sweep ──
+ *
+ * The remaining entries are dead too, and each needs its own judgement: some
+ * want a rule written, some want the attribute removed, and a few are
+ * third-party hooks. Deleting them blind is how a class that WAS load-bearing
+ * disappears. So they are listed, visible, and — most importantly — closed: this
+ * fails on a twenty-fourth name, so the count can only go down.
+ *
+ * Removing an entry is the fix. Adding one needs a reason in the diff.
+ */
+describe('no hand-written class dangles either', () => {
+  const KNOWN_DEAD = new Set([
+    // Utility names borrowed from other design systems; this product has none.
+    'capitalize', 'mx-auto', 'p-4', 'large', 'surface',
+    // Colour/state helpers that were never written. `.muted` and `.text-danger`
+    // are the real ones; these three read as if they were.
+    'text-brand', 'text-ok', 'text-warn',
+    // Badge variants with no rules.
+    'badge-brand', 'badge-subtle',
+    // Provider buttons — they render on `.btn` alone today.
+    'btn-apple', 'btn-google', 'btn-microsoft',
+    // Component-local names whose rules were never added.
+    'action-panel-apply', 'back-btn', 'data-export-modal', 'empty-state',
+    'event-detail-hero-main', 'location-card-distance', 'notif-trigger',
+    'settings-section', 'settings-section-content', 'tabpanel-content',
+  ]);
+
+  it('has no class in JSX that no stylesheet defines', () => {
+    let css = '';
+    const walkCss = (dir) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walkCss(full);
+        else if (entry.name.endsWith('.css')) css += readFileSync(full, 'utf8');
+      }
+    };
+    walkCss(SRC);
+    const defined = new Set([...css.matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));
+
+    const used = new Map();
+    const walk = (dir) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) { walk(full); continue; }
+        if (!/\.jsx?$/.test(entry.name) || /\.test\.jsx?$/.test(entry.name)) continue;
+        const src = readFileSync(full, 'utf8');
+        /* Only static string literals. A template literal or a ternary is a
+           computed name this cannot resolve, and guessing at one would produce
+           the false positives that get a guard deleted. */
+        for (const m of src.matchAll(/className=["']([^"'{}]+)["']/g)) {
+          for (const cls of m[1].split(/\s+/).filter(Boolean)) {
+            if (!used.has(cls)) used.set(cls, new Set());
+            used.get(cls).add(path.relative(SRC, full));
+          }
+        }
+      }
+    };
+    walk(SRC);
+
+    const dangling = [...used.keys()]
+      .filter(c => !defined.has(c) && !KNOWN_DEAD.has(c))
+      .sort()
+      .map(c => `${c} — used in ${[...used.get(c)].slice(0, 2).join(', ')}`);
+
+    expect(
+      dangling,
+      'these class names style nothing. Write the rule, or drop the attribute — '
+      + 'and if it is deliberately unstyled, add it to KNOWN_DEAD with a reason'
+    ).toEqual([]);
+  });
+
+  /** A ratchet only ratchets if it cannot be loosened by accident. */
+  it('does not carry an allowlist entry that has since been fixed', () => {
+    let css = '';
+    const walkCss = (dir) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walkCss(full);
+        else if (entry.name.endsWith('.css')) css += readFileSync(full, 'utf8');
+      }
+    };
+    walkCss(SRC);
+    const defined = new Set([...css.matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));
+
+    const stale = [...KNOWN_DEAD].filter(c => defined.has(c)).sort();
+    expect(stale, 'now defined in CSS — remove from KNOWN_DEAD').toEqual([]);
+  });
+});
