@@ -38,6 +38,18 @@ import { verifyPolicyFiles } from './legalContent.js';
 
 initDatabase();
 
+try {
+  const { count } = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'super_admin'").get();
+  if (count === 0) {
+    console.warn('[ownership] WARNING: Platform has ZERO owners. Super admin access is completely lost.');
+    console.warn('[ownership] Use `node bin/grant-ownership.mjs` to bootstrap an owner.');
+  } else if (count > 2) {
+    console.warn(`[ownership] WARNING: Platform has ${count} owners. Expected 1 or 2.`);
+  }
+} catch (err) {
+  console.error('[ownership] Failed to verify owner count at startup:', err.message);
+}
+
 /**
  * Refuse to serve policy text this build cannot vouch for.
  *
