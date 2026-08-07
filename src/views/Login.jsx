@@ -569,7 +569,14 @@ export default function Login({ onLoginSuccess, addToast }) {
         {/* Reachable from the front door, signed out. Somebody deciding whether
             this app is safe to use should not have to create an account to read
             the safety and privacy policies first. */}
+        {/* The community figures sit beside the policies for the same reason:
+            somebody deciding whether this programme is real — a parent, a grant
+            reviewer, a district administrator — should not have to make an
+            account to see what it has actually done. A public page nobody can
+            find from the front door is a private page with extra steps. */}
         <p className="auth-footer">
+          <a className="auth-link" href="/community">What this community has done</a>
+          {' · '}
           <a className="auth-link" href="/legal">Terms, privacy and safety policies</a>
         </p>
 

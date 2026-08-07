@@ -2,7 +2,7 @@ import express from 'express';
 import { db } from '../db.js';
 import { authenticateToken } from '../utils.js';
 import { requireCap } from '../authz.js';
-import { buildImpact } from '../impact.js';
+import { buildImpact, buildPublicImpact } from '../impact.js';
 
 const router = express.Router();
 
@@ -41,6 +41,46 @@ router.get('/api/impact', authenticateToken, requireCap('analytics.impact'), (re
   } catch (err) {
     console.error('Failed to build impact figures:', err);
     res.status(500).json({ error: 'Could not load the impact figures.' });
+  }
+});
+
+/**
+ * GET /api/public/impact — the figures anybody may see, with no account.
+ *
+ * ── Why this exists ──
+ *
+ * Three of the four reasons the impact figures were built — marketing, grant
+ * applications, community trust — are about people who do not have an account and
+ * are not going to make one. A grant reviewer will not sign up, and a link that
+ * asks them to is a link they close.
+ *
+ * ── Why it is a SEPARATE route and not a relaxed gate ──
+ *
+ * `/api/impact` answers to somebody the platform can name. This answers to
+ * anybody at all, including somebody who already knows things about a particular
+ * school and wants one more number to line them up against. Two audiences, two
+ * threat models, two handlers — and `buildPublicImpact` names the fields it emits
+ * rather than filtering the private payload, so a breakdown added to
+ * `buildImpact` later cannot arrive here by inheritance.
+ *
+ * ── No `authenticateToken`, deliberately ──
+ *
+ * Adding it would make this an authenticated route with no capability gate, which
+ * is exactly the shape `authz.completeness.test.js` Guard 2 exists to catch, and
+ * it would be the wrong shape: there is no principal here and nothing that varies
+ * by who is asking. The response is identical for every caller, which is the
+ * property that makes it safe to publish and also the property that makes it
+ * cacheable by anything in front of the server.
+ *
+ * The blanket `apiLimiter` still applies — this is under `/api` — so the endpoint
+ * cannot be used to hammer five aggregate queries in a loop.
+ */
+router.get('/api/public/impact', (req, res) => {
+  try {
+    res.json(buildPublicImpact(db));
+  } catch (err) {
+    console.error('Failed to build public impact figures:', err);
+    res.status(500).json({ error: 'Could not load the community figures.' });
   }
 });
 
