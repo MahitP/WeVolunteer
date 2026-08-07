@@ -6,6 +6,30 @@ Priority is by consequence, not by effort. Original-plan references point at
 
 ---
 
+## UX and product pass — 2026-08-07, commits `a6b8d9b`…`31bbc23`
+
+A separate pass after the milestone work above, on quality rather than capability. Six areas,
+all verified in a browser at phone, tablet, laptop and desktop widths rather than only in tests.
+
+| Area | Outcome |
+|---|---|
+| **Error screens** | The 403 rendered in the top-left of an empty viewport above ~55% dead space — `App.jsx` had promoted it to a takeover without `WEIGHTS` agreeing. Every kind is now one weight; the dead `medium` CSS is deleted rather than left to rot. A second defect found while checking: the stacked layout keyed on width alone, so a phone held sideways put the only way out 396px below the fold, on all eight kinds |
+| **Suspension** | A suspended person can now sign in, read the decision with its reason and dates, appeal it, and sign out — reaching four routes and nothing else. Closed an enumeration oracle in the process |
+| **Audit Explorer** | Rebuilt around how the record is read: sentences instead of SCREAMING_SNAKE, a time as well as a date, the `details` sentence on the row, and a genuine card layout on mobile instead of a 680px-min-width table scrolling sideways. The action filter offered actions nobody writes; it derives from the trail now |
+| **Messaging** | The "New message" dialog told three of its four audiences the wrong thing. Copy is derived from capabilities, most-privileged-first, ending in an explicit fallback |
+| **Consistency** | The Admin Roster was built on five class names no stylesheet defines. The dangling-class guard could not see them — it matched only generated `s-xxxxxx` names — so 24 dead classes had accumulated. The check now covers every static class name and is closed against new ones |
+| **Responsive** | Eleven routes swept at 375px. One overflowed: the calendar, by 85px, from the flexbox `min-width: auto` trap |
+
+**3,340 tests** (209 files), lint exit 0, build exit 0.
+
+**Not done:** the moderation-workflow product review (item 6 of the request). The mechanics are
+sound — every action writes an audit row inside the same transaction as the act, and the
+Explorer now makes those rows readable — but the end-to-end question of whether an
+administrator can reconstruct *why* a decision was made, from the queue rather than from the
+audit log, has not been walked through.
+
+---
+
 ## Status — updated 2026-08-07, commit `c57acd1`
 
 **All of P0 is done, and P1-2 and P1-3 with it. M1c is complete; M2's roster works.**
