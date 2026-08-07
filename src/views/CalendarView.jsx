@@ -345,8 +345,15 @@ export default function CalendarView({
             </section>
             
             {!isOrganizer && (
-              <div className="row" style={{ alignItems: 'flex-start', gap: 'var(--s6)' }}>
-                <section style={{ flex: 1 }}>
+              /* `row-wrap`, and a flex-basis rather than a bare `flex: 1`.
+                 `.row` is `nowrap`, and `flex: 1` is `flex: 1 1 0%` with
+                 `min-width: auto` — so neither column could shrink below its own
+                 content and the pair pushed the document 85px wider than a
+                 phone, giving the whole app a horizontal scrollbar. An 18rem
+                 basis keeps them side by side wherever there is room and drops
+                 History beneath Awaiting Decision when there is not. */
+              <div className="row row-wrap" style={{ alignItems: 'flex-start', gap: 'var(--s6)' }}>
+                <section style={{ flex: '1 1 18rem', minWidth: 0 }}>
                   <div className="section-head"><h2>Awaiting Decision</h2></div>
                   {agendaPending.length === 0 ? (
                     <div className="card empty" style={{ background: 'var(--surface-2)', borderColor: 'var(--rule)', padding: 'var(--s4)' }}>
@@ -356,7 +363,7 @@ export default function CalendarView({
                     {agendaPending.map((e, i) => <EntryRow key={i} entry={e} onViewEvent={onViewEvent} showDate />)}
                   </div>}
                 </section>
-                <section style={{ flex: 1 }}>
+                <section style={{ flex: '1 1 18rem', minWidth: 0 }}>
                   <div className="section-head"><h2>History</h2></div>
                   {agendaHistory.length === 0 ? (
                     <div className="card empty" style={{ background: 'var(--surface-2)', borderColor: 'var(--rule)', padding: 'var(--s4)' }}>
