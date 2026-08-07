@@ -9,6 +9,24 @@ disagree, the disagreement is called out and the reason given.
 **Sized for.** A one-to-two-person moderation team. Everything that assumes a moderation
 department is listed in §5.7 as deliberately omitted, with the reason.
 
+> **Partly superseded, 2026-08-07 — suspended sessions.** This document states in several
+> places that `authenticateToken` refuses a suspended account outright and that "a suspended
+> account never reaches" anything past it. That was true when it was written and is no longer
+> the behaviour. A suspended account now receives a session that reaches exactly four routes —
+> read yourself, submit an appeal, read your appeals, sign out — enumerated in
+> `server/suspendedAccess.js` and matched by exact method and exact path.
+>
+> The reason for the change is that the old design left the person with no durable account of
+> what had happened to them: everything they were told existed in one email sent at the moment
+> of suspension, and the product's only other answer was a sentence on the login form. The
+> enforcement itself did not weaken — everything outside those four routes is still refused in
+> `authenticateToken`, before any handler and before any capability gate — and the sign-in
+> refusal moved below the password check, which closed an enumeration oracle this document
+> accepted as a product decision.
+>
+> Left otherwise unedited: it is a dated record of what was designed on 2026-08-05, and
+> rewriting it would destroy that. `server/suspendedSession.test.js` is the current contract.
+
 ---
 
 ## 0. Ground truth — what the code actually does today
