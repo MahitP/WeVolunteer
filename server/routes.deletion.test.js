@@ -66,6 +66,20 @@ describe('Account Deletion System', () => {
     expect(res.body.action).toBe('account.delete');
   });
 
+  it('refuses to delete a super_admin account', async () => {
+    const { cookie, body } = await signup();
+    
+    const db = openDb();
+    db.prepare("UPDATE users SET role = 'super_admin' WHERE id = ?").run(body.user.id);
+    db.close();
+
+    const granted = await srv.stepUp(cookie, 'account.delete', { password: 'Password123' });
+    const res = await deleteAccount(cookie, granted);
+    
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('super_admin_protected');
+  });
+
   it('refuses a grant obtained for a different action', async () => {
     const { cookie, body } = await signup();
 

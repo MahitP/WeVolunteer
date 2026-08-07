@@ -11,7 +11,7 @@ import {
 import { VALID_GRADES, JWT_SECRET, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
-import { requireAAL2, ROLE } from '../authz.js';
+import { requireAAL2, ROLE, can } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import { recordAudit } from '../auditLog.js';
 import { db } from '../db.js';
@@ -49,6 +49,13 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
   try {
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!userRow) return res.status(404).json({ error: 'User not found' });
+
+    if (can(req.principal, 'admin.create')) {
+      return res.status(403).json({
+        error: 'Super administrators cannot delete their own accounts. You must demote yourself to an ordinary administrator first.',
+        code: 'super_admin_protected'
+      });
+    }
 
     // Active-events check: business logic about what deletion does, not an
     // authorization gate — "may this account be deleted while it still hosts
