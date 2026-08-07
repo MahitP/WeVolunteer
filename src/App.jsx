@@ -15,6 +15,7 @@ import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
 import Toasts from './components/common/Toasts';
 import VerifyEmailWall from './components/account/VerifyEmailWall';
+import SuspendedWall from './components/account/SuspendedWall';
 import { Can } from './components/common/Can.jsx';
 import EmptyState from './components/common/EmptyState';
 import { can } from './authz.js';
@@ -712,6 +713,29 @@ function AppShell({ toasts, addToast, removeToast }) {
         </React.Suspense>
         <Toasts toasts={toasts} onRemove={removeToast} />
       </OfflineOverlay>
+    );
+  }
+
+  /* A suspended account gets the suspension screen and nothing else.
+     ABOVE the email-verification wall, because a suspended account that also
+     has an unconfirmed address should be told the thing that is actually
+     stopping it: confirming the address would change nothing while the
+     suspension stands, and sending them round a verification loop for it is the
+     kind of dead end this screen exists to end.
+     This is presentation, not enforcement — `authenticateToken` refuses every
+     route but four regardless of what renders here (server/suspendedAccess.js),
+     so deleting this component would leave the account just as locked out and
+     merely uninformed. */
+  if (currentUser.suspension) {
+    return (
+      <>
+        <SuspendedWall
+          user={currentUser}
+          suspension={currentUser.suspension}
+          onSignOut={handleLogout}
+        />
+        <Toasts toasts={toasts} onRemove={removeToast} />
+      </>
     );
   }
 

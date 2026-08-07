@@ -102,7 +102,19 @@ describe('POST /api/admin/users/:id/suspend', () => {
     expect(after.token_version).toBe(before.token_version + 1);
   });
 
-  it('refuses sign-in while suspended', async () => {
+  /**
+   * Sign-in SUCCEEDS while suspended, and the session it hands out is worthless.
+   *
+   * This test used to assert a 403 with no cookie. The refusal moved below the
+   * password check so the person can be shown what happened to them: being
+   * locked out with the only explanation in an email they may never have
+   * received is the part that failed them, and they are usually minors.
+   *
+   * What replaces "no session" as the guarantee is `suspendedAccess.js` — the
+   * session reaches four routes and nothing else. `suspendedSession.test.js`
+   * owns that boundary in full; this asserts the sign-in half of the contract.
+   */
+  it('signs in while suspended, and says so', async () => {
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
       { reason: GOOD_REASON }, adminToken);
 
@@ -112,9 +124,38 @@ describe('POST /api/admin/users/:id/suspend', () => {
       email: 'priya.patel.nhs@outlook.com', password: 'password123'
     });
 
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe('suspended');
-    expect(res.cookie, 'a refused sign-in must not hand out a session').toBeFalsy();
+    expect(res.status).toBe(200);
+    expect(res.body.suspension, 'the reason has to reach the person').toMatchObject({
+      reason: GOOD_REASON,
+      indefinite: true,
+    });
+    expect(res.cookie, 'the session is what carries them to the suspension screen').toBeTruthy();
+
+    // And it is good for nothing else.
+    const blocked = await srv.call('GET', '/api/events', undefined, res.cookie);
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.code).toBe('account_suspended');
+  });
+
+  /**
+   * The password is still the gate.
+   *
+   * Moving the suspension branch below `bcrypt.compare` means a wrong password
+   * must reveal nothing — not that the account is suspended, and certainly not
+   * why. This is the assertion that keeps the move from becoming a disclosure.
+   */
+  it('tells a wrong password nothing about the suspension', async () => {
+    await srv.call('POST', '/api/admin/users/user-student-2/suspend',
+      { reason: GOOD_REASON }, adminToken);
+
+    const res = await srv.call('POST', '/api/auth/login', {
+      email: 'priya.patel.nhs@outlook.com', password: 'wrong-on-purpose'
+    });
+
+    expect(res.status).toBe(401);
+    expect(res.body.suspension).toBeUndefined();
+    expect(res.cookie).toBeFalsy();
+    expect(JSON.stringify(res.body)).not.toContain(GOOD_REASON);
   });
 
   it('writes an audit row naming the actor and the target', async () => {
@@ -362,12 +403,19 @@ describe('timed suspension', () => {
   });
 
   it('still blocks while the deadline is in the future', async () => {
+    const until = inDays(7);
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
-      { reason: GOOD_REASON, until: inDays(7) }, adminToken);
+      { reason: GOOD_REASON, until }, adminToken);
 
     const res = await srv.call('POST', '/api/auth/login',
       { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
-    expect([401, 403]).toContain(res.status);
+
+    // Signed in, still suspended, and told when it ends.
+    expect(res.status).toBe(200);
+    expect(res.body.suspension).toMatchObject({ until, indefinite: false });
+    // "Blocks" is now about what the session reaches, not whether one exists.
+    const blocked = await srv.call('GET', '/api/events', undefined, res.cookie);
+    expect(blocked.status).toBe(403);
   });
 
   /** The whole point: access comes back on its own, with nothing having run. */
@@ -425,7 +473,15 @@ describe('timed suspension', () => {
 
     const res = await srv.call('POST', '/api/auth/login',
       { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
-    expect([401, 403]).toContain(res.status);
+
+    /**
+     * `indefinite` is reported as its own field rather than left to be inferred
+     * from a null date. A client that reads "no end date" as "ends soon" is the
+     * exact misreading this costs one boolean to prevent, and the person reading
+     * it has more at stake than anyone.
+     */
+    expect(res.status).toBe(200);
+    expect(res.body.suspension).toMatchObject({ until: null, indefinite: true });
   });
 
   /**
@@ -442,8 +498,17 @@ describe('timed suspension', () => {
    *
    * This was briefly the opposite. It read the date back and asserted it was
    * present, which is how the disclosure was found.
+   *
+   * ── The guarantee got stronger, not weaker ──
+   *
+   * The suspension branch now runs BELOW the password check, so an unproven
+   * caller no longer learns that the account is suspended at all — the response
+   * is an ordinary 401. The old design leaked account state to anyone who could
+   * guess an address, an accepted-but-real disclosure that `GENERIC_LOGIN_ERRORS`
+   * did not even cover. This asserts the whole notice is absent now, not just
+   * the date.
    */
-  it('does not disclose the end date to an unauthenticated caller', async () => {
+  it('discloses nothing to a caller who has not proved the password', async () => {
     const until = inDays(7);
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
       { reason: GOOD_REASON, until }, adminToken);
@@ -451,12 +516,15 @@ describe('timed suspension', () => {
     const res = await srv.call('POST', '/api/auth/login',
       { email: 'priya.patel.nhs@outlook.com', password: 'wrong-on-purpose' });
 
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe('suspended');
-    expect(res.body.suspendedUntil, 'the deadline must not leave the building here')
+    expect(res.status).toBe(401);
+    expect(res.body.suspension, 'the notice must not leave the building here')
       .toBeUndefined();
     expect(JSON.stringify(res.body), 'no part of the date may appear in the message')
       .not.toContain(until.slice(0, 10));
+    expect(JSON.stringify(res.body), 'nor the reason')
+      .not.toContain(GOOD_REASON);
+    expect(JSON.stringify(res.body).toLowerCase(), 'nor that the account is suspended at all')
+      .not.toContain('suspend');
   });
 
   /**

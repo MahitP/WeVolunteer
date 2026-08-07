@@ -16,7 +16,7 @@ import { withheldCapabilitiesFor } from '../organizerAgreement.js';
 import { db, initDatabase } from '../db.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
-import { isSuspended, liftIfExpired } from '../suspension.js';
+import { isSuspended, liftIfExpired, suspensionNotice } from '../suspension.js';
 import { ROLE } from '../authz.js';
 
 const router = express.Router();
@@ -504,14 +504,6 @@ router.post('/api/auth/login', async (req, res) => {
      * authenticated place to repeat it, because a suspended account never gets a
      * session — which is the whole point of the suspension.
      */
-    if (isSuspended(userRow)) {
-      return res.status(403).json({
-        error: 'This account has been suspended. If you think that is wrong, email '
-          + 'wevolunteer.platform@gmail.com to ask for a review — we reply within five '
-          + 'business days with the outcome and the reason.',
-        code: 'suspended',
-      });
-    }
     liftIfExpired(db, userRow);
 
     /**
@@ -548,6 +540,43 @@ router.post('/api/auth/login', async (req, res) => {
 
     const user = formatUserResponse(userRow);
     issueSession(res, user, userRow.token_version);
+
+    /**
+     * A suspended account signs in, and lands on the suspension screen.
+     *
+     * ── This refusal used to sit above the password check ──
+     *
+     * It was there for a good reason: telling a suspended person their password
+     * is wrong sends them round a reset loop for a problem a reset cannot fix.
+     * The cost, recorded beside it, was that "anybody who can guess an email
+     * address reaches this message", and that the end date therefore could not be
+     * named — "a detail of a moderation action against a named person, frequently
+     * a minor".
+     *
+     * Moving it below `bcrypt.compare` resolves both at once, and it has to move
+     * for a third reason anyway: this branch now MINTS A SESSION, and a session
+     * must never be issued to someone who has not proved who they are.
+     *
+     * The original worry survives in a weaker form — a suspended person who
+     * mistypes their password is told the password is wrong. That is the correct
+     * answer to what they did, and the right password now leads somewhere that
+     * explains the rest, which is what the reset loop existed to substitute for.
+     *
+     * It also closes an enumeration oracle. `code: 'suspended'` was previously
+     * readable pre-authentication, and `GENERIC_LOGIN_ERRORS` — the documented
+     * switch for suppressing exactly this class of disclosure — did not cover it.
+     * Account state is no longer observable without the password.
+     */
+    if (isSuspended(userRow)) {
+      return res.json({
+        user,
+        emailVerified: userRow.email_verified === 1,
+        /* The client keys off this to route straight to the suspension screen.
+           The session cookie is already set: the person can read the decision,
+           appeal it and sign out, and nothing else — `suspendedAccess.js`. */
+        suspension: suspensionNotice(userRow),
+      });
+    }
 
     /**
      * An unconfirmed account is signed in but confined by the email gate in
@@ -595,6 +624,19 @@ router.get('/api/auth/me', authenticateToken, (req, res) => {
     res.json({
       ...formatUserResponse(userRow),
       withheld: withheldCapabilitiesFor(db, userRow),
+      /**
+       * Attached by `authenticateToken`, not recomputed here.
+       *
+       * That middleware is what decided this suspended session was allowed to
+       * reach this route at all, and it made that decision from `isSuspended`.
+       * Asking the question a second time would let the gate and the disclosure
+       * disagree — and the direction they would disagree in is a session the
+       * gate believes is suspended being told it is not.
+       *
+       * `null` for everybody else, so the client has one field to read rather
+       * than a presence check on a key that is sometimes absent.
+       */
+      suspension: req.suspension ?? null,
     });
   } catch (error) {
     console.error('Auth check error:', error);
