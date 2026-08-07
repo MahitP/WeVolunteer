@@ -98,16 +98,13 @@ describe('the retention worker sweeps at startup', () => {
      * because they need no conversation fixture: the point is only that the
      * sweep RAN.
      */
-    recordAudit(db, {
+    const stale = new Date(Date.now() - (worker.RETENTION.auditDays + 30) * 86400000).toISOString();
+    const seeded = recordAudit(db, {
       adminId: 'ret-admin',
       action: 'RETENTION_SCHEDULER_FIXTURE',
       details: 'past its window',
+      createdAt: stale
     });
-    const seeded = db.prepare(
-      "SELECT id FROM admin_audit_logs WHERE action = 'RETENTION_SCHEDULER_FIXTURE'"
-    ).get();
-    const stale = new Date(Date.now() - (worker.RETENTION.auditDays + 30) * 86400000).toISOString();
-    db.prepare('UPDATE admin_audit_logs SET created_at = ? WHERE id = ?').run(stale, seeded.id);
 
     const countStale = () => db.prepare(
       'SELECT COUNT(*) c FROM admin_audit_logs WHERE id = ?'

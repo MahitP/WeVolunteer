@@ -46,7 +46,7 @@ import crypto from 'crypto';
  * a severity that was never recorded. Refusing the call converts that into a
  * failure at the moment the mistake is made.
  */
-const ALLOWED_FIELDS = Object.freeze(['adminId', 'action', 'targetUserId', 'details']);
+const ALLOWED_FIELDS = Object.freeze(['adminId', 'action', 'targetUserId', 'details', 'createdAt']);
 
 /** Required, and required to be a non-empty string. */
 function requireText(value, field) {
@@ -126,9 +126,10 @@ export function recordAudit(db, entry) {
   const action = requireText(entry.action, 'action');
   const targetUserId = optionalText(entry.targetUserId, 'targetUserId');
   const details = optionalText(entry.details, 'details');
+  const providedCreatedAt = optionalText(entry.createdAt, 'createdAt');
 
   const id = `audit-${crypto.randomUUID()}`;
-  const createdAt = new Date().toISOString();
+  const createdAt = providedCreatedAt || new Date().toISOString();
 
   db.prepare(`
     INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
