@@ -1,124 +1,155 @@
 # Questions for the Owner
 
-Raised 2026-08-07. **Work continued past every one of these** under the stated
-assumption — none blocked implementation, and each is cheap to reverse.
+Updated 2026-08-07 (second autonomous run). **Work continued past every one of these**
+under the stated assumption; each is cheap to reverse.
 
-Supersedes `docs/audits/questions-for-owner.md`, whose five questions have all been
-answered by the Q1–Q5 decisions.
+**Resolved since the last version** — no action needed:
 
----
-
-## Q-A · Should a CLI ownership change be attributable to a person?
-
-**Question.** `admin_audit_logs.admin_id` is a foreign key to `users`, and migration 019
-added a trigger refusing to delete any account that has written an audit row. So the column
-must hold a real account — and a shell operator is not one. Both ownership scripts therefore
-record the **subject** as the actor, which read alone says "this person granted themselves
-ownership".
-
-**Why it matters.** Ownership is the most consequential change the platform can undergo, and
-its audit row currently misattributes it. The details line states the truth explicitly
-(`method=CLI`, `operator=<login>@<host>`, and a note saying the actor is the operator, not
-the subject), so the record is not misleading to anyone who reads it — but the structured
-`admin_id` field is still wrong, and that is the field a future query would group by.
-
-**Current assumption.** Implemented as above: correct in the prose, wrong in the column,
-with the discrepancy stated in the row itself.
-
-**Recommended option.** A reserved `system-cli` user row, seeded by migration, referenced by
-every `bin/` script that mutates privilege. It keeps the foreign key honest, makes CLI
-actions groupable in the Audit Explorer, and costs one row that exists only to be pointed at.
-
-**Alternatives.** (a) Leave it — the prose carries the truth. (b) Drop the foreign key, which
-would let any string go in the column and lose the deletion protection 019 added. (c) Add a
-nullable `actor_note` column, which is the same information in a place nothing reads.
+| Was | Now |
+|---|---|
+| Q-A · CLI audit actor | **Done.** Migration 022 seeds a reserved `system-cli` account; all four privileged CLI commands record against it with `method=CLI` |
+| Q-E · `make-admin.mjs` auditing | **Done.** It wrote nothing at all; it now writes `ADMIN_PROMOTED_CLI` in the same transaction as the promotion, through the shared mechanism |
+| Q-D · owner bootstrap | **Done and verified.** Both accounts exist, hold no usable password, and appear on the roster with "Never" for last sign-in. See Q-1 below for the one thing left |
 
 ---
 
-## Q-B · Should the Impact Dashboard be public?
+## Q-1 · Claim the two owner accounts
 
-**Question.** It is currently behind sign-in (`analytics.impact`, held by every role). Three
-of the four stated purposes — marketing, grants, community trust — are about people who do
-not have accounts.
+**Question.** Neither bootstrap owner has set a password yet. Both hold a bcrypt hash of a
+discarded random value, so nobody can sign in as either.
+
+**Why it matters.** The reset link goes to the address on the account. Until both are
+claimed, the platform has two owners nobody can use, and `bin/grant-ownership.mjs` is the
+only way to make another.
+
+**Current behaviour.** The accounts are `super_admin`, verified, active, and visible on the
+Admin Roster showing "Never" for last sign-in — which is exactly what an unclaimed account
+looks like.
+
+**Recommendation.** Claim both this week via "Forgot password", confirm sign-in works, then
+rotate on a schedule. An owner account is the only one nobody else can suspend or demote.
+
+**Alternatives.** (a) Claim one and keep the master account as a break-glass credential — 
+defensible, but its reset path is then untested when you need it. (b) Connect both to OAuth
+instead of a password.
+
+**Implemented meanwhile.** Nothing depends on this; every other feature works.
+
+---
+
+## Q-2 · Should the event taxonomy become impact-oriented?
+
+**Question.** The taxonomy is `School | 5K | Food Pantry | Fundraiser | Other`, enforced by a
+CHECK constraint. The impact brief asks for need-oriented categories — Education, Food
+Security, Environment, Healthcare, Youth & Families, Senior Services, Animal Welfare,
+Disaster Relief, Arts & Culture, Community Services, Civic Engagement.
+
+**Why it matters.** "Where the effort went" is the section meant to tell a community what it
+needs, and the current five cannot: `5K` is a format, `Fundraiser` is a mechanism, and `Other`
+is a shrug that a large share of real events land in. A grant reader cannot use it.
+
+**Current behaviour.** The Impact Dashboard reports whatever categories exist and needs no
+change when they change. Nothing was widened — redefining a product taxonomy while nobody is
+awake is not a call to make autonomously.
+
+**Recommendation — a tag table, not a wider enum.** The brief itself asks for "a flexible
+tagging architecture that can expand later", and an enum cannot be that.
+
+1. New `event_tags` table (`event_id`, `tag`), many-to-many, so one event can be Education
+   *and* Youth & Families — which is true of most school events and unrepresentable today.
+2. Keep `events.category` as-is, populated and constrained, so nothing that reads it breaks.
+3. Backfill tags from existing categories: `Food Pantry` → Food Security, `School` →
+   Education, `5K` → Community Services + Health, `Fundraiser` → Community Services, `Other`
+   → untagged (deliberately: inventing a need for it would be fabricating the data the
+   dashboard exists to report).
+4. Impact reads tags when present and falls back to `category`, so the dashboard improves as
+   organizers tag and never shows a gap.
+5. Retire `category` from the UI once tag coverage is high; drop it only after.
+
+**Alternatives.** (a) Widen the enum and map the five forward — simpler, but keeps one
+category per event, which is the limitation causing the problem. (b) Free-text tags — richer
+input, much harder aggregation, and a privacy hazard since organizers would type specifics.
+(c) Leave it, and drop "community needs" from the dashboard's stated purpose.
+
+**Implemented meanwhile.** The dashboard's category section is live and correct against the
+real taxonomy. No migration was written.
+
+---
+
+## Q-3 · Should the Impact Dashboard have a public view?
+
+**Question.** It is behind sign-in (`analytics.impact`, held by every role). Three of its four
+stated purposes — marketing, grants, community trust — are about people without accounts.
 
 **Why it matters.** A grant reviewer will not create an account, and a link that asks them to
-is a link they do not open. But publishing to unauthenticated visitors changes the threat
-model: today a reader is a known account; tomorrow they are anybody, including somebody
-correlating a small figure against what they know about a specific school.
+is a link they do not open. But publishing changes the threat model: today a reader is a known
+account, tomorrow anybody, including somebody correlating a small figure against what they
+know about a specific school.
 
-**Current assumption.** Authenticated only. The suppression threshold is already applied
-server-side, so this is a gate change rather than a rewrite.
+**Current behaviour.** Authenticated only. Suppression below five volunteers is applied
+server-side to every breakdown, so this is a gate change rather than a rewrite.
 
-**Recommended option.** A separate public route showing **only** the four community totals —
-volunteers, hours, events, organizations — with no breakdowns at all. Totals over the whole
-population identify nobody; it is the categories and months that carry risk, and they are the
-part a grant reader least needs.
+**Recommendation.** A separate public route showing **only the four community totals** —
+volunteers, hours, events, organizations. Totals over the whole population identify nobody;
+the categories and months carry the risk and are the part a grant reader least needs.
 
-**Alternatives.** (a) Keep it private and export a PDF for grant applications. (b) Publish the
-whole page, raising `MIN_BUCKET` from 5 to something like 15. (c) Publish behind an
-unguessable link, which is security by obscurity and would end up in a search index.
+**Alternatives.** (a) Keep it private and export a PDF for applications. (b) Publish
+everything with `MIN_BUCKET` raised from 5 to ~15. (c) Publish behind an unguessable link — 
+security by obscurity, and it would end up indexed.
 
----
-
-## Q-C · Should the event category list be widened?
-
-**Question.** The impact brief names Education, Food Security, Environment and Healthcare as
-example categories. The real taxonomy is `School | 5K | Food Pantry | Fundraiser | Other`,
-enforced by a CHECK constraint on `events.category`.
-
-**Why it matters.** "Where the effort went" is the section that tells a community what it
-needs, and the current five do not describe need — `5K` is a format and `Other` is a shrug.
-Roughly half of real events land in `Other`, which is where a category system goes to die.
-
-**Current assumption.** The impact module reports whatever categories exist and needs no
-change when they change. Nothing was widened: redefining a product taxonomy silently is not a
-call to make while the owner is asleep.
-
-**Recommended option.** Widen to a need-based list (Education, Food Security, Environment,
-Health, Community, Animals, Seniors, Other) in a migration that maps the existing five
-forward — `Food Pantry` → `Food Security`, `School` → `Education`, `5K` and `Fundraiser` →
-`Community`. Existing events keep a meaning rather than being dumped into `Other`.
-
-**Alternatives.** (a) Leave it. (b) Add free-form tags alongside categories, which gives
-richer data and a much harder aggregation problem. (c) Widen without mapping, which converts
-every existing event to `Other` and loses the history the dashboard is built on.
+**Implemented meanwhile.** Nothing public. The suppression, the totals and the endpoint are
+all in place, so the public variant is a route and a gate.
 
 ---
 
-## Q-D · How long should the owner accounts stay password-less?
+## Q-4 · The Youth Safety Guidelines promise less than the platform now does
 
-**Question.** Both owner accounts were created with a bcrypt hash of a discarded random
-value. Nobody can sign in until each owner completes a password reset.
+**Question.** The published text says reading a student's private messages "is the one
+situation in which an administrator reads private messages, and it is logged." As of this run
+it also requires a fresh identity verification bound to that specific report. The promise got
+stronger; the text has not caught up.
 
-**Why it matters.** The reset link goes to the address on the account and expires. If neither
-account is claimed, the platform has two owners nobody can use — and `bin/grant-ownership.mjs`
-is the only way to make another.
+**Why it matters.** The guidelines are what a parent or a district reads. Understating a
+protection is better than overstating one, but a document that lags the product loses
+authority the next time somebody checks it.
 
-**Current assumption.** Claim them at your convenience; nothing depends on it yet.
+**Current behaviour.** Unchanged, deliberately. Published legal documents are pinned by
+content hash and `syncLegalDocuments` throws if a published version's content changes —
+editing the live text would invalidate every acceptance record on the platform. That makes it
+a version bump, which is a legal decision.
 
-**Recommended option.** Claim both within the week, set distinct passwords, and confirm
-sign-in works before relying on either. Then rotate on a schedule — an owner account is the
-only one on this platform nobody else can lock out.
+**Recommendation.** Add one sentence at the next version bump: "Opening preserved messages
+requires the administrator to re-enter their password, and each access is recorded against
+that specific report." Ship it with the next scheduled legal revision rather than on its own.
 
-**Alternatives.** (a) Claim one and leave the master account dormant as a break-glass
-credential, which is defensible but means its reset path is untested when you need it. (b)
-Connect both to OAuth instead of a password.
+**Alternatives.** (a) Leave it — the text is not false, only incomplete. (b) Bump now, which
+means a re-acceptance flow for every user for one sentence.
+
+**Implemented meanwhile.** The protection is live and tested
+(`server/routes.evidenceStepUp.test.js`); only the wording lags.
 
 ---
 
-## Q-E · Should `bin/make-admin.mjs` write an audit row?
+## Q-5 · Should administrators hold `report.evidence.read` at all?
 
-**Question.** It promotes an account to `admin` and records nothing. Every in-product
-administrative action writes an audit row; this one does not.
+**Question.** An ordinary administrator can read the private message bodies a report
+preserved. Full analysis in `docs/trust-safety/03-EVIDENCE-ACCESS-REVIEW.md`.
 
-**Why it matters.** Administrator promotion is the second most consequential privilege change
-on the platform, and it is currently the only one that leaves no trace.
+**Why it matters.** It is the most invasive read on the platform, and the population is mostly
+minors.
 
-**Current assumption.** Unchanged — it is blocked on the same actor-identity problem as Q-A.
+**Current behaviour.** Held by `admin` and `super_admin`, now behind a step-up bound to the
+report, logged to two trails in the same transaction as the read.
 
-**Recommended option.** Fix it together with Q-A: once `system-cli` exists, every `bin/`
-script that mutates privilege writes a row through it, and this stops being a special case.
+**Recommendation.** Keep it. On a one-to-two-person team the administrator *is* the moderator,
+so owner-only would mean either the owner reads every report or administrators decide reports
+without seeing them — worse for the student on both sides. This is a staffing question rather
+than a technical one, and the capability is already split from `report.resolve` precisely so a
+per-user grant can create a triage helper who never reads a body. That is the mechanism to
+reach for if the team grows.
 
-**Alternatives.** (a) Attribute it to the target, as the ownership scripts do. (b) Remove the
-script and require `POST /api/admin/users/:id/promote`, which is audited and step-up
-protected — but needs an existing owner, so it cannot be the bootstrap path.
+**Alternatives.** (a) Owner-only. (b) Restrict to reports assigned to the reader — closes
+casual browsing but blocks the triage step that assigns them. (c) Time-box access to reports
+opened in the last N days, which breaks appeal review.
+
+**Implemented meanwhile.** Step-up added; capability unchanged.
