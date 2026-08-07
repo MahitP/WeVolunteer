@@ -1,12 +1,13 @@
-import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import readline from 'readline';
 import { recordCliAudit, assertSystemActor, CLI_EVENTS } from './cliAudit.mjs';
+import { openPrivilegedDb } from './resolveDb.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dbPath = process.env.WEV_DB_PATH || path.join(__dirname, '..', 'server', 'wevolunteer.db');
+/* Path resolution, `.env` loading and the refusal to create a database all
+   live in resolveDb.mjs — see the incident recorded there. */
 
 const invokedDirectly = process.argv[1]
   && path.resolve(process.argv[1]) === path.resolve(__filename);
@@ -35,7 +36,7 @@ async function main() {
   }
 
   try {
-    const db = new DatabaseSync(dbPath);
+    const { db } = openPrivilegedDb('bin/grant-ownership.mjs');
     assertSystemActor(db);
 
     const user = db.prepare('SELECT id, role, verified, account_status FROM users WHERE email = ?').get(email);
@@ -60,8 +61,20 @@ async function main() {
       process.exit(0);
     }
 
+    /**
+     * This said "full, irrevocable control", which is false — `bin/revoke-ownership.mjs`
+     * exists and demotes an owner in one command. Overstating a consequence is not
+     * a harmless scare: an operator who has been told the action cannot be undone
+     * either avoids a grant they should make, or discovers the warning was wrong
+     * and reads the next one less carefully. What is actually true is worse in the
+     * ways that matter and better in the way that counts — the authority is total
+     * while it is held, and no owner can be restrained by another.
+     */
     console.log(`WARNING: You are about to grant super_admin privileges to ${email}.`);
-    console.log(`This grants full, irrevocable control over the platform and access to all data.`);
+    console.log(`An owner holds every capability, can read any data on the platform,`);
+    console.log(`and cannot be suspended or demoted by an administrator.`);
+    console.log(`This is reversible with bin/revoke-ownership.mjs — but only by`);
+    console.log(`somebody with shell access to this database.`);
     console.log(`Reason provided: "${reason}"`);
     console.log('');
     

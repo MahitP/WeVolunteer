@@ -1,12 +1,13 @@
-import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import readline from 'readline';
 import { recordCliAudit, assertSystemActor, CLI_EVENTS } from './cliAudit.mjs';
+import { openPrivilegedDb } from './resolveDb.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dbPath = process.env.WEV_DB_PATH || path.join(__dirname, '..', 'server', 'wevolunteer.db');
+/* Path resolution, `.env` loading and the refusal to create a database all
+   live in resolveDb.mjs — see the incident recorded there. */
 
 const invokedDirectly = process.argv[1]
   && path.resolve(process.argv[1]) === path.resolve(__filename);
@@ -35,7 +36,7 @@ async function main() {
   }
 
   try {
-    const db = new DatabaseSync(dbPath);
+    const { db } = openPrivilegedDb('bin/revoke-ownership.mjs');
     assertSystemActor(db);
 
     const user = db.prepare('SELECT id, role FROM users WHERE email = ?').get(email);

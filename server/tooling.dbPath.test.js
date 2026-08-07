@@ -65,12 +65,31 @@ function seedDb(file) {
 }
 
 describe('every CLI tool honours WEV_DB_PATH', () => {
-  // A static guard, so a NEW tool that forgets the variable fails here rather
-  // than silently operating on the wrong file in production.
+  /**
+   * A tool satisfies this either by naming the variable itself, or by delegating
+   * to `openPrivilegedDb` — which names it, anchors a relative value, and refuses
+   * to create a database that is not there.
+   *
+   * The delegation clause was added when the four privileged scripts moved to the
+   * shared resolver. Each had kept its own copy of
+   *
+   *     process.env.WEV_DB_PATH || path.join(__dirname, '..', 'server', 'wevolunteer.db')
+   *
+   * and four private copies of one expression is exactly why fixing
+   * `verifyHours.js` for this same bug did not fix them — see
+   * `docs/audits/04-PRIVILEGED-CLI-DATABASE-TARGET.md`. Requiring the literal
+   * string would now push a tool AWAY from the shared resolver to satisfy a guard,
+   * which inverts what the guard is for.
+   *
+   * It is not a weakening: a new tool that consults neither still fails, which is
+   * the case this exists to catch.
+   */
+  const honoursDbPath = (src) => /WEV_DB_PATH/.test(src) || /openPrivilegedDb/.test(src);
+
   for (const tool of CLI_TOOLS) {
-    it(`${tool} references WEV_DB_PATH`, () => {
+    it(`${tool} honours WEV_DB_PATH, directly or via openPrivilegedDb`, () => {
       const src = readFileSync(path.join(ROOT, tool), 'utf8');
-      expect(src).toMatch(/WEV_DB_PATH/);
+      expect(honoursDbPath(src)).toBe(true);
     });
   }
 
@@ -79,8 +98,8 @@ describe('every CLI tool honours WEV_DB_PATH', () => {
     for (const name of readdirSync(path.join(ROOT, 'bin'))) {
       if (!/\.(mjs|js)$/.test(name)) continue;
       const src = readFileSync(path.join(ROOT, 'bin', name), 'utf8');
-      const opensDb = /new DatabaseSync\(|from '.*db\.js'|import\(.*db\.js/.test(src);
-      if (opensDb && !src.includes('WEV_DB_PATH')) offenders.push(name);
+      const opensDb = /new DatabaseSync\(|from '.*db\.js'|import\(.*db\.js|openPrivilegedDb/.test(src);
+      if (opensDb && !honoursDbPath(src)) offenders.push(name);
     }
     expect(offenders).toEqual([]);
   });

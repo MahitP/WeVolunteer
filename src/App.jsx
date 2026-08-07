@@ -179,7 +179,11 @@ const NAV = [
      the intent: the student quoting a figure on a college application and the
      organizer writing a grant report are looking at the same page. */
   { id: 'impact', path: '/impact', label: 'Community impact', icon: Sprout, requiredCap: 'analytics.impact' },
-  { id: 'audit', path: '/admin/audit-logs', label: 'Audit Log', icon: Activity, requiredCap: 'audit.read' },
+  /* "Audit Explorer", not "Audit Log": the page heading and the permission-denied
+     message both name it that way, so the nav was the only place calling it
+     something else — and the nav is where somebody looks after being told which
+     feature they lack. */
+  { id: 'audit', path: '/admin/audit-logs', label: 'Audit Explorer', icon: Activity, requiredCap: 'audit.read' },
   { id: 'roster', path: '/admin/roster', label: 'Admin Roster', icon: UserCog, requiredCap: 'admin.create' },
   { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS }
 ];

@@ -153,3 +153,38 @@ casual browsing but blocks the triage step that assigns them. (c) Time-box acces
 opened in the last N days, which breaks appeal review.
 
 **Implemented meanwhile.** Step-up added; capability unchanged.
+
+---
+
+## Q-6 · A stale database sits outside the repository — inspect and delete?
+
+**Question.** There is a `pilot.db` one level *above* the repository, at
+`New Projects/pilot.db`. It has 15 migrations and 14 users. The live database, at the
+repository root, has 23 and 18. Should the stale one be deleted?
+
+**Why it matters.** It is the physical evidence of a real bug, now fixed: the four
+privileged CLI scripts resolved a relative `WEV_DB_PATH` against the working directory,
+and `new DatabaseSync` creates an absent file, so a privileged command wrote a brand-new
+empty database and reported success about it. Full analysis in
+`docs/audits/04-PRIVILEGED-CLI-DATABASE-TARGET.md`.
+
+Left in place, it is a loaded gun: anything that resolves a path slightly differently
+finds a plausible-looking WeVolunteer database with real-looking rows in it.
+
+**Current behaviour.** Untouched. It sits outside the repository, where this work has no
+business writing, and deleting a database that might hold the only copy of something is
+not a call to make autonomously.
+
+**Recommendation.** Open it, confirm it holds nothing that is not also in the live
+database — particularly any `hours_ledger` rows, since credited hours are the one thing
+here that cannot be reconstructed — then delete it with `trash` rather than `rm`. Also
+worth considering: change `.env` to an **absolute** `WEV_DB_PATH`. The fix makes a
+relative value unambiguous, but an absolute one cannot be misread by a tool that has not
+been fixed yet.
+
+**Alternatives.** (a) Rename it to `pilot.db.stale-20260807` and keep it a while — safer,
+and it stops anything finding it by accident. (b) Leave it; the resolver now refuses to
+create databases and anchors relative paths, so nothing in the repository points at it.
+
+**Implemented meanwhile.** The bug is fixed, the three properties are mutation-tested,
+and every privileged script now prints which database it opened.
