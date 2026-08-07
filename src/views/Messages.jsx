@@ -111,7 +111,13 @@ export default function Messages() {
 
   return (
     <div className="page" style={{ paddingTop: 'var(--s5)' }}>
-      {showPicker && <RecipientPicker onClose={() => setShowPicker(false)} onSelect={handleSelectRecipient} />}
+      {showPicker && (
+        <RecipientPicker
+          user={api.getCurrentCachedUser()}
+          onClose={() => setShowPicker(false)}
+          onSelect={handleSelectRecipient}
+        />
+      )}
       <div className="page-head" style={{ marginBottom: 'var(--s2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>
           Messages
