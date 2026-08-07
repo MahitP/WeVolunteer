@@ -87,16 +87,13 @@ function seedMessage(ageDays, id = `msg-ret-${Math.random().toString(36).slice(2
  * primary-key collision between two deletions in the same millisecond.
  */
 function seedAudit(marker, ageDays) {
-  recordAudit(db, {
+  const { id } = recordAudit(db, {
     adminId: 'user-admin',
     action: 'RETENTION_FIXTURE',
     details: marker,
+    createdAt: daysAgo(ageDays)
   });
-  const row = db.prepare(
-    "SELECT id FROM admin_audit_logs WHERE action = 'RETENTION_FIXTURE' AND details = ? ORDER BY created_at DESC LIMIT 1"
-  ).get(marker);
-  db.prepare('UPDATE admin_audit_logs SET created_at = ? WHERE id = ?').run(daysAgo(ageDays), row.id);
-  return row.id;
+  return id;
 }
 
 beforeEach(() => {

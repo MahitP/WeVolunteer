@@ -27,6 +27,7 @@ import appealsIntegrity from './015_appeals_integrity.js';
 import legalV1Republish from './016_legal_v1_republish.js';
 import timedSuspension from './017_timed_suspension.js';
 import adminConversations from './018_admin_conversations.js';
+import auditLogHardening from './019_audit_log_hardening.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -61,6 +62,11 @@ export const MIGRATIONS = [
    * the whole rebuild depends on it taking effect.
    */
   adminConversations,
+  /**
+   * 019 adds indexes and immutability triggers to admin_audit_logs.
+   * Additive, no table rebuild required.
+   */
+  auditLogHardening,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
