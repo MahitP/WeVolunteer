@@ -2,75 +2,42 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
-import { Shield, Search, ChevronLeft, ChevronRight, Activity, Filter, FileText } from 'lucide-react';
-import { useModal } from '../utils/useModal';
+import { Shield, Search, ChevronLeft, ChevronRight, FileText, ChevronDown } from 'lucide-react';
+import { auditLabel, auditTone, auditTimestamp } from './auditFormat';
 
-const formatDateShort = (iso) => new Date(iso).toLocaleDateString();
-const formatDateTime = (iso) => new Date(iso).toLocaleString();
+const PAGE_SIZE = 20;
 
-const LOG_ACTIONS = [
-  'ACCOUNT_SUSPENDED',
-  'ACCOUNT_WARNED',
-  'ACCOUNT_UNSUSPENDED',
-  'OWNER_BOOTSTRAPPED',
-  'OWNER_RETIRED',
-  'OWNER_CREDENTIAL_RESET',
-  'ORGANIZER_APPROVED',
-  'ORGANIZER_DENIED',
-  'APPEAL_TOKEN_ISSUED'
-];
-
-function AuditDetailModal({ log, onClose }) {
-  const dialogRef = useModal(onClose);
-  if (!log) return null;
-
-  return (
-    <div className="modal-overlay">
-      <div className="modal" ref={dialogRef} role="dialog" aria-modal="true">
-        <div className="modal-head">
-          <h2>Audit Record: {log.id}</h2>
-        </div>
-        <div className="modal-body stack-md">
-          <div className="form-group">
-            <label>Action</label>
-            <div><strong>{log.action}</strong></div>
-          </div>
-          <div className="form-group">
-            <label>Timestamp</label>
-            <div>{formatDateTime(log.created_at)}</div>
-          </div>
-          <div className="form-group">
-            <label>Actor (Admin)</label>
-            <div>{log.admin_name} <code style={{ marginLeft: '4px' }}>({log.admin_id})</code></div>
-          </div>
-          {log.target_user_id && (
-            <div className="form-group">
-              <label>Target User</label>
-              <div>{log.target_user_name} <code style={{ marginLeft: '4px' }}>({log.target_user_id})</code></div>
-            </div>
-          )}
-          <div className="form-group">
-            <label>Details</label>
-            <pre style={{ whiteSpace: 'pre-wrap', padding: '12px', background: 'var(--surface-2)', borderRadius: '4px' }}>
-              {log.details || 'No details provided.'}
-            </pre>
-          </div>
-        </div>
-        <div className="modal-foot">
-          <button type="button" className="btn btn-primary" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
+/**
+ * The administrative audit trail, for the platform owner.
+ *
+ * ── What this screen is for ──
+ *
+ * Answering "what did this administrator do, and when" months after the fact.
+ * That framing decides the layout: the rows are a chronology, not a dataset, so
+ * they are read down rather than compared across, and the field that explains an
+ * entry — `details`, the sentence somebody wrote at the time — belongs on the
+ * row rather than behind a button.
+ *
+ * ── Why this is not a `<table>` ──
+ *
+ * It was. `.table` carries `min-width: 680px` and the wrapper scrolls, which is
+ * the right call for a dense grid on a laptop and the wrong one here: on a phone
+ * the action names were clipped mid-word and Actor, Target and the controls were
+ * entirely off-screen, reachable only by horizontal scrolling nobody discovers.
+ *
+ * A list of records styled by grid gives the aligned columns on a wide screen
+ * and genuinely stacks on a narrow one — the same markup, no duplicated
+ * rendering, no min-width floor. `<table>` semantics buy little for a log whose
+ * rows are read individually and whose most useful column is a paragraph.
+ */
 export default function AdminAuditExplorer() {
   const [logs, setLogs] = useState([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  const [actions, setActions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [selectedLog, setSelectedLog] = useState(null);
+  const [expanded, setExpanded] = useState(null);
 
   /**
    * `filters` is the APPLIED query — changing it is what fetches.
@@ -80,17 +47,9 @@ export default function AdminAuditExplorer() {
    * object, so typing "SEARCHABLE" was ten requests, each a
    * `details LIKE '%…%'` against a table with no index able to serve it and
    * which only ever grows. `searchInput` holds the text; submitting commits it.
-   *
-   * The select and the two date inputs still apply on change, and should: they
-   * are single discrete choices, so one change is one query the reader meant.
    */
   const [filters, setFilters] = useState({
-    page: 1,
-    limit: 20,
-    action: '',
-    search: '',
-    startDate: '',
-    endDate: ''
+    page: 1, limit: PAGE_SIZE, action: '', search: '', startDate: '', endDate: '',
   });
   const [searchInput, setSearchInput] = useState('');
 
@@ -101,15 +60,15 @@ export default function AdminAuditExplorer() {
       setLogs(res.logs);
       setTotal(res.total);
       setTotalPages(res.totalPages);
+      /* Derived server-side from the trail itself, so the filter cannot offer an
+         action nobody writes — see the endpoint for the drift that caused. */
+      if (Array.isArray(res.actions)) setActions(res.actions);
       setError(null);
     } catch (err) {
       /**
-       * Distinguished, because the two need different next actions.
-       *
-       * This screen is reachable only by the platform owner, so "Access Denied"
-       * is simultaneously the least likely explanation and the most alarming
-       * one: it tells the one person entitled to be here that they are not.
-       * A request that did not come back is a retry; a refusal is not.
+       * Distinguished, because the two need different next actions. This screen
+       * is reachable only by the platform owner, so "Access Denied" is
+       * simultaneously the least likely explanation and the most alarming one.
        */
       const denied = /denied|forbidden|403/i.test(err?.message ?? '');
       setError(denied
@@ -120,175 +79,190 @@ export default function AdminAuditExplorer() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchLogs(filters);
-  }, [fetchLogs, filters]);
+  useEffect(() => { fetchLogs(filters); }, [fetchLogs, filters]);
 
+  /* Every filter change returns to page 1: page 3 of one filter is not page 3
+     of the next, and keeping the offset strands the reader on an empty result. */
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
     setFilters(prev => ({ ...prev, [name]: value, page: 1 }));
   };
 
-  /**
-   * Commits the typed text into the applied filters, which is what triggers the
-   * effect. Returning to page 1 matters: page 3 of one search is not page 3 of
-   * the next, and leaving the offset behind strands the reader on what looks
-   * like an empty result.
-   */
   const handleSearchSubmit = (e) => {
     e.preventDefault();
     setFilters(prev => ({ ...prev, search: searchInput, page: 1 }));
   };
+
+  const canPrev = filters.page > 1;
+  const canNext = filters.page < totalPages;
+  const firstOnPage = total === 0 ? 0 : ((filters.page - 1) * filters.limit) + 1;
+  const lastOnPage = Math.min(filters.page * filters.limit, total);
 
   return (
     <div className="page">
       <header className="page-head">
         <h1>Audit Explorer</h1>
         <p className="muted">
-          Immutable, append-only record of privileged administrative actions and safety interventions.
+          Every privileged action, append-only and impossible to edit. Kept for one year.
         </p>
       </header>
 
-      <section className="card" style={{ marginBottom: '16px' }}>
-        <form onSubmit={handleSearchSubmit} className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div className="form-group" style={{ flex: '1 1 200px', marginBottom: 0 }}>
-            <label htmlFor="search">Search Details</label>
-            <input
-              id="search"
-              name="search"
-              type="text"
-              placeholder="Search audit trail..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              style={{ width: '100%' }}
-            />
+      <div className="stack">
+        <form onSubmit={handleSearchSubmit} className="audit-filters" role="search">
+          <div className="field audit-filter-search">
+            <label htmlFor="audit-search">Search the record</label>
+            <div className="audit-search-wrap">
+              <Search size={16} className="audit-search-icon" aria-hidden="true" />
+              <input
+                id="audit-search"
+                name="search"
+                type="search"
+                className="input"
+                placeholder="Words from an entry…"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+              />
+            </div>
           </div>
-          
-          <div className="form-group" style={{ flex: '0 0 180px', marginBottom: 0 }}>
-            <label htmlFor="action">Action</label>
+
+          <div className="field">
+            <label htmlFor="audit-action">Action</label>
             <select
-              id="action"
-              name="action"
-              value={filters.action}
-              onChange={handleFilterChange}
-              style={{ width: '100%' }}
+              id="audit-action" name="action" className="input"
+              value={filters.action} onChange={handleFilterChange}
             >
-              <option value="">All Actions</option>
-              {LOG_ACTIONS.map(a => (
-                <option key={a} value={a}>{a}</option>
-              ))}
+              <option value="">All actions</option>
+              {actions.map(a => <option key={a} value={a}>{auditLabel(a)}</option>)}
             </select>
           </div>
 
-          <div className="form-group" style={{ flex: '0 0 150px', marginBottom: 0 }}>
-            <label htmlFor="startDate">Start Date</label>
+          <div className="field">
+            <label htmlFor="audit-start">From</label>
             <input
-              id="startDate"
-              name="startDate"
-              type="date"
-              value={filters.startDate}
-              onChange={handleFilterChange}
-              style={{ width: '100%' }}
+              id="audit-start" name="startDate" type="date" className="input"
+              value={filters.startDate} onChange={handleFilterChange}
             />
           </div>
 
-          <div className="form-group" style={{ flex: '0 0 150px', marginBottom: 0 }}>
-            <label htmlFor="endDate">End Date</label>
+          <div className="field">
+            <label htmlFor="audit-end">To</label>
             <input
-              id="endDate"
-              name="endDate"
-              type="date"
-              value={filters.endDate}
-              onChange={handleFilterChange}
-              style={{ width: '100%' }}
+              id="audit-end" name="endDate" type="date" className="input"
+              value={filters.endDate} onChange={handleFilterChange}
             />
           </div>
+
+          <button type="submit" className="btn btn-secondary audit-filter-submit">Search</button>
         </form>
-      </section>
 
-      {error ? (
-        <EmptyState icon={Shield} title={error.title} message={error.message} />
-      ) : loading && logs.length === 0 ? (
-        <LoadingSkeleton heights={[40, 60, 60, 60, 60]} />
-      ) : logs.length === 0 ? (
-        <EmptyState icon={FileText} title="No logs found" message="Try adjusting your filters or date range." />
-      ) : (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
-                  <th style={{ padding: '12px' }}>Timestamp</th>
-                  <th style={{ padding: '12px' }}>Action</th>
-                  <th style={{ padding: '12px' }}>Actor</th>
-                  <th style={{ padding: '12px' }}>Target</th>
-                  <th style={{ padding: '12px', textAlign: 'right' }}>Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {logs.map((log) => (
-                  <tr key={log.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '12px', whiteSpace: 'nowrap' }}>
-                      {formatDateShort(log.created_at)}
-                    </td>
-                    <td style={{ padding: '12px' }}>
-                      <span style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        <Activity size={16} />
-                        {log.action}
+        {error ? (
+          <EmptyState icon={Shield} title={error.title} message={error.message} />
+        ) : loading && logs.length === 0 ? (
+          <LoadingSkeleton heights={[40, 72, 72, 72, 72]} />
+        ) : logs.length === 0 ? (
+          <EmptyState
+            icon={FileText}
+            title="Nothing matches those filters"
+            message="Try a wider date range, or clear the action filter."
+          />
+        ) : (
+          <>
+            {/* Column headings, shown only where there are columns. `aria-hidden`
+                because each row already labels its own fields for a screen
+                reader — repeating them here would announce every heading twice. */}
+            <div className="audit-head" aria-hidden="true">
+              <span>When</span><span>Action</span><span>Who</span><span>About</span>
+            </div>
+
+            <ul className="audit-list">
+              {logs.map((log) => {
+                const when = auditTimestamp(log.created_at);
+                const isOpen = expanded === log.id;
+                return (
+                  <li key={log.id} className="audit-row" data-tone={auditTone(log.action)}>
+                    <div className="audit-cell audit-when">
+                      <span className="audit-label">When</span>
+                      <time dateTime={log.created_at} title={when.title}>
+                        {when.date} <span className="audit-time">{when.time}</span>
+                      </time>
+                    </div>
+
+                    <div className="audit-cell audit-action">
+                      <span className="audit-label">Action</span>
+                      <span className="audit-action-name">{auditLabel(log.action)}</span>
+                    </div>
+
+                    <div className="audit-cell">
+                      <span className="audit-label">Who</span>
+                      <span>{log.admin_name}</span>
+                    </div>
+
+                    <div className="audit-cell">
+                      <span className="audit-label">About</span>
+                      <span>
+                        {log.target_user_name || <span className="muted">No one in particular</span>}
                       </span>
-                    </td>
-                    <td style={{ padding: '12px' }}>
-                      {log.admin_name}
-                    </td>
-                    <td style={{ padding: '12px' }}>
-                      {log.target_user_name || <span className="muted" style={{ fontStyle: 'italic' }}>System</span>}
-                    </td>
-                    <td style={{ padding: '12px', textAlign: 'right' }}>
-                      <button 
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => setSelectedLog(log)}
-                      >
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          
-          {totalPages > 1 && (
-            <div className="row-between" style={{ padding: '16px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)' }}>
-              <span className="muted">
-                Showing {((filters.page - 1) * filters.limit) + 1} to {Math.min(filters.page * filters.limit, total)} of {total} entries
-              </span>
+                    </div>
+
+                    {/* The sentence somebody wrote at the time. It is the reason
+                        the row exists, so it sits on the row rather than behind
+                        a button — the old screen hid it in a modal and showed a
+                        column of identical action names instead. */}
+                    {log.details && (
+                      <p className="audit-details">{log.details}</p>
+                    )}
+
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm audit-more"
+                      aria-expanded={isOpen}
+                      onClick={() => setExpanded(isOpen ? null : log.id)}
+                    >
+                      <ChevronDown size={14} aria-hidden="true" />
+                      {isOpen ? 'Hide record' : 'Full record'}
+                    </button>
+
+                    {isOpen && (
+                      <dl className="audit-full">
+                        <dt>Record id</dt><dd><code>{log.id}</code></dd>
+                        <dt>Stored action</dt><dd><code>{log.action}</code></dd>
+                        <dt>Recorded</dt><dd>{when.title}</dd>
+                        <dt>Actor</dt><dd>{log.admin_name} <code>{log.admin_id}</code></dd>
+                        {log.target_user_id && (
+                          <>
+                            <dt>Subject</dt>
+                            <dd>{log.target_user_name} <code>{log.target_user_id}</code></dd>
+                          </>
+                        )}
+                      </dl>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+
+            <div className="audit-pager">
+              <p className="muted">
+                {firstOnPage}–{lastOnPage} of {total}
+              </p>
               <div className="row">
                 <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  disabled={filters.page === 1}
+                  type="button" className="btn btn-secondary btn-sm" disabled={!canPrev}
                   onClick={() => setFilters(p => ({ ...p, page: p.page - 1 }))}
                 >
-                  Previous
+                  <ChevronLeft size={14} aria-hidden="true" /> Previous
                 </button>
                 <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  disabled={filters.page >= totalPages}
+                  type="button" className="btn btn-secondary btn-sm" disabled={!canNext}
                   onClick={() => setFilters(p => ({ ...p, page: p.page + 1 }))}
                 >
-                  Next
+                  Next <ChevronRight size={14} aria-hidden="true" />
                 </button>
               </div>
             </div>
-          )}
-        </div>
-      )}
-
-      {selectedLog && (
-        <AuditDetailModal log={selectedLog} onClose={() => setSelectedLog(null)} />
-      )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

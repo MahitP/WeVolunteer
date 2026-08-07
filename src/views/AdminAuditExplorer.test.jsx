@@ -33,7 +33,7 @@ const LOG = (over = {}) => ({
   ...over,
 });
 
-const PAGE = (over = {}) => ({ logs: [LOG()], total: 1, totalPages: 1, page: 1, ...over });
+const PAGE = (over = {}) => ({ logs: [LOG()], total: 1, totalPages: 1, page: 1, actions: ['ACCOUNT_SUSPENDED'], ...over });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -41,11 +41,44 @@ beforeEach(() => {
 });
 
 describe('AdminAuditExplorer', () => {
-  it('renders a row for each audit record', async () => {
+  /**
+   * The action is shown as a sentence, not as the stored SCREAMING_SNAKE name.
+   * A page of `REPORT_EVIDENCE_VIEWED` is a page nobody scans: every row looks
+   * like every other row, and the one that matters sits at the same weight as a
+   * routine approval. `auditFormat.js` owns the mapping.
+   */
+  it('renders a row for each audit record, in words', async () => {
+    const { container } = render(<AdminAuditExplorer />);
+    // Scoped to the list: the same label also names the filter's option, which
+    // is correct — both are read by the same person and should agree.
+    await screen.findByText('Platform Owner');
+    const list = container.querySelector('.audit-list');
+    expect(list.textContent).toContain('Account suspended');
+    expect(list.textContent).toContain('Priya Patel');
+    expect(list.textContent).not.toContain('ACCOUNT_SUSPENDED');
+  });
+
+  /**
+   * The sentence somebody wrote at the time is the reason the row exists, so it
+   * is on the row. The previous design hid it in a modal behind a View button
+   * and showed a column of identical action names instead.
+   */
+  it('shows the details sentence on the row rather than behind a button', async () => {
     render(<AdminAuditExplorer />);
-    expect(await screen.findByText('ACCOUNT_SUSPENDED')).toBeInTheDocument();
-    expect(screen.getByText('Platform Owner')).toBeInTheDocument();
-    expect(screen.getByText('Priya Patel')).toBeInTheDocument();
+    expect(
+      await screen.findByText(/messaging after being asked to stop/i)
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * Date AND time. The old column used `toLocaleDateString()` alone, so every
+   * row of a busy afternoon read the same date and the ordering — the whole
+   * point of an append-only log — was invisible.
+   */
+  it('shows a time, not just a date', async () => {
+    render(<AdminAuditExplorer />);
+    const when = await screen.findByText(/2026/);
+    expect(when.textContent).toMatch(/\d{1,2}:\d{2}/);
   });
 
   it('labels an entry with no target as System rather than leaving it blank', async () => {
@@ -53,13 +86,36 @@ describe('AdminAuditExplorer', () => {
       logs: [LOG({ target_user_id: null, target_user_name: null })],
     }));
     render(<AdminAuditExplorer />);
-    expect(await screen.findByText('System')).toBeInTheDocument();
+    expect(await screen.findByText(/no one in particular/i)).toBeInTheDocument();
   });
 
   it('shows an empty state rather than a bare table when nothing matches', async () => {
     api.fetchAuditLogs.mockResolvedValue(PAGE({ logs: [], total: 0, totalPages: 0 }));
     render(<AdminAuditExplorer />);
-    expect(await screen.findByText(/no logs found/i)).toBeInTheDocument();
+    expect(await screen.findByText(/nothing matches those filters/i)).toBeInTheDocument();
+  });
+
+  /**
+   * The filter's options come from the server, derived from the trail itself.
+   *
+   * The client used to carry a hand-written list that had drifted: it offered
+   * `ORGANIZER_APPROVED` and `ORGANIZER_DENIED` when the real actions are
+   * `APPROVE_ORGANIZER` and `DENY_ORGANIZER`, so those two filters could only
+   * ever return nothing, and it omitted most of what the table contains. On an
+   * accountability surface a filter that silently returns nothing says "this
+   * never happened" when the truth is "nobody writes that string".
+   */
+  it('offers only actions the trail actually contains', async () => {
+    api.fetchAuditLogs.mockResolvedValue(PAGE({
+      actions: ['ACCOUNT_SUSPENDED', 'APPROVE_ORGANIZER'],
+    }));
+    render(<AdminAuditExplorer />);
+
+    const select = await screen.findByLabelText(/^action$/i);
+    const options = [...select.querySelectorAll('option')].map((o) => o.value);
+    expect(options).toEqual(['', 'ACCOUNT_SUSPENDED', 'APPROVE_ORGANIZER']);
+    // Offered in words, like the rows.
+    expect(screen.getByRole('option', { name: 'Organizer approved' })).toBeInTheDocument();
   });
 
   /**
@@ -77,7 +133,7 @@ describe('AdminAuditExplorer', () => {
     render(<AdminAuditExplorer />);
     await waitFor(() => expect(api.fetchAuditLogs).toHaveBeenCalledTimes(1));
 
-    const box = screen.getByLabelText(/search details/i);
+    const box = screen.getByLabelText(/search the record/i);
     fireEvent.change(box, { target: { value: 'S' } });
     fireEvent.change(box, { target: { value: 'SE' } });
     fireEvent.change(box, { target: { value: 'SEA' } });
@@ -92,8 +148,8 @@ describe('AdminAuditExplorer', () => {
     render(<AdminAuditExplorer />);
     await waitFor(() => expect(api.fetchAuditLogs).toHaveBeenCalledTimes(1));
 
-    fireEvent.change(screen.getByLabelText(/search details/i), { target: { value: 'SEARCHABLE' } });
-    fireEvent.submit(screen.getByLabelText(/search details/i).closest('form'));
+    fireEvent.change(screen.getByLabelText(/search the record/i), { target: { value: 'SEARCHABLE' } });
+    fireEvent.submit(screen.getByLabelText(/search the record/i).closest('form'));
 
     await waitFor(() => expect(api.fetchAuditLogs).toHaveBeenCalledTimes(2));
     expect(api.fetchAuditLogs).toHaveBeenLastCalledWith(

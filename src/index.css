@@ -7025,3 +7025,185 @@ input:disabled + .premium-slider {
     align-items: center;
   }
 }
+
+/* ==========================================================================
+   Audit Explorer
+
+   A chronology, not a dataset. The rows are read down one at a time — "what did
+   this administrator do, and when" — rather than compared across, so the field
+   that explains an entry sits ON the row instead of behind a button, and the
+   layout is a grid rather than a `<table>`.
+
+   `.table` was the first attempt and is the wrong tool here: it carries
+   `min-width: 680px` so the wrapper scrolls, which is right for a dense grid on
+   a laptop and wrong for this. On a phone the action names were clipped
+   mid-word and the actor, the subject and the controls were entirely off-screen
+   behind horizontal scrolling nobody discovers. A grid gives aligned columns
+   where there is room and genuinely stacks where there is not, from one set of
+   markup.
+   ========================================================================== */
+
+/* Shared by the header strip and every row, so a column cannot drift between
+   them — the heading and the value it labels are laid out by the same
+   declaration. */
+.audit-head,
+.audit-row {
+  display: grid;
+  grid-template-columns: 12rem minmax(11rem, 1fr) 10rem 10rem;
+  gap: var(--s3);
+  align-items: baseline;
+}
+
+.audit-head {
+  padding: 0 var(--s4) var(--s2);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.audit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.audit-row {
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--rule);
+  /* The details paragraph and the disclosure sit under the four columns rather
+     than in them. */
+  grid-template-areas:
+    'when action who about'
+    'details details details details'
+    'more more more more';
+  transition: background var(--t-fast);
+}
+.audit-row:last-child { border-bottom: none; }
+.audit-row:hover { background: var(--surface-2); }
+
+.audit-when    { grid-area: when; }
+.audit-action  { grid-area: action; }
+.audit-details { grid-area: details; }
+.audit-more    { grid-area: more; }
+
+.audit-cell { min-width: 0; }
+
+/* The per-cell heading. Carried in the markup for every screen and hidden where
+   the column header already says it — so the stacked layout needs no second
+   copy of the labels and no `::before` content that a screen reader would read
+   twice. */
+.audit-label { display: none; }
+
+.audit-when time { color: var(--ink-2); font-size: 0.8125rem; white-space: nowrap; }
+.audit-time { color: var(--ink-3); }
+
+.audit-action-name { font-weight: 600; }
+
+/* The tone ladder from auditFormat.js. A left edge rather than coloured text:
+   the action name stays legible, and a year of records can be skimmed for the
+   two things this platform can do that a person cannot undo. */
+.audit-row { border-left: 3px solid transparent; }
+.audit-row[data-tone='grave']   { border-left-color: var(--danger); }
+.audit-row[data-tone='notable'] { border-left-color: var(--warn); }
+
+.audit-details {
+  margin: var(--s2) 0 0;
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.audit-more { justify-self: start; margin-top: var(--s1); }
+
+.audit-full {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: var(--s1) var(--s3);
+  margin: var(--s3) 0 0;
+  padding: var(--s3);
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  font-size: 0.8125rem;
+}
+.audit-full dt { color: var(--ink-3); }
+.audit-full dd { margin: 0; overflow-wrap: anywhere; }
+
+/* ── Filters ── */
+.audit-filters {
+  display: grid;
+  grid-template-columns: minmax(12rem, 2fr) minmax(9rem, 1fr) 9rem 9rem auto;
+  gap: var(--s3);
+  align-items: end;
+}
+.audit-filter-search { grid-column: span 1; }
+.audit-search-wrap { position: relative; }
+.audit-search-icon {
+  position: absolute;
+  left: var(--s3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-3);
+  pointer-events: none;
+}
+.audit-search-wrap .input { padding-left: var(--s8); }
+.audit-filter-submit { white-space: nowrap; }
+
+.audit-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+
+/* ── Stacked ──
+   Below this width there is no room for four columns, so the row becomes a card
+   and each value carries its own label. No horizontal scrolling at any width:
+   that was the defect this layout replaced. */
+@media (max-width: 60rem) {
+  .audit-head { display: none; }
+
+  .audit-row {
+    grid-template-columns: minmax(0, 1fr);
+    /* The action leads the card: it is what the reader is scanning for, and a
+       date is only useful once you know what it is the date OF.
+       Ordered by the areas, not by `order` — `order` has no effect on an item
+       placed with `grid-area`, which is why the first attempt at this left the
+       timestamp on top regardless. */
+    grid-template-areas: 'action' 'when' 'who' 'about' 'details' 'more';
+    gap: var(--s1);
+    padding: var(--s4);
+  }
+
+  .audit-action-name { font-size: 0.9375rem; }
+
+  .audit-label {
+    display: block;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  /* Its own name is the label — repeating "Action" above it is noise. */
+  .audit-action .audit-label { display: none; }
+
+  .audit-full { grid-template-columns: 1fr; gap: var(--s1); }
+  .audit-full dt { margin-top: var(--s2); }
+
+  /* `minmax(0, 1fr)`, not `1fr`. A bare `1fr` floors at the item's intrinsic
+     width, and a native date input reports a wide one — so the columns refused
+     to shrink and pushed the whole document 2px past the viewport, which is all
+     it takes for the page to scroll sideways. */
+  .audit-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .audit-filters .input { min-width: 0; width: 100%; }
+  .audit-filter-search { grid-column: 1 / -1; }
+  .audit-filter-submit { grid-column: 1 / -1; }
+}

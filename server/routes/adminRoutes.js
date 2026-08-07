@@ -1860,11 +1860,37 @@ router.get('/api/admin/audit-logs', authenticateToken, requireCap('audit.read'),
       LIMIT ? OFFSET ?
     `).all(...params, limit, offset);
 
+    /**
+     * The action filter's options, derived from the trail itself.
+     *
+     * The client used to carry a hand-written list, and it had drifted badly:
+     * it offered `ORGANIZER_APPROVED` and `ORGANIZER_DENIED` (the real actions
+     * are `APPROVE_ORGANIZER` and `DENY_ORGANIZER`), so those two filters could
+     * only ever return nothing, and it omitted `ADMIN_PROMOTED`,
+     * `ADMIN_REVOKED`, `REPORT_EVIDENCE_VIEWED`, `MODERATE_REPORT` and
+     * `ADMIN_CONVERSATION_OPENED` — between them most of what the table
+     * actually contains.
+     *
+     * On an accountability surface that is the worst class of bug: a filter
+     * that silently returns nothing tells the reader "this never happened"
+     * when the truthful answer is "you searched for a string nobody writes".
+     *
+     * Deriving it means the list cannot drift, and an action with no rows is
+     * simply not offered — filtering by it would have returned nothing anyway.
+     * Unfiltered on purpose: the options describe the whole trail, so they must
+     * not narrow as the reader filters, or each choice would eliminate the
+     * others.
+     */
+    const actions = db.prepare(
+      'SELECT DISTINCT action FROM admin_audit_logs ORDER BY action'
+    ).all().map((r) => r.action);
+
     res.json({
       logs,
       total,
       page,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
+      actions,
     });
   } catch (err) {
     console.error('Failed to fetch audit logs:', err);
