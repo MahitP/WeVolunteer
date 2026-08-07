@@ -41,6 +41,10 @@ const ACTIONS = {
   ADMIN_PROMOTED:           ['Administrator promoted', TONES.GRAVE],
   ADMIN_REVOKED:            ['Administrator revoked', TONES.GRAVE],
   OWNER_GRANTED:            ['Ownership granted', TONES.GRAVE],
+  /* Promotion from the command line, distinct from `ADMIN_PROMOTED` which is the
+     in-product action. Worth telling apart: one went through a step-up
+     challenge and an owner's session, the other through a shell. */
+  ADMIN_PROMOTED_CLI:       ['Administrator promoted (command line)', TONES.GRAVE],
   OWNER_REVOKED:            ['Ownership revoked', TONES.GRAVE],
   /* The names these two carried before the CLI scripts were standardised.
      Kept because the trail is append-only and immutable: rows written under the

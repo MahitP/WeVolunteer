@@ -2,8 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import readline from 'readline';
-import { recordAudit } from '../server/auditLog.js';
-import { ownershipAuditDetails, OWNERSHIP_EVENTS } from './ownershipAudit.mjs';
+import { recordCliAudit, assertSystemActor, CLI_EVENTS } from './cliAudit.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,6 +36,7 @@ async function main() {
 
   try {
     const db = new DatabaseSync(dbPath);
+    assertSystemActor(db);
 
     const user = db.prepare('SELECT id, role, verified, account_status FROM users WHERE email = ?').get(email);
 
@@ -81,11 +81,12 @@ async function main() {
         WHERE id = ?
       `).run(user.id);
 
-      recordAudit(db, {
-        adminId: user.id,
-        action: OWNERSHIP_EVENTS.GRANTED,
+      recordCliAudit(db, {
+        action: CLI_EVENTS.OWNER_GRANTED,
         targetUserId: user.id,
-        details: ownershipAuditDetails({ verb: 'granted', email, reason }),
+        command: 'bin/grant-ownership.mjs',
+        reason,
+        metadata: { subject: email, previousRole: user.role },
       });
 
       db.exec('COMMIT');

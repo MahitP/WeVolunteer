@@ -10,16 +10,40 @@ import { SELF_ASSIGNABLE_ROLES } from './accountValidation.js';
 const ROOT = process.cwd();
 const SCRIPT_PATH = path.join(ROOT, 'bin', 'make-admin.mjs');
 
+/**
+ * A fixture faithful enough to test what the script now does.
+ *
+ * It used to be three columns and no audit table, which was adequate while the
+ * script's whole behaviour was one UPDATE. It now writes an audit row in the
+ * same transaction — administrator promotion was previously the only privilege
+ * change on the platform that left no trace — so a fixture without
+ * `admin_audit_logs` cannot exercise it, and one without `system-cli` is
+ * refused before the script does anything.
+ *
+ * `id` is TEXT to match the real schema. It was `INTEGER PRIMARY KEY
+ * AUTOINCREMENT`, which is a rowid alias and cannot hold `'system-cli'`.
+ */
 function createTestDb(dir) {
   const dbPath = path.join(dir, 'test.db');
   const db = new DatabaseSync(dbPath);
   db.exec(`
     CREATE TABLE users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
-      role TEXT NOT NULL DEFAULT 'student'
+      role TEXT NOT NULL DEFAULT 'student',
+      token_version INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE admin_audit_logs (
+      id TEXT PRIMARY KEY,
+      admin_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      target_user_id TEXT,
+      details TEXT,
+      created_at TEXT NOT NULL
     );
   `);
+  /* The reserved actor, seeded by migration 022 in a real database. */
+  db.prepare("INSERT INTO users (id, email, role) VALUES ('system-cli', 'system-cli@wevolunteer.invalid', 'student')").run();
   return { dbPath, db };
 }
 
@@ -75,7 +99,7 @@ describe('bin/make-admin.mjs', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'make-admin-test-'));
     const { dbPath, db } = createTestDb(dir);
     try {
-      db.prepare("INSERT INTO users (email, role) VALUES ('student@example.com', 'student')").run();
+      db.prepare("INSERT INTO users (id, email, role) VALUES ('u-student', 'student@example.com', 'student')").run();
 
       const res = runScript(dbPath, ['student@example.com']);
       expect(res.code).toBe(0);
@@ -93,7 +117,7 @@ describe('bin/make-admin.mjs', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'make-admin-test-'));
     const { dbPath, db } = createTestDb(dir);
     try {
-      db.prepare("INSERT INTO users (email, role) VALUES ('org@example.com', 'organizer')").run();
+      db.prepare("INSERT INTO users (id, email, role) VALUES ('u-org', 'org@example.com', 'organizer')").run();
 
       const res = runScript(dbPath, ['org@example.com']);
       expect(res.code).toBe(0);
@@ -111,7 +135,7 @@ describe('bin/make-admin.mjs', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'make-admin-test-'));
     const { dbPath, db } = createTestDb(dir);
     try {
-      db.prepare("INSERT INTO users (email, role) VALUES ('admin@example.com', 'admin')").run();
+      db.prepare("INSERT INTO users (id, email, role) VALUES ('u-admin', 'admin@example.com', 'admin')").run();
 
       const res = runScript(dbPath, ['admin@example.com']);
       expect(res.code).toBe(0);
@@ -129,7 +153,7 @@ describe('bin/make-admin.mjs', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'make-admin-test-'));
     const { dbPath, db } = createTestDb(dir);
     try {
-      db.prepare("INSERT INTO users (email, role) VALUES ('owner@example.com', 'super_admin')").run();
+      db.prepare("INSERT INTO users (id, email, role) VALUES ('u-owner', 'owner@example.com', 'super_admin')").run();
 
       const res = runScript(dbPath, ['owner@example.com']);
       expect(res.code).not.toBe(0);
@@ -148,7 +172,7 @@ describe('bin/make-admin.mjs', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'make-admin-test-'));
     const { dbPath, db } = createTestDb(dir);
     try {
-      db.prepare("INSERT INTO users (email, role) VALUES ('partner@example.com', 'partner')").run();
+      db.prepare("INSERT INTO users (id, email, role) VALUES ('u-partner', 'partner@example.com', 'partner')").run();
 
       const res = runScript(dbPath, ['partner@example.com']);
       expect(res.code).not.toBe(0);

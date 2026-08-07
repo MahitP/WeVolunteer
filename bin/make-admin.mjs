@@ -33,6 +33,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { recordCliAudit, assertSystemActor, CLI_EVENTS } from './cliAudit.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,6 +70,7 @@ if (!email) {
 
 try {
   const db = new DatabaseSync(dbPath);
+  assertSystemActor(db);
 
   const user = db.prepare('SELECT id, role FROM users WHERE email = ?').get(email);
 
@@ -115,8 +117,47 @@ try {
     process.exit(1);
   }
 
-  db.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run(email);
+  /**
+   * The promotion and its audit row, in one transaction.
+   *
+   * This script wrote NOTHING to the trail until now, which made administrator
+   * promotion the only privilege change on the platform that left no trace —
+   * while every in-product administrative action, down to reading a report, was
+   * recorded. The gap was invisible precisely because the script worked.
+   *
+   * Atomic in both directions, for the same reason the suspension path is:
+   * `recordAudit` never catches, so a failed audit rolls the promotion back.
+   * There is no state where somebody became an administrator and the record of
+   * it did not happen.
+   *
+   * `token_version` is bumped as well. A role change on an already-issued cookie
+   * is stale the moment it is made, and `authenticateToken` re-reads the row on
+   * every request — but the JWT's own `tokenVersion` claim is what invalidates
+   * the old sessions, and leaving them alive means a freshly promoted
+   * administrator holds a cookie minted before they had the capabilities.
+   */
+  db.exec('BEGIN');
+  try {
+    db.prepare(
+      "UPDATE users SET role = 'admin', token_version = token_version + 1 WHERE email = ?"
+    ).run(email);
+
+    recordCliAudit(db, {
+      action: CLI_EVENTS.ADMIN_PROMOTED_CLI,
+      targetUserId: user.id,
+      command: 'bin/make-admin.mjs',
+      reason: 'Administrator promotion from the command line',
+      metadata: { subject: email, previousRole: user.role },
+    });
+
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+
   console.log(`Successfully promoted ${email} to admin (was ${user.role}).`);
+  console.log('Recorded in the audit trail. Their existing sessions have been invalidated.');
 } catch (error) {
   console.error('Database error:', error.message);
   process.exit(1);

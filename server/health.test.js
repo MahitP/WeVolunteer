@@ -74,7 +74,20 @@ describe('/health on a healthy database', () => {
     const tables = () => db.prepare(
       "SELECT COUNT(*) AS c FROM sqlite_master WHERE type = 'table'"
     ).get().c;
+    const rows = (t) => db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get().c;
     const before = tables();
+    /**
+     * Compared against the count BEFORE the polls, not against zero.
+     *
+     * `users` is no longer empty in a freshly migrated database: migration 022
+     * seeds the reserved `system-cli` row that privileged command-line actions
+     * are recorded against. Asserting zero made this test a statement about how
+     * many rows migrations create, which is not what it is for — it is for
+     * "polling /health writes nothing", and a delta says that precisely while
+     * surviving every future seed.
+     */
+    const usersBefore = rows('users');
+    const notificationsBefore = rows('notifications');
 
     // Several polls, as a load balancer would.
     await request(app).get('/health');
@@ -83,8 +96,8 @@ describe('/health on a healthy database', () => {
 
     // No scratch table left over, and no row growth anywhere that matters.
     expect(tables()).toBe(before);
-    expect(db.prepare('SELECT COUNT(*) AS c FROM users').get().c).toBe(0);
-    expect(db.prepare('SELECT COUNT(*) AS c FROM notifications').get().c).toBe(0);
+    expect(rows('users')).toBe(usersBefore);
+    expect(rows('notifications')).toBe(notificationsBefore);
   });
 
   it('stays cheap enough to poll', async () => {

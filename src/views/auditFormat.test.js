@@ -48,6 +48,7 @@ describe('auditTone', () => {
     'ADMIN_PROMOTED',
     'ADMIN_REVOKED',
     'OWNER_GRANTED',
+    'ADMIN_PROMOTED_CLI',
     'OWNER_REVOKED',
     'OWNER_BOOTSTRAPPED',
   ])('marks %s as grave', (action) => {
