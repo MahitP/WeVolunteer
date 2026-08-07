@@ -26,6 +26,29 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
+/**
+ * A file-wide budget, measured rather than guessed — the same remedy and the same
+ * reasoning as `tooling.dbPath.test.js`.
+ *
+ * `allows many different addresses from one IP to request verification` makes
+ * **twelve sequential HTTP round trips** through `/api/auth/forgot-password`, and
+ * each one boots the reset path. Sequential is not incidental: the test is about a
+ * per-IP counter, so the requests cannot be parallelised without changing what is
+ * being measured.
+ *
+ * Isolated, the whole file runs in ~1.3s. Under the parallel load of the full
+ * suite that one test was measured at **5133ms** against vitest's 5000ms default
+ * and timed out — then passed on the next full run, with the rest of the file
+ * green both times. Nothing was hung, and the assertion it makes (0 of 12
+ * rate-limited) never failed; it ran out of clock.
+ *
+ * So this is a flake, and flakiness on the gate every other gate depends on is a
+ * defect in its own right. Raised here rather than on the single test so a second
+ * slow case in this file does not have to rediscover it. The global default stays
+ * 5000ms, so a genuinely hung test elsewhere still fails fast.
+ */
+vi.setConfig({ testTimeout: 20000 });
+
 async function freshEmail({ failing = false } = {}) {
   process.env.JWT_SECRET = 'x'.repeat(48);
   process.env.APP_URL = 'http://localhost:5173';
