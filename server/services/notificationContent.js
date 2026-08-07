@@ -131,6 +131,16 @@ export const EVENT_CATEGORIES = {
   PASSWORD_CHANGED: 'ACCOUNT',
   PASSWORD_RESET: 'ACCOUNT',
   EMAIL_VERIFIED: 'ACCOUNT',
+  /**
+   * ACCOUNT, not SYSTEM.
+   *
+   * It was briefly changed to SYSTEM during the M1c work with no stated reason.
+   * That is the same defect `APPLICATION_WAITLISTED` caused: a notice filed
+   * under the wrong category is invisible under the filter the reader would
+   * actually use. Someone who has just been locked out opens their notifications
+   * and filters by Account to find out why — a suspension notice sitting under
+   * System is one they have to already know to look for.
+   */
   ACCOUNT_SUSPENDED: 'ACCOUNT',
   ACCOUNT_WARNED: 'ACCOUNT',
   ACCOUNT_REINSTATED: 'ACCOUNT',
@@ -139,6 +149,8 @@ export const EVENT_CATEGORIES = {
   APPEAL_REOPENED: 'ACCOUNT',
 
   // SYSTEM
+  ADMIN_PROMOTED: 'SYSTEM',
+  ADMIN_REVOKED: 'SYSTEM',
   MAINTENANCE_NOTICE: 'SYSTEM',
   IMPORTANT_ANNOUNCEMENT: 'SYSTEM',
   // Operational alerts about a request the user made about their own account —
@@ -577,6 +589,22 @@ export function getInAppContent(event, payload) {
         title: payload.title || 'Account update',
         body: payload.body || 'Something about your account needs your attention.',
         link: payload.link || '/settings'
+      };
+    case 'ADMIN_PROMOTED':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: 'You are now a platform administrator',
+        body: payload.reason ? `Reason: ${payload.reason}` : 'Your account has been granted administrative access.',
+        link: '/admin'
+      };
+    case 'ADMIN_REVOKED':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: 'Administrative access revoked',
+        body: 'Your administrative access has been removed by the platform owner.',
+        link: '/'
       };
     case 'DIRECT_MESSAGE':
       return {

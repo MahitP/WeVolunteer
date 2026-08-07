@@ -107,7 +107,35 @@ export const CAPABILITIES = {
      * disciplinary notice on a student's record.
      */
     'user.warn',
-    'report.resolve', 'appeal.review', 'audit.read', 'analytics.school',
+    'report.resolve', 'appeal.review', 'analytics.school',
+    /**
+     * `audit.read` is deliberately NOT here — it moved to SUPER_ONLY when the
+     * Audit Explorer shipped (M1c).
+     *
+     * The administrative audit trail records administrators acting on students,
+     * and on each other. An administrator who can read it can see who reviewed
+     * a report naming them, who looked at their record, and what was written
+     * about them — which makes the trail an instrument of the people it exists
+     * to hold accountable. Oversight of administrators belongs to the tier above
+     * them.
+     *
+     * These two exist because `audit.read` used to be doing three unrelated jobs
+     * at once, and only one of them was about the audit trail. Splitting them is
+     * what made the move possible without taking anything away from an
+     * administrator that they legitimately need:
+     *
+     *   - `application.read_all` gates the unscoped branch of GET /api/applications.
+     *   - `user.contact.read` gates contact PII on a student profile.
+     *
+     * Both are named for what they authorize. Reusing `audit.read` for either
+     * was the original defect: a capability whose name describes one power and
+     * whose removal silently withdraws two others. Removing it without this
+     * split would have emptied every administrator's application list — a 200
+     * with an empty array, which the status-only authorization matrix cannot
+     * detect. `routes.adminCapabilitySplit.test.js` asserts the CONTENT, not the
+     * status, for exactly that reason.
+     */
+    'application.read_all', 'user.contact.read',
     /**
      * Reading the message bodies preserved with a safety report is split from
      * deciding the report, and holds the same roles today, so nothing changes
@@ -170,6 +198,19 @@ export const SUPER_ONLY = [
   'analytics.platform',
   'impersonation.start',
   'admin.create',
+  /**
+   * Reading the administrative audit trail (M1c, the Audit Explorer).
+   *
+   * Here rather than in the `admin` list for the reason given beside its removal
+   * there: a trail that records what administrators do is not a thing
+   * administrators should be able to read about each other.
+   *
+   * SUPER_ONLY also makes it UNGRANTABLE — the check runs before per-user grants
+   * are consulted, and `userCapabilities.js` refuses to store a grant naming one.
+   * That is deliberate. A grant is the natural way to create a "triage helper",
+   * and audit access is exactly what such a helper should not quietly acquire.
+   */
+  'audit.read',
 ];
 
 export const ALL_CAPABILITIES = [...new Set([

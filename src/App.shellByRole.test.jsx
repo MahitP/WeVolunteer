@@ -141,6 +141,19 @@ describe('navigation, per role', () => {
      * row — which is the right place for it: reaching a person is a moderation
      * action, not an afterthought behind "More".
      */
+    /**
+     * No `Audit Log`, and no `Admin Roster`.
+     *
+     * Both were briefly here while the Audit Explorer shipped, because
+     * `audit.read` was still an administrator capability. M1c moved it to
+     * SUPER_ONLY: a trail recording what administrators did to students, and to
+     * each other, is not a thing administrators read about one another.
+     * `Admin Roster` is gated on `admin.create`, which has always been
+     * super-only.
+     *
+     * This list is exact rather than a `toContain`, so the entry cannot return
+     * unnoticed — which is exactly how it got here the first time.
+     */
     ['admin', ['Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Appeals']]
   ])('%s nav is what its capabilities justify', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
@@ -150,7 +163,7 @@ describe('navigation, per role', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
       'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'New event',
-      'Notifications', 'Errors', 'Appeals', 'My profile'
+      'Notifications', 'Errors', 'Appeals', 'Audit Log', 'Admin Roster', 'My profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
     expect(items.length).toBeGreaterThan(0);
@@ -197,7 +210,7 @@ describe('navigation, per role', () => {
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
       'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'New event',
-      'Notifications', 'Errors', 'Appeals', 'My profile'
+      'Notifications', 'Errors', 'Appeals', 'Audit Log', 'Admin Roster', 'My profile'
     ]);
   });
 
@@ -206,8 +219,24 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
-      'Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Appeals',
+      'Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Appeals'
     ]);
+  });
+
+  /**
+   * The rendered counterpart of the capability move.
+   *
+   * `navItemsFor` is pure and already covered above; this asserts the same thing
+   * through the actual shell, because the nav is filtered in one place and
+   * rendered in another, and only one of those is what a user sees.
+   */
+  it('does not show an administrator the owner-only entries', async () => {
+    signedInAs(USER('admin'));
+    renderAt('/');
+    await screen.findByTestId('admin-dash');
+    expect(sidebarLabels()).not.toContain('Audit Log');
+    expect(sidebarLabels()).not.toContain('Admin Roster');
+    expect(sidebarLabels()).not.toContain('Errors');
   });
 });
 

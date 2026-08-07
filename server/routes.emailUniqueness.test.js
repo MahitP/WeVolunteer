@@ -146,7 +146,7 @@ describe('email dedupe migration (F-11, defensive/no data loss)', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'wev-email-dedupe-'));
     const dbFile = makeDuplicateDb(dir);
 
-    initAgainst(dbFile);
+    initAgainst(dbFile, { DEMO_MODE: 'false' });
 
     const { users, attendance, indexes } = readState(dbFile);
 
@@ -177,10 +177,10 @@ describe('email dedupe migration (F-11, defensive/no data loss)', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'wev-email-dedupe-idem-'));
     const dbFile = makeDuplicateDb(dir);
 
-    initAgainst(dbFile);
+    initAgainst(dbFile, { DEMO_MODE: 'false' });
     const after1 = readState(dbFile);
 
-    expect(() => initAgainst(dbFile)).not.toThrow();
+    expect(() => initAgainst(dbFile, { DEMO_MODE: 'false' })).not.toThrow();
     const after2 = readState(dbFile);
 
     expect(after2.users).toEqual(after1.users);

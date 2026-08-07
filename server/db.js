@@ -947,6 +947,7 @@ export function initDatabase() {
    */
   syncLegalDocuments(db);
   seedOrganizerAcceptance();
+  seedSuperAdmin();
 }
 
 /**
@@ -989,6 +990,47 @@ function seedOrganizerAcceptance() {
   if (!organizer) return;
 
   acceptOrganizerAgreement(db, { userId: organizer.id, now: new Date().toISOString() });
+}
+
+/**
+ * Inserts the platform owner (super_admin) seed account.
+ *
+ * ── Why not in seedDatabase ──
+ *
+ * `seedDatabase` runs before `runMigrations`, and migration 001 is what
+ * expands the `users.role` CHECK constraint from
+ * `('student', 'organizer', 'admin')` to include `super_admin` and `partner`.
+ * Inserting a `super_admin` row before that migration runs violates the
+ * constraint and crashes the server on every fresh database boot.
+ *
+ * Idempotent: the INSERT is OR IGNORE, so repeated calls on existing databases
+ * produce no change and no error.
+ */
+function seedSuperAdmin() {
+  if (!DEMO_MODE) return;
+
+  // Only seed the owner account if the rest of the demo dataset is present.
+  // This prevents a stray super_admin row from appearing in migration-only
+  // test fixtures that run initDatabase() against a hand-built schema that
+  // already has a non-zero user count (which bypasses seedDatabase() but
+  // inherits DEMO_MODE=true from the parent test runner process).
+  const adminSeedPresent = db.prepare("SELECT id FROM users WHERE id = 'user-admin'").get();
+  if (!adminSeedPresent) return;
+
+  const existing = db.prepare("SELECT id FROM users WHERE id = 'user-super'").get();
+  if (existing) return;
+
+  const salt = bcrypt.genSaltSync(10);
+  const passwordHash = bcrypt.hashSync('password123', salt);
+  const nowStr = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO users (id, name, email, username, password_hash, grade, role, verified,
+                       avatar, bio, school, skills, email_verified, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run('user-super', 'Platform Owner', 'owner@wevolunteer.local', 'platformowner',
+         passwordHash, 'N/A', 'super_admin', 1, '👑', 'Platform owner.',
+         'WeVolunteer', JSON.stringify([]), 1, nowStr);
 }
 
 /**
