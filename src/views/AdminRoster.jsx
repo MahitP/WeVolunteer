@@ -270,46 +270,46 @@ export default function AdminRoster() {
 
   if (loading) {
     return (
-      <main className="view">
-        <header className="view-head">
-          <div className="title-block">
-            <h1 className="view-title">Administrator Roster</h1>
+      <div className="page">
+        <header className="page-head">
+          <div>
+            <h1>Administrator Roster</h1>
           </div>
         </header>
-        <div className="view-body">
+        <div className="stack">
           <LoadingSkeleton rows={5} />
         </div>
-      </main>
+      </div>
     );
   }
 
   if (error) {
     return (
-      <main className="view">
-        <header className="view-head">
-          <div className="title-block">
-            <h1 className="view-title">Administrator Roster</h1>
+      <div className="page">
+        <header className="page-head">
+          <div>
+            <h1>Administrator Roster</h1>
           </div>
         </header>
-        <div className="view-body">
+        <div className="stack">
           <div className="empty-state">
             <AlertTriangle className="empty-icon" size={48} />
             <h3>Failed to Load Roster</h3>
-            <p className="text-muted">{error}</p>
+            <p className="muted">{error}</p>
           </div>
         </div>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="view">
-      <header className="view-head">
-        <div className="title-block">
-          <h1 className="view-title">Administrator Roster</h1>
-          <p className="view-subtitle">Platform administrators and their effective capabilities</p>
+    <div className="page">
+      <header className="page-head">
+        <div>
+          <h1>Administrator Roster</h1>
+          <p className="muted">Platform administrators and their effective capabilities</p>
         </div>
-        <div className="title-actions">
+        <div>
           <button type="button" className="btn btn-primary" onClick={() => setPromoting(true)}>
             Promote Administrator
           </button>
@@ -317,7 +317,7 @@ export default function AdminRoster() {
 
       </header>
 
-      <div className="view-body">
+      <div className="stack">
         {stepUpModal}
         {promoting && (
           <PromoteAdminModal
@@ -359,7 +359,7 @@ export default function AdminRoster() {
                             </span>
                             <div>
                               <div>{admin.name}</div>
-                              <div className="text-muted" style={{ fontSize: '0.75rem' }}>{admin.email}</div>
+                              <div className="muted" style={{ fontSize: '0.75rem' }}>{admin.email}</div>
                             </div>
                           </div>
                         </td>
@@ -376,14 +376,24 @@ export default function AdminRoster() {
                           {admin.lastSignInAt ? formatDate(admin.lastSignInAt) : 'Never'}
                         </td>
                         <td>
+                          {/* Two bare icons and two numbers said nothing to
+                              anyone who could not see them — `title` is a hover
+                              affordance, not an accessible name, so a screen
+                              reader announced "1 2" and a mouse was the only way
+                              to learn which was which. The visible text stays
+                              compact; the name spells it out. */}
                           <div className="row">
                             <span title="Decisions made (last 30 days)">
-                              <Shield size={14} className="text-muted" style={{ marginRight: '4px' }} />
-                              {admin.decisionCount}
+                              <Shield size={14} className="muted" style={{ marginRight: '4px' }} aria-hidden="true" />
+                              <span aria-label={`${admin.decisionCount} decisions in the last 30 days`}>
+                                {admin.decisionCount}
+                              </span>
                             </span>
                             <span title="Evidence reviewed (last 30 days)" style={{ marginLeft: 'var(--s3)' }}>
-                              <Activity size={14} className="text-muted" style={{ marginRight: '4px' }} />
-                              {admin.evidenceReadCount}
+                              <Activity size={14} className="muted" style={{ marginRight: '4px' }} aria-hidden="true" />
+                              <span aria-label={`${admin.evidenceReadCount} evidence reads in the last 30 days`}>
+                                {admin.evidenceReadCount}
+                              </span>
                             </span>
                           </div>
                         </td>
@@ -406,13 +416,13 @@ export default function AdminRoster() {
                                 <div>
                                   <h4 style={{ margin: '0 0 var(--s2) 0', fontSize: '0.875rem' }}>Promotion Metadata</h4>
                                   {admin.promotedAt ? (
-                                    <ul className="text-muted" style={{ margin: 0, paddingLeft: 'var(--s4)', fontSize: '0.8125rem' }}>
+                                    <ul className="muted" style={{ margin: 0, paddingLeft: 'var(--s4)', fontSize: '0.8125rem' }}>
                                       <li>Promoted: {formatDate(admin.promotedAt)}</li>
                                       <li>By: {admin.promotedBy}</li>
                                       <li>Reason: {admin.promotionReason}</li>
                                     </ul>
                                   ) : (
-                                    <p className="text-muted" style={{ margin: 0, fontSize: '0.8125rem' }}>
+                                    <p className="muted" style={{ margin: 0, fontSize: '0.8125rem' }}>
                                       Promoted prior to metadata tracking.
                                     </p>
                                   )}
@@ -442,7 +452,7 @@ export default function AdminRoster() {
                                 <h4 style={{ margin: '0 0 var(--s2) 0', fontSize: '0.875rem' }}>Effective Capabilities</h4>
                                 <div className="row" style={{ flexWrap: 'wrap' }}>
                                   {admin.capabilities.length === 0 ? (
-                                    <span className="text-muted" style={{ fontSize: '0.8125rem' }}>None</span>
+                                    <span className="muted" style={{ fontSize: '0.8125rem' }}>None</span>
                                   ) : (
                                     admin.capabilities.map(cap => (
                                       <span key={cap} className="badge badge-subtle">{cap}</span>
@@ -450,7 +460,7 @@ export default function AdminRoster() {
                                   )}
                                 </div>
                                 {(admin.grants?.length > 0 || admin.withholdings?.length > 0) && (
-                                  <div style={{ marginTop: 'var(--s2)', fontSize: '0.8125rem' }} className="text-muted">
+                                  <div style={{ marginTop: 'var(--s2)', fontSize: '0.8125rem' }} className="muted">
                                     {admin.grants?.length > 0 && <div>+ Explicit grants: {admin.grants.join(', ')}</div>}
                                     {admin.withholdings?.length > 0 && <div>- Withholdings: {admin.withholdings.join(', ')}</div>}
                                   </div>
@@ -468,6 +478,6 @@ export default function AdminRoster() {
           </div>
         </div>
       </div>
-    </main>
+    </div>
   );
 }
