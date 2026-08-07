@@ -486,8 +486,10 @@ describe('authorization hygiene', () => {
       // a route argument so a 403 could name the feature and the remedy
       // (denialDetail.js), and `deniedMatch` was hoisted above the early return.
       // Re-read once more — unchanged, and still the ?type= view discriminator.
-      // 912 -> 915 when M1C Audit Explorer added route props.
-      'src/App.jsx:920': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      // 912 -> 920 when M1C added route props; 920 -> 944 when the suspension
+      // wall was inserted above the email-verification wall. Re-read at 944:
+      // unchanged, still the ?type= view discriminator, still grants nothing.
+      'src/App.jsx:944': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
       'src/components/EventComments.jsx:112': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
       'src/components/EventComments.jsx:113': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
       'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },

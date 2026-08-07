@@ -910,6 +910,24 @@ export const api = {
       body: JSON.stringify({ statement }),
     }),
 
+  /**
+   * The signed-in appeal path, used by `SuspendedWall`.
+   *
+   * Distinct from the token pair above rather than folded into it. The token
+   * route is for somebody who has a link and no session — the person suspended
+   * before this existed, or reading the notice on a device they never signed in
+   * on. These two are for somebody sitting on the suspension screen, and they
+   * are two of the only four routes a suspended session may reach at all
+   * (`server/suspendedAccess.js`).
+   */
+  listMyAppeals: async () => apiFetch('/api/appeals/mine'),
+
+  submitAppeal: async ({ subject, statement }) =>
+    apiFetch('/api/appeals', {
+      method: 'POST',
+      body: JSON.stringify({ subject, statement }),
+    }),
+
   /* ── The moderator-facing appeals queue (`AdminAppeals.jsx`) ─────────────────── */
   
   // Audit Explorer

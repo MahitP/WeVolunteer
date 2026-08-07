@@ -184,7 +184,18 @@ export default function Login({ onLoginSuccess, addToast }) {
     setLoading(true);
     try {
       const result = await api.login(loginId, loginPassword);
-      if (result.emailVerified === false) {
+      if (result.suspension) {
+        /**
+         * No toast at all, and no greeting.
+         *
+         * The sign-in genuinely succeeded, so the error channel would be wrong;
+         * "Welcome back" would be worse. The screen they are about to land on
+         * says what happened in full, and a cheerful banner floating over it is
+         * the product failing to read the room at the worst moment it has with
+         * this person. Checked before `emailVerified`, because App shows the
+         * suspension wall above the verification wall for the same reason.
+         */
+      } else if (result.emailVerified === false) {
         // App routes an unconfirmed session to the confirmation screen; saying
         // "welcome back" first would be misleading about what happens next.
         addToast('Confirm your email address to finish signing in.', 'info');

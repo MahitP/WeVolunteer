@@ -126,3 +126,58 @@ export function sweepExpiredSuspensions(db, { now = new Date() } = {}) {
   }
   return lifted;
 }
+
+/**
+ * What a suspended person is told about their own suspension.
+ *
+ * ── Why this exists at all ──
+ *
+ * Until now the answer was "nothing, from an authenticated place". A suspended
+ * account was refused a session outright, and the note beside that refusal in
+ * `authRoutes.js` said so plainly: "there is deliberately no authenticated place
+ * to repeat it, because a suspended account never gets a session — which is the
+ * whole point of the suspension."
+ *
+ * That was a defensible reading of the point, and it had one bad consequence.
+ * Everything the person was told arrived in a single email at the moment they
+ * were suspended. Lose it, never receive it, or read it a week later on a
+ * different device, and the product's answer to "why can I not get in" was a
+ * sentence on a login form telling them to write to an address. For a platform
+ * whose users are mostly minors, being locked out with no durable, re-readable
+ * statement of what happened is the part that fails them.
+ *
+ * So a suspended session now exists, reaches almost nothing (see
+ * `suspendedMayReach`), and carries this.
+ *
+ * ── What may be in it, and what may not ──
+ *
+ * These are facts about the reader's OWN account, returned only to a session
+ * that has already proved it is them. That is what makes the end date sayable
+ * here when it is not sayable on the login form: the objection recorded there is
+ * that the date "must not be readable by anyone who types their address into a
+ * form", and a caller holding a valid session for this account is not that.
+ *
+ * The suspending administrator is deliberately NOT named. The reason is written
+ * for the person, and who wrote it is between them and the appeal process — a
+ * name here turns a moderation decision into a personal one, on a platform where
+ * the moderator may be a student's own teacher.
+ */
+export function suspensionNotice(row, now = new Date()) {
+  if (!isSuspended(row, now)) return null;
+
+  return {
+    /** The words the administrator wrote. Shown verbatim — see MIN_SUSPENSION_REASON. */
+    reason: row.suspension_reason ?? null,
+    /** When it started. */
+    since: row.suspended_at ?? null,
+    /**
+     * When it ends, or null for indefinite.
+     *
+     * Null and "indefinite" are reported separately rather than being inferred
+     * from each other at every call site, because a client that reads a missing
+     * date as "ends soon" is the failure this field exists to prevent.
+     */
+    until: row.suspended_until ?? null,
+    indefinite: !row.suspended_until,
+  };
+}

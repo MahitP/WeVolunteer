@@ -10,7 +10,8 @@ import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
 import { sweepErrors } from './errorReporter.js';
 import { sendErrorAlerts } from './alerting.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
-import { isSuspended, liftIfExpired } from './suspension.js';
+import { isSuspended, liftIfExpired, suspensionNotice } from './suspension.js';
+import { suspendedMayReach } from './suspendedAccess.js';
 
 /**
  * Whether this specific session has been signed out.
@@ -179,7 +180,9 @@ export function authenticateToken(req, res, next) {
     // trusting the (up to 7-day-old) token payload, so a deleted user's
     // token stops working and a role/email change takes effect immediately.
     const userRow = db.prepare(
-      'SELECT id, role, email, name, email_verified, token_version, account_status, suspended_until FROM users WHERE id = ?'
+      `SELECT id, role, email, name, email_verified, token_version, account_status,
+              suspended_until, suspended_at, suspension_reason
+         FROM users WHERE id = ?`
     ).get(decodedUser.id);
 
     if (!userRow) return res.status(401).json({ error: 'Account no longer exists' });
@@ -198,7 +201,7 @@ export function authenticateToken(req, res, next) {
      * read `account_status` directly, stop describing this person as suspended.
      * The sweep does the same thing for accounts that never come back.
      */
-    if (isSuspended(userRow)) return res.status(403).json({ error: 'Account is suspended' });
+    const suspended = isSuspended(userRow);
     liftIfExpired(db, userRow);
 
     if ((decodedUser.tokenVersion ?? 0) !== userRow.token_version) {
@@ -210,6 +213,50 @@ export function authenticateToken(req, res, next) {
     // revoked token never reaches a handler.
     if (isSessionRevoked(decodedUser.jti)) {
       return res.status(401).json({ error: 'You have been signed out. Please sign in again.' });
+    }
+
+    /**
+     * The suspension gate.
+     *
+     * ── What changed, and what did not ──
+     *
+     * This used to be a flat `return 403` sitting above the two checks before
+     * it, and it refused everything. A suspended account therefore had no
+     * authenticated surface at all, which meant the only account of what had
+     * happened to the person was the email sent at the moment of suspension.
+     *
+     * A suspended session now exists and reaches four routes: read the decision,
+     * appeal it, check the appeal, sign out. `suspendedAccess.js` holds that list
+     * and matches it exactly, by method and full path, with no prefixes.
+     *
+     * What did not change is the part that matters: everything else is still
+     * refused here, before any route handler and before any capability gate. A
+     * suspended administrator is a suspended account first.
+     *
+     * ── Ordering ──
+     *
+     * Deliberately BELOW `token_version` and the revocation denylist, where it
+     * used to sit above both. A session that is expired or has been signed out
+     * is not a suspended session, it is not a session at all, and answering it
+     * with a suspension notice would disclose the account's moderation state to
+     * a cookie that is no longer valid.
+     *
+     * The notice is attached rather than looked up again by the handlers, so
+     * `/api/auth/me` cannot disagree with the gate that let it through.
+     */
+    if (suspended) {
+      req.suspension = suspensionNotice(userRow);
+
+      if (!suspendedMayReach(req.method, req.originalUrl.split('?')[0])) {
+        return res.status(403).json({
+          error: 'Your account is suspended.',
+          /* Distinct from the generic `Access denied` a capability refusal
+             returns, because the client has to tell them apart: one shows the
+             suspension screen, the other shows the permission refusal. */
+          code: 'account_suspended',
+          suspension: req.suspension,
+        });
+      }
     }
 
     req.user = {

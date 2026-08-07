@@ -139,6 +139,29 @@ export function SessionProvider({ addToast, children }) {
        * The verification wall renders from `currentUser` alone and needs none
        * of this data.
        */
+      /**
+       * And stop here for a suspended account, for the same reason and first.
+       *
+       * `authenticateToken` confines a suspended session to four routes
+       * (server/suspendedAccess.js), so every fetch below answers 403. Those
+       * failures are caught further down and surfaced as "Some of your
+       * information could not be loaded" — which is how the suspension screen
+       * came to greet a locked-out student with two error toasts telling them to
+       * reload, on top of the notice explaining they cannot use the product.
+       *
+       * Checked BEFORE `emailVerified` because the wall order in App.jsx is the
+       * same: a suspended account with an unconfirmed address is stopped by the
+       * suspension, and confirming the address would change nothing.
+       *
+       * `SuspendedWall` renders from `currentUser` alone. It does fetch its own
+       * appeal list, which is one of the four routes it may reach.
+       */
+      if (user.suspension) {
+        disconnectSocket();
+        setIsCheckingSession(false);
+        return;
+      }
+
       if (user.emailVerified === false) {
         setIsCheckingSession(false);
         return;
