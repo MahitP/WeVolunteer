@@ -10,7 +10,7 @@ import { getMailHealth } from '../email.js';
 import { getQueueHealth } from '../workers/notificationWorker.js';
 import { requireCap, can, principalFor, ALL_CAPABILITIES, requireAAL2, ROLE } from '../authz.js';
 import { grantsFor } from '../userCapabilities.js';
-import { spendChallenge } from '../reauthResponses.js';
+import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import { recordAudit } from '../auditLog.js';
 import {
   REPORT_PRIORITIES, REPORT_RESOLUTIONS, REPORT_STATUSES, REPORT_TARGET_TYPES,
@@ -1016,7 +1016,29 @@ router.get('/api/admin/reports/:id', authenticateToken, requireCap('report.resol
   }
 });
 
-router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('report.evidence.read'), (req, res) => {
+/**
+ * Reading the private message bodies a safety report preserved.
+ *
+ * ── Step-up, added in the v1.2c privacy review ──
+ *
+ * `requireCap('report.evidence.read')` says this KIND of account may read
+ * evidence. `requireAAL2('report.evidence')` says this person, at this moment,
+ * has proved they are still themselves. The read was already logged twice — to
+ * `admin_audit_logs` and to the retention-exempt `moderation_actions` — so the
+ * accountability was in place; what was missing was the deliberation. An idle
+ * click on "Show the messages" is now an act somebody has to mean.
+ *
+ * The grant binds `reportId`, so one verification opens one report. Without the
+ * binding a moderator who verified once would hold a five-minute key to every
+ * child's messages on the platform, which is worse than the position this
+ * replaced.
+ *
+ * The gate is the early refusal, NOT the check: `spendChallenge` below is what
+ * consumes it, as the first statement inside the same transaction as the two log
+ * writes. A gate with no spend leaves the grant replayable and every functional
+ * test still passes.
+ */
+router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('report.evidence.read'), requireAAL2('report.evidence'), (req, res) => {
   try {
     const report = db.prepare(
       'SELECT id, reporter_id, target_author_id, target_type, target_id, status FROM reports WHERE id = ?'
@@ -1064,6 +1086,13 @@ router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('rep
      * messages were read.
      */
     inTransaction(() => {
+      /**
+       * First statement, and bound to the report actually being read — not to
+       * whatever the client claimed. `report.id` comes from the row fetched
+       * above, so a grant obtained for one report cannot open another.
+       */
+      spendChallenge(db, req, 'report.evidence', { reportId: report.id });
+
       db.prepare(`
         INSERT INTO moderation_actions (id, report_id, actor_id, action, created_at)
         VALUES (?, ?, ?, 'evidence_viewed', ?)
@@ -1079,6 +1108,14 @@ router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('rep
 
     res.json({ reportId: report.id, status: report.status, messages });
   } catch (err) {
+    /**
+     * A grant that does not cover this read is a 403 the client can act on, not
+     * a 500. `spendChallenge` throws `ChallengeNotSpent` when the challenge is
+     * missing, expired, already spent, or bound to a DIFFERENT report — the last
+     * being exactly the case `bindsParams: ['reportId']` exists to create, so
+     * answering it with a server error would make the binding look like a fault.
+     */
+    if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
     console.error('Fetch report evidence error:', err);
     res.status(500).json({ error: 'Failed to fetch preserved evidence' });
   }
@@ -2025,6 +2062,19 @@ router.post('/api/admin/users/:id/promote', authenticateToken, requireCap('admin
     notificationService.dispatch('ADMIN_PROMOTED', { reason: reason.trim() }, targetUserId);
     res.json({ success: true });
   } catch (err) {
+    /**
+     * A grant that does not cover this request is a 403 the client can act on,
+     * not a 500.
+     *
+     * `spendChallenge` throws `ChallengeNotSpent` when the challenge is missing,
+     * expired, already spent, or bound to different params. Falling through to
+     * the generic handler turned all of those into "Failed to …" with status 500
+     * — and `useStepUp` re-prompts on `code: 'reauth_required'`, so a moderator
+     * whose verification had simply lapsed saw a server error and had no way
+     * forward. `refuseReauth` is the shared shape the account and privacy routes
+     * have always used.
+     */
+    if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
     console.error('Failed to promote user:', err);
     res.status(500).json({ error: 'Failed to promote user' });
   }
@@ -2085,6 +2135,19 @@ router.post('/api/admin/users/:id/revoke', authenticateToken, requireCap('admin.
     notificationService.dispatch('ADMIN_REVOKED', {}, targetUserId);
     res.json({ success: true });
   } catch (err) {
+    /**
+     * A grant that does not cover this request is a 403 the client can act on,
+     * not a 500.
+     *
+     * `spendChallenge` throws `ChallengeNotSpent` when the challenge is missing,
+     * expired, already spent, or bound to different params. Falling through to
+     * the generic handler turned all of those into "Failed to …" with status 500
+     * — and `useStepUp` re-prompts on `code: 'reauth_required'`, so a moderator
+     * whose verification had simply lapsed saw a server error and had no way
+     * forward. `refuseReauth` is the shared shape the account and privacy routes
+     * have always used.
+     */
+    if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
     console.error('Failed to revoke user:', err);
     res.status(500).json({ error: 'Failed to revoke user' });
   }

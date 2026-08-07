@@ -164,6 +164,25 @@ export async function startTestServer() {
     return row.id;
   };
 
+  /**
+   * Reads a report's preserved evidence, through the step-up the route requires.
+   *
+   * `GET /api/admin/reports/:id/evidence` gained `requireAAL2('report.evidence')`
+   * in the v1.2c privacy review: reading a child's private messages was the most
+   * invasive read on the platform and the only one of its weight behind nothing
+   * but a session. Every suite that reads evidence therefore has to verify first,
+   * and doing it in one helper keeps that from being seven copies of the same
+   * four lines — and makes the requirement obvious to whoever writes the eighth.
+   *
+   * The grant binds `reportId`, so this deliberately opens a challenge per
+   * report rather than caching one.
+   */
+  const readEvidence = async (token, reportId) => {
+    const challengeId = await stepUp(token, 'report.evidence', { params: { reportId } });
+    return call('GET', `/api/admin/reports/${reportId}/evidence`, undefined, token,
+      { [REAUTH_CHALLENGE_HEADER]: challengeId });
+  };
+
   /** `makeOwner` then sign in, which is what every caller actually wants. */
   const loginAsOwner = async (email, password = 'password123') => {
     await makeOwner(email);
@@ -318,6 +337,7 @@ export async function startTestServer() {
     call,
     login,
     makeOwner,
+    readEvidence,
     loginAsOwner,
     signup,
     confirmEmail,

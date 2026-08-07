@@ -676,8 +676,8 @@ export const api = {
    */
   fetchReport: async (reportId) => apiFetch(`/api/admin/reports/${encodeURIComponent(reportId)}`),
 
-  fetchReportEvidence: async (reportId) =>
-    apiFetch(`/api/admin/reports/${encodeURIComponent(reportId)}/evidence`),
+  fetchReportEvidence: async (reportId, headers = {}) =>
+    apiFetch(`/api/admin/reports/${encodeURIComponent(reportId)}/evidence`, { headers }),
 
   updateReport: async (reportId, patch) =>
     apiFetch(`/api/admin/reports/${encodeURIComponent(reportId)}`, {

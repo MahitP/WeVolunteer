@@ -134,11 +134,39 @@ describe('reading preserved evidence', () => {
       .toBeInTheDocument();
   });
 
+  /**
+   * The privacy property, asserted on the client side.
+   *
+   * Reading a child's preserved messages is the most invasive read on this
+   * platform, and until the v1.2c review it was also the cheapest: a session was
+   * enough, while downloading your OWN data archive required a fresh
+   * verification. The server enforces it (`requireAAL2('report.evidence')` plus a
+   * bound `spendChallenge`); this asserts the client actually asks through that
+   * path, because a component that called the endpoint directly would get a 403
+   * the moderator could not clear and the feature would look broken.
+   */
+  it('asks for the evidence through the step-up, bound to this report', async () => {
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: /Open preserved messages/ }));
+
+    await waitFor(() => expect(api.fetchReportEvidence).toHaveBeenCalled());
+    const [, headers] = api.fetchReportEvidence.mock.calls[0];
+    expect(headers, 'the call must carry the step-up headers slot').toBeDefined();
+  });
+
   it('fetches and shows the frozen bodies once asked', async () => {
     open();
     fireEvent.click(await screen.findByRole('button', { name: /Open preserved messages/ }));
 
-    await waitFor(() => expect(api.fetchReportEvidence).toHaveBeenCalledWith('rep_1'));
+    /**
+     * A headers argument now, because the read goes through a step-up.
+     *
+     * `run()` attempts the call first and only prompts if the server refuses
+     * with `reauth_required`, so the happy path here carries an empty headers
+     * object — and that argument existing is what proves the call is wired
+     * through the step-up rather than around it.
+     */
+    await waitFor(() => expect(api.fetchReportEvidence).toHaveBeenCalledWith('rep_1', {}));
     expect(await screen.findByText('answer me')).toBeInTheDocument();
     expect(screen.getByText('please stop')).toBeInTheDocument();
     expect(screen.getByText('Chris Vale')).toBeInTheDocument();

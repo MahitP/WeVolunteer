@@ -43,7 +43,8 @@ export const STEP_UP = Object.freeze({
   DATA_EXPORT: 'data.export',
   DATA_DOWNLOAD: 'data.download',
   ADMIN_PROMOTE: 'admin.promote',
-  ADMIN_REVOKE: 'admin.revoke'
+  ADMIN_REVOKE: 'admin.revoke',
+  REPORT_EVIDENCE: 'report.evidence'
 });
 
 // Fails at module load, not at 403 time. A name that has drifted out of the

@@ -12,11 +12,18 @@ describe('sensitive action registry', () => {
    * archive that did not exist yet while leaving the finished one behind a bare
    * session for seven days, the second because `oauth.link` was gated and the
    * operation that removes the same credential was not.
+   *
+   * `report.evidence` joined in the v1.2c privacy review, and it is the entry
+   * that exposes what the rest of this list had in common: every other action
+   * here is about the ACTOR's own account. This one is about somebody else's
+   * private messages, and that somebody is usually a minor. Downloading your own
+   * data archive required a fresh verification while reading a child's messages
+   * required only a session.
    */
   it('lists exactly the actions requiring step-up', () => {
     expect(Object.keys(SENSITIVE_ACTIONS).sort()).toEqual([
       'account.delete', 'admin.promote', 'admin.revoke', 'data.download', 'data.export', 'email.change',
-      'oauth.link', 'oauth.unlink', 'password.change',
+      'oauth.link', 'oauth.unlink', 'password.change', 'report.evidence',
     ]);
   });
 

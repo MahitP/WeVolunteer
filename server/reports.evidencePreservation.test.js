@@ -294,8 +294,7 @@ describe('a report outlives what it is about', () => {
     db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(convId);
     db.prepare('DELETE FROM conversations WHERE id = ?').run(convId);
 
-    const evidence = await srv.call('GET', `/api/admin/reports/${filed.body.reportId}/evidence`,
-      undefined, await adminToken());
+    const evidence = await srv.readEvidence(await adminToken(), filed.body.reportId);
     expect(evidence.status).toBe(200);
     expect(evidence.body.messages.length).toBe(30);
     expect(evidence.body.messages[0].body).toContain('body ');
@@ -323,7 +322,7 @@ describe('reading evidence is logged to both trails', () => {
       "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'"
     ).get().c;
 
-    const res = await srv.call('GET', `/api/admin/reports/${reportId}/evidence`, undefined, await adminToken());
+    const res = await srv.readEvidence(await adminToken(), reportId);
     expect(res.status).toBe(200);
 
     expect(
