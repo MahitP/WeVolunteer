@@ -142,7 +142,7 @@ describe('navigation, per role', () => {
      * action, not an afterthought behind "More".
      */
     /**
-     * No `Audit Log`, and no `Admin Roster`.
+     * No `Audit Explorer`, and no `Admin Roster`.
      *
      * Both were briefly here while the Audit Explorer shipped, because
      * `audit.read` was still an administrator capability. M1c moved it to
@@ -163,7 +163,7 @@ describe('navigation, per role', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
       'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'New event',
-      'Notifications', 'Errors', 'Appeals', 'Community impact', 'Audit Log', 'Admin Roster', 'My profile'
+      'Notifications', 'Errors', 'Appeals', 'Community impact', 'Audit Explorer', 'Admin Roster', 'My profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
     expect(items.length).toBeGreaterThan(0);
@@ -210,7 +210,7 @@ describe('navigation, per role', () => {
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
       'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'New event',
-      'Notifications', 'Errors', 'Appeals', 'Community impact', 'Audit Log', 'Admin Roster', 'My profile'
+      'Notifications', 'Errors', 'Appeals', 'Community impact', 'Audit Explorer', 'Admin Roster', 'My profile'
     ]);
   });
 
@@ -234,7 +234,7 @@ describe('navigation, per role', () => {
     signedInAs(USER('admin'));
     renderAt('/');
     await screen.findByTestId('admin-dash');
-    expect(sidebarLabels()).not.toContain('Audit Log');
+    expect(sidebarLabels()).not.toContain('Audit Explorer');
     expect(sidebarLabels()).not.toContain('Admin Roster');
     expect(sidebarLabels()).not.toContain('Errors');
   });

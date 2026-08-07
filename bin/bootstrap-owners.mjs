@@ -1,10 +1,10 @@
-import { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import path from 'path';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
 import { recordCliAudit, assertSystemActor, CLI_EVENTS } from './cliAudit.mjs';
+import { openPrivilegedDb } from './resolveDb.mjs';
 
 /**
  * Creates the platform's owner accounts, directly in the database.
@@ -49,7 +49,8 @@ import { recordCliAudit, assertSystemActor, CLI_EVENTS } from './cliAudit.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dbPath = process.env.WEV_DB_PATH || path.join(__dirname, '..', 'server', 'wevolunteer.db');
+/* Path resolution, `.env` loading and the refusal to create a database all
+   live in resolveDb.mjs — see the incident recorded there. */
 
 const invokedDirectly = process.argv[1]
   && path.resolve(process.argv[1]) === path.resolve(__filename);
@@ -96,10 +97,11 @@ async function main() {
     process.exit(1);
   }
 
-  const db = new DatabaseSync(dbPath);
+  /* `openPrivilegedDb` prints the resolved path itself — this script used to do it
+     separately, which is where the duplicate came from. */
+  const { db } = openPrivilegedDb('bin/bootstrap-owners.mjs');
   assertSystemActor(db);
 
-  console.log(`Database: ${dbPath}`);
   console.log('');
   console.log('About to grant PLATFORM OWNERSHIP — full, unrestricted control over');
   console.log('every account and every record — to:');

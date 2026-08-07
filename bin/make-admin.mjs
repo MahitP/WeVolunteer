@@ -30,14 +30,15 @@
  * same question, not that one is derived from the other. `make-admin.test.js`
  * asserts they have not drifted.
  */
-import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { recordCliAudit, assertSystemActor, CLI_EVENTS } from './cliAudit.mjs';
+import { openPrivilegedDb } from './resolveDb.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dbPath = process.env.WEV_DB_PATH || path.join(__dirname, '..', 'server', 'wevolunteer.db');
+/* Path resolution, `.env` loading and the refusal to create a database all
+   live in resolveDb.mjs — see the incident recorded there. */
 
 /**
  * The only roles this script will overwrite.
@@ -69,7 +70,7 @@ if (!email) {
 }
 
 try {
-  const db = new DatabaseSync(dbPath);
+  const { db } = openPrivilegedDb('bin/make-admin.mjs');
   assertSystemActor(db);
 
   const user = db.prepare('SELECT id, role FROM users WHERE email = ?').get(email);

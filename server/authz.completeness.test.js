@@ -490,7 +490,12 @@ describe('authorization hygiene', () => {
       // wall was inserted above the email-verification wall; 944 -> 950 when the
       // impact route joined ROUTE_PROPS. Re-read at 950: unchanged, still the
       // ?type= view discriminator, still grants nothing.
-      'src/App.jsx:950': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      /* 950 → 954 when the Audit Explorer nav label was renamed and gained a
+         comment above it. Re-read at the new line before moving the pin: it is
+         still `viewingProfile.type === 'organizer'`, the same view discriminator
+         described below. Mechanically bumping a line number without looking is
+         how an exemption outlives the code that earned it. */
+      'src/App.jsx:954': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
       'src/components/EventComments.jsx:112': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
       'src/components/EventComments.jsx:113': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
       'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
