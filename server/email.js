@@ -440,6 +440,53 @@ export async function sendVerificationEmail(toEmail, token) {
   return sendTransactional('verification', mailOptions);
 }
 
+/**
+ * The administrator invitation link (IV-4).
+ *
+ * Composed here rather than in the route because `APP_URL` lives here, alongside
+ * every other link this application sends — and because the boot guard that
+ * refuses to start in production without it is in this file. A route that built
+ * its own link would be the one link with no guard behind it.
+ *
+ * The copy leads with what the role IS, not with congratulations. Somebody
+ * accepting this gains the ability to read safety reports and suspend accounts on
+ * a platform used mostly by under-18s, and the message they decide from should say
+ * so plainly.
+ */
+export async function sendAdminInvitationEmail(toEmail, token) {
+  const link = `${APP_URL}/accept-invitation?token=${encodeURIComponent(token)}`;
+
+  const contentHTML = `
+    <h1>You have been invited to help moderate ${APP_NAME}</h1>
+    <p>A platform owner has invited you to become an <strong>administrator</strong>.</p>
+    <p>Administrators review safety reports and can suspend accounts. It is a position
+       of trust on a platform used mostly by under-18s.</p>
+    <p>To accept, sign in with <strong>this</strong> email address and open the link below.
+       It works once and expires in seven days.</p>
+    <p style="color: #66736d; font-size: 14px;">If you were not expecting this, ignore it —
+       nothing happens unless you accept.</p>
+  `;
+
+  return sendTransactional('admin-invitation', {
+    from: EMAIL_FROM,
+    to: toEmail,
+    subject: `You have been invited to help moderate ${APP_NAME}`,
+    text: [
+      `A ${APP_NAME} platform owner has invited you to become an administrator.`,
+      '',
+      'Administrators review safety reports and can suspend accounts. It is a position',
+      'of trust on a platform used mostly by under-18s.',
+      '',
+      'To accept, sign in with THIS email address and open:',
+      link,
+      '',
+      'The link works once and expires in seven days. If you were not expecting this,',
+      'ignore it — nothing happens unless you accept.',
+    ].join('\n'),
+    html: buildHtmlTemplate('You have been invited to help moderate', contentHTML, 'Accept the invitation', link),
+  });
+}
+
 export async function sendPasswordResetEmail(toEmail, token) {
   const resetLink = `${APP_URL}/?reset=${encodeURIComponent(token)}`;
   

@@ -31,6 +31,7 @@ import auditLogHardening from './019_audit_log_hardening.js';
 import administratorRoster from './020_administrator_roster.js';
 import administratorPromotionMetadata from './021_administrator_promotion_metadata.js';
 import systemCliActor from './022_system_cli_actor.js';
+import adminInvitations from './023_admin_invitations.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -83,6 +84,11 @@ export const MIGRATIONS = [
    * from a shell has an actor that is not its own victim.
    */
   systemCliActor,
+  /**
+   * 023 adds `admin_invitations`, with a partial unique index enforcing one
+   * pending invitation per address (IV-13) and the token stored hashed.
+   */
+  adminInvitations,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
