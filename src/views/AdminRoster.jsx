@@ -9,6 +9,7 @@ import { STEP_UP } from '../utils/stepUp';
 import { useModal } from '../utils/useModal';
 
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
+import PendingInvitations from '../components/admin/PendingInvitations';
 
 const formatDate = (iso) => new Date(iso).toLocaleDateString();
 
@@ -477,6 +478,12 @@ export default function AdminRoster() {
             </table>
           </div>
         </div>
+
+        {/* Beside the roster rather than on its own page: a pending invitation is
+            a future row in the table above, and an owner asking "who has
+            administrative access" should not have to check two screens to learn
+            who is about to. */}
+        <PendingInvitations addToast={showFeedback ? (m, t) => showFeedback(t, m) : undefined} />
       </div>
     </div>
   );

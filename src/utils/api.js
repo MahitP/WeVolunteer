@@ -927,6 +927,20 @@ export const api = {
    */
   fetchImpact: async () => apiFetch('/api/impact'),
 
+  /* ── Administrator invitations (§4.3) ─────────────────────────────────────
+     The token is never returned by any of these. It is emailed to the invited
+     address and exists nowhere else, because an inviter holding it could accept
+     from an address they control. */
+  fetchAdminInvitations: async () => apiFetch('/api/admin/invitations'),
+
+  inviteAdmin: async ({ email, reason }, headers = {}) => apiFetch('/api/admin/invitations', {
+    method: 'POST', headers,
+    body: JSON.stringify({ email, reason, role: 'admin' }),
+  }),
+
+  revokeAdminInvitation: async (id) =>
+    apiFetch(`/api/admin/invitations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
   listMyAppeals: async () => apiFetch('/api/appeals/mine'),
 
   submitAppeal: async ({ subject, statement }) =>

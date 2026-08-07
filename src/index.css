@@ -7303,3 +7303,73 @@ input:disabled + .premium-slider {
   .impact-bar-value { grid-area: value; }
   .impact-bar-track { grid-area: track; }
 }
+
+/* ==========================================================================
+   Pending administrator invitations
+
+   Same grid-to-cards approach as the Audit Explorer, and for the same reason:
+   `.table` carries a 680px min-width and scrolls its wrapper, which on a phone
+   puts columns off screen behind a gesture nobody discovers. The labels are in
+   the markup and hidden where the header says them, so the stacked layout needs
+   no second copy and no ::before content a screen reader would read twice.
+   ========================================================================== */
+
+.invite-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s2);
+}
+
+.invite-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) 7rem 9rem auto;
+  grid-template-areas:
+    'address invitedby age expires revoke'
+    'reason  reason    reason reason revoke';
+  gap: var(--s1) var(--s3);
+  align-items: baseline;
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+/* An expired-but-unresolved invitation is shown rather than hidden: expiry is
+   derived from the data, so a row can be past its date and still pending, and
+   hiding it would tell an owner it is gone while the row is still there. */
+.invite-row[data-expired='true'] { border-left: 3px solid var(--warn); }
+
+.invite-cell:nth-of-type(1) { grid-area: address; }
+.invite-cell:nth-of-type(2) { grid-area: invitedby; }
+.invite-cell:nth-of-type(3) { grid-area: age; }
+.invite-cell:nth-of-type(4) { grid-area: expires; }
+.invite-reason { grid-area: reason; }
+.invite-revoke { grid-area: revoke; justify-self: end; align-self: center; }
+
+.invite-cell { min-width: 0; display: grid; gap: 2px; }
+.invite-email { font-weight: 600; overflow-wrap: anywhere; }
+
+.invite-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.invite-reason {
+  margin: var(--s1) 0 0;
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 60rem) {
+  .invite-row {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'address' 'invitedby' 'age' 'expires' 'reason' 'revoke';
+  }
+  .invite-revoke { justify-self: start; }
+}
