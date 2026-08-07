@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import readline from 'readline';
 import { recordAudit } from '../server/auditLog.js';
+import { ownershipAuditDetails, OWNERSHIP_EVENTS } from './ownershipAudit.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -80,9 +81,9 @@ async function main() {
 
       recordAudit(db, {
         adminId: user.id, // the subject of the revocation
-        action: 'OWNER_RETIRED',
+        action: OWNERSHIP_EVENTS.REVOKED,
         targetUserId: user.id,
-        details: reason
+        details: ownershipAuditDetails({ verb: 'revoked', email, reason }),
       });
 
       db.exec('COMMIT');

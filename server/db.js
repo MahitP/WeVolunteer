@@ -947,7 +947,7 @@ export function initDatabase() {
    */
   syncLegalDocuments(db);
   seedOrganizerAcceptance();
-  seedSuperAdmin();
+  assertNoDemoOwner();
 }
 
 /**
@@ -993,44 +993,56 @@ function seedOrganizerAcceptance() {
 }
 
 /**
- * Inserts the platform owner (super_admin) seed account.
+ * Refuses to boot if a demo database contains a platform owner.
  *
- * ── Why not in seedDatabase ──
+ * ── What used to be here ──
  *
- * `seedDatabase` runs before `runMigrations`, and migration 001 is what
- * expands the `users.role` CHECK constraint from
- * `('student', 'organizer', 'admin')` to include `super_admin` and `partner`.
- * Inserting a `super_admin` row before that migration runs violates the
- * constraint and crashes the server on every fresh database boot.
+ * `seedSuperAdmin()`, which inserted `user-super` / `owner@wevolunteer.local`
+ * with the role `super_admin` and a known password whenever DEMO_MODE was set.
+ * It was gated and it was convenient, and it was also the only code in this
+ * repository that could create an owner.
  *
- * Idempotent: the INSERT is OR IGNORE, so repeated calls on existing databases
- * produce no change and no error.
+ * That mattered more than the gate did. The platform's strongest defence
+ * against privilege escalation is not a permission check — it is that no code
+ * path exists: there is no `UPDATE users SET role` anywhere in `server/`, and
+ * `bin/make-admin.mjs` refuses any role but student and organizer. A seeding
+ * function made that "no path except this one", and an invariant with an
+ * exception is a convention.
+ *
+ * Ownership is now created in exactly two ways, both requiring direct access to
+ * the database file: `bin/grant-ownership.mjs`, or a deliberate bootstrap by an
+ * operator. Neither can be reached by anything running in the application.
+ *
+ * ── Why a guard rather than simply deleting the function ──
+ *
+ * Deleting it stops NEW demo databases getting an owner. It does nothing about
+ * the ones that already have `user-super` sitting in them from before this
+ * change, and those are the dangerous artefact: an account with full control
+ * over the platform whose password is a string in this file's git history.
+ *
+ * So the rule is enforced rather than intended. A demo database carrying an
+ * owner fails to start, and says how to remove it.
  */
-function seedSuperAdmin() {
+function assertNoDemoOwner() {
   if (!DEMO_MODE) return;
 
-  // Only seed the owner account if the rest of the demo dataset is present.
-  // This prevents a stray super_admin row from appearing in migration-only
-  // test fixtures that run initDatabase() against a hand-built schema that
-  // already has a non-zero user count (which bypasses seedDatabase() but
-  // inherits DEMO_MODE=true from the parent test runner process).
-  const adminSeedPresent = db.prepare("SELECT id FROM users WHERE id = 'user-admin'").get();
-  if (!adminSeedPresent) return;
+  const owners = db.prepare(
+    "SELECT id, email FROM users WHERE role = 'super_admin'"
+  ).all();
+  if (owners.length === 0) return;
 
-  const existing = db.prepare("SELECT id FROM users WHERE id = 'user-super'").get();
-  if (existing) return;
-
-  const salt = bcrypt.genSaltSync(10);
-  const passwordHash = bcrypt.hashSync('password123', salt);
-  const nowStr = new Date().toISOString();
-
-  db.prepare(`
-    INSERT INTO users (id, name, email, username, password_hash, grade, role, verified,
-                       avatar, bio, school, skills, email_verified, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run('user-super', 'Platform Owner', 'owner@wevolunteer.local', 'platformowner',
-         passwordHash, 'N/A', 'super_admin', 1, '👑', 'Platform owner.',
-         'WeVolunteer', JSON.stringify([]), 1, nowStr);
+  const who = owners.map(o => `${o.email} (${o.id})`).join(', ');
+  throw new Error(
+    'DEMO_MODE database contains a platform owner, which must never exist in a '
+    + `demo dataset: ${who}\n\n`
+    + 'This is almost certainly left over from the seeding function removed in '
+    + 'v1.2.0. An owner account with a seeded password is a full-control account '
+    + 'whose credentials are public.\n\n'
+    + 'Remove it, or demote it, before starting again:\n'
+    + "  UPDATE users SET role = 'student' WHERE role = 'super_admin';\n\n"
+    + 'Ownership is granted only by bin/grant-ownership.mjs or a deliberate '
+    + 'database bootstrap — never by anything the application runs.'
+  );
 }
 
 /**

@@ -40,8 +40,13 @@ const ACTIONS = {
   REPORT_EVIDENCE_VIEWED:   ['Report evidence read', TONES.GRAVE],
   ADMIN_PROMOTED:           ['Administrator promoted', TONES.GRAVE],
   ADMIN_REVOKED:            ['Administrator revoked', TONES.GRAVE],
-  OWNER_BOOTSTRAPPED:       ['Platform owner created', TONES.GRAVE],
-  OWNER_RETIRED:            ['Platform owner retired', TONES.GRAVE],
+  OWNER_GRANTED:            ['Ownership granted', TONES.GRAVE],
+  OWNER_REVOKED:            ['Ownership revoked', TONES.GRAVE],
+  /* The names these two carried before the CLI scripts were standardised.
+     Kept because the trail is append-only and immutable: rows written under the
+     old names still exist and still have to read as something. */
+  OWNER_BOOTSTRAPPED:       ['Ownership granted', TONES.GRAVE],
+  OWNER_RETIRED:            ['Ownership revoked', TONES.GRAVE],
   OWNER_CREDENTIAL_RESET:   ['Owner credentials reset', TONES.GRAVE],
 
   MODERATE_REPORT:          ['Report resolved', TONES.NOTABLE],

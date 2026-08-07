@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import readline from 'readline';
 import { recordAudit } from '../server/auditLog.js';
+import { ownershipAuditDetails, OWNERSHIP_EVENTS } from './ownershipAudit.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -82,9 +83,9 @@ async function main() {
 
       recordAudit(db, {
         adminId: user.id,
-        action: 'OWNER_BOOTSTRAPPED',
+        action: OWNERSHIP_EVENTS.GRANTED,
         targetUserId: user.id,
-        details: reason
+        details: ownershipAuditDetails({ verb: 'granted', email, reason }),
       });
 
       db.exec('COMMIT');

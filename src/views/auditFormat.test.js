@@ -47,6 +47,8 @@ describe('auditTone', () => {
     'REPORT_EVIDENCE_VIEWED',
     'ADMIN_PROMOTED',
     'ADMIN_REVOKED',
+    'OWNER_GRANTED',
+    'OWNER_REVOKED',
     'OWNER_BOOTSTRAPPED',
   ])('marks %s as grave', (action) => {
     expect(auditTone(action)).toBe(TONES.GRAVE);

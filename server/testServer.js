@@ -132,6 +132,43 @@ export async function startTestServer() {
     const res = await call('POST', '/api/auth/login', { email, password });
     return res.cookie;
   };
+
+  /**
+   * Promotes a seeded account to platform owner, by direct SQL.
+   *
+   * ── Why the suite has to do this itself now ──
+   *
+   * The demo seed used to insert `user-super` whenever DEMO_MODE was set, and
+   * three suites signed in as it. That seeding function is gone: it was the only
+   * code in the repository that could create an owner, and the platform's
+   * strongest defence against privilege escalation is that no such code exists.
+   * `db.js` now refuses to boot a demo database that contains one.
+   *
+   * ── Why direct SQL rather than a route ──
+   *
+   * Because that is how ownership is actually created. There is no endpoint, and
+   * adding one for the convenience of tests would recreate exactly the path this
+   * change removed. `bin/grant-ownership.mjs` does the same UPDATE against the
+   * same column; this is that statement, run against a throwaway database.
+   *
+   * Bumps `token_version` for the same reason the real script does: the role on
+   * an already-issued cookie is stale the moment it changes.
+   */
+  const makeOwner = async (email) => {
+    const { db } = await import('./db.js');
+    const row = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (!row) throw new Error(`makeOwner: no account for ${email}`);
+    db.prepare(
+      "UPDATE users SET role = 'super_admin', token_version = token_version + 1 WHERE id = ?"
+    ).run(row.id);
+    return row.id;
+  };
+
+  /** `makeOwner` then sign in, which is what every caller actually wants. */
+  const loginAsOwner = async (email, password = 'password123') => {
+    await makeOwner(email);
+    return login(email, password);
+  };
   
   // Consent supplied for the same reason signupConfirmed does: this helper's
   // job is "give me an account", not "exercise the consent gate".
@@ -280,6 +317,8 @@ export async function startTestServer() {
     close,
     call,
     login,
+    makeOwner,
+    loginAsOwner,
     signup,
     confirmEmail,
     signupConfirmed,

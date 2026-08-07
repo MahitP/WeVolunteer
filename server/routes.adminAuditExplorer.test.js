@@ -2,6 +2,19 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer } from './testServer.js';
 
 /**
+ * The owner is promoted by this suite, not seeded.
+ *
+ * `seedSuperAdmin()` used to insert `owner@wevolunteer.local` whenever DEMO_MODE
+ * was set. It is gone: it was the only code in the repository that could create
+ * an owner, and "no code path exists" is a stronger guarantee than any
+ * permission check. `db.js` now refuses to boot a demo database containing one.
+ *
+ * `srv.loginAsOwner` runs the same UPDATE `bin/grant-ownership.mjs` runs,
+ * against this suite's throwaway database.
+ */
+const OWNER_EMAIL = 'dsanger@outlook.com';
+
+/**
  * `audit.read` is SUPER_ONLY as of M1c, so every success case below signs in as
  * the OWNER, not as an administrator.
  *
@@ -17,7 +30,7 @@ describe('Admin Audit Explorer API', () => {
 
   beforeAll(async () => {
     srv = await startTestServer();
-    owner = await srv.login('owner@wevolunteer.local');
+    owner = await srv.loginAsOwner(OWNER_EMAIL);
     admin = await srv.login('admin@example.gov');
     student = await srv.login('leo.chen28@gmail.com');
     const dbModule = await import('./db.js');

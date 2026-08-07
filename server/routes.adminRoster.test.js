@@ -2,6 +2,19 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer } from './testServer.js';
 import { recordAudit } from './auditLog.js';
 
+/**
+ * The owner is promoted by this suite, not seeded.
+ *
+ * `seedSuperAdmin()` used to insert `owner@wevolunteer.local` whenever DEMO_MODE
+ * was set. It is gone: it was the only code in the repository that could create
+ * an owner, and "no code path exists" is a stronger guarantee than any
+ * permission check. `db.js` now refuses to boot a demo database containing one.
+ *
+ * `srv.loginAsOwner` runs the same UPDATE `bin/grant-ownership.mjs` runs,
+ * against this suite's throwaway database.
+ */
+const OWNER_EMAIL = 'dsanger@outlook.com';
+
 let srv;
 let db;
 beforeAll(async () => { 
@@ -34,7 +47,7 @@ describe('GET /api/admin/roster', () => {
   });
 
   it('allows owner (super_admin) requests and returns proper roster data', async () => {
-    const ownerToken = await srv.login('owner@wevolunteer.local');
+    const ownerToken = await srv.loginAsOwner(OWNER_EMAIL);
     
     const adminUser = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get();
     const studentUser = db.prepare("SELECT id FROM users WHERE email = 'leo.chen28@gmail.com'").get();
@@ -62,7 +75,7 @@ describe('GET /api/admin/roster', () => {
     
     const owner = data.find(u => u.isOwner === true);
     expect(owner).toBeDefined();
-    expect(owner.email).toBe('owner@wevolunteer.local');
+    expect(owner.email).toBe(OWNER_EMAIL);
     expect(owner.capabilities).toContain('admin.create');
     
     const admin = data.find(u => u.email === 'admin@example.gov');
