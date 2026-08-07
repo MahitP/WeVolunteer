@@ -36,13 +36,13 @@ router.get('/api/applications', authenticateToken, (req, res) => {
     // first here so the wildcard resolves to the same (correct) branch an
     // admin would.
     //
-    // `audit.read` is admin-only among named roles (organizer/student/partner
+    // `application.read_all` is admin-only among named roles (organizer/student/partner
     // do not hold it) and reads as "platform-wide oversight", which is what
     // seeing every application unscoped actually is — so it, not an `else`,
     // is the unscoped branch's gate. The cascade ends in an explicit empty
     // result, not a bare unscoped `else`: "no recognised capability" must
     // default to seeing nothing, never to seeing everything.
-    if (can(req.principal, 'audit.read')) {
+    if (can(req.principal, 'application.read_all')) {
       // admin, and super_admin via the wildcard: every application.
       rows = db.prepare(BASE_QUERY).all();
     } else if (can(req.principal, 'applicant.review')) {

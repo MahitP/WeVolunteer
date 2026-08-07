@@ -48,6 +48,8 @@ export const SENSITIVE_ACTIONS = {
    * are doing the former.
    */
   'data.download':    { label: 'download your data archive',     methods: ['password', 'oauth'], bindsParams: ['jobId'] },
+  'admin.promote':    { label: 'promote an administrator',       methods: ['password', 'oauth'], bindsParams: ['targetUserId'] },
+  'admin.revoke':     { label: 'revoke an administrator',        methods: ['password', 'oauth'], bindsParams: ['targetUserId'] },
 };
 
 export function isSensitiveAction(action) {

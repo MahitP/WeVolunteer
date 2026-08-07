@@ -15,7 +15,7 @@ describe('sensitive action registry', () => {
    */
   it('lists exactly the actions requiring step-up', () => {
     expect(Object.keys(SENSITIVE_ACTIONS).sort()).toEqual([
-      'account.delete', 'data.download', 'data.export', 'email.change',
+      'account.delete', 'admin.promote', 'admin.revoke', 'data.download', 'data.export', 'email.change',
       'oauth.link', 'oauth.unlink', 'password.change',
     ]);
   });

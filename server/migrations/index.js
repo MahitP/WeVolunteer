@@ -28,6 +28,8 @@ import legalV1Republish from './016_legal_v1_republish.js';
 import timedSuspension from './017_timed_suspension.js';
 import adminConversations from './018_admin_conversations.js';
 import auditLogHardening from './019_audit_log_hardening.js';
+import administratorRoster from './020_administrator_roster.js';
+import administratorPromotionMetadata from './021_administrator_promotion_metadata.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -67,6 +69,14 @@ export const MIGRATIONS = [
    * Additive, no table rebuild required.
    */
   auditLogHardening,
+  /**
+   * 020 adds last_sign_in_at to users and a composite index to admin_audit_logs.
+   */
+  administratorRoster,
+  /**
+   * 021 adds promoted_at, promoted_by, and promotion_reason to users.
+   */
+  administratorPromotionMetadata,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

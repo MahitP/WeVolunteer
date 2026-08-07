@@ -26,7 +26,7 @@ import {
 } from './routes/index.jsx';
 import {
   LayoutDashboard, Compass, CalendarPlus, ShieldCheck, LogOut, CalendarDays,
-  UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon, Bug
+  UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon, Bug, Activity
 } from 'lucide-react';
 
 // The two heaviest modals. EventModal pulls in the whole organizer surface —
@@ -174,6 +174,8 @@ const NAV = [
      mobile primary row, and super_admin's first four must not shift. */
   { id: 'errors', path: '/errors', label: 'Errors', icon: Bug, requiredCap: 'error.read' },
   { id: 'appeals', path: '/admin/appeals', label: 'Appeals', icon: ShieldCheck, requiredCap: 'appeal.review' },
+  { id: 'audit', path: '/admin/audit-logs', label: 'Audit Log', icon: Activity, requiredCap: 'audit.read' },
+  { id: 'roster', path: '/admin/roster', label: 'Admin Roster', icon: UserCog, requiredCap: 'admin.create' },
   { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS }
 ];
 
@@ -222,6 +224,8 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/settings')) return 'settings';
   if (pathname.startsWith('/messages')) return 'messages';
   if (pathname.startsWith('/admin/appeals')) return 'appeals';
+  if (pathname.startsWith('/admin/audit-logs')) return 'audit';
+  if (pathname.startsWith('/admin/roster')) return 'roster';
   return 'dashboard';
 }
 
@@ -771,7 +775,11 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
     '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
     '/errors': { addToast },
-    '/admin/appeals': {}
+    '/admin/appeals': {
+      userRole: currentUser.role,
+    },
+    '/admin/audit-logs': {},
+    '/admin/roster': {}
   };
 
   /** Where a route the user cannot reach sends them. Unchanged from the ternaries. */

@@ -8,9 +8,20 @@
  * This is UX only. Every capability is re-checked server-side; hiding a control
  * here is a convenience, never a security boundary.
  */
-import { can as decide, principalFor, CAPABILITIES, SUPER_ONLY, ROLES, ALL_CAPABILITIES } from '../server/authz.js';
+import { can as decide, principalFor, CAPABILITIES, SUPER_ONLY, ROLES, ROLE, ALL_CAPABILITIES } from '../server/authz.js';
 
-export { CAPABILITIES, SUPER_ONLY, ROLES, ALL_CAPABILITIES };
+/**
+ * `ROLE` is re-exported for the same reason the server has it: a few decisions
+ * genuinely are about which KIND of account something is, not what it may do,
+ * and those need a way to name a role without hardcoding the string.
+ *
+ * The Administrator Roster's promotion lookup is one — "this person is already
+ * an administrator" and "only students can be promoted" are statements about the
+ * target's role, and there is no capability that expresses either. See the
+ * header above `ROLE` in server/authz.js: the rule the completeness guard
+ * enforces is "role names live in one file", not "roles are never named".
+ */
+export { CAPABILITIES, SUPER_ONLY, ROLES, ROLE, ALL_CAPABILITIES };
 
 /**
  * `user` is the object from /api/auth/me — `{ id, role, withheld, … }`.

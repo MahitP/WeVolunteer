@@ -911,7 +911,45 @@ export const api = {
     }),
 
   /* ── The moderator-facing appeals queue (`AdminAppeals.jsx`) ─────────────────── */
+  
+  // Audit Explorer
+  fetchAdminRoster: async () => {
+    return apiFetch('/api/admin/roster');
+  },
 
+  lookupUserByEmail: async (email) => {
+    return apiFetch(`/api/admin/users/lookup?email=${encodeURIComponent(email)}`);
+  },
+
+  promoteAdmin: async (userId, reason, headers = {}) => {
+    return apiFetch(`/api/admin/users/${userId}/promote`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ reason })
+    });
+  },
+
+  revokeAdmin: async (userId, headers = {}) => {
+    return apiFetch(`/api/admin/users/${userId}/revoke`, {
+      method: 'POST',
+      headers
+    });
+  },
+
+  fetchAuditLogs: async (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.page) q.append('page', params.page);
+    if (params.limit) q.append('limit', params.limit);
+    if (params.action) q.append('action', params.action);
+    if (params.adminId) q.append('adminId', params.adminId);
+    if (params.targetUserId) q.append('targetUserId', params.targetUserId);
+    if (params.startDate) q.append('startDate', params.startDate);
+    if (params.endDate) q.append('endDate', params.endDate);
+    if (params.search) q.append('search', params.search);
+    return apiFetch(`/api/admin/audit-logs?${q.toString()}`);
+  },
+
+  // Appeals
   fetchAdminAppeals: async () => apiFetch('/api/admin/appeals'),
 
   fetchAdminAppeal: async (id) =>

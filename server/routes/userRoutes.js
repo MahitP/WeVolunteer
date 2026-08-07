@@ -36,7 +36,7 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
       WHERE a.user_id = ? AND e.organizer_id = ?
       LIMIT 1
     `).get(req.params.id, req.principal.userId);
-    const canSeeContact = isSelf || can(req.principal, 'audit.read') || hostsApplicant;
+    const canSeeContact = isSelf || can(req.principal, 'user.contact.read') || hostsApplicant;
 
     const totals = db.prepare(`
       SELECT COALESCE(SUM(hours_awarded), 0) as hours,

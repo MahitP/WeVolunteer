@@ -47,6 +47,8 @@ const FEATURE_NAMES = Object.freeze({
   'error.read': 'the error dashboard',
   'appeal.review': 'the appeals queue',
   'report.resolve': 'the Moderation Center',
+  'audit.read': 'the Audit Explorer',
+  'admin.create': 'the Administrator Roster',
 });
 
 /**

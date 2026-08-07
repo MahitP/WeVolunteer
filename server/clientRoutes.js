@@ -87,6 +87,8 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
      every other failure, so a blind spot here hides all of them. */
   '/errors',
   '/admin/appeals',
+  '/admin/audit-logs',
+  '/admin/roster',
 
   // src/routes/index.jsx — SIGNED_OUT_ROUTES
   '/welcome',

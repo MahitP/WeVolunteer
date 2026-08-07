@@ -8,8 +8,9 @@ import { db } from '../db.js';
 import { notificationService } from '../services/notificationService.js';
 import { getMailHealth } from '../email.js';
 import { getQueueHealth } from '../workers/notificationWorker.js';
-import { requireCap, can, principalFor } from '../authz.js';
+import { requireCap, can, principalFor, ALL_CAPABILITIES, requireAAL2, ROLE } from '../authz.js';
 import { grantsFor } from '../userCapabilities.js';
+import { spendChallenge } from '../reauthResponses.js';
 import { recordAudit } from '../auditLog.js';
 import {
   REPORT_PRIORITIES, REPORT_RESOLUTIONS, REPORT_STATUSES, REPORT_TARGET_TYPES,
@@ -1204,7 +1205,20 @@ function hoursLedgerStatus() {
  * as unknown rather than 500-ing the whole panel, because a status endpoint that
  * goes down during an incident is worse than one that admits partial ignorance.
  */
-router.get('/api/admin/system/status', authenticateToken, requireCap('audit.read'), (req, res) => {
+/**
+ * Gated on `analytics.school`, not `audit.read`.
+ *
+ * It was `audit.read` until M1c, which is how a capability named for the audit
+ * trail came to be the gate on a mail-and-queue health panel that has nothing to
+ * do with it. When `audit.read` moved to SUPER_ONLY, keeping this gate would have
+ * taken system status away from every administrator as a side effect of securing
+ * a different screen — so the two had to move together, in one commit, or there
+ * would be a window with no operational visibility for the people on call.
+ *
+ * `analytics.school` is what administrators already hold for platform-health
+ * figures, and it is what this endpoint actually returns.
+ */
+router.get('/api/admin/system/status', authenticateToken, requireCap('analytics.school'), (req, res) => {
   const smtpConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 
   res.json({
@@ -1789,6 +1803,265 @@ router.post('/api/admin/users/:id/appeal-token', authenticateToken, requireCap('
   }
 
   res.json({ success: true, token, expiresAt });
+});
+
+router.get('/api/admin/audit-logs', authenticateToken, requireCap('audit.read'), (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const offset = (page - 1) * limit;
+
+  const conditions = [];
+  const params = [];
+
+  if (req.query.action) {
+    conditions.push('a.action = ?');
+    params.push(req.query.action);
+  }
+  if (req.query.adminId) {
+    conditions.push('a.admin_id = ?');
+    params.push(req.query.adminId);
+  }
+  if (req.query.targetUserId) {
+    conditions.push('a.target_user_id = ?');
+    params.push(req.query.targetUserId);
+  }
+  if (req.query.startDate) {
+    conditions.push('a.created_at >= ?');
+    params.push(req.query.startDate);
+  }
+  if (req.query.endDate) {
+    conditions.push('a.created_at <= ?');
+    params.push(req.query.endDate);
+  }
+  if (req.query.search) {
+    conditions.push('a.details LIKE ?');
+    params.push(`%${req.query.search}%`);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  try {
+    const totalRow = db.prepare(`
+      SELECT COUNT(*) as count 
+      FROM admin_audit_logs a
+      ${whereClause}
+    `).get(...params);
+    const total = totalRow.count;
+
+    const logs = db.prepare(`
+      SELECT a.*, 
+             COALESCE(u_admin.name, 'Account since deleted') as admin_name,
+             COALESCE(u_target.name, 'Account since deleted') as target_user_name
+      FROM admin_audit_logs a
+      LEFT JOIN users u_admin ON a.admin_id = u_admin.id
+      LEFT JOIN users u_target ON a.target_user_id = u_target.id
+      ${whereClause}
+      ORDER BY a.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
+
+    res.json({
+      logs,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit)
+    });
+  } catch (err) {
+    console.error('Failed to fetch audit logs:', err);
+    res.status(500).json({ error: 'Failed to fetch audit logs' });
+  }
+});
+
+// P-02: Administrator Roster
+router.get('/api/admin/roster', authenticateToken, requireCap('admin.create'), (req, res) => {
+  try {
+    const admins = db.prepare(`
+      SELECT id, name, email, role, avatar, last_sign_in_at,
+             promoted_at, promoted_by, promotion_reason
+      FROM users
+      WHERE role IN ('admin', 'super_admin')
+      AND account_status = 'active'
+    `).all();
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const roster = admins.map(admin => {
+      // Recompute capabilities using kernel
+      const principal = principalFor(admin, {
+        grants: grantsFor(db, admin.id)
+      });
+      
+      const counts = db.prepare(`
+        SELECT action, COUNT(*) as count
+        FROM admin_audit_logs
+        WHERE admin_id = ? AND created_at >= ?
+        GROUP BY action
+      `).all(admin.id, thirtyDaysAgo);
+
+      let decisionCount = 0;
+      let evidenceReadCount = 0;
+      
+      for (const row of counts) {
+        if (row.action === 'REPORT_EVIDENCE_VIEWED') {
+          evidenceReadCount += row.count;
+        } else if (
+          row.action === 'MODERATE_REPORT' ||
+          row.action === 'MODERATE_REPORT_SELF_REVIEW' ||
+          row.action === 'USER_SUSPENDED' ||
+          row.action === 'USER_UNSUSPENDED' ||
+          row.action === 'USER_WARNED' ||
+          row.action === 'APPROVE_ORGANIZER' ||
+          row.action === 'DENY_ORGANIZER'
+        ) {
+          decisionCount += row.count;
+        }
+      }
+
+      return {
+        id: admin.id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+        avatar: admin.avatar,
+        lastSignInAt: admin.last_sign_in_at || null,
+        promotedAt: admin.promoted_at || null,
+        promotedBy: admin.promoted_by || null,
+        promotionReason: admin.promotion_reason || null,
+        isOwner: admin.role === ROLE.SUPER_ADMIN,
+        capabilities: ALL_CAPABILITIES.filter(cap => can(principal, cap)),
+        grants: principal.grants,
+        withholdings: principal.withheld,
+        decisionCount,
+        evidenceReadCount
+      };
+    });
+
+    res.json(roster);
+  } catch (err) {
+    console.error('Failed to fetch admin roster:', err);
+    res.status(500).json({ error: 'Failed to fetch admin roster' });
+  }
+});
+
+router.get('/api/admin/users/lookup', authenticateToken, requireCap('admin.create'), (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).json({ error: 'Email query parameter is required' });
+
+  try {
+    const user = db.prepare('SELECT id, name, email, avatar, role FROM users WHERE email = ? COLLATE NOCASE').get(email);
+    if (!user) return res.status(404).json({ error: 'No user found with that email address' });
+
+    res.json({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar,
+      role: user.role
+    });
+  } catch (err) {
+    console.error('Failed to lookup user:', err);
+    res.status(500).json({ error: 'Failed to lookup user' });
+  }
+});
+
+router.post('/api/admin/users/:id/promote', authenticateToken, requireCap('admin.create'), requireAAL2('admin.promote'), async (req, res) => {
+  const targetUserId = req.params.id;
+  const { reason } = req.body;
+
+  if (!reason || typeof reason !== 'string' || reason.trim() === '') {
+    return res.status(400).json({ error: 'Promotion requires a stated reason', field: 'reason' });
+  }
+
+  try {
+    const target = db.prepare('SELECT id, role, email FROM users WHERE id = ?').get(targetUserId);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    if (target.role === ROLE.ADMIN || target.role === ROLE.SUPER_ADMIN) {
+      return res.status(400).json({ error: 'User is already an administrator' });
+    }
+
+    inTransaction(() => {
+      spendChallenge(db, req, 'admin.promote', { targetUserId });
+
+      db.prepare(`
+        UPDATE users 
+        SET role = ?, promoted_at = CURRENT_TIMESTAMP, promoted_by = ?, promotion_reason = ? 
+        WHERE id = ?
+      `).run(ROLE.ADMIN, req.user.id, reason.trim(), targetUserId);
+
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'ADMIN_PROMOTED',
+        targetUserId,
+        details: `Promoted to administrator. Reason: ${reason.trim()}`
+      });
+    });
+
+    notificationService.dispatch('ADMIN_PROMOTED', { reason: reason.trim() }, targetUserId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Failed to promote user:', err);
+    res.status(500).json({ error: 'Failed to promote user' });
+  }
+});
+
+router.post('/api/admin/users/:id/revoke', authenticateToken, requireCap('admin.create'), requireAAL2('admin.revoke'), async (req, res) => {
+  const targetUserId = req.params.id;
+
+  try {
+    const target = db.prepare('SELECT id, role, email FROM users WHERE id = ?').get(targetUserId);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    
+    if (target.role === ROLE.SUPER_ADMIN) {
+      return res.status(403).json({ error: 'Cannot revoke the platform owner' });
+    }
+    if (targetUserId === req.user.id) {
+      return res.status(403).json({ error: 'Cannot revoke your own administrative access' });
+    }
+    if (target.role !== ROLE.ADMIN) {
+      return res.status(400).json({ error: 'User is not an administrator' });
+    }
+
+    inTransaction(() => {
+      spendChallenge(db, req, 'admin.revoke', { targetUserId });
+
+      db.prepare(`
+        UPDATE users
+        SET role = ?, promoted_at = NULL, promoted_by = NULL, promotion_reason = NULL
+        WHERE id = ?
+      `).run(ROLE.STUDENT, targetUserId);
+
+      /**
+       * Per-user grants go with the role, in the same transaction.
+       *
+       * Dropping the role alone is not a revocation. `grantsFor()` reads
+       * `user_capabilities` unconditionally and unions it into the principal, so
+       * an administrator who had been given a grant — the triage-helper pattern
+       * migration 002 exists for — would keep it after being demoted to
+       * `student`. The most consequential case is `report.evidence.read`: the
+       * ability to read students' private message bodies, which is the most
+       * invasive power on this platform and precisely the kind of thing a
+       * revocation is meant to end.
+       *
+       * Wiping unconditionally rather than selectively: a revoked administrator
+       * has no grant that should survive, and enumerating which ones might would
+       * be a list that goes stale the first time a capability is added.
+       */
+      db.prepare('DELETE FROM user_capabilities WHERE user_id = ?').run(targetUserId);
+
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'ADMIN_REVOKED',
+        targetUserId,
+        details: 'Revoked administrative access, including any per-user capability grants'
+      });
+    });
+
+    notificationService.dispatch('ADMIN_REVOKED', {}, targetUserId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Failed to revoke user:', err);
+    res.status(500).json({ error: 'Failed to revoke user' });
+  }
 });
 
 export default router;

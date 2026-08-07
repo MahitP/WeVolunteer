@@ -17,6 +17,7 @@ import { db, initDatabase } from '../db.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
 import { isSuspended, liftIfExpired } from '../suspension.js';
+import { ROLE } from '../authz.js';
 
 const router = express.Router();
 
@@ -105,6 +106,12 @@ export function __resetLoginThrottle() {
 
 /** Signs the caller in by setting the session cookie. */
 export function issueSession(res, user, tokenVersion) {
+  try {
+    db.prepare('UPDATE users SET last_sign_in_at = ? WHERE id = ?').run(new Date().toISOString(), user.id);
+  } catch (err) {
+    console.error('Failed to record last sign-in:', err);
+  }
+
   const token = jwt.sign(
     {
       id: user.id, role: user.role, email: user.email, name: user.name,
@@ -256,7 +263,7 @@ router.post('/api/auth/signup', async (req, res) => {
 
     // Organizers are approved by staff before they can post events. Separate
     // gate from confirming an email address; both must pass.
-    const verifiedVal = fields.role === 'organizer' ? 0 : 1;
+    const verifiedVal = fields.role === ROLE.ORGANIZER ? 0 : 1;
 
     /**
      * Only a provider that actually attests to the address counts as
