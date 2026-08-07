@@ -27,7 +27,7 @@ import {
 } from './routes/index.jsx';
 import {
   LayoutDashboard, Compass, CalendarPlus, ShieldCheck, LogOut, CalendarDays,
-  UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon, Bug, Activity
+  UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon, Bug, Activity, Sprout
 } from 'lucide-react';
 
 // The two heaviest modals. EventModal pulls in the whole organizer surface —
@@ -175,6 +175,10 @@ const NAV = [
      mobile primary row, and super_admin's first four must not shift. */
   { id: 'errors', path: '/errors', label: 'Errors', icon: Bug, requiredCap: 'error.read' },
   { id: 'appeals', path: '/admin/appeals', label: 'Appeals', icon: ShieldCheck, requiredCap: 'appeal.review' },
+  /* Held by every signed-in role, so this entry shows for everybody. That is
+     the intent: the student quoting a figure on a college application and the
+     organizer writing a grant report are looking at the same page. */
+  { id: 'impact', path: '/impact', label: 'Community impact', icon: Sprout, requiredCap: 'analytics.impact' },
   { id: 'audit', path: '/admin/audit-logs', label: 'Audit Log', icon: Activity, requiredCap: 'audit.read' },
   { id: 'roster', path: '/admin/roster', label: 'Admin Roster', icon: UserCog, requiredCap: 'admin.create' },
   { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS }
@@ -225,6 +229,7 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/settings')) return 'settings';
   if (pathname.startsWith('/messages')) return 'messages';
   if (pathname.startsWith('/admin/appeals')) return 'appeals';
+  if (pathname.startsWith('/impact')) return 'impact';
   if (pathname.startsWith('/admin/audit-logs')) return 'audit';
   if (pathname.startsWith('/admin/roster')) return 'roster';
   return 'dashboard';
@@ -802,6 +807,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/admin/appeals': {
       userRole: currentUser.role,
     },
+    '/impact': {},
     '/admin/audit-logs': {},
     '/admin/roster': {}
   };

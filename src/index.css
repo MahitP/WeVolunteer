@@ -7207,3 +7207,99 @@ input:disabled + .premium-slider {
   .audit-filter-search { grid-column: 1 / -1; }
   .audit-filter-submit { grid-column: 1 / -1; }
 }
+
+/* ==========================================================================
+   Community impact
+
+   Read by three people at once: a student attaching a number to a college
+   application, an organizer writing a grant report, and a parent deciding
+   whether this is real. The layout follows from that — a figure is never shown
+   without the sentence saying what it counts, because "1,240 hours" invites the
+   question "hours of what, claimed by whom" and the answer belongs in the same
+   breath rather than in a footnote nobody reads.
+   ========================================================================== */
+
+.impact-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--s3);
+}
+
+.impact-figure {
+  display: grid;
+  gap: var(--s1);
+  padding: var(--s4);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.impact-figure-icon { color: var(--brand); }
+
+.impact-figure-value {
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.impact-figure-label { font-weight: 600; }
+
+/* The caveat, and the reason the number is believable. Quieter than the figure,
+   never absent from it. */
+.impact-figure-note {
+  color: var(--ink-3);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.impact-bars { display: grid; gap: var(--s2); }
+
+.impact-bar-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr) 6rem;
+  align-items: center;
+  gap: var(--s3);
+  font-size: 0.875rem;
+}
+
+.impact-bar-label { color: var(--ink-2); }
+
+.impact-bar-track {
+  height: 0.625rem;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.impact-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-full);
+  background: var(--brand);
+}
+
+.impact-bar-value { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* A withheld row keeps its place in the list and loses its bar. Dropping it
+   would let a reader believe they had the whole picture; drawing a bar of zero
+   would state that nothing happened. Neither is true. */
+.impact-bar-suppressed .impact-bar-label,
+.impact-bar-suppressed .impact-bar-value { color: var(--ink-3); font-style: italic; }
+.impact-bar-suppressed .impact-bar-track { background: repeating-linear-gradient(
+  90deg, var(--surface-3) 0 4px, transparent 4px 8px); }
+
+.impact-note { max-width: 62ch; line-height: 1.55; }
+
+@media (max-width: 40rem) {
+  /* The label and the figure stack above the bar rather than being squeezed
+     into three columns nobody can read. */
+  .impact-bar-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'label value' 'track track';
+    gap: var(--s1) var(--s3);
+  }
+  .impact-bar-label { grid-area: label; }
+  .impact-bar-value { grid-area: value; }
+  .impact-bar-track { grid-area: track; }
+}

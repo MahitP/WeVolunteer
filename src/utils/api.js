@@ -920,6 +920,13 @@ export const api = {
    * are two of the only four routes a suspended session may reach at all
    * (`server/suspendedAccess.js`).
    */
+  /**
+   * The community impact figures. One call, not one per section: the numbers are
+   * read against each other, and a client that fetched four of six could render
+   * a total without the caveat that made it honest.
+   */
+  fetchImpact: async () => apiFetch('/api/impact'),
+
   listMyAppeals: async () => apiFetch('/api/appeals/mine'),
 
   submitAppeal: async ({ subject, statement }) =>

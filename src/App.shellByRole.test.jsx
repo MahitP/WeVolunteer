@@ -121,8 +121,8 @@ describe('navigation, per role', () => {
    * just the set.
    */
   it.each([
-    ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'My profile']],
-    ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'New event', 'Notifications', 'My profile']],
+    ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Community impact', 'My profile']],
+    ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'New event', 'Notifications', 'Community impact', 'My profile']],
     /**
      * Admin GAINED `Messages`, and this pin was updated deliberately rather than
      * relaxed.
@@ -154,7 +154,7 @@ describe('navigation, per role', () => {
      * This list is exact rather than a `toContain`, so the entry cannot return
      * unnoticed — which is exactly how it got here the first time.
      */
-    ['admin', ['Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Appeals']]
+    ['admin', ['Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Appeals', 'Community impact']]
   ])('%s nav is what its capabilities justify', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
   });
@@ -163,7 +163,7 @@ describe('navigation, per role', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
       'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'New event',
-      'Notifications', 'Errors', 'Appeals', 'Audit Log', 'Admin Roster', 'My profile'
+      'Notifications', 'Errors', 'Appeals', 'Community impact', 'Audit Log', 'Admin Roster', 'My profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
     expect(items.length).toBeGreaterThan(0);
@@ -196,7 +196,7 @@ describe('navigation, per role', () => {
   it('partner gets only what analytics.public/event.view justify', () => {
     // No dashboard entry, because partner has no dashboard to be sent to —
     // an entry pointing at a page that says "nothing here" is worse than none.
-    expect(navItemsFor(USER('partner')).map(n => n.label)).toEqual(['Opportunities']);
+    expect(navItemsFor(USER('partner')).map(n => n.label)).toEqual(['Opportunities', 'Community impact']);
   });
 
   it('an unverified organizer still loses New event', () => {
@@ -210,7 +210,7 @@ describe('navigation, per role', () => {
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
       'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'New event',
-      'Notifications', 'Errors', 'Appeals', 'Audit Log', 'Admin Roster', 'My profile'
+      'Notifications', 'Errors', 'Appeals', 'Community impact', 'Audit Log', 'Admin Roster', 'My profile'
     ]);
   });
 
@@ -219,7 +219,7 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
-      'Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Appeals'
+      'Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Appeals', 'Community impact'
     ]);
   });
 
