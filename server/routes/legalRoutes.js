@@ -1,7 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { DEMO_MODE } from '../config.js';
-import { LEGAL_DOCUMENTS, documentBySlug } from '../legalDocuments.js';
+import { LEGAL_DOCUMENTS, documentBySlug, publishedHash } from '../legalDocuments.js';
 import { policyContent, PolicyContentError } from '../legalContent.js';
 
 /**
@@ -69,7 +69,16 @@ function publicMeta(doc) {
     scope: doc.scope,
     summary: doc.summary,
     effectiveAt: doc.effectiveAt,
-    contentHash: doc.contentHash,
+    /**
+     * What was actually published, not the pinned constant.
+     *
+     * `LegalDocument.jsx` renders the first 16 characters of this as a "Content
+     * fingerprint" beside the text. Before launch the pinned constant is allowed
+     * to lag the file (see LEGAL_HASHES_ENFORCED), so reporting it here would
+     * print a fingerprint that does not describe the words underneath it — a
+     * worse failure than no fingerprint, because it looks like verification.
+     */
+    contentHash: publishedHash(doc),
     bundledWith: doc.bundledWith,
   };
 }

@@ -37,7 +37,20 @@ instead of a password.
 
 ---
 
-## Q-2 · Should the event taxonomy become impact-oriented?
+## Q-2 · ~~Should the event taxonomy become impact-oriented?~~ — ANSWERED 2026-08-07
+
+**Owner's answer: organizer-created tags. No fixed taxonomy.** This supersedes the
+recommendation below, which proposed a curated tag vocabulary. Implementation is pending — see
+the note in `docs/audits/remaining-implementation-roadmap.md`. One consequence worth stating
+before it is built: free-form tags make the Impact Dashboard's "where the effort went" section
+harder to aggregate honestly, and organizers typing specifics is a privacy hazard on a platform
+whose users are mostly minors. The build will normalise case and whitespace, suppress tags below
+the same five-volunteer floor every other breakdown uses, and never render a tag as a heading
+without that suppression.
+
+Original analysis kept below for the record.
+
+### Original
 
 **Question.** The taxonomy is `School | 5K | Food Pantry | Fundraiser | Other`, enforced by a
 CHECK constraint. The impact brief asks for need-oriented categories — Education, Food
@@ -102,7 +115,21 @@ all in place, so the public variant is a route and a gate.
 
 ---
 
-## Q-4 · The Youth Safety Guidelines promise less than the platform now does
+## Q-4 · ~~The Youth Safety Guidelines promise less than the platform now does~~ — RESOLVED 2026-08-07
+
+**Resolved by the owner's decision to make legal content hashes advisory before launch.** The
+blocker was never the wording: it was that editing a published document invalidated every
+acceptance record, which made a one-sentence correction a legal decision. With
+`LEGAL_HASHES_ENFORCED` false, documents stay at version 1.0 and the text can be corrected.
+
+The sentence now reads: opening preserved messages requires the administrator to re-enter their
+password at that moment, the permission to do it is separate from the permission to decide the
+report, and each access is recorded against that specific report in a log that cannot be edited
+or deleted. All three of those are true and tested.
+
+Original question kept below for the record.
+
+### Original
 
 **Question.** The published text says reading a student's private messages "is the one
 situation in which an administrator reads private messages, and it is logged." As of this run

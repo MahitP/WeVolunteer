@@ -233,7 +233,10 @@ You will not get in trouble for reporting something that turns out to be nothing
    that sorting decides how quickly we are told, and it is the only thing software decides. No
    software closes a report, decides what happened, or acts on an account.
 2. **We look at what was reported** — including the messages in a reported conversation. This
-   is the one situation in which an administrator reads private messages, and it is logged.
+   is the one situation in which an administrator reads private messages. Opening them requires
+   the administrator to re-enter their password at that moment, the permission to do it is
+   separate from the permission to decide the report, and each access is recorded against that
+   specific report in a log that cannot be edited or deleted.
 3. **We act.** Depending on what we find: a warning, removing content, suspending an account,
    or suspending an organizer permanently. A suspension ends every session that account has,
    immediately — not just the next sign-in.
