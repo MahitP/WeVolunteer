@@ -495,10 +495,14 @@ describe('authorization hygiene', () => {
          still `viewingProfile.type === 'organizer'`, the same view discriminator
          described below. Mechanically bumping a line number without looking is
          how an exemption outlives the code that earned it. */
-      /* 954 → 1008 when the rail gained groups and the create entry left it.
-         Re-read at the new line: still `viewingProfile.type === 'organizer'`,
-         the `?type=` view discriminator described below. */
-      'src/App.jsx:1008': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      /* 950 → 954 → 1008 → 1116 across the create-button move and the rail
+         grouping. Re-read at each new line before the pin moved, this time
+         included: still `viewingProfile.type === 'organizer'`, the `?type=` view
+         discriminator described below. The number has now moved four times, which
+         is an argument for anchoring these on something other than a line — but
+         not one to act on mid-change, and every move so far has been a genuine
+         re-read rather than a mechanical bump. */
+      'src/App.jsx:1116': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
       'src/components/EventComments.jsx:112': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
       'src/components/EventComments.jsx:113': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
       'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },

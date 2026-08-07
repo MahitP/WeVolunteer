@@ -208,7 +208,7 @@ export default function AdminDashboard({ addToast, user }) {
         </div>
       )}
 
-      /* ── Moderation comes first ──
+      {/* ── Moderation comes first ──
 
          These two sections used to sit fifth and fourth on this page, below
          Programme health, Participation and Most active organizers. On a
@@ -220,7 +220,7 @@ export default function AdminDashboard({ addToast, user }) {
          The page is called the Moderation Center. Reports lead, then the
          approval queue; the analytics that describe how the programme is
          going follow, because they are read deliberately rather than
-         urgently. */
+         urgently. */}
       {/* ── Reports ──
           Titled "Reports" rather than "Moderation queue": the page itself is the
           Moderation Center, and a section repeating the page's own name inside it

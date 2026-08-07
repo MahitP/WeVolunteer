@@ -154,7 +154,7 @@ describe('navigation, per role', () => {
      * This list is exact rather than a `toContain`, so the entry cannot return
      * unnoticed — which is exactly how it got here the first time.
      */
-    ['admin', ['Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Appeals', 'Community impact']]
+    ['admin', ['Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Community impact', 'Appeals']]
   ])('%s nav is what its capabilities justify', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
   });
@@ -162,8 +162,10 @@ describe('navigation, per role', () => {
   it('super_admin gets a populated rail, not an empty shell', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
-      'Moderation Center', 'Opportunities', 'Calendar', 'Messages',
-      'Notifications', 'Errors', 'Appeals', 'Community impact', 'Audit Explorer', 'Admin Roster', 'My profile'
+      'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Community impact',
+      /* Administration */ 'Appeals',
+      /* Platform */ 'Admin Roster', 'Audit Explorer', 'Errors',
+      'My profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
     expect(items.length).toBeGreaterThan(0);
@@ -224,8 +226,10 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
-      'Moderation Center', 'Opportunities', 'Calendar', 'Messages',
-      'Notifications', 'Errors', 'Appeals', 'Community impact', 'Audit Explorer', 'Admin Roster', 'My profile'
+      'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Community impact',
+      /* Administration */ 'Appeals',
+      /* Platform */ 'Admin Roster', 'Audit Explorer', 'Errors',
+      'My profile'
     ]);
   });
 
@@ -234,7 +238,9 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
-      'Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Appeals', 'Community impact'
+      'Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Community impact',
+      /* Administration — one entry, and it keeps its heading. See NAV_GROUPS. */
+      'Appeals',
     ]);
   });
 

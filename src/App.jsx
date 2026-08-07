@@ -223,23 +223,34 @@ const NAV = [
      `browse`. A path with no rail item is normal here — `/settings` has never had
      one either. */
   { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, requiredCap: 'self.read' },
-  /* Error triage. `error.read` is SUPER_ONLY, so this is invisible to every
-     role but the platform owner and unreachable even with a per-user grant.
-     Placed before `profile` rather than appended: `navItems.slice(0, 4)` is the
-     mobile primary row, and super_admin's first four must not shift. */
-  { id: 'errors', path: '/errors', label: 'Errors', icon: Bug, requiredCap: 'error.read' },
-  { id: 'appeals', path: '/admin/appeals', label: 'Appeals', icon: ShieldCheck, requiredCap: 'appeal.review' },
   /* Held by every signed-in role, so this entry shows for everybody. That is
      the intent: the student quoting a figure on a college application and the
      organizer writing a grant report are looking at the same page. */
   { id: 'impact', path: '/impact', label: 'Community impact', icon: Sprout, requiredCap: 'analytics.impact' },
-  /* "Audit Explorer", not "Audit Log": the page heading and the permission-denied
-     message both name it that way, so the nav was the only place calling it
-     something else — and the nav is where somebody looks after being told which
-     feature they lack. */
-  { id: 'audit', path: '/admin/audit-logs', label: 'Audit Explorer', icon: Activity, requiredCap: 'audit.read' },
-  { id: 'roster', path: '/admin/roster', label: 'Admin Roster', icon: UserCog, requiredCap: 'admin.create' },
-  { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS }
+
+  /* ── Administration ── what an ordinary administrator can reach ── */
+  { id: 'appeals', path: '/admin/appeals', label: 'Appeals', icon: ShieldCheck, requiredCap: 'appeal.review', group: 'admin' },
+
+  /* ── Platform ── every one of these is SUPER_ONLY ──
+
+     `admin.create`, `audit.read` and `error.read` are all in authz.js's
+     SUPER_ONLY list, which is checked BEFORE per-user grants — so no amount of
+     granting puts an administrator in this section. That is what makes the group
+     honest rather than decorative: its absence tells an administrator something
+     true about their account. */
+  { id: 'roster', path: '/admin/roster', label: 'Admin Roster', icon: UserCog, requiredCap: 'admin.create', group: 'platform' },
+  { id: 'audit', path: '/admin/audit-logs', label: 'Audit Explorer', icon: Activity, requiredCap: 'audit.read', group: 'platform' },
+  /* Error triage. Named "Errors" rather than "Developer Tools": it is one page
+     showing real failures real people hit, and dressing it up as a toolset would
+     promise more than it is. */
+  { id: 'errors', path: '/errors', label: 'Errors', icon: Bug, requiredCap: 'error.read', group: 'platform' },
+
+  /* `trailing` keeps this last in the rail. It is ungrouped, but rendering it in
+     the ungrouped block at the top would put "My profile" above
+     "Administration", which reads as the most important thing on the page. The
+     one entry whose position is about the shape of the rail rather than what it
+     does. */
+  { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS, trailing: true }
 ];
 
 /**
@@ -300,6 +311,36 @@ export function navItemsFor(user) {
     ...(dashboard ? [{ id: 'dashboard', path: '/', ...dashboard }] : []),
     ...NAV.filter(n => (n.requiredCapAny ?? [n.requiredCap]).some(cap => can(user, cap)))
   ].filter(n => !n.requiresVerified || user.verified);
+}
+
+/**
+ * The same entries `navItemsFor` returns, arranged into the sections the rail
+ * draws — everyday work, then the named groups, then the trailing entry.
+ *
+ * ── Derived from navItemsFor, deliberately ──
+ *
+ * It takes that function's OUTPUT rather than filtering `NAV` a second time.
+ * Two independent filters over one table is how a nav entry ends up visible in
+ * one surface and not the other, and here the two surfaces are the desktop rail
+ * and the mobile "More" sheet — so a drift would mean a page an administrator
+ * can reach on a phone and cannot find on a laptop. Every capability decision
+ * happens in exactly one place, above.
+ *
+ * Empty groups are dropped: a heading with nothing under it tells the reader
+ * about a feature they do not have, on every page, forever. A group that DOES
+ * have exactly one entry keeps its heading — see NAV_GROUPS for why.
+ *
+ * @returns {{ primary: object[], groups: {id, label, items}[], trailing: object[] }}
+ */
+export function navSectionsFor(user) {
+  const items = navItemsFor(user);
+  return {
+    primary: items.filter(n => !n.group && !n.trailing),
+    groups: NAV_GROUPS
+      .map(g => ({ ...g, items: items.filter(n => n.group === g.id) }))
+      .filter(g => g.items.length > 0),
+    trailing: items.filter(n => n.trailing),
+  };
 }
 
 /**
@@ -824,9 +865,69 @@ function AppShell({ toasts, addToast, removeToast }) {
   const selfProfile = selfProfileFor(currentUser);
 
   const navItems = navItemsFor(currentUser);
+  const navSections = navSectionsFor(currentUser);
 
   const primaryNavItems = navItems.slice(0, 4);
-  const secondaryNavItems = navItems.slice(4);
+
+  /**
+   * The "More" sheet: every section, minus whatever the bottom bar already shows.
+   *
+   * Subtracting by id rather than re-slicing at 4. The bar takes the first four
+   * of the FLAT list and the sheet renders SECTIONS, so an index into one is not
+   * an index into the other — and the failure mode of getting that wrong is an
+   * entry appearing twice, or worse, an administrative page appearing in neither.
+   */
+  const barIds = new Set(primaryNavItems.map(n => n.id));
+  const withoutBarItems = (list) => list.filter(n => !barIds.has(n.id));
+  const moreSections = {
+    primary: withoutBarItems(navSections.primary),
+    groups: navSections.groups
+      .map(g => ({ ...g, items: withoutBarItems(g.items) }))
+      .filter(g => g.items.length > 0),
+    trailing: withoutBarItems(navSections.trailing),
+  };
+
+  const hasMoreItems = moreSections.primary.length > 0
+    || moreSections.groups.length > 0
+    || moreSections.trailing.length > 0;
+
+  const renderMoreItem = ({ id, path, label, icon: Icon }) => (
+    <button
+      key={id + label}
+      className="mobile-more-btn"
+      onClick={() => {
+        setShowMobileMore(false);
+        setViewingProfileState(null);
+        navigate(path);
+      }}
+    >
+      <Icon size={20} />
+      <span>{label}</span>
+    </button>
+  );
+
+  /**
+   * One rail button, used by all three sections of the sidebar.
+   *
+   * Extracted when the rail gained groups, because the alternative was the same
+   * eleven lines of JSX written three times — and the `aria-current` line is the
+   * one that decides whether a screen-reader user can tell where they are.
+   * Three copies of that is three chances for it to be right in two of them.
+   */
+  const renderNavItem = ({ id, path, label, icon: Icon }) => (
+    <button
+      key={id + label}
+      className="nav-item"
+      aria-current={activeTab === id ? 'page' : undefined}
+      onClick={() => { setViewingProfileState(null); navigate(path); }}
+    >
+      <Icon size={17} strokeWidth={2} />
+      <span>{label}</span>
+      {id === 'dashboard' && pendingForMe > 0 && (
+        <span className="nav-count is-urgent">{pendingForMe}</span>
+      )}
+    </button>
+  );
 
   const meta = PAGE_META[persona]?.[activeTab] || { title: APP_NAME, sub: '' };
 
@@ -950,21 +1051,28 @@ function AppShell({ toasts, addToast, removeToast }) {
           </span>
         </a>
 
+        {/**
+          * One rail, three kinds of section: everyday entries, named groups, and
+          * the trailing profile entry.
+          *
+          * The heading is a real `<h2>` inside the `<nav>`, referenced by
+          * `aria-labelledby` on the group's own `role="group"` wrapper — so a
+          * screen-reader user hears "Platform, group" before its entries rather
+          * than eleven undifferentiated buttons, which is the same problem the
+          * grouping solves visually. A styled `<div>` would have looked identical
+          * and conveyed nothing.
+          */}
         <nav className="nav" aria-label="Main">
-          {navItems.map(({ id, path, label, icon: Icon }) => (
-            <button
-              key={id + label}
-              className="nav-item"
-              aria-current={activeTab === id ? 'page' : undefined}
-              onClick={() => { setViewingProfileState(null); navigate(path); }}
-            >
-              <Icon size={17} strokeWidth={2} />
-              <span>{label}</span>
-              {id === 'dashboard' && pendingForMe > 0 && (
-                <span className="nav-count is-urgent">{pendingForMe}</span>
-              )}
-            </button>
+          {navSections.primary.map(renderNavItem)}
+
+          {navSections.groups.map(({ id, label, items }) => (
+            <div key={id} className="nav-section" role="group" aria-labelledby={`nav-group-${id}`}>
+              <h2 className="nav-section-label" id={`nav-group-${id}`}>{label}</h2>
+              {items.map(renderNavItem)}
+            </div>
           ))}
+
+          {navSections.trailing.map(renderNavItem)}
         </nav>
 
         <div className="sidebar-foot">
@@ -1141,7 +1249,10 @@ function AppShell({ toasts, addToast, removeToast }) {
             {label}
           </button>
         ))}
-        {secondaryNavItems.length > 0 && (
+        {/* Derived from what the sheet will actually render, not from a slice
+            index. `More` opening onto an empty sheet is the failure this guards,
+            and after grouping the two are no longer the same question. */}
+        {hasMoreItems && (
           <button
             className="mobilenav-item"
             aria-current={showMobileMore ? 'page' : undefined}
@@ -1170,21 +1281,27 @@ function AppShell({ toasts, addToast, removeToast }) {
                 <X size={20} />
               </button>
             </div>
+            {/**
+              * The same sections as the desktop rail, minus whatever the bottom
+              * bar is already showing.
+              *
+              * Grouped here too, and not only on desktop: this sheet is where a
+              * phone user meets the administrative pages, so it is the surface
+              * where the grouping matters MOST. Leaving it flat would have meant
+              * the small screen — the one with the least room to scan — kept the
+              * long undifferentiated list the redesign exists to remove.
+              */}
             <div className="mobile-more-menu">
-              {secondaryNavItems.map(({ id, path, label, icon: Icon }) => (
-                <button
-                  key={id + label}
-                  className="mobile-more-btn"
-                  onClick={() => {
-                    setShowMobileMore(false);
-                    setViewingProfileState(null);
-                    navigate(path);
-                  }}
-                >
-                  <Icon size={20} />
-                  <span>{label}</span>
-                </button>
+              {moreSections.primary.map(renderMoreItem)}
+
+              {moreSections.groups.map(({ id, label, items }) => (
+                <div key={id} className="nav-section" role="group" aria-labelledby={`more-group-${id}`}>
+                  <h2 className="nav-section-label" id={`more-group-${id}`}>{label}</h2>
+                  {items.map(renderMoreItem)}
+                </div>
               ))}
+
+              {moreSections.trailing.map(renderMoreItem)}
               {/* Only for someone whose own profile page has no edit button of
                   its own — the volunteer profile carries one, so offering a
                   second here would be a duplicate affordance. Derived from the
