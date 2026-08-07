@@ -2,6 +2,19 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer } from './testServer.js';
 
 /**
+ * The owner is promoted by this suite, not seeded.
+ *
+ * `seedSuperAdmin()` used to insert `owner@wevolunteer.local` whenever DEMO_MODE
+ * was set. It is gone: it was the only code in the repository that could create
+ * an owner, and "no code path exists" is a stronger guarantee than any
+ * permission check. `db.js` now refuses to boot a demo database containing one.
+ *
+ * `srv.loginAsOwner` runs the same UPDATE `bin/grant-ownership.mjs` runs,
+ * against this suite's throwaway database.
+ */
+const OWNER_EMAIL = 'dsanger@outlook.com';
+
+/**
  * `db` is imported inside `beforeAll`, never at the top of the file.
  *
  * `db.js` opens its connection at module scope, so the FIRST import decides
@@ -33,7 +46,7 @@ describe('Administrator Promotion and Revocation', () => {
   });
 
   it('requires step-up authentication for promotion', async () => {
-    const ownerToken = await srv.login('owner@wevolunteer.local');
+    const ownerToken = await srv.loginAsOwner(OWNER_EMAIL);
     const res = await fetch(srv.base + '/api/admin/users/user-student-2/promote', {
       method: 'POST',
       headers: { Cookie: `wev_session=${ownerToken}`, 'Content-Type': 'application/json' },
@@ -45,7 +58,7 @@ describe('Administrator Promotion and Revocation', () => {
   });
 
   it('allows owner to promote a student with valid step-up', async () => {
-    const ownerToken = await srv.login('owner@wevolunteer.local');
+    const ownerToken = await srv.loginAsOwner(OWNER_EMAIL);
     
     // 1. Get challenge
     const cRes = await fetch(srv.base + '/api/auth/reauth/challenge', {
@@ -90,8 +103,13 @@ describe('Administrator Promotion and Revocation', () => {
   });
 
   it('prevents revoking the owner', async () => {
-    const ownerToken = await srv.login('owner@wevolunteer.local');
-    const res = await fetch(srv.base + '/api/admin/users/user-super/revoke', {
+    const ownerToken = await srv.loginAsOwner(OWNER_EMAIL);
+    /* The owner's own id, resolved rather than hardcoded. This used to name
+       `user-super`, the seeded owner that no longer exists — so the request
+       404'd on a missing user and the test passed its own precondition without
+       ever reaching the refusal it was written to prove. */
+    const ownerId = db.prepare('SELECT id FROM users WHERE email = ?').get(OWNER_EMAIL).id;
+    const res = await fetch(srv.base + `/api/admin/users/${ownerId}/revoke`, {
       method: 'POST',
       headers: { 
         Cookie: `wev_session=${ownerToken}`, 
@@ -105,7 +123,7 @@ describe('Administrator Promotion and Revocation', () => {
     const cRes = await fetch(srv.base + '/api/auth/reauth/challenge', {
       method: 'POST',
       headers: { Cookie: `wev_session=${ownerToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'admin.revoke', params: { targetUserId: 'user-super' } })
+      body: JSON.stringify({ action: 'admin.revoke', params: { targetUserId: ownerId } })
     });
     const { challengeId } = await cRes.json();
     
@@ -115,7 +133,7 @@ describe('Administrator Promotion and Revocation', () => {
       body: JSON.stringify({ challengeId, password: 'password123' })
     });
 
-    const res2 = await fetch(srv.base + '/api/admin/users/user-super/revoke', {
+    const res2 = await fetch(srv.base + `/api/admin/users/${ownerId}/revoke`, {
       method: 'POST',
       headers: { 
         Cookie: `wev_session=${ownerToken}`, 
@@ -129,7 +147,7 @@ describe('Administrator Promotion and Revocation', () => {
   });
 
   it('allows owner to revoke an admin', async () => {
-    const ownerToken = await srv.login('owner@wevolunteer.local');
+    const ownerToken = await srv.loginAsOwner(OWNER_EMAIL);
     
     // 1. Get challenge
     const cRes = await fetch(srv.base + '/api/auth/reauth/challenge', {

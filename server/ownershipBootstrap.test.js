@@ -97,8 +97,23 @@ describe('bin/grant-ownership.mjs', () => {
     expect(user.token_version).toBe(2);
 
     const audit = db.prepare('SELECT action, details FROM admin_audit_logs WHERE target_user_id = ?').get('u4');
-    expect(audit.action).toBe('OWNER_BOOTSTRAPPED');
-    expect(audit.details).toBe('Promotion reasoning');
+    expect(audit.action).toBe('OWNER_GRANTED');
+    /**
+     * The details are structured, not the bare reason.
+     *
+     * `method=CLI` leads because it is the fact that changes how the rest of the
+     * row is read: there is no product path to ownership, so a row that does not
+     * say where the change came from leaves its single most useful fact out.
+     *
+     * The note about attribution is asserted too. `admin_id` is a foreign key to
+     * `users` and a shell operator has no account, so the subject is recorded as
+     * the actor — which read alone says "this person granted themselves
+     * ownership". It is not what happened, and the row has to say so.
+     */
+    expect(audit.details).toContain('method=CLI');
+    expect(audit.details).toContain('operator=');
+    expect(audit.details).toContain('reason=Promotion reasoning');
+    expect(audit.details).toMatch(/subject's own id/);
   });
 });
 
@@ -127,7 +142,9 @@ describe('bin/revoke-ownership.mjs', () => {
     expect(user.token_version).toBe(2);
 
     const audit = db.prepare('SELECT action, details FROM admin_audit_logs WHERE target_user_id = ?').get('u5');
-    expect(audit.action).toBe('OWNER_RETIRED');
-    expect(audit.details).toBe('Retiring');
+    expect(audit.action).toBe('OWNER_REVOKED');
+    expect(audit.details).toContain('method=CLI');
+    expect(audit.details).toContain('operator=');
+    expect(audit.details).toContain('reason=Retiring');
   });
 });
