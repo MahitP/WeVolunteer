@@ -546,12 +546,28 @@ describe('catastrophic failures take over the whole screen', () => {
  * only the chrome that changed.
  */
 describe('a permission refusal is a takeover', () => {
+  /**
+   * This test used to assert `medium` on the line below while the two lines
+   * under it asserted the shell was gone — the contradiction that hid the
+   * defect. It said, correctly, that a refusal replaces the shell, and then
+   * pinned the sizing written for a refusal that sits INSIDE one.
+   *
+   * The rendered result was a takeover wearing in-shell dimensions:
+   * `min-height: 0` and a 0.64× scene on an empty viewport, so the whole
+   * composition sat in the top-left corner above roughly 55% dead space with a
+   * visible seam where the clipped wash ended. Every assertion here passed
+   * throughout.
+   */
   it('403 replaces the shell, like every other error state', async () => {
     signedInAs(USER('student'));
     const { container } = renderAt('/events/new');
 
     await findErrorKind('403');
-    expect(container.querySelector('.err').dataset.errorWeight).toBe('medium');
+    expect(
+      container.querySelector('.err').dataset.errorWeight,
+      'a refusal that replaces the shell must be sized like one that replaces '
+      + 'the shell — the two assertions below are the other half of this claim'
+    ).toBe('immersive');
     expect(container.querySelector('.app'), '403 kept the shell').toBeNull();
     expect(container.querySelector('.sidebar')).toBeNull();
   });

@@ -36,15 +36,18 @@ import { getTheme } from './themes/index.js';
  *
  * ── Weight ──
  *
- * Three of them, from `WEIGHTS` in kinds.js: `immersive` owns the viewport,
- * `page` fills its region, `medium` stays a contained composition inside a
- * shell that still works around it. The attribute is the only thing that
- * changes; the frame, the scene and the copy are identical at every weight.
+ * One, from `WEIGHTS` in kinds.js: `immersive` owns the viewport. There were
+ * three, then two, and now every kind is a takeover — see the note above
+ * `WEIGHTS` for why the middle tiers went, and for the drift that removing the
+ * last one fixed. The attribute is the only thing that changes; the frame, the
+ * scene and the copy are identical whatever it says.
  *
- * `100dvh` is used ONLY where this renders at the top level. Inside the app
- * shell the same block would push the nav and the topbar off screen, so there
- * it fills the region it was given instead — `.app .err` in index.css. That is
- * a correctness constraint, not a style preference.
+ * `100dvh`, not `100vh`: on mobile Safari `100vh` is the tallest the viewport
+ * ever gets, so with the URL bar showing the actions land below the fold on the
+ * one screen whose whole job is to offer a way out. Everything this component
+ * renders is a top-level takeover, so there is no in-shell case to special-case
+ * — an earlier version of this note pointed at an `.app .err` rule that does
+ * not exist.
  */
 
 /**

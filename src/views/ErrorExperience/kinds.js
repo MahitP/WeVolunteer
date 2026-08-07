@@ -65,19 +65,31 @@ export const RETRYABLE = Object.freeze(['500', 'crash', 'chunk', 'offline', 'mai
  *   medium    — the reader is fine, the app is fine, this door is closed. The
  *               shell around it still works and should still be visible.
  *
- * ── There are two weights because there are two situations ──
+ * ── Every kind is a takeover, and that took two goes to get right ──
  *
- * This was three. `page` sat between them and meant "a whole page, inside the
- * shell", which turned out to describe nothing: a 404 is a dead URL and the
- * navigation is no help with it, and an expired session has no shell to stand
- * in because the reader is signed out. Both are takeovers. Collapsing the
- * middle removed a weight, a block of CSS and the question of which one a new
- * kind belongs to.
+ * This was three weights. `page` sat in the middle and meant "a whole page,
+ * inside the shell", which turned out to describe nothing: a 404 is a dead URL
+ * and the navigation is no help with it, and an expired session has no shell to
+ * stand in because the reader is signed out. Both are takeovers.
  *
- * `403` is the sole `medium`, and it is the one that matters: it renders inside
- * the authenticated shell with the nav, the bell and sign-out all live beside
- * it, because "ask your administrator" is advice the reader acts on by using
- * the navigation that a takeover would have removed.
+ * `403` was then the sole `medium`, on the argument that "ask your
+ * administrator" is advice the reader acts on using the navigation a takeover
+ * would remove. `App.jsx` later rejected that and promoted the refusal to a
+ * takeover for a better reason: a refusal rendered as a card inside the running
+ * app "reads as a page that failed to load rather than a decision, and it leaves
+ * the nav for a section the reader has just been told they cannot open."
+ *
+ * **This table was not updated with it.** For a while the 403 was returned
+ * before the shell was built — owning the viewport — while still carrying the
+ * sizing meant for a card inside one: `min-height: 0` and a 0.64× scene, which
+ * put the entire composition in the top-left corner above roughly 55% dead
+ * space, with a visible seam where the clipped wash ended. The behaviour and
+ * the table had drifted, and only the table was wrong.
+ *
+ * So there is one weight now. The attribute stays because it is what the CSS
+ * hangs off and what the tests assert, but nothing renders inside a shell, and
+ * the `medium` rules have been deleted rather than left to rot — adding a
+ * non-takeover kind means writing that CSS again, deliberately.
  */
 export const WEIGHTS = Object.freeze({
   404: 'immersive',
@@ -87,7 +99,7 @@ export const WEIGHTS = Object.freeze({
   offline: 'immersive',
   maintenance: 'immersive',
   expired: 'immersive',
-  403: 'medium',
+  403: 'immersive',
 });
 
 /**
