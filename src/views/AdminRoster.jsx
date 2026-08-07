@@ -226,7 +226,7 @@ export default function AdminRoster() {
     try {
       await run(
         STEP_UP.ADMIN_PROMOTE,
-        { id: userId },
+        { targetUserId: userId },
         (headers) => api.promoteAdmin(userId, reason, headers)
       );
       setPromoting(false);
@@ -245,7 +245,7 @@ export default function AdminRoster() {
     try {
       await run(
         STEP_UP.ADMIN_REVOKE,
-        { id: userId },
+        { targetUserId: userId },
         (headers) => api.revokeAdmin(userId, headers)
       );
       setRevoking(null);
