@@ -2,8 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import readline from 'readline';
-import { recordAudit } from '../server/auditLog.js';
-import { ownershipAuditDetails, OWNERSHIP_EVENTS } from './ownershipAudit.mjs';
+import { recordCliAudit, assertSystemActor, CLI_EVENTS } from './cliAudit.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,6 +36,7 @@ async function main() {
 
   try {
     const db = new DatabaseSync(dbPath);
+    assertSystemActor(db);
 
     const user = db.prepare('SELECT id, role FROM users WHERE email = ?').get(email);
 
@@ -79,11 +79,12 @@ async function main() {
         WHERE id = ?
       `).run(user.id);
 
-      recordAudit(db, {
-        adminId: user.id, // the subject of the revocation
-        action: OWNERSHIP_EVENTS.REVOKED,
+      recordCliAudit(db, {
+        action: CLI_EVENTS.OWNER_REVOKED,
         targetUserId: user.id,
-        details: ownershipAuditDetails({ verb: 'revoked', email, reason }),
+        command: 'bin/revoke-ownership.mjs',
+        reason,
+        metadata: { subject: email },
       });
 
       db.exec('COMMIT');

@@ -1,0 +1,108 @@
+import os from 'node:os';
+import { recordAudit } from '../server/auditLog.js';
+import { SYSTEM_CLI_ID } from '../server/migrations/022_system_cli_actor.js';
+
+/**
+ * The audit entry every privileged command-line action writes.
+ *
+ * ── One mechanism, not one per script ──
+ *
+ * This replaces `ownershipAudit.mjs`, which only knew about the two ownership
+ * scripts. `make-admin.mjs` — the command that creates administrators, the
+ * second most consequential privilege change on the platform — wrote nothing at
+ * all, and would have grown its own copy of this the first time somebody
+ * noticed.
+ *
+ * Every `bin/` command that changes what an account may do goes through here, so
+ * the answer to "what privileged things have been done from a shell" is one
+ * query rather than a hunt through four files with three formats.
+ *
+ * ── The actor ──
+ *
+ * `system-cli`, seeded by migration 022. Before it existed the scripts recorded
+ * the SUBJECT as the actor, so a bootstrap row read "this person granted
+ * themselves ownership" — not what happened, and worse, `admin_id` is the field
+ * a report groups by, so every CLI action was attributed to its own victim.
+ *
+ * The human operator cannot be the actor: they have no account, and
+ * `admin_audit_logs.admin_id` is a foreign key. Their OS login and host are
+ * recorded in the details instead, on a best-effort basis. That is not
+ * authentication — anybody who can run these scripts can set them — but on a
+ * platform where the shell is reachable by a handful of people, "which machine,
+ * which login" is enough to start a conversation, and an empty field is worth
+ * nothing at all.
+ */
+
+/** The events. Named here so a typo in one script cannot diverge from another. */
+export const CLI_EVENTS = Object.freeze({
+  OWNER_GRANTED: 'OWNER_GRANTED',
+  OWNER_REVOKED: 'OWNER_REVOKED',
+  ADMIN_PROMOTED_CLI: 'ADMIN_PROMOTED_CLI',
+});
+
+/**
+ * `who` and `where`, best effort.
+ *
+ * `userInfo()` throws where there is no passwd entry — some containers — and the
+ * entry is still worth writing without it.
+ */
+function operator() {
+  try {
+    return `${os.userInfo().username}@${os.hostname()}`;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * Writes the row.
+ *
+ * `command` is the script that ran, so a reader can find the code that produced
+ * the row rather than inferring it from the action name. `metadata` is for
+ * anything a specific command wants on the record — the previous role, a
+ * target's address — and is rendered as `key=value` pairs in the same style as
+ * the rest, because `details` is one TEXT column and the value of a consistent
+ * shape in it is being greppable.
+ */
+export function recordCliAudit(db, { action, targetUserId, command, reason, metadata = {} }) {
+  if (!action) throw new Error('recordCliAudit: action is required');
+  if (!targetUserId) throw new Error('recordCliAudit: targetUserId is required');
+  if (!command) throw new Error('recordCliAudit: command is required');
+
+  const parts = [
+    'method=CLI',
+    `command=${command}`,
+    `operator=${operator()}`,
+    ...Object.entries(metadata).map(([k, v]) => `${k}=${v}`),
+  ];
+  if (reason) parts.push(`reason=${reason}`);
+
+  return recordAudit(db, {
+    adminId: SYSTEM_CLI_ID,
+    action,
+    targetUserId,
+    details: parts.join('; '),
+  });
+}
+
+/**
+ * Refuses to run when the reserved actor is absent.
+ *
+ * A script that reaches for `system-cli` against a database whose migrations
+ * have not run would fail on the foreign key AFTER doing its work, inside a
+ * transaction it then rolls back — which reads to the operator as "the command
+ * is broken" rather than "this database is out of date". Checking first means
+ * the message names the actual problem.
+ */
+export function assertSystemActor(db) {
+  const row = db.prepare('SELECT id FROM users WHERE id = ?').get(SYSTEM_CLI_ID);
+  if (row) return;
+  throw new Error(
+    `The reserved '${SYSTEM_CLI_ID}' account is missing from this database.\n\n`
+    + 'It is created by migration 022 and is what privileged command-line actions\n'
+    + 'are recorded against. Start the server once against this database so the\n'
+    + 'migrations run, then try again.'
+  );
+}
+
+export { SYSTEM_CLI_ID };

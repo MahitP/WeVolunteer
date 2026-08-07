@@ -30,6 +30,7 @@ import adminConversations from './018_admin_conversations.js';
 import auditLogHardening from './019_audit_log_hardening.js';
 import administratorRoster from './020_administrator_roster.js';
 import administratorPromotionMetadata from './021_administrator_promotion_metadata.js';
+import systemCliActor from './022_system_cli_actor.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -77,6 +78,11 @@ export const MIGRATIONS = [
    * 021 adds promoted_at, promoted_by, and promotion_reason to users.
    */
   administratorPromotionMetadata,
+  /**
+   * 022 seeds the reserved `system-cli` account, so a privileged action taken
+   * from a shell has an actor that is not its own victim.
+   */
+  systemCliActor,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

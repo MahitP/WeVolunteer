@@ -4,8 +4,7 @@ import bcrypt from 'bcryptjs';
 import path from 'path';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
-import { recordAudit } from '../server/auditLog.js';
-import { ownershipAuditDetails, OWNERSHIP_EVENTS } from './ownershipAudit.mjs';
+import { recordCliAudit, assertSystemActor, CLI_EVENTS } from './cliAudit.mjs';
 
 /**
  * Creates the platform's owner accounts, directly in the database.
@@ -98,6 +97,7 @@ async function main() {
   }
 
   const db = new DatabaseSync(dbPath);
+  assertSystemActor(db);
 
   console.log(`Database: ${dbPath}`);
   console.log('');
@@ -161,15 +161,12 @@ async function main() {
         );
       }
 
-      recordAudit(db, {
-        adminId: userId,
-        action: OWNERSHIP_EVENTS.GRANTED,
+      recordCliAudit(db, {
+        action: CLI_EVENTS.OWNER_GRANTED,
         targetUserId: userId,
-        details: ownershipAuditDetails({
-          verb: 'granted',
-          email,
-          reason: `Bootstrap owner account (${what}) via bin/bootstrap-owners.mjs`,
-        }),
+        command: 'bin/bootstrap-owners.mjs',
+        reason: `Bootstrap owner account (${what})`,
+        metadata: { subject: email },
       });
 
       db.exec('COMMIT');

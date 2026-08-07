@@ -134,7 +134,13 @@ function makeDuplicateDb(dir) {
 
 function readState(dbFile) {
   const db = new DatabaseSync(dbFile);
-  const users = db.prepare('SELECT rowid, id, email, token_version FROM users ORDER BY id').all();
+  /* The two `dup-*` fixtures only. The reserved `system-cli` row is seeded by
+     migration 022 in every database and is not part of what this test is about —
+     scoping to the fixtures keeps the assertions about the dedupe, rather than
+     about how many rows migrations happen to create. */
+  const users = db.prepare(
+    "SELECT rowid, id, email, token_version FROM users WHERE id LIKE 'dup-%' ORDER BY id"
+  ).all();
   const attendance = db.prepare('SELECT user_id, hours_awarded FROM attendance ORDER BY user_id').all();
   const indexes = db.prepare('PRAGMA index_list(users)').all();
   db.close();

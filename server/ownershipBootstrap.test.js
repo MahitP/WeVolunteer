@@ -96,7 +96,7 @@ describe('bin/grant-ownership.mjs', () => {
     expect(user.role).toBe('super_admin');
     expect(user.token_version).toBe(2);
 
-    const audit = db.prepare('SELECT action, details FROM admin_audit_logs WHERE target_user_id = ?').get('u4');
+    const audit = db.prepare('SELECT action, details, admin_id, target_user_id FROM admin_audit_logs WHERE target_user_id = ?').get('u4');
     expect(audit.action).toBe('OWNER_GRANTED');
     /**
      * The details are structured, not the bare reason.
@@ -105,15 +105,24 @@ describe('bin/grant-ownership.mjs', () => {
      * row is read: there is no product path to ownership, so a row that does not
      * say where the change came from leaves its single most useful fact out.
      *
-     * The note about attribution is asserted too. `admin_id` is a foreign key to
-     * `users` and a shell operator has no account, so the subject is recorded as
-     * the actor — which read alone says "this person granted themselves
-     * ownership". It is not what happened, and the row has to say so.
+     * The ACTOR is asserted too, and it is the part that changed.
+     *
+     * These rows used to record the subject as the actor, because
+     * `admin_audit_logs.admin_id` is a foreign key to `users` and a shell
+     * operator has no account. Read alone, a bootstrap row therefore said "this
+     * person granted themselves ownership" — not what happened, and worse,
+     * `admin_id` is the field a report groups by, so every CLI action was
+     * attributed to its own subject.
+     *
+     * Migration 022 seeds `system-cli` for exactly this, so the actor and the
+     * target are now different rows and neither is a lie.
      */
+    expect(audit.admin_id).toBe('system-cli');
+    expect(audit.admin_id).not.toBe(audit.target_user_id);
     expect(audit.details).toContain('method=CLI');
+    expect(audit.details).toContain('command=bin/grant-ownership.mjs');
     expect(audit.details).toContain('operator=');
     expect(audit.details).toContain('reason=Promotion reasoning');
-    expect(audit.details).toMatch(/subject's own id/);
   });
 });
 
@@ -141,7 +150,7 @@ describe('bin/revoke-ownership.mjs', () => {
     expect(user.role).toBe('admin');
     expect(user.token_version).toBe(2);
 
-    const audit = db.prepare('SELECT action, details FROM admin_audit_logs WHERE target_user_id = ?').get('u5');
+    const audit = db.prepare('SELECT action, details, admin_id, target_user_id FROM admin_audit_logs WHERE target_user_id = ?').get('u5');
     expect(audit.action).toBe('OWNER_REVOKED');
     expect(audit.details).toContain('method=CLI');
     expect(audit.details).toContain('operator=');
