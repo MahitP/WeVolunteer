@@ -12,7 +12,10 @@ let decryptSecret;
 beforeAll(async () => { 
   srv = await startTestServer(); 
   
-  const serverModule = await import('./server.js');
+  /* No `await import('./server.js')` here. It was imported into an unused
+     variable, which boots a SECOND full server — instance lock, workers,
+     scheduler, a listener on 5050 — inside a process that already has one from
+     `startTestServer()`. */
 
   const dbModule = await import('./db.js');
   db = dbModule.db;
@@ -32,7 +35,7 @@ describe('2FA Security Hardening Regressions', () => {
 
   describe('Pre-auth bypass', () => {
     it('rejects a preauth token on protected endpoints', async () => {
-      const preauthToken = jwt.sign({ id: 'user-student', email: 'student@example.com', preauth: true }, JWT_SECRET, { expiresIn: '15m' });
+      const preauthToken = jwt.sign({ id: 'user-student-1', email: 'leo.chen28@gmail.com', preauth: true }, JWT_SECRET, { expiresIn: '15m' });
       
       const res = await srv.call('GET', '/api/auth/me', undefined, preauthToken);
       
@@ -41,7 +44,7 @@ describe('2FA Security Hardening Regressions', () => {
     });
 
     it('rejects a modified preauth token (tampered signature)', async () => {
-      const forgedToken = jwt.sign({ id: 'user-student', email: 'student@example.com' }, 'wrong-secret');
+      const forgedToken = jwt.sign({ id: 'user-student-1', email: 'leo.chen28@gmail.com' }, 'wrong-secret');
       
       const res = await srv.call('GET', '/api/auth/me', undefined, forgedToken);
       
@@ -65,26 +68,36 @@ describe('2FA Security Hardening Regressions', () => {
       expect(decryptSecret(userRow.tfa_secret)).toBe(generateRes.body.secret);
     });
 
+    /**
+     * Deliberately NOT the seeded administrator.
+     *
+     * This wrote a legacy plaintext secret over `admin@example.gov`, which the
+     * harness enrols with a known secret so that `srv.login` can complete the
+     * second factor. Clobbering it left every later test in the file unable to
+     * sign in as an administrator at all — a test that damages a shared fixture
+     * fails its neighbours rather than itself, which is the hardest kind to read.
+     */
     it('migrates legacy plaintext secrets cleanly without corruption', async () => {
+      const MIGRATION_SUBJECT = 'priya.patel.nhs@outlook.com';
       const plaintextSecret = 'JBSWY3DPEHPK3PXP';
-      db.prepare('UPDATE users SET tfa_secret = ? WHERE email = ?').run(plaintextSecret, 'admin@example.gov');
+      db.prepare('UPDATE users SET tfa_secret = ? WHERE email = ?').run(plaintextSecret, MIGRATION_SUBJECT);
 
       const m = await import('./migrations/027_encrypt_tfa_secrets.js');
       m.default.up(db);
       
-      const userRow = db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get('admin@example.gov');
+      const userRow = db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get(MIGRATION_SUBJECT);
       expect(userRow.tfa_secret.startsWith('v1:')).toBe(true);
       expect(decryptSecret(userRow.tfa_secret)).toBe(plaintextSecret);
       
       m.default.up(db);
-      const userRow2 = db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get('admin@example.gov');
+      const userRow2 = db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get(MIGRATION_SUBJECT);
       expect(userRow2.tfa_secret).toBe(userRow.tfa_secret);
     });
   });
 
   describe('Recovery codes', () => {
     it('uses bcrypt for storage and verifies correctly', async () => {
-      const preauthToken = jwt.sign({ id: 'user-admin', email: 'admin@example.com', preauth: true }, JWT_SECRET, { expiresIn: '15m' });
+      const preauthToken = jwt.sign({ id: 'user-admin', email: 'admin@example.gov', preauth: true }, JWT_SECRET, { expiresIn: '15m' });
       db.prepare('UPDATE users SET tfa_enabled = 1 WHERE id = ?').run('user-admin');
 
       const recoveryCode = 'A1B2C3D4E5';
@@ -106,17 +119,68 @@ describe('2FA Security Hardening Regressions', () => {
   });
 
   describe('Admin enforcement', () => {
-    it('blocks admin actions if tfaRequired is true', async () => {
-      const sessionToken = await srv.login('admin@example.com');
-      
-      const res = await srv.call('GET', '/api/admin/metrics', undefined, sessionToken);
-      
-      if (res.status === 404 && !res.body.code) {
-      } else {
+    /**
+     * This asserted nothing.
+     *
+     * It signed in as `admin@example.com` — an address that does not exist; the
+     * seeded administrator is `admin@example.gov` — and called
+     * `/api/admin/metrics`, a route that does not exist either. The whole body
+     * was then wrapped in
+     *
+     *     if (res.status === 404 && !res.body.code) { } else { …assertions… }
+     *
+     * so the 404 it always received took the empty branch and the test passed
+     * without executing a single expectation. A test that cannot fail is worse
+     * than a missing one: it occupies the space where the real one would go and
+     * reports the feature as covered.
+     *
+     * Rewritten against a route that exists, an account that exists, and an
+     * administrator deliberately stripped of the second factor — because the
+     * harness now enrols seeded administrators, so the unenrolled state has to be
+     * created on purpose rather than inherited by accident.
+     */
+    it('refuses an administrator who has no second factor', async () => {
+      const token = await srv.login('admin@example.gov');
+
+      db.prepare(
+        'UPDATE users SET tfa_enabled = 0, tfa_email_enabled = 0, tfa_secret = NULL WHERE email = ?'
+      ).run('admin@example.gov');
+
+      try {
+        const res = await srv.call('GET', '/api/admin/organizers/pending', undefined, token);
+
         expect(res.status).toBe(403);
         expect(res.body.error).toMatch(/Two-factor authentication must be enabled/);
         expect(res.body.code).toBe('tfa_required');
+      } finally {
+        const { encryptSecret } = await import('./cryptoUtils.js');
+        const { TEST_TOTP_SECRET } = await import('./testServer.js');
+        db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
+          .run(encryptSecret(TEST_TOTP_SECRET), 'admin@example.gov');
       }
+    });
+
+    /**
+     * And an enrolled administrator is let through.
+     *
+     * Without this the enforcement could be "refuse every administrator", which
+     * passes the case above and makes the platform unusable.
+     */
+    it('lets an enrolled administrator through', async () => {
+      const token = await srv.login('admin@example.gov');
+      const res = await srv.call('GET', '/api/admin/organizers/pending', undefined, token);
+      expect(res.status).toBe(200);
+    });
+
+    /**
+     * A student is unaffected. The policy is about blast radius, not about
+     * everybody — applying it to volunteers would make 2FA a condition of using
+     * the platform at all.
+     */
+    it('does not apply the rule to an ordinary volunteer', async () => {
+      const token = await srv.login('leo.chen28@gmail.com');
+      const res = await srv.call('GET', '/api/auth/me', undefined, token);
+      expect(res.status).toBe(200);
     });
   });
 });

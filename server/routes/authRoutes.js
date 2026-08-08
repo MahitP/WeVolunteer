@@ -735,9 +735,22 @@ router.post('/api/auth/login-2fa', async (req, res) => {
       isValid = verifyTotp(token, userRow.tfa_secret);
     } else if (effectiveMethod === 'email' && code) {
       // Find valid codes for the user. We must bcrypt.compare each one.
+      /**
+       * The expiry is bound as an ISO string, not compared against
+       * `datetime('now')`.
+       *
+       * `expires_at` is written with `new Date(...).toISOString()` —
+       * `2026-08-07T22:15:00.000Z`. SQLite's `datetime('now')` produces
+       * `2026-08-07 22:15:00`. The comparison is textual, and `'T'` (0x54) sorts
+       * after `' '` (0x20), so ANY ISO timestamp on today's date compares as
+       * greater than now. An emailed code stayed acceptable for the rest of the
+       * calendar day rather than its ten minutes — and `datetimeComparison.test.js`
+       * exists because this exact mistake has been made here before.
+       */
       const validEmailCodes = db.prepare(
-        'SELECT id, code_hash FROM tfa_email_codes WHERE user_id = ? AND used_at IS NULL AND expires_at > datetime("now") AND attempts < 3'
-      ).all(payload.id);
+        'SELECT id, code_hash FROM tfa_email_codes WHERE user_id = ? AND used_at IS NULL '
+        + 'AND expires_at > ? AND attempts < 3'
+      ).all(payload.id, new Date().toISOString());
       
       /**
        * `await bcrypt.compare`, not `compareSync` — see the note on the recovery
@@ -759,7 +772,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
 
       if (matched) {
         isValid = true;
-        db.prepare('UPDATE tfa_email_codes SET used_at = datetime("now") WHERE id = ?').run(matched.id);
+        db.prepare("UPDATE tfa_email_codes SET used_at = datetime('now') WHERE id = ?").run(matched.id);
       } else {
         for (const emailCode of validEmailCodes) {
           db.prepare('UPDATE tfa_email_codes SET attempts = attempts + 1 WHERE id = ?').run(emailCode.id);
