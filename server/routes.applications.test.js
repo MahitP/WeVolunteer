@@ -454,6 +454,10 @@ describe('applications: admin-tier oversight of PATCH /api/applications/:id', ()
       password: 'Password123', grade: 'Adult', role: 'student'
     });
     db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('super_admin', superSigned.user.id);
+    /* Promoted by SQL, so `login()`'s two-factor enrolment never ran and
+       `requireCap` would refuse this account before any capability is read. */
+    const { enrolTwoFactor } = await import('./testServer.js');
+    await enrolTwoFactor(db, 'oversight-super@test.local');
     superToken = superSigned.cookie;
 
     const partnerSigned = await srv.signupConfirmed({

@@ -440,6 +440,16 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
       db.prepare('UPDATE oauth_accounts SET last_used_at = ?, provider_email = ? WHERE id = ?')
         .run(new Date().toISOString(), providerEmail, oauthRow.id);
 
+      if (userRow.tfa_enabled || userRow.tfa_email_enabled) {
+        const { issuePreAuthSession } = await import('./authRoutes.js');
+        issuePreAuthSession(res, userRow);
+        const methods = [];
+        if (userRow.tfa_enabled) methods.push('totp');
+        if (userRow.tfa_email_enabled) methods.push('email');
+        methods.push('recovery');
+        return res.json({ action: 'require_2fa', availableMethods: methods });
+      }
+
       const user = formatUserResponse(userRow);
       issueSession(res, user, userRow.token_version);
       return res.json({ action: 'login', user, emailVerified: userRow.email_verified === 1 });
@@ -628,6 +638,16 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
       });
 
       const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(newUserId);
+      if (userRow.tfa_enabled || userRow.tfa_email_enabled) {
+        const { issuePreAuthSession } = await import('./authRoutes.js');
+        issuePreAuthSession(res, userRow);
+        const methods = [];
+        if (userRow.tfa_enabled) methods.push('totp');
+        if (userRow.tfa_email_enabled) methods.push('email');
+        methods.push('recovery');
+        return res.json({ action: 'require_2fa', availableMethods: methods });
+      }
+
       const user = formatUserResponse(userRow);
       issueSession(res, user, userRow.token_version);
 

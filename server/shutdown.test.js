@@ -205,7 +205,9 @@ describe('the bind address is configurable', () => {
         SMTP_HOST: 'smtp.invalid',
         SMTP_USER: 'u',
         SMTP_PASS: 'p',
-        APP_URL: 'https://volunteers.example.org'
+        APP_URL: 'https://volunteers.example.org',
+        // Fatal boot guard in production, same class as JWT_SECRET above.
+        TFA_ENCRYPTION_KEY: 'c3VwZXJzZWNyZXRrZXkxMjM0NTY3ODkwYWJjZGVmZ2g='
       }
     });
 

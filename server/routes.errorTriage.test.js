@@ -28,6 +28,11 @@ beforeAll(async () => {
     password: 'Password123', grade: 'Adult', role: 'student'
   });
   db.prepare("UPDATE users SET role = 'super_admin', verified = 1 WHERE email = 'triage@test.local'").run();
+  /* Promoting by SQL skips `login()`, which is where the two-factor enrolment
+     normally happens — and an unenrolled administrator is refused by
+     `requireCap` before `error.read` is ever consulted. */
+  const { enrolTwoFactor } = await import('./testServer.js');
+  await enrolTwoFactor(db, 'triage@test.local');
   owner = signed.cookie;
 }, 60000);
 

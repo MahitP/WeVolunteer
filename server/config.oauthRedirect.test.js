@@ -54,7 +54,17 @@ function boot(env) {
 }
 
 const STRONG = 'JXAvK3n2Qp7RtY9wLmZbC4dE6fG8hJ1kN5oP0qS2uV4xA7yB9cD3eF5gH8iJ0kLm';
-const PROD = { NODE_ENV: 'production', JWT_SECRET: STRONG };
+/**
+ * A valid AES-256 key for the production boots below.
+ *
+ * `config.js` requires `TFA_ENCRYPTION_KEY` in production — an absent one is a
+ * fatal boot guard, the same as a missing `JWT_SECRET`. These tests are about
+ * other guards entirely, so they supply a real key for the same reason they
+ * supply `STRONG` above: to reach the thing they are actually testing.
+ */
+const TFA_KEY = 'c3VwZXJzZWNyZXRrZXkxMjM0NTY3ODkwYWJjZGVmZ2g=';
+
+const PROD = { NODE_ENV: 'production', JWT_SECRET: STRONG, TFA_ENCRYPTION_KEY: TFA_KEY };
 const GOOGLE = { GOOGLE_CLIENT_ID: 'id.apps.googleusercontent.com', GOOGLE_CLIENT_SECRET: 'secret' };
 const MICROSOFT = { MICROSOFT_CLIENT_ID: 'ms-id', MICROSOFT_CLIENT_SECRET: 'ms-secret' };
 

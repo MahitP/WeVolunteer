@@ -31,6 +31,26 @@ import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
  */
 export const TEST_TOTP_SECRET = 'UZ4DHT22AL6CQMULDYSGGT4YT4UU2GMT';
 
+/**
+ * Enrols an account in two-factor authentication, by address.
+ *
+ * For the suites that mint a privileged session by promoting a throwaway account
+ * with direct SQL and reusing a cookie they already hold — `authz.matrix` and
+ * `routes.errorTriage` do exactly that, deliberately, because identity is
+ * re-derived from the users row on every request and no re-login is needed.
+ *
+ * Those never call `login()`, so the enrolment it performs does not reach them,
+ * and `requireCap` then refuses the account with `tfa_required`. Exported rather
+ * than duplicated so there is one answer to "how does a test make a compliant
+ * administrator", and so the next suite that promotes by SQL has something to
+ * find.
+ */
+export async function enrolTwoFactor(db, email) {
+  const { encryptSecret } = await import('./cryptoUtils.js');
+  db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
+    .run(encryptSecret(TEST_TOTP_SECRET), email);
+}
+
 export async function startTestServer() {
   const dir = mkdtempSync(path.join(tmpdir(), 'wev-test-'));
   process.env.WEV_DB_PATH = path.join(dir, 'test.db');
