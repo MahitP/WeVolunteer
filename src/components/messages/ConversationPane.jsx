@@ -41,7 +41,7 @@ function getGroupClass(messages, idx) {
   return 'group-start'; // single message treated as start (gets top padding)
 }
 
-export default function ConversationPane({ conversation, onBack, onUpdateConversation }) {
+export default function ConversationPane({ conversation, onBack, onUpdateConversation, emptyCopy }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
@@ -297,8 +297,13 @@ export default function ConversationPane({ conversation, onBack, onUpdateConvers
         {!loading && messages.length === 0 && (
           <div className="chat-empty-state">
             <div className="empty-emoji">👋</div>
-            <h4>Start the conversation</h4>
-            <p>Coordinate details, ask questions, and stay connected with your volunteer opportunity.</p>
+            {/* An administrator's thread is about a report, not about a shift, and
+                the student's line ("stay connected with your volunteer
+                opportunity") described the one kind of conversation an
+                administrator never has. Falls back so the component still renders
+                if a caller forgets to pass copy. */}
+            <h4>{emptyCopy?.title || 'Start the conversation'}</h4>
+            <p>{emptyCopy?.body || 'Coordinate details, ask questions, and stay connected.'}</p>
           </div>
         )}
 

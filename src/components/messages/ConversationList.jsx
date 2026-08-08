@@ -18,7 +18,7 @@ function formatRelativeTime(dateString) {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export default function ConversationList({ conversations, activeId, onSelect, loading, error }) {
+export default function ConversationList({ conversations, activeId, onSelect, loading, error, emptyText }) {
   const [searchQuery, setSearchQuery] = useState('');
 
   const filtered = conversations.filter(c => {
@@ -48,7 +48,14 @@ export default function ConversationList({ conversations, activeId, onSelect, lo
         {error && <div className="list-status error">{error}</div>}
         {!loading && !error && filtered.length === 0 && (
           <div className="list-status">
-            {searchQuery ? 'No matching conversations.' : 'No conversations yet.'}
+            {/* The search miss is the same for everybody — they typed something and
+                it did not match. The empty INBOX is not: what would put a
+                conversation here differs per role, and that is the sentence worth
+                saying. Falls back if no copy was passed, so this component keeps
+                working standalone. */}
+            {searchQuery
+              ? 'No matching conversations.'
+              : (emptyText || 'No conversations yet.')}
           </div>
         )}
         

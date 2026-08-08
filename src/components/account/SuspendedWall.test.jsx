@@ -137,7 +137,7 @@ describe('SuspendedWall', () => {
   it('shows the outcome once an appeal has been decided', async () => {
     api.listMyAppeals.mockResolvedValue({
       appeals: [{
-        id: 'a1', status: 'decided', decision: 'stands',
+        id: 'a1', status: 'resolved', decision: 'stands',
         reasoning: 'The messages continued after a clear request to stop.',
         reviewerName: 'a WeVolunteer administrator',
       }],

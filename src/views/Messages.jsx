@@ -5,8 +5,19 @@ import { subscribeSocket, unsubscribeSocket } from '../services/socket';
 import ConversationList from '../components/messages/ConversationList';
 import ConversationPane from '../components/messages/ConversationPane';
 import RecipientPicker from '../components/messages/RecipientPicker';
+import { recipientCopyFor } from '../components/messages/recipientCopy';
 
 export default function Messages() {
+  /**
+   * Every messaging surface's wording, from one capability cascade.
+   *
+   * Read from the cached user rather than threaded through props because the
+   * recipient picker below already does exactly that — two ways of answering
+   * "who is reading this" is how the picker and the empty states end up
+   * disagreeing about it.
+   */
+  const copy = recipientCopyFor(api.getCurrentCachedUser());
+
   const [conversations, setConversations] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -140,23 +151,34 @@ export default function Messages() {
             onSelect={handleSelectConversation}
             loading={loading}
             error={error}
+            emptyText={copy.listEmpty}
           />
         </div>
         <div className={`messages-main ${!isMobilePaneVisible ? 'mobile-hidden' : ''}`}>
           {activeConversation ? (
             <ConversationPane 
               conversation={activeConversation} 
+              emptyCopy={copy.threadEmpty}
               onBack={handleBackToList}
               onUpdateConversation={(updates) => {
                 setConversations(prev => prev.map(c => c.id === activeConversation.id ? { ...c, ...updates } : c));
               }}
             />
           ) : (
+            /* Expression position, not children — a block comment here is a real
+               comment. It only becomes visible text when it sits among an
+               element's CHILDREN, which is the mistake AdminDashboard.jsx shipped
+               and `setupTests.js` now fails the build on.
+
+               Role-aware: an administrator's threads are moderation conversations,
+               not "volunteer opportunity" ones, and an organizer read the
+               student's sentence backwards. Same cascade as the recipient picker,
+               so the two cannot disagree about who is reading. */
             <div className="messages-empty-state">
               <div className="empty-state-content">
                 <MessageSquare size={48} className="empty-state-icon" />
-                <h3>Select a conversation</h3>
-                <p>Choose a volunteer opportunity conversation to start messaging.</p>
+                <h3>{copy.noneSelected.title}</h3>
+                <p>{copy.noneSelected.body}</p>
               </div>
             </div>
           )}
