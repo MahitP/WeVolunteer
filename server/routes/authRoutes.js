@@ -18,6 +18,8 @@ import { validateAccountFields, validatePassword, validateUsername, validateEmai
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
 import { isSuspended, liftIfExpired, suspensionNotice } from '../suspension.js';
 import { ROLE } from '../authz.js';
+import { decryptSecret, verifyTotp } from '../cryptoUtils.js';
+import { recordSecurityEvent } from '../securityAudit.js';
 
 const router = express.Router();
 
@@ -131,6 +133,45 @@ export function issueSession(res, user, tokenVersion) {
     { expiresIn: '7d' }
   );
   res.cookie(COOKIE_NAME, token, cookieOptions());
+}
+
+/**
+ * The half-authenticated grant handed out between a correct password and a
+ * correct second factor.
+ *
+ * ── Why it carries a `jti`, like `issueSession` above ──
+ *
+ * It did not, and the payload was otherwise `{ id, preauth: true }` plus `iat`
+ * and `exp` at one-second resolution. HS256 is deterministic, so two sign-ins by
+ * the same account in the same second produced a BYTE-IDENTICAL token. Three
+ * things followed from that, in ascending order of seriousness:
+ *
+ *   1. The brute-force counter for the second factor is keyed on
+ *      `sha256(preauthToken)`. Two concurrent sign-ins shared one counter and
+ *      locked each other out at five attempts — which is what made the test
+ *      fixtures start answering 429.
+ *   2. Worse, in the other direction: an attacker guessing TOTP codes could
+ *      reset that counter to zero simply by re-posting `/api/auth/login` in the
+ *      next second and getting a fresh token hash. The five-attempt cap on a
+ *      six-digit code — the whole thing standing between a stolen password and
+ *      an account — was bypassable by anybody who noticed.
+ *   3. The grant could not be individually revoked or tied to one sign-in.
+ *
+ * ── And a 15-minute cookie for a 15-minute credential ──
+ *
+ * `cookieOptions()` carries a seven-day `maxAge`. The JWT expired in fifteen
+ * minutes either way, so this was never exploitable, but leaving a spent
+ * half-credential in the browser for a week is not what the code says it does.
+ */
+const PREAUTH_TTL_MS = 15 * 60 * 1000;
+
+export function issuePreAuthSession(res, user) {
+  const token = jwt.sign(
+    { id: user.id, preauth: true, jti: crypto.randomUUID() },
+    JWT_SECRET,
+    { expiresIn: '15m' }
+  );
+  res.cookie('wev_preauth', token, { ...cookieOptions(), maxAge: PREAUTH_TTL_MS });
 }
 
 /**
@@ -539,6 +580,16 @@ router.post('/api/auth/login', async (req, res) => {
     clearLoginFailuresForUser(userRow.id);
 
     const user = formatUserResponse(userRow);
+    
+    if (userRow.tfa_enabled || userRow.tfa_email_enabled) {
+      issuePreAuthSession(res, userRow);
+      const methods = [];
+      if (userRow.tfa_enabled) methods.push('totp');
+      if (userRow.tfa_email_enabled) methods.push('email');
+      methods.push('recovery'); // always available as fallback
+      return res.json({ require2FA: true, userId: userRow.id, availableMethods: methods });
+    }
+
     issueSession(res, user, userRow.token_version);
 
     /**
@@ -596,6 +647,238 @@ router.post('/api/auth/login', async (req, res) => {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error during login' });
   }
+});
+
+router.post('/api/auth/login-2fa', async (req, res) => {
+  const { method, token, code } = req.body;
+  const preauthToken = req.cookies.wev_preauth;
+  
+  if (!preauthToken) {
+    return res.status(401).json({ error: 'Session expired. Please log in again.' });
+  }
+
+  let payload;
+  try {
+    payload = jwt.verify(preauthToken, JWT_SECRET);
+    if (!payload.preauth) throw new Error('Invalid token');
+  } catch (err) {
+    return res.status(401).json({ error: 'Session expired. Please log in again.' });
+  }
+
+  try {
+    const tokenHash = crypto.createHash('sha256').update(preauthToken).digest('hex');
+
+    /**
+     * Two ceilings, and the second one is the one that matters.
+     *
+     * Per TOKEN: five guesses against this particular grant. That is the obvious
+     * one, and on its own it is decorative — now that every grant carries a
+     * `jti`, an attacker guessing a six-digit code just re-posts
+     * `/api/auth/login` with the password they already have, receives a fresh
+     * token with a fresh counter, and continues. Five guesses per grant with
+     * unlimited grants is unlimited guesses.
+     *
+     * Per ACCOUNT, in a rolling window: the ceiling that actually bounds the
+     * search. A six-digit code is 10^6, so 20 attempts per 15 minutes leaves an
+     * attacker needing about a year of uninterrupted guessing per account, which
+     * is the point at which the second factor is doing its job rather than
+     * appearing to.
+     *
+     * Deliberately NOT a lockout. Refusing further attempts for a window is
+     * recoverable by waiting; disabling the account would let anybody with a
+     * stolen password lock the owner out of their own platform on purpose.
+     */
+    const ACCOUNT_WINDOW_MINUTES = 15;
+    const ACCOUNT_ATTEMPT_CEILING = 20;
+
+    const perToken = db.prepare(
+      'SELECT attempts FROM tfa_login_attempts WHERE token_hash = ?'
+    ).get(tokenHash);
+
+    const perAccount = db.prepare(
+      `SELECT COALESCE(SUM(attempts), 0) AS attempts
+         FROM tfa_login_attempts
+        WHERE user_id = ?
+          AND last_attempt_at > datetime('now', '-${ACCOUNT_WINDOW_MINUTES} minutes')`
+    ).get(payload.id);
+
+    if ((perToken && perToken.attempts >= 5)
+      || (perAccount && perAccount.attempts >= ACCOUNT_ATTEMPT_CEILING)) {
+      recordSecurityEvent(db, req, payload.id, '2FA_THROTTLED');
+      return res.status(429).json({ error: 'Too many failed attempts. Please log in again.' });
+    }
+
+    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
+    if (!userRow || userRow.account_status === 'deleted' || isSuspended(userRow)) {
+      res.clearCookie('wev_preauth', clearCookieOptions());
+      return res.status(401).json({ error: 'Authentication failed.' });
+    }
+
+    let isValid = false;
+    let usedRecoveryCodeId = null;
+    const effectiveMethod = method || (token ? 'totp' : (code ? 'recovery' : null));
+    
+    if (effectiveMethod === 'totp' && token) {
+      /**
+       * The authentication bypass this replaced.
+       *
+       * otplib's `verifySync` returns `{ valid: false }` for a wrong code — an
+       * object, and therefore truthy. Assigning it straight to `isValid` meant
+       * ANY six-digit string completed the second factor. An attacker holding a
+       * stolen password was not slowed down at all, while the account holder
+       * believed they were protected — which is worse than having no second
+       * factor, because it is the reason somebody reuses a password.
+       *
+       * `verifyTotp` returns a real boolean and cannot be misread. See
+       * cryptoUtils.js.
+       */
+      isValid = verifyTotp(token, userRow.tfa_secret);
+    } else if (effectiveMethod === 'email' && code) {
+      // Find valid codes for the user. We must bcrypt.compare each one.
+      const validEmailCodes = db.prepare(
+        'SELECT id, code_hash FROM tfa_email_codes WHERE user_id = ? AND used_at IS NULL AND expires_at > datetime("now") AND attempts < 3'
+      ).all(payload.id);
+      
+      /**
+       * `await bcrypt.compare`, not `compareSync` — see the note on the recovery
+       * loop below, and `bcryptAsync.test.js`.
+       *
+       * The attempt counter is bumped ONCE for the whole submission rather than
+       * once per stored code. It used to increment inside the else branch, so a
+       * user with three live codes burned three attempts on one wrong guess and
+       * was locked out after a single typo — while somebody with one live code
+       * got the three the design intends.
+       */
+      let matched = null;
+      for (const emailCode of validEmailCodes) {
+        if (await bcrypt.compare(code.trim(), emailCode.code_hash)) {
+          matched = emailCode;
+          break;
+        }
+      }
+
+      if (matched) {
+        isValid = true;
+        db.prepare('UPDATE tfa_email_codes SET used_at = datetime("now") WHERE id = ?').run(matched.id);
+      } else {
+        for (const emailCode of validEmailCodes) {
+          db.prepare('UPDATE tfa_email_codes SET attempts = attempts + 1 WHERE id = ?').run(emailCode.id);
+        }
+      }
+    } else if (effectiveMethod === 'recovery' && code) {
+      // Find all recovery codes for the user. We must bcrypt.compare each one.
+      const recoveryCodes = db.prepare('SELECT id, code_hash FROM recovery_codes WHERE user_id = ?').all(payload.id);
+      
+      /**
+       * `await bcrypt.compare` rather than the sync form.
+       *
+       * This is the worst of the five sites the guard flagged: it compares up to
+       * ten hashes at cost 10 per attempt, so a single wrong recovery code
+       * blocked the event loop for roughly a second — for every other user of the
+       * process, not just the one guessing.
+       */
+      for (const rc of recoveryCodes) {
+        if (await bcrypt.compare(code.trim().toUpperCase(), rc.code_hash)) {
+          isValid = true;
+          usedRecoveryCodeId = rc.id;
+          db.prepare('DELETE FROM recovery_codes WHERE id = ?').run(rc.id);
+          break;
+        }
+      }
+    }
+
+    db.prepare(`
+      INSERT INTO tfa_login_attempts (token_hash, user_id, attempts, last_attempt_at) 
+      VALUES (?, ?, 1, datetime('now'))
+      ON CONFLICT(token_hash) DO UPDATE SET 
+        attempts = attempts + 1,
+        last_attempt_at = datetime('now')
+    `).run(tokenHash, payload.id);
+
+    if (!isValid) {
+      recordSecurityEvent(db, req, payload.id, '2FA_FAILED', { method: effectiveMethod });
+      return res.status(401).json({ error: 'Invalid code.' });
+    }
+
+    recordSecurityEvent(db, req, payload.id, '2FA_SUCCESS', { method: effectiveMethod });
+    if (usedRecoveryCodeId) {
+      recordSecurityEvent(db, req, payload.id, '2FA_RECOVERY_USED', { recovery_id: usedRecoveryCodeId });
+    }
+
+    // Success!
+    res.clearCookie('wev_preauth', clearCookieOptions());
+    const user = formatUserResponse(userRow);
+    issueSession(res, user, userRow.token_version);
+
+    res.json({
+      user,
+      emailVerified: userRow.email_verified === 1,
+      ...(userRow.email_verified !== 1 && {
+        action: 'verification_required',
+        message: 'This account has not been verified. Check your email for the confirmation link.'
+      })
+    });
+  } catch (error) {
+    console.error('2FA Login error:', error);
+    res.status(500).json({ error: 'Internal server error during 2FA login' });
+  }
+});
+
+router.post('/api/auth/login-2fa/email/send', async (req, res) => {
+  const preauthToken = req.cookies.wev_preauth;
+  if (!preauthToken) return res.status(401).json({ error: 'Session expired. Please log in again.' });
+  
+  let payload;
+  try {
+    payload = jwt.verify(preauthToken, JWT_SECRET);
+    if (!payload.preauth) throw new Error('Invalid token');
+  } catch {
+    return res.status(401).json({ error: 'Session expired. Please log in again.' });
+  }
+
+  const userRow = db.prepare('SELECT id, email, email_verified, tfa_email_enabled FROM users WHERE id = ?').get(payload.id);
+  if (!userRow || !userRow.tfa_email_enabled || !userRow.email_verified) {
+    return res.status(400).json({ error: 'Email verification is not available for this account.' });
+  }
+
+  const recent = db.prepare(
+    'SELECT created_at FROM tfa_email_codes WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
+  ).get(userRow.id);
+  if (recent) {
+    const elapsed = Date.now() - new Date(recent.created_at + 'Z').getTime();
+    if (elapsed < 60000) {
+      const wait = Math.ceil((60000 - elapsed) / 1000);
+      return res.status(429).json({ error: `Please wait ${wait} seconds before requesting another code.`, retryAfter: wait });
+    }
+  }
+
+  const code = String(crypto.randomInt(100000, 999999));
+  const codeHash = await bcrypt.hash(code, 10);
+  const codeId = `tfa-email-${crypto.randomUUID()}`;
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+  /**
+   * Asking for a new code retires the old ones.
+   *
+   * Without this every code stayed live until it expired, so a user who pressed
+   * "send again" three times had three working codes for ten minutes — three
+   * times the guessing surface, and three chances that an intercepted older
+   * message still opens the account. "Send me another" means the previous one
+   * was not received; it should stop working.
+   */
+  db.prepare(
+    "UPDATE tfa_email_codes SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL"
+  ).run(userRow.id);
+
+  db.prepare(
+    'INSERT INTO tfa_email_codes (id, user_id, code_hash, expires_at) VALUES (?, ?, ?, ?)'
+  ).run(codeId, userRow.id, codeHash, expiresAt);
+
+  const { send2FACode } = await import('../email.js');
+  await send2FACode(userRow.email, code);
+
+  const masked = userRow.email.replace(/^(.{2})(.*)(@.*)$/, '$1***$3');
+  res.json({ sent: true, maskedEmail: masked });
 });
 
 /**

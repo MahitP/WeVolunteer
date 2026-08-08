@@ -89,6 +89,87 @@ if (weakness) {
 
 export const JWT_SECRET = resolvedSecret;
 
+/**
+ * 2FA Encryption Key.
+ * 
+ * Used for AES-256-GCM encryption of TOTP secrets. Must be exactly a 32-byte
+ * cryptographically random value encoded as a base64 string.
+ * 
+ * Generation: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+ */
+/**
+ * AES-256 key for encrypting stored TOTP secrets, base64, 32 bytes.
+ *
+ * ── Why this does not `process.exit` ──
+ *
+ * It used to, from module scope, in development as well as production — with a
+ * comment saying that failing was safer than falling back to plaintext. The
+ * second half of that is right and is preserved below: there is no plaintext
+ * path, and an unset key still stops a production boot.
+ *
+ * Exiting from a config module is the part that was wrong. `config.js` is
+ * imported by almost every module in the server, including from inside tests
+ * that deliberately clear `NODE_ENV` to exercise the production guards — and
+ * `process.exit(1)` there kills the test runner rather than failing an
+ * assertion. It took out ~100 tests across a dozen files that have nothing to do
+ * with two-factor authentication, and the failures pointed at `health.test.js`
+ * and `instanceLock.test.js` rather than at the key.
+ *
+ * So it follows the shape `JWT_SECRET` a few lines above already uses, for the
+ * same reasons: a loud development fallback, and a THROW in production that
+ * `server.js` catches and reports as a fatal boot guard. Deciding to end the
+ * process belongs to the entry point, not to a module somebody imported for a
+ * constant.
+ *
+ * The fallback is a fixed, publicly-known key. Secrets encrypted with it are not
+ * protected from anybody who reads this file — which is true of the development
+ * `JWT_SECRET` too, and is why both warn. What it buys is that the storage FORMAT
+ * is identical in development and production, so the encrypt/decrypt path is
+ * exercised rather than skipped.
+ */
+const DEV_TFA_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+
+function resolveTfaKey() {
+  const configured = process.env.TFA_ENCRYPTION_KEY;
+
+  if (!configured) {
+    if (IS_PRODUCTION) {
+      throw new Error(
+        'FATAL: TFA_ENCRYPTION_KEY is not set. A 32-byte base64 AES-256 key is '
+        + 'required to encrypt stored two-factor secrets. Generate one with:\n'
+        + "  node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"\n"
+        + 'and set it in the deployment environment (never in a committed file).'
+      );
+    }
+    console.warn(
+      '[config] TFA_ENCRYPTION_KEY is not set — using an insecure development key.\n'
+      + '         Stored two-factor secrets are recoverable by anyone with this source.'
+    );
+    return DEV_TFA_KEY;
+  }
+
+  /* A malformed key is fatal everywhere, development included: unlike an absent
+     one there is no safe interpretation, and silently falling back would encrypt
+     with a different key than the operator believes they configured — which
+     surfaces later as every stored secret failing to decrypt. */
+  let bytes;
+  try {
+    bytes = Buffer.from(configured, 'base64');
+  } catch (err) {
+    throw new Error(`FATAL: TFA_ENCRYPTION_KEY is not valid base64. ${err.message}`);
+  }
+  if (bytes.length !== 32) {
+    throw new Error(
+      `FATAL: TFA_ENCRYPTION_KEY must decode to 32 bytes, got ${bytes.length}. `
+      + 'AES-256 takes a 256-bit key.'
+    );
+  }
+  return configured;
+}
+
+export const TFA_ENCRYPTION_KEY = resolveTfaKey();
+
+
 export const VALID_GRADES = ['9', '10', '11', '12', 'Adult', 'N/A'];
 export const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 

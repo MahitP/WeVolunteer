@@ -21,6 +21,16 @@ import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
  * before db.js and app.js are first imported, which is why the imports here
  * are dynamic.
  */
+/**
+ * The base32 TOTP secret every seeded administrator is enrolled with.
+ *
+ * Fixed and in the open on purpose: it is a test fixture and protects nothing.
+ * 32 characters of base32 — otplib v13 rejects anything under 16 bytes, which is
+ * why the shorter secrets that read naturally (`JBSWY3DPEHPK3PXP`) cannot be
+ * used here.
+ */
+export const TEST_TOTP_SECRET = 'UZ4DHT22AL6CQMULDYSGGT4YT4UU2GMT';
+
 export async function startTestServer() {
   const dir = mkdtempSync(path.join(tmpdir(), 'wev-test-'));
   process.env.WEV_DB_PATH = path.join(dir, 'test.db');
@@ -98,6 +108,38 @@ export async function startTestServer() {
 
   initDatabase();
 
+  /**
+   * Every seeded administrator is enrolled in two-factor authentication.
+   *
+   * ── Why the fixtures have to change ──
+   *
+   * `requireCap` refuses any `admin`/`super_admin` whose account has no second
+   * factor, answering 403 `tfa_required`. That is the point of the feature — an
+   * administrator without 2FA cannot administer — and it means a fixture
+   * representing a WORKING administrator must be enrolled. Left unenrolled, ~290
+   * tests across 49 files fail on a policy they predate, and every one of those
+   * failures is about the fixture rather than about the thing under test.
+   *
+   * So this is not a workaround. It is the seed catching up with the rule: the
+   * suite's admin is now a compliant admin, and the NON-compliant case gets its
+   * own explicit tests (`routes.2faHardening.test.js`, and the enforcement cases
+   * that disable it deliberately) rather than being every test's accidental
+   * state.
+   *
+   * ── One shared secret ──
+   *
+   * A fixed, valid base32 secret rather than a random one per run, so `login`
+   * below can produce a code without threading state, and so a failing test can
+   * be reproduced by hand. It is a test fixture; it protects nothing.
+   */
+  {
+    const { encryptSecret } = await import('./cryptoUtils.js');
+    const { db: seeded } = await import('./db.js');
+    seeded.prepare(
+      "UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE role IN ('admin', 'super_admin')"
+    ).run(encryptSecret(TEST_TOTP_SECRET));
+  }
+
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -128,9 +170,75 @@ export async function startTestServer() {
     return { status: res.status, body: parsed, headers: res.headers, cookie };
   };
 
+  /**
+   * Sign in, completing two-factor authentication when the account has it.
+   *
+   * ── Why the helper does the second step ──
+   *
+   * An enrolled account's `POST /api/auth/login` no longer returns a session. It
+   * returns `{ require2FA: true }` and a `wev_preauth` cookie, and the session
+   * only exists after `POST /api/auth/login-2fa`. Every one of the ~1,500
+   * existing `srv.login(...)` call sites wants "give me a signed-in session", so
+   * the exchange belongs here rather than in each of them.
+   *
+   * The code is generated from the same fixed secret the seed enrolled, through
+   * the REAL endpoint — so every test that signs in as an administrator now
+   * exercises the 2FA exchange as a side effect, which is strictly more coverage
+   * than before rather than less.
+   *
+   * A test that wants the UNENROLLED behaviour turns it off explicitly
+   * (`UPDATE users SET tfa_enabled = 0 …`) and gets the 403 the policy promises.
+   */
   const login = async (email, password = 'password123') => {
+    /**
+     * Bring the account into line with the two-factor policy before signing in.
+     *
+     * The seed enrols the administrators it creates, but a dozen suites promote a
+     * throwaway account with direct SQL —
+     * `UPDATE users SET role = 'super_admin' …` — and those accounts are then
+     * refused by `requireCap` with `tfa_required`, which is correct policy and a
+     * baffling way to discover it three assertions later.
+     *
+     * Doing it HERE rather than in each suite: this helper's contract is "give me
+     * a working signed-in session for this account", and under the policy a
+     * working ADMINISTRATOR session is an enrolled one. Non-admins are untouched,
+     * so ordinary sign-in stays a single round trip and the suites that test the
+     * login flow itself see exactly what they saw before.
+     */
+    {
+      const { db: live } = await import('./db.js');
+      const { encryptSecret } = await import('./cryptoUtils.js');
+      live.prepare(
+        "UPDATE users SET tfa_enabled = 1, tfa_secret = ?\n"
+        + "         WHERE email = ? AND role IN ('admin', 'super_admin')\n"
+        + '           AND (tfa_enabled IS NULL OR tfa_enabled = 0)\n'
+        + '           AND (tfa_email_enabled IS NULL OR tfa_email_enabled = 0)'
+      ).run(encryptSecret(TEST_TOTP_SECRET), email);
+    }
+
     const res = await call('POST', '/api/auth/login', { email, password });
-    return res.cookie;
+    if (!res.body?.require2FA) return res.cookie;
+
+    const preauth = (res.headers.get('set-cookie') || '').match(/wev_preauth=([^;]+)/)?.[1];
+    if (!preauth) {
+      throw new Error(
+        `login(${email}): the server asked for a second factor but issued no preauth cookie.`
+      );
+    }
+
+    const { generateSync } = await import('otplib');
+    const second = await call('POST', '/api/auth/login-2fa',
+      { method: 'totp', token: generateSync({ secret: TEST_TOTP_SECRET }) },
+      undefined, { Cookie: `wev_preauth=${preauth}` });
+
+    if (!second.cookie) {
+      throw new Error(
+        `login(${email}): the second factor was refused (${second.status} `
+        + `${JSON.stringify(second.body)}). The fixture's enrolment and the secret `
+        + 'in testServer.js have drifted apart.'
+      );
+    }
+    return second.cookie;
   };
 
   /**
@@ -158,9 +266,15 @@ export async function startTestServer() {
     const { db } = await import('./db.js');
     const row = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
     if (!row) throw new Error(`makeOwner: no account for ${email}`);
+    /* Enrolled at the same moment as the promotion. This helper turns an
+       ordinary account into one the 2FA policy applies to, so without this the
+       caller gets an owner who is immediately refused by `requireCap` — which is
+       correct behaviour and a confusing way to learn it. */
+    const { encryptSecret } = await import('./cryptoUtils.js');
     db.prepare(
-      "UPDATE users SET role = 'super_admin', token_version = token_version + 1 WHERE id = ?"
-    ).run(row.id);
+      "UPDATE users SET role = 'super_admin', tfa_enabled = 1, tfa_secret = ?, "
+      + 'token_version = token_version + 1 WHERE id = ?'
+    ).run(encryptSecret(TEST_TOTP_SECRET), row.id);
     return row.id;
   };
 
