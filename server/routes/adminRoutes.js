@@ -35,17 +35,51 @@ router.post('/api/admin/organizers/:id/approve', authenticateToken, requireCap('
   const orgId = req.params.id;
 
   try {
-    db.prepare('UPDATE users SET verified = 1 WHERE id = ?').run(orgId);
-    
-    // Log the audit event
-    recordAudit(db, {
-      adminId: req.user.id,
-      action: 'APPROVE_ORGANIZER',
-      targetUserId: orgId,
-      details: 'Approved pending organizer account'
+    /**
+     * Scoped exactly like `deny` twenty lines below, which documents why.
+     *
+     * This was `UPDATE users SET verified = 1 WHERE id = ?` — no role filter, no
+     * pending filter, no existence check, no transaction. Three consequences:
+     *
+     *   1. Any user id could be marked `verified`. That flag gates event creation
+     *      and drives the "Approved by school staff" badge on a profile, so a
+     *      student pre-approved this way became a trusted organizer the moment
+     *      their role changed — with no record of anybody deciding that.
+     *   2. A mistyped or stale id still returned `{ success: true }`, still wrote
+     *      an `APPROVE_ORGANIZER` audit row, and still dispatched an approval
+     *      notification. The trail recorded an approval that never happened,
+     *      which is worse than no trail: it is a false one.
+     *   3. The write and its audit row were not atomic, so a failing
+     *      `recordAudit` left an approved organizer nobody was recorded as
+     *      approving.
+     *
+     * Already-approved is a 404 rather than a silent success, matching `deny`:
+     * "there is no pending request here" is the true answer to both.
+     */
+    const target = db.prepare(
+      "SELECT id FROM users WHERE id = ? AND role = 'organizer' AND verified = 0"
+    ).get(orgId);
+
+    if (!target) {
+      return res.status(404).json({
+        error: 'No pending organizer request matches that id.',
+      });
+    }
+
+    inTransaction(() => {
+      db.prepare('UPDATE users SET verified = 1 WHERE id = ?').run(target.id);
+
+      recordAudit(db, {
+        adminId: req.user.id,
+        action: 'APPROVE_ORGANIZER',
+        targetUserId: target.id,
+        details: 'Approved pending organizer account'
+      });
     });
 
-    notificationService.dispatch('ORGANIZER_APPROVED', {}, orgId);
+    /* After the commit, deliberately. A notification sent from inside the
+       transaction would go out even if the approval rolled back. */
+    notificationService.dispatch('ORGANIZER_APPROVED', {}, target.id);
     res.json({ success: true });
   } catch (error) {
     console.error('Verify organizer error:', error);

@@ -1,4 +1,21 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+
+/**
+ * A file-wide budget, measured rather than guessed — same remedy and reasoning as
+ * `tooling.dbPath.test.js` and `email.reliability.test.js`.
+ *
+ * Changing an email, a password or a username is bcrypt work by design: every one
+ * of these 29 cases hashes or compares at cost 10, several do both, and the
+ * step-up they sit behind adds another. Isolated the file runs in ~8.7s. Under
+ * the parallel load of the full suite it was measured at 22.8s and a case timed
+ * out against vitest's 5000ms default, then passed on the next run.
+ *
+ * Nothing was hung and no assertion failed — it ran out of clock on the slowest
+ * legitimate work in the suite. Flakiness on the gate every other gate depends on
+ * is a defect in its own right, so this is raised deliberately rather than
+ * re-run. The global default stays 5000ms.
+ */
+vi.setConfig({ testTimeout: 30000 });
 import { DatabaseSync } from 'node:sqlite';
 import { TEST_SIGNUP_DEFAULTS } from './testConsent.js';
 
