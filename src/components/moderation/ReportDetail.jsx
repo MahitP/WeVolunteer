@@ -353,6 +353,14 @@ export default function ReportDetail({ reportId, user, onClose, onChanged, addTo
                         <div className="timeline-date">{formatMoment(row.created_at)}</div>
                         <div className="timeline-title">
                           {ACTION_LABELS[row.action] ?? row.action.replace(/_/g, ' ')}
+                          {/* The reasoning that was withdrawn, kept on the row
+                              that withdrew it. A reopen without it tells a
+                              reviewer that a decision was reversed and nothing
+                              about what the decision said — which is the one
+                              thing an appeal is judged against. */}
+                          {row.note && (
+                            <span className="small dim">{row.note}</span>
+                          )}
                         </div>
                         <div className="timeline-meta">
                           {row.actor_name}
