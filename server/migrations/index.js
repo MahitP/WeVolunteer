@@ -32,6 +32,10 @@ import administratorRoster from './020_administrator_roster.js';
 import administratorPromotionMetadata from './021_administrator_promotion_metadata.js';
 import systemCliActor from './022_system_cli_actor.js';
 import adminInvitations from './023_admin_invitations.js';
+import featuresExpansion from './024_features_expansion.js';
+import tfaHardening from './025_tfa_hardening.js';
+import securityAuditLogs from './026_security_audit_logs.js';
+import encryptTfaSecrets from './027_encrypt_tfa_secrets.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -89,6 +93,24 @@ export const MIGRATIONS = [
    * pending invitation per address (IV-13) and the token stored hashed.
    */
   adminInvitations,
+  /**
+   * 024 expands features for profile pictures, 2FA, and badges.
+   */
+  featuresExpansion,
+  /**
+   * 025 hardens 2FA by invalidating plain-text recovery codes, 
+   * creating tables for email codes and login attempt throttling.
+   */
+  tfaHardening,
+  /**
+   * 026 adds a dedicated security_audit_logs table to isolate user
+   * security lifecycle events from administrator actions.
+   */
+  securityAuditLogs,
+  /**
+   * 027 encrypts existing plaintext TOTP secrets using AES-256-GCM.
+   */
+  encryptTfaSecrets,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

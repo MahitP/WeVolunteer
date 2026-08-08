@@ -5,6 +5,7 @@ import { authenticateToken, inTransaction } from '../utils.js';
 import { can, requireCap } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
 import { getOrCreateCertificateCode } from '../certificates.js';
+import { badgeService } from '../services/badgeService.js';
 import { db } from '../db.js';
 
 const router = express.Router();
@@ -105,6 +106,9 @@ router.post('/api/events/:id/attendance', authenticateToken, requireCap('attenda
         { eventId: event.id, eventTitle: event.title, hours: Number(c.hours) },
         c.userId
       );
+      
+      // Evaluate badge eligibility with newly approved hours
+      badgeService.evaluateBadges(c.userId);
       
       // If the event is fully completed and this user was credited hours, their certificate is ready
       if (outcome.eventCompleted) {

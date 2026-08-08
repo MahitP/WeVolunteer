@@ -787,18 +787,35 @@ router.post('/api/auth/login-2fa', async (req, res) => {
       }
     }
 
-    db.prepare(`
-      INSERT INTO tfa_login_attempts (token_hash, user_id, attempts, last_attempt_at) 
-      VALUES (?, ?, 1, datetime('now'))
-      ON CONFLICT(token_hash) DO UPDATE SET 
-        attempts = attempts + 1,
-        last_attempt_at = datetime('now')
-    `).run(tokenHash, payload.id);
-
+    /**
+     * Only FAILURES are counted.
+     *
+     * This ran unconditionally, before `isValid` was consulted, so a successful
+     * sign-in incremented the failed-attempt counter. With the per-account
+     * ceiling that means an administrator who signs in twenty times in a quarter
+     * of an hour locks themselves out of their own platform — having done
+     * nothing wrong and having got the code right every time. A rate limit on
+     * guessing must count guesses, not authentications.
+     *
+     * On success the account's recent failures are cleared. Somebody who has
+     * just proved possession of the second factor is not mid-attack, and leaving
+     * a fat-fingered code earlier in the window counting against their next
+     * sign-in is the behaviour that teaches people to disable 2FA.
+     */
     if (!isValid) {
+      db.prepare(`
+        INSERT INTO tfa_login_attempts (token_hash, user_id, attempts, last_attempt_at) 
+        VALUES (?, ?, 1, datetime('now'))
+        ON CONFLICT(token_hash) DO UPDATE SET 
+          attempts = attempts + 1,
+          last_attempt_at = datetime('now')
+      `).run(tokenHash, payload.id);
+
       recordSecurityEvent(db, req, payload.id, '2FA_FAILED', { method: effectiveMethod });
       return res.status(401).json({ error: 'Invalid code.' });
     }
+
+    db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(payload.id);
 
     recordSecurityEvent(db, req, payload.id, '2FA_SUCCESS', { method: effectiveMethod });
     if (usedRecoveryCodeId) {

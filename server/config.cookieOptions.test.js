@@ -36,7 +36,16 @@ function importCookieOptions(env) {
       // under 32 characters in production, so this has to be a realistic one;
       // the previous 30-character placeholder made these cases fail for a reason
       // that had nothing to do with cookies.
-      env: { ...process.env, NODE_ENV: '', JWT_SECRET: 'JXAvK3n2Qp7RtY9wLmZbC4dE6fG8hJ1kN5oP0qS2uV4xA7yB9cD3eF5gH8iJ0kLm', ...env },
+      /* `TFA_ENCRYPTION_KEY` for the same reason as `JWT_SECRET`: both are fatal
+         boot guards in production, and these cases boot with NODE_ENV=production
+         to inspect an unrelated property of the cookie. */
+      env: {
+        ...process.env,
+        NODE_ENV: '',
+        JWT_SECRET: 'JXAvK3n2Qp7RtY9wLmZbC4dE6fG8hJ1kN5oP0qS2uV4xA7yB9cD3eF5gH8iJ0kLm',
+        TFA_ENCRYPTION_KEY: 'c3VwZXJzZWNyZXRrZXkxMjM0NTY3ODkwYWJjZGVmZ2g=',
+        ...env,
+      },
       stdio: 'pipe',
       encoding: 'utf8'
     });

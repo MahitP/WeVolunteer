@@ -81,6 +81,12 @@ beforeAll(async () => {
       name: role, username: `matrix_${role}`, email, password: 'Password123', grade: 'Adult', role: 'student'
     });
     db.prepare('UPDATE users SET role = ?, verified = 1 WHERE email = ?').run(role, email);
+    /* An administrator without a second factor is refused by `requireCap` before
+       any capability is consulted, so a promoted fixture has to be enrolled or
+       every row in the matrix reads 403 for reasons that have nothing to do with
+       the capability under test. */
+    const { enrolTwoFactor } = await import('./testServer.js');
+    await enrolTwoFactor(db, email);
     tokens[role] = signed.cookie;
   }
 

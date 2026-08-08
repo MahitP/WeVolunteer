@@ -605,3 +605,22 @@ export async function sendMail({ to, subject, text, html }) {
     throw err; // throw to let the worker handle retry
   }
 }
+
+export async function send2FACode(to, code) {
+  const contentHTML = `
+    <h1>Your verification code</h1>
+    <p>Your verification code is: <strong>${escapeHtml(code)}</strong></p>
+    <p>This code expires in 10 minutes.</p>
+    <p style="color: #66736d; font-size: 14px;">If you did not request this code, you can safely ignore this email.</p>
+  `;
+
+  const mailOptions = {
+    from: EMAIL_FROM,
+    to,
+    subject: `Your ${APP_NAME} verification code`,
+    text: `Your verification code is: ${code}\n\nThis code expires in 10 minutes.\n\nIf you did not request this code, you can safely ignore this email.`,
+    html: buildHtmlTemplate('Your verification code', contentHTML)
+  };
+
+  return sendTransactional('2fa-code', mailOptions);
+}

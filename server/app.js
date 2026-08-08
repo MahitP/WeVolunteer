@@ -32,6 +32,9 @@ import impactRoutes from './routes/impactRoutes.js';
 import invitationRoutes from './routes/invitationRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import appealsRoutes from './routes/appealsRoutes.js';
+import profilePictureRoutes from './routes/profilePictureRoutes.js';
+import badgeRoutes from './routes/badgeRoutes.js';
+import twoFactorRoutes from './routes/twoFactorRoutes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -610,6 +613,9 @@ app.use(legalRoutes);
 app.use(impactRoutes);
 app.use(invitationRoutes);
 app.use(reportRoutes);
+app.use(profilePictureRoutes);
+app.use(badgeRoutes);
+app.use(twoFactorRoutes);
 /**
  * Reading the appeal form must not spend the budget for filing it.
  *
@@ -775,6 +781,7 @@ if (IS_PRODUCTION) {
    * points at the hashed assets, so a cached copy would keep sending returning
    * users to the previous deployment's chunks indefinitely.
    */
+  app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
   app.use(express.static(distPath, {
     setHeaders: (res, filePath) => {
       if (filePath.endsWith('index.html')) {

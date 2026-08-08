@@ -90,6 +90,13 @@ export const SENSITIVE_ACTIONS = {
   'admin.invite':     { label: 'invite an administrator',         methods: ['password', 'oauth'], bindsParams: ['email'] },
   'admin.promote':    { label: 'promote an administrator',       methods: ['password', 'oauth'], bindsParams: ['targetUserId'] },
   'admin.revoke':     { label: 'revoke an administrator',        methods: ['password', 'oauth'], bindsParams: ['targetUserId'] },
+  /**
+   * Modifying 2FA changes the security posture of an account. It requires a fresh verification
+   * to ensure an attacker with a hijacked session cannot quietly add a backdoor or disable 2FA.
+   */
+  '2fa.generate':     { label: 'set up two-factor authentication', methods: ['password', 'oauth'], bindsParams: [] },
+  '2fa.enable':       { label: 'enable two-factor authentication', methods: ['password', 'oauth'], bindsParams: [] },
+  '2fa.disable':      { label: 'disable two-factor authentication', methods: ['password', 'oauth'], bindsParams: [] },
 };
 
 export function isSensitiveAction(action) {

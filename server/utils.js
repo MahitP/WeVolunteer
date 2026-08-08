@@ -176,12 +176,18 @@ export function authenticateToken(req, res, next) {
   jwt.verify(token, JWT_SECRET, (err, decodedUser) => {
     if (err) return res.status(403).json({ error: 'Invalid or expired token' });
 
+    // A preauth token must never be accepted as a full session token.
+    if (decodedUser.preauth) {
+      return res.status(401).json({ error: 'Pre-authentication tokens cannot be used as full sessions' });
+    }
+
     // Re-derive identity from the database on every request rather than
     // trusting the (up to 7-day-old) token payload, so a deleted user's
     // token stops working and a role/email change takes effect immediately.
     const userRow = db.prepare(
       `SELECT id, role, email, name, email_verified, token_version, account_status,
-              suspended_until, suspended_at, suspension_reason
+              suspended_until, suspended_at, suspension_reason,
+              tfa_enabled, tfa_email_enabled
          FROM users WHERE id = ?`
     ).get(decodedUser.id);
 
@@ -270,6 +276,7 @@ export function authenticateToken(req, res, next) {
     // The capability principal. req.user is left exactly as it was, so every
     // existing handler and test keeps working while call sites migrate.
     req.principal = buildPrincipal(userRow);
+    req.principal.tfaRequired = ['admin', 'super_admin'].includes(userRow.role) && !userRow.tfa_enabled && !userRow.tfa_email_enabled;
 
     /**
      * This session's identifier, for the routes that BIND something to it.
@@ -368,7 +375,15 @@ export function formatUserResponse(row) {
     leaderboardOptIn: row.leaderboard_opt_in === 1,
     emailOptOut: row.email_opt_out === 1,
     hasPassword: row.password_hash !== '!OAUTH_ONLY!',
+    tfaEnabled: Boolean(row.tfa_enabled),
+    tfaEmailEnabled: Boolean(row.tfa_email_enabled),
+    tfaMethods: [
+      ...(row.tfa_enabled ? ['totp'] : []),
+      ...(row.tfa_email_enabled ? ['email'] : []),
+    ],
+    tfaRequired: ['admin', 'super_admin'].includes(row.role) && !row.tfa_enabled && !row.tfa_email_enabled,
     avatar: row.avatar,
+    profile_picture_url: row.profile_picture_url,
     volunteeredHours: totalHours,
     bio: row.bio,
     school: row.school,

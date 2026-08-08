@@ -29,34 +29,44 @@ function boot(env) {
 }
 
 /** 64 chars, high entropy — what `openssl rand -base64 48` produces. */
+/**
+ * A valid AES-256 key for the production boots below.
+ *
+ * `config.js` requires `TFA_ENCRYPTION_KEY` in production — an absent one is a
+ * fatal boot guard, the same as a missing `JWT_SECRET`. These tests are about
+ * other guards entirely, so they supply a real key for the same reason they
+ * supply `STRONG` above: to reach the thing they are actually testing.
+ */
+const TFA_KEY = 'c3VwZXJzZWNyZXRrZXkxMjM0NTY3ODkwYWJjZGVmZ2g=';
+
 const STRONG = 'JXAvK3n2Qp7RtY9wLmZbC4dE6fG8hJ1kN5oP0qS2uV4xA7yB9cD3eF5gH8iJ0kLm';
 
 describe('JWT_SECRET validation in production', () => {
   it('boots with a strong secret', () => {
-    const r = boot({ NODE_ENV: 'production', JWT_SECRET: STRONG });
+    const r = boot({ NODE_ENV: 'production', TFA_ENCRYPTION_KEY: TFA_KEY, JWT_SECRET: STRONG });
     expect(r.booted).toBe(true);
   });
 
   it('refuses to boot when the secret is missing', () => {
-    const r = boot({ NODE_ENV: 'production', JWT_SECRET: '' });
+    const r = boot({ NODE_ENV: 'production', TFA_ENCRYPTION_KEY: TFA_KEY, JWT_SECRET: '' });
     expect(r.booted).toBe(false);
     expect(r.stderr).toMatch(/JWT_SECRET must be set/);
   });
 
   /** The exact value sitting in .env.example — the one that shipped. */
   it('refuses the placeholder from the template', () => {
-    const r = boot({ NODE_ENV: 'production', JWT_SECRET: 'your-super-secret-jwt-key' });
+    const r = boot({ NODE_ENV: 'production', TFA_ENCRYPTION_KEY: TFA_KEY, JWT_SECRET: 'your-super-secret-jwt-key' });
     expect(r.booted).toBe(false);
     expect(r.stderr).toMatch(/placeholder/i);
   });
 
   it('refuses the development fallback', () => {
-    const r = boot({ NODE_ENV: 'production', JWT_SECRET: 'dev-only-insecure-secret-do-not-use-in-production' });
+    const r = boot({ NODE_ENV: 'production', TFA_ENCRYPTION_KEY: TFA_KEY, JWT_SECRET: 'dev-only-insecure-secret-do-not-use-in-production' });
     expect(r.booted).toBe(false);
   });
 
   it('refuses a secret shorter than 32 characters', () => {
-    const r = boot({ NODE_ENV: 'production', JWT_SECRET: 'abc123' });
+    const r = boot({ NODE_ENV: 'production', TFA_ENCRYPTION_KEY: TFA_KEY, JWT_SECRET: 'abc123' });
     expect(r.booted).toBe(false);
     expect(r.stderr).toMatch(/32/);
   });
@@ -66,13 +76,13 @@ describe('JWT_SECRET validation in production', () => {
    * the shape a hurried "make the error go away" fix produces.
    */
   it('refuses a long but low-entropy secret', () => {
-    const r = boot({ NODE_ENV: 'production', JWT_SECRET: 'a'.repeat(64) });
+    const r = boot({ NODE_ENV: 'production', TFA_ENCRYPTION_KEY: TFA_KEY, JWT_SECRET: 'a'.repeat(64) });
     expect(r.booted).toBe(false);
     expect(r.stderr).toMatch(/entropy/i);
   });
 
   it('is case-insensitive about placeholders', () => {
-    const r = boot({ NODE_ENV: 'production', JWT_SECRET: 'YOUR-SUPER-SECRET-JWT-KEY' });
+    const r = boot({ NODE_ENV: 'production', TFA_ENCRYPTION_KEY: TFA_KEY, JWT_SECRET: 'YOUR-SUPER-SECRET-JWT-KEY' });
     expect(r.booted).toBe(false);
   });
 });

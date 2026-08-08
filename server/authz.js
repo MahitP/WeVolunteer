@@ -368,6 +368,12 @@ export function requireCap(capability) {
   }
   return function capabilityGate(req, res, next) {
     if (!req.principal) return res.status(401).json({ error: 'Access token required' });
+    if (req.principal.tfaRequired) {
+      return res.status(403).json({ 
+        error: 'Two-factor authentication must be enabled to perform this action', 
+        code: 'tfa_required' 
+      });
+    }
     if (!can(req.principal, capability)) return res.status(403).json({ error: 'Access denied' });
     return next();
   };
@@ -402,6 +408,12 @@ export function requireCapAny(capabilities) {
   }
   return function capabilityGate(req, res, next) {
     if (!req.principal) return res.status(401).json({ error: 'Access token required' });
+    if (req.principal.tfaRequired) {
+      return res.status(403).json({ 
+        error: 'Two-factor authentication must be enabled to perform this action', 
+        code: 'tfa_required' 
+      });
+    }
     if (!capabilities.some((capability) => can(req.principal, capability))) {
       return res.status(403).json({ error: 'Access denied' });
     }

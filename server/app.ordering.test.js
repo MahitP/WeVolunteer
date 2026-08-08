@@ -84,7 +84,10 @@ function bootProdAndProbe() {
         JWT_SECRET: 'JXAvK3n2Qp7RtY9wLmZbC4dE6fG8hJ1kN5oP0qS2uV4xA7yB9cD3eF5gH8iJ0kLm',
         SMTP_HOST: 'smtp.example.org', SMTP_USER: 'u', SMTP_PASS: 'p',
         // Required in production since email.js started enforcing it.
-        APP_URL: 'https://volunteers.example.org'
+        APP_URL: 'https://volunteers.example.org',
+        // Required in production since two-factor authentication started
+        // encrypting stored TOTP secrets. Same class of guard as JWT_SECRET.
+        TFA_ENCRYPTION_KEY: 'c3VwZXJzZWNyZXRrZXkxMjM0NTY3ODkwYWJjZGVmZ2g='
       },
       stdio: 'pipe',
       encoding: 'utf8'
