@@ -72,6 +72,38 @@ export const ROLE = Object.freeze({
   PARTNER: 'partner',
 });
 
+/**
+ * Roles for which a second authentication factor is mandatory.
+ *
+ * ── Why it lives here rather than being spelled out at each site ──
+ *
+ * It was written inline as `['admin', 'super_admin'].includes(role)` in four
+ * places — twice in `utils.js`, twice in `twoFactorRoutes.js`. CLAUDE.md's rule
+ * is that route files never compare a role string, and the sanctioned remedy
+ * (see this file's header) is that role names live in ONE file. That spelling
+ * also happens to be one the completeness guard cannot see, so it passed the
+ * build while breaking the rule — which is the worst of both.
+ *
+ * Four copies of a security policy is four places to update when it changes and
+ * three places to forget.
+ *
+ * ── Why a role list and not a capability ──
+ *
+ * Deliberate, and worth stating because everything else in this file is a
+ * capability question. "Which accounts must carry a second factor" is about how
+ * much damage a stolen session does, not about what the holder may do — and it
+ * has to be answerable for an account whose capabilities are currently WITHHELD
+ * (an organizer mid-agreement) or wildcarded (`super_admin` holds `'*'`, so a
+ * capability test would match every role). The blast radius is the question, and
+ * the role is the honest expression of it.
+ */
+export const SECOND_FACTOR_REQUIRED_ROLES = Object.freeze([ROLE.ADMIN, ROLE.SUPER_ADMIN]);
+
+/** Whether `role` must carry a second factor. Accepts anything; only roles match. */
+export function requiresSecondFactor(role) {
+  return SECOND_FACTOR_REQUIRED_ROLES.includes(role);
+}
+
 export const CAPABILITIES = {
   student: [
     'event.view', 'event.apply', 'application.withdraw',

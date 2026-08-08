@@ -16,6 +16,7 @@ import ProfileMenu from './components/account/ProfileMenu';
 import Toasts from './components/common/Toasts';
 import VerifyEmailWall from './components/account/VerifyEmailWall';
 import SuspendedWall from './components/account/SuspendedWall';
+import TwoFactorRequiredWall from './components/auth/TwoFactorRequiredWall';
 import { Can } from './components/common/Can.jsx';
 import EmptyState from './components/common/EmptyState';
 import { can } from './authz.js';
@@ -838,6 +839,15 @@ function AppShell({ toasts, addToast, removeToast }) {
           suspension={currentUser.suspension}
           onSignOut={handleLogout}
         />
+        <Toasts toasts={toasts} onRemove={removeToast} />
+      </>
+    );
+  }
+
+  if (currentUser.tfaRequired) {
+    return (
+      <>
+        <TwoFactorRequiredWall addToast={addToast} />
         <Toasts toasts={toasts} onRemove={removeToast} />
       </>
     );

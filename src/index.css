@@ -440,6 +440,42 @@
   --sh-popover: 0 22px 55px -28px rgba(0, 0, 0, 0.78), 0 10px 24px -16px rgba(0, 0, 0, 0.68);
 }
 
+/* ── 2FA method picker ──────────────────────────────────────────── */
+.tfa-methods {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  margin-bottom: var(--s4);
+}
+.tfa-method {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.tfa-method:hover {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+.tfa-method.active {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+}
+.tfa-method input[type="radio"] {
+  accent-color: var(--accent);
+  margin: 0;
+  flex-shrink: 0;
+}
+.tfa-method > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 /* ==========================================================================
    Base
    ========================================================================== */

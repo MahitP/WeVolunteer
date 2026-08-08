@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
-import { Mail, Lock, AlertCircle, ArrowLeft, Eye, EyeOff, User } from 'lucide-react';
+import { Mail, Lock, AlertCircle, ArrowLeft, Eye, EyeOff, User, Shield, Key } from 'lucide-react';
 import ProviderButtons from '../components/auth/ProviderButtons';
 import { useStepUp } from '../components/auth/useStepUp';
 import { STEP_UP } from '../utils/stepUp';
@@ -22,11 +22,18 @@ const providerLabel = (provider) =>
 export default function Login({ onLoginSuccess, addToast }) {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [tfaToken, setTfaToken] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   /** Which input the server blamed, so the message can sit beside it. */
   const [errorField, setErrorField] = useState(null);
   const [loading, setLoading] = useState(false);
+  
+  const [availableMethods, setAvailableMethods] = useState([]);
+  const [selected2FAMethod, setSelected2FAMethod] = useState('totp');
+  const [emailCodeSent, setEmailCodeSent] = useState(false);
+  const [emailCooldown, setEmailCooldown] = useState(0);
+  const [maskedEmail, setMaskedEmail] = useState('');
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -46,9 +53,29 @@ export default function Login({ onLoginSuccess, addToast }) {
    * OAuth callback, which a URL cannot carry.
    */
   const urlMode = searchParams.get('mode');
-  const mode = linkData ? 'link' : (['forgot', 'forgot-success'].includes(urlMode) ? urlMode : 'login');
+  // '2fa' is not in URL so it doesn't persist across refresh
+  const [internalMode, setInternalMode] = useState(null);
+  
+  /**
+   * `email` belongs in this list, and its absence made password sign-in
+   * unreachable.
+   *
+   * `setMode('email')` writes `?mode=email` and clears `internalMode`. With
+   * `email` missing from the allowed URL modes, the expression fell through to
+   * `'login'` — so the whole `mode === 'email'` block below was dead code and
+   * the "Sign in with email" button on the method picker did nothing at all.
+   * There was no error and no console warning; the page simply did not move.
+   */
+  const URL_MODES = ['forgot', 'forgot-success', 'email'];
+
+  const mode = internalMode || (linkData ? 'link' : (URL_MODES.includes(urlMode) ? urlMode : 'login'));
 
   const setMode = (next) => {
+    if (next === '2fa') {
+      setInternalMode('2fa');
+      return;
+    }
+    setInternalMode(null);
     const params = new URLSearchParams(searchParams);
     if (next === 'login') params.delete('mode');
     else params.set('mode', next);
@@ -84,6 +111,31 @@ export default function Login({ onLoginSuccess, addToast }) {
   useEffect(() => {
     if (linkData) setIdentifier(linkData.email);
   }, [linkData]);
+
+  /**
+   * The other way into the second-factor screen: signing in with a provider.
+   *
+   * `OAuthCallback` sends the user here with `state.twoFactorRequired` and the
+   * methods the server offered, exactly as the password path does with
+   * `result.require2FA`. This screen read only `state.linkData`, so that state
+   * was dropped on the floor — and the user landed on the method picker holding a
+   * valid preauth cookie, with no form to spend it on and no way back except
+   * starting the whole provider round trip again.
+   *
+   * Runs once on arrival. `setMode('2fa')` writes `internalMode` rather than the
+   * URL deliberately (see `setMode`): a half-authenticated state must not survive
+   * a refresh, because the preauth cookie behind it expires in fifteen minutes
+   * and a restored form for a dead grant is a worse dead end than none.
+   */
+  useEffect(() => {
+    if (!location.state?.twoFactorRequired) return;
+    setAvailableMethods(location.state.availableMethods || ['totp', 'recovery']);
+    setMode('2fa');
+    /* Clear it so a later in-app navigation back to /login does not re-enter the
+       2FA screen for a grant that has since been spent or expired. */
+    navigate(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state?.twoFactorRequired]);
 
   const startOAuth = async (provider) => {
     setLoading(true);
@@ -184,6 +236,14 @@ export default function Login({ onLoginSuccess, addToast }) {
     setLoading(true);
     try {
       const result = await api.login(loginId, loginPassword);
+      
+      if (result.require2FA) {
+        setAvailableMethods(result.availableMethods || ['totp', 'recovery']);
+        setMode('2fa');
+        setLoading(false);
+        return;
+      }
+      
       if (result.suspension) {
         /**
          * No toast at all, and no greeting.
@@ -226,6 +286,59 @@ export default function Login({ onLoginSuccess, addToast }) {
   const signIn = (e) => {
     e.preventDefault();
     performLogin(identifier.trim(), password);
+  };
+
+  const sendEmailCode = async () => {
+    try {
+      setLoading(true);
+      const result = await api.send2FAEmailCode();
+      setMaskedEmail(result.maskedEmail || '');
+      setEmailCodeSent(true);
+      setEmailCooldown(60);
+      setLoading(false);
+      const interval = setInterval(() => {
+        setEmailCooldown(prev => {
+          if (prev <= 1) { clearInterval(interval); return 0; }
+          return prev - 1;
+        });
+      }, 1000);
+    } catch (err) {
+      setError(err.message || 'Could not send email code.');
+      setLoading(false);
+    }
+  };
+
+  const handle2FASubmit = async (e) => {
+    e.preventDefault();
+    const value = tfaToken.trim();
+    if (!value) return setError('Enter your verification code.');
+    setError('');
+    setLoading(true);
+    
+    try {
+      const payload = {};
+      if (selected2FAMethod === 'totp') {
+        payload.method = 'totp';
+        payload.token = value;
+      } else if (selected2FAMethod === 'email') {
+        payload.method = 'email';
+        payload.code = value;
+      } else {
+        payload.method = 'recovery';
+        payload.code = value;
+      }
+      
+      const result = await api.login2FA(payload.token || null, payload.code || null, payload.method);
+      if (result.emailVerified === false) {
+        addToast('Confirm your email address to finish signing in.', 'info');
+      } else {
+        addToast(`Welcome back, ${result.user.name.split(' ')[0]}.`, 'success');
+      }
+      onLoginSuccess();
+    } catch (err) {
+      setError(err.message || 'Invalid code.');
+      setLoading(false);
+    }
   };
 
   const handleForgotPassword = async (e) => {
@@ -334,6 +447,135 @@ export default function Login({ onLoginSuccess, addToast }) {
             <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={loading}>
               {loading ? 'Sending…' : 'Send reset link'}
             </button>
+          </form>
+        </main>
+      </div>
+    );
+  }
+
+  if (mode === '2fa') {
+    return (
+      <div className="auth">
+        <main className="auth-form auth-form-narrow" aria-labelledby="tfa-heading">
+          {verifyModal}
+          <button className="auth-back" onClick={() => { setMode('login'); setInternalMode(null); }}>
+            <ArrowLeft size={16} aria-hidden="true" /> Back to sign in
+          </button>
+          
+          <div className="auth-head">
+            <h1 id="tfa-heading" className="auth-title">Verify your identity</h1>
+            <p className="auth-subtitle">Choose a verification method to continue.</p>
+          </div>
+
+          {errorBanner}
+
+          <div className="tfa-methods" role="radiogroup" aria-label="Verification method">
+            {availableMethods.includes('totp') && (
+              <label className={`tfa-method${selected2FAMethod === 'totp' ? ' active' : ''}`}>
+                <input type="radio" name="tfa-method" value="totp" checked={selected2FAMethod === 'totp'} onChange={() => { setSelected2FAMethod('totp'); setTfaToken(''); setError(''); }} />
+                <Shield size={18} />
+                <div>
+                  <span className="strong">Authenticator app (recommended)</span>
+                  <span className="dim small">Use your authenticator app to generate a code</span>
+                </div>
+              </label>
+            )}
+            {availableMethods.includes('email') && (
+              <label className={`tfa-method${selected2FAMethod === 'email' ? ' active' : ''}`}>
+                <input type="radio" name="tfa-method" value="email" checked={selected2FAMethod === 'email'} onChange={() => { setSelected2FAMethod('email'); setTfaToken(''); setError(''); }} />
+                <Mail size={18} />
+                <div>
+                  <span className="strong">Email code</span>
+                  <span className="dim small">Send a verification code to your email</span>
+                </div>
+              </label>
+            )}
+            <label className={`tfa-method${selected2FAMethod === 'recovery' ? ' active' : ''}`}>
+              <input type="radio" name="tfa-method" value="recovery" checked={selected2FAMethod === 'recovery'} onChange={() => { setSelected2FAMethod('recovery'); setTfaToken(''); setError(''); }} />
+              <Key size={18} />
+              <div>
+                <span className="strong">Recovery code</span>
+                <span className="dim small">Use one of your single-use backup codes</span>
+              </div>
+            </label>
+          </div>
+
+          <form onSubmit={handle2FASubmit} className="stack-md" noValidate>
+            {selected2FAMethod === 'totp' && (
+              <div className="field">
+                <label htmlFor="tfa-code">6-digit code</label>
+                <input
+                  id="tfa-code"
+                  type="text"
+                  className="input input-lg"
+                  value={tfaToken}
+                  onChange={e => setTfaToken(e.target.value)}
+                  placeholder="000000"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  required
+                />
+              </div>
+            )}
+            {selected2FAMethod === 'email' && (
+              <>
+                {!emailCodeSent ? (
+                  <button type="button" className="btn btn-secondary btn-block btn-lg" onClick={sendEmailCode} disabled={loading}>
+                    Send code to email
+                  </button>
+                ) : (
+                  <div className="field">
+                    <label htmlFor="tfa-code">6-digit code sent to {maskedEmail || 'your email'}</label>
+                    <input
+                      id="tfa-code"
+                      type="text"
+                      className="input input-lg"
+                      value={tfaToken}
+                      onChange={e => setTfaToken(e.target.value)}
+                      placeholder="000000"
+                      autoComplete="one-time-code"
+                      autoFocus
+                      required
+                    />
+                    <div style={{ marginTop: 'var(--s2)', textAlign: 'right' }}>
+                      <button type="button" className="auth-link small" onClick={sendEmailCode} disabled={loading || emailCooldown > 0}>
+                        {emailCooldown > 0 ? `Resend in ${emailCooldown}s` : 'Resend code'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+            {selected2FAMethod === 'recovery' && (
+              <div className="field">
+                <label htmlFor="tfa-code">10-character recovery code</label>
+                <input
+                  id="tfa-code"
+                  type="text"
+                  className="input input-lg"
+                  value={tfaToken}
+                  onChange={e => setTfaToken(e.target.value)}
+                  placeholder="XXXXXXXXXX"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  required
+                />
+                <span className="field-hint" style={{ color: 'var(--warn-ink)', display: 'flex', alignItems: 'center', marginTop: '4px' }}>
+                  <AlertCircle size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                  Warning: recovery codes are single-use.
+                </span>
+              </div>
+            )}
+            
+            {!(selected2FAMethod === 'email' && !emailCodeSent) && (
+              <button
+                type="submit"
+                className="btn btn-primary btn-block btn-lg"
+                disabled={loading}
+              >
+                {loading ? 'Verifying…' : 'Verify'}
+              </button>
+            )}
           </form>
         </main>
       </div>
@@ -451,7 +693,143 @@ export default function Login({ onLoginSuccess, addToast }) {
     );
   }
 
-  /* ── Sign in ──────────────────────────────────────────────────────── */
+  /* ── Email Credentials ────────────────────────────────────────────── */
+  if (mode === 'email') {
+    return (
+      <div className="auth">
+        <main className="auth-form auth-form-narrow" aria-labelledby="email-heading">
+          <button className="auth-back" onClick={() => setMode('login')}>
+            <ArrowLeft size={16} aria-hidden="true" /> Back
+          </button>
+
+          <div className="auth-head">
+            <h1 id="email-heading" className="auth-title">Sign in with email</h1>
+            <p className="auth-subtitle">Enter your email or username and password.</p>
+          </div>
+
+          {errorBanner}
+
+          <form onSubmit={signIn} className="stack-md" noValidate>
+            <div className="field">
+              <label htmlFor="login-identifier">Email or username</label>
+              <div className="input-affix">
+                <User size={16} aria-hidden="true" />
+                <input
+                  id="login-identifier"
+                  name="username"
+                  type="text"
+                  className="input input-lg"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck="false"
+                  placeholder="you@example.com or your username"
+                  value={identifier}
+                  onChange={e => { setIdentifier(e.target.value); if (errorField === 'identifier') setErrorField(null); }}
+                  aria-invalid={errorField === 'identifier'}
+                  aria-describedby={errorField === 'identifier' ? 'login-identifier-error' : undefined}
+                  required
+                  disabled={loading}
+                />
+              </div>
+              {errorField === 'identifier' && (
+                <span className="field-error" id="login-identifier-error">
+                  <AlertCircle size={12} aria-hidden="true" />{error}
+                </span>
+              )}
+            </div>
+
+            <div className="field">
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <label htmlFor="login-password">Password</label>
+                <button
+                  type="button"
+                  className="auth-link auth-inline-link small"
+                  onClick={() => { setMode('forgot'); setError(''); setErrorField(null); }}
+                >
+                  Forgot?
+                </button>
+              </div>
+              <div className="input-affix">
+                <Lock size={16} aria-hidden="true" />
+                <input
+                  id="login-password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="input input-lg"
+                  autoComplete="current-password"
+                  placeholder="Your password"
+                  value={password}
+                  onChange={e => { setPassword(e.target.value); if (errorField === 'password') setErrorField(null); }}
+                  aria-invalid={errorField === 'password'}
+                  aria-describedby={errorField === 'password' ? 'login-password-error' : undefined}
+                  required
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  className="btn-icon-right"
+                  onClick={() => setShowPassword(v => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                >
+                  {showPassword ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+                </button>
+              </div>
+              {errorField === 'password' && (
+                <span className="field-error" id="login-password-error">
+                  <AlertCircle size={12} aria-hidden="true" />{error}
+                </span>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              className="btn btn-primary btn-block btn-lg"
+              disabled={loading}
+              style={{ marginTop: 'var(--s2)' }}
+            >
+              {loading ? 'Signing in…' : 'Sign in'}
+            </button>
+          </form>
+
+          {DEMO_MODE && (
+            <div className="auth-demo" style={{ marginTop: 'var(--s6)' }}>
+              <div className="eyebrow" style={{ textAlign: 'center', marginBottom: 'var(--s3)' }}>
+                Demo accounts — password “password123”
+              </div>
+              <div className="auth-demo-grid">
+                {DEMO_ACCOUNTS.map(acc => (
+                  <button
+                    key={acc.email}
+                    type="button"
+                    className="auth-demo-btn"
+                    disabled={loading}
+                    onClick={() => {
+                      setIdentifier(acc.email);
+                      setPassword('password123');
+                      performLogin(acc.email, 'password123');
+                    }}
+                  >
+                    <span className="avatar sm" aria-hidden="true">{acc.avatar}</span>
+                    <span className="truncate">
+                      <span className="auth-demo-name truncate">{acc.name}</span>
+                      <span className="auth-demo-role">{acc.role}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <span className="sr-only" role="status" aria-live="polite">
+            {loading ? 'Signing in' : ''}
+          </span>
+        </main>
+      </div>
+    );
+  }
+
+  /* ── Method Selection (default login) ─────────────────────────────── */
   return (
     <div className="auth">
       <main className="auth-form auth-form-narrow" aria-labelledby="login-heading">
@@ -461,7 +839,7 @@ export default function Login({ onLoginSuccess, addToast }) {
 
         <div className="auth-head">
           <h1 id="login-heading" className="auth-title">Welcome back</h1>
-          <p className="auth-subtitle">Sign in to see your shifts and service hours.</p>
+          <p className="auth-subtitle">Choose how you want to sign in.</p>
         </div>
 
         {errorBanner}
@@ -469,150 +847,25 @@ export default function Login({ onLoginSuccess, addToast }) {
         <ProviderButtons onSelect={startOAuth} disabled={loading} />
 
         <div className="auth-divider" role="separator">or</div>
+        
+        <button className="btn btn-secondary btn-block btn-lg" onClick={() => { setMode('email'); setError(''); setErrorField(null); }} disabled={loading}>
+          <Mail size={18} aria-hidden="true" style={{ marginRight: '8px' }} />
+          <span>Sign in with email</span>
+        </button>
 
-        <form onSubmit={signIn} className="stack-md" noValidate>
-          <div className="field">
-            <label htmlFor="login-identifier">Email or username</label>
-            <div className="input-affix">
-              <User size={16} aria-hidden="true" />
-              <input
-                id="login-identifier"
-                name="username"
-                /*
-                  type="text", not "email". This field accepts a username too,
-                  and type="email" makes the browser's own validation reject
-                  every username before the request is even sent.
-                */
-                type="text"
-                className="input input-lg"
-                autoComplete="username"
-                /* Mobile keyboards otherwise capitalise the first letter and
-                   autocorrect the address into something else entirely. */
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck="false"
-                placeholder="you@example.com or your username"
-                value={identifier}
-                onChange={e => { setIdentifier(e.target.value); if (errorField === 'identifier') setErrorField(null); }}
-                aria-invalid={errorField === 'identifier'}
-                aria-describedby={errorField === 'identifier' ? 'login-identifier-error' : undefined}
-                required
-                disabled={loading}
-              />
-            </div>
-            {errorField === 'identifier' && (
-              <span className="field-error" id="login-identifier-error">
-                <AlertCircle size={12} aria-hidden="true" />{error}
-              </span>
-            )}
-          </div>
+        <div className="auth-footer" style={{ marginTop: 'var(--s6)' }}>
+          Don't have an account?{' '}
+          <button className="auth-link" onClick={() => navigate('/signup')}>Create one</button>
+        </div>
 
-          <div className="field">
-            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <label htmlFor="login-password">Password</label>
-              <button
-                type="button"
-                className="auth-link auth-inline-link small"
-                onClick={() => { setMode('forgot'); setError(''); setErrorField(null); }}
-              >
-                Forgot?
-              </button>
-            </div>
-            <div className="input-affix">
-              <Lock size={16} aria-hidden="true" />
-              <input
-                id="login-password"
-                name="password"
-                type={showPassword ? 'text' : 'password'}
-                className="input input-lg"
-                autoComplete="current-password"
-                placeholder="Your password"
-                value={password}
-                onChange={e => { setPassword(e.target.value); if (errorField === 'password') setErrorField(null); }}
-                aria-invalid={errorField === 'password'}
-                aria-describedby={errorField === 'password' ? 'login-password-error' : undefined}
-                required
-                disabled={loading}
-              />
-              <button
-                type="button"
-                className="btn-icon-right"
-                onClick={() => setShowPassword(v => !v)}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-                aria-pressed={showPassword}
-              >
-                {showPassword ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
-              </button>
-            </div>
-            {errorField === 'password' && (
-              <span className="field-error" id="login-password-error">
-                <AlertCircle size={12} aria-hidden="true" />{error}
-              </span>
-            )}
-          </div>
-
-          <button
-            type="submit"
-            className="btn btn-primary btn-block btn-lg"
-            disabled={loading}
-            style={{ marginTop: 'var(--s2)' }}
-          >
-            {loading ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
-
-        <p className="auth-footer">
-          New here?{' '}
-          <button className="auth-link" onClick={() => navigate('/signup')}>Create an account</button>
-        </p>
-
-        {/* Reachable from the front door, signed out. Somebody deciding whether
-            this app is safe to use should not have to create an account to read
-            the safety and privacy policies first. */}
-        {/* The community figures sit beside the policies for the same reason:
-            somebody deciding whether this programme is real — a parent, a grant
-            reviewer, a district administrator — should not have to make an
-            account to see what it has actually done. A public page nobody can
-            find from the front door is a private page with extra steps. */}
         <p className="auth-footer">
           <a className="auth-link" href="/community">What this community has done</a>
           {' · '}
           <a className="auth-link" href="/legal">Terms, privacy and safety policies</a>
         </p>
 
-        {DEMO_MODE && (
-          <div className="auth-demo">
-            <div className="eyebrow" style={{ textAlign: 'center', marginBottom: 'var(--s3)' }}>
-              Demo accounts — password “password123”
-            </div>
-            <div className="auth-demo-grid">
-              {DEMO_ACCOUNTS.map(acc => (
-                <button
-                  key={acc.email}
-                  type="button"
-                  className="auth-demo-btn"
-                  disabled={loading}
-                  onClick={() => {
-                    setIdentifier(acc.email);
-                    setPassword('password123');
-                    performLogin(acc.email, 'password123');
-                  }}
-                >
-                  <span className="avatar sm" aria-hidden="true">{acc.avatar}</span>
-                  <span className="truncate">
-                    <span className="auth-demo-name truncate">{acc.name}</span>
-                    <span className="auth-demo-role">{acc.role}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Live region so a screen reader hears the outcome of a sign-in
-            attempt, which otherwise only ever changes a visual button label. */}
         <span className="sr-only" role="status" aria-live="polite">
-          {loading ? 'Signing in' : ''}
+          {loading ? 'Loading…' : ''}
         </span>
       </main>
     </div>

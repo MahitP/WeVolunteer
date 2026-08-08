@@ -153,6 +153,17 @@ export default function OAuthCallback({ onLoginSuccess, onLinked, addToast }) {
          */
         window.history.replaceState({}, '', '/oauth/callback');
 
+        if (data.action === 'require_2fa') {
+          navigate('/login', { 
+            state: { 
+              twoFactorRequired: true,
+              availableMethods: data.availableMethods || ['totp', 'recovery']
+            },
+            replace: true 
+          });
+          return;
+        }
+
         if (data.action === 'login') {
           if (data.emailVerified === false) {
             addToast('Signed in. Confirm your email address to finish setting up.', 'info');

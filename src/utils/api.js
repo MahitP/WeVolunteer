@@ -127,8 +127,31 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, password })
     });
-    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
+    if (data.user) {
+      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
+    }
     return data;
+  },
+
+  login2FA: async (token, code, method) => {
+    const data = await apiFetch('/api/auth/login-2fa', {
+      method: 'POST',
+      body: JSON.stringify({ token, code, method })
+    });
+    if (data.user) {
+      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
+    }
+    return data;
+  },
+
+  send2FAEmailCode: async () => {
+    return apiFetch('/api/auth/login-2fa/email/send', { method: 'POST' });
+  },
+
+  get2FAStatus: async () => apiFetch('/api/2fa/status'),
+
+  regenerateRecoveryCodes: async (headers = {}) => {
+    return apiFetch('/api/2fa/recovery-codes/regenerate', { method: 'POST', headers });
   },
 
   signup: async (signupData) => {
@@ -183,6 +206,26 @@ export const api = {
 
   /** Invalidate every other session. Also previously a toast and nothing else. */
   signOutOtherDevices: async () => apiFetch('/api/auth/sign-out-others', { method: 'POST' }),
+
+  uploadProfilePicture: async (file) => {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    // Don't set Content-Type header so the browser sets multipart boundary automatically
+    return fetch('/api/users/me/profile-picture', {
+      method: 'POST',
+      body: formData,
+      credentials: 'include'
+    }).then(async res => {
+      if (!res.ok) {
+        let err;
+        try { err = await res.json(); } catch(e) {}
+        throw new ApiError(err?.error || 'Upload failed', { status: res.status });
+      }
+      return res.json();
+    });
+  },
+  
+  deleteProfilePicture: async () => apiFetch('/api/users/me/profile-picture', { method: 'DELETE' }),
 
   /**
    * Email address changes, in two steps.

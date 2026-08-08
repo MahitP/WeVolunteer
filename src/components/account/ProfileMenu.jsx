@@ -57,7 +57,11 @@ export default function ProfileMenu({ user, onEditProfile, onSignOut }) {
         aria-expanded={isOpen}
         aria-haspopup="menu"
       >
-        <span className="avatar">{user.avatar || '👤'}</span>
+        {user.profile_picture_url ? (
+          <img src={user.profile_picture_url} alt="Avatar" className="avatar" />
+        ) : (
+          <span className="avatar">{user.avatar || '👤'}</span>
+        )}
         <span className="userchip-text truncate">
           <span className="userchip-name truncate">{user.name}</span>
           <span className="userchip-role">{displayRole}</span>
@@ -68,7 +72,11 @@ export default function ProfileMenu({ user, onEditProfile, onSignOut }) {
       {isOpen && (
         <div className="popover menu profile-popover" role="menu">
           <div className="profile-popover-header">
-            <span className="avatar lg">{user.avatar || '👤'}</span>
+            {user.profile_picture_url ? (
+              <img src={user.profile_picture_url} alt="Avatar" className="avatar lg" />
+            ) : (
+              <span className="avatar lg">{user.avatar || '👤'}</span>
+            )}
             <div className="profile-popover-info">
               <div className="profile-popover-name truncate">{user.name}</div>
               {user.username && <div className="profile-popover-username truncate">@{user.username}</div>}

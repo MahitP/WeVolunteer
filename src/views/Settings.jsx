@@ -7,6 +7,7 @@ import DeleteAccountModal from '../components/account/DeleteAccountModal';
 import DataExportCard from '../components/account/DataExportCard';
 import ConnectedAccounts from '../components/account/ConnectedAccounts';
 import PasswordCard from '../components/account/PasswordCard';
+import TwoFactorSetup from '../components/account/TwoFactorSetup';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import EmailCard from '../components/account/EmailCard';
 import UsernameCard from '../components/account/UsernameCard';
@@ -169,6 +170,7 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
         return (
           <SettingsSection title="Security" isMobile={isMobile} onBack={handleBack}>
             <PasswordCard currentUser={currentUser} addToast={addToast} />
+            <TwoFactorSetup currentUser={currentUser} addToast={addToast} />
 
             <div className="card card-pad" style={{ marginTop: 'var(--s4)' }}>
               <h3 style={{ marginBottom: 'var(--s2)' }}>Sessions</h3>

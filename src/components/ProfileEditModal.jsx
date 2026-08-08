@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useModal } from '../utils/useModal';
 import { X, LogOut } from 'lucide-react';
 import { api } from '../utils/api';
@@ -20,6 +20,27 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
   });
   const [saving, setSaving] = useState(false);
 
+  /**
+   * Every hook above the `if (!user)` guard, not below it.
+   *
+   * These four sat AFTER an early `return null`, so on a render with no user
+   * React saw two hooks and on a render with one it saw six. React identifies
+   * hooks by call order, so the next render maps `saving` onto `profileFile`,
+   * `form` onto whatever follows, and the component starts reading somebody
+   * else's state — or throws "rendered more hooks than during the previous
+   * render" outright.
+   *
+   * The modal is opened FROM a profile screen, so `user` is populated in
+   * practice and the crash was rare rather than impossible: it needed the modal
+   * mounted for a moment while the session was still resolving. `oxlint`'s
+   * `react-hooks/rules-of-hooks` catches it statically, which is why it is one
+   * of the four PR gates.
+   */
+  const fileInputRef = useRef(null);
+  const [profileFile, setProfileFile] = useState(null);
+  const [profilePreview, setProfilePreview] = useState(user?.profile_picture_url || null);
+  const [removePicture, setRemovePicture] = useState(false);
+
   if (!user) return null;
 
   const set = (name, value) => setForm(prev => ({ ...prev, [name]: value }));
@@ -32,6 +53,7 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
     }
     setSaving(true);
     try {
+      let latestUser = null;
       const res = await api.updateProfile({
         name: form.name.trim(),
         avatar: form.avatar,
@@ -41,13 +63,32 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
         skills: form.skillsInput.split(',').map(s => s.trim()).filter(Boolean),
         leaderboardOptIn: form.leaderboardOptIn
       });
+      latestUser = res.user;
+
+      if (profileFile) {
+        const picRes = await api.uploadProfilePicture(profileFile);
+        latestUser = picRes.user;
+      } else if (removePicture && user.profile_picture_url) {
+        const picRes = await api.deleteProfilePicture();
+        latestUser = picRes.user;
+      }
+
       addToast('Profile updated.', 'success');
-      onSave(res.user);
+      onSave(latestUser);
       onClose();
     } catch (err) {
       addToast(`Could not save: ${err.message}`, 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setProfileFile(file);
+      setProfilePreview(URL.createObjectURL(file));
+      setRemovePicture(false);
     }
   };
 
@@ -66,7 +107,34 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
 
         <form id="profile-form" className="modal-body" onSubmit={handleSave}>
           <div className="field">
-            <span className="label">Avatar</span>
+            <span className="label">Profile Picture</span>
+            <div className="row" style={{ alignItems: 'center', gap: '1rem' }}>
+              <div className="avatar lg" style={{ width: 64, height: 64, position: 'relative', overflow: 'hidden' }}>
+                {profilePreview && !removePicture ? (
+                  <img src={profilePreview} alt="Profile preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <span>{form.avatar}</span>
+                )}
+              </div>
+              <div className="stack-xs">
+                <div className="row" style={{ gap: '0.5rem' }}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current?.click()}>
+                    Upload Image
+                  </button>
+                  {profilePreview && !removePicture && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRemovePicture(true)}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} style={{ display: 'none' }} />
+                <span className="field-hint">Max 5MB. Will be cropped to a square.</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="field" style={{ marginTop: '1rem' }}>
+            <span className="label">Emoji Avatar (Fallback)</span>
             <div className="choicegrid">
               {AVATARS.map(av => (
                 <button
