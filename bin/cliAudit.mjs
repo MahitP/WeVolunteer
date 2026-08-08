@@ -38,6 +38,10 @@ export const CLI_EVENTS = Object.freeze({
   OWNER_GRANTED: 'OWNER_GRANTED',
   OWNER_REVOKED: 'OWNER_REVOKED',
   ADMIN_PROMOTED_CLI: 'ADMIN_PROMOTED_CLI',
+  /* Clearing a locked-out account's second factor from a shell. Grave: it is the
+     one operation that removes an authentication factor without proving
+     possession of it. */
+  TFA_RESET_CLI: 'TFA_RESET_CLI',
 });
 
 /**

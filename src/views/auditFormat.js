@@ -52,6 +52,10 @@ const ACTIONS = {
      in-product action. Worth telling apart: one went through a step-up
      challenge and an owner's session, the other through a shell. */
   ADMIN_PROMOTED_CLI:       ['Administrator promoted (command line)', TONES.GRAVE],
+  /* Clearing somebody's second factor from a shell. Grave, and the only action
+     on this platform that removes an authentication factor without anybody
+     proving possession of it — so it must be conspicuous in a year of rows. */
+  TFA_RESET_CLI:            ['Two-factor authentication reset (command line)', TONES.GRAVE],
   OWNER_REVOKED:            ['Ownership revoked', TONES.GRAVE],
   /* The names these two carried before the CLI scripts were standardised.
      Kept because the trail is append-only and immutable: rows written under the

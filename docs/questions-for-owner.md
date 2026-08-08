@@ -232,3 +232,32 @@ create databases and anchors relative paths, so nothing in the repository points
 
 **Implemented meanwhile.** The bug is fixed, the three properties are mutation-tested,
 and every privileged script now prints which database it opened.
+
+---
+
+## Q-7 · Two `TFA_ENCRYPTION_KEY` lines in your local `.env`, with different values
+
+**Question.** `.env` contains `TFA_ENCRYPTION_KEY` twice, on consecutive lines, holding two
+*different* 32-byte keys. Which one do you want?
+
+**Why it matters.** Node's `--env-file` is last-wins, so line 31 is the effective key. Any TOTP
+secret encrypted while line 30 was effective would be permanently undecryptable — the affected
+user could not sign in and would have to be reset with `bin/reset-2fa.mjs`.
+
+**Current behaviour.** Harmless *today*: the active database has not yet run the migration that
+adds the column, so no secret is encrypted under either key. That stops being true the first
+time somebody enrols.
+
+**Recommendation.** Delete line 30, keep line 31, and do it before anybody enrols. I did not edit
+the file myself — it holds live secrets, and removing one is not a change to make on somebody's
+behalf without them looking.
+
+**Also worth knowing.** This key has no rotation path. Changing it makes every stored TOTP secret
+undecryptable, and the only recovery is clearing each account's enrolment one at a time. The
+`v1:` prefix on stored values anticipates versioned re-encryption, but nothing implements it. If
+you want key rotation to be possible later, that is a small piece of work to do while there are
+no enrolments to migrate.
+
+**Implemented meanwhile.** `TFA_ENCRYPTION_KEY` is documented in `.env.example` and
+`.env.production.example`, production refuses to boot without it, and development falls back to a
+known insecure key with a warning rather than exiting.
