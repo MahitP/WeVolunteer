@@ -9,6 +9,7 @@ import { computeDraw, recordRun, applyRun } from '../services/autoSelect.js';
 import { attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, inTransaction, notifyConfirmedVolunteers } from '../utils.js';
 import { can, requireCap, requireCapAny } from '../authz.js';
+import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 import { validateEventPayload } from '../validation.js';
@@ -884,6 +885,32 @@ router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.modera
       db.prepare('DELETE FROM event_announcements WHERE event_id = ?').run(eventId);
       db.prepare('DELETE FROM slots WHERE event_id = ?').run(eventId);
       db.prepare('DELETE FROM events WHERE id = ?').run(eventId);
+
+      /**
+       * An administrator deleting somebody ELSE's event is recorded.
+       *
+       * This route had no audit row at all, so an administrator could remove
+       * another organizer's event — and with it every comment, application and
+       * announcement under it — and nothing anywhere said who did it. The
+       * organizer sees their event gone and has nobody to ask.
+       *
+       * Not recorded when an organizer deletes their own: that is somebody
+       * withdrawing their own listing, not an exercise of power over another
+       * person, and filling the administrative trail with it would bury the rows
+       * that matter.
+       *
+       * Inside the transaction, so the deletion and its record commit or fail
+       * together. An audit row for a deletion that rolled back is a false record;
+       * a deletion with no row is an unattributable one.
+       */
+      if (event.organizer_id !== req.principal.userId) {
+        recordAudit(db, {
+          adminId: req.principal.userId,
+          action: 'EVENT_DELETED',
+          targetUserId: event.organizer_id,
+          details: `Deleted "${event.title}" (${eventId}), hosted by another organizer`,
+        });
+      }
     });
 
     res.json({ success: true });
