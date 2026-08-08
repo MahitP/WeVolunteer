@@ -136,7 +136,11 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
 
       db.prepare('UPDATE users SET tfa_enabled = 1 WHERE id = ?').run(req.user.id);
       
-      const insertRC = db.prepare('INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime("now"))');
+      /* `datetime('now')`, single quotes. Double quotes make SQLite parse `now` as an
+         IDENTIFIER, and `node:sqlite` does not enable the legacy fallback that treats
+         an unresolvable identifier as a string — so this fails at runtime with
+         "no such column: now". It is a latent 500 in every recovery-code path. */
+      const insertRC = db.prepare("INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))");
       for (const hash of hashedCodes) {
         insertRC.run(`rc-${crypto.randomUUID()}`, req.user.id, hash);
       }
@@ -225,8 +229,35 @@ router.post('/api/2fa/disable', authenticateToken, requireAAL2('2fa.disable'), (
  * 
  * Uses the '2fa.enable' sensitive action. Requires a verified email address.
  */
-router.post('/api/2fa/email/enable', authenticateToken, requireAAL2('2fa.enable'), (req, res) => {
+router.post('/api/2fa/email/enable', authenticateToken, requireAAL2('2fa.enable'), async (req, res) => {
   try {
+    /**
+     * Email enrolment issues recovery codes too — unless the account already has
+     * some from TOTP.
+     *
+     * It issued none, while `TwoFactorSetup.jsx` read `data.recoveryCodes` from
+     * this response. So somebody who chose email as their only second factor was
+     * shown nothing where the codes should be, and — more seriously — had no way
+     * back if they lost access to the mailbox. Email is the weaker of the two
+     * methods and the one most likely to become unreachable; leaving it as the
+     * single credential with no fallback is the wrong way round.
+     *
+     * Existing codes are left alone: silently replacing the set an authenticator
+     * user already wrote down would invalidate the paper in their drawer.
+     */
+    const existing = db.prepare(
+      'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
+    ).get(req.user.id).n;
+
+    const recoveryCodes = existing > 0
+      ? null
+      : Array.from({ length: 10 }, () => generateRecoveryCode());
+
+    /* Hashed before the transaction — `inTransaction` is synchronous. */
+    const hashedCodes = recoveryCodes
+      ? await Promise.all(recoveryCodes.map((code) => bcrypt.hash(code, 10)))
+      : [];
+
     inTransaction(() => {
       spendChallenge(db, req, '2fa.enable', {});
 
@@ -236,10 +267,19 @@ router.post('/api/2fa/email/enable', authenticateToken, requireAAL2('2fa.enable'
       }
 
       db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE id = ?').run(req.user.id);
+
+      if (hashedCodes.length) {
+        const insertRC = db.prepare("INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))");
+        for (const hash of hashedCodes) {
+          insertRC.run(`rc-${crypto.randomUUID()}`, req.user.id, hash);
+        }
+        recordSecurityEvent(db, req, req.user.id, '2FA_RECOVERY_GENERATED');
+      }
+
       recordSecurityEvent(db, req, req.user.id, '2FA_EMAIL_ENABLED');
     });
 
-    res.json({ success: true });
+    res.json({ success: true, recoveryCodes });
   } catch (err) {
     if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result || err);
     if (err.message === 'Email must be verified to enable email 2FA') {
@@ -334,7 +374,7 @@ router.post('/api/2fa/recovery-codes/regenerate', authenticateToken, requireAAL2
 
       db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
       
-      const insertRC = db.prepare('INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime("now"))');
+      const insertRC = db.prepare("INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))");
       for (const hash of hashedCodes) {
         insertRC.run(`rc-${crypto.randomUUID()}`, req.user.id, hash);
       }
