@@ -295,13 +295,56 @@ router.post('/api/appeals', authenticateToken, (req, res) => {
   const appealId = newAppealId();
   const now = new Date().toISOString();
 
+  /**
+   * Snapshot the suspension, exactly as the emailed-link route does.
+   *
+   * ── Why the reviewer cannot rely on the live columns ──
+   *
+   * `POST /api/admin/users/:id/unsuspend` NULLs `suspension_reason`,
+   * `suspended_at` and `suspended_by`. So the moment an appeal succeeds — or the
+   * moment anybody lifts the suspension for any reason — the record of what the
+   * person was actually appealing is gone from the user row.
+   *
+   * `AdminAppeals.jsx` reads `suspended_by_name_snapshot` and
+   * `suspension_reason_snapshot` and falls back to "Not recorded". This route
+   * wrote neither, so every appeal filed from the suspension wall reached the
+   * reviewer with no statement of what the person was suspended FOR — which is
+   * the single fact a reviewer needs, and this is now the primary way appeals
+   * arrive. The emailed-link route has always snapshotted; only this one did not.
+   *
+   * It also weakens `disqualifiers()`: one of its three conflict checks compares
+   * the reviewer against `suspended_by_snapshot`, so without it a moderator can
+   * review an appeal against their own suspension undetected by that check.
+   *
+   * Only for `suspension` appeals — a content-removal appeal has no suspension to
+   * describe, and writing the caller's unrelated suspension state onto it would
+   * be worse than leaving it null.
+   */
+  const suspensionSnapshot = subject === 'suspension'
+    ? db.prepare(`
+        SELECT u.suspension_reason, u.suspended_at, u.suspended_by,
+               (SELECT name FROM users WHERE id = u.suspended_by) AS suspended_by_name
+          FROM users u WHERE u.id = ?
+      `).get(req.user.id)
+    : null;
+
   try {
     inTransaction(() => {
       db.prepare(`
         INSERT INTO appeals (id, user_id, report_id, subject, subject_ref, statement,
-                             status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)
-      `).run(appealId, req.user.id, reportId, subject, subjectRef, check.value, now, now);
+                             status,
+                             suspension_reason_snapshot, suspended_at_snapshot,
+                             suspended_by_snapshot, suspended_by_name_snapshot,
+                             created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)
+      `).run(
+        appealId, req.user.id, reportId, subject, subjectRef, check.value,
+        suspensionSnapshot?.suspension_reason ?? null,
+        suspensionSnapshot?.suspended_at ?? null,
+        suspensionSnapshot?.suspended_by ?? null,
+        suspensionSnapshot?.suspended_by_name ?? null,
+        now, now,
+      );
 
       recordAppealEvent(db, {
         appealId, actorId: req.user.id, actorRole: 'appellant',

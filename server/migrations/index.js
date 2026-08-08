@@ -36,6 +36,7 @@ import featuresExpansion from './024_features_expansion.js';
 import tfaHardening from './025_tfa_hardening.js';
 import securityAuditLogs from './026_security_audit_logs.js';
 import encryptTfaSecrets from './027_encrypt_tfa_secrets.js';
+import moderationActionNote from './028_moderation_action_note.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -111,6 +112,11 @@ export const MIGRATIONS = [
    * 027 encrypts existing plaintext TOTP secrets using AES-256-GCM.
    */
   encryptTfaSecrets,
+  /**
+   * 028 gives `moderation_actions` a `note` column, so reopening a report keeps
+   * the withdrawn decision's reasoning instead of destroying it.
+   */
+  moderationActionNote,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

@@ -596,7 +596,11 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
 
   try {
     const report = db.prepare(`
-      SELECT id, reporter_id, target_author_id, target_type, target_id, status, priority, assigned_to
+      SELECT id, reporter_id, target_author_id, target_type, target_id, status, priority, assigned_to,
+             -- Read so a reopen can carry the withdrawn decision's reasoning
+             -- onto the history row before clearing it here. Without it the
+             -- capture below reads undefined and the note is lost as before.
+             resolution_note
         FROM reports WHERE id = ?
     `).get(req.params.id);
     if (!report) {
@@ -746,17 +750,31 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
       }
 
       /**
-       * Reopening clears the decision it reverses.
+       * Reopening clears the decision it reverses — and carries its words across.
        *
        * Left in place, a reopened report reads as open AND resolved by a named
-       * person at a named time, and the next moderator to pick it up sees a
-       * decision that has been withdrawn. The withdrawn decision is not lost —
-       * it is in `moderation_actions`, which is where a superseded decision
-       * belongs.
+       * person at a named time, and the next moderator to pick it up acts on a
+       * decision that has been withdrawn.
+       *
+       * This comment used to say the withdrawn decision was not lost because it
+       * lived in `moderation_actions`. That was false: the table records the
+       * resolution ENUM (`warning_issued`, `no_action`) and had no column for
+       * text, so `resolution_note` — the moderator's account of what they decided
+       * and why — was destroyed. `ResolutionModal.jsx` tells the moderator
+       * writing it that it is "kept permanently and… what an appeal is reviewed
+       * against", so a student appealing a reopened decision was appealing
+       * against nothing, with the interface still promising otherwise.
+       *
+       * Migration 028 added the column. The note is captured here and written
+       * onto the `reopened` history row below, which is the row that withdrew it
+       * and is retention-exempt.
        */
       if (reopening) {
         sets.push('resolution = NULL', 'resolution_note = NULL', 'resolved_by = NULL', 'resolved_at = NULL');
-        changes.push({ action: 'reopened' });
+        changes.push({
+          action: 'reopened',
+          note: report.resolution_note ?? null,
+        });
       }
 
       if (changes.length === 0) return;      // nothing asked for; nothing recorded
@@ -775,21 +793,27 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
       const insertAction = db.prepare(`
         INSERT INTO moderation_actions
           (id, report_id, actor_id, action, old_status, new_status,
-           old_priority, new_priority, old_resolution, new_resolution, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           old_priority, new_priority, old_resolution, new_resolution, note, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const c of changes) {
         insertAction.run(
           `act_${crypto.randomUUID()}`, report.id, req.user.id, c.action,
           c.from ?? null, c.to ?? null,
           c.fromPriority ?? null, c.toPriority ?? null,
-          null, c.toResolution ?? null, now,
+          /* `note` carries the WITHDRAWN resolution note on a `reopened` row, so
+             the reasoning a later appeal is reviewed against survives the reopen
+             that cleared it from the report. Null on every other action. */
+          null, c.toResolution ?? null, c.note ?? null, now,
         );
       }
       if (selfReview) {
         insertAction.run(
           `act_${crypto.randomUUID()}`, report.id, req.user.id, 'self_review',
-          null, null, null, null, null, null, now,
+          /* Twelve values now that `note` exists — this second call site shares the
+             prepared statement and was still passing eleven, so `created_at`
+             received the note's NULL and the insert failed its NOT NULL. */
+          null, null, null, null, null, null, null, now,
         );
       }
 
@@ -1002,6 +1026,10 @@ router.get('/api/admin/reports/:id', authenticateToken, requireCap('report.resol
              ma.old_status, ma.new_status,
              ma.old_priority, ma.new_priority,
              ma.old_resolution, ma.new_resolution,
+             -- The withdrawn decision's reasoning, on the row that withdrew it.
+             -- Without this the reviewer of an appeal against a reopened report
+             -- has the fact of the reversal and none of the thinking behind it.
+             ma.note,
              COALESCE(us.name, 'Account since deleted') AS actor_name
         FROM moderation_actions ma
         LEFT JOIN users us ON us.id = ma.actor_id
