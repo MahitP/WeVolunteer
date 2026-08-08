@@ -58,7 +58,15 @@ const ACTION_LABELS = {
   resolved: 'Decided',
   reopened: 'Reopened',
   evidence_viewed: 'Preserved messages read',
+  /* An owner reading the preserved messages of a report they are NAMED in. Given
+     its own label rather than folded into `evidence_viewed`, because the whole
+     point of allowing it is that it must be conspicuous afterwards. */
+  evidence_viewed_self_review: 'Preserved messages read — by someone named in this report',
   self_review: 'Self-review — the actor is named in this report',
+  /* Written by `POST /api/appeals` when a suspended person appeals against the
+     report. It had no label, so the one row telling a moderator that their
+     decision is being contested rendered as raw `appealed`. */
+  appealed: 'Appealed by the person it is about',
 };
 
 /**

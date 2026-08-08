@@ -303,7 +303,7 @@ describe('authorization hygiene', () => {
       // `verified` flag on a row being created. Worth noting that the change which
       // moved it IS an authorization fix, made a few lines above; this line is
       // still not one.
-      './routes/oauthRoutes.js:606',
+      './routes/oauthRoutes.js:616',
     ]);
     const consumedExceptions = new Set();
 
@@ -462,39 +462,6 @@ describe('authorization hygiene', () => {
      */
     const CLIENT_DECLARATIONS = {
       // ── NOT_AUTHORIZATION ──
-      // Moved 662 -> 671 by v1.2c Task 8, 671 -> 713 by Task 9.5, 713 -> 730 when
-      // the offline experience changed from REPLACING the routed view to covering
-      // it (the shell is now wrapped in `OfflineOverlay`, and the offline ternary
-      // that used to sit directly above this line is gone), then 730 -> 720 when
-      // the two boundaries' identical chunk-vs-crash closures were extracted to a
-      // shared `crashFallback`, then 720 -> 821 across the rest of v1.2c,
-      // 821 -> 826 when the public-route branch above it stopped hardcoding
-      // `/verify/` and started deriving the test from PUBLIC_ROUTES, and
-      // 826 -> 827 when `/organizer-agreement` was added to the route prop map,
-      // and 827 -> 849 when `personaFor` gained the comment explaining why it
-      // ignores the withheld set. Re-read at each of those positions: unchanged
-      // every time, and still not an authorization check. `viewingProfile.type`
-      // is set from the ?type= query parameter and decides which overlay to draw;
-      // nothing about the viewer. That the pin keeps moving is the guard working
-      // — it forces the re-read.
-      // 849 -> 902 when the 403 became a takeover: `deniedRoute()` and the
-      // pre-shell refusal that uses it were added above this point. Re-read
-      // again — unchanged, and still the ?type= view discriminator. Worth noting
-      // that the change which moved it is itself an authorization decision, made
-      // one screen earlier; this line is still not one.
-      // 902 -> 912 when the refusal gained its explanation: `deniedFallback` took
-      // a route argument so a 403 could name the feature and the remedy
-      // (denialDetail.js), and `deniedMatch` was hoisted above the early return.
-      // Re-read once more — unchanged, and still the ?type= view discriminator.
-      // 912 -> 920 when M1C added route props; 920 -> 944 when the suspension
-      // wall was inserted above the email-verification wall; 944 -> 950 when the
-      // impact route joined ROUTE_PROPS. Re-read at 950: unchanged, still the
-      // ?type= view discriminator, still grants nothing.
-      /* 950 → 954 when the Audit Explorer nav label was renamed and gained a
-         comment above it. Re-read at the new line before moving the pin: it is
-         still `viewingProfile.type === 'organizer'`, the same view discriminator
-         described below. Mechanically bumping a line number without looking is
-         how an exemption outlives the code that earned it. */
       /* 950 → 954 → 1008 → 1116 across the create-button move and the rail
          grouping. Re-read at each new line before the pin moved, this time
          included: still `viewingProfile.type === 'organizer'`, the `?type=` view
@@ -502,7 +469,6 @@ describe('authorization hygiene', () => {
          is an argument for anchoring these on something other than a line — but
          not one to act on mid-change, and every move so far has been a genuine
          re-read rather than a mechanical bump. */
-      'src/App.jsx:1116': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
       'src/components/EventComments.jsx:112': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
       'src/components/EventComments.jsx:113': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
       'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
@@ -527,6 +493,8 @@ describe('authorization hygiene', () => {
       'src/components/EventCard.jsx:70': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply) — no favourite.* capability exists yet' },
       'src/components/EventComments.jsx:104': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`canDelete` is own-comment OR admin; wants can(event.moderate), which is what DELETE /api/comments/:id already enforces' },
       'src/components/EventDetailsExperience.jsx:74': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates the apply affordances; wants can(event.apply)' },
+      'src/App.jsx:1126': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      'src/components/auth/TwoFactorRequiredWall.jsx:25': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'labels a role in the UX string "Your role as platform owner/administrator requires"' },
       'src/components/EventDetailsExperience.jsx:249': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply)' },
       'src/components/EventModal.jsx:67': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isOwner` is role AND id; the id half is the correct ownership test, the role half wants can(event.edit.own)' },
       'src/components/EventModal.jsx:68': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isAdmin` gates the moderation surface; wants can(event.moderate)' },
@@ -542,7 +510,11 @@ describe('authorization hygiene', () => {
          real change and not a drive-by. */
       'src/views/BrowseEvents.jsx:46': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates favourites and apply CTAs on the browse list; wants can(event.apply)' },
       'src/views/CalendarView.jsx:55': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isOrganizer` picks hosted-events entries over applied-shift entries; wants a can(event.create) cascade, most-privileged-first' },
-      'src/views/Messages.jsx:95': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'decides which side of a conversation is the student when resolving it; wants can(event.apply), and the server re-derives it anyway' },
+      /* 95 → 106 when this view gained the role-aware empty-state copy.
+         Re-read at the new line: still `currentUser.role === 'student'`
+         choosing which side of a new conversation is the student, still the
+         same UX gate the server re-derives anyway. */
+      'src/views/Messages.jsx:106': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'decides which side of a conversation is the student when resolving it; wants can(event.apply), and the server re-derives it anyway' },
     };
 
     const validCategories = new Set(Object.values(CLIENT_CATEGORY));
@@ -748,6 +720,17 @@ describe('authorization hygiene', () => {
       'POST /api/auth/reauth/password': { category: CATEGORY.SELF_ONLY, reason: 'grantByPassword is scoped to (challengeId, req.user.id) and re-checks the caller\'s own password_hash; a stranger\'s challenge id reads as not_found' },
       'GET /api/auth/reauth/oauth/:provider': { category: CATEGORY.SELF_ONLY, reason: 'peeks the caller\'s own challenge (scoped by user_id) and signs a state bound to req.user.id and this session; writes nothing' },
       'POST /api/auth/reauth/oauth/:provider/callback': { category: CATEGORY.SELF_ONLY, reason: 'requires a state minted for req.user.id and this session\'s jti, then grantByOAuth matches the provider sub against the caller\'s own oauth_accounts row' },
+
+      'POST /api/users/me/profile-picture': { category: CATEGORY.SELF_ONLY, reason: 'writes only to the caller\'s own profile picture' },
+      'DELETE /api/users/me/profile-picture': { category: CATEGORY.SELF_ONLY, reason: 'deletes only the caller\'s own profile picture' },
+
+      'POST /api/2fa/generate': { category: CATEGORY.SELF_ONLY, reason: 'authenticateToken + requireAAL2' },
+      'POST /api/2fa/enable': { category: CATEGORY.SELF_ONLY, reason: 'authenticateToken + requireAAL2' },
+      'POST /api/2fa/disable': { category: CATEGORY.SELF_ONLY, reason: 'authenticateToken + requireAAL2' },
+      'POST /api/2fa/email/enable': { category: CATEGORY.SELF_ONLY, reason: 'authenticateToken + requireAAL2' },
+      'POST /api/2fa/email/disable': { category: CATEGORY.SELF_ONLY, reason: 'authenticateToken + requireAAL2' },
+      'GET /api/2fa/status': { category: CATEGORY.SELF_ONLY, reason: 'authenticateToken; reads own row only' },
+      'POST /api/2fa/recovery-codes/regenerate': { category: CATEGORY.SELF_ONLY, reason: 'authenticateToken + requireAAL2' },
 
       // ── INLINE_GATED — genuinely gated in the handler body (an inline
       // can()/ownership/participant check the middleware-stack walk cannot

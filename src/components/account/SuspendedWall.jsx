@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ShieldOff, Clock, CalendarX2 } from 'lucide-react';
 import { api } from '../../utils/api';
+import { isFinal, MIN_STATEMENT_LENGTH } from '../../appeals';
 
 /**
  * The screen a suspended account sees instead of the application.
@@ -63,8 +64,21 @@ export default function SuspendedWall({ user, suspension, onSignOut }) {
 
   const since = dateOf(suspension?.since);
   const until = dateOf(suspension?.until);
-  const open = (appeals ?? []).find((a) => a.status !== 'decided');
-  const decided = (appeals ?? []).filter((a) => a.status === 'decided');
+  /**
+   * Finished vs still-open, using the server's own vocabulary.
+   *
+   * This compared against the string `'decided'`, which no appeal has ever had —
+   * the server writes `open` → `reviewing` → `resolved`. So `open` matched every
+   * appeal including finished ones, `decided` was permanently empty, and the
+   * block below that shows the reviewer's answer was unreachable.
+   *
+   * A suspended student who appealed and WON read "Your appeal is with us… you do
+   * not need to send another" indefinitely, with the re-file form suppressed
+   * underneath. `isFinal` comes from `src/appeals.js`, which re-exports the
+   * server's constants so the two cannot invent different words again.
+   */
+  const open = (appeals ?? []).find((a) => !isFinal(a.status));
+  const decided = (appeals ?? []).filter((a) => isFinal(a.status));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -162,9 +176,22 @@ export default function SuspendedWall({ user, suspension, onSignOut }) {
             <div key={a.id} className="alert alert-warn" role="status">
               <div>
                 <span className="alert-title">
-                  We reviewed your appeal{a.reviewerName ? ` — ${a.reviewerName}` : ''}
+                  {a.decision === 'reversed'
+                    ? 'We agreed with you'
+                    : 'We reviewed your appeal and the decision stands'}
+                  {a.reviewerName ? ` — ${a.reviewerName}` : ''}
                 </span>
                 {a.reasoning && <p>{a.reasoning}</p>}
+                {/* An upheld appeal does not always lift the suspension in the same
+                    moment — reinstatement is a separate administrative step. Saying
+                    so is better than a person reading "we agreed with you" while
+                    still locked out and concluding the page is lying to them. */}
+                {a.decision === 'reversed' && (
+                  <p className="small">
+                    If you can still not sign in normally, the change may not have been
+                    applied yet. Reply to the email we sent and somebody will finish it.
+                  </p>
+                )}
               </div>
             </div>
           ))}
@@ -183,15 +210,22 @@ export default function SuspendedWall({ user, suspension, onSignOut }) {
                   onChange={(e) => setStatement(e.target.value)}
                   placeholder="What you think we got wrong, and anything we may not know."
                 />
+                {/* The server's minimum, named. This said "a couple of sentences"
+                    and disabled the button below 40 characters while the server
+                    accepts 20 — so somebody who wrote a perfectly valid appeal got
+                    a dead button and no explanation of why. */}
                 <p className="muted">
-                  A person reads this. Please write at least a couple of sentences.
+                  A person reads this. At least {MIN_STATEMENT_LENGTH} characters
+                  {statement.trim().length > 0 && statement.trim().length < MIN_STATEMENT_LENGTH
+                    ? ` — ${MIN_STATEMENT_LENGTH - statement.trim().length} to go.`
+                    : '.'}
                 </p>
               </div>
               {error && <p className="text-danger" role="alert">{error}</p>}
               <button
                 type="submit"
                 className="btn btn-primary btn-block"
-                disabled={sending || statement.trim().length < 40}
+                disabled={sending || statement.trim().length < MIN_STATEMENT_LENGTH}
               >
                 {sending ? 'Sending…' : 'Send my appeal'}
               </button>

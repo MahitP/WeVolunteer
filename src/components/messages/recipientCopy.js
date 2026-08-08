@@ -1,7 +1,13 @@
 import { can } from '../../authz.js';
 
 /**
- * What the "New message" dialog tells each kind of account it can do.
+ * What every messaging surface tells each kind of account.
+ *
+ * Originally just the "New message" dialog, which is why the file is named for
+ * the recipient picker. It now also carries the three EMPTY STATES, because they
+ * had the same defect for the same reason and fixing them anywhere else would
+ * have meant a second cascade that could disagree with this one about who the
+ * reader is.
  *
  * ── The defect ──
  *
@@ -59,6 +65,23 @@ const ENTRIES = [
     placeholder: 'Search volunteers who applied to your events…',
     empty: 'Nobody matched. Administrators reach a person about a report from the '
       + 'Moderation Center, not from here.',
+    /**
+     * An administrator's threads are moderation conversations, opened from a
+     * report. Calling them "volunteer opportunity conversations" — which is what
+     * every account used to be told — describes the one kind of thread an
+     * administrator does not have.
+     */
+    listEmpty: 'No conversations yet. One appears here when you contact somebody about a report.',
+    noneSelected: {
+      title: 'Select a conversation',
+      body: 'Moderation conversations you have opened appear on the left. Each one is '
+        + 'recorded against the report it came from.',
+    },
+    threadEmpty: {
+      title: 'Start the conversation',
+      body: 'Say why you are getting in touch. This person can see everything you write '
+        + 'here, and so can any administrator reviewing the report afterwards.',
+    },
   },
   {
     cap: 'applicant.review',
@@ -66,6 +89,16 @@ const ENTRIES = [
     placeholder: 'Search your applicants…',
     empty: 'Nobody matched. You can message a volunteer once they have applied to one '
       + 'of your events.',
+    listEmpty: 'No conversations yet. One appears here when you message a volunteer who '
+      + 'applied to one of your events, or when one of them messages you.',
+    noneSelected: {
+      title: 'Select a conversation',
+      body: 'Choose a volunteer on the left to talk about the shift they applied for.',
+    },
+    threadEmpty: {
+      title: 'Start the conversation',
+      body: 'Confirm the details, answer questions, and let them know what to bring.',
+    },
   },
   {
     cap: 'application.withdraw',
@@ -73,6 +106,17 @@ const ENTRIES = [
     placeholder: 'Search organizers of events you applied to…',
     empty: 'Nobody matched. You can message an organizer once you have applied to one '
       + 'of their events.',
+    listEmpty: 'No conversations yet. One appears here when you message the organizer of '
+      + 'an event you have applied to, or when they message you.',
+    noneSelected: {
+      title: 'Select a conversation',
+      body: 'Choose an organizer on the left to ask about a shift you applied for.',
+    },
+    threadEmpty: {
+      title: 'Start the conversation',
+      body: 'Ask about the shift, the place, or what to bring. An adult at the '
+        + 'organization will see what you write.',
+    },
   },
 ];
 
@@ -88,6 +132,15 @@ const NONE = {
   description: 'Messaging is not available for this account.',
   placeholder: 'Search…',
   empty: 'Messaging is not available for this account.',
+  listEmpty: 'Messaging is not available for this account.',
+  noneSelected: {
+    title: 'Messaging is not available',
+    body: 'This account cannot start or receive conversations.',
+  },
+  threadEmpty: {
+    title: 'Messaging is not available',
+    body: 'This account cannot start or receive conversations.',
+  },
 };
 
 /** The copy for `user`. Never null — callers render this unconditionally. */

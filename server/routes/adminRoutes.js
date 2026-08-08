@@ -1046,6 +1046,49 @@ router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('rep
     if (!report) return res.status(404).json({ error: 'Report not found' });
 
     /**
+     * A moderator named in the report cannot read its preserved messages.
+     *
+     * ── Why this is not covered by the PATCH route's check ──
+     *
+     * `PATCH /api/admin/reports/:id` refuses a conflicted moderator from ACTING,
+     * and its comment says reading is deliberately still allowed because "a
+     * moderator has to be able to see what was said about them". That reasoning
+     * was written about the report's METADATA — who filed it, what category, what
+     * status. This route discloses the preserved private message BODIES, which
+     * `sensitiveActions.js` calls the most invasive read on the platform, usually
+     * of a minor.
+     *
+     * So an administrator who is the subject of a safety report could step up and
+     * read the private messages of the student who reported them. That is the
+     * shape of retaliation this whole conflict rule exists to prevent, and the
+     * step-up made it worse rather than better: it produced a clean audit trail
+     * of an access that should never have been allowed.
+     *
+     * ── Same cascade as PATCH, most-privileged-first ──
+     *
+     * An owner is allowed through and the read is recorded as a self-review,
+     * because on a one-to-two-person team refusing outright would mean a report
+     * naming the owner can never be looked at by anyone. An ordinary
+     * administrator is refused and told a super administrator can do it. Ends in
+     * an explicit deny, never a bare else.
+     */
+    const involved = isPartyToReport(report, req.user.id);
+    let selfReview = false;
+    if (involved) {
+      if (can(req.principal, 'admin.create')) {
+        selfReview = true;
+      } else if (can(req.principal, 'report.evidence.read')) {
+        return res.status(403).json({
+          error: 'You are named in this report, so you cannot read its preserved messages. '
+            + 'A super administrator can, and their access is recorded as a self-review.',
+          code: 'conflict_of_interest',
+        });
+      } else {
+        return res.status(403).json({ error: 'Forbidden', code: 'conflict_of_interest' });
+      }
+    }
+
+    /**
      * `captured_at` alongside `created_at`, because they are different facts and
      * the difference is the one a moderator needs. `created_at` is when the
      * message was sent; `captured_at` is when this report froze a copy of it. The
@@ -1095,14 +1138,25 @@ router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('rep
 
       db.prepare(`
         INSERT INTO moderation_actions (id, report_id, actor_id, action, created_at)
-        VALUES (?, ?, ?, 'evidence_viewed', ?)
-      `).run(`act_${crypto.randomUUID()}`, report.id, req.user.id, new Date().toISOString());
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        `act_${crypto.randomUUID()}`, report.id, req.user.id,
+        selfReview ? 'evidence_viewed_self_review' : 'evidence_viewed',
+        new Date().toISOString(),
+      );
 
       recordAudit(db, {
         adminId: req.user.id,
         action: 'REPORT_EVIDENCE_VIEWED',
         targetUserId: auditSubject(report),
-        details: `Read ${messages.length} preserved message(s) for report ${report.id}`,
+        /* The self-review case is spelled out in the record rather than left to
+           be inferred by comparing the actor against the report's parties later.
+           An owner reading the messages of somebody who reported THEM is the one
+           access here a reviewer must be able to find without reconstructing it. */
+        details: selfReview
+          ? `SELF-REVIEW: read ${messages.length} preserved message(s) for report ${report.id}, `
+            + 'in which this administrator is named'
+          : `Read ${messages.length} preserved message(s) for report ${report.id}`,
       });
     });
 

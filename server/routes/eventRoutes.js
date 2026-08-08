@@ -602,6 +602,43 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
     const payloadIds = slots.filter(s => s.id && !s.id.startsWith('new-')).map(s => s.id);
     const existingIds = db.prepare('SELECT id FROM slots WHERE event_id = ?').all(eventId).map(s => s.id);
     const removedIds = existingIds.filter(id => !payloadIds.includes(id));
+    /**
+     * Every slot id in the body must belong to THIS event.
+     *
+     * ── The hole this closes ──
+     *
+     * The ownership check above proves the caller owns the event named in the
+     * PATH. It says nothing about the slot ids in the BODY, and the update below
+     * was `WHERE id = ?` with no event scope — so an organizer editing their own
+     * event could name a slot belonging to somebody else's and rewrite it.
+     *
+     * Slot ids are not secret: `GET /api/events` returns every event's slots to
+     * every signed-in user, so there was nothing to guess.
+     *
+     * And this is not a cosmetic write. Credited hours are `end_datetime -
+     * start_datetime` at the moment attendance is confirmed (`attendance.js`), so
+     * moving a foreign slot's times changes what ANOTHER organizer's volunteers
+     * will be credited — the one number this platform exists to get right, and the
+     * one thing `hours_ledger` cannot warn about because the ledger faithfully
+     * records the wrong duration. Pushing `end_datetime` into the future makes
+     * that event's attendance impossible to finalise at all; lowering `max_spots`
+     * breaks waitlist promotion.
+     *
+     * ── Refused, not silently ignored ──
+     *
+     * Scoping the UPDATE alone would turn this into a no-op, which is safe and
+     * dishonest: a legitimate client bug would then look like a successful save
+     * that changed nothing. A malformed edit is a 400.
+     */
+    const foreignIds = payloadIds.filter(id => !existingIds.includes(id));
+    if (foreignIds.length > 0) {
+      return res.status(400).json({
+        error: 'That edit names shifts which do not belong to this event.',
+        code: 'slot_not_on_event',
+        slots: foreignIds,
+      });
+    }
+
     const protectedRows = attendanceOnSlots(db, removedIds);
 
     if (protectedRows.length > 0) {
@@ -651,11 +688,16 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
       // 3. Insert new or update existing slots
       for (const slot of slots) {
         if (slot.id && !slot.id.startsWith('new-')) {
+          /* `AND event_id = ?` as well as the refusal above — belt and braces on
+             purpose. The check above is the one that produces a good error; this
+             is what still holds if a future edit reorders the handler and moves
+             the validation after the transaction, which is exactly the kind of
+             refactor that reintroduces this class of bug. */
           db.prepare(`
             UPDATE slots
             SET name = ?, description = ?, start_datetime = ?, end_datetime = ?, max_spots = ?
-            WHERE id = ?
-          `).run(slot.name, slot.description, slot.startDatetime, slot.endDatetime, Number(slot.maxSpots), slot.id);
+            WHERE id = ? AND event_id = ?
+          `).run(slot.name, slot.description, slot.startDatetime, slot.endDatetime, Number(slot.maxSpots), slot.id, eventId);
         } else {
           const slotId = `slot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
           db.prepare(`
