@@ -48,11 +48,27 @@ export default function AdminAppeals() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
+  const [pendingRemedies, setPendingRemedies] = useState([]);
 
   const fetchAppeals = useCallback(async () => {
     try {
-      const { appeals: rows } = await api.fetchAdminAppeals();
+      const { appeals: rows, pendingRemedies: remedies } = await api.fetchAdminAppeals();
       setAppeals(rows);
+      /**
+       * Appeals that were UPHELD and whose appellant is still suspended.
+       *
+       * The server has computed this since appeals shipped, with a long comment
+       * explaining that a reviewer who decides "reversed" and then closes the tab
+       * before pressing "Reinstate" leaves a student suspended on the strength of
+       * an appeal they had WON. This screen destructured only `appeals` and threw
+       * it away.
+       *
+       * The consequence is the worst state in the product: the appeal is
+       * `resolved`, so it drops out of the default `open,reviewing` queue and no
+       * screen mentions it again. Nobody is looking for the student, the student
+       * has been told they were right, and they are still locked out.
+       */
+      setPendingRemedies(remedies || []);
       setError(null);
     } catch (err) {
       setError(err.message || 'Failed to load appeals.');
@@ -90,6 +106,38 @@ export default function AdminAppeals() {
           item is the promise.
         </p>
       </header>
+
+      {/**
+        * Above the queue, deliberately.
+        *
+        * Everything below is somebody waiting for an answer. This is somebody who
+        * already HAS their answer, in their favour, and is still locked out — so
+        * it is both more urgent and more embarrassing, and it must not be
+        * something a moderator scrolls past on a busy day.
+        */}
+      {pendingRemedies.length > 0 && (
+        <div className="alert alert-warn" role="alert">
+          <div>
+            <span className="alert-title">
+              {pendingRemedies.length === 1
+                ? 'One person won their appeal and is still suspended'
+                : `${pendingRemedies.length} people won their appeals and are still suspended`}
+            </span>
+            <p className="small">
+              The decision was recorded but the account was never reinstated. Open the
+              account and lift the suspension.
+            </p>
+            <ul className="stack-sm">
+              {pendingRemedies.map(r => (
+                <li key={r.id} className="small">
+                  <span className="strong">{r.user_name}</span>
+                  {r.decided_at && <span className="dim"> — decided {new Date(r.decided_at).toLocaleString()}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {appeals.length === 0 ? (
         <EmptyState icon={CheckCircle2} title="Inbox zero" message="No appeals are waiting." />
