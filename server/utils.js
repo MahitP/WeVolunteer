@@ -3,7 +3,7 @@ import { db } from './db.js';
 import { notificationService } from './services/notificationService.js';
 import { sendNotificationEmail, sendMail } from './email.js';
 import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, isEmailGateAllowed, COOKIE_NAME } from './config.js';
-import { principalFor } from './authz.js';
+import { principalFor, requiresSecondFactor } from './authz.js';
 import { grantsFor } from './userCapabilities.js';
 import { withheldCapabilitiesFor } from './organizerAgreement.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
@@ -276,7 +276,8 @@ export function authenticateToken(req, res, next) {
     // The capability principal. req.user is left exactly as it was, so every
     // existing handler and test keeps working while call sites migrate.
     req.principal = buildPrincipal(userRow);
-    req.principal.tfaRequired = ['admin', 'super_admin'].includes(userRow.role) && !userRow.tfa_enabled && !userRow.tfa_email_enabled;
+    req.principal.tfaRequired = requiresSecondFactor(userRow.role)
+      && !userRow.tfa_enabled && !userRow.tfa_email_enabled;
 
     /**
      * This session's identifier, for the routes that BIND something to it.
@@ -381,7 +382,7 @@ export function formatUserResponse(row) {
       ...(row.tfa_enabled ? ['totp'] : []),
       ...(row.tfa_email_enabled ? ['email'] : []),
     ],
-    tfaRequired: ['admin', 'super_admin'].includes(row.role) && !row.tfa_enabled && !row.tfa_email_enabled,
+    tfaRequired: requiresSecondFactor(row.role) && !row.tfa_enabled && !row.tfa_email_enabled,
     avatar: row.avatar,
     profile_picture_url: row.profile_picture_url,
     volunteeredHours: totalHours,

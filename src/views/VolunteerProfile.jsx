@@ -8,6 +8,7 @@ import { api } from '../utils/api';
 import { formatHours, formatDay, formatTimeRange, gradeLabel, countdown } from '../utils/helpers';
 import { DateChip } from '../components/Seats';
 import CertificateModal from '../components/CertificateModal';
+import BadgesList from '../components/BadgesList';
 import { Link } from 'react-router-dom';
 
 const HOUR_GOAL = 25;
@@ -169,6 +170,10 @@ export default function VolunteerProfile({
           </div>
         </section>
       )}
+
+      <section>
+        <BadgesList userId={userId} />
+      </section>
 
       <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', alignItems: 'start', gap: 'var(--s6)' }}>
         <div className="stack-lg">

@@ -5,7 +5,7 @@ import { generateSecret, generateURI } from 'otplib';
 import QRCode from 'qrcode';
 import { db } from '../db.js';
 import { authenticateToken, inTransaction } from '../utils.js';
-import { requireAAL2 } from '../authz.js';
+import { requireAAL2, requiresSecondFactor } from '../authz.js';
 import { spendChallenge, ChallengeNotSpent, refuseReauth } from '../reauthResponses.js';
 import { encryptSecret, decryptSecret, verifyTotp } from '../cryptoUtils.js';
 import { recordSecurityEvent } from '../securityAudit.js';
@@ -42,9 +42,34 @@ router.post('/api/2fa/generate', authenticateToken, requireAAL2('2fa.generate'),
     inTransaction(() => {
       spendChallenge(db, req, '2fa.generate', {});
 
-      const user = db.prepare('SELECT email FROM users WHERE id = ?').get(req.user.id);
+      const user = db.prepare('SELECT email, tfa_enabled FROM users WHERE id = ?').get(req.user.id);
+
+      /**
+       * Generating a new secret would overwrite a working one.
+       *
+       * This wrote `tfa_secret` unconditionally while leaving `tfa_enabled` at 1.
+       * So a user who already had TOTP working and pressed "Set Up
+       * Authenticator" again — to add a second device, or just out of curiosity —
+       * had their live secret replaced by one they had not scanned yet, while the
+       * account still demanded a code. Their authenticator produced codes for a
+       * secret the server no longer held: locked out, recovery codes only.
+       *
+       * Refused rather than silently re-enrolled. The alternative is a second
+       * column holding a PENDING secret so the live one survives until the new
+       * one is confirmed, which is the better design and a schema change; this is
+       * the honest behaviour until then, and it never costs anybody their access.
+       */
+      if (user.tfa_enabled) {
+        throw new Error('already_enrolled');
+      }
+
       const secret = generateSecret();
-      const otpauth = generateURI({ secret, accountName: user.email, issuer: 'WeVolunteer' });
+      /* `label`, not `accountName` — otplib v13 names it `label`, and the wrong
+         key is silently ignored rather than rejected. The URI came out as
+         `otpauth://totp/WeVolunteer:undefined`, so every authenticator app
+         listed the entry as "undefined" and somebody with two accounts on the
+         platform could not tell which code belonged to which. */
+      const otpauth = generateURI({ secret, label: user.email, issuer: 'WeVolunteer' });
       
       const encryptedSecret = encryptSecret(secret);
       db.prepare('UPDATE users SET tfa_secret = ? WHERE id = ?').run(encryptedSecret, req.user.id);
@@ -58,6 +83,13 @@ router.post('/api/2fa/generate', authenticateToken, requireAAL2('2fa.generate'),
     res.json({ secret: req.tempSecret, qr });
   } catch (err) {
     if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result || err);
+    if (err.message === 'already_enrolled') {
+      return res.status(409).json({
+        error: 'An authenticator is already set up for this account. Turn it off first, '
+          + 'then set up the new device.',
+        code: 'already_enrolled',
+      });
+    }
     console.error('Failed to generate 2FA:', err);
     res.status(500).json({ error: 'Failed to generate 2FA secret' });
   }
@@ -137,8 +169,26 @@ router.post('/api/2fa/disable', authenticateToken, requireAAL2('2fa.disable'), (
     inTransaction(() => {
       spendChallenge(db, req, '2fa.disable', {});
 
-      const user = db.prepare('SELECT tfa_secret, tfa_enabled FROM users WHERE id = ?').get(req.user.id);
+      const user = db.prepare(
+        'SELECT tfa_secret, tfa_enabled, tfa_email_enabled, role FROM users WHERE id = ?'
+      ).get(req.user.id);
       if (!user.tfa_enabled) throw new Error('2FA is not enabled');
+
+      /**
+       * An administrator may not remove their last factor.
+       *
+       * `/api/2fa/email/disable` has had this check; this route did not — and it
+       * is the more dangerous of the two, because it clears `tfa_email_enabled`
+       * as well as `tfa_enabled`. So an administrator could strip BOTH factors
+       * in one call and immediately be refused by `requireCap` on every
+       * administrative route: walled out of their own platform by a control
+       * offered to them as a normal setting, with no way back except a shell.
+       *
+       * Turning TOTP off is allowed when email 2FA would survive it — but this
+       * handler switches that off too, so the honest rule is that an
+       * administrator disables nothing here until the policy stops applying.
+       */
+      if (requiresSecondFactor(user.role)) throw new Error('role_requires_2fa');
 
       if (!token) throw new Error('Token is required to disable 2FA');
       /* Same object-is-truthy defect as enable, and worse here: anybody holding
@@ -155,6 +205,13 @@ router.post('/api/2fa/disable', authenticateToken, requireAAL2('2fa.disable'), (
     res.json({ success: true });
   } catch (err) {
     if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result || err);
+    if (err.message === 'role_requires_2fa') {
+      return res.status(403).json({
+        error: 'Your role requires a second factor, so it cannot be turned off. '
+          + 'An administrator without one cannot use the administrative pages at all.',
+        code: 'role_requires_2fa',
+      });
+    }
     if (err.message === '2FA is not enabled' || err.message === 'Invalid token' || err.message === 'Token is required to disable 2FA') {
       return res.status(400).json({ error: err.message });
     }
@@ -205,7 +262,7 @@ router.post('/api/2fa/email/disable', authenticateToken, requireAAL2('2fa.disabl
 
       const user = db.prepare('SELECT tfa_enabled, role FROM users WHERE id = ?').get(req.user.id);
       
-      const requires2FA = ['admin', 'super_admin'].includes(user.role);
+      const requires2FA = requiresSecondFactor(user.role);
       if (requires2FA && user.tfa_enabled !== 1) {
         throw new Error('role_requires_2fa');
       }
