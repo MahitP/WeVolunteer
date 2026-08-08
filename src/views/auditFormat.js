@@ -64,6 +64,12 @@ const ACTIONS = {
   OWNER_RETIRED:            ['Ownership revoked', TONES.GRAVE],
   OWNER_CREDENTIAL_RESET:   ['Owner credentials reset', TONES.GRAVE],
 
+  /* An administrator removing somebody else's content. Notable rather than
+     grave — it is reversible in the sense that the person can post again — but
+     it is power exercised over another person's words, which is exactly what
+     this trail is for. Neither route recorded anything at all before. */
+  COMMENT_DELETED:          ['Comment deleted by a moderator', TONES.NOTABLE],
+  EVENT_DELETED:            ['Event deleted by an administrator', TONES.NOTABLE],
   MODERATE_REPORT:          ['Report resolved', TONES.NOTABLE],
   MODERATE_REPORT_SELF_REVIEW: ['Report resolved by its own subject', TONES.GRAVE],
   APPEAL_REVIEWED:          ['Appeal decided', TONES.NOTABLE],

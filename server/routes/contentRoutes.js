@@ -1,8 +1,9 @@
 import express from 'express';
 import crypto from 'crypto';
 
-import { authenticateToken } from '../utils.js';
+import { authenticateToken, inTransaction } from '../utils.js';
 import { can, requireCap } from '../authz.js';
+import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
@@ -146,7 +147,41 @@ router.delete('/api/comments/:id', authenticateToken, (req, res) => {
     if (commentHasLiveReport(db, req.params.id)) {
       return res.status(409).json({ error: COMMENT_HELD_MESSAGE, code: 'under_review' });
     }
-    db.prepare('DELETE FROM event_comments WHERE id = ?').run(req.params.id);
+    /**
+     * A moderator deleting somebody ELSE's comment is recorded; an author
+     * deleting their own is not.
+     *
+     * `admin_audit_logs` answers "what did an administrator do to a person", and
+     * this route had no entry at all — so an administrator could remove a
+     * student's words from an event page and nothing anywhere said it had
+     * happened, let alone who did it. The student sees their comment gone and has
+     * no way to ask about it.
+     *
+     * Not logged when the author deletes their own, deliberately: that is a
+     * person editing their own contribution, not an exercise of power over
+     * somebody, and filling the administrative trail with it would bury the rows
+     * that matter.
+     *
+     * The comment BODY is not copied into the row. It is a student's words about
+     * a school event, `admin_audit_logs` is read for operational questions, and
+     * the trail should record that a deletion happened without republishing what
+     * was deleted into a second table with a different retention period.
+     */
+    const moderating = cmt.user_id !== req.principal.userId;
+
+    inTransaction(() => {
+      db.prepare('DELETE FROM event_comments WHERE id = ?').run(req.params.id);
+
+      if (moderating) {
+        recordAudit(db, {
+          adminId: req.principal.userId,
+          action: 'COMMENT_DELETED',
+          targetUserId: cmt.user_id,
+          details: `Deleted a comment on event ${cmt.event_id}`,
+        });
+      }
+    });
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete comment' });
