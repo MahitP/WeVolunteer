@@ -17,6 +17,7 @@ import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
 import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
 import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
+import { canManage, memberIds } from '../organizations.js';
 
 const router = express.Router();
 
@@ -141,6 +142,9 @@ router.get('/api/events', authenticateToken, (req, res) => {
       JOIN users u ON e.organizer_id = u.id
       JOIN agg ON agg.event_id = e.id
       LEFT JOIN acc ON acc.event_id = e.id
+      /* LEFT, not JOIN: most events belong to no organization, and an inner
+         join here would silently empty the entire opportunities list. */
+      LEFT JOIN organizations org ON org.id = e.organization_id
       ${where}
     `;
 
@@ -152,6 +156,10 @@ router.get('/api/events', authenticateToken, (req, res) => {
     const SELECT = `
       SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
              u.school as organizer_school,
+             /* One LEFT JOIN rather than a lookup per event. An event card shows
+                the organization's name, and fetching it per row is the N+1 the
+                whole list query is shaped to avoid. */
+             org.name as organization_name, org.slug as organization_slug,
              ${spotsSelect},
              ${distanceSelect}
     `;
@@ -314,6 +322,18 @@ router.get('/api/events', authenticateToken, (req, res) => {
         hasAttendance: withAttendance.has(event.id),
         autoApprove: event.auto_approve === 1,
         attendeeVisibility: event.attendee_visibility || 'accepted',
+        /**
+         * `creditsHours: false` means "this event does not measure service in
+         * hours" — a donation drive, a supply sort. It is NOT "zero hours". The
+         * client reads the flag before formatting any number, so a
+         * participation event shows "Participation" where an hours event shows
+         * a duration. Defaulting `!== 0` rather than `=== 1` keeps every event
+         * that predates the column crediting hours.
+         */
+        creditsHours: event.credits_hours !== 0,
+        organizationId: event.organization_id || null,
+        organizationName: event.organization_name || null,
+        organizationSlug: event.organization_slug || null,
         selectionSummary: event.selection_summary ? JSON.parse(event.selection_summary) : null,
         /**
          * Distance in MILES, computed in SQL when the caller supplied lat/lng.
@@ -410,8 +430,10 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
   try {
     const event = db.prepare(`
       SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
-             u.school as organizer_school
+             u.school as organizer_school,
+             org.name as organization_name, org.slug as organization_slug
       FROM events e JOIN users u ON e.organizer_id = u.id
+      LEFT JOIN organizations org ON org.id = e.organization_id
       WHERE e.id = ?
     `).get(req.params.id);
 
@@ -464,6 +486,10 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
         organizerName: event.organizer_name,
         status: event.status,
         autoApprove: event.auto_approve === 1,
+        creditsHours: event.credits_hours !== 0,
+        organizationId: event.organization_id || null,
+        organizationName: event.organization_name || null,
+        organizationSlug: event.organization_slug || null,
         /* Same shape as the list response, so a client that renders chips from
            one can render them from the other without a second code path. */
         tags: tagsForEvent(db, event.id),
@@ -517,7 +543,7 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
   const {
     title, description, category, location, applicationDeadline, slots,
     autoApprove, instructions, attendeeVisibility,
-    address, latitude, longitude, tags
+    address, latitude, longitude, tags, organizationId, creditsHours
   } = req.body;
 
   if (!title || !description || !category || !location || !applicationDeadline || !slots || !Array.isArray(slots) || slots.length === 0) {
@@ -538,6 +564,40 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
      than silently dropped. */
   const tagCheck = validateTags(tags);
   if (!tagCheck.ok) return res.status(400).json({ error: tagCheck.error, field: tagCheck.field });
+
+  /**
+   * Attaching the event to an organization is a MEMBERSHIP question, not a
+   * capability one.
+   *
+   * `event.create` says this account may create events. It does not say this
+   * account may publish under the National Honor Society's name and notify its
+   * three hundred members. Only a manager of that organization may do that, and
+   * that check is `canManage`, the same one organizationRoutes uses — so there
+   * is one answer to "may you act for this organization" rather than two.
+   */
+  let organization = null;
+  if (organizationId != null && organizationId !== '') {
+    organization = db.prepare('SELECT * FROM organizations WHERE id = ?').get(organizationId);
+    if (!organization || organization.status !== 'active') {
+      return res.status(400).json({ error: 'That organization does not exist.', field: 'organizationId' });
+    }
+    if (!canManage(db, organization.id, req.user.id, { hasModerate: can(req.principal, 'organization.moderate') })) {
+      return res.status(403).json({
+        error: 'You are not a manager of that organization.',
+        field: 'organizationId', code: 'not_manager',
+      });
+    }
+  }
+
+  /**
+   * `creditsHours` defaults to TRUE when absent.
+   *
+   * Every existing client sends no such field, and every existing event awards
+   * hours. Defaulting the other way would silently turn the whole back catalogue
+   * of organizer habits into participation-only events. Only an explicit
+   * `false` opts out.
+   */
+  const awardsHours = creditsHours !== false;
 
   try {
     /**
@@ -565,8 +625,8 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
       db.prepare(`
         INSERT INTO events (id, title, description, category, location, application_deadline,
                             organizer_id, status, created_at, auto_approve, instructions, attendee_visibility,
-                            address, latitude, longitude)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)
+                            address, latitude, longitude, organization_id, credits_hours)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         eventId,
         title,
@@ -581,7 +641,9 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
         attendeeVisibility === 'private' ? 'private' : 'accepted',
         address || null,
         latitude != null ? latitude : null,
-        longitude != null ? longitude : null
+        longitude != null ? longitude : null,
+        organization ? organization.id : null,
+        awardsHours ? 1 : 0
       );
 
       // B. Insert slots
@@ -607,6 +669,41 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
       replaceEventTags(db, eventId, tagCheck.value);
     });
 
+    /**
+     * Tell the organization's members, in one pass, after the commit.
+     *
+     * `memberIds` is a single query returning ids; the loop then writes rows
+     * through the notification service. That is one query for the roster plus
+     * the per-recipient writes the service must do anyway — never a query per
+     * member to discover who they are, which for a club of three hundred would
+     * be three hundred round trips inside the request that created the event.
+     *
+     * The creator is excluded: they know, they just did it.
+     *
+     * Dedupe key is per (member, event), so a member who also qualifies through
+     * some future mechanism gets one notification about one event, not two.
+     * `dispatch` consults each recipient's preferences individually, so a member
+     * who has turned Events off is not told.
+     *
+     * After the transaction and inside its own try/catch: a fan-out failure must
+     * never destroy an event the organizer successfully created.
+     */
+    if (organization) {
+      try {
+        const recipients = memberIds(db, organization.id, { excluding: [req.user.id] });
+        for (const memberId of recipients) {
+          notificationService.dispatch(
+            'ORGANIZATION_EVENT_POSTED',
+            { eventId, eventTitle: title, organizationName: organization.name, organizationSlug: organization.slug },
+            memberId,
+            `org-event:${eventId}`
+          );
+        }
+      } catch (err) {
+        console.error('Organization fan-out failed:', err);
+      }
+    }
+
     res.status(201).json({
       success: true,
       id: eventId,
@@ -620,7 +717,9 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
       applicationDeadline,
       organizerId: req.user.id,
       status: 'open',
-      autoApprove: !!autoApprove
+      autoApprove: !!autoApprove,
+      organizationId: organization ? organization.id : null,
+      creditsHours: awardsHours
     });
   } catch (error) {
     console.error('Create event error:', error);

@@ -46,6 +46,18 @@ export function createCheckinTable(db) {
 }
 
 /** Hours a slot is worth, from its current duration. Only ever used for new credits. */
+/**
+ * The ceiling on hours an organizer may credit for one shift.
+ *
+ * A single shift cannot be longer than a day, so a number above this is a typo
+ * or an attempt — and either way it is better refused at the screen than
+ * discovered in a service record months later. There is no lower bound beyond
+ * zero: crediting 0 for a shift somebody attended but did not complete is a
+ * legitimate, if unkind, organizer decision, and `present` still records that
+ * they turned up.
+ */
+export const MAX_CREDITABLE_HOURS = 24;
+
 export function slotDuration(slot) {
   const ms = new Date(slot.end_datetime) - new Date(slot.start_datetime);
   return Math.max(0.1, Number((ms / 3600000).toFixed(2)));
@@ -159,11 +171,25 @@ export function getCheckins(db, eventId) {
  *
  * Caller is responsible for wrapping this in a transaction.
  */
-export function finalizeAttendance(db, { event, attendanceMap, reason, actor, now }) {
+export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason, actor, now }) {
   const entries = Object.entries(attendanceMap || {});
   const planned = [];
   const skipped = [];
   const notEnded = [];
+  const invalidHours = [];
+
+  /**
+   * The event may not measure service in hours at all.
+   *
+   * A donation drive still has a roster and still records who turned up; it
+   * just credits nothing. Attendance is written with `hours_awarded = 0` so
+   * that every SUM and the ledger's parity check keep working untouched — the
+   * meaning lives on `events.credits_hours`, which every display path reads
+   * before it formats a number. An organizer-supplied hours correction on such
+   * an event is ignored rather than refused, because there is nothing there to
+   * correct.
+   */
+  const awardsHours = event.credits_hours !== 0;
 
   for (const [applicationId, rawPresent] of entries) {
     const present = rawPresent ? 1 : 0;
@@ -200,19 +226,62 @@ export function finalizeAttendance(db, { event, attendanceMap, reason, actor, no
       continue;
     }
 
-    if (prior && prior.present === present) {
+    /**
+     * The actual hours the volunteer completed, when the organizer supplies
+     * them.
+     *
+     * A volunteer scheduled for four hours who leaves after two and a half did
+     * two and a half, and one who stays an extra hour did four. The scheduled
+     * slot duration is a default, not a fact, and until now it was the only
+     * thing that could ever be credited.
+     *
+     * The override is the SOURCE OF TRUTH, and the client's "left early"
+     * checkbox is only a way of computing a number to put here. A boolean
+     * cannot say how early, so a checkbox alone would either credit nothing or
+     * guess — both worse than the scheduled duration it replaced.
+     *
+     * When no override is given the existing rule is untouched: an existing
+     * credit keeps its original value permanently, and a new one is priced from
+     * the slot. That invariant is what stops an edit to a slot's times
+     * re-pricing service somebody already performed.
+     */
+    let hours = prior ? prior.hours_awarded : slotDuration(app);
+    let hoursOverridden = false;
+
+    if (awardsHours && hoursMap && Object.hasOwn(hoursMap, applicationId)) {
+      const raw = Number(hoursMap[applicationId]);
+      if (!Number.isFinite(raw) || raw < 0 || raw > MAX_CREDITABLE_HOURS) {
+        invalidHours.push({
+          applicationId, name: app.user_name, slotName: app.slot_name, value: hoursMap[applicationId],
+        });
+        continue;
+      }
+      const rounded = Number(raw.toFixed(2));
+      if (rounded !== hours) { hours = rounded; hoursOverridden = true; }
+    }
+
+    if (!awardsHours) hours = 0;
+
+    /* An unchanged record with an unchanged number is genuinely nothing to do.
+       This check moved below the hours calculation so that correcting ONLY the
+       hours — same present flag, different number — is no longer skipped as
+       "unchanged", which is the single most likely reason to open this screen
+       a second time. */
+    if (prior && prior.present === present && !hoursOverridden) {
       skipped.push({ applicationId, why: 'unchanged' });
       continue;
     }
 
-    planned.push({
-      app,
-      prior: prior || null,
-      present,
-      // Snapshot: an existing credit is never re-priced, however the slot's
-      // times have been edited since.
-      hours: prior ? prior.hours_awarded : slotDuration(app)
-    });
+    planned.push({ app, prior: prior || null, present, hours, hoursOverridden });
+  }
+
+  if (invalidHours.length > 0) {
+    return {
+      ok: false,
+      error: 'invalid_hours',
+      message: `Hours must be a number between 0 and ${MAX_CREDITABLE_HOURS}.`,
+      invalidHours
+    };
   }
 
   // A shift that has not finished cannot be credited. Check-in is the tool for
@@ -226,6 +295,9 @@ export function finalizeAttendance(db, { event, attendanceMap, reason, actor, no
     };
   }
 
+  /* A correction is any change to a record that already existed — including an
+     hours-only change. Re-pricing somebody's service record without saying why
+     is exactly what the reason requirement exists to prevent. */
   const corrections = planned.filter(p => p.prior !== null);
   if (corrections.length > 0 && !String(reason || '').trim()) {
     return {
@@ -236,7 +308,9 @@ export function finalizeAttendance(db, { event, attendanceMap, reason, actor, no
         name: c.app.user_name,
         slotName: c.app.slot_name,
         from: c.prior.present === 1 ? 'present' : 'absent',
-        to: c.present === 1 ? 'present' : 'absent'
+        to: c.present === 1 ? 'present' : 'absent',
+        hoursFrom: c.prior.hours_awarded,
+        hoursTo: c.hours
       }))
     };
   }
@@ -256,7 +330,16 @@ export function finalizeAttendance(db, { event, attendanceMap, reason, actor, no
 
     const wasCredited = p.prior ? p.prior.present === 1 : false;
     const isCredited = p.present === 1;
-    const action = wasCredited && !isCredited ? 'revoked' : 'credited';
+    /**
+     * `adjusted` is a distinct ledger action from `credited`, and the
+     * distinction matters to anybody reading the trail later. "Credited 2.5"
+     * after "credited 4" reads as two separate awards; "adjusted 4 → 2.5" reads
+     * as what actually happened. The enum has carried `adjusted` since the
+     * ledger shipped with no production writer; this is it.
+     */
+    const action = wasCredited && !isCredited ? 'revoked'
+      : (wasCredited && isCredited && p.hoursOverridden) ? 'adjusted'
+        : 'credited';
 
     recordHoursChange(db, {
       userId: p.app.user_id,

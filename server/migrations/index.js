@@ -39,6 +39,7 @@ import encryptTfaSecrets from './027_encrypt_tfa_secrets.js';
 import moderationActionNote from './028_moderation_action_note.js';
 import totpReplayHighWater from './029_totp_replay_high_water.js';
 import personaPreview from './030_persona_preview.js';
+import socialDirectory from './031_social_directory.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -123,7 +124,16 @@ export const MIGRATIONS = [
    * 030 adds the two columns a persona preview lives in. Additive, nullable, and
    * order-independent: nothing reads them during migration.
    */
-  personaPreview
+  personaPreview,
+  /**
+   * 031 adds the v1.3 directory: profile fields, relationships, organizations,
+   * external service records, and the flag for events that credit no hours.
+   * Purely additive and order-independent — it creates new tables and appends
+   * nullable/defaulted columns, and reads nothing that an earlier migration
+   * writes. It must nonetheless stay after 001, which rebuilds `users` from an
+   * explicit column list and would fail on a column it does not know about.
+   */
+  socialDirectory
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

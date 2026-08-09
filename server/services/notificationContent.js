@@ -131,6 +131,23 @@ export const EVENT_CATEGORIES = {
   // point: badgeService used to INSERT into `notifications` directly and no
   // preference reached it at all.
   BADGE_EARNED: 'VOLUNTEER',
+  /**
+   * A friend signed up for something you could sign up for too. VOLUNTEER
+   * rather than a new SOCIAL category, because that is what it is for: the
+   * feature exists to surface opportunities, and filing it under Volunteering
+   * puts it beside hours and certificates where a volunteer already looks.
+   *
+   * It also means one existing preference switch already turns it off, rather
+   * than a sixth category appearing in everybody's settings.
+   */
+  FRIEND_SIGNED_UP: 'VOLUNTEER',
+  /** A new event from an organization you joined. */
+  ORGANIZATION_EVENT_POSTED: 'EVENT',
+
+  // ACCOUNT — the two relationship notices. ACCOUNT, not VOLUNTEER: these are
+  // about who may see your activity, which is an account matter.
+  FRIEND_REQUEST: 'ACCOUNT',
+  FRIEND_ACCEPTED: 'ACCOUNT',
 
   // ACCOUNT
   ORGANIZER_APPROVED: 'ACCOUNT',
@@ -641,6 +658,48 @@ export function getInAppContent(event, payload) {
           ? `Your profile now shows the "${payload.badgeName}" badge.`
           : 'Your profile now shows a new badge.',
         link: '/profile'
+      };
+    /**
+     * A friend signed up for something.
+     *
+     * The body names the friend and the event and nothing else — not the shift,
+     * not the time, not the location. The recipient is being told an
+     * opportunity exists, and the link takes them to the event where the public
+     * detail already lives. Putting a named person's schedule into a
+     * notification body would put it into an email too, which is a copy of a
+     * minor's whereabouts sitting in an inbox outside anybody's control.
+     */
+    case 'FRIEND_SIGNED_UP':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.LOW,
+        title: 'A friend signed up',
+        body: `${payload.actorName || 'A friend'} signed up for ${payload.eventTitle}. There may still be places.`,
+        link: `event:${payload.eventId}`
+      };
+    case 'ORGANIZATION_EVENT_POSTED':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `New from ${payload.organizationName || 'your organization'}`,
+        body: `${payload.eventTitle} is open for applications.`,
+        link: `event:${payload.eventId}`
+      };
+    case 'FRIEND_REQUEST':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: 'New friend request',
+        body: `${payload.actorName || 'Someone'} wants to add you as a friend.`,
+        link: payload.actorUsername ? `/users/@${payload.actorUsername}` : '/notifications'
+      };
+    case 'FRIEND_ACCEPTED':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.LOW,
+        title: 'Friend request accepted',
+        body: `${payload.actorName || 'Someone'} is now your friend.`,
+        link: payload.actorUsername ? `/users/@${payload.actorUsername}` : '/notifications'
       };
     case 'CERTIFICATE_AVAILABLE':
       return {
