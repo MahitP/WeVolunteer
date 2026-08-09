@@ -8,6 +8,7 @@ import { api } from '../utils/api';
 import EmptyState from '../components/common/EmptyState';
 import { useLocationContext } from '../contexts/LocationContext';
 import { useWindowedRows } from '../hooks/useWindowedRows';
+import DatePicker from '../components/common/DatePicker';
 const CATEGORIES = ['All', 'School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 export default function BrowseEvents({
   currentUser,
@@ -53,6 +54,15 @@ export default function BrowseEvents({
   const [results, setResults] = useState([]);
   const [total, setTotal] = useState(0);
   const [places, setPlaces] = useState(['All']);
+  /**
+   * Selected tag keys, and the vocabulary to offer.
+   *
+   * Keys (`nhs`), not labels, because the key is what the server filters on and
+   * what a shareable URL should carry — a label would have to be re-normalised on
+   * arrival and could not survive a spelling difference between organizers.
+   */
+  const [selectedTags, setSelectedTags] = useState([]);
+  const [tagOptions, setTagOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
@@ -65,6 +75,10 @@ export default function BrowseEvents({
     scope: 'listable',
     q: query.trim() || undefined,
     category: category !== 'All' ? category : undefined,
+    /* Joined for the URL; the server also accepts a repeated parameter. Undefined
+       rather than an empty string when nothing is selected, so the query does not
+       carry a filter that means nothing. */
+    tags: selectedTags.length ? selectedTags.join(',') : undefined,
     place: place !== 'All' ? place : undefined,
     openOnly: openOnly || undefined,
     favoritesOnly: showFavoritesOnly || undefined,
@@ -78,7 +92,7 @@ export default function BrowseEvents({
     lng: (maxDistance || sortBy === 'distance') && location ? location.longitude : undefined,
     maxDistance: location ? (maxDistance || undefined) : undefined,
     sort: sortBy
-  }), [query, category, place, openOnly, showFavoritesOnly, fromDate, toDate, minHours, closingSoon, maxDistance, sortBy, location]);
+  }), [query, category, place, openOnly, showFavoritesOnly, fromDate, toDate, minHours, closingSoon, maxDistance, sortBy, location, selectedTags]);
 
   /**
    * Debounced, and guarded against out-of-order responses.
@@ -104,6 +118,10 @@ export default function BrowseEvents({
         setTotal(res.pagination?.total ?? (res.events || []).length);
         setNextOffset(res.pagination?.nextOffset ?? null);
         if (res.places) setPlaces(['All', ...res.places]);
+        /* The vocabulary comes back with the results and is computed over every
+           event rather than the current page — so ticking one tag does not remove
+           the others from the bar. See the note in eventRoutes.js. */
+        if (res.tags) setTagOptions(res.tags);
         onEventsSeen?.(res.events || []);
       } catch (err) {
         if (isCurrent()) setError(err.message || 'Could not load opportunities.');
@@ -173,7 +191,7 @@ export default function BrowseEvents({
      "approved yet" — so it stays a separate flag here exactly as it is in NAV. */
   const canCreate = can(currentUser, 'event.create') && Boolean(currentUser?.verified);
 
-  const hasFilters = query || category !== 'All' || !openOnly || showFavoritesOnly || advancedCount > 0;
+  const hasFilters = query || category !== 'All' || !openOnly || showFavoritesOnly || selectedTags.length > 0 || advancedCount > 0;
   const clearFilters = () => {
     setQuery('');
     setCategory('All');
@@ -185,6 +203,10 @@ export default function BrowseEvents({
     setPlace('All');
     setClosingSoon(false);
     setMaxDistance('');
+    /* Tags are a filter, so "Clear filters" has to clear them. Omitting this left
+       an empty result set with a visible "no events match" and no visible reason,
+       because the selected chips scroll out of view above the list. */
+    setSelectedTags([]);
   };
   return <div className="stack-lg">
       {isStudent && <div className="row-between row-wrap">
@@ -282,6 +304,45 @@ export default function BrowseEvents({
             </label>}
         </div>
 
+        {/**
+          * The tag facet.
+          *
+          * Rendered only when tags exist, so a district that never uses them never
+          * sees an empty control. Selecting more than one WIDENS the result set —
+          * OR within the facet — which is the faceted-search convention and is
+          * said out loud in the hint, because "any of" versus "all of" is not
+          * something a reader should have to infer from the result count.
+          *
+          * A `group` with an accessible name rather than a heading: it is one row
+          * of controls beside the category chips, and each chip already reports
+          * its own pressed state.
+          */}
+        {tagOptions.length > 0 && (
+          <div className="row row-wrap s-775d10" role="group" aria-label="Filter by tag">
+            <div className="chips">
+              {tagOptions.map(({ tag, label }) => {
+                const on = selectedTags.includes(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    className="chip"
+                    aria-pressed={on}
+                    onClick={() => setSelectedTags(prev => (
+                      on ? prev.filter(t => t !== tag) : [...prev, tag]
+                    ))}
+                  >
+                    <span aria-hidden="true">#</span>{label}
+                  </button>
+                );
+              })}
+            </div>
+            {selectedTags.length > 1 && (
+              <span className="small dim">Showing events with any of these tags</span>
+            )}
+          </div>
+        )}
+
         <div className="row row-wrap s-775d10">
           <div className="chips">
             {CATEGORIES.map(cat => <button key={cat} className="chip" aria-pressed={category === cat} onClick={() => setCategory(cat)}>
@@ -297,13 +358,28 @@ export default function BrowseEvents({
 
         {showFilters && <div className="card card-pad s-88cfef">
             <div className="grid s-346730">
+              {/* Two independent pickers rather than one range widget, matching
+                  AdminAuditExplorer and for the same reason recorded there: the
+                  common query here is open-ended ("anything from next week on"),
+                  and a range control wants both ends before it commits. They are
+                  deliberately NOT bounded by each other either — pinning `min`
+                  on the second to the first makes correcting a mistyped start
+                  date impossible without clearing both. */}
               <div className="field s-535b39">
-                <label htmlFor="f-from">Happening from</label>
-                <input id="f-from" type="date" className="input" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+                <DatePicker
+                  id="f-from"
+                  label="Happening from"
+                  value={fromDate}
+                  onChange={setFromDate}
+                />
               </div>
               <div className="field s-535b39">
-                <label htmlFor="f-to">Up until</label>
-                <input id="f-to" type="date" className="input" value={toDate} onChange={e => setToDate(e.target.value)} />
+                <DatePicker
+                  id="f-to"
+                  label="Up until"
+                  value={toDate}
+                  onChange={setToDate}
+                />
               </div>
               <div className="field s-535b39">
                 <label htmlFor="f-hours">Awards at least</label>

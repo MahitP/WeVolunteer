@@ -12,6 +12,7 @@ import { can, requireCap, requireCapAny } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
+import { validateTags, replaceEventTags, tagsForEvent, tagsForEvents, tagVocabulary } from '../eventTags.js';
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
 import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
@@ -259,6 +260,11 @@ router.get('/api/events', authenticateToken, (req, res) => {
         : []
     );
 
+    /* Tags for the whole page in ONE query, beside the other per-page batch
+       loads above. Per-event reads here would be an N+1 on the endpoint the
+       browse screen calls on every keystroke. */
+    const tagsByEvent = tagsForEvents(db, pageIds);
+
     const formattedEvents = events.map(event => {
       const slots = slotsByEvent.get(event.id) || [];
 
@@ -317,6 +323,11 @@ router.get('/api/events', authenticateToken, (req, res) => {
          * the sort places nulls last, matching the `?? Infinity` it replaced.
          */
         distance: event.distance_miles != null ? Number(event.distance_miles) : null,
+        /* Organizer-created tags: `{tag, label}` pairs. `tag` is the normalised
+           key a filter uses, `label` is what the organizer typed and what the
+           reader sees. Always an array, never absent, so the client never has to
+           distinguish "no tags" from "field missing". */
+        tags: tagsByEvent[event.id] || [],
         slots: formattedSlots
       };
     });
@@ -350,6 +361,20 @@ router.get('/api/events', authenticateToken, (req, res) => {
       ORDER BY location COLLATE NOCASE
     `).all().map(r => r.location);
 
+    /**
+     * The tag vocabulary, computed over everything and NOT over the current page.
+     *
+     * Same argument as `places` above, and it bites harder here: a tag facet whose
+     * options are narrowed by the current selection removes every option the
+     * moment one is ticked, so a reader can neither add a second tag nor see what
+     * they have excluded. It is a vocabulary, not a result count.
+     *
+     * Served alongside the results rather than from its own endpoint so the
+     * browse screen renders its filter bar from the response it already makes,
+     * instead of a second round trip on first paint.
+     */
+    const tags = tagVocabulary(db);
+
     res.json({
       events: formattedEvents,
       pagination: {
@@ -364,6 +389,7 @@ router.get('/api/events', authenticateToken, (req, res) => {
         maxLimit: EVENTS_MAX_LIMIT
       },
       places,
+      tags,
       // Echoed back so a client can tell which filters the server actually
       // applied, rather than assuming its request was understood verbatim.
       filters
@@ -438,6 +464,9 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
         organizerName: event.organizer_name,
         status: event.status,
         autoApprove: event.auto_approve === 1,
+        /* Same shape as the list response, so a client that renders chips from
+           one can render them from the other without a second code path. */
+        tags: tagsForEvent(db, event.id),
         slots: formattedSlots
       },
       applications
@@ -445,6 +474,36 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
   } catch (err) {
     console.error('Fetch event error:', err);
     res.status(500).json({ error: 'Failed to load event' });
+  }
+});
+
+/**
+ * GET /api/events/tags — the tag vocabulary, for reuse rather than reinvention.
+ *
+ * ── Why a route of its own ──
+ *
+ * The list endpoint already returns this alongside its results, which is right for
+ * the browse screen's filter bar. The event FORM needs it too and has no reason to
+ * fetch a page of events to get it — so this is the same data without the payload
+ * the caller would throw away.
+ *
+ * ── Why it is authenticated but ungated ──
+ *
+ * The vocabulary is the words organizers have used on events that are already
+ * visible to every signed-in account, so it discloses nothing a reader cannot see
+ * by browsing. It is behind `authenticateToken` because there is no reason for it
+ * to be the one event endpoint answering anonymously, and it carries no capability
+ * because every signed-in role can already read the tags on an event.
+ *
+ * Declared ABOVE `/api/events/:id`: Express matches in order, so registering it
+ * after would make `tags` be read as an event id and answer 404.
+ */
+router.get('/api/events/tags', authenticateToken, (req, res) => {
+  try {
+    res.json({ tags: tagVocabulary(db, { limit: req.query.limit }) });
+  } catch (err) {
+    console.error('Failed to load the tag vocabulary:', err);
+    res.status(500).json({ error: 'Could not load tags.' });
   }
 });
 
@@ -458,7 +517,7 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
   const {
     title, description, category, location, applicationDeadline, slots,
     autoApprove, instructions, attendeeVisibility,
-    address, latitude, longitude
+    address, latitude, longitude, tags
   } = req.body;
 
   if (!title || !description || !category || !location || !applicationDeadline || !slots || !Array.isArray(slots) || slots.length === 0) {
@@ -472,6 +531,13 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
 
   const validation = validateEventPayload({ title, description, location, instructions, applicationDeadline, slots, address, latitude, longitude });
   if (!validation.ok) return res.status(400).json({ error: validation.error });
+
+  /* Tags are OPTIONAL — absent and `[]` both mean "none". Validated server-side
+     regardless of what the form checked, because the form is not the boundary:
+     see server/eventTags.js for the limits and why a bad tag is an error rather
+     than silently dropped. */
+  const tagCheck = validateTags(tags);
+  if (!tagCheck.ok) return res.status(400).json({ error: tagCheck.error, field: tagCheck.field });
 
   try {
     /**
@@ -534,6 +600,11 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
           Number(slot.maxSpots)
         );
       }
+
+      /* C. Tags. Inside the same transaction as the event and its slots: an
+         event that saved without the tags the organizer typed is a silent partial
+         write, and they would have no way to tell other than reopening it. */
+      replaceEventTags(db, eventId, tagCheck.value);
     });
 
     res.status(201).json({
@@ -564,7 +635,7 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
   const {
     title, description, category, location, applicationDeadline, slots,
     autoApprove, instructions, attendeeVisibility,
-    address, latitude, longitude
+    address, latitude, longitude, tags
   } = req.body;
 
   if (!title || !description || !category || !location || !applicationDeadline || !slots || !Array.isArray(slots)) {
@@ -576,6 +647,12 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
 
   const validation = validateEventPayload({ title, description, location, instructions, applicationDeadline, slots, address, latitude, longitude });
   if (!validation.ok) return res.status(400).json({ error: validation.error });
+
+  /* Validated before the ownership check below runs, which is only about
+     ordering of error messages: a caller who does not host this event is refused
+     either way, and `validateTags` reads nothing from the database. */
+  const tagCheck = validateTags(tags);
+  if (!tagCheck.ok) return res.status(400).json({ error: tagCheck.error, field: tagCheck.field });
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
@@ -671,6 +748,19 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
       if (attendeeVisibility !== undefined) {
         db.prepare('UPDATE events SET attendee_visibility = ? WHERE id = ?')
           .run(attendeeVisibility === 'private' ? 'private' : 'accepted', eventId);
+      }
+
+      /**
+       * Tags, only when the caller actually sent the field.
+       *
+       * `tags: []` means "remove them all" and is honoured; OMITTING `tags` means
+       * "I am not editing tags" and must leave them alone. The distinction
+       * matters because this endpoint is also used by clients that were written
+       * before tags existed — treating absent as empty would silently strip every
+       * tag off an event the moment such a client saved anything else about it.
+       */
+      if (tags !== undefined) {
+        replaceEventTags(db, eventId, tagCheck.value);
       }
 
       // 2. Differential sync slots.
