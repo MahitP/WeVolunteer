@@ -401,6 +401,19 @@ const EXPECTED = [
     { student: 403, organizer: 403, admin: 403, super_admin: 404, partner: 403 },
     { body: { status: 'resolved' } }],
 
+  // ── impactRoutes.js ──
+  //
+  // `analytics.impact` was held by student, organizer, admin AND partner, so this
+  // row read all-'allow' for every signed-in role. It is now an administrative
+  // capability: the community figures are an internal view of how the programme
+  // is doing (the reason `/api/public/impact` was deleted rather than re-gated),
+  // and "how much did this school's children do" is a management question. The
+  // three 403s are the policy, asserted at the layer that enforces it — the nav
+  // entry and the client route are hidden by the same word, and neither is a
+  // boundary.
+  ['GET', '/api/impact',
+    { student: 403, organizer: 403, admin: 'allow', super_admin: 'allow', partner: 403 }],
+
   // ── eventRoutes.js, continued: kept LAST in the whole table ──
   //
   // Real event-softball id, denied-roles-first ordering (same hazard as the
