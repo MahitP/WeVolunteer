@@ -126,7 +126,7 @@ to know.
 Some organizers use a computer draw called **Auto Select**. Here is exactly how it works — we
 publish it because there is no reason to hide it:
 
-- Every applicant gets a **weight** based only on their **total credited hours**.
+- Every applicant gets a **weight** based mainly on their **total credited hours**.
 - The formula is `weight = 1.5 + 8.5 / (1 + 0.005 × hours)`.
 - A student with **0 hours gets weight 10.0**. A student with **200 hours gets about 5.8**. A
   student with **500 hours gets about 4.0**. The weight keeps falling but never reaches zero.
@@ -136,8 +136,31 @@ publish it because there is no reason to hide it:
 **In plain terms: if you have volunteered less, you get a better chance.** That is intentional.
 It stops the same few students taking every opportunity and shuts out everyone else.
 
+#### Turning up matters a little, and only a little
+
+Since version 1.3 the draw also looks at whether you turned up to shifts you were accepted for.
+It is a **small** adjustment, and we have deliberately made it hard for it to matter much:
+
+- Your weight is multiplied by a number between **0.95 and 1.03**. That is the whole range.
+- **If we have no record of you either way, the multiplier is exactly 1.0** — a volunteer the
+  system knows nothing about is neither helped nor harmed.
+- The rate is **smoothed**, so a small number of shifts barely moves it. One shift attended out
+  of one is not treated as a perfect record, and **one missed shift out of two is a small dip,
+  not a verdict**. It takes a real pattern to move the number far.
+- **A shift your organizer never confirmed does not count against you.** If nobody recorded
+  whether you were there, it is left out of the calculation entirely — it is not counted as an
+  absence.
+- Shifts you **withdrew from in time** are not counted against you either, and neither is an
+  event that was **cancelled**.
+
+**Hours still come first.** The guarantee we hold ourselves to, and test on every build: below
+200 credited hours, a **50-hour difference in hours outweighs any possible difference in
+attendance**. You cannot climb the draw by being reliable instead of by needing hours.
+
 **What Auto Select never uses:** your grade, your school, your name, your profile, your bio,
-your skills, your gender, or anything else about who you are. Only your hours.
+your skills, your hobbies, your gender, your friends, the organizations you have joined, any
+hours you logged yourself from outside WeVolunteer, or anything else about who you are. Only
+your credited hours and whether you turned up.
 
 **Every draw is recorded** — including the random seed — so any draw can be re-run and checked
 afterwards. If you think a draw went wrong, email **wevolunteer.platform@gmail.com** and we will
