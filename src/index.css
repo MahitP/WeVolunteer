@@ -3189,6 +3189,33 @@ time { font-variant-numeric: tabular-nums; }
     min-width: 3.25rem;
     border-left: 1px solid var(--rule);
   }
+
+  /**
+   * A cue that the strip has more in it, at the widths where it actually does.
+   *
+   * Five primary destinations fit down to 375px. Below roughly 360px they do not,
+   * and the strip scrolls — which is the intended mechanism, but nothing said so:
+   * at 320px the bar showed four labels and a `⋯`, and `Admin` was simply absent
+   * from view with no hint that a sideways swipe would reach it. Measured before
+   * this rule: 329px of content in a 268px strip, so `Admin` sat 61px past the
+   * right edge, fully reachable and completely invisible.
+   *
+   * A trailing fade is the conventional signal for that and costs no layout. It
+   * is scoped to the widths where the overflow is real, so a 375px phone — where
+   * everything fits — gets no gratuitous dimming of its last item.
+   *
+   * `mask-image` rather than an overlaid gradient: an overlay would need a
+   * background colour to blend into, and this bar sits on `--surface` in light
+   * mode and a dark surface in dark mode. A mask fades to transparency whatever
+   * is behind it, so one rule is correct in both themes — which is also why it is
+   * not a `linear-gradient` background borrowed from the page colour.
+   */
+  @media (max-width: 360px) {
+    .mobilenav-scroll {
+      mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+      -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+    }
+  }
   .mobilenav-item[aria-current='page'] { color: var(--brand); }
   .mobilenav-item[aria-current='page']::before {
     content: '';
