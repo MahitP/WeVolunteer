@@ -46,14 +46,15 @@ the registry is acceptable; a test that hardcodes this table is not (P-3).
 |---|---|---|---|---|---|
 | 1 | `admin.create` | Promote or revoke administrator standing; manage invitations | **No** | No | Ownership |
 | 2 | `analytics.own_events` | Read statistics for events the principal runs | Yes | Yes | Read |
-| 3 | `analytics.platform` | Read platform-wide analytics | **No** | No | Read, privileged |
-| 4 | `analytics.public` | Read aggregate public analytics | Yes | Yes | Read |
-| 5 | `analytics.school` | Read institution-wide analytics | Yes | Yes | Read, privileged |
-| 6 | `announcement.post` | Post an announcement to an event's participants | Yes | Yes | Write |
-| 7 | `appeal.review` | Read and decide appeals | Yes | Yes | Enforcement |
-| 8 | `applicant.review` | Accept, reject or waitlist applications | Yes | Yes | Write |
-| 9 | `application.withdraw` | Withdraw one's own application | Yes | Yes | Self |
-| 10 | `attendance.mark` | Record attendance and confirm hours | Yes | Yes | Write, hours |
+| 3 | `analytics.impact` | Read the community impact figures (`/impact`, `GET /api/impact`) | Yes | Yes | Read, privileged |
+| 4 | `analytics.platform` | Read platform-wide analytics | **No** | No | Read, privileged |
+| 5 | `analytics.public` | Read aggregate public analytics | Yes | Yes | Read |
+| 6 | `analytics.school` | Read institution-wide analytics | Yes | Yes | Read, privileged |
+| 7 | `announcement.post` | Post an announcement to an event's participants | Yes | Yes | Write |
+| 8 | `appeal.review` | Read and decide appeals | Yes | Yes | Enforcement |
+| 9 | `applicant.review` | Accept, reject or waitlist applications | Yes | Yes | Write |
+| 10 | `application.withdraw` | Withdraw one's own application | Yes | Yes | Self |
+| 11 | `attendance.mark` | Record attendance and confirm hours | Yes | Yes | Write, hours |
 | 11 | `attendance.scan` | Use the check-in scanner | Yes | Yes | Write |
 | 12 | `attendance.view` | Read attendance records | Yes | Yes | Read |
 | 13 | `audit.read` | Read the operational audit trail | Yes | Yes | Read, privileged |
@@ -115,10 +116,19 @@ Volume 0 §0.8.
 
 `●` held by role. `—` not held. `*` wildcard: every registered capability.
 
+> **Corrected 2026-08-08.** `analytics.impact` was missing from both tables
+> entirely — it postdates this appendix. It is held by `admin` and `super_admin`
+> only: it was briefly held by every signed-in role, which made the community
+> impact figures readable by students, and narrowing the holder set was the fix.
+> `partner` is deliberately excluded; `analytics.public` is where a figure chosen
+> *for* an outside reader would go. Rows below `analytics.impact` in the
+> definition table are renumbered accordingly.
+
 | Capability | student | organizer | admin | super_admin | partner |
 |---|:---:|:---:|:---:|:---:|:---:|
 | `admin.create` | — | — | — | * | — |
 | `analytics.own_events` | — | ● | ● | * | — |
+| `analytics.impact` | — | — | ● | * | — |
 | `analytics.platform` | — | — | — | * | — |
 | `analytics.public` | — | — | — | * | ● |
 | `analytics.school` | — | — | ● | * | — |

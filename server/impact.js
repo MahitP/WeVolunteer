@@ -226,6 +226,75 @@ function geography(db) {
 }
 
 /**
+ * What organizers actually said their events were about, by tag.
+ *
+ * ── Why this exists beside `categories` and does not replace it ──
+ *
+ * `events.category` is five fixed values — `School`, `5K`, `Food Pantry`,
+ * `Fundraiser`, `Other` — and the owner's answer to Q-2 records why that cannot
+ * answer "where did the effort go": `5K` is a format, `Fundraiser` is a mechanism,
+ * and `Other` is a shrug that a large share of real events land in. Tags are the
+ * open vocabulary organizers write themselves, so they carry the answer the
+ * category cannot.
+ *
+ * Both are reported. The category is still the only field every event is
+ * guaranteed to have (a CHECK constraint enforces it) and it is what the Auto
+ * Select draw reads; tags are optional, so a tag breakdown alone would silently
+ * omit every untagged event. Two sections, each honest about what it covers.
+ *
+ * ── The number that must not be added up ──
+ *
+ * An event may carry up to eight tags, and its hours are counted under EVERY tag
+ * it carries. So these hours overlap, and summing the column gives a figure larger
+ * than the platform total — which is the one way a reader can be badly misled by
+ * this section. `overlapping: true` travels in the payload so the screen can say
+ * so beside the numbers rather than leaving somebody to discover it by arithmetic.
+ *
+ * That is a property of many-to-many tagging, not a defect to engineer around:
+ * "how many hours went to something tagged Environment" is a real question, and
+ * the honest answer double-counts an event that is also tagged Education.
+ *
+ * ── Suppression, same floor as every other breakdown ──
+ *
+ * Suppressed on VOLUNTEER count through the shared `bucket()` helper, because a
+ * tag with two volunteers is two identifiable students and an organizer-typed tag
+ * can be far more specific than a category — `#MrsAlvarezTutoring` names a room.
+ * That specificity is exactly the privacy hazard Q-2 warned about before tags were
+ * built, and it is why this floor is not optional here.
+ *
+ * `label` via MAX so a bucket renders with a real spelling rather than the
+ * normalised key — an arbitrary pick among the spellings in use, which is fine for
+ * a display label and is why `tag` is what any filter would use.
+ */
+function tags(db) {
+  const rows = db.prepare(`
+    SELECT et.tag                          AS tag,
+           MAX(et.label)                   AS label,
+           COUNT(DISTINCT a.user_id)       AS volunteers,
+           COUNT(DISTINCT a.event_id)      AS events,
+           COALESCE(SUM(a.hours_awarded), 0) AS hours
+      FROM attendance a
+      JOIN event_tags et ON et.event_id = a.event_id
+     WHERE a.present = 1
+     GROUP BY et.tag
+     ORDER BY hours DESC, et.tag ASC
+  `).all();
+
+  return {
+    /* Named on the section rather than on each row: it is true of the whole
+       breakdown, and repeating it per bucket would read as a per-tag caveat. */
+    overlapping: true,
+    breakdown: rows.map((r) => ({
+      tag: r.tag,
+      ...bucket(r.label, r.volunteers, {
+        events: r.events,
+        hours: round1(Number(r.hours) || 0),
+      }),
+    })),
+  };
+}
+
+/**
  * Everything, in one read.
  *
  * `generatedAt` is returned so a screen can say when the figures are from. They
@@ -240,88 +309,85 @@ export function buildImpact(db) {
     growth: growth(db),
     volunteers: volunteers(db),
     categories: categories(db),
+    tags: tags(db),
     geography: geography(db),
   };
 }
 
 /**
- * The figures anybody may see, without an account.
+ * Every figure, with the sentence that says what it counts.
  *
- * ── Why a separate builder rather than a filtered `buildImpact` ──
- *
- * Because the two answer different questions and have different threat models,
- * and a shared shape with a `public` flag is how the wrong field eventually ships
- * to the wrong audience. `buildImpact` is read by somebody the platform can
- * name — a student, an organizer, an administrator. This is read by anybody at
- * all, including somebody who already knows things about a specific school and is
- * looking for one more number to line them up against.
- *
- * So this is an allowlist expressed as code: it names the fields it emits, and a
- * new breakdown added to `buildImpact` cannot leak into it by inheritance.
- *
- * ── What is deliberately NOT here ──
- *
- *   - **Categories, months, geography.** Every one is a breakdown, and a
- *     breakdown is a way of asking about a smaller group. They are the parts a
- *     grant reader least needs and the parts that carry the correlation risk.
- *   - **Average and median hours per volunteer.** These are whole-population
- *     aggregates and look harmless, and they are still left out: published
- *     alongside the cohort size and the total, each additional statistic is
- *     another equation, and a small cohort is a small system of equations. The
- *     four totals and the returning rate carry what marketing and a grant
- *     application actually need.
- *   - **Any filter.** `/api/public/impact` takes no parameters at all. A date
- *     range is a way to ask about smaller and smaller groups until a figure
- *     describes one person.
- *
- * ── The floor ──
- *
- * A total over the whole population identifies nobody, which is the argument for
- * publishing these four without suppression. It stops being quite true when the
- * population is four people at a named school. Below `MIN_BUCKET` volunteers the
- * response says so rather than publishing the number — and says so explicitly
- * rather than returning zeros, because zeros read as "this platform does
- * nothing" and that is a different, false, claim.
+ * "318 hours" invites "hours of what, claimed by whom", and a dashboard that
+ * leaves that unanswered is one whose numbers get quoted wrongly in a grant
+ * application. These travel in the PAYLOAD rather than living in the client so
+ * the definition cannot drift from the query that produced the number.
  */
-export function buildPublicImpact(db) {
-  const totals = community(db);
-  const { returningRate, cohort } = volunteers(db);
+const DEFINITIONS = Object.freeze({
+  totalVolunteers: 'People who were marked present at at least one shift. Sign-ups are not counted.',
+  totalHours: 'Hours credited after an organizer confirmed attendance. Scheduled hours are not counted.',
+  eventsCompleted: 'Events where at least one volunteer was marked present.',
+  organizationsSupported: 'Organizations that hosted at least one of those events.',
+  returningRate: 'Share of volunteers who came back for a second, different event.',
+  averageHours: 'Total credited hours divided by the number of volunteers.',
+  medianHours: 'The middle volunteer\'s hours. Read beside the average: a gap between them means a few people carry most of the total.',
+  distinctLocations: 'Places at least one attended event was held. Locations themselves are never published — see geography() above.',
+});
 
-  /**
-   * Every figure carries the sentence that says what it counts.
-   *
-   * "318 hours" invites "hours of what, claimed by whom", and a public page that
-   * leaves that unanswered is one a grant reader stops quoting. These travel in
-   * the payload rather than living in the client so the definition cannot drift
-   * from the query that produced the number.
-   */
-  const definitions = {
-    totalVolunteers: 'People who were marked present at at least one shift. Sign-ups are not counted.',
-    totalHours: 'Hours credited after an organizer confirmed attendance. Scheduled hours are not counted.',
-    eventsCompleted: 'Events where at least one volunteer was marked present.',
-    organizationsSupported: 'Organizations that hosted at least one of those events.',
-    returningRate: 'Share of volunteers who came back for a second, different event.',
-  };
-
-  if (totals.totalVolunteers < MIN_BUCKET) {
-    return {
-      generatedAt: new Date().toISOString(),
-      available: false,
-      minBucket: MIN_BUCKET,
-      reason: `Published once ${MIN_BUCKET} volunteers have taken part. Below that, a figure `
-        + 'about this community is close enough to a figure about a particular person.',
-      community: null,
-      participation: null,
-      definitions,
-    };
-  }
-
+/**
+ * The platform-wide figures, for `analytics.platform`.
+ *
+ * ── This used to be `buildPublicImpact`, and the change of audience is the
+ *    whole reason its contents changed ──
+ *
+ * It was written for `/api/public/impact`, readable by anybody with no account,
+ * and it was correct for that: it named four totals and a rate and deliberately
+ * withheld every breakdown, because a breakdown is a way of asking about a
+ * smaller group, and the population here is mostly minors at a named school.
+ *
+ * That endpoint is gone. This one is behind `analytics.platform`, which is
+ * SUPER_ONLY — `can()` refuses it before it consults per-user grants, so no
+ * capability grant reaches it and only the platform owner holds it. The reader
+ * is no longer "anybody at all"; it is the one account that can already read the
+ * roster, the audit trail and every user record.
+ *
+ * So the withholding now protects nobody, and it costs something real: the
+ * owner is the person who needs to see whether participation is rising, and the
+ * month series is the only thing that answers that.
+ *
+ * ── Why this is not new exposure ──
+ *
+ * `/api/impact` returns the full `buildImpact` payload behind
+ * `analytics.impact`. A super_admin holds `'*'`, so it can already fetch all of
+ * it there. This route is strictly narrower in audience than one that already
+ * exists and serves the same data, so nothing here is readable by anybody who
+ * could not read it a moment ago.
+ *
+ * That argument used to rest on `analytics.impact` being held by every signed-in
+ * role. It no longer is — the community figures became administrative — and the
+ * argument survives unchanged, because it never depended on the wide audience:
+ * it depends only on the wildcard, i.e. on this reader being able to open
+ * `/api/impact` too.
+ *
+ * ── What is still withheld, and still is on purpose ──
+ *
+ * The `MIN_BUCKET` suppression inside `growth()` and `categories()` is
+ * untouched. It is not an access control — it is a statement that a bucket of
+ * two people is a description of two people — and it applies to this reader for
+ * the same reason it applies on `/api/impact`: a suppressed bucket returns
+ * `count: null, suppressed: true` rather than being dropped, so the screen can
+ * say something was withheld instead of implying it was nothing.
+ *
+ * ── No `available` gate ──
+ *
+ * The old builder refused to publish anything below `MIN_BUCKET` volunteers.
+ * That floor was about a stranger reading a page about four named children. The
+ * owner of a programme with four volunteers is entitled to know it has four,
+ * and telling them "not published yet" on their own platform is a bug wearing a
+ * privacy argument. The per-bucket suppression that does the real work stays.
+ */
+export function buildAdminImpact(db) {
   return {
-    generatedAt: new Date().toISOString(),
-    available: true,
-    minBucket: MIN_BUCKET,
-    community: totals,
-    participation: { returningRate, cohort },
-    definitions,
+    ...buildImpact(db),
+    definitions: DEFINITIONS,
   };
 }

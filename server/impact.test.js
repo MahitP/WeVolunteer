@@ -33,6 +33,10 @@ beforeAll(async () => {
 const wipe = () => {
   db.exec('DELETE FROM attendance');
   db.exec("DELETE FROM slots WHERE id LIKE 'i-%'");
+  /* Explicitly, not via ON DELETE CASCADE: `PRAGMA foreign_keys` is per-connection
+     and this harness does not assert it is on, so a leaked tag row would make the
+     next test's breakdown non-empty for no visible reason. */
+  db.exec("DELETE FROM event_tags WHERE event_id LIKE 'i-%'");
   db.exec("DELETE FROM events WHERE id LIKE 'i-%'");
   db.exec("DELETE FROM users WHERE id LIKE 'iv-%'");
   db.exec("DELETE FROM users WHERE id LIKE 'org-%'");
@@ -93,6 +97,25 @@ const addSlot = (eventId, suffix) => {
     VALUES (?, ?, 'Shift', '', ?, ?, 50)
   `).run(`i-slot-${eventId}-${suffix}`, eventId, NOW, NOW);
   return `i-slot-${eventId}-${suffix}`;
+};
+
+/**
+ * `n` distinct volunteers, each credited an hour on `eventId`.
+ *
+ * At module scope rather than inside one describe: the tag breakdown needs the
+ * same "put a bucket either side of the threshold" fixture the category
+ * suppression test does, and a second copy is how two fixtures drift apart.
+ */
+const fill = (n, eventId) => {
+  for (let i = 1; i <= n; i += 1) {
+    addVolunteer(`iv-${eventId}-${i}`);
+    attend(`iv-${eventId}-${i}`, eventId, 1);
+  }
+};
+
+const addTag = (eventId, label) => {
+  db.prepare('INSERT INTO event_tags (event_id, tag, label) VALUES (?, ?, ?)')
+    .run(eventId, label.toLowerCase(), label);
 };
 
 const attend = (userId, eventId, hours, present = 1, slotId = null) => {
@@ -200,12 +223,6 @@ describe('volunteer insights', () => {
 });
 
 describe('the privacy threshold', () => {
-  const fill = (n, eventId) => {
-    for (let i = 1; i <= n; i += 1) {
-      addVolunteer(`iv-${eventId}-${i}`);
-      attend(`iv-${eventId}-${i}`, eventId, 1);
-    }
-  };
 
   /**
    * The assertion this whole module is shaped around.
@@ -308,15 +325,115 @@ describe('the privacy threshold', () => {
   });
 });
 
+describe('the tag breakdown', () => {
+  /**
+   * The section that answers what `events.category` cannot.
+   *
+   * `5K` is a format and `Fundraiser` is a mechanism; neither says what the effort
+   * was FOR. Tags are the organizer's own words, so they carry that — which is the
+   * whole reason Q-2 asked for them.
+   */
+  it('reports hours and events under each tag an organizer used', () => {
+    addEvent('i-a', 'School', 'org-1');
+    addTag('i-a', 'Environment');
+    addTag('i-a', 'Education');
+    fill(MIN_BUCKET, 'i-a');
+
+    const { tags } = buildImpact(db);
+    const env = tags.breakdown.find(t => t.tag === 'environment');
+
+    expect(env.label).toBe('Environment');
+    expect(env.suppressed).toBe(false);
+    expect(env.count).toBe(MIN_BUCKET);
+    expect(env.events).toBe(1);
+    expect(env.hours).toBeGreaterThan(0);
+  });
+
+  /**
+   * The same floor as every other breakdown, and it matters MORE here.
+   *
+   * A category is one of five broad words. An organizer-typed tag can name a room
+   * or a person — `#MrsAlvarezTutoring` — so a bucket of two is far more
+   * identifying than a category of two. This is the privacy hazard Q-2 flagged
+   * before tags existed, which is why the floor is not optional on this section.
+   */
+  it('suppresses a tag used by fewer volunteers than the threshold', () => {
+    addEvent('i-big', 'School', 'org-1');
+    addEvent('i-small', 'School', 'org-2');
+    addTag('i-big', 'Popular');
+    addTag('i-small', 'Specific');
+    fill(MIN_BUCKET, 'i-big');
+    fill(MIN_BUCKET - 1, 'i-small');
+
+    const { tags } = buildImpact(db);
+    const big = tags.breakdown.find(t => t.tag === 'popular');
+    const small = tags.breakdown.find(t => t.tag === 'specific');
+
+    expect(big.suppressed).toBe(false);
+    expect(small.suppressed).toBe(true);
+    expect(small.count).toBeNull();
+    /* Present rather than dropped: a reader who sees a withheld row knows
+       something was held back, which is the whole argument in bucket(). */
+    expect(small).toBeTruthy();
+  });
+
+  /**
+   * The overlap, declared.
+   *
+   * An event's hours count under EVERY tag it carries, so the column sums to more
+   * than the platform total. That is inherent to many-to-many tagging and is the
+   * one way this section can badly mislead — so the flag travels in the payload
+   * for the screen to say it beside the numbers.
+   */
+  it('declares that its hours overlap, and they really do', () => {
+    addEvent('i-multi', 'School', 'org-1');
+    addTag('i-multi', 'One');
+    addTag('i-multi', 'Two');
+    fill(MIN_BUCKET, 'i-multi');
+
+    const out = buildImpact(db);
+    expect(out.tags.overlapping).toBe(true);
+
+    const summed = out.tags.breakdown.reduce((total, t) => total + t.hours, 0);
+    /* Two tags on one event, so the tag column is exactly twice the real total.
+       If this ever stops being true the flag is the thing to re-examine. */
+    expect(summed).toBeCloseTo(out.community.totalHours * 2, 5);
+  });
+
+  it('counts nothing for a tag on an event nobody attended', () => {
+    addEvent('i-empty', 'School', 'org-1');
+    addTag('i-empty', 'Ghost');
+
+    expect(buildImpact(db).tags.breakdown).toEqual([]);
+  });
+
+  /** Absence is not zero: an untagged programme gets an empty section, not a gap. */
+  it('returns an empty breakdown when nobody tags anything', () => {
+    addEvent('i-plain', 'School', 'org-1');
+    fill(MIN_BUCKET, 'i-plain');
+
+    const { tags, categories } = buildImpact(db);
+    expect(tags.breakdown).toEqual([]);
+    /* And the category section still reports it — which is why both sections
+       exist: a tag-only breakdown would silently omit every untagged event. */
+    expect(categories.find(c => c.label === 'School')).toBeTruthy();
+  });
+});
+
 describe('shape', () => {
   /** Sections are always present, so a client never distinguishes missing from none. */
   it('returns every section even with no data at all', () => {
     const out = buildImpact(db);
     expect(Object.keys(out).sort()).toEqual(
-      ['categories', 'community', 'generatedAt', 'geography', 'growth', 'minBucket', 'volunteers']
+      ['categories', 'community', 'generatedAt', 'geography', 'growth', 'minBucket', 'tags', 'volunteers']
     );
     expect(out.growth).toEqual([]);
     expect(out.categories).toEqual([]);
+    /* The tag section is an OBJECT, not an array: it carries the
+       `overlapping` flag alongside its buckets, because an event's hours are
+       counted under every tag it has and summing the column exceeds the
+       platform total. A reader must be told that beside the numbers. */
+    expect(out.tags).toEqual({ overlapping: true, breakdown: [] });
   });
 
   /** The client renders the threshold in its own footnote; it should not hardcode it. */

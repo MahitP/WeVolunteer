@@ -2,12 +2,20 @@ import express from 'express';
 import { db } from '../db.js';
 import { authenticateToken } from '../utils.js';
 import { requireCap } from '../authz.js';
-import { buildImpact, buildPublicImpact } from '../impact.js';
+import { buildImpact, buildAdminImpact } from '../impact.js';
 
 const router = express.Router();
 
 /**
  * GET /api/impact — the community impact figures.
+ *
+ * ── Who may read them ──
+ *
+ * `analytics.impact`, which is held by `admin` and (through the `'*'` wildcard)
+ * `super_admin`, and by nobody below. It used to be held by every signed-in role;
+ * see the note beside it in `authz.js`, which carries the reasoning. Nothing in
+ * this file expresses the policy — the capability does — which is what lets the
+ * rail, the client route and this handler agree by naming one word.
  *
  * ── One endpoint, not one per figure ──
  *
@@ -45,41 +53,33 @@ router.get('/api/impact', authenticateToken, requireCap('analytics.impact'), (re
 });
 
 /**
- * GET /api/public/impact — the figures anybody may see, with no account.
+ * GET /api/admin/impact — the platform-wide figures, for the owner.
  *
- * ── Why this exists ──
+ * ── What this replaced ──
  *
- * Three of the four reasons the impact figures were built — marketing, grant
- * applications, community trust — are about people who do not have an account and
- * are not going to make one. A grant reviewer will not sign up, and a link that
- * asks them to is a link they close.
+ * `/api/public/impact`, which took no session at all and served a deliberately
+ * small payload to anybody on the internet. That endpoint is deleted rather
+ * than gated, and `routes.adminImpact.test.js` asserts it 404s, because the
+ * reason it existed — marketing, grant applications, community trust, none of
+ * which needs an account — turned out not to be what the figures were wanted
+ * for. They are an internal view of how the programme is doing.
  *
- * ── Why it is a SEPARATE route and not a relaxed gate ──
+ * ── Why a separate route rather than a parameter on `/api/impact` ──
  *
- * `/api/impact` answers to somebody the platform can name. This answers to
- * anybody at all, including somebody who already knows things about a particular
- * school and wants one more number to line them up against. Two audiences, two
- * threat models, two handlers — and `buildPublicImpact` names the fields it emits
- * rather than filtering the private payload, so a breakdown added to
- * `buildImpact` later cannot arrive here by inheritance.
+ * `/api/impact` answers `analytics.impact`, which administrators hold. This
+ * answers `analytics.platform`, which is SUPER_ONLY. Keeping them as two routes
+ * means the gate is a property of the URL rather than of a branch inside a
+ * handler, which is the form `authz.completeness.test.js` can actually check.
  *
- * ── No `authenticateToken`, deliberately ──
- *
- * Adding it would make this an authenticated route with no capability gate, which
- * is exactly the shape `authz.completeness.test.js` Guard 2 exists to catch, and
- * it would be the wrong shape: there is no principal here and nothing that varies
- * by who is asking. The response is identical for every caller, which is the
- * property that makes it safe to publish and also the property that makes it
- * cacheable by anything in front of the server.
- *
- * The blanket `apiLimiter` still applies — this is under `/api` — so the endpoint
- * cannot be used to hammer five aggregate queries in a loop.
+ * The payload is a superset today (see `buildAdminImpact`) and that is safe
+ * precisely because the audience is narrower: a super_admin holds `'*'` and can
+ * already read everything `/api/impact` returns.
  */
-router.get('/api/public/impact', (req, res) => {
+router.get('/api/admin/impact', authenticateToken, requireCap('analytics.platform'), (req, res) => {
   try {
-    res.json(buildPublicImpact(db));
+    res.json(buildAdminImpact(db));
   } catch (err) {
-    console.error('Failed to build public impact figures:', err);
+    console.error('Failed to build admin impact figures:', err);
     res.status(500).json({ error: 'Could not load the community figures.' });
   }
 });
