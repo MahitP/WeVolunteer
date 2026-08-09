@@ -124,7 +124,7 @@ fifty reports that turn out fine than miss the one that was not.
 ## For organizers
 
 Accepting an organizer account means accepting these rules. They are also in the
-[Organizer Agreement](09-organizer-agreement.md), which you sign.
+[Organizer Agreement](/legal/organizer-agreement), which you sign.
 
 ### Contact
 
@@ -148,7 +148,7 @@ Accepting an organizer account means accepting these rules. They are also in the
    another programme, not with anyone. Inside your organization, share only what a specific
    person needs to run this event (a shift supervisor's check-in list, for example), and make
    sure they are bound by the same rules. The
-   [Organizer Agreement](09-organizer-agreement.md) §4 is the binding version of this rule.
+   [Organizer Agreement](/legal/organizer-agreement) §4 is the binding version of this rule.
 
 ### At your event
 
@@ -190,7 +190,7 @@ a Report button everywhere, and blocking that works in one direction only so an 
 use it against a student.
 
 We would rather tell you that than print "a guardian must approve" and not check. The
-[Privacy Policy](01-privacy-policy.md) says the same thing in more detail, and it lists what you
+[Privacy Policy](/legal/privacy-policy) says the same thing in more detail, and it lists what you
 can ask us for at any time.
 
 ---

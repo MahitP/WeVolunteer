@@ -82,7 +82,24 @@ export function parseInline(line) {
         href: token.slice(split + 2, -1),
       });
     } else {
-      spans.push({ type: 'bold', text: token.slice(2, -2) });
+      /**
+       * Bold can contain a link or a code span, so its payload is re-parsed.
+       *
+       * The alternation above picks the LEFTMOST construct, so
+       * `**Please read the [Data Deletion Policy](/legal/...) first**` matched
+       * as bold and the link inside it became literal text. That is not a
+       * hypothetical: it is the Privacy Policy's "Your choices" table, on the
+       * row a reader lands on while deciding to delete their account — the one
+       * row where the pointer to the Data Deletion Policy has to work.
+       *
+       * `text` is kept and `spans` added only when the payload really is
+       * nested, so ordinary bold keeps the flat shape every caller already
+       * handles and only the nested case costs a renderer branch.
+       */
+      const inner = token.slice(2, -2);
+      const nested = parseInline(inner);
+      const flat = nested.length <= 1 && nested.every(s => s.type === 'text');
+      spans.push(flat ? { type: 'bold', text: inner } : { type: 'bold', text: inner, spans: nested });
     }
 
     rest = rest.slice(match.index + token.length);
@@ -199,10 +216,30 @@ export function parsePolicyMarkdown(source) {
       continue;
     }
 
-    // A continuation line of a list item, indented under it.
+    /**
+     * A continuation line of a list item, indented under it.
+     *
+     * Parsed inline, exactly like the item's first line. It used to be appended
+     * as a raw text span, which made a wrapped list item the one place in the
+     * document where Markdown did not work: five cross-document links in the
+     * published set — three in the Terms, one in the Privacy Policy, one in the
+     * Youth Safety Guidelines — happened to fall past the wrap point and were
+     * printed to readers as `[Youth Safety Guidelines](/legal/...)`.
+     *
+     * That is worse than it looks for these documents specifically. The link
+     * that failed to render is the one telling a reader where the safety rules
+     * are, so the failure lands on the sentence that was trying to send them
+     * somewhere. It also inverts this parser's stated bargain: unsupported
+     * syntax is meant to stay visible so somebody files a bug, not supported
+     * syntax silently degrading because of where a line happened to wrap.
+     *
+     * `server/legalContent.test.js` now fails the build on any link-shaped
+     * construct the renderer does not turn into a link, so this cannot come
+     * back quietly.
+     */
     if (list && /^\s{2,}\S/.test(raw)) {
       const item = list.items[list.items.length - 1];
-      item.push({ type: 'text', text: ` ${line.trim()}` });
+      item.push(...parseInline(` ${line.trim()}`));
       continue;
     }
 

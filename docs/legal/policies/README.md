@@ -14,7 +14,7 @@ provider (01) and the monitored hours for the safety inbox (08).
 
 **The two `[[NOT YET IMPLEMENTED]]` / `[[NOT YET BUILT]]` blocks are gone, and how they went is
 worth recording.** Both held drafted text for certificate voiding, a feature that is not built.
-The one in [04](04-data-deletion-policy.md) had a problem the marker did not describe: the
+The one in [04](/legal/data-deletion-policy) had a problem the marker did not describe: the
 drafted text sat in the published body under a real heading, so the Data Deletion Policy told a
 student choosing whether to delete their account that they could void their certificates — while
 the Privacy Policy in the same set said plainly that no such option exists. A reader hit the
@@ -44,16 +44,16 @@ contact and retention periods are filled in.
 
 | # | Document | Audience | Status |
 |---|---|---|---|
-| 1 | [Privacy Policy](01-privacy-policy.md) | Students, guardians | **Blocked on one item** — the hosting provider. SMTP is resolved (Gmail, so Google); the archive promise is resolved by this being v1.0; the applications retention period it publishes is now enforced in `retentionWorker.js`; safety-report retention is now a stated decision rather than a pending one |
-| 2 | [Terms of Service](02-terms-of-service.md) | All users | **Ready, pending counsel confirmation** — liability cap set at $100 with its reasoning in the text; no postal address printed, service arranged on request instead, and the draft says why; archive resolved by v1.0. Counsel should still confirm the cap, the no-arbitration choice and the NJ venue |
-| 3 | [Community Guidelines](03-community-guidelines.md) | Students, organizers | **Ready** — enforcement ladder now describes what exists (no expiring suspensions, no warning record), "moderation team" is one person, response times are targets rather than guarantees, and the one-administrator limit on appeals is disclosed |
-| 4 | [Data Deletion Policy](04-data-deletion-policy.md) | Students, guardians | **Ready** — the unimplemented certificate-voiding section is removed. It had been contradicting the Privacy Policy on the page a student reads while deciding to delete |
-| 5 | [Cookie and Tracking Notice](05-cookie-and-tracking-notice.md) | All | **Ready** — archive resolved by v1.0; diagnostics retention states the real code values |
-| 6 | [Certificate Verification Policy](06-certificate-verification-policy.md) | Verifiers, students | **Ready** — verification points at the page rather than a URL that does not resolve yet; the voiding block is replaced with the true position |
-| 7 | [Volunteer Record Policy](07-volunteer-record-policy.md) | Students, schools | **Ready** |
-| 8 | [Youth Safety Guidelines](08-youth-safety-guidelines.md) | Everyone | **Blocked on monitored hours** — one marker. The "one business day" promise it gated is removed rather than published against a blank, and "reports are not triaged by software" is corrected: software does derive priority. Still wants counsel on the mandated-reporter wording |
-| 9 | [Organizer Agreement](09-organizer-agreement.md) | Organizers | **Blocked on the product change** — the text is complete and the counterparty is named, but nothing records acceptance, so it binds nobody |
-| 10 | [Admin Responsibilities Policy](10-admin-responsibilities-policy.md) | Admins | **Ready** — approver is the operator (sole holder of `admin.create`); the register is `docs/operations/administrator-register.md`, deliberately outside the app database; review is quarterly |
+| 1 | [Privacy Policy](/legal/privacy-policy) | Students, guardians | **Blocked on one item** — the hosting provider. SMTP is resolved (Gmail, so Google); the archive promise is resolved by this being v1.0; the applications retention period it publishes is now enforced in `retentionWorker.js`; safety-report retention is now a stated decision rather than a pending one |
+| 2 | [Terms of Service](/legal/terms-of-service) | All users | **Ready, pending counsel confirmation** — liability cap set at $100 with its reasoning in the text; no postal address printed, service arranged on request instead, and the draft says why; archive resolved by v1.0. Counsel should still confirm the cap, the no-arbitration choice and the NJ venue |
+| 3 | [Community Guidelines](/legal/community-guidelines) | Students, organizers | **Ready** — enforcement ladder now describes what exists (no expiring suspensions, no warning record), "moderation team" is one person, response times are targets rather than guarantees, and the one-administrator limit on appeals is disclosed |
+| 4 | [Data Deletion Policy](/legal/data-deletion-policy) | Students, guardians | **Ready** — the unimplemented certificate-voiding section is removed. It had been contradicting the Privacy Policy on the page a student reads while deciding to delete |
+| 5 | [Cookie and Tracking Notice](/legal/cookie-and-tracking-notice) | All | **Ready** — archive resolved by v1.0; diagnostics retention states the real code values |
+| 6 | [Certificate Verification Policy](/legal/certificate-verification-policy) | Verifiers, students | **Ready** — verification points at the page rather than a URL that does not resolve yet; the voiding block is replaced with the true position |
+| 7 | [Volunteer Record Policy](/legal/volunteer-record-policy) | Students, schools | **Ready** |
+| 8 | [Youth Safety Guidelines](/legal/youth-safety-guidelines) | Everyone | **Blocked on monitored hours** — one marker. The "one business day" promise it gated is removed rather than published against a blank, and "reports are not triaged by software" is corrected: software does derive priority. Still wants counsel on the mandated-reporter wording |
+| 9 | [Organizer Agreement](/legal/organizer-agreement) | Organizers | **Blocked on the product change** — the text is complete and the counterparty is named, but nothing records acceptance, so it binds nobody |
+| 10 | [Admin Responsibilities Policy](/legal/admin-responsibilities-policy) | Admins | **Ready** — approver is the operator (sole holder of `admin.create`); the register is `docs/operations/administrator-register.md`, deliberately outside the app database; review is quarterly |
 
 ## What changed on 2026-08-05
 
@@ -90,25 +90,43 @@ them are wording:
 
 ## Versioning — read before publishing
 
-`server/legalDocuments.js` pins a **sha256 of the published source** of documents 01, 02, and 03
-and `server/legalDocuments.test.js` fails the build when a file changes without the pinned hash
-changing. That guard is working as designed: **this pass changed all three, so that test now
-fails until the registry is updated.**
+`server/legalDocuments.js` pins a **sha256 of the published body** of all ten documents — the
+half below the `## Draft` marker, so editing the specification block above it does not invalidate
+anybody's acceptance record.
 
-Fixing it is two steps, and the second one is a judgement call, not a formality:
+**Every document is at version 1.0, and stays there until launch.** The drafting numbers that
+reached 2.1, 2.2 and 3.0 were reset, because a version number exists to answer "what did this
+person agree to, and when" and nothing here has ever been published to a real person. Shipping a
+Terms of Service at 2.0 would tell the first reader they are looking at the second revision of a
+contract whose first revision nobody can produce. The reasoning is recorded in full at the top of
+`LEGAL_DOCUMENTS` in `server/legalDocuments.js`; the reset was available exactly once and has been
+used. **Do not bump a version to record a pre-launch wording fix.** MAJOR/MINOR applies from the
+first published release forward.
 
-1. Run `node bin/legal-hashes.mjs` and paste the refreshed `contentHash` values in.
-2. **Bump the versions.** By the registry's own rule — MAJOR when a reasonable reader of the
-   previous version would be surprised or worse off — the recommendation is:
-   - **Terms of Service → 2.0.** New organizer obligations, a liability cap, and a governing-law
-     and venue clause. Requires re-acceptance.
-   - **Privacy Policy → 2.0.** A retention period changed (diagnostics), and a stated option
-     was withdrawn (certificate voiding). Both are explicitly MAJOR triggers.
-   - **Community Guidelines → 2.0.** Bundled with the Terms and re-accepted with them; a
-     notification the reader may have been relying on was removed.
+**Hash enforcement is advisory before launch**, by owner decision — see `LEGAL_HASHES_ENFORCED`
+in `server/legalDocuments.js` for why, and for the one line that turns it back on. What that
+means in practice:
 
-Each document's own header now states its version. Keep the header, the registry, and the pinned
-hash moving together — that is the drift the pinned hash exists to catch.
+- **The verifier is `server/consent.test.js`** — the "pins a content hash that matches the
+  published file" case, `skipIf`'d while enforcement is off and re-armed automatically when it is
+  turned on. (Earlier revisions of this file named `server/legalDocuments.test.js`. There is no
+  such file and there never was.)
+- **`node bin/legal-hashes.mjs`** prints the current hash of every document and reports `DRIFT`
+  in both modes. It exits 0 while hashes are advisory, so it is a report rather than a gate.
+- The server still serves a drifted file, warns once per slug, and records the hash it actually
+  published — so `legal_documents` stays honest even in the mode that stops checking.
+- What is **not** relaxed: a missing file or one that has lost its `## Draft` marker still throws
+  and still stops a production boot.
+
+At launch: run `node bin/legal-hashes.mjs`, paste the printed values into `LEGAL_DOCUMENTS`, and
+set `LEGAL_HASHES_ENFORCED` to `true`. From then on, keep each document's own header, the registry
+version, and the pinned hash moving together — that is the drift the pinned hash exists to catch.
+
+**Links between these documents are checked by `server/legalContent.test.js`.** It extracts links
+by running the published body through the real renderer (`src/utils/policyMarkdown.js`) rather
+than a regex of its own, and fails the build on a `.md` path, an unregistered slug, a `#fragment`
+naming no heading, or anything link-shaped the renderer would print as literal text. Write
+cross-references as `/legal/<slug>` or `/legal/<slug>#<heading-slug>`, never as a filename.
 
 ## The publication rule this set is built around
 

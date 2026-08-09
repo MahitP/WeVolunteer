@@ -33,7 +33,7 @@ to absorb that. This document is the standard.
 # Community Guidelines
 
 **Version 1.0 · Last updated 2026-08-06** · Part of the
-[Terms of Service](02-terms-of-service.md), and accepted with them
+[Terms of Service](/legal/terms-of-service), and accepted with them
 
 WeVolunteer is a small community of students and the adults who organise volunteer work. It
 works because people are decent to each other. These are the rules that keep it that way.
@@ -68,7 +68,7 @@ that.
 - **Content that sexualises anyone**
 
 Accounts doing these things are removed, and where a student may have been harmed we report
-it. See the [Youth Safety Guidelines](08-youth-safety-guidelines.md).
+it. See the [Youth Safety Guidelines](/legal/youth-safety-guidelines).
 
 ### Not allowed, and we will usually warn first
 
@@ -144,7 +144,7 @@ We skip straight to step 4 for anything in the "never" list.
 and we aim to look at those the same day. Everything else we aim to reach within a few days.
 WeVolunteer is run by one person, so these are targets rather than guarantees — and that is
 exactly why, for anything urgent, the hotlines in the
-[Youth Safety Guidelines](08-youth-safety-guidelines.md) are the right call rather than us. They
+[Youth Safety Guidelines](/legal/youth-safety-guidelines) are the right call rather than us. They
 are staffed around the clock. We are not.
 
 **We tell you** — the account holder — what happened and why, at the email address on your

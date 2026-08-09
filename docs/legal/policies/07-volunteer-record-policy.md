@@ -151,7 +151,7 @@ You will always be told whether an event used Auto Select.
 |---|---|
 | **Attendance and credited hours** | **Indefinitely** |
 | **The hours ledger** | **Indefinitely** — it is what proves the hours are right |
-| **Certificates** | **Indefinitely** — see the [Certificate Verification Policy](06-certificate-verification-policy.md) |
+| **Certificates** | **Indefinitely** — see the [Certificate Verification Policy](/legal/certificate-verification-policy) |
 | Applications | 3 years after the event |
 
 **Why indefinitely.** People come back for a service record years after they earned it — for a
@@ -167,7 +167,7 @@ example, "Alex R.").
 They are your service record, and deleting them could cost a student the hours they needed to
 graduate in the same year they closed their account. The full explanation — including what
 happens to your certificates, which is the part most people do not expect — is in the
-[Data Deletion Policy](04-data-deletion-policy.md). **Please read it before deleting.**
+[Data Deletion Policy](/legal/data-deletion-policy). **Please read it before deleting.**
 
 ## Your rights over your record
 

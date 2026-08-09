@@ -179,7 +179,7 @@ wrong, contact **wevolunteer.platform@gmail.com** and we will look at the record
 - **We do not sell your information.** Not to advertisers, not to colleges, not to anyone.
 - **We do not show you ads**, and we do not use your information to target ads anywhere else.
 - **We do not use tracking cookies or third-party analytics.** See the
-  [Cookie and Tracking Notice](05-cookie-and-tracking-notice.md).
+  [Cookie and Tracking Notice](/legal/cookie-and-tracking-notice).
 - **We do not read your messages routinely.** An administrator reads a conversation only when
   somebody reports it, or when we are required to investigate a safety concern.
 - **We do not record what is on your screen when something breaks.** When the app hits an
@@ -193,11 +193,11 @@ wrong, contact **wevolunteer.platform@gmail.com** and we will look at the record
 | What | How long | Why |
 |---|---|---|
 | **Volunteer hours and attendance** | **Kept indefinitely** | This is your service record. People come back for it years later — for a college application, a scholarship, a job. Deleting it would destroy the thing WeVolunteer exists to build |
-| **Certificates** | **Kept indefinitely** | So a college or employer can still verify one years after you earned it. See the [Certificate Verification Policy](06-certificate-verification-policy.md) — including what this means if you delete your account |
+| **Certificates** | **Kept indefinitely** | So a college or employer can still verify one years after you earned it. See the [Certificate Verification Policy](/legal/certificate-verification-policy) — including what this means if you delete your account |
 | Account and profile | While your account is open. After deletion, your details are replaced with a shortened name, and the remaining shell is deleted after **3 years** — unless you have volunteer hours or a certificate, which the shell has to outlive, or you are named in an open safety report, in which case it waits until that report is closed | The two exceptions are narrow and neither is open-ended: hours and certificates are the record the shell exists to support, and a report gets closed |
 | Applications | 3 years after the event | Long enough to resolve a dispute about a placement |
 | Messages | **3 years** — longer if the conversation has been reported | Long enough to investigate a safety report, which often surfaces late. A reported conversation is never deleted on schedule, because that would destroy the evidence an investigation needs |
-| **Safety reports, and the messages saved with them** | **Kept indefinitely** | A report is the record of a decision we made about somebody's safety, and both the person who reported and the person reported are entitled to have it still exist if it is ever questioned. It is kept even if you delete your account, and it cannot be edited or deleted by anyone — including us. See the [Data Deletion Policy](04-data-deletion-policy.md) |
+| **Safety reports, and the messages saved with them** | **Kept indefinitely** | A report is the record of a decision we made about somebody's safety, and both the person who reported and the person reported are entitled to have it still exist if it is ever questioned. It is kept even if you delete your account, and it cannot be edited or deleted by anyone — including us. See the [Data Deletion Policy](/legal/data-deletion-policy) |
 | Comments | Until the event is deleted — and an event named in an open safety report cannot be deleted until that report is closed | |
 | Error diagnostics | The detailed record of one error: **30 days**. The summary of a problem we have already dealt with: **30 days**. The summary of a problem nobody has dealt with yet: **180 days**. A one-off glitch seen once from one browser: **7 days** | Long enough to find and fix a bug, and no longer. A problem nobody has fixed is still true, which is why its summary outlives the individual records |
 | Administrator audit logs | **1 year** | So misuse of an administrator account can be traced later |
@@ -249,7 +249,7 @@ add an option to void them when you delete your account — removing your name a
 codes working — but **it does not exist, and we cannot promise a date**, so the only accurate
 thing we can tell you today is that a certificate you have earned keeps your full name on it,
 permanently. The
-[Data Deletion Policy](04-data-deletion-policy.md) explains exactly what that means. Please read
+[Data Deletion Policy](/legal/data-deletion-policy) explains exactly what that means. Please read
 it before you delete, not after.
 
 ## Your choices
@@ -261,7 +261,7 @@ it before you delete, not after.
 | Stop emails | Settings → Notifications. Security emails cannot be switched off |
 | Hide your profile | Settings → Privacy. It is already private unless you changed it |
 | Leave the leaderboard | Settings → Privacy. Takes effect immediately |
-| Delete your account | Settings → Delete account. **Please read the [Data Deletion Policy](04-data-deletion-policy.md) first** — some things are kept |
+| Delete your account | Settings → Delete account. **Please read the [Data Deletion Policy](/legal/data-deletion-policy) first** — some things are kept |
 | Complain | **wevolunteer.platform@gmail.com**. We will acknowledge within 10 business days |
 
 ## For parents and guardians
@@ -348,7 +348,7 @@ Two of these are contacted by our servers, so they never see your device.
 loads the map images directly from CARTO. That means CARTO can see your IP address and which
 part of the map you looked at. It does **not** receive your name, email, or account. This only
 happens on pages with a map. See the
-[Cookie and Tracking Notice](05-cookie-and-tracking-notice.md).
+[Cookie and Tracking Notice](/legal/cookie-and-tracking-notice).
 
 ### Your device location
 
@@ -398,4 +398,4 @@ business days.
 
 Being one person is the honest answer to "who monitors this?", and it is why we do not claim a
 24-hour response. For anything urgent, the numbers in the
-[Youth Safety Guidelines](08-youth-safety-guidelines.md) reach people who are awake.
+[Youth Safety Guidelines](/legal/youth-safety-guidelines) reach people who are awake.

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, AlertTriangle } from 'lucide-react';
 import { api } from '../../utils/api';
 import { parsePolicyMarkdown, tableOfContents } from '../../utils/policyMarkdown';
@@ -26,6 +26,20 @@ import PolicyBody from '../../components/legal/PolicyBody';
  * second one must not be dressed up as the first.
  */
 
+/**
+ * The heading a `#fragment` names, or null.
+ *
+ * `decodeURIComponent` can throw on a malformed escape somebody pasted into the
+ * address bar. A bad fragment must mean "no deep link", never a blank page on
+ * the document a user was sent to read.
+ */
+function fragmentTarget(hash) {
+  if (!hash || hash === '#') return null;
+  let id = hash.slice(1);
+  try { id = decodeURIComponent(id); } catch { /* use the raw form */ }
+  return id ? document.getElementById(id) : null;
+}
+
 function formatDate(iso) {
   if (!iso) return null;
   const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
@@ -37,6 +51,7 @@ function formatDate(iso) {
 
 export default function LegalDocument() {
   const { slug } = useParams();
+  const { hash } = useLocation();
   const [doc, setDoc] = React.useState(null);
   const [failure, setFailure] = React.useState(null);
 
@@ -54,6 +69,42 @@ export default function LegalDocument() {
 
     return () => { cancelled = true; };
   }, [slug]);
+
+  /**
+   * Deep links have to wait for the document they point into.
+   *
+   * The markdown is fetched, so at the moment the browser resolves
+   * `/legal/privacy-policy#how-long-we-keep-things` the target heading does not
+   * exist yet. The browser gives up silently and the reader lands at the top of
+   * a long Privacy Policy with no indication of where they were being sent —
+   * which is how the Data Deletion Policy and the Cookie Notice, both of which
+   * link to that exact section, were quietly failing to answer the question
+   * they had just raised.
+   *
+   * Focus moves too, not just the scroll position. A scroll-only jump serves
+   * the sighted mouse user and leaves a keyboard or screen-reader user at the
+   * top of the document — the deep link either works for everybody or it is
+   * decoration.
+   *
+   * `scrollIntoView` is called optionally: jsdom does not implement it, and a
+   * scrolling convenience must never be able to take down the page that shows
+   * somebody the terms they are held to.
+   */
+  React.useEffect(() => {
+    if (!doc || !hash) return;
+
+    const el = fragmentTarget(hash);
+    if (!el) return;
+
+    // Honour the OS setting rather than animating a jump that can trigger
+    // vestibular symptoms. `matchMedia` is optional-called for jsdom's sake.
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+    el.scrollIntoView?.({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+
+    // `preventScroll` so focusing cannot fight the scroll above; the headings
+    // carry `tabIndex={-1}` from PolicyBody, which is what makes this land.
+    el.focus?.({ preventScroll: true });
+  }, [doc, hash]);
 
   const contents = React.useMemo(
     () => (doc?.markdown ? tableOfContents(parsePolicyMarkdown(doc.markdown)) : []),

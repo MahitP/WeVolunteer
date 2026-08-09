@@ -29,7 +29,11 @@ import { parsePolicyMarkdown } from '../../utils/policyMarkdown';
 
 function Spans({ spans }) {
   return spans.map((span, i) => {
-    if (span.type === 'bold') return <strong key={i}>{span.text}</strong>;
+    if (span.type === 'bold') {
+      /* A bold run may contain a link or a code span — see parseInline. `spans`
+         is present only for that case, so plain bold stays a single text node. */
+      return <strong key={i}>{span.spans ? <Spans spans={span.spans} /> : span.text}</strong>;
+    }
     if (span.type === 'code') return <code key={i} className="policy-code">{span.text}</code>;
     if (span.type === 'link') {
       const external = /^https?:\/\//.test(span.href) || span.href.startsWith('mailto:');
@@ -59,7 +63,21 @@ function Block({ block }) {
        * stays ordered rather than jumping h1 → h3.
        */
       const Tag = `h${Math.min(block.level + 1, 6)}`;
-      return <Tag id={block.id} className="policy-heading"><Spans spans={block.spans} /></Tag>;
+      /**
+       * `tabIndex={-1}` makes the heading a focus target without putting it in
+       * the tab order.
+       *
+       * A fragment link — `/legal/privacy-policy#how-long-we-keep-things`, or
+       * an entry in the contents list — has to land a KEYBOARD user on the
+       * section, not just scroll a sighted one to it. Scrolling alone leaves
+       * the focus ring at the top of the document, so the next Tab walks the
+       * page from the beginning and a screen reader keeps reading whatever it
+       * was on. `LegalDocument.jsx` focuses this element after the document
+       * loads; a heading is not focusable by default, and setting the attribute
+       * here rather than mutating the DOM from that effect keeps the property
+       * declared where the element is.
+       */
+      return <Tag id={block.id} tabIndex={-1} className="policy-heading"><Spans spans={block.spans} /></Tag>;
     }
     case 'paragraph':
       return <p className="policy-paragraph"><Spans spans={block.spans} /></p>;

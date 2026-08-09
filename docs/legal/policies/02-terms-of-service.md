@@ -164,7 +164,7 @@ This is the acceptable-use section. Do not:
   volunteer event
 - Post anything illegal
 
-The [Community Guidelines](03-community-guidelines.md) explain what these look like in
+The [Community Guidelines](/legal/community-guidelines) explain what these look like in
 practice, and they are part of these terms. Breaking them is breaking these terms.
 
 ## 5. What you are responsible for
@@ -184,13 +184,13 @@ obligations, because they hold different amounts of other people's information.
   somewhere new, tell a parent, guardian, or another adult you trust. This is not boilerplate;
   it is the actual advice, and it is the main thing we cannot do for you.
 - **Report what worries you.** You will not get in trouble for reporting something that turns
-  out to be nothing. See the [Youth Safety Guidelines](08-youth-safety-guidelines.md).
+  out to be nothing. See the [Youth Safety Guidelines](/legal/youth-safety-guidelines).
 
 ### 5.2 If you are an organizer
 
 Organizer accounts carry obligations student accounts do not, because organizers receive
 minors' contact details. The full set is in the
-[Organizer Agreement](09-organizer-agreement.md). These are the commitments at the level of
+[Organizer Agreement](/legal/organizer-agreement). These are the commitments at the level of
 these terms, and they bind you from the moment your organizer account is approved:
 
 - **Protect student information.** Names, email addresses, grade levels, and attendance you
@@ -214,7 +214,7 @@ these terms, and they bind you from the moment your organizer account is approve
 - **Follow the safety rules.** At least two adults present at all times; never alone with a
   single student, at any point, for any reason; and the permissions, insurance, and supervision
   your activity actually requires. See the
-  [Youth Safety Guidelines](08-youth-safety-guidelines.md).
+  [Youth Safety Guidelines](/legal/youth-safety-guidelines).
 - **Never misuse a student's contact information** — not to recruit, not to solicit, not to
   contact them about anything other than the event they applied to, and not after it ends.
 - **Report suspected harm to a child yourself.** New Jersey law requires *any person* with
@@ -258,7 +258,7 @@ where you are going. This is not legal boilerplate; it is the actual advice.
 
 If something at an event makes you uncomfortable or unsafe, leave, and then tell us at
 wevolunteer.platform@gmail.com and tell an adult you trust. See the
-[Youth Safety Guidelines](08-youth-safety-guidelines.md).
+[Youth Safety Guidelines](/legal/youth-safety-guidelines).
 
 ## 8. Who owns what
 
@@ -281,7 +281,7 @@ example, showing your comment on an event page to other people at that event). I
 permission to operate the platform and nothing more: we do not licence your content to anyone
 else, we do not use it in advertising, and we do not sell it. That permission ends when you
 delete the content or your account, except where we have said in the
-[Data Deletion Policy](04-data-deletion-policy.md) that something is kept, and why.
+[Data Deletion Policy](/legal/data-deletion-policy) that something is kept, and why.
 
 ### Material you upload
 
@@ -309,7 +309,7 @@ first and explain after.
 
 **What we take into account.** What happened, whether it was deliberate, whether it has
 happened before, and whether anyone was put at risk. The ladder of consequences is published in
-the [Community Guidelines](03-community-guidelines.md), and anything on the "never" list there
+the [Community Guidelines](/legal/community-guidelines), and anything on the "never" list there
 skips it.
 
 **Appeals.** If you think we got it wrong, you can submit an appeal directly through the
@@ -317,7 +317,7 @@ platform. Your appeal will always be reviewed by a different administrator than 
 issued the original decision. If we were wrong, we say so and we undo it.
 
 **Closing your own account.** You can do it whenever you like, from Settings. See the
-[Data Deletion Policy](04-data-deletion-policy.md) for exactly what happens — including the
+[Data Deletion Policy](/legal/data-deletion-policy) for exactly what happens — including the
 parts that are kept, which you should read before you decide rather than after.
 
 ## 10. What we do not promise

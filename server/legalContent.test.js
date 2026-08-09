@@ -5,6 +5,18 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { LEGAL_DOCUMENTS, POLICY_DIR, publishedBody, PolicyStructureError, hashPolicyFile } from './legalDocuments.js';
 import { policyContent, verifyPolicyFiles, resetPolicyCache, PolicyContentError } from './legalContent.js';
+/**
+ * The renderer itself, imported rather than reimplemented.
+ *
+ * A server test reaching into `src/` is unusual here and deliberate: this is the
+ * one question that cannot be answered on the server side, because "is this link
+ * correct" means "does the thing that renders it produce a working link", and
+ * that thing lives in the client bundle. `policyMarkdown.js` is a pure module
+ * with no DOM and no imports, so it loads under the `node` project unchanged —
+ * the same reason `src/authz.js` re-exports the server's capability table
+ * instead of restating it.
+ */
+import { parsePolicyMarkdown, slugifyHeading } from '../src/utils/policyMarkdown.js';
 
 /**
  * The guard that makes serving policy text off disk safe.
@@ -183,5 +195,282 @@ describe('policy content verification', () => {
         `${doc.slug} points at a missing file: ${doc.file}`
       ).not.toThrow();
     }
+  });
+  /**
+   * Cross-references between published documents actually work.
+   *
+   * ── Why this is checked through the renderer and not with a regex ──
+   *
+   * The previous version of this suite carried its own copy of `slugifyHeading`
+   * and its own link regex. Both were subtly different from the real ones, and a
+   * guard that models the thing it is guarding fails in the one direction that
+   * matters: it stays green while the product breaks.
+   *
+   *   - Its slugifier was a verbatim copy. Change the renderer's and every
+   *     fragment link in the published set stops resolving with the suite still
+   *     passing, because the suite is now validating against an algorithm
+   *     nothing runs.
+   *   - Its link regex accepted `([^)]+)` as an href. The renderer's rejects
+   *     whitespace (`[^)\s]+`), so `[Privacy Policy](/legal/privacy policy)`
+   *     satisfied the test and printed as literal Markdown on the page.
+   *
+   * So nothing here derives anything. Links are the link spans
+   * `parsePolicyMarkdown` produces, and anchors are the `id`s it puts on heading
+   * blocks — the same values `PolicyBody` renders into `href` and `id`. The test
+   * and the page cannot disagree, because they are reading the same output.
+   *
+   * ── The two-sided rule ──
+   *
+   * Asking only "are the rendered links valid" is half a check: a link the
+   * renderer refuses to render is not an invalid link, it is not a link at all,
+   * and it disappears from the corpus the test is looking at while remaining
+   * visible to every reader as raw `[Text](/legal/...)`. So the first rule
+   * compares link-SHAPED source against link spans actually produced. It found
+   * two live defects in the published set, both now fixed in the renderer: a
+   * link on the wrapped line of a list item, and a link inside a bold run.
+   */
+  describe('link integrity', () => {
+    const validSlugs = new Set(LEGAL_DOCUMENTS.map(d => d.slug));
+
+    /** Every link span the renderer produces, in document order. */
+    function renderedLinks(source) {
+      const found = [];
+      const fromSpans = (spans) => {
+        for (const span of spans) {
+          if (span.type === 'link') found.push(span);
+          // A link inside a bold run is a nested span list, not a flat token.
+          if (span.spans) fromSpans(span.spans);
+        }
+      };
+      for (const block of parsePolicyMarkdown(source)) {
+        if (block.spans) fromSpans(block.spans);
+        if (block.items) block.items.forEach(fromSpans);
+        if (block.header) block.header.forEach(fromSpans);
+        if (block.rows) block.rows.forEach(row => row.forEach(fromSpans));
+      }
+      return found;
+    }
+
+    /** Every anchor id the renderer emits — what a `#fragment` has to hit. */
+    function renderedAnchors(source) {
+      return new Set(
+        parsePolicyMarkdown(source).filter(b => b.type === 'heading').map(b => b.id)
+      );
+    }
+
+    /**
+     * Source text shaped like a link, whether or not the renderer accepts it.
+     *
+     * Code spans are stripped first because the renderer matches them first, so
+     * `` `[a](b)` `` is documentation of Markdown rather than a broken link. The
+     * href pattern here is deliberately permissive — accepting what the renderer
+     * rejects is the entire point of this side of the check.
+     */
+    function linkShaped(source) {
+      const withoutCode = String(source).replace(/`[^`]+`/g, '');
+      return [...withoutCode.matchAll(/\[[^\]]+\]\(([^)]*)\)/g)]
+        .map(m => ({ token: m[0], href: m[1] }));
+    }
+
+    /** Every way one document's links can be wrong. Empty means clean. */
+    function linkProblems(slug, source, anchorsBySlug) {
+      const problems = [];
+      const rendered = renderedLinks(source);
+
+      const unmatched = rendered.map(l => l.href);
+      for (const candidate of linkShaped(source)) {
+        const at = unmatched.indexOf(candidate.href);
+        if (at === -1) {
+          problems.push(
+            `${slug}: ${candidate.token} is shaped like a link but the renderer `
+            + 'produces no link from it, so it prints to the reader as raw Markdown'
+          );
+        } else {
+          unmatched.splice(at, 1);
+        }
+      }
+
+      for (const { href } of rendered) {
+        if (/^https?:\/\//.test(href) || href.startsWith('mailto:')) continue;
+
+        if (/\.md(#.*)?$/.test(href)) {
+          problems.push(`${slug}: links to a repository file rather than a published page: ${href}`);
+          continue;
+        }
+
+        if (href.startsWith('#')) {
+          const fragment = href.slice(1);
+          if (!anchorsBySlug.get(slug)?.has(fragment)) {
+            problems.push(`${slug}: links to #${fragment}, which is not a heading in this document`);
+          }
+          continue;
+        }
+
+        if (!href.startsWith('/legal/')) {
+          problems.push(`${slug}: internal link is neither /legal/<slug> nor #fragment: ${href}`);
+          continue;
+        }
+
+        const [target, fragment] = href.slice('/legal/'.length).split('#');
+        if (!validSlugs.has(target)) {
+          problems.push(`${slug}: links to an unregistered document slug: ${target}`);
+          continue;
+        }
+        if (fragment && !anchorsBySlug.get(target).has(fragment)) {
+          problems.push(`${slug}: links to #${fragment} in ${target}, which has no such heading`);
+        }
+      }
+
+      return problems;
+    }
+
+    /** Anchors for the real published set, which fixtures link into. */
+    function corpusAnchors() {
+      return new Map(LEGAL_DOCUMENTS.map(d => [d.slug, renderedAnchors(policyContent(d.slug))]));
+    }
+
+    /** Runs one synthetic document through the same rules the corpus faces. */
+    function problemsForFixture(source, slug = 'terms-of-service') {
+      const anchors = corpusAnchors();
+      anchors.set(slug, renderedAnchors(source));
+      return linkProblems(slug, source, anchors);
+    }
+
+    it('validates fragments against the ids the renderer actually emits', () => {
+      /**
+       * The pin that makes everything below mean something.
+       *
+       * `slugifyHeading` is imported, not copied, and the ids this suite checks
+       * against are the ones on the parsed heading blocks — the values
+       * `PolicyBody` puts in the `id` attribute. If those two ever stopped
+       * agreeing, every fragment assertion here would be checking a set of
+       * anchors that appears nowhere on the page.
+       */
+      for (const doc of LEGAL_DOCUMENTS) {
+        for (const block of parsePolicyMarkdown(policyContent(doc.slug))) {
+          if (block.type !== 'heading') continue;
+          expect(block.id, `${doc.slug}: heading "${block.text}" does not carry its slugified id`)
+            .toBe(slugifyHeading(block.text));
+        }
+      }
+    });
+
+    it('every published document links only where the reader can actually go', () => {
+      const anchors = corpusAnchors();
+      const problems = LEGAL_DOCUMENTS.flatMap(
+        doc => linkProblems(doc.slug, policyContent(doc.slug), anchors)
+      );
+      expect(problems, `Broken links in the published set:\n  - ${problems.join('\n  - ')}`).toEqual([]);
+    });
+
+    it('has at least one link to check, so a clean result is not an empty corpus', () => {
+      // The failure mode of the assertion above is that it passes because the
+      // extraction returned nothing. Counted, not assumed.
+      const total = LEGAL_DOCUMENTS
+        .reduce((n, doc) => n + renderedLinks(policyContent(doc.slug)).length, 0);
+      expect(total).toBeGreaterThan(20);
+    });
+
+    /**
+     * Every rule above, proven able to fail.
+     *
+     * A guard nobody has seen fail is not a guard — it is a line that runs. Each
+     * case here is a document that SHOULD be rejected, run through the same
+     * function the real corpus is run through, so the two cannot drift apart.
+     */
+    describe('rejects', () => {
+      it('a relative .md path, which is a repository file and not a page', () => {
+        const problems = problemsForFixture('# T\n\nSee [the notice](./01-privacy-policy.md).\n');
+        expect(problems).toHaveLength(1);
+        expect(problems[0]).toMatch(/repository file/);
+      });
+
+      it('a .md path carrying a fragment', () => {
+        const problems = problemsForFixture('# T\n\nSee [it](01-privacy-policy.md#your-rights).\n');
+        expect(problems).toHaveLength(1);
+        expect(problems[0]).toMatch(/repository file/);
+      });
+
+      it('a link to a slug no document is registered under', () => {
+        const problems = problemsForFixture('# T\n\nSee the [Refund Policy](/legal/refund-policy).\n');
+        expect(problems).toHaveLength(1);
+        expect(problems[0]).toMatch(/unregistered document slug: refund-policy/);
+      });
+
+      it('a fragment that names no heading in the target document', () => {
+        const problems = problemsForFixture(
+          '# T\n\nSee [retention](/legal/privacy-policy#how-long-we-keep-receipts).\n'
+        );
+        expect(problems).toHaveLength(1);
+        expect(problems[0]).toMatch(/no such heading/);
+      });
+
+      it('a same-document fragment that names no heading here', () => {
+        const problems = problemsForFixture('# T\n\n## Real section\n\nSee [above](#imaginary-section).\n');
+        expect(problems).toHaveLength(1);
+        expect(problems[0]).toMatch(/not a heading in this document/);
+      });
+
+      it('an internal link that is neither a /legal/ page nor a fragment', () => {
+        const problems = problemsForFixture('# T\n\nSee [settings](/settings/privacy).\n');
+        expect(problems).toHaveLength(1);
+        expect(problems[0]).toMatch(/neither \/legal\/<slug> nor #fragment/);
+      });
+
+      it('an href containing a space, which the renderer prints as literal text', () => {
+        /**
+         * The defect the old regex could not see. Its href alternative was
+         * `([^)]+)`, so this parsed as a perfectly valid link pointing at a
+         * registered slug and passed. The renderer's is `[^)\s]+`, so the reader
+         * got `[Privacy Policy](/legal/privacy policy)` printed on the page.
+         */
+        const problems = problemsForFixture('# T\n\nRead the [Privacy Policy](/legal/privacy policy).\n');
+        expect(problems).toHaveLength(1);
+        expect(problems[0]).toMatch(/prints to the reader as raw Markdown/);
+      });
+    });
+
+    describe('accepts', () => {
+      it('a correct cross-document fragment link', () => {
+        expect(problemsForFixture(
+          '# T\n\nSee [retention](/legal/privacy-policy#how-long-we-keep-things).\n'
+        )).toEqual([]);
+      });
+
+      it('external and mailto links, which are nobody here to validate', () => {
+        expect(problemsForFixture(
+          '# T\n\n[Docs](https://example.org/x) and [us](mailto:a@example.org).\n'
+        )).toEqual([]);
+      });
+
+      it('a link on the wrapped line of a list item', () => {
+        /**
+         * Regression, and it was live. A continuation line was appended as a raw
+         * text span, so a link that happened to fall past the wrap point printed
+         * as Markdown — including the Terms telling a reader where the safety
+         * rules are.
+         */
+        expect(problemsForFixture(
+          '# T\n\n- **Report what worries you.** You will not get in trouble for reporting\n'
+          + '  something. See the [Youth Safety Guidelines](/legal/youth-safety-guidelines).\n'
+        )).toEqual([]);
+      });
+
+      it('a link nested inside a bold run', () => {
+        /**
+         * Regression, and it was live. Bold matched first and swallowed the
+         * link, on the Privacy Policy's "Your choices" row about deleting an
+         * account — the one place the pointer to the Data Deletion Policy has to
+         * work.
+         */
+        expect(problemsForFixture(
+          '# T\n\n**Please read the [Data Deletion Policy](/legal/data-deletion-policy) first.**\n'
+        )).toEqual([]);
+      });
+
+      it('a link written inside a code span, which documents syntax rather than pointing anywhere', () => {
+        expect(problemsForFixture('# T\n\nWrite `[Title](/legal/whatever-you-like)` to link.\n')).toEqual([]);
+      });
+    });
   });
 });
