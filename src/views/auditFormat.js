@@ -72,6 +72,14 @@ const ACTIONS = {
      on this platform that removes an authentication factor without anybody
      proving possession of it — so it must be conspicuous in a year of rows. */
   TFA_RESET_CLI:            ['Two-factor authentication reset (command line)', TONES.GRAVE],
+  /* Deliberately NOT grave, and the distinction is the whole reason it has its
+     own action name. `TFA_RESET_CLI` above removes a factor somebody was using;
+     this removes an authenticator secret that was generated and never confirmed,
+     which the command refuses to run unless `tfa_enabled` is 0 — so no factor the
+     account relied on is touched, and nobody's access changes. Notable because it
+     is still a privileged write to a credential column from a shell; grave would
+     make a year of rows harder to read by crying wolf. */
+  TFA_STALE_SECRET_CLEARED: ['Unconfirmed authenticator secret cleared (command line)', TONES.NOTABLE],
   OWNER_REVOKED:            ['Ownership revoked', TONES.GRAVE],
   /* The names these two carried before the CLI scripts were standardised.
      Kept because the trail is append-only and immutable: rows written under the

@@ -42,6 +42,12 @@ export const CLI_EVENTS = Object.freeze({
      one operation that removes an authentication factor without proving
      possession of it. */
   TFA_RESET_CLI: 'TFA_RESET_CLI',
+  /* Removing an authenticator secret that was generated and never confirmed.
+     Distinct from TFA_RESET_CLI on purpose: it removes NO factor the account was
+     using — `tfa_enabled` is 0, which the command refuses to proceed without —
+     so a reader of the audit trail should not have to open the code to tell the
+     two apart. See bin/clear-stale-tfa-secret.mjs. */
+  TFA_STALE_SECRET_CLEARED: 'TFA_STALE_SECRET_CLEARED',
 });
 
 /**
