@@ -279,3 +279,51 @@ describe('account deletion and the photograph', () => {
     expect(fs.existsSync(onDisk(url))).toBe(false);
   });
 });
+
+/**
+ * Denying a pending organizer is the product's one genuine hard delete.
+ *
+ * ── Why the photograph was being left behind ──
+ *
+ * `POST /api/admin/organizers/:id/deny` removes the user row outright, because a
+ * denied registration never became a member and there is nothing to retain. But
+ * a pending organizer CAN sign in and upload a picture — `authenticateToken`
+ * gates on `email_verified`, not on `users.verified` — so the row being deleted
+ * may own a file.
+ *
+ * That file is served unauthenticated out of `public/uploads/`. Deleting the row
+ * without unlinking it leaves a photograph of a real person retrievable at a URL
+ * that has already been handed out, with nothing left in the database pointing
+ * at it — so no later cleanup can even find it.
+ *
+ * This is the same shape as the two findings the step-up audit recorded (the
+ * export download; provider disconnect): a gated effect — destroying somebody's
+ * photograph — reached by a second route that did not implement it. Account
+ * deletion had it right; this path had never been asked the question.
+ */
+describe('denying a pending organizer and the photograph', () => {
+  it('removes the uploaded file from disk along with the row', async () => {
+    const { token, user } = await freshStudent('pic-deny-organizer@example.org');
+
+    // Become a pending organizer: the state deny operates on. Written directly
+    // because no route produces "organizer, not yet verified, already signed in
+    // with a picture" — and it is the state, not the way in, that is under test.
+    db.prepare("UPDATE users SET role = 'organizer', verified = 0 WHERE id = ?").run(user.id);
+
+    const uploaded = await postAvatar(token, await realPng(), 'me.png', 'image/png');
+    expect(uploaded.status).toBe(200);
+    const url = uploaded.body.user.profile_picture_url;
+    scratchFiles.push(onDisk(url));
+    expect(fs.existsSync(onDisk(url)), 'fixture upload did not land').toBe(true);
+
+    const ownerToken = await srv.loginAsOwner('dsanger@outlook.com');
+    const res = await srv.call('POST', `/api/admin/organizers/${user.id}/deny`, {}, ownerToken);
+    expect(res.status).toBe(200);
+
+    // Both halves. The row is gone — that part already worked — and the file it
+    // pointed at is gone too, which is the part that did not.
+    const row = db.prepare('SELECT id FROM users WHERE id = ?').get(user.id);
+    expect(row, 'the row survived the denial').toBeUndefined();
+    expect(fs.existsSync(onDisk(url)), 'the photograph outlived the account').toBe(false);
+  });
+});

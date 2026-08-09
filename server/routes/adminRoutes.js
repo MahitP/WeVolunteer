@@ -12,6 +12,7 @@ import { requireCap, can, principalFor, ALL_CAPABILITIES, requireAAL2, ROLE } fr
 import { grantsFor } from '../userCapabilities.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import { recordAudit } from '../auditLog.js';
+import { deleteUploadedFile } from './profilePictureRoutes.js';
 import {
   REPORT_PRIORITIES, REPORT_RESOLUTIONS, REPORT_STATUSES, REPORT_TARGET_TYPES,
   LIVE_REPORT_STATUSES, CATEGORY_VALUES, isValidCategory, normalizeTargetType,
@@ -97,8 +98,11 @@ router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('org
     // with them, silently destroying credited service hours. Denial only ever
     // applies to an organizer who has not been approved yet, and who therefore
     // has no events and no volunteers attached.
+    // `profile_picture_url` is read here because the row is about to be hard
+    // deleted, and the file it names lives on disk outside the database. Once
+    // the row is gone there is no pointer left to ever find that file again.
     const target = db.prepare(
-      "SELECT id FROM users WHERE id = ? AND role = 'organizer' AND verified = 0"
+      "SELECT id, profile_picture_url FROM users WHERE id = ? AND role = 'organizer' AND verified = 0"
     ).get(orgId);
 
     if (!target) {
@@ -140,6 +144,26 @@ router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('org
         details: 'Denied and deleted pending organizer account request'
       });
     });
+
+    /**
+     * The photograph goes with the row.
+     *
+     * A pending organizer can sign in and upload a profile picture —
+     * `authenticateToken` gates on `email_verified`, not on `users.verified` —
+     * so denial can be destroying an account that has one. The upload is served
+     * unauthenticated from `public/uploads/`, so leaving it behind means a
+     * picture of a real person stays retrievable at a URL that was already
+     * handed out, with the row that pointed at it gone and no way left to find
+     * it. Deleting an account we declined has to include what they gave us.
+     *
+     * After the transaction, matching account deletion in accountRoutes.js: the
+     * only tolerable mismatch is a committed delete with a file still on disk,
+     * never a live row whose picture has already been destroyed.
+     * `deleteUploadedFile` refuses any path resolving outside `public/uploads/`
+     * and never throws, so a missing file cannot turn a completed denial into a
+     * 500.
+     */
+    deleteUploadedFile(target.profile_picture_url);
 
     res.json({ success: true });
   } catch (error) {
@@ -2154,7 +2178,14 @@ router.get('/api/admin/users/lookup', authenticateToken, requireCap('admin.creat
   if (!email) return res.status(400).json({ error: 'Email query parameter is required' });
 
   try {
-    const user = db.prepare('SELECT id, name, email, avatar, role FROM users WHERE email = ? COLLATE NOCASE').get(email);
+    // This lookup exists to find somebody to promote, so a deleted account must
+    // not answer it. Deletion anonymises the row in place and leaves `role`
+    // untouched, so without the status predicate a tombstone is reported back as
+    // a promotable administrator — and the promote endpoint below would then act
+    // on an account nobody can sign in to.
+    const user = db.prepare(
+      "SELECT id, name, email, avatar, role FROM users WHERE email = ? COLLATE NOCASE AND account_status <> 'deleted'"
+    ).get(email);
     if (!user) return res.status(404).json({ error: 'No user found with that email address' });
 
     res.json({
@@ -2179,8 +2210,16 @@ router.post('/api/admin/users/:id/promote', authenticateToken, requireCap('admin
   }
 
   try {
-    const target = db.prepare('SELECT id, role, email FROM users WHERE id = ?').get(targetUserId);
+    const target = db.prepare('SELECT id, role, email, account_status FROM users WHERE id = ?').get(targetUserId);
     if (!target) return res.status(404).json({ error: 'User not found' });
+    // Deleted accounts keep their row and their role, so they are reachable by
+    // id and would otherwise be promotable — granting administrator to an
+    // account nobody can sign in to, and writing an audit record that reads as a
+    // real promotion. Refused here, above the transaction, so the refusal does
+    // not spend the step-up challenge the caller would then have to repeat.
+    if (target.account_status === 'deleted') {
+      return res.status(404).json({ error: 'User not found' });
+    }
     if (target.role === ROLE.ADMIN || target.role === ROLE.SUPER_ADMIN) {
       return res.status(400).json({ error: 'User is already an administrator' });
     }

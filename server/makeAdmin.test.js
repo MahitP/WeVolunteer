@@ -31,6 +31,11 @@ function createTestDb(dir) {
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
       role TEXT NOT NULL DEFAULT 'student',
+      /* Present in every real database since the account-lifecycle migration.
+         The CLI refuses to promote a deleted account, and without this column
+         that refusal cannot be expressed here — the fixture would be asserting
+         against a schema the application has not had for some time. */
+      account_status TEXT NOT NULL DEFAULT 'active',
       token_version INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE admin_audit_logs (
@@ -91,6 +96,36 @@ describe('bin/make-admin.mjs', () => {
       expect(res.code).not.toBe(0);
       expect(res.combined).toContain('User with email missing@example.com not found');
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Deletion is a tombstone: the row stays so audit history and foreign keys
+   * still resolve, anonymised and marked `account_status = 'deleted'`, with
+   * `role` deliberately left as it was. A lookup by email therefore still finds
+   * one, and without an explicit refusal this CLI would promote an account
+   * nobody can sign in to — and write an audit record that reads as a genuine
+   * promotion. The web endpoint refuses the same case; this is the second door
+   * into it.
+   */
+  it('refuses to promote a deleted account', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'make-admin-test-'));
+    const { dbPath, db } = createTestDb(dir);
+    try {
+      db.prepare(`
+        INSERT INTO users (id, email, role, account_status)
+        VALUES ('u-gone', 'gone@example.com', 'student', 'deleted')
+      `).run();
+
+      const res = runScript(dbPath, ['gone@example.com']);
+      expect(res.code).not.toBe(0);
+      expect(res.combined).toContain('has been deleted');
+
+      const user = db.prepare('SELECT role FROM users WHERE email = ?').get('gone@example.com');
+      expect(user.role, 'a deleted account was promoted').toBe('student');
+    } finally {
+      db.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
