@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
+import DatePicker from '../components/common/DatePicker';
 import { Shield, Search, ChevronLeft, ChevronRight, FileText, ChevronDown } from 'lucide-react';
 import { auditLabel, auditTone, auditTimestamp } from './auditFormat';
 
@@ -83,10 +84,19 @@ export default function AdminAuditExplorer() {
 
   /* Every filter change returns to page 1: page 3 of one filter is not page 3
      of the next, and keeping the offset strands the reader on an empty result. */
-  const handleFilterChange = (e) => {
-    const { name, value } = e.target;
+  const setFilter = (name, value) => {
     setFilters(prev => ({ ...prev, [name]: value, page: 1 }));
   };
+
+  /**
+   * The event-shaped wrapper, kept for the controls that are still native.
+   *
+   * `DatePicker` hands back a value, not an event — it is not an `<input>` and
+   * synthesising a fake `e.target` so a shared handler keeps working is how a
+   * component ends up pretending to be a DOM node. So the state update lives in
+   * `setFilter(name, value)` and both shapes call it.
+   */
+  const handleFilterChange = (e) => setFilter(e.target.name, e.target.value);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -136,19 +146,40 @@ export default function AdminAuditExplorer() {
             </select>
           </div>
 
+          {/*
+            Two independent pickers, not one range control — a deliberate choice.
+
+            The overwhelmingly common query against this trail is open-ended:
+            "anything since the incident", or "anything before the account was
+            closed". A range widget makes both of those awkward, because it wants
+            two ends before it commits and it reads a second click as "revise the
+            start" rather than "set the end". Two fields let either end stand
+            alone, which is what the endpoint already accepts.
+
+            `max` on each is deliberately absent. An audit trail only ever holds
+            the past, so a future date returns nothing rather than something
+            wrong, and bounding the fields to today would be a rule this screen
+            does not actually have. `min`/`max` are NOT crossed between the two
+            either: constraining "To" by "From" makes correcting a mistyped start
+            impossible without clearing the end first.
+          */}
           <div className="field">
             <label htmlFor="audit-start">From</label>
-            <input
-              id="audit-start" name="startDate" type="date" className="input"
-              value={filters.startDate} onChange={handleFilterChange}
+            <DatePicker
+              id="audit-start"
+              name="startDate"
+              value={filters.startDate}
+              onChange={next => setFilter('startDate', next)}
             />
           </div>
 
           <div className="field">
             <label htmlFor="audit-end">To</label>
-            <input
-              id="audit-end" name="endDate" type="date" className="input"
-              value={filters.endDate} onChange={handleFilterChange}
+            <DatePicker
+              id="audit-end"
+              name="endDate"
+              value={filters.endDate}
+              onChange={next => setFilter('endDate', next)}
             />
           </div>
 

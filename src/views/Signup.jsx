@@ -4,6 +4,7 @@ import { api } from '../utils/api';
 import { PRIVACY_URL } from '../config';
 import { AlertCircle, ArrowLeft, Mail, Check, X, Loader2, Eye, EyeOff } from 'lucide-react';
 import ProviderButtons from '../components/auth/ProviderButtons';
+import DatePicker from '../components/common/DatePicker';
 
 const AVATARS = ['👤', '🧑‍💻', '👩‍⚕️', '🧑‍🎨', '👩‍🎓', '👩‍💼', '🦁', '🦉', '🦊', '🎨'];
 
@@ -856,25 +857,43 @@ export default function Signup({ onSignupSuccess, addToast }) {
             than everything around it. It now matches, and `.field-dob` caps the
             measure — a date input stretched to the full form width reads as a
             text field that is mostly empty. The cap is lifted below 480px, where
-            the native picker needs the room.
+            the picker needs the room.
+
+            ── Why this is no longer `<input type="date">` ──
+
+            It was, and it was the only control on this form that did not look
+            like the product: a native date input is whatever the browser draws,
+            it takes none of the app's tokens, and in dark mode its picker chrome
+            stayed light. On the age gate, of all fields.
+
+            `DatePicker` also fixes the thing that made the native control
+            actively hostile HERE specifically. A date of birth is decades in the
+            past, and a calendar whose only navigation is a month arrow puts 1979
+            about 560 presses away. The replacement accepts the date typed, and
+            offers month and year as selects, and — because `max` is today —
+            opens on the most recent legal answer rather than on a month nobody
+            wants. See the component header.
+
+            The error moves INSIDE the control, which is also why it gains
+            `role="alert"`: the previous span announced nothing, so a
+            screen-reader user submitting an empty date of birth was told only
+            that the form had not gone through.
           */}
           <div className="field field-dob">
             <label htmlFor="su-dob">Date of birth</label>
-            <input
+            <DatePicker
               id="su-dob"
               name="dateOfBirth"
-              type="date"
-              className="input input-lg"
+              inputClassName="input-lg"
               value={form.dateOfBirth}
               max={new Date().toISOString().slice(0, 10)}
-              onChange={e => set('dateOfBirth', e.target.value)}
-              aria-invalid={!!errors.dateOfBirth}
-              aria-describedby="su-dob-hint"
+              onChange={next => set('dateOfBirth', next)}
+              error={errors.dateOfBirth || ''}
+              describedBy="su-dob-hint"
             />
             <span id="su-dob-hint" className="field-hint">
               We ask because WeVolunteer is for students in grade 9 and up.
             </span>
-            {errors.dateOfBirth && <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.dateOfBirth}</span>}
           </div>
           </div>
 

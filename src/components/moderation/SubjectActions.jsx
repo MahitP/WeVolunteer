@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AlertTriangle, UserX, UserCheck, MessageSquareWarning, MessageSquare } from 'lucide-react';
 import { api } from '../../utils/api';
 import { can } from '../../authz';
+import DatePicker from '../common/DatePicker';
 
 /**
  * Actions against the PERSON a report is about.
@@ -249,12 +250,24 @@ export default function SubjectActions({ subject, user, onDone, addToast }) {
               <label className="strong small" htmlFor="subject-action-until">
                 Until (optional)
               </label>
-              <input
+              {/*
+                `DatePicker`, not `<input type="date">`, so the one date control
+                in the moderation flow matches the rest of the product and reads
+                correctly in dark mode — this panel is opened from a dialog over
+                a dark surface, which is where the native picker's light chrome
+                was most obvious.
+
+                Still deliberately unbounded. The server refuses a date in the
+                past and says so, and that refusal is the one worth keeping:
+                pinning `min` to today here would silently move a mistyped 2025
+                to 2026 in the reader's mind, when what a moderator needs to see
+                is that the date they chose is not a suspension at all. The
+                message is shown above and the typed text survives it.
+              */}
+              <DatePicker
                 id="subject-action-until"
-                type="date"
-                className="input"
                 value={until}
-                onChange={(e) => setUntil(e.target.value)}
+                onChange={setUntil}
                 disabled={busy}
               />
               {/* States the consequence of leaving it blank, rather than letting
