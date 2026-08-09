@@ -178,3 +178,63 @@ describe('deleted accounts are not administratively actionable', () => {
     expect(after.role).toBe('student');
   });
 });
+
+/**
+ * Counts and exports describe people, not rows.
+ *
+ * The same tombstone-keeps-its-role property that made the profile endpoints
+ * answer 200 also made every `role = 'student'` aggregate include deleted
+ * accounts and the reserved `system-cli` actor. Two consequences, and the second
+ * is the one that would have gone unnoticed:
+ *
+ * - the CSV export handed whoever asked for a list of volunteers a set of rows
+ *   named `deleted_user-…@system.local`;
+ * - `participationRate` divides real volunteers by `totals.students`, so an
+ *   inflated denominator UNDERSTATES participation — a wrong number on the page
+ *   that exists to report that number, with nothing about it looking wrong.
+ */
+describe('deleted accounts are excluded from counts and exports', () => {
+  it('keeps a deleted student out of the CSV export, and a live one in', async () => {
+    const ownerToken = await srv.loginAsOwner(OWNER_EMAIL);
+
+    // Raw fetch, not srv.call: the response is text/csv and the helper parses
+    // JSON, so the body comes back null and every assertion below would be
+    // comparing against the string "null".
+    const res = await fetch(srv.base + '/api/admin/reports/export', {
+      headers: { Cookie: `wev_session=${ownerToken}` }
+    });
+
+    expect(res.status).toBe(200);
+    const csv = await res.text();
+    expect(csv.length, 'the export was empty').toBeGreaterThan(0);
+
+    // Positive control first: if the export were simply empty or broken, the
+    // absence assertion below would pass for the wrong reason.
+    const live = db.prepare('SELECT email FROM users WHERE id = ?').get(LIVE_STUDENT);
+    expect(csv).toContain(live.email);
+
+    const dead = db.prepare('SELECT email FROM users WHERE id = ?').get(DEAD_STUDENT);
+    expect(csv, 'a deleted account was exported').not.toContain(dead.email);
+    expect(csv, 'the reserved CLI actor was exported').not.toContain('system-cli@wevolunteer.invalid');
+  });
+
+  it('does not count deleted students in the platform totals', async () => {
+    const ownerToken = await srv.loginAsOwner(OWNER_EMAIL);
+    const res = await srv.call('GET', '/api/admin/stats', undefined, ownerToken);
+    expect(res.status).toBe(200);
+
+    const liveStudents = db.prepare(
+      "SELECT COUNT(*) AS c FROM users WHERE role = 'student' AND account_status <> 'deleted'"
+    ).get().c;
+    const allStudentRows = db.prepare(
+      "SELECT COUNT(*) AS c FROM users WHERE role = 'student'"
+    ).get().c;
+
+    // The fixture must actually contain a deleted student, or this asserts nothing.
+    expect(allStudentRows, 'no tombstone in the fixture — this test is vacuous')
+      .toBeGreaterThan(liveStudents);
+
+    // `totals` is spread into the response, so the counts sit at the top level.
+    expect(res.body.students).toBe(liveStudents);
+  });
+});
