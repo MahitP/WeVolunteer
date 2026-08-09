@@ -140,6 +140,51 @@ describe('2FA Security Hardening Regressions', () => {
      * created on purpose rather than inherited by accident.
      */
     it('refuses an administrator who has no second factor', async () => {
+      /**
+       * A promoted account, NOT the seeded `admin@example.gov`.
+       *
+       * That address is the demo administrator, and it is deliberately exempt from
+       * the two-factor policy in a DEMO_MODE process (see `isDemoExemptAccount` in
+       * server/utils.js) — the harness runs with DEMO_MODE on, so this assertion
+       * used it and started passing vacuously the moment the exemption landed.
+       *
+       * That is the second time this exact test has been able to pass without
+       * proving anything; the docstring above records the first. So it now uses an
+       * administrator the exemption cannot reach, and the exempt account gets its
+       * own case below asserting the opposite.
+       */
+      const email = 'leo.chen28@gmail.com';
+      const token = await srv.login(email);
+
+      db.prepare(
+        "UPDATE users SET role = 'admin', tfa_enabled = 0, tfa_email_enabled = 0, tfa_secret = NULL WHERE email = ?"
+      ).run(email);
+
+      try {
+        const res = await srv.call('GET', '/api/admin/organizers/pending', undefined, token);
+
+        expect(res.status).toBe(403);
+        expect(res.body.error).toMatch(/Two-factor authentication must be enabled/);
+        expect(res.body.code).toBe('tfa_required');
+      } finally {
+        db.prepare("UPDATE users SET role = 'student' WHERE email = ?").run(email);
+      }
+    });
+
+    /**
+     * The exemption, from the other side.
+     *
+     * The demo administrator has no mailbox anybody can read — `admin@example.gov`
+     * does not exist — so an enrolment wall makes the one account a developer needs
+     * in order to see the administrative surfaces permanently unusable. It is
+     * exempt in a DEMO_MODE process and nowhere else;
+     * `demoTwoFactorExemption.test.js` covers the boundary in every direction.
+     *
+     * Asserted here as well because this is the file that owns "the policy is
+     * enforced", and an exemption is part of that policy rather than a footnote to
+     * it: the two cases have to sit together or the next person removes one.
+     */
+    it('lets the demo administrator through without one, in a demo process', async () => {
       const token = await srv.login('admin@example.gov');
 
       db.prepare(
@@ -148,10 +193,7 @@ describe('2FA Security Hardening Regressions', () => {
 
       try {
         const res = await srv.call('GET', '/api/admin/organizers/pending', undefined, token);
-
-        expect(res.status).toBe(403);
-        expect(res.body.error).toMatch(/Two-factor authentication must be enabled/);
-        expect(res.body.code).toBe('tfa_required');
+        expect(res.status, JSON.stringify(res.body)).toBe(200);
       } finally {
         const { encryptSecret } = await import('./cryptoUtils.js');
         const { TEST_TOTP_SECRET } = await import('./testServer.js');

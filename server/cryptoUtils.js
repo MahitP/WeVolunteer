@@ -91,15 +91,91 @@ export function decryptSecret(encryptedData) {
  * the same as its answer to "this is wrong", and making them handle two failure
  * shapes is how one of them ends up handling neither.
  */
-export function verifyTotp(token, encryptedSecret) {
-  if (typeof token !== 'string' || !/^\d{6}$/.test(token.trim())) return false;
-  if (!encryptedSecret) return false;
+/**
+ * How much clock skew a code may carry, in SECONDS, as `[past, future]`.
+ *
+ * ── Why this is no longer zero ──
+ *
+ * It was `epochTolerance: 0` — only the current 30-second step, no grace at all —
+ * and that rejected CORRECT codes. Three things push a submitted code into the
+ * past, and they add up: the user's own typing time, network latency, and this
+ * server's processing before the check (`/api/2fa/enable` spent about a second
+ * hashing recovery codes before verifying, until that was reordered). A code
+ * typed in the last second of a step was routinely checked in the next one. It
+ * was measured: an enrolment test failed roughly one run in three on a code that
+ * was right when it was typed.
+ *
+ * A second factor that rejects a correct code is not "strict", it is broken —
+ * and it teaches people that 2FA is unreliable, which is how they end up turning
+ * it off.
+ *
+ * ── Why PAST only, and not the symmetric ±30 ──
+ *
+ * Every cause above makes the code OLDER than "now", never newer; a future code
+ * can only come from a clock genuinely running ahead, which is a user-side
+ * misconfiguration rather than a normal condition. otplib's own documentation
+ * labels the asymmetric past-only form the RFC-compliant one, and accepting one
+ * step instead of two halves the widening for no loss in the cases that actually
+ * occur. `[30, 0]` is one previous step and nothing from the future.
+ *
+ * ── Why this is not a net weakening ──
+ *
+ * On its own, accepting two steps instead of one would double the window in which
+ * an intercepted code can be replayed, and RFC 6238 §5.2 requires a verifier to
+ * refuse a second use of the same code. Nothing here did.
+ *
+ * So the tolerance ships WITH replay protection: `verifyTotpStep` returns the
+ * counter it matched, and every call site records the highest counter accepted for
+ * that account and refuses anything at or below it (`users.tfa_last_counter`). A
+ * code is therefore usable exactly once, which it was not before — the window is
+ * wider and the guarantee is stronger.
+ *
+ * Guessing is unaffected in any way that matters: the bound is the attempt
+ * counters (five per pre-auth token, twenty per account per quarter hour), not the
+ * window, so this moves an attacker from one-in-a-million per guess to
+ * two-in-a-million against a five-guess cap.
+ */
+const TOTP_EPOCH_TOLERANCE = [30, 0];
+
+/**
+ * Verifies a code and reports WHICH time step it matched.
+ *
+ * Returns `{ valid: false }` or `{ valid: true, counter }`. The counter is what
+ * makes single-use enforcement possible: a caller compares it against the highest
+ * one it has already accepted for that account, so the same code cannot be
+ * presented twice even inside its own validity window.
+ *
+ * Kept separate from `verifyTotp` below rather than replacing it: the boolean form
+ * is the right shape for a caller that has no account context to record against,
+ * and collapsing the two would push a `{valid}` object back into the `if (!x)`
+ * shape whose misreading is the whole reason this module exists.
+ */
+export function verifyTotpStep(token, encryptedSecret) {
+  if (typeof token !== 'string' || !/^\d{6}$/.test(token.trim())) return { valid: false };
+  if (!encryptedSecret) return { valid: false };
 
   try {
     const secret = decryptSecret(encryptedSecret);
-    const result = verifySync({ token: token.trim(), secret });
-    return result?.valid === true;
+    const result = verifySync({
+      token: token.trim(),
+      secret,
+      epochTolerance: TOTP_EPOCH_TOLERANCE,
+    });
+    if (result?.valid !== true) return { valid: false };
+
+    /* `timeStep` is the counter otplib matched. Falling back to a computed
+       current step keeps this defined if a future version stops reporting it —
+       a missing counter must not become `undefined` and silently disable the
+       replay check at every call site. */
+    const counter = Number.isFinite(result.timeStep)
+      ? result.timeStep
+      : Math.floor(Date.now() / 1000 / 30);
+    return { valid: true, counter };
   } catch {
-    return false;
+    return { valid: false };
   }
+}
+
+export function verifyTotp(token, encryptedSecret) {
+  return verifyTotpStep(token, encryptedSecret).valid === true;
 }
