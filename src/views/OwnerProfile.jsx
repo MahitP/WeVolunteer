@@ -92,11 +92,11 @@ export default function OwnerProfile({ currentUser }) {
 
       <div className="owner-links">
         {/* Two destinations, because there are two: everything administrative is
-            reached through the Moderation Center, and everything about this
+            reached through the Admin hub, and everything about this
             account is in Settings. Repeating the hub's own list here would be a
             second index to keep in step with the first. */}
         <Link className="btn btn-secondary" to="/admin/moderation">
-          <ShieldCheck size={16} aria-hidden="true" /> Moderation Center
+          <ShieldCheck size={16} aria-hidden="true" /> Admin
         </Link>
         <Link className="btn btn-secondary" to="/settings">
           <SettingsIcon size={16} aria-hidden="true" /> Account settings

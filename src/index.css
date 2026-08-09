@@ -714,16 +714,13 @@ time { font-variant-numeric: tabular-nums; }
   gap: 2px;
 }
 
-/* A hair rule instead of a heading bar — see NAV_GROUPS in src/App.jsx. The
-   group keeps its name for assistive technology; sighted readers get a
-   separator that costs one pixel instead of a row that looks clickable and is
-   not. Drawn on the section itself rather than on `+ .nav-section` so the FIRST
-   group is divided from the ungrouped entries above it too. */
-.nav-section {
-  margin-top: var(--s3);
-  padding-top: var(--s3);
-  border-top: 1px solid var(--rule);
-}
+/* There is deliberately no `.nav-section` rule any more.
+
+   It drew a hair rule above the "Administration" group, which held exactly one
+   entry: the administrative hub. Separating one item from four says it is a
+   different kind of thing, and the authority boundary it was marking is already
+   marked by the entry being absent for anyone without `report.resolve`. The rail
+   is one list now — see the NAV table in src/App.jsx. */
 
 .nav-item {
   display: flex;
@@ -2833,9 +2830,98 @@ time { font-variant-numeric: tabular-nums; }
 .persona-banner-exit:hover:not(:disabled) { background: var(--warn-tint); }
 .persona-banner-exit:disabled { opacity: 0.6; cursor: progress; }
 
-/* ── Starting a preview, on the Moderation Center ─────────────────────────── */
-.persona-picker { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
-.persona-picker-label { font-size: 0.875rem; color: var(--ink-2); }
+/* ── Starting a preview, on the Admin hub ─────────────────────────────────────
+   Replaces `.persona-picker`, which was a bare `<select>` and a button loose in a
+   flex row above the tiles — a shape that reads as a filter for the list beneath
+   it rather than as a control that drops the owner's own capabilities for fifteen
+   minutes. See the comment on the markup in views/ModerationCenter.jsx.
+
+   Neutral surface tokens, deliberately not the warn ones: this is an offer, and
+   the loud warn treatment belongs to `.persona-banner`, which is the state you
+   are IN. Making both shout would leave nothing to distinguish them. */
+.persona-preview { margin-bottom: var(--s5); }
+
+.persona-preview-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+}
+.persona-preview-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--r-sm);
+  background: var(--surface-selected);
+  color: var(--accent);
+}
+.persona-preview-title {
+  font-size: 1rem;
+  line-height: 1.3;
+  margin: 0 0 2px;
+}
+.persona-preview-lead {
+  font-size: 0.875rem;
+  color: var(--ink-2);
+  margin: 0;
+  max-width: 46ch;
+}
+
+/* Auto-fit rather than a fixed column count: four options sit in a row on a
+   laptop, two on a tablet and one on a phone, without a breakpoint for each. */
+.persona-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--s2);
+  margin-bottom: var(--s4);
+}
+
+.persona-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.persona-option:hover { border-color: var(--accent); background: var(--surface-hover); }
+.persona-option.is-selected { border-color: var(--accent); background: var(--surface-selected); }
+
+/* The radio stays visible and keeps its native semantics — arrow-key movement,
+   "2 of 4" announcements and the platform's own focus ring all come free, and a
+   hidden input styled back in by hand loses the last of those on every browser
+   that has ever shipped a custom one. */
+.persona-option input[type='radio'] {
+  accent-color: var(--accent);
+  margin: 0;
+  flex-shrink: 0;
+  /* Optically aligned with the first line of the label rather than its box. */
+  margin-top: 0.1875rem;
+}
+/* Focus lands on the input; the ring is drawn around the whole tile so the hit
+   target and the focus indicator describe the same thing. */
+/* `box-shadow`, not `outline` — `--focus` IS a box-shadow (two rings, a surface
+   halo then a brand ring), so `outline: 2px solid var(--focus)` is not a valid
+   declaration and drops silently. `.gradepick-option` is the same pattern done
+   the same way. */
+.persona-option:focus-within { box-shadow: var(--focus); }
+
+.persona-option-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.persona-option-label { font-size: 0.875rem; font-weight: 600; }
+.persona-option-blurb { font-size: 0.75rem; color: var(--ink-3); }
+
+.persona-preview-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
 
 /* ── The platform owner's profile ─────────────────────────────────────────── */
 .owner-card { display: flex; gap: var(--s5); align-items: flex-start; flex-wrap: wrap; }
@@ -3000,7 +3086,6 @@ time { font-variant-numeric: tabular-nums; }
   .sidebar { padding-left: var(--s2); padding-right: var(--s2); align-items: center; }
   .sidebar .brand-text,
   .sidebar .nav-item span,
-  .sidebar .nav-section-label,
   .sidebar .userchip-text,
   .sidebar .nav-count { display: none; }
   .nav-item { justify-content: center; padding: 0.5625rem; }
@@ -3038,19 +3123,40 @@ time { font-variant-numeric: tabular-nums; }
 
   .page { padding: var(--s5) var(--s4) calc(72px + var(--s5)); }
 
+  /* The bar was `display: grid` with `grid-auto-columns: 1fr`, which is a hard
+     ceiling of "however many fit equally" on the number of primary
+     destinations — and the entry that fell past it for administrators was the
+     administrative hub. Flex plus a scroller lifts the ceiling: five entries
+     still fill the width on any current phone, and six or seven scroll rather
+     than being demoted into a menu. See the mobile-navigation comment in
+     src/App.jsx. */
   .mobilenav {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
     z-index: 100;
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: 1fr;
+    display: flex;
+    align-items: stretch;
     background: var(--surface);
     border-top: 1px solid var(--rule);
     padding-bottom: env(safe-area-inset-bottom);
   }
+
+  /* Only this part scrolls. `⋯` sits outside it (below) because it is how you
+     reach what you cannot see, so it must never be the thing you cannot see. */
+  .mobilenav-scroll {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+  }
+  .mobilenav-scroll::-webkit-scrollbar { display: none; }
+
   .mobilenav-item {
     display: flex;
     flex-direction: column;
@@ -3063,6 +3169,25 @@ time { font-variant-numeric: tabular-nums; }
     color: var(--ink-3);
     position: relative;
     min-height: 56px;
+    /* `1 0 0` inside the scroller: the items share the width when they fit and
+       stop shrinking at `min-width`, which is what makes the strip scroll
+       instead of crushing seven labels into illegibility. */
+    flex: 1 0 auto;
+    /* 4rem, sized against the narrowest phone this has to work on.
+       375px − 3.25rem (the pinned `⋯`) leaves ~323px, which is five 4rem items
+       with a little to spare — so the five primary destinations all FIT on an
+       iPhone SE rather than the fifth being half off-screen and needing a scroll
+       to read. Six or seven (a future addition) then scroll, which is the point
+       of the scroller: it is the overflow mechanism, not the normal state. */
+    min-width: 4rem;
+    scroll-snap-align: start;
+  }
+
+  /* Pinned, and visibly a different control from the destinations beside it. */
+  .mobilenav-more {
+    flex: 0 0 auto;
+    min-width: 3.25rem;
+    border-left: 1px solid var(--rule);
   }
   .mobilenav-item[aria-current='page'] { color: var(--brand); }
   .mobilenav-item[aria-current='page']::before {

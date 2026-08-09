@@ -46,7 +46,10 @@ const FEATURE_NAMES = Object.freeze({
   'portfolio.write': 'your volunteer portfolio',
   'error.read': 'the error dashboard',
   'appeal.review': 'the appeals queue',
-  'report.resolve': 'the Moderation Center',
+  /* "the Admin area", matching the rail entry, the page title and the page's own
+     heading. A refusal that names a destination by a name the product no longer
+     shows anywhere sends the reader looking for something they cannot find. */
+  'report.resolve': 'the Admin area',
   'audit.read': 'the Audit Explorer',
   'analytics.impact': 'the community impact figures',
   'admin.create': 'the Administrator Roster',

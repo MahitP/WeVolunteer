@@ -179,86 +179,42 @@ const SELF_PROFILE_CAPS = SELF_PROFILE.filter(p => p.view !== 'denied').map(p =>
    and is what an entry uses when two unrelated capabilities each justify it.
    `requiresVerified` is unchanged — no capability expresses "approved yet". */
 /**
- * Named sections of the rail, in render order.
+ * ── PRIMARY and SECONDARY, and why that replaced grouping ──
  *
- * ── Why the rail is grouped at all ──
+ * The rail used to sort itself into named groups, and the one group left held a
+ * single entry: `Administration`, containing the Moderation Center. A hair rule
+ * above it kept it visually apart from Messages and Calendar.
  *
- * Flat, it reached eleven entries for the platform owner, and the ordering was
- * historical rather than meaningful: `Errors` sat between `Notifications` and
- * `Appeals` because that is where it happened to be added. Eleven undifferentiated
- * rows is a list somebody reads once and thereafter scans by muscle memory, which
- * is exactly when a rarely-used but consequential page — the audit trail — stops
- * being noticed.
+ * That separation was wrong in the surface where it mattered most. The mobile bar
+ * took `navItemsFor(...).slice(0, 4)` — Dashboard, Opportunities, Calendar,
+ * Messages — and everything after the fourth entry went behind the `⋯` sheet. So
+ * for an administrator, the administrative area of the product was reachable only
+ * by opening a menu, while it is the destination they came to the phone for. An
+ * index into a flat list is not a statement about priority; it is an accident of
+ * how many entries happen to precede yours.
  *
- * ── Why THESE two groups ──
+ * So priority is now DECLARED. Everything is primary unless it says otherwise,
+ * and exactly two entries say otherwise:
  *
- * They follow the capability boundary that already exists, rather than inventing
- * a taxonomy on top of it. Everything in `platform` is SUPER_ONLY (`audit.read`,
- * `error.read`, `admin.create`); `admin` holds what an ordinary administrator can
- * reach. So the grouping teaches the real authority boundary instead of
- * decorating it — an administrator seeing "Platform" absent has learned something
- * true about their account.
+ *   PRIMARY    Dashboard · Opportunities · Calendar · Messages · Admin
+ *   SECONDARY  Notifications · My profile
  *
- * ── Why the labels are no longer DRAWN ──
+ * Both surfaces read the same flag. The desktop rail draws primary then secondary
+ * with no divider between them — Admin sits with the rest, because it is one of
+ * the rest. The mobile bar draws every primary entry, scrolling horizontally when
+ * five will not fit, and the `⋯` button holds the secondary ones. Nothing appears
+ * in both, and nothing appears in neither: `App.navGroups.test.jsx` asserts both
+ * halves.
  *
- * They used to render as an uppercase `<h2>` bar above each group. Two of those
- * bars cost more vertical space than the three entries under one of them, and
- * the rail is the one surface with no room to spare: on a phone it collapses to
- * four buttons and a sheet, and the sheet had no scroll container, so the
- * headings were pushing real destinations off the bottom of the screen.
+ * ── Why the label is "Admin" ──
  *
- * They also said nothing a reader could act on. "Administration" is not
- * somewhere you can go — every heading was a row that looked like a
- * destination, was not one, and had to be visually skipped past on the way to
- * the entry underneath.
- *
- * So the grouping survives, and only its DRAWING changes: the sections are
- * still `role="group"` and still carry the label as an accessible name, so a
- * screen-reader user hears "Administration, group" exactly as before and the
- * support-conversation argument above still holds. Sighted readers get a hair
- * rule instead of a heading — one pixel where there were three lines, and a
- * separator that survives the tablet icon rail, which used to hide the headings
- * outright and leave the groups indistinguishable.
- */
-/**
- * ── One group, and why the machinery is still here for it ──
- *
- * There used to be two, holding seven entries between them: Appeals, Admin
- * Roster, Audit Explorer, Errors, Platform Impact and Community Impact beside
- * the Moderation Center. Every one of those pages still exists and every one is
- * still reachable — they are reached THROUGH the Moderation Center now, which is
- * the single administrative entry on the rail.
- *
- * The rail was the wrong index for them. It is the same list on every page, so
- * seven administrative rows sat permanently in front of an audience that is
- * mostly students, and the pages themselves are related to each other in ways a
- * flat rail cannot show — an appeal is about a suspension that came out of a
- * report. ModerationCenter.jsx is a page that can say that; a rail item cannot.
- *
- * `Platform` is gone rather than emptied: it grouped the SUPER_ONLY pages, and
- * with all of them behind the hub a group definition nothing can join is a
- * question for the next reader with no answer.
- *
- * The grouping mechanism stays for the one group that remains. `Administration`
- * holds a single entry and keeps its heading — see `navSectionsFor` — because
- * the heading is what tells an administrator that the entry beneath it is a
- * different kind of thing from Messages and Calendar.
- */
-const NAV_GROUPS = [
-  { id: 'admin', label: 'Administration' },
-];
-
-/**
- * ── ORDER IS LOAD-BEARING, twice over ──
- *
- * `navItemsFor` returns this flat and in this order, and `navItems.slice(0, 4)`
- * is the mobile primary row. So the five everyday entries come first, then the
- * grouped administrative ones, then `profile` last via `trailing`.
- *
- * `trailing` exists because `profile` is ungrouped but must not render in the
- * ungrouped block at the TOP — "My profile" above "Administration" reads as the
- * most important thing on the rail. It is the one entry whose position is about
- * the shape of the page rather than about what it does.
+ * It was "Moderation Center", which is a fine name for the page and a bad one for
+ * a rail: it is the longest label in the list, it wraps in the tablet rail and in
+ * a 56px-tall mobile button, and it describes one of the things behind the entry
+ * rather than the area. Every surface now says "Admin" — one word, no
+ * platform-dependent abbreviation, and the same word an administrator would use.
+ * `PAGE_META` follows it so the page title agrees with the way the reader got
+ * there.
  */
 const NAV = [
   { id: 'browse', path: '/events', label: 'Opportunities', icon: Compass, requiredCap: 'event.view' },
@@ -268,23 +224,21 @@ const NAV = [
 
      It was one, which put the single most common organizer action behind reading
      a twelve-item rail of mostly administrative pages — and on a phone, where the
-     rail collapses to four items plus a "More" sheet, frequently behind a tap as
-     well. It now lives as a primary button on Opportunities, which is where an
+     rail collapses to a bar plus a "More" sheet, frequently behind a tap as well.
+     It now lives as a primary button on Opportunities, which is where an
      organizer already is when they think "I want to post a shift".
 
      `tabForPath` still maps `/events/new` to `create`, and PAGE_META still has a
      `create` entry: the page needs its own title and must not be reported as
      `browse`. A path with no rail item is normal here — `/settings` has never had
      one either. */
-  { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, requiredCap: 'self.read' },
-  /* ── Administration ── what an ordinary administrator can reach ── */
-  /* The hub, first in its group — it is the way in to the rest of them, and on
-     a phone (four buttons and a sheet) it is often the only administrative
-     entry that fits. `report.resolve` rather than a new capability: the hub
-     lists what the reader can already open, and every tile re-checks its own. */
-  { id: 'moderation', path: '/admin/moderation', label: 'Moderation Center', icon: ShieldCheck, requiredCap: 'report.resolve', group: 'admin' },
 
-  /* ── The six entries that used to follow this one ──
+  /* The administrative hub, and a PRIMARY destination.
+
+     `report.resolve` rather than a new capability: the hub lists what the reader
+     can already open, and every tile re-checks its own.
+
+     ── The six entries that used to follow this one ──
 
      Community impact (`/impact`), Appeals (`/admin/appeals`), Admin Roster
      (`/admin/roster`), Audit Explorer (`/admin/audit-logs`), Errors (`/errors`)
@@ -292,23 +246,26 @@ const NAV = [
 
      NONE of them was removed. Every route is still registered in
      `routes/index.jsx`, every page still exists, every capability is unchanged,
-     and every one is listed on the Moderation Center above — which is why that
-     entry is the only administrative one left rather than the first of seven.
+     and every one is listed on the Admin hub above — which is why this entry is
+     the only administrative one rather than the first of seven.
      `App.navGroups.test.jsx` asserts both halves: that they are absent from the
      rail, and that the hub still offers each of them to a reader who holds the
      capability.
 
      `tabForPath` deliberately still maps all six paths. It is not derived from
      NAV and never was; a path with no rail entry still needs a tab id so the
-     page gets its own title and no rail item is wrongly highlighted. `/settings`
-     has worked that way since before any of this. */
+     page gets its own title and no rail item is wrongly highlighted. */
+  { id: 'moderation', path: '/admin/moderation', label: 'Admin', icon: ShieldCheck, requiredCap: 'report.resolve' },
 
-  /* `trailing` keeps this last in the rail. It is ungrouped, but rendering it in
-     the ungrouped block at the top would put "My profile" above
-     "Administration", which reads as the most important thing on the page. The
-     one entry whose position is about the shape of the rail rather than what it
-     does. */
-  { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS, trailing: true }
+  /* ── Secondary: reachable, not resident ──────────────────────────────────
+
+     Both of these have another way in that is closer to hand than the rail.
+     Notifications has the bell in the header, which also carries the unread
+     count; the profile is in the ProfileMenu at the foot of the rail and in the
+     header of the mobile sheet. Neither is a place people navigate to as the
+     next step in a task, which is what the primary row is for. */
+  { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, requiredCap: 'self.read', secondary: true },
+  { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS, secondary: true }
 ];
 
 /**
@@ -374,8 +331,7 @@ export function navItemsFor(user) {
 }
 
 /**
- * The same entries `navItemsFor` returns, arranged into the sections the rail
- * draws — everyday work, then the named groups, then the trailing entry.
+ * The same entries `navItemsFor` returns, split by declared priority.
  *
  * ── Derived from navItemsFor, deliberately ──
  *
@@ -386,20 +342,20 @@ export function navItemsFor(user) {
  * can reach on a phone and cannot find on a laptop. Every capability decision
  * happens in exactly one place, above.
  *
- * Empty groups are dropped: a heading with nothing under it tells the reader
- * about a feature they do not have, on every page, forever. A group that DOES
- * have exactly one entry keeps its heading — see NAV_GROUPS for why.
+ * The two lists PARTITION the flat one: every entry is in exactly one of them,
+ * because `secondary` is a boolean and nothing else is consulted. That is the
+ * property the mobile bar depends on — it draws `primary` and puts `secondary`
+ * behind `⋯`, so an entry in both would render twice and an entry in neither
+ * would be unreachable. It replaced a `slice(0, 4)` against a separate
+ * section-based sheet, where those two failure modes were one off-by-one apart.
  *
- * @returns {{ primary: object[], groups: {id, label, items}[], trailing: object[] }}
+ * @returns {{ primary: object[], secondary: object[] }}
  */
 export function navSectionsFor(user) {
   const items = navItemsFor(user);
   return {
-    primary: items.filter(n => !n.group && !n.trailing),
-    groups: NAV_GROUPS
-      .map(g => ({ ...g, items: items.filter(n => n.group === g.id) }))
-      .filter(g => g.items.length > 0),
-    trailing: items.filter(n => n.trailing),
+    primary: items.filter(n => !n.secondary),
+    secondary: items.filter(n => n.secondary),
   };
 }
 
@@ -416,7 +372,10 @@ export function navSectionsFor(user) {
  * mean adding keys to the shared `staff` block, which would also change what an
  * admin reads on /calendar and /settings — and admin behaviour must not change.
  */
-const PAGE_META = {
+/* Exported for `App.navGroups.test.jsx`, which asserts that the administrative
+   hub is called the same thing in the rail and in the page title — two names for
+   one destination means two people cannot describe it to each other. */
+export const PAGE_META = {
   volunteer: {
     dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
     browse: { title: 'Opportunities', sub: 'Find a shift and apply — organizers confirm who attends' },
@@ -439,7 +398,9 @@ const PAGE_META = {
     notifications: { title: 'Notifications', sub: 'Platform activity' },
     errors: { title: 'Errors', sub: 'Crashes and faults reported by browsers, the server, and background jobs' },
     appeals: { title: 'Appeals', sub: 'Review and decide user suspension appeals' },
-    moderation: { title: 'Moderation Center', sub: 'Every administrative area you can open' },
+    /* "Admin", matching the rail. A page whose title differs from the label the
+       reader clicked to reach it makes them wonder whether they arrived. */
+    moderation: { title: 'Admin', sub: 'Every administrative area you can open' },
     /* `staff` only, because `staff` is now the only persona that can open the
        page — `analytics.impact` is administrative. There was no entry for it at
        all while every role could reach it, so the topbar fell back to the
@@ -603,7 +564,7 @@ function AppShell({ toasts, addToast, removeToast }) {
   }, [searchParams, location.pathname, navigate]);
 
   const [showMobileMore, setShowMobileMore] = useState(false);
-  const mobileNavRef = useRef(null);
+  const mobileNavScrollRef = useRef(null);
   const setActiveTab = (tab) => {
     const map = {
       dashboard: '/',
@@ -655,16 +616,26 @@ function AppShell({ toasts, addToast, removeToast }) {
   const currentPath = location.pathname;
   const activeTab = tabForPath(currentPath);
 
-  // Auto-scroll the active item into view on mobile
+  /**
+   * Centre the active destination in the mobile strip.
+   *
+   * The ref is on the SCROLLER, not on the `<nav>`. It used to be on the `<nav>`,
+   * which was `display: grid` with no overflow — so `scrollTo` was a no-op on an
+   * element that could not scroll, and this effect had never done anything. Now
+   * that the strip genuinely scrolls, pointing it at the wrong element would leave
+   * an off-screen active tab off-screen, which is the only case it exists for.
+   *
+   * Scoping the query to the scroller also excludes the `⋯` button, which carries
+   * `aria-current="page"` while the sheet is open and is deliberately outside the
+   * scroller.
+   */
   useEffect(() => {
-    if (mobileNavRef.current) {
-      const activeBtn = mobileNavRef.current.querySelector('[aria-current="page"]');
-      if (activeBtn) {
-        // center the button in the view
-        const scrollLeft = activeBtn.offsetLeft - (mobileNavRef.current.offsetWidth / 2) + (activeBtn.offsetWidth / 2);
-        mobileNavRef.current.scrollTo({ left: scrollLeft, behavior: 'smooth' });
-      }
-    }
+    const scroller = mobileNavScrollRef.current;
+    if (!scroller) return;
+    const activeBtn = scroller.querySelector('[aria-current="page"]');
+    if (!activeBtn) return;
+    const scrollLeft = activeBtn.offsetLeft - (scroller.offsetWidth / 2) + (activeBtn.offsetWidth / 2);
+    scroller.scrollTo({ left: scrollLeft, behavior: 'smooth' });
   }, [activeTab]);
 
   useEffect(() => {
@@ -955,29 +926,21 @@ function AppShell({ toasts, addToast, removeToast }) {
   const navItems = navItemsFor(currentUser);
   const navSections = navSectionsFor(currentUser);
 
-  const primaryNavItems = navItems.slice(0, 4);
-
   /**
-   * The "More" sheet: every section, minus whatever the bottom bar already shows.
+   * The mobile bar shows every PRIMARY entry; `⋯` holds the secondary ones.
    *
-   * Subtracting by id rather than re-slicing at 4. The bar takes the first four
-   * of the FLAT list and the sheet renders SECTIONS, so an index into one is not
-   * an index into the other — and the failure mode of getting that wrong is an
-   * entry appearing twice, or worse, an administrative page appearing in neither.
+   * It used to be `navItems.slice(0, 4)`, which is where the administrative hub
+   * went missing on phones: it is the fifth entry, so it fell into the sheet along
+   * with Notifications and My profile. A count of how many entries fit is not a
+   * statement about which ones matter, and the bar scrolls now precisely so that
+   * the answer to "does Admin fit" stops depending on the viewport.
+   *
+   * The two lists partition `navItems` by construction (see `navSectionsFor`), so
+   * there is nothing to subtract and no id can land in both or in neither.
    */
-  const barIds = new Set(primaryNavItems.map(n => n.id));
-  const withoutBarItems = (list) => list.filter(n => !barIds.has(n.id));
-  const moreSections = {
-    primary: withoutBarItems(navSections.primary),
-    groups: navSections.groups
-      .map(g => ({ ...g, items: withoutBarItems(g.items) }))
-      .filter(g => g.items.length > 0),
-    trailing: withoutBarItems(navSections.trailing),
-  };
-
-  const hasMoreItems = moreSections.primary.length > 0
-    || moreSections.groups.length > 0
-    || moreSections.trailing.length > 0;
+  const primaryNavItems = navSections.primary;
+  const moreItems = navSections.secondary;
+  const hasMoreItems = moreItems.length > 0;
 
   const renderMoreItem = ({ id, path, label, icon: Icon }) => (
     <button
@@ -1148,29 +1111,24 @@ function AppShell({ toasts, addToast, removeToast }) {
         </a>
 
         {/**
-          * One rail, three kinds of section: everyday entries, named groups, and
-          * the trailing profile entry.
+          * One rail, one list, no divider.
           *
-          * The heading is a real `<h2>` inside the `<nav>`, referenced by
-          * `aria-labelledby` on the group's own `role="group"` wrapper — so a
-          * screen-reader user hears "Platform, group" before its entries rather
-          * than eleven undifferentiated buttons, which is the same problem the
-          * grouping solves visually. A styled `<div>` would have looked identical
-          * and conveyed nothing.
+          * `Admin` used to sit inside a `role="group"` labelled "Administration",
+          * with a hair rule above it. Separating one entry from four says the
+          * entry is a different KIND of thing, which is a claim about the product
+          * rather than about the reader's authority — and the boundary the rule
+          * was drawing is already drawn by the entry's absence for anyone without
+          * `report.resolve`. An administrator who sees Admin has learned that
+          * they are one; a line above it teaches nothing further and costs the
+          * hub its place among the destinations people actually use.
+          *
+          * `secondary` entries follow, still with no rule between: the rail is
+          * five or seven rows, which is a list you read rather than one you scan
+          * by section.
           */}
         <nav className="nav" aria-label="Main">
           {navSections.primary.map(renderNavItem)}
-
-          {navSections.groups.map(({ id, label, items }) => (
-            /* `aria-label` rather than a rendered `<h2>` — see NAV_GROUPS. The
-               group keeps its accessible name; the separator above it is drawn
-               by `.nav-section` in CSS, costing one pixel instead of a row. */
-            <div key={id} className="nav-section" role="group" aria-label={label}>
-              {items.map(renderNavItem)}
-            </div>
-          ))}
-
-          {navSections.trailing.map(renderNavItem)}
+          {navSections.secondary.map(renderNavItem)}
         </nav>
 
         <div className="sidebar-foot">
@@ -1335,26 +1293,46 @@ function AppShell({ toasts, addToast, removeToast }) {
         </main>
       </div>
 
-      {/* ── Mobile navigation ── */}
-      <nav className="mobilenav" aria-label="Main" ref={mobileNavRef}>
-        {primaryNavItems.map(({ id, path, label, icon: Icon }) => (
-          <button
-            key={id + label}
-            className="mobilenav-item"
-            aria-current={activeTab === id ? 'page' : undefined}
-            onClick={() => { setViewingProfileState(null); navigate(path); }}
-          >
-            <Icon size={19} strokeWidth={2} />
-            {label}
-          </button>
-        ))}
-        {/* Derived from what the sheet will actually render, not from a slice
-            index. `More` opening onto an empty sheet is the failure this guards,
-            and after grouping the two are no longer the same question. */}
+      {/**
+        * ── Mobile navigation ──
+        *
+        * Two parts, and the split is the whole design: a horizontally scrollable
+        * strip holding every PRIMARY destination, and a `⋯` button pinned to the
+        * right edge holding the secondary ones.
+        *
+        * It was a five-cell CSS grid over `navItems.slice(0, 4)` plus `More`. Five
+        * equal cells is a hard ceiling on how many primary destinations can exist,
+        * and the entry that fell off the end for administrators was `Admin` — the
+        * one they opened the phone for. Scrolling removes the ceiling instead of
+        * arguing about where to put it: five entries fit on any current phone,
+        * six or seven scroll, and none of them is ever demoted to a menu by
+        * arithmetic.
+        *
+        * The `⋯` button is OUTSIDE the scroller so it cannot scroll away. It is
+        * the one control whose position has to be predictable, because it is how
+        * you reach anything you cannot currently see.
+        */}
+      <nav className="mobilenav" aria-label="Main">
+        <div className="mobilenav-scroll" ref={mobileNavScrollRef}>
+          {primaryNavItems.map(({ id, path, label, icon: Icon }) => (
+            <button
+              key={id + label}
+              className="mobilenav-item"
+              aria-current={activeTab === id ? 'page' : undefined}
+              onClick={() => { setViewingProfileState(null); navigate(path); }}
+            >
+              <Icon size={19} strokeWidth={2} />
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* Derived from what the sheet will actually render. `More` opening onto
+            an empty sheet is the failure this guards. */}
         {hasMoreItems && (
           <button
-            className="mobilenav-item"
+            className="mobilenav-item mobilenav-more"
             aria-current={showMobileMore ? 'page' : undefined}
+            aria-expanded={showMobileMore}
             onClick={() => setShowMobileMore(true)}
           >
             <MoreHorizontal size={19} strokeWidth={2} />
@@ -1381,27 +1359,17 @@ function AppShell({ toasts, addToast, removeToast }) {
               </button>
             </div>
             {/**
-              * The same sections as the desktop rail, minus whatever the bottom
-              * bar is already showing.
+              * The SECONDARY entries, and the account actions.
               *
-              * Grouped here too, and not only on desktop: this sheet is where a
-              * phone user meets the administrative pages, so it is the surface
-              * where the grouping matters MOST. Leaving it flat would have meant
-              * the small screen — the one with the least room to scan — kept the
-              * long undifferentiated list the redesign exists to remove.
+              * Flat, and short by construction: two destinations rather than the
+              * five-to-seven the sheet used to inherit from a slice index. It
+              * previously carried the administrative pages, which is why it was
+              * grouped with headings — those are primary now and live in the bar,
+              * so there is nothing left to group and a heading over a list of two
+              * would be furniture.
               */}
             <div className="mobile-more-menu">
-              {moreSections.primary.map(renderMoreItem)}
-
-              {moreSections.groups.map(({ id, label, items }) => (
-                /* Same treatment as the rail — see NAV_GROUPS. The sheet is
-                   where the headings cost the most: it has the least room. */
-                <div key={id} className="nav-section" role="group" aria-label={label}>
-                  {items.map(renderMoreItem)}
-                </div>
-              ))}
-
-              {moreSections.trailing.map(renderMoreItem)}
+              {moreItems.map(renderMoreItem)}
               {/* Only for someone whose own profile page has no edit button of
                   its own — the volunteer profile carries one, so offering a
                   second here would be a duplicate affordance. Derived from the

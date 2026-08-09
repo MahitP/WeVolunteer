@@ -79,7 +79,7 @@ export default function AdminDashboard({ addToast, user }) {
   /**
    * Scroll to `#reports` / `#organizer-requests` once there is something there.
    *
-   * The Moderation Center links to sections of this page, and the browser
+   * The Admin hub links to sections of this page, and the browser
    * cannot resolve those fragments itself: it looks for the element the moment
    * the document loads, which is several hundred milliseconds before the four
    * fetches in `loadData` return and the sections exist. Left to the browser the
@@ -245,17 +245,17 @@ export default function AdminDashboard({ addToast, user }) {
          thing here that is time-sensitive, and the "N waiting" count that
          exists to raise the alarm was below the fold with it.
 
-         The page is called the Moderation Center. Reports lead, then the
+         The Admin hub links to sections of this page. Reports lead, then the
          approval queue; the analytics that describe how the programme is
          going follow, because they are read deliberately rather than
          urgently. */}
       {/* ── Reports ──
           Titled "Reports" rather than "Moderation queue": the page itself is the
-          Moderation Center, and a section repeating the page's own name inside it
+          Admin hub, and a section repeating that name inside it
           told the reader nothing while making the two sound like different places.
           The other section here is "Organizer requests", which is also moderation
           — what distinguishes this one is that it holds reports. */}
-      {/* `id` is the target of the Moderation Center's Reports tile
+      {/* `id` is the target of the Admin hub's Reports tile
           (`/#reports`). Scrolled to by the hash effect above once the data has
           arrived — see the comment there for why it cannot be left to the
           browser. */}
@@ -435,7 +435,7 @@ export default function AdminDashboard({ addToast, user }) {
       </section>
 
       {/* ── Approval queue: the admin's actual job ── */}
-      {/* `id`: the Moderation Center's Organizer requests tile (`/#organizer-requests`). */}
+      {/* `id`: the Admin hub's Organizer requests tile (`/#organizer-requests`). */}
       <section id="organizer-requests">
         <div className="section-head">
           <h2>Organizer requests</h2>
