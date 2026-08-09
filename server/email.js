@@ -58,6 +58,10 @@ if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
   console.log('[Email] Running in mock mode. Emails will be logged to console.');
 }
 
+/* The transport chosen above, kept so `setMailTransportForTests` can put it
+   back. Captured once, at module load, before any test can have replaced it. */
+const realTransporter = transporter;
+
 // Checked after the SMTP transport so the order of startup failures stays
 // stable: JWT_SECRET (config.js) -> SMTP -> APP_URL. An operator fixes them in
 // that order, and the runbook documents it that way.
@@ -115,6 +119,26 @@ export function getMailHealth() {
 }
 
 /** Test seam: resets the counters between cases. */
+/**
+ * Replaces the mail transport, for tests only.
+ *
+ * The alternative is `vi.doMock` on this module, and it does not work for the
+ * callers that matter: routes import email.js DYNAMICALLY inside the handler, so
+ * by the time a test registers a mock the module is already resolved and cached
+ * and the mock is silently ignored — a delivery-failure test that passes without
+ * ever simulating a failure. A seam that plainly does what it says is better than
+ * a mock that quietly does nothing.
+ *
+ * Refuses to run in production. This is the one function here that could turn
+ * real delivery off, so it is not left to a convention about who calls it.
+ *
+ * @param {object|null} t  a `{ sendMail }` object, or null to restore the real one
+ */
+export function setMailTransportForTests(t) {
+  if (IS_PRODUCTION) throw new Error('setMailTransportForTests is not available in production');
+  transporter = t ?? realTransporter;
+}
+
 export function resetMailHealthForTests() {
   mailHealth.failures = 0;
   mailHealth.successes = 0;
