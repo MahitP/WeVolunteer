@@ -1,33 +1,65 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '../utils/api';
-
-const SEED_USERS = [
-  { id: 'user-student-1', name: 'Leo Chen', email: 'leo.chen28@gmail.com', avatar: '🧑‍💻', role: 'Volunteer' },
-  { id: 'user-student-2', name: 'Priya Patel', email: 'priya.patel.nhs@outlook.com', avatar: '👩‍⚕️', role: 'Volunteer' },
-  { id: 'user-student-3', name: 'Ethan Miller', email: 'emiller2027@gmail.com', avatar: '🧑‍🎨', role: 'Volunteer' },
-  { id: 'user-org-1', name: 'Jacquelyn Katzenback', email: 'jkatzenback@vikings.org', avatar: '👩‍💼', role: 'Organizer' },
-  { id: 'user-org-pending', name: 'Robert Miller', email: 'rmiller@sbpl.info', avatar: '👨‍🏫', role: 'Organizer, pending' },
-  { id: 'user-admin', name: 'System Admin', email: 'admin@example.gov', avatar: '🛠️', role: 'Administrator' }
-];
 
 /**
  * Demo-only account switcher. Deliberately recessive: it is scaffolding for
  * exploring the product, not part of the product.
+ *
+ * ── Why the roster is fetched rather than written here ──
+ *
+ * It was a literal `SEED_USERS` array, a second copy of the one in `Login.jsx`
+ * with different role labels. A literal describes the seed as written, not the
+ * database as it is: on the pilot deployment `user-admin` had been deleted, and
+ * this switcher went on listing "🛠️ System Admin · Administrator" as somewhere
+ * you could go. Choosing it signed you out of nothing and in to nothing —
+ * `api.login` answered "No account found with that email address" and the toast
+ * blamed the switch.
+ *
+ * `GET /api/auth/demo-accounts` filters tombstones and internal actors and reads
+ * every field live, so this cannot drift again. It is DEMO_MODE-gated
+ * server-side; this component only renders under DEMO_MODE anyway.
  */
 export default function DemoBar({ currentUser, refreshAll, addToast }) {
-  const isSeedUser = currentUser && SEED_USERS.some(u => u.id === currentUser.id);
+  const [seedUsers, setSeedUsers] = useState([]);
+
+  useEffect(() => {
+    let live = true;
+    api.demoAccounts().then(list => { if (live) setSeedUsers(list); });
+    return () => { live = false; };
+  }, []);
+
+  const isSeedUser = currentUser && seedUsers.some(u => u.id === currentUser.id);
 
   const handleSwitch = async (e) => {
-    const seed = SEED_USERS.find(u => u.id === e.target.value);
+    const seed = seedUsers.find(u => u.id === e.target.value);
     if (!seed) return;
     try {
-      await api.login(seed.email, 'password123');
+      const result = await api.login(seed.email, 'password123');
+      /**
+       * A demo account with a second factor cannot be switched into silently.
+       *
+       * `api.login` returns `{ require2FA: true }` and issues only a pre-auth
+       * cookie, so `refreshAll()` would re-read the OLD session and the switcher
+       * would sit there claiming to have changed account while nothing had. Say
+       * so instead: the sign-in screen is where a second factor can be answered.
+       */
+      if (result?.require2FA) {
+        addToast(
+          `${seed.name} has two-factor authentication on — sign in from the sign-in screen to switch to it.`,
+          'info'
+        );
+        return;
+      }
       addToast(`Now viewing as ${seed.name}.`, 'success');
       refreshAll();
     } catch (err) {
       addToast(`Could not switch account: ${err.message}`, 'error');
     }
   };
+
+  /* Nothing to switch to — a demo build against a database with no demo
+     accounts left. An empty select is worse than no bar. */
+  if (!seedUsers.length) return null;
 
   /**
    * There is deliberately no "Reset data" button here any more.
@@ -58,7 +90,7 @@ export default function DemoBar({ currentUser, refreshAll, addToast }) {
           {!isSeedUser && currentUser && (
             <option value="custom" disabled>{currentUser.name} (your account)</option>
           )}
-          {SEED_USERS.map(u => (
+          {seedUsers.map(u => (
             <option key={u.id} value={u.id}>{u.avatar} {u.name} · {u.role}</option>
           ))}
         </select>

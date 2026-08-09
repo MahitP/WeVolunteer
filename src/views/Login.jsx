@@ -7,14 +7,6 @@ import { useStepUp } from '../components/auth/useStepUp';
 import { STEP_UP } from '../utils/stepUp';
 import { DEMO_MODE } from '../config';
 
-const DEMO_ACCOUNTS = [
-  { name: 'Leo Chen', email: 'leo.chen28@gmail.com', avatar: '🧑‍💻', role: 'Student' },
-  { name: 'Priya Patel', email: 'priya.patel.nhs@outlook.com', avatar: '👩‍⚕️', role: 'Student' },
-  { name: 'Jacquelyn K.', email: 'jkatzenback@vikings.org', avatar: '👩‍💼', role: 'Organizer' },
-  { name: 'Robert M.', email: 'rmiller@sbpl.info', avatar: '👨‍🏫', role: 'Pending organizer' },
-  { name: 'System Admin', email: 'admin@example.gov', avatar: '🛠️', role: 'Administrator' }
-];
-
 /** "google" → "Google". Provider names are lowercase keys on the wire. */
 const providerLabel = (provider) =>
   provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : 'that provider';
@@ -30,10 +22,48 @@ export default function Login({ onLoginSuccess, addToast }) {
   const [loading, setLoading] = useState(false);
   
   const [availableMethods, setAvailableMethods] = useState([]);
-  const [selected2FAMethod, setSelected2FAMethod] = useState('totp');
+  /**
+   * Null until the server has said what this account can actually satisfy.
+   *
+   * ── The bug this shape prevents ──
+   *
+   * This was `useState('totp')`, and nothing ever reconciled it with
+   * `availableMethods`. So an account enrolled in EMAIL codes and nothing else
+   * landed on this screen with the authenticator field rendered, no radio
+   * selected, and no "Send code to email" button — the one control that would
+   * have got them a code. Whatever they typed was submitted as `method: 'totp'`,
+   * which is not a method their account holds. Both pilot super-administrator
+   * accounts are email-only, so this was the entire second-factor experience for
+   * the people who own the platform.
+   *
+   * Derived from the server's list instead, in `useEffect` below, so the default
+   * cannot drift from what the account has. `null` is a real state — "we have not
+   * been told yet" — and rendering nothing is the correct answer to it.
+   */
+  const [selected2FAMethod, setSelected2FAMethod] = useState(null);
   const [emailCodeSent, setEmailCodeSent] = useState(false);
   const [emailCooldown, setEmailCooldown] = useState(0);
   const [maskedEmail, setMaskedEmail] = useState('');
+  /**
+   * A provider link waiting for the second factor to finish.
+   *
+   * `{ provider, linkToken }` when the user arrived from an OAuth callback, gave
+   * the right password, and the account then asked for a second factor. Held here
+   * rather than in `location.state` so that switching to the 2FA screen does not
+   * leave `linkData` pinning `mode` at `'link'`. See `handleLinkSignIn`.
+   */
+  const [pendingLink, setPendingLink] = useState(null);
+  /**
+   * The demo sign-in shortcuts, read from the server rather than written here.
+   *
+   * The array that used to live at the top of this file listed
+   * "System Admin · admin@example.gov", an account that had been DELETED on the
+   * pilot deployment — so the sign-in screen offered a one-tap credential that
+   * answered "No account found with that email address". See the endpoint's
+   * header in server/routes/authRoutes.js for why the fix is a query rather than
+   * a shorter literal.
+   */
+  const [demoAccounts, setDemoAccounts] = useState([]);
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -112,6 +142,36 @@ export default function Login({ onLoginSuccess, addToast }) {
     if (linkData) setIdentifier(linkData.email);
   }, [linkData]);
 
+  /* Demo shortcuts, once, on arrival. `api.demoAccounts()` swallows its own
+     failures and returns `[]`, so a non-demo server simply renders none. */
+  useEffect(() => {
+    if (!DEMO_MODE) return;
+    let live = true;
+    api.demoAccounts().then(list => { if (live) setDemoAccounts(list); });
+    return () => { live = false; };
+  }, []);
+
+  /**
+   * The selected method follows the account, and cannot be one it does not have.
+   *
+   * Preference order is strongest-first: an authenticator app beats an emailed
+   * code, and a recovery code is a last resort rather than a default — landing on
+   * it would invite somebody to burn a single-use credential when an ordinary one
+   * was available. `availableMethods` is already narrowed server-side, so this
+   * only chooses among what is genuinely on offer.
+   */
+  useEffect(() => {
+    if (!availableMethods.length) {
+      setSelected2FAMethod(null);
+      return;
+    }
+    setSelected2FAMethod(prev => (
+      prev && availableMethods.includes(prev)
+        ? prev
+        : ['totp', 'email', 'recovery'].find(m => availableMethods.includes(m)) ?? null
+    ));
+  }, [availableMethods]);
+
   /**
    * The other way into the second-factor screen: signing in with a provider.
    *
@@ -129,7 +189,11 @@ export default function Login({ onLoginSuccess, addToast }) {
    */
   useEffect(() => {
     if (!location.state?.twoFactorRequired) return;
-    setAvailableMethods(location.state.availableMethods || ['totp', 'recovery']);
+    /* No `|| ['totp','recovery']` fallback. A hardcoded default is how the
+       authenticator field came to be shown to accounts that have no
+       authenticator; if the server did not say, we show the "nothing to offer"
+       branch rather than guessing. */
+    setAvailableMethods(location.state.availableMethods || []);
     setMode('2fa');
     /* Clear it so a later in-app navigation back to /login does not re-enter the
        2FA screen for a grant that has since been spent or expired. */
@@ -181,6 +245,30 @@ export default function Login({ onLoginSuccess, addToast }) {
    * A failure after sign-in is not a failure overall: the session is real and
    * the user is signed in. Saying so, and naming Settings as the other way to
    * finish, beats reporting an error for something that half worked.
+   *
+   * ── Why the second factor is handled here (the "Google sign-in is broken" bug) ──
+   *
+   * `api.login()` does not always produce a session. For an account with a second
+   * factor it returns `{ require2FA: true }` and issues only the fifteen-minute
+   * `wev_preauth` cookie; the session exists only after `POST /api/auth/login-2fa`.
+   * This handler ignored that and went straight on to `POST /api/oauth/link`,
+   * which is behind `authenticateToken` — so the request was answered
+   * `401 Access token required` and the user was shown
+   *
+   *     "Signed in, but we could not connect Google: Access token required."
+   *
+   * Every clause of which was wrong: they were not signed in, nothing was
+   * connected, and the missing token was this application's session rather than
+   * anything of Google's. Reproduced against a scratch database: the 401 body is
+   * exactly `{"error":"Access token required"}`.
+   *
+   * It is the ONLY way a linked provider can be adopted by an account that has
+   * 2FA on, so it locked every administrator out of provider sign-in — and both
+   * pilot super-administrators have a second factor.
+   *
+   * So a `require2FA` answer now routes into the second-factor screen with the
+   * link token still in hand, and the link is completed after that screen mints
+   * the session. `pendingLink` is what carries it across.
    */
   const handleLinkSignIn = async (e) => {
     e.preventDefault();
@@ -189,8 +277,9 @@ export default function Login({ onLoginSuccess, addToast }) {
     setLoading(true);
 
     const label = providerLabel(linkData.provider);
+    let signIn;
     try {
-      await api.login(linkData.email, password);
+      signIn = await api.login(linkData.email, password);
     } catch (err) {
       setError(err.message || 'That password is not correct.');
       const code = err.data?.code;
@@ -199,11 +288,45 @@ export default function Login({ onLoginSuccess, addToast }) {
       return;
     }
 
+    /**
+     * A second factor stands between the password and a session.
+     *
+     * The link token is held in component state rather than in `location.state`,
+     * because `setMode('2fa')` re-renders this same component and `linkData` would
+     * otherwise keep `mode` pinned at `'link'`. `finishPendingLink` picks it up
+     * once `handle2FASubmit` has a real session.
+     */
+    if (signIn?.require2FA) {
+      setPendingLink({ provider: linkData.provider, linkToken: linkData.linkToken });
+      setAvailableMethods(signIn.availableMethods || []);
+      setPassword('');
+      setMode('2fa');
+      setLoading(false);
+      return;
+    }
+
+    await completeLink({ provider: linkData.provider, linkToken: linkData.linkToken }, label);
+    onLoginSuccess();
+  };
+
+  /**
+   * Spend a grant to attach the provider identity, once a session exists.
+   *
+   * Extracted so the two ways of reaching this point — password only, and
+   * password plus a second factor — cannot drift apart. The caller is
+   * responsible for `onLoginSuccess()`: it unmounts this component, so it has to
+   * be last.
+   *
+   * Never throws. Every outcome here is reported as a toast because the sign-in
+   * itself has already succeeded, and turning "your provider is not connected
+   * yet" into a failed sign-in would be a worse answer than the truth.
+   */
+  const completeLink = async (pending, label) => {
     try {
       const linked = await run(
         STEP_UP.OAUTH_LINK,
-        { provider: linkData.provider },
-        headers => api.linkOAuthAccount(linkData.linkToken, headers)
+        { provider: pending.provider },
+        headers => api.linkOAuthAccount(pending.linkToken, headers)
       );
 
       if (linked) addToast(`Signed in, and ${label} is now connected.`, 'success');
@@ -216,8 +339,6 @@ export default function Login({ onLoginSuccess, addToast }) {
         'error'
       );
     }
-
-    onLoginSuccess();
   };
 
   /**
@@ -238,7 +359,7 @@ export default function Login({ onLoginSuccess, addToast }) {
       const result = await api.login(loginId, loginPassword);
       
       if (result.require2FA) {
-        setAvailableMethods(result.availableMethods || ['totp', 'recovery']);
+        setAvailableMethods(result.availableMethods || []);
         setMode('2fa');
         setLoading(false);
         return;
@@ -329,6 +450,22 @@ export default function Login({ onLoginSuccess, addToast }) {
       }
       
       const result = await api.login2FA(payload.token || null, payload.code || null, payload.method);
+
+      /**
+       * The link the user came here to make, now that a session exists.
+       *
+       * Before the toast, because `completeLink` opens the verification dialog
+       * and a "Welcome back" floating over it reads as though the sign-in had
+       * already finished. Its own toast reports the link either way.
+       */
+      if (pendingLink) {
+        const label = providerLabel(pendingLink.provider);
+        setPendingLink(null);
+        await completeLink(pendingLink, label);
+        onLoginSuccess();
+        return;
+      }
+
       if (result.emailVerified === false) {
         addToast('Confirm your email address to finish signing in.', 'info');
       } else {
@@ -464,42 +601,82 @@ export default function Login({ onLoginSuccess, addToast }) {
           
           <div className="auth-head">
             <h1 id="tfa-heading" className="auth-title">Verify your identity</h1>
-            <p className="auth-subtitle">Choose a verification method to continue.</p>
+            <p className="auth-subtitle">
+              {/*
+                The subtitle describes what is actually on screen. "Choose a
+                verification method" was printed even when the account had one
+                method and there was nothing to choose.
+              */}
+              {availableMethods.length > 1
+                ? 'Choose a verification method to continue.'
+                : availableMethods.includes('email')
+                  ? 'We will email you a code to finish signing in.'
+                  : availableMethods.includes('totp')
+                    ? 'Enter the code from your authenticator app to continue.'
+                    : availableMethods.includes('recovery')
+                      ? 'Enter one of your recovery codes to continue.'
+                      : 'We could not find a second factor for this account.'}
+            </p>
           </div>
 
           {errorBanner}
 
-          <div className="tfa-methods" role="radiogroup" aria-label="Verification method">
-            {availableMethods.includes('totp') && (
-              <label className={`tfa-method${selected2FAMethod === 'totp' ? ' active' : ''}`}>
-                <input type="radio" name="tfa-method" value="totp" checked={selected2FAMethod === 'totp'} onChange={() => { setSelected2FAMethod('totp'); setTfaToken(''); setError(''); }} />
-                <Shield size={18} />
-                <div>
-                  <span className="strong">Authenticator app (recommended)</span>
-                  <span className="dim small">Use your authenticator app to generate a code</span>
-                </div>
-              </label>
-            )}
-            {availableMethods.includes('email') && (
-              <label className={`tfa-method${selected2FAMethod === 'email' ? ' active' : ''}`}>
-                <input type="radio" name="tfa-method" value="email" checked={selected2FAMethod === 'email'} onChange={() => { setSelected2FAMethod('email'); setTfaToken(''); setError(''); }} />
-                <Mail size={18} />
-                <div>
-                  <span className="strong">Email code</span>
-                  <span className="dim small">Send a verification code to your email</span>
-                </div>
-              </label>
-            )}
-            <label className={`tfa-method${selected2FAMethod === 'recovery' ? ' active' : ''}`}>
-              <input type="radio" name="tfa-method" value="recovery" checked={selected2FAMethod === 'recovery'} onChange={() => { setSelected2FAMethod('recovery'); setTfaToken(''); setError(''); }} />
-              <Key size={18} />
-              <div>
-                <span className="strong">Recovery code</span>
-                <span className="dim small">Use one of your single-use backup codes</span>
-              </div>
-            </label>
-          </div>
+          {/*
+            Only the methods this account holds, and only a picker when there is
+            something to pick.
 
+            `recovery` used to render unconditionally, so an account with no
+            recovery codes was offered the one method guaranteed to fail — on the
+            screen where it is already the user's last resort. The server now
+            reports recovery only when codes exist (`enabledSecondFactors` in
+            server/utils.js) and refuses any method not on that list, so this row
+            and the server agree by construction rather than by coincidence.
+          */}
+          {availableMethods.length === 0 ? (
+            <div className="alert alert-danger" role="alert">
+              This account has no second factor set up, so there is nothing to
+              verify here. Sign in again, or ask an administrator to help you
+              back in.
+            </div>
+          ) : availableMethods.length > 1 ? (
+            <div className="tfa-methods" role="radiogroup" aria-label="Verification method">
+              {availableMethods.includes('totp') && (
+                <label className={`tfa-method${selected2FAMethod === 'totp' ? ' active' : ''}`}>
+                  <input type="radio" name="tfa-method" value="totp" checked={selected2FAMethod === 'totp'} onChange={() => { setSelected2FAMethod('totp'); setTfaToken(''); setError(''); }} />
+                  <Shield size={18} />
+                  <div>
+                    <span className="strong">Authenticator app (recommended)</span>
+                    <span className="dim small">Use your authenticator app to generate a code</span>
+                  </div>
+                </label>
+              )}
+              {availableMethods.includes('email') && (
+                <label className={`tfa-method${selected2FAMethod === 'email' ? ' active' : ''}`}>
+                  <input type="radio" name="tfa-method" value="email" checked={selected2FAMethod === 'email'} onChange={() => { setSelected2FAMethod('email'); setTfaToken(''); setError(''); }} />
+                  <Mail size={18} />
+                  <div>
+                    <span className="strong">Email code</span>
+                    <span className="dim small">Send a verification code to your email</span>
+                  </div>
+                </label>
+              )}
+              {availableMethods.includes('recovery') && (
+                <label className={`tfa-method${selected2FAMethod === 'recovery' ? ' active' : ''}`}>
+                  <input type="radio" name="tfa-method" value="recovery" checked={selected2FAMethod === 'recovery'} onChange={() => { setSelected2FAMethod('recovery'); setTfaToken(''); setError(''); }} />
+                  <Key size={18} />
+                  <div>
+                    <span className="strong">Recovery code</span>
+                    <span className="dim small">Use one of your single-use backup codes</span>
+                  </div>
+                </label>
+              )}
+            </div>
+          ) : null}
+
+          {/* No method means no form. Rendering the fields against
+              `selected2FAMethod === null` would show nothing but a Verify button
+              that cannot succeed. */}
+          {selected2FAMethod && (
           <form onSubmit={handle2FASubmit} className="stack-md" noValidate>
             {selected2FAMethod === 'totp' && (
               <div className="field">
@@ -577,6 +754,7 @@ export default function Login({ onLoginSuccess, addToast }) {
               </button>
             )}
           </form>
+          )}
         </main>
       </div>
     );
@@ -793,13 +971,22 @@ export default function Login({ onLoginSuccess, addToast }) {
             </button>
           </form>
 
-          {DEMO_MODE && (
+          {/*
+            `demoAccounts.length`, not `DEMO_MODE`, decides whether this renders.
+
+            The flag says the BUNDLE was built for a demo; the list says the
+            SERVER has accounts to offer. When they disagree — a demo build
+            pointed at a database whose demo accounts have been deleted — the
+            heading "Demo accounts — password password123" over an empty grid is
+            worse than nothing.
+          */}
+          {DEMO_MODE && demoAccounts.length > 0 && (
             <div className="auth-demo" style={{ marginTop: 'var(--s6)' }}>
               <div className="eyebrow" style={{ textAlign: 'center', marginBottom: 'var(--s3)' }}>
                 Demo accounts — password “password123”
               </div>
               <div className="auth-demo-grid">
-                {DEMO_ACCOUNTS.map(acc => (
+                {demoAccounts.map(acc => (
                   <button
                     key={acc.email}
                     type="button"

@@ -133,6 +133,22 @@ export const api = {
     return data;
   },
 
+  /**
+   * The demo sign-in shortcuts, as the database currently has them.
+   *
+   * Answers 404 when the server is not in DEMO_MODE, which is not an error worth
+   * surfacing — the callers simply render nothing. Returning `[]` for every
+   * failure keeps a demo-only convenience from ever breaking the sign-in screen.
+   */
+  demoAccounts: async () => {
+    try {
+      const data = await apiFetch('/api/auth/demo-accounts');
+      return Array.isArray(data?.accounts) ? data.accounts : [];
+    } catch {
+      return [];
+    }
+  },
+
   login2FA: async (token, code, method) => {
     const data = await apiFetch('/api/auth/login-2fa', {
       method: 'POST',
