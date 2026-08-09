@@ -47,7 +47,7 @@ export const ROLES = ['student', 'organizer', 'admin', 'super_admin', 'partner']
  * ── Why this exists ──
  *
  * `authz.completeness.test.js` fails the build on any `.role` property compared
- * against a role-name LITERAL, and its failure message names the remedy: "import
+ * against a role-name LITERAL, and its failure message names the remedy: "import 
  * role names from authz.js's ROLES rather than hardcoding them". `ROLES` is an
  * array, so it answers "is this a real role" but gives no way to name one.
  *
@@ -108,36 +108,64 @@ export const CAPABILITIES = {
   student: [
     'event.view', 'event.apply', 'application.withdraw',
     'self.read', 'self.write', 'portfolio.write', 'message.send', 'qr.present',
+    /**
+     * Leaving a persona preview, held by EVERY role including this one.
+     *
+     * A preview narrows an owner's capabilities to a plain member of some role,
+     * so if the way out were owner-only the owner would lose it the instant they
+     * previewed as a student — trapped until the expiry, by a feature whose whole
+     * purpose is to be stepped in and out of.
+     *
+     * Universal rather than an exception carved into the gate, because the safe
+     * version of "this route ignores the effective role" is a route that does not
+     * need to. It clears the caller's own preview and nothing else; for an account
+     * that has none it does nothing at all, so holding it grants no one anything.
+     */
+    'persona.preview.exit',
     // A student reading their own volunteer statistics (Task 7d). Organizers
     // cannot reach GET /api/stats/volunteer today (the handler denies anyone
     // whose role is not 'student'), so this stays a student-only capability
     // rather than being widened to organizer as well.
     'stats.self',
     /**
-     * The community impact figures (`GET /api/impact`).
+     * `analytics.impact` is deliberately NOT here — it became an administrative
+     * capability, and this is the role it was taken from.
      *
-     * Held by EVERY role, which makes it look like it is not a gate at all. It
-     * is a gate — it is just one whose answer is currently yes for everyone
-     * signed in, and naming it is what makes that a decision rather than an
-     * omission. `authz.completeness.test.js` guard 2 requires every
-     * authenticated route to carry a capability or a reviewed justification, and
-     * "aggregate, suppressed, identifies nobody" is a justification that belongs
-     * in a capability name rather than in an exemption list.
+     * A student's own figures are `stats.self`, which is about them. The
+     * community impact page is about everybody: how many hours this school's
+     * children served, in which categories, and whether participation is rising.
+     * Aggregated and suppressed, it still describes a cohort of minors to a
+     * reader with no responsibility for them, and "the numbers identify nobody"
+     * answers the wrong question — the one worth asking is whose figures these
+     * are to read.
      *
-     * It also makes the question a one-line change if the answer stops being
-     * yes: publishing these figures to unauthenticated visitors, or withholding
-     * them from a role, both become edits to this table rather than to a route.
+     * See the note beside `analytics.impact` in the `admin` list below.
      */
-    'analytics.impact',
   ],
   organizer: [
     'event.view', 'event.create', 'event.edit.own', 'applicant.review',
     'attendance.mark', 'attendance.view', 'attendance.scan', 'announcement.post',
     'message.send', 'self.read', 'self.write', 'service.verify.own_event',
+    /**
+     * Leaving a persona preview, held by EVERY role including this one.
+     *
+     * A preview narrows an owner's capabilities to a plain member of some role,
+     * so if the way out were owner-only the owner would lose it the instant they
+     * previewed as a student — trapped until the expiry, by a feature whose whole
+     * purpose is to be stepped in and out of.
+     *
+     * Universal rather than an exception carved into the gate, because the safe
+     * version of "this route ignores the effective role" is a route that does not
+     * need to. It clears the caller's own preview and nothing else; for an account
+     * that has none it does nothing at all, so holding it grants no one anything.
+     */
+    'persona.preview.exit',
     'geocode.use',
     // An organizer reading statistics for the events they run (Task 7d).
+    // `analytics.own_events` is the organizer's analytics capability, and it is
+    // scoped to the events they ran. `analytics.impact` — the whole community —
+    // is not theirs to read; see the note in the `admin` list below.
     'analytics.own_events',
-    'analytics.impact',
   ],
   admin: [
     'event.view', 'event.moderate', 'organizer.approve', 'user.suspend',
@@ -215,6 +243,20 @@ export const CAPABILITIES = {
     'message.send',
     'attendance.mark', 'attendance.view',
     'self.read', 'self.write', 'geocode.use',
+    /**
+     * Leaving a persona preview, held by EVERY role including this one.
+     *
+     * A preview narrows an owner's capabilities to a plain member of some role,
+     * so if the way out were owner-only the owner would lose it the instant they
+     * previewed as a student — trapped until the expiry, by a feature whose whole
+     * purpose is to be stepped in and out of.
+     *
+     * Universal rather than an exception carved into the gate, because the safe
+     * version of "this route ignores the effective role" is a route that does not
+     * need to. It clears the caller's own preview and nothing else; for an account
+     * that has none it does nothing at all, so holding it grants no one anything.
+     */
+    'persona.preview.exit',
     // Deliberate widening (Task 7d, same pattern as attendanceRoutes.js's
     // attendance.mark correction in Task 7b): GET /api/stats/organizer denies
     // admin today (`role !== 'organizer'`), which is an inconsistency with the
@@ -222,8 +264,62 @@ export const CAPABILITIES = {
     // every application and every event, but not one organizer's own stats
     // page. `analytics.own_events` closes that gap.
     'analytics.own_events',
+    /**
+     * The community impact figures (`GET /api/impact`, `/impact`).
+     *
+     * ── What changed, and why the capability moved rather than the route ──
+     *
+     * This was held by student, organizer, admin AND partner, and the comment
+     * where it used to live said that was the point: "a gate whose answer is
+     * currently yes for everyone signed in". It also said what to do if the
+     * answer stopped being yes — "withholding them from a role becomes an edit to
+     * this table rather than to a route" — and this is that edit. The nav entry,
+     * the client route guard and the API handler all name this one word, so
+     * narrowing the holders narrows all three at once, and none of them had to
+     * learn a new spelling.
+     *
+     * The figures are an internal view of how the programme is doing. That is not
+     * a new conclusion: it is the same one that DELETED `/api/public/impact`
+     * rather than re-gating it, on the grounds that the surface had been built
+     * for an audience (strangers, grant readers, marketing) that turned out not
+     * to be who the figures were for. Everyone-signed-in was the same mistake one
+     * step in: a cohort of minors at a named school, described to every account
+     * on the platform, with the suppression threshold doing all of the work.
+     *
+     * ── Why not `analytics.school`, which admin already holds ──
+     *
+     * Because it gates something else. `analytics.school` is the administrative
+     * dashboard's own numbers (`GET /api/admin/stats`) and platform health
+     * (`GET /api/admin/system/status`). Reusing it here would make one capability
+     * authorize three unrelated surfaces — which is precisely the defect that
+     * forced `audit.read` to be split into `application.read_all` and
+     * `user.contact.read`: a name that describes one power and whose removal
+     * silently withdraws two others. It would also make a grant of school
+     * analytics quietly hand over the community figures, and leave
+     * `analytics.impact` registered with no route and no holder.
+     *
+     * ── Why not a new capability name ──
+     *
+     * `analytics.impact` already means exactly this surface, and it is already
+     * spelled in the route table, the nav table, the API handler and the refusal
+     * copy (`denialDetail.js`). A new name would edit four files to say the same
+     * thing, and leave this one to be deleted from the docs' capability matrix.
+     * The honest change is to who holds it, not to what it is called.
+     *
+     * ── Why not SUPER_ONLY ──
+     *
+     * SUPER_ONLY is checked before per-user grants, which makes a capability
+     * ungrantable — right for `audit.read`, wrong here. The policy is "admin and
+     * above", and `analytics.platform` (the platform-wide superset at
+     * `/admin/impact`) already occupies the owner-only tier. Leaving this
+     * grantable means an administrator can deliberately extend the figures to one
+     * account through `capability.grant`, which is audited and revocable, instead
+     * of that being impossible or done by promoting somebody to admin.
+     */
     'analytics.impact',
   ],
+  /* Holds everything, including `persona.preview.exit` — which is the role a
+     preview is always started FROM, so it is the one that must never lose it. */
   super_admin: ['*'],
   // `event.view` and `geocode.use`: neither route these gate (GET
   // /api/organizers/:id/profile, GET /api/geocode) has ever had a partner-
@@ -231,7 +327,19 @@ export const CAPABILITIES = {
   // 'admin'/'organizer', so partner already passes both. Granting the
   // capabilities keeps that unchanged now that the routes ask `can()` instead
   // of comparing role strings.
-  partner: ['analytics.public', 'analytics.impact', 'event.view', 'geocode.use'],
+  //
+  // `analytics.impact` is deliberately NOT here, and partner is the role where
+  // the decision needed making rather than following. A partner is an EXTERNAL
+  // organization: it is the audience `/api/public/impact` was built for, and that
+  // route was deleted rather than re-gated because these figures are an internal
+  // view of how the programme is doing. Handing a partner the full community
+  // breakdown — categories, month-by-month participation, a cohort of minors at a
+  // named school — is the disclosure the deletion refused, with a login on top.
+  // `analytics.public` stays registered and still reads nothing: it is the name
+  // for figures chosen FOR an outside reader, and that surface has not been
+  // designed. A partner who should see a figure is the argument for building it,
+  // not for reusing the administrators' page.
+  partner: ['analytics.public', 'event.view', 'geocode.use', 'persona.preview.exit'],
 };
 
 /**
@@ -261,6 +369,20 @@ export const SUPER_ONLY = [
    * and audit access is exactly what such a helper should not quietly acquire.
    */
   'audit.read',
+  /**
+   * STARTING a persona preview (`persona.preview.exit` is the other half, and is
+   * held by every role — see the note beside it).
+   *
+   * SUPER_ONLY makes it ungrantable as well as owner-only: the check runs before
+   * per-user grants are consulted and `userCapabilities.js` refuses to store a
+   * grant naming one. That matters more here than the owner-only part. A preview
+   * cannot escalate — `can()` intersects the previewed role with the real one —
+   * so the risk is not that a grantee would gain access, it is that "let the
+   * helpdesk see what a student sees" is an extremely reasonable-sounding grant
+   * that would put a role switch in the hands of an account nobody audited for
+   * it. Ungrantable means that conversation happens as a role change instead.
+   */
+  'persona.preview',
 ];
 
 export const ALL_CAPABILITIES = [...new Set([
@@ -300,6 +422,29 @@ export function principalFor(
     withheld,
     impersonating: Boolean(actorId),
   };
+}
+
+/**
+ * The persona this principal is previewing as, or null.
+ *
+ * ── Why this is a function here rather than a comparison there ──
+ *
+ * "Is a preview in force" is `effectiveRole !== actualRole`, and a route that
+ * writes that out is a role-string comparison in a route — which Guard 1 fails
+ * the build on, correctly and for a reason that applies here. The comparison is
+ * one line and it is not an authorization decision, but it is the sort of line
+ * that gets copied to a place where the next reader treats it as one, and the
+ * spelling of a "preview" is exactly the kind of thing two files should not each
+ * hold an opinion about.
+ *
+ * Reporting only. Nothing may be authorised on the strength of this — `can()` is
+ * the only answer to whether something is allowed, and it applies the narrowing
+ * rule itself.
+ */
+export function previewPersonaOf(principal) {
+  if (!principal || !principal.actualRole) return null;
+  if (principal.effectiveRole === principal.actualRole) return null;
+  return principal.effectiveRole;
 }
 
 /** Deny-by-default authorization decision. */
@@ -347,13 +492,60 @@ export function can(principal, capability) {
    */
   if (Array.isArray(principal.withheld) && principal.withheld.includes(capability)) return false;
 
+  /**
+   * ── The narrowing rule ──
+   *
+   * When `effectiveRole` differs from `actualRole`, BOTH must permit the
+   * capability. A differing effective role can therefore only ever take
+   * capabilities away; it can never add one the account does not really hold.
+   *
+   * ── Why this is structural rather than a check at the place that sets it ──
+   *
+   * `effectiveRole` is what a persona preview changes, and a persona preview is
+   * a role switch. Role switches are the classic privilege-escalation shape: the
+   * bug is never "the feature was designed to escalate", it is "some path set
+   * the field without re-asking who was allowed to". There are several places
+   * that could come to set it — the preview routes, impersonation (v2.0), a
+   * future support tool — and a rule enforced at each of them is a rule that one
+   * of them will eventually miss, silently, with every functional test green.
+   *
+   * Enforced HERE, the guarantee does not depend on the caller at all. A
+   * `preview_persona` of 'super_admin' written straight into a student's row by
+   * a SQL-injection bug, a compromised admin, or a mistake in this repository
+   * grants that student exactly nothing, because their `actualRole` is read from
+   * the database on every request and still says 'student'.
+   *
+   * ── Why the intersection is computed by recursion, not by set maths ──
+   *
+   * Asking `can()` again under the real role means the wildcard, `SUPER_ONLY`,
+   * `withheld` and the grants rules are all applied to it too, by the same code.
+   * A hand-written intersection of the two capability arrays would be a second
+   * implementation of this function, and the day they disagree is the day the
+   * disagreement is a security bug.
+   */
+  if (principal.actualRole && principal.actualRole !== role) {
+    if (!ROLES.includes(principal.actualRole)) return false;
+    const asActual = { ...principal, effectiveRole: principal.actualRole, actualRole: null };
+    if (!can(asActual, capability)) return false;
+  }
+
   const roleCaps = CAPABILITIES[role] || [];
   if (roleCaps.includes('*')) return true;             // super_admin
   if (roleCaps.includes(capability)) return true;
 
-  // Per-user grants (Task 4) extend a role, but can never reach a super-only
-  // capability — otherwise `capability.grant` would be a path to root.
+  /**
+   * Per-user grants (Task 4) extend a role, but can never reach a super-only
+   * capability — otherwise `capability.grant` would be a path to root.
+   *
+   * They are also ignored while a different effective role is in force. A grant
+   * is an extension of what THIS account may do; a preview asks a different
+   * question — what does a plain member of that role see — and answering it with
+   * this account's extras would show the owner a student's view containing
+   * something no student has. That would make the preview quietly useless for
+   * the one job it exists to do.
+   */
   if (SUPER_ONLY_SET.has(capability)) return false;
+  if (principal.actualRole && principal.actualRole !== role) return false;
   return Array.isArray(principal.grants) && principal.grants.includes(capability);
 }
 

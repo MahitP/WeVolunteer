@@ -2,8 +2,9 @@ import jwt from 'jsonwebtoken';
 import { db } from './db.js';
 import { notificationService } from './services/notificationService.js';
 import { sendNotificationEmail, sendMail } from './email.js';
-import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, isEmailGateAllowed, COOKIE_NAME } from './config.js';
-import { principalFor, requiresSecondFactor } from './authz.js';
+import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, isEmailGateAllowed, COOKIE_NAME, REQUIRE_ADMIN_2FA, DEMO_MODE } from './config.js';
+import { principalFor, requiresSecondFactor, ROLE, ROLES } from './authz.js';
+import { SERVICE_HOUR_GOAL } from './milestones.js';
 import { grantsFor } from './userCapabilities.js';
 import { withheldCapabilitiesFor } from './organizerAgreement.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
@@ -12,6 +13,81 @@ import { sendErrorAlerts } from './alerting.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
 import { isSuspended, liftIfExpired, suspensionNotice } from './suspension.js';
 import { suspendedMayReach } from './suspendedAccess.js';
+
+/**
+ * The seeded demo administrator, and the ONLY account that may skip the policy.
+ *
+ * `db.js` creates it as `admin@example.gov` — an address nobody can receive mail
+ * at, which is the whole problem: the account is enrolled in EMAIL two-factor, so
+ * signing in requires a code delivered to a mailbox that does not exist. The
+ * account is unusable, and it is the account a developer needs to see the
+ * administrative surfaces at all.
+ *
+ * Matched on the address rather than the id so a re-seeded database with a fresh
+ * UUID still resolves, and lower-cased because addresses are compared that way
+ * everywhere else here.
+ */
+const DEMO_EXEMPT_EMAILS = new Set(['admin@example.gov']);
+
+/**
+ * Whether `user` is the demo administrator, in a process that is actually a demo.
+ *
+ * ── Why this cannot become a production backdoor ──
+ *
+ * Three independent things must all be true, and the first cannot be true in
+ * production at all: `server.js` refuses to boot when `IS_PRODUCTION && DEMO_MODE`.
+ * So the gate is not "an attacker must not guess the address" — the branch does
+ * not exist in a production process.
+ *
+ * On top of that it is a single hardcoded address rather than a pattern, and
+ * `super_admin` is excluded outright: an owner account must never be exempt, and
+ * naming that here means a demo database that somehow contained one still could
+ * not use this path. `db.js` already refuses to boot a demo database holding a
+ * super_admin, so this is the second lock on a door that is already bolted.
+ *
+ * This is deliberately NOT a general "development skips 2FA" switch. That is what
+ * `REQUIRE_ADMIN_2FA=false` is for, and it is a different, louder decision: it
+ * turns the policy off for every administrator, and production refuses to boot
+ * with it. This exempts one seeded fixture and nothing else.
+ */
+function isDemoExemptAccount(user) {
+  if (!DEMO_MODE || !user) return false;
+  /* `ROLE.SUPER_ADMIN`, not the literal — `authz.completeness.test.js` fails the
+     build on a role name compared as a string, and it is right to: this IS an
+     authorization decision, and the remedy its message names is importing the
+     name from the one table that defines it. */
+  if (user.role === ROLE.SUPER_ADMIN) return false;
+  return DEMO_EXEMPT_EMAILS.has(String(user.email || '').toLowerCase());
+}
+
+/**
+ * Whether the second-factor policy applies to `role` in this deployment.
+ *
+ * ── Why the policy is one function and not four expressions ──
+ *
+ * `requiresSecondFactor(role)` in authz.js answers "does the ROLE carry the
+ * rule"; `REQUIRE_ADMIN_2FA` answers "is the rule switched on here". Both are
+ * needed at four call sites — twice in this file, twice in
+ * routes/twoFactorRoutes.js — and for a while only two of them consulted the
+ * flag. The result was an asymmetry that is worse than either setting: with the
+ * flag off, an administrator could not be REQUIRED to enrol, and an
+ * administrator who had enrolled anyway was still refused when they tried to
+ * turn it off. Enrolment was optional and irreversible at the same time.
+ *
+ * `authz.js` cannot answer this itself — it imports nothing, deliberately, so
+ * that the capability table cannot acquire a dependency on configuration — so
+ * the composition lives here, once.
+ *
+ * @param {string} role   the account's role
+ * @param {object} [user] the account row, when the caller has it. Supplying it is
+ *   what enables the demo exemption above; a caller that omits it gets the plain
+ *   policy unchanged, which is the safe direction to fail.
+ */
+export function secondFactorRequiredFor(role, user = null) {
+  if (!REQUIRE_ADMIN_2FA) return false;
+  if (isDemoExemptAccount(user)) return false;
+  return requiresSecondFactor(role);
+}
 
 /**
  * Whether this specific session has been signed out.
@@ -90,12 +166,65 @@ export function purgeExpiredRevocations(now = new Date()) {
  * requiring a fully migrated database to assert that a field is spelled
  * correctly. Production never passes it.
  */
+/**
+ * The persona a row is previewing as, or null.
+ *
+ * Both columns must be present and the expiry must be in the future. A row with
+ * one of the pair written and not the other resolves to null — the safe
+ * direction, since the only thing this value can do is take capabilities away,
+ * and "no preview" is the account's real access.
+ *
+ * The persona is checked against `ROLES` rather than trusted. It reaches the
+ * database through a route that validates it, but this is the function that
+ * decides what `can()` is asked about, and a value that is not a role would make
+ * `can()` deny everything — locking the account out of the application until the
+ * expiry, from one bad write.
+ *
+ * ISO strings compared as strings, both sides in the same format. `expires_at`
+ * is written with `toISOString()` and read against another `toISOString()`; this
+ * module never compares one to SQLite's `datetime('now')`, which is the mistake
+ * `datetimeComparison.test.js` exists for.
+ */
+function previewPersonaFor(userRow) {
+  const persona = userRow?.preview_persona;
+  const expiresAt = userRow?.preview_expires_at;
+  if (!persona || !expiresAt) return null;
+  if (!ROLES.includes(persona)) return null;
+  if (expiresAt <= new Date().toISOString()) return null;
+  /* Previewing as your own role is not a preview; resolving it to null keeps
+     `effectiveRole !== actualRole` meaning what it says everywhere downstream. */
+  if (persona === userRow.role) return null;
+  return persona;
+}
+
+/**
+ * ── The persona preview ──
+ *
+ * `effectiveRole` is set from the row's preview columns, and that is the ONLY
+ * place in this application it is set to anything other than the real role.
+ *
+ * It cannot escalate, and the reason is not that this function checks anything.
+ * `can()` intersects the effective role with `actualRole` — which is read from
+ * the database on every request and is never the preview — so a preview column
+ * naming a more powerful role grants nothing at all. See the narrowing rule in
+ * `authz.js`. That is what makes it safe for this to be a plain column read
+ * rather than a gate: there is no value that could be written here, by any means,
+ * that would give the account more than it already has.
+ *
+ * Nothing about the account's own security follows the preview. Whether a second
+ * factor is required is decided from `userRow.role` at sign-in
+ * (`secondFactorRequiredFor`), before a principal exists — so an owner previewing
+ * as a student is still an owner as far as authentication is concerned.
+ */
 export function buildPrincipal(
   userRow,
   fetchGrants = (id) => grantsFor(db, id),
   computeWithheld = (row) => withheldCapabilitiesFor(db, row)
 ) {
-  const principal = principalFor(userRow, { withheld: computeWithheld(userRow) });
+  const principal = principalFor(userRow, {
+    withheld: computeWithheld(userRow),
+    effectiveRole: previewPersonaFor(userRow) || userRow?.role,
+  });
   let cached = null;
   Object.defineProperty(principal, 'grants', {
     get() {
@@ -185,9 +314,16 @@ export function authenticateToken(req, res, next) {
     // trusting the (up to 7-day-old) token payload, so a deleted user's
     // token stops working and a role/email change takes effect immediately.
     const userRow = db.prepare(
+      /* An explicit list, not `SELECT *`, and that is a trap worth naming: a
+         column this list omits is simply absent from the row `buildPrincipal`
+         resolves the principal from, with no error anywhere. The persona preview
+         columns were added to the schema and to `buildPrincipal` and did nothing
+         at all on a real request until they were added HERE — while every unit
+         test passed, because those build a principal from `SELECT *`. */
       `SELECT id, role, email, name, email_verified, token_version, account_status,
               suspended_until, suspended_at, suspension_reason,
-              tfa_enabled, tfa_email_enabled
+              tfa_enabled, tfa_email_enabled,
+              preview_persona, preview_expires_at
          FROM users WHERE id = ?`
     ).get(decodedUser.id);
 
@@ -276,7 +412,7 @@ export function authenticateToken(req, res, next) {
     // The capability principal. req.user is left exactly as it was, so every
     // existing handler and test keeps working while call sites migrate.
     req.principal = buildPrincipal(userRow);
-    req.principal.tfaRequired = requiresSecondFactor(userRow.role)
+    req.principal.tfaRequired = secondFactorRequiredFor(userRow.role, userRow)
       && !userRow.tfa_enabled && !userRow.tfa_email_enabled;
 
     /**
@@ -382,10 +518,27 @@ export function formatUserResponse(row) {
       ...(row.tfa_enabled ? ['totp'] : []),
       ...(row.tfa_email_enabled ? ['email'] : []),
     ],
-    tfaRequired: requiresSecondFactor(row.role) && !row.tfa_enabled && !row.tfa_email_enabled,
+    tfaRequired: secondFactorRequiredFor(row.role, row) && !row.tfa_enabled && !row.tfa_email_enabled,
     avatar: row.avatar,
     profile_picture_url: row.profile_picture_url,
     volunteeredHours: totalHours,
+    /**
+     * The threshold `volunteeredHours` is measured against, sent beside it.
+     *
+     * A platform-wide constant on a per-user payload, deliberately: it is the
+     * denominator of the figure on the line above, and both client views that
+     * draw that progress meter — VolunteerDashboard and VolunteerProfile — held
+     * their own `const HOUR_GOAL = 25` instead. Two copies of the district's
+     * Silver Award threshold in a different language from the server that decides
+     * whether the milestone is earned, so nothing could check them against it and
+     * the meter could read "8 hours to go" beside a milestone already shown as
+     * achieved.
+     *
+     * Delivered here rather than on a fetch so it is present on the first frame:
+     * the alternative was a meter that could not render its own maximum until a
+     * second request landed. Derived from the Silver tier in milestones.js.
+     */
+    serviceHourGoal: SERVICE_HOUR_GOAL,
     bio: row.bio,
     school: row.school,
     skills: row.skills ? JSON.parse(row.skills) : [],
@@ -861,22 +1014,15 @@ export function handleWaitlistPromotion(slotId) {
   }
 }
 
-export const MILESTONE_TIERS = [
-  { id: 'first-shift', label: 'First shift', hint: 'Completed your first volunteer shift', test: (h, e) => e >= 1 },
-  { id: 'ten-hours', label: '10 hours', hint: 'Ten hours of service', test: (h) => h >= 10 },
-  { id: 'five-events', label: '5 events', hint: 'Helped at five different events', test: (h, e) => e >= 5 },
-  { id: 'silver', label: 'Silver Award', hint: '25 hours — the district Silver Award target', test: (h) => h >= 25 },
-  { id: 'fifty-hours', label: '50 hours', hint: 'Fifty hours of service', test: (h) => h >= 50 },
-  { id: 'ten-events', label: '10 events', hint: 'Helped at ten different events', test: (h, e) => e >= 10 },
-  { id: 'century', label: '100 hours', hint: 'One hundred hours of service', test: (h) => h >= 100 }
-];
+/* `MILESTONE_TIERS` and `buildMilestones` were here too, exported, and were a
+   byte-for-byte duplicate of the copies in routes/userRoutes.js. Nothing
+   imported these: the only call site uses its own local copy, so this pair was
+   dead the day it was written.
 
-export function buildMilestones(hours, events) {
-  return MILESTONE_TIERS.map(m => ({
-    id: m.id,
-    label: m.label,
-    hint: m.hint,
-    earned: m.test(hours, events)
-  }));
-}
+   Deleted rather than left as a spare, because of what the duplication was OF.
+   These are the hour thresholds a student's service record is judged against —
+   including the 25-hour Silver Award — and two copies of a threshold diverge
+   silently. Whoever next raised the Silver target had a 50% chance of editing
+   the copy nobody calls, shipping a change that appeared to work because the
+   tests and the page both read the other one. */
 

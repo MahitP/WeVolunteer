@@ -34,12 +34,13 @@
  * An administrator sees three tiles; the platform owner sees seven. That
  * difference is the authority boundary, drawn honestly.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout,
 } from 'lucide-react';
 import { can } from '../authz';
+import { api } from '../utils/api';
 
 /**
  * Every administrative destination, with the capability that opens it.
@@ -139,8 +140,43 @@ export const AREAS = [
   },
 ];
 
-export default function ModerationCenter({ currentUser }) {
+/**
+ * Roles the owner can preview as.
+ *
+ * Hard-coded here rather than derived from `ROLES`, because this is a list of
+ * things a person picks from and it needs a readable label each — and because
+ * `super_admin` must not appear: previewing as your own role is resolved to no
+ * preview at all server-side, so offering it would be a button that does nothing.
+ * The server validates the choice regardless; this list decides what is offered,
+ * never what is allowed.
+ */
+const PERSONAS = [
+  { id: 'student', label: 'a student' },
+  { id: 'organizer', label: 'an organizer' },
+  { id: 'admin', label: 'an administrator' },
+  { id: 'partner', label: 'a partner' },
+];
+
+export default function ModerationCenter({ currentUser, onPreviewStarted }) {
   const areas = AREAS.filter(a => can(currentUser, a.cap));
+  const [persona, setPersona] = useState(PERSONAS[0].id);
+  const [previewError, setPreviewError] = useState(null);
+  const [starting, setStarting] = useState(false);
+
+  const startPreview = async () => {
+    setStarting(true);
+    setPreviewError(null);
+    try {
+      await api.startPersonaPreview(persona);
+      /* Refetch the session rather than patching state. The server has changed
+         what this account may do, so every gated control on every page is now
+         stale — including this one, which the owner is about to lose. */
+      await onPreviewStarted?.();
+    } catch (err) {
+      setPreviewError(err?.data?.error || err?.message || 'Could not start the preview.');
+      setStarting(false);
+    }
+  };
 
   return (
     <div className="page">
@@ -150,6 +186,34 @@ export default function ModerationCenter({ currentUser }) {
           The administrative areas this account can open. Each one re-checks your access when you get there.
         </p>
       </header>
+
+      {/*
+        * Previewing is offered only to an account that holds `persona.preview`,
+        * which is SUPER_ONLY and ungrantable. Hiding it is UX: the endpoint
+        * re-checks the capability, and the kernel makes a preview incapable of
+        * granting anything in any case — it intersects the previewed role with
+        * the real one, so the worst a forged request achieves is less access for
+        * whoever sent it.
+        */}
+      {can(currentUser, 'persona.preview') && (
+        <div className="persona-picker">
+          <label className="persona-picker-label" htmlFor="persona-preview">
+            See WeVolunteer as
+          </label>
+          <select
+            id="persona-preview"
+            value={persona}
+            onChange={(e) => setPersona(e.target.value)}
+            disabled={starting}
+          >
+            {PERSONAS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+          <button type="button" className="btn btn-secondary" onClick={startPreview} disabled={starting}>
+            {starting ? 'Starting…' : 'Start preview'}
+          </button>
+          {previewError && <span className="persona-banner-error">{previewError}</span>}
+        </div>
+      )}
 
       {/* A list, because it is one — `list-style: none` in CSS, so the semantics
           are there for a screen reader without the bullets being there for

@@ -44,12 +44,36 @@ export { CAPABILITIES, SUPER_ONLY, ROLES, ROLE, ALL_CAPABILITIES };
  * is the correct direction for a UX mirror — over-offering a control the server
  * will refuse, never hiding one it would have allowed.
  */
+/**
+ * ── Why the persona preview is threaded through too ──
+ *
+ * The server narrows a previewing owner's capabilities on every request. If this
+ * mirror did not, the owner would be shown their real administrative navigation
+ * while every one of those pages 403'd — the drift this module exists to prevent,
+ * in its most confusing form, on the one feature whose entire purpose is to show
+ * somebody an accurate picture of another role's experience.
+ *
+ * `role` in the payload stays the REAL role deliberately, so "signed in as" and
+ * every other consumer keeps telling the truth; the preview arrives beside it and
+ * is applied here.
+ *
+ * This still cannot grant anything. `decide` intersects the effective role with
+ * `actualRole` exactly as the server does — it is the same function — so a
+ * `preview` field forged in a response, or set by hand in a debugger, can only
+ * ever take controls away from the person doing it. The server would refuse the
+ * request regardless.
+ */
 export function can(user, capability) {
   if (!user) return false;
+  const persona = user.preview?.persona;
   return decide(
     principalFor(
       { id: user.id, role: user.role },
-      { grants: user.grants || [], withheld: user.withheld || [] }
+      {
+        grants: user.grants || [],
+        withheld: user.withheld || [],
+        effectiveRole: persona || user.role,
+      }
     ),
     capability
   );

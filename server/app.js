@@ -26,13 +26,17 @@ import messageRoutes from './routes/messageRoutes.js';
 import privacyRoutes from './routes/privacyRoutes.js';
 import oauthRoutes from './routes/oauthRoutes.js';
 import reauthRoutes from './routes/reauthRoutes.js';
+import personaRoutes from './routes/personaRoutes.js';
 import errorRoutes from './routes/errorRoutes.js';
 import legalRoutes from './routes/legalRoutes.js';
 import impactRoutes from './routes/impactRoutes.js';
 import invitationRoutes from './routes/invitationRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import appealsRoutes from './routes/appealsRoutes.js';
-import profilePictureRoutes from './routes/profilePictureRoutes.js';
+// UPLOADS_ROOT alongside the router on purpose: the module that WRITES the
+// pictures is the one that decides where they live, and the static mount below
+// serves exactly that. See the comment at the mount.
+import profilePictureRoutes, { UPLOADS_ROOT } from './routes/profilePictureRoutes.js';
 import badgeRoutes from './routes/badgeRoutes.js';
 import twoFactorRoutes from './routes/twoFactorRoutes.js';
 const __filename = fileURLToPath(import.meta.url);
@@ -518,6 +522,36 @@ export const lookupLimiter = rateLimit({
 });
 
 app.use('/api/auth/login', authLimiter);
+/**
+ * The second factor, limited SEPARATELY — `/api/auth/login` does not cover it.
+ *
+ * `app.use('/api/auth/login', …)` matches at path-segment boundaries, so it
+ * applies to `/api/auth/login` and `/api/auth/login/x` and NOT to
+ * `/api/auth/login-2fa`, which is a sibling rather than a child. The two
+ * endpoints that actually verify the second factor were therefore carrying
+ * nothing but the blanket `apiLimiter` — 600 requests per fifteen minutes per
+ * device — while the password step they follow carried ten.
+ *
+ * The in-handler counters in authRoutes.js (five per preauth token, twenty per
+ * account per rolling fifteen minutes) are what genuinely bound guessing, and
+ * they still are. This is the network-level floor underneath them: the account
+ * counters are per account, so without it a single device could work through
+ * many accounts at API volume, and each account's counter would look calm.
+ *
+ * Listed as two explicit mounts rather than a `/api/auth/login-2fa` prefix plus
+ * a hope, because the prefix behaviour above is exactly what went wrong here.
+ */
+app.use('/api/auth/login-2fa', authLimiter);
+/**
+ * Sending an emailed code is a MAIL endpoint, and authLimiter above does not
+ * bound it: `skipSuccessfulRequests` means a successful send costs nothing, and
+ * a successful send is exactly the request being abused. The handler's own
+ * sixty-second cooldown is per account, so it caps one mailbox at fifteen
+ * messages per quarter hour and says nothing about how many mailboxes one
+ * device may work through. The per-IP ceiling counts every request and is what
+ * makes this endpoint cost something in aggregate.
+ */
+app.use('/api/auth/login-2fa/email/send', mailIpCeilingLimiter);
 app.use('/api/auth/signup', authLimiter);
 // Both mail endpoints get the per-IP ceiling first, then the per-address limiter.
 // Order is immaterial to the outcome (both must pass) but reads in the direction of
@@ -599,6 +633,7 @@ app.use(accountRoutes);
 app.use(userRoutes);
 app.use(oauthRoutes);
 app.use(reauthRoutes);
+app.use(personaRoutes);
 app.use(eventRoutes);
 app.use(applicationRoutes);
 app.use(attendanceRoutes);
@@ -764,6 +799,49 @@ app.use('/api', (req, res) => {
   res.status(404).json({ error: `Not found: ${req.method} ${req.originalUrl}` });
 });
 
+/**
+ * Profile pictures, in every environment — not only in production.
+ *
+ * ── The incident ──
+ *
+ * This mount used to sit inside the `if (IS_PRODUCTION)` block below, next to
+ * the built client. Development is where the feature is actually used by hand,
+ * and it was the one environment in which nothing served the file: the browser
+ * asked Vite (:5173), Vite looked in its own publicDir, did not find the file the
+ * API had written under `server/public/`, and answered the SPA shell — 200 with
+ * `content-type: text/html`. The `<img>` was handed HTML, could not decode it,
+ * and showed nothing. "I can edit my avatar but it never appears."
+ *
+ * Two things are load-bearing here:
+ *
+ *   1. `UPLOADS_ROOT` is IMPORTED from the module that writes the files rather
+ *      than re-derived. Both sides used to compute `path.join(process.cwd(),
+ *      'public', 'uploads')`, which is `server/public/uploads` under the npm
+ *      workspace scripts and `public/uploads` under vitest — so the two agreed
+ *      in the test suite and only in the test suite. One constant, one place.
+ *   2. It is registered unconditionally, and ABOVE the SPA fallback, so a
+ *      request for a picture is answered by this middleware or by the 404 below
+ *      it — never by index.html. A miss that arrives as 200 text/html is
+ *      indistinguishable from success to everything except an image decoder.
+ *
+ * The bytes are user-supplied, so: no directory listings, no dotfiles, and
+ * `immutable` is safe because the filename carries `Date.now()` — replacing a
+ * picture mints a new URL, so the bytes behind a given one never change.
+ */
+app.use('/uploads', express.static(UPLOADS_ROOT, {
+  index: false,
+  dotfiles: 'deny',
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  }
+}));
+
+// Deliberately terminal: see (2) above. A picture that is gone is a 404, which
+// is a thing the client can recognise and fall back from.
+app.use('/uploads', (req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
 if (IS_PRODUCTION) {
   const distPath = path.join(__dirname, '../dist');
 
@@ -781,7 +859,6 @@ if (IS_PRODUCTION) {
    * points at the hashed assets, so a cached copy would keep sending returning
    * users to the previous deployment's chunks indefinitely.
    */
-  app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
   app.use(express.static(distPath, {
     setHeaders: (res, filePath) => {
       if (filePath.endsWith('index.html')) {

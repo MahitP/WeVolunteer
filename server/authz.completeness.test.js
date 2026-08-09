@@ -550,7 +550,7 @@ describe('authorization hygiene', () => {
          still the ?type= view discriminator, still grants nobody anything. The
          change that moved it IS an authorization decision — made in the NAV table
          nine hundred lines above — and this line still is not one. */
-      'src/App.jsx:1212': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      'src/App.jsx:1217': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
       'src/components/auth/TwoFactorRequiredWall.jsx:43': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'labels a role in the UX string "Your role as platform owner/administrator requires"' },
       'src/components/EventDetailsExperience.jsx:258': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply)' },
       'src/components/EventModal.jsx:67': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isOwner` is role AND id; the id half is the correct ownership test, the role half wants can(event.edit.own)' },

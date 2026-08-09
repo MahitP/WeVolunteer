@@ -144,6 +144,16 @@ export const api = {
     return data;
   },
 
+  /* The persona preview. Starting one needs `persona.preview` (owner-only);
+     ending one needs `persona.preview.exit`, which every role holds so that a
+     preview can never lock its own exit away. Both are re-checked server-side. */
+  startPersonaPreview: async (persona) => apiFetch('/api/admin/persona-preview', {
+    method: 'POST',
+    body: JSON.stringify({ persona })
+  }),
+
+  endPersonaPreview: async () => apiFetch('/api/admin/persona-preview', { method: 'DELETE' }),
+
   send2FAEmailCode: async () => {
     return apiFetch('/api/auth/login-2fa/email/send', { method: 'POST' });
   },
@@ -968,12 +978,17 @@ export const api = {
    * read against each other, and a client that fetched four of six could render
    * a total without the caveat that made it honest.
    */
+  /* The tag vocabulary, for the organizer form's suggestions. The browse screen
+     gets the same list inside its event-page response and does not need this. */
+  fetchEventTags: async () => apiFetch('/api/events/tags'),
+
   fetchImpact: async () => apiFetch('/api/impact'),
 
-  /* The public figures. A separate endpoint rather than a parameter on the one
-     above: it answers to anybody at all and emits a deliberately smaller payload.
-     See server/impact.js's buildPublicImpact for what it leaves out and why. */
-  fetchPublicImpact: async () => apiFetch('/api/public/impact'),
+  /**
+   * The high-level community figures for superadmins.
+   * See server/impact.js's buildAdminImpact for what it leaves out and why.
+   */
+  fetchAdminImpact: async () => apiFetch('/api/admin/impact'),
 
   /* ── Administrator invitations (§4.3) ─────────────────────────────────────
      The token is never returned by any of these. It is emailed to the invited

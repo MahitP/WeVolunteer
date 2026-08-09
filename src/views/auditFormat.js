@@ -31,6 +31,14 @@
 export const TONES = Object.freeze({ GRAVE: 'grave', NOTABLE: 'notable', ROUTINE: 'routine' });
 
 const ACTIONS = {
+  /* The owner browsing as another role. NOTABLE rather than routine: it is the
+     only action on this platform that changes what a principal may do without
+     anybody having acted on somebody else, so "the owner was a student between
+     14:02 and 14:31" needs to be answerable from these rows. Not GRAVE — it can
+     only ever REMOVE the owner's own access (see the narrowing rule in authz.js),
+     so it is a thing to be able to account for, not a thing to be alarmed by. */
+  PERSONA_PREVIEW_START:    ['Started previewing as another role', TONES.NOTABLE],
+  PERSONA_PREVIEW_END:      ['Stopped previewing as another role', TONES.ROUTINE],
   ACCOUNT_SUSPENDED:        ['Account suspended', TONES.GRAVE],
   ACCOUNT_UNSUSPENDED:      ['Suspension lifted', TONES.NOTABLE],
   ACCOUNT_WARNED:           ['Formal warning issued', TONES.GRAVE],
@@ -38,6 +46,14 @@ const ACTIONS = {
   /* Reading the message bodies preserved with a safety report. The most
      invasive power on this platform, and the reason the read is double-logged. */
   REPORT_EVIDENCE_VIEWED:   ['Report evidence read', TONES.GRAVE],
+  /* Manual badge awards and revocations. Routine rather than notable: a badge
+     is a recognition, it carries no authority, and an administrator handing one
+     out is ordinary work. They are logged at all because the alternative is a
+     permanent record on a student's profile that nobody can attribute — and a
+     revocation, in particular, is somebody taking a recognition back off a
+     child's page, which they should have to put their name to. */
+  BADGE_AWARDED:            ['Badge awarded', TONES.ROUTINE],
+  BADGE_REVOKED:            ['Badge revoked', TONES.ROUTINE],
   ADMIN_PROMOTED:           ['Administrator promoted', TONES.GRAVE],
   /* Invitations. `ADMIN_INVITED` is grave because a pending invitation is
      administrator authority awaiting collection — the offer is the consequential
