@@ -77,9 +77,14 @@ describe('denialDetail', () => {
    * than printing `event.moderate` at a fifteen-year-old.
    */
   it('falls back to a generic reason rather than showing a capability id', () => {
-    const detail = denialDetail({ requiredCap: 'analytics.platform' });
+    /* `event.moderate` — the capability this test's own comment names, and one
+       that gates no route, so the sweep below cannot start requiring a name for
+       it. It previously used `analytics.platform`, which became a route-gated
+       capability with `/admin/impact` and therefore had to be given a name;
+       that made this assertion and the sweep below contradict each other. */
+    const detail = denialDetail({ requiredCap: 'event.moderate' });
     expect(detail.feature).toBe(null);
-    expect(detail.reason).not.toMatch(/analytics\.platform/);
+    expect(detail.reason).not.toMatch(/event\.moderate/);
     expect(detail.reason).toMatch(/this area/);
   });
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 /**
  * Every icon rendered below must be imported here.
  *
@@ -40,6 +41,7 @@ const STATUS_TAG = {
 };
 
 export default function AdminDashboard({ addToast, user }) {
+  const { hash } = useLocation();
   const [pendingOrganizers, setPendingOrganizers] = useState([]);
   const [events, setEvents] = useState([]);
   const [totals, setTotals] = useState(null);
@@ -66,13 +68,39 @@ export default function AdminDashboard({ addToast, user }) {
       setTotals(stats);
       setReports(rpts);
     } catch (err) {
-      addToast(`Could not load the Moderation Center: ${err.message}`, 'error');
+      addToast(`Could not load the dashboard: ${err.message}`, 'error');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => { loadData(); }, []);
+
+  /**
+   * Scroll to `#reports` / `#organizer-requests` once there is something there.
+   *
+   * The Moderation Center links to sections of this page, and the browser
+   * cannot resolve those fragments itself: it looks for the element the moment
+   * the document loads, which is several hundred milliseconds before the four
+   * fetches in `loadData` return and the sections exist. Left to the browser the
+   * link silently does nothing, which reads as a broken tile.
+   *
+   * Keyed on `loading` so it runs when the content appears, and on `hash` so
+   * clicking a second tile from the same page still moves. `smooth` is dropped
+   * for anybody who has asked for reduced motion — this is a jump of most of a
+   * screen height, which is exactly the kind that causes trouble.
+   */
+  useEffect(() => {
+    if (loading || !hash) return;
+    const target = document.getElementById(hash.slice(1));
+    if (!target) return;
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    /* Optional call, not because a browser might lack it, but because failing to
+       scroll must never be able to take the page down. This effect runs on the
+       administrative dashboard; the worst acceptable outcome of a missing
+       convenience is that the reader lands at the top and scrolls themselves. */
+    target.scrollIntoView?.({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+  }, [loading, hash]);
 
   /**
    * Closing a report, with the resolution and the note the server requires.
@@ -227,7 +255,11 @@ export default function AdminDashboard({ addToast, user }) {
           told the reader nothing while making the two sound like different places.
           The other section here is "Organizer requests", which is also moderation
           — what distinguishes this one is that it holds reports. */}
-      <section>
+      {/* `id` is the target of the Moderation Center's Reports tile
+          (`/#reports`). Scrolled to by the hash effect above once the data has
+          arrived — see the comment there for why it cannot be left to the
+          browser. */}
+      <section id="reports">
         <div className="section-head">
           <h2>Reports</h2>
           {reports.filter(r => r.status === 'open').length > 0 && (
@@ -403,7 +435,8 @@ export default function AdminDashboard({ addToast, user }) {
       </section>
 
       {/* ── Approval queue: the admin's actual job ── */}
-      <section>
+      {/* `id`: the Moderation Center's Organizer requests tile (`/#organizer-requests`). */}
+      <section id="organizer-requests">
         <div className="section-head">
           <h2>Organizer requests</h2>
           {pendingOrganizers.length > 0 && (

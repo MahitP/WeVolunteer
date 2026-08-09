@@ -240,8 +240,6 @@ describe('no hand-written class dangles either', () => {
     'action-panel-apply', 'back-btn', 'data-export-modal', 'empty-state',
     'event-detail-hero-main', 'location-card-distance', 'notif-trigger',
     'settings-section', 'settings-section-content', 'tabpanel-content',
-    // Unstyled classes from BadgesList.jsx component development
-    'badge-item', 'card-header', 'card-title', 'loading-skeleton', 'text-secondary'
   ]);
 
   it('has no class in JSX that no stylesheet defines', () => {
