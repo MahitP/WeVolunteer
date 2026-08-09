@@ -264,7 +264,19 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
      * never fail because a notification could not be created.
      */
     try {
-      const recipients = friendsToNotify(db, req.user.id);
+      /**
+       * An organizer who set the roster private gets to mean it.
+       *
+       * `attendee_visibility: 'private'` already refuses the roster even to an
+       * accepted co-attendee (contentRoutes.js). Telling this volunteer's
+       * friends "X signed up for <title>" would disclose exactly the
+       * participation that setting exists to withhold, to people who are not on
+       * the event at all — so the fan-out is skipped entirely for such events.
+       * The organizer's control and the volunteer's control are both honoured;
+       * either one alone empties the list.
+       */
+      const rosterPublic = (event.attendee_visibility || 'accepted') === 'accepted';
+      const recipients = rosterPublic ? friendsToNotify(db, req.user.id) : [];
       if (recipients.length > 0) {
         const actor = db.prepare('SELECT name, username FROM users WHERE id = ?').get(req.user.id);
         const payload = {

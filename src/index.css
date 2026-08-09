@@ -8160,6 +8160,12 @@ input:disabled + .premium-slider {
    referenced from JSX.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* `.chips` predates v1.3 and was only ever used on a <div>, so it never needed
+   to suppress list markers. The profile and organization pages use a <ul>,
+   which is the right element for a list of tags — this makes the existing class
+   work on one. */
+.chips { list-style: none; }
+
 /* ── Shared: a larger avatar for page headers ─────────────────────────────── */
 
 .avatar-lg {
@@ -8236,6 +8242,24 @@ input:disabled + .premium-slider {
 }
 
 .profile-stats { margin-bottom: var(--s2); }
+
+/* The shared `.stat-value` / `.stat-label` rules assume block children; this
+   block uses spans (so the icon can sit inline with the number), which left the
+   label running straight into the digit — "1EVENTS SIGNED UP". Stacking them
+   here restores the intended shape without touching the shared rules. */
+.profile-stats .stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.profile-stats .stat-value {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+.profile-stats .stat-label { display: block; }
 
 .profile-awaiting,
 .profile-external {
@@ -8489,3 +8513,15 @@ input:disabled + .premium-slider {
 
   .ext-row { gap: var(--s2); }
 }
+
+/* The editable hours field on the attendance screen. Narrow, right-aligned, and
+   sized to match the `.hourspill` it replaces so a row does not reflow when a
+   volunteer is marked present. */
+.hoursedit {
+  width: 5rem;
+  flex-shrink: 0;
+  text-align: right;
+  padding: var(--s1) var(--s2);
+}
+
+.attendance-hourshint { margin: var(--s2) 0 0; }

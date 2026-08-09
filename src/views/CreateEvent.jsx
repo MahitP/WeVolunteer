@@ -26,6 +26,27 @@ export default function CreateEvent({
   addToast,
   setActiveTab
 }) {
+  /**
+   * The organizations this account may publish under.
+   *
+   * `?mine=true` returns the ones they belong to; the select then offers only
+   * those they MANAGE, because publishing under an organization's name notifies
+   * all of its members and only a manager may do that. The server re-checks with
+   * the same `canManage` the organization routes use — this list exists so an
+   * organizer is not offered a choice that will be refused.
+   */
+  const [manageableOrgs, setManageableOrgs] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.fetchOrganizations({ mine: true, limit: 50 })
+      .then(res => { if (!cancelled) setManageableOrgs(res.organizations || []); })
+      /* A missing list is not an error worth showing: the field is optional, so
+         it simply does not appear. */
+      .catch(() => { if (!cancelled) setManageableOrgs([]); });
+    return () => { cancelled = true; };
+  }, []);
+
   const [form, setForm] = useState({
     title: '',
     category: 'School',
@@ -34,6 +55,8 @@ export default function CreateEvent({
     location: { location: '', address: null, latitude: null, longitude: null },
     applicationDeadline: '',
     autoApprove: false,
+    organizationId: '',
+    creditsHours: true,
     attendeeVisibility: 'accepted',
     /* `{tag, label}` pairs, the same shape the API returns — so an edit loads its
        existing tags straight into this state with no conversion. */
@@ -192,6 +215,11 @@ export default function CreateEvent({
         applicationDeadline: new Date(form.applicationDeadline).toISOString(),
         autoApprove: form.autoApprove,
         attendeeVisibility: form.attendeeVisibility,
+        /* Empty string means "no organization" — the server takes null or an
+           absent field, and only a manager of the named organization may set
+           one (it re-checks; this select only lists the ones they manage). */
+        organizationId: form.organizationId || null,
+        creditsHours: form.creditsHours,
         /* Sent as the raw labels. The server normalises and de-duplicates them —
            it is the authority on what a tag is, and sending the client's
            normalised keys would make the display casing the client's decision. */
@@ -279,6 +307,59 @@ export default function CreateEvent({
               <span className="field-hint">
                 Shown to volunteers once they're confirmed. You can post changes later as an update.
               </span>
+            </div>
+
+            {manageableOrgs.length > 0 && (
+              <div className="field">
+                <label htmlFor="ce-org">Organization <span className="dim">(optional)</span></label>
+                <select id="ce-org" className="select" value={form.organizationId}
+                  onChange={e => set('organizationId', e.target.value)}>
+                  <option value="">No organization</option>
+                  {manageableOrgs.map(org => (
+                    <option key={org.id} value={org.id}>{org.name}</option>
+                  ))}
+                </select>
+                <span className="field-hint">
+                  The event appears on that organization&rsquo;s page, and its members are notified
+                  that a new opportunity is open.
+                </span>
+              </div>
+            )}
+
+            {/**
+              * Hours are OPTIONAL, and the wording says what the alternative
+              * means rather than naming a flag. Some real volunteering — a
+              * donation drive, a one-off collection — is not measured in time,
+              * and crediting "0 hours" for it would read as a failure rather
+              * than as a category.
+              */}
+            <div className="field">
+              <span className="label">Service hours</span>
+              <div className="stack-sm">
+                <label className="check" data-checked={form.creditsHours ? 'true' : 'false'}>
+                  <input type="radio" name="creditsHours" checked={form.creditsHours}
+                    onChange={() => set('creditsHours', true)} />
+                  <span>
+                    <span className="check-title">Award service hours</span>
+                    <span className="check-desc">
+                      Volunteers are credited for the time they work. You confirm the actual hours
+                      on the attendance screen after each shift.
+                    </span>
+                  </span>
+                </label>
+                <label className="check" data-checked={!form.creditsHours ? 'true' : 'false'}>
+                  <input type="radio" name="creditsHours" checked={!form.creditsHours}
+                    onChange={() => set('creditsHours', false)} />
+                  <span>
+                    <span className="check-title">Participation only — no hours</span>
+                    <span className="check-desc">
+                      For activities time doesn&rsquo;t measure, like a donation drive. You still take
+                      attendance, and it still counts toward a volunteer&rsquo;s events attended —
+                      it just credits no hours.
+                    </span>
+                  </span>
+                </label>
+              </div>
             </div>
 
             <div className="field">

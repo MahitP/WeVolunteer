@@ -104,8 +104,24 @@ function buildProfileResponse(req, row) {
      * The viewer's own standing, not a property of the subject. Kept in a
      * sibling key rather than merged into `profile` so that no caller can
      * mistake "you have muted this person" for something the subject published.
+     *
+     * `restrictedBy` is STRIPPED before it goes over the wire. Restriction is
+     * documented in relationships.js as invisible to its subject — that is the
+     * whole difference between it and blocking, and the reason a student who
+     * wants distance without a confrontation has something to reach for. Sending
+     * the flag told the restricted person directly, and the client rendered it
+     * as a missing Add-friend button that appears on every other profile. To the
+     * restricted party this must be indistinguishable from no relationship,
+     * which is what deleting the key achieves.
+     *
+     * The 409 on a friend request is a knowable signal and a deliberate
+     * trade-off — refusing silently would be a worse lie. Leaking the state on
+     * every profile GET was not a trade-off, just an oversight.
      */
-    viewer: relationshipState(db, viewerId, row.id),
+    viewer: (() => {
+      const { restrictedBy, ...visible } = relationshipState(db, viewerId, row.id);
+      return visible;
+    })(),
   };
 }
 
@@ -120,7 +136,28 @@ function buildProfileResponse(req, row) {
 router.get('/api/users/:id/service-record', authenticateToken, requireCap('directory.read'), (req, res) => {
   const targetId = req.params.id;
   const isSelf = targetId === req.principal.userId;
-  if (!isSelf && !can(req.principal, 'user.contact.read')) {
+
+  /**
+   * The same rule `GET /api/users/:id/profile` applies to its `completed`
+   * array, restated here against the same three conditions rather than a
+   * narrower set of two.
+   *
+   * Two endpoints returning the same rows under different rules is the failure
+   * this file's header warns about, and it does not matter which of the two is
+   * stricter — the looser one is the effective policy either way. An organizer
+   * reviewing somebody who applied to THEIR event is the applicant-review
+   * workflow and is a reviewed decision (see the note in userRoutes.js and the
+   * test that pins it); it requires an application this organizer cannot
+   * manufacture.
+   */
+  const hostsApplicant = can(req.principal, 'applicant.review') && Boolean(db.prepare(`
+    SELECT 1 FROM applications a
+    JOIN events e ON e.id = a.event_id
+    WHERE a.user_id = ? AND e.organizer_id = ?
+    LIMIT 1
+  `).get(targetId, req.principal.userId));
+
+  if (!isSelf && !can(req.principal, 'user.contact.read') && !hostsApplicant) {
     return res.status(403).json({ error: 'That volunteer\'s detailed service record is not public.', code: 'forbidden' });
   }
   const row = db.prepare(`SELECT id FROM users WHERE id = ? AND ${LIVE_USER}`).get(targetId);
@@ -337,6 +374,7 @@ router.get('/api/me/friends', authenticateToken, requireCap('relationship.manage
     WHERE r.kind = 'friend' AND (r.actor_id = ? OR r.subject_id = ?)
       AND u.account_status = 'active'
     ORDER BY u.name COLLATE NOCASE
+    LIMIT 500
   `).all(me, me, me);
 
   const friends = [], incoming = [], outgoing = [];

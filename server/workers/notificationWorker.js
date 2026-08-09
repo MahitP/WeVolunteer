@@ -3,6 +3,43 @@ import { recordError } from '../errorReporter.js';
 import { sendMail, buildHtmlTemplate, escapeHtml } from '../email.js';
 import { getInAppContent } from '../services/notificationContent.js';
 
+/**
+ * The notification kinds whose email may carry the shift's date, time,
+ * location and organizer.
+ *
+ * Every one of these is a message to somebody who is GOING, or was going: the
+ * details are the useful part, and the recipient already has them from the
+ * event page. A kind that is absent from this set gets the plain body and the
+ * link, and nothing else.
+ *
+ * `FRIEND_SIGNED_UP` is the reason this set exists. It is a message ABOUT
+ * another student, it carries an `eventId` only so the in-app row can link
+ * somewhere, and its in-app copy is written to name no time and no place. An
+ * email that appended a street address and an hour under a named minor's name
+ * undid all of that, into an inbox that may be shared, forwarded, or retained
+ * indefinitely.
+ *
+ * Add to this set deliberately. The default for anything new is no card.
+ */
+const EVENT_CARD_EVENTS = new Set([
+  'APPLICATION_ACCEPTED',
+  'APPLICATION_WAITLISTED',
+  'WAITLIST_PROMOTED',
+  'EVENT_REMINDER_24H',
+  'EVENT_REMINDER_2H',
+  'EVENT_DEADLINE_APPROACHING',
+  'EVENT_CANCELLED',
+  'EVENT_UPDATED',
+  'EVENT_LOCATION_CHANGED',
+  'EVENT_TIME_CHANGED',
+  'HOURS_APPROVED',
+  'HOURS_ADJUSTED',
+  'CERTIFICATE_AVAILABLE',
+  'REMOVED_FROM_EVENT',
+  'SCHEDULE_CONFLICT_WARNING',
+]);
+
+
 const APP_NAME = process.env.APP_NAME || 'WeVolunteer';
 const APP_URL = process.env.APP_URL || (process.env.NODE_ENV === 'production' ? null : 'http://localhost:5173');
 
@@ -322,7 +359,25 @@ async function handleEmailJob(job) {
     <p style="font-size: 16px; line-height: 1.5;">${bodyHtml}</p>
   `;
 
-  if (payload && payload.eventId) {
+  /**
+   * The event-details card is opt-IN by notification kind, not "any payload
+   * that happens to carry an eventId".
+   *
+   * The card renders the shift's date, time, LOCATION and organizer. That is
+   * correct in an email to somebody who is going — an acceptance, a reminder, a
+   * cancellation — and wrong in an email ABOUT somebody else. `FRIEND_SIGNED_UP`
+   * carries an `eventId` purely so the in-app notification can link to the
+   * event, and its content case in notificationContent.js is written carefully
+   * to name no time and no place for exactly this reason. Keying the card off
+   * the presence of `eventId` defeated that: the in-app row said "Ana signed up
+   * for Beach Cleanup" and the email said it with a street address and an hour
+   * underneath, to an inbox nobody controls.
+   *
+   * So: an allowlist. A new event-scoped notification gets no card until
+   * somebody decides it should have one, which is the safe default for a
+   * message about a child's whereabouts.
+   */
+  if (payload && payload.eventId && EVENT_CARD_EVENTS.has(event)) {
     try {
       /**
        * The shift time comes from `slots`, not `events`.

@@ -209,7 +209,10 @@ function EventList({ title, events, muted = false }) {
       <ul className="list">
         {events.map(e => (
           <li key={e.id} className="list-row">
-            <Link to={`/events/${e.id}`} className={muted ? 'card-link dim' : 'card-link'}>
+            {/* `/events?event=<id>` — there is no `/events/:id` route, and the
+                catch-all is a real 404. This is the same form RedirectToEvent
+                sends `/events/:id/edit` to. */}
+            <Link to={`/events?event=${e.id}`} className={muted ? 'card-link dim' : 'card-link'}>
               <span className="row-between org-event">
                 <span>{e.title}</span>
                 <span className="muted org-event-meta">

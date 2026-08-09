@@ -256,6 +256,33 @@ router.patch('/api/organizations/:key/members/:userId', authenticateToken, requi
   if (!['member', 'manager'].includes(memberRole)) {
     return res.status(400).json({ error: 'Role must be member or manager.', field: 'memberRole' });
   }
+  /**
+   * Demoting the last manager is the same defect as letting them leave, and the
+   * leave route guards it while this one did not.
+   *
+   * Without this, the sole manager demotes themselves (200), the organization
+   * now has zero managers, and the leave guard then passes too because it reads
+   * `member_role = 'member'` — so the invariant is defeated in two requests
+   * rather than one. Same check, same reason: an organization nobody can manage
+   * is recoverable only by an administrator, and only if somebody notices.
+   */
+  if (memberRole === 'member') {
+    const current = db.prepare(
+      'SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?'
+    ).get(row.id, req.params.userId);
+    if (current?.member_role === 'manager') {
+      const managers = db.prepare(
+        `SELECT COUNT(*) AS n FROM organization_members WHERE organization_id = ? AND member_role = 'manager'`
+      ).get(row.id).n;
+      if (managers <= 1) {
+        return res.status(409).json({
+          error: 'This is the only manager. Make somebody else a manager first.',
+          code: 'last_manager',
+        });
+      }
+    }
+  }
+
   const { changes } = db.prepare(
     'UPDATE organization_members SET member_role = ? WHERE organization_id = ? AND user_id = ?'
   ).run(memberRole, row.id, req.params.userId);

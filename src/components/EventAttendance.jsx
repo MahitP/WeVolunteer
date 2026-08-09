@@ -13,6 +13,14 @@ export default function EventAttendance({
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [attendanceMap, setAttendanceMap] = useState({});
+  /**
+   * Actual hours, keyed by application id, only for rows the organizer edited.
+   *
+   * Sparse on purpose: an untouched row sends nothing, and the server prices it
+   * from the slot exactly as it always has. Sending every row's current value
+   * would turn opening this screen into an edit of everybody's record.
+   */
+  const [hoursMap, setHoursMap] = useState({});
   const [touchedIds, setTouchedIds] = useState(new Set());
   const [attendanceReason, setAttendanceReason] = useState('');
   const [loading, setLoading] = useState(true);
@@ -97,7 +105,17 @@ export default function EventAttendance({
     setSubmitting(true);
     try {
       const payload = Object.fromEntries([...touchedIds].filter(id => id in attendanceMap).map(id => [id, !!attendanceMap[id]]));
-      const res = await api.submitAttendance(event.id, payload, attendanceReason);
+      /* Only rows that were actually edited, and only ones marked present —
+         hours on an absent volunteer are meaningless and the server ignores
+         them anyway. */
+      const hours = Object.fromEntries(
+        Object.entries(hoursMap)
+          .filter(([id, v]) => v !== '' && v != null && attendanceMap[id])
+          .map(([id, v]) => [id, Number(v)])
+      );
+      const res = await api.submitAttendance(
+        event.id, payload, attendanceReason, Object.keys(hours).length ? hours : undefined
+      );
       const credited = res.credited?.length || 0;
       const revoked = res.revoked?.length || 0;
       localStorage.removeItem(`wev_draft_attendance_${event.id}`);
@@ -115,7 +133,18 @@ export default function EventAttendance({
   }
   const markedCount = markableApps.filter(a => touchedIds.has(a.id)).length;
   const presentCount = markableApps.filter(a => touchedIds.has(a.id) && attendanceMap[a.id]).length;
-  const correctionCount = markableApps.filter(a => touchedIds.has(a.id) && a.attendance && a.attendance.present !== !!attendanceMap[a.id]).length;
+  /**
+   * A correction is any change to a record that already exists — including an
+   * hours-only change. The server refuses one without a reason (400
+   * `reason_required`), so the field has to appear for it here too, or the
+   * organizer meets a refusal with no way to satisfy it.
+   */
+  const correctionCount = markableApps.filter(a => {
+    if (!touchedIds.has(a.id) || !a.attendance) return false;
+    if (a.attendance.present !== !!attendanceMap[a.id]) return true;
+    const edited = hoursMap[a.id];
+    return edited !== undefined && edited !== '' && Number(edited) !== a.attendance.hoursAwarded;
+  }).length;
   return <>
       <div className="modal-body">
         <div className="alert alert-brand s-22c500">
@@ -161,10 +190,47 @@ export default function EventAttendance({
                     </span>
                     {!isTouched && <span className="status status-muted">Not marked</span>}
                     {changesExisting && <span className="status status-pending">Changes record</span>}
-                    <span className="hourspill">{formatHours(app.attendance?.hoursAwarded ?? app.slot?.hours)}</span>
+                    {/**
+                      * The number is EDITABLE when the volunteer is marked
+                      * present, and the scheduled duration is only its default.
+                      * A volunteer rostered for four hours who left after two
+                      * and a half did two and a half.
+                      *
+                      * There is deliberately no "left early" checkbox on its
+                      * own: a boolean cannot say how early, so it would either
+                      * credit nothing or guess. The input is the source of
+                      * truth, and the hint below the list explains it.
+                      *
+                      * `onClick`/`onKeyDown` stopPropagation because this sits
+                      * inside a <label> whose click toggles the checkbox —
+                      * without it, typing a number would un-mark the volunteer.
+                      */}
+                    {isPresent && event.creditsHours !== false ? (
+                      <input
+                        type="number" className="input hoursedit" min="0" max="24" step="0.25"
+                        aria-label={`Hours credited to ${app.volunteer?.name}`}
+                        value={hoursMap[app.id] ?? (app.attendance?.hoursAwarded ?? app.slot?.hours ?? '')}
+                        onClick={e => e.stopPropagation()}
+                        onKeyDown={e => e.stopPropagation()}
+                        onChange={e => setHoursMap(prev => ({ ...prev, [app.id]: e.target.value }))}
+                      />
+                    ) : (
+                      <span className="hourspill">
+                        {event.creditsHours === false
+                          ? 'Participation'
+                          : formatHours(app.attendance?.hoursAwarded ?? app.slot?.hours)}
+                      </span>
+                    )}
                   </label>;
           })}
             </div>
+
+            {event.creditsHours !== false && (
+              <p className="dim small attendance-hourshint">
+                Hours default to the length of the shift. Change the number if a volunteer left
+                early or stayed on — what you enter here is what gets credited.
+              </p>
+            )}
 
             {correctionCount > 0 && <div className="field s-fc751d">
                 <label htmlFor="att-reason">

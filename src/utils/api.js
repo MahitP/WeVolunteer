@@ -606,9 +606,14 @@ export const api = {
   // ── Attendance ──────────────────────────────────
   // Finalising credits hours and is only possible once a shift has ended.
   // `reason` is required when it changes a record that already exists.
-  submitAttendance: async (eventId, attendanceMap, reason) => apiFetch(`/api/events/${eventId}/attendance`, {
+  /**
+   * `hoursMap` is optional and keyed by application id, like `attendanceMap`.
+   * Omitting it keeps the pre-v1.3 behaviour exactly: each credit is priced
+   * from the slot's scheduled duration.
+   */
+  submitAttendance: async (eventId, attendanceMap, reason, hoursMap) => apiFetch(`/api/events/${eventId}/attendance`, {
     method: 'POST',
-    body: JSON.stringify({ attendanceMap, reason })
+    body: JSON.stringify({ attendanceMap, reason, hoursMap })
   }),
 
   // ── Check-in ────────────────────────────────────
