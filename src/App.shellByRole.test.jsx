@@ -382,17 +382,24 @@ describe('/profile, per role', () => {
   });
 
   /**
-   * A page, not a redirect loop — which is what `denied` gave the platform
-   * owner before. It is deliberately NOT the organizer view: both profile
-   * endpoints filter by role in SQL (`role = 'student'`, `role IN
-   * ('organizer','admin')`), so either real view would render a 404 for a
-   * super_admin. Widening those queries is a server change.
+   * A page, not a redirect loop — which is what `denied` gave the platform owner
+   * before, and not the empty state that replaced it either.
+   *
+   * It is deliberately NOT one of the two real profile views: both endpoints
+   * filter by role in SQL (`role = 'student'`, `role IN ('organizer','admin')`),
+   * so either would render a 404 dressed as a profile for a super_admin.
+   * `OwnerProfile` is built from `/api/auth/me`, which the shell already holds,
+   * so it needs no endpoint and no widening of the two that exist.
    */
   it('super_admin gets a real page instead of being bounced to `/`', async () => {
     signedInAs(USER('super_admin'));
     renderAt('/profile');
-    expect(await screen.findByText(/No service record for this account/i)).toBeInTheDocument();
+    expect(await screen.findByText(/This account administers WeVolunteer/i)).toBeInTheDocument();
+    expect(screen.getByText(/Platform owner/i)).toBeInTheDocument();
     expect(screen.queryByTestId('admin-dash')).not.toBeInTheDocument();
+    /* And not either of the record-based views, which would 404 for this role. */
+    expect(screen.queryByTestId('org-profile')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('vol-profile')).not.toBeInTheDocument();
   });
 });
 
