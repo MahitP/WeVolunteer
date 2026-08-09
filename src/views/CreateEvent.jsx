@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Calendar, Plus, AlertCircle, Trash2, Info, X } from 'lucide-react';
 import { formatHours } from '../utils/helpers';
 import { LocationPicker } from '../components/location';
+import TagInput from '../components/common/TagInput';
+import DatePicker from '../components/common/DatePicker';
+import { api } from '../utils/api';
 const CATEGORIES = [{
   value: 'School',
   label: 'School project'
@@ -31,9 +34,28 @@ export default function CreateEvent({
     location: { location: '', address: null, latitude: null, longitude: null },
     applicationDeadline: '',
     autoApprove: false,
-    attendeeVisibility: 'accepted'
+    attendeeVisibility: 'accepted',
+    /* `{tag, label}` pairs, the same shape the API returns — so an edit loads its
+       existing tags straight into this state with no conversion. */
+    tags: []
   });
   const [errors, setErrors] = useState({});
+  /**
+   * Existing tags, offered as suggestions.
+   *
+   * A failure here is swallowed: suggestions are a shortcut, and an organizer who
+   * cannot see them can still type any tag they like. Blocking the form — or
+   * showing an error about a convenience — would be a worse outcome than a plain
+   * text field.
+   */
+  const [tagSuggestions, setTagSuggestions] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    api.fetchEventTags()
+      .then(res => { if (!cancelled) setTagSuggestions(res.tags || []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
   const [submitting, setSubmitting] = useState(false);
   const slotCounter = useRef(0);
   const [dateInput, setDateInput] = useState('');
@@ -170,6 +192,10 @@ export default function CreateEvent({
         applicationDeadline: new Date(form.applicationDeadline).toISOString(),
         autoApprove: form.autoApprove,
         attendeeVisibility: form.attendeeVisibility,
+        /* Sent as the raw labels. The server normalises and de-duplicates them —
+           it is the authority on what a tag is, and sending the client's
+           normalised keys would make the display casing the client's decision. */
+        tags: form.tags.map(t => t.label),
         slots: slots.map(s => ({
           name: s.name,
           description: s.description,
@@ -211,6 +237,10 @@ export default function CreateEvent({
                 <select id="ce-cat" className="select" value={form.category} onChange={e => set('category', e.target.value)}>
                   {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
+                {/* Category is the fixed five-value taxonomy the Impact Dashboard
+                    aggregates on and the Auto Select draw reads; tags are the
+                    open vocabulary beside it. Kept adjacent so the difference is
+                    visible: one is a choice, the other is free text. */}
               </div>
               <div className="field s-535b39">
                 <label>Location</label>
@@ -222,6 +252,12 @@ export default function CreateEvent({
                 />
               </div>
             </div>
+
+            <TagInput
+              value={form.tags}
+              onChange={(tags) => set('tags', tags)}
+              suggestions={tagSuggestions}
+            />
 
             <div className="field">
               <label htmlFor="ce-desc">What volunteers need to know</label>
@@ -306,13 +342,20 @@ export default function CreateEvent({
 
             <div className="row s-dffffd">
               <div className="field s-983db5">
-                <label htmlFor="ce-date">Date</label>
-                <input id="ce-date" type="date" className="input" value={dateInput} onChange={e => setDateInput(e.target.value)} onKeyDown={e => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  addDate();
-                }
-              }} />
+                {/* `min` is today: a shift cannot be scheduled into the past,
+                    and the picker refusing it is a clearer answer than the form
+                    accepting it and the server rejecting the whole event.
+                    Enter-to-add is handled by the picker's own typed input
+                    committing on Enter, and `addDate` is still reachable by the
+                    button beside it — so the keyboard shortcut this replaced is
+                    not lost, it is just no longer the only way. */}
+                <DatePicker
+                  id="ce-date"
+                  label="Date"
+                  value={dateInput}
+                  onChange={setDateInput}
+                  min={new Date().toISOString().slice(0, 10)}
+                />
               </div>
               <button type="button" className="btn btn-secondary" onClick={addDate}>
                 <Plus size={14} /> Add date

@@ -125,10 +125,20 @@ describe('issuing a warning', () => {
 });
 
 describe('suspending', () => {
+  /**
+   * The reason box is named, rather than being "the textbox".
+   *
+   * A bare `getByRole('textbox')` worked only while the suspend form had exactly
+   * one, and it stopped the day the end-date field became a `DatePicker` — that
+   * control is a real text input you can type a date into, so there are now two.
+   * Naming the one this line means is both unambiguous and clearer about intent.
+   */
+  const reasonBox = () => screen.getByRole('textbox', { name: /Why are you suspending them/ });
+
   const openSuspend = () => {
     show();
     fireEvent.click(screen.getByRole('button', { name: /Suspend/ }));
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: REASON } });
+    fireEvent.change(reasonBox(), { target: { value: REASON } });
   };
 
   it('sends no end date when none is chosen, and says that means indefinite', async () => {
@@ -168,7 +178,7 @@ describe('suspending', () => {
     const onDone = vi.fn();
     render(<SubjectActions subject={SUBJECT} user={ADMIN} addToast={vi.fn()} onDone={onDone} />);
     fireEvent.click(screen.getByRole('button', { name: /Suspend/ }));
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: REASON } });
+    fireEvent.change(reasonBox(), { target: { value: REASON } });
     fireEvent.click(screen.getByRole('button', { name: /Suspend this account/ }));
 
     await waitFor(() => expect(onDone).toHaveBeenCalled());
