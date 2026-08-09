@@ -4,8 +4,8 @@ import bcrypt from 'bcryptjs';
 import { generateSecret, generateURI } from 'otplib';
 import QRCode from 'qrcode';
 import { db } from '../db.js';
-import { authenticateToken, inTransaction } from '../utils.js';
-import { requireAAL2, requiresSecondFactor } from '../authz.js';
+import { authenticateToken, inTransaction, secondFactorRequiredFor } from '../utils.js';
+import { requireAAL2 } from '../authz.js';
 import { spendChallenge, ChallengeNotSpent, refuseReauth } from '../reauthResponses.js';
 import { encryptSecret, decryptSecret, verifyTotp } from '../cryptoUtils.js';
 import { recordSecurityEvent } from '../securityAudit.js';
@@ -106,6 +106,55 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
   if (!token) return res.status(400).json({ error: 'Token is required' });
 
   try {
+    /**
+     * The code is checked BEFORE ten bcrypt hashes are computed.
+     *
+     * ── Why this pre-check is not redundant ──
+     *
+     * The authoritative verification is still the one inside the transaction
+     * below, beside `spendChallenge`, and it has to be: only there is it atomic
+     * with the enrolment. This is a cheap gate in front of it.
+     *
+     * Without it, every wrong six digits cost the server ten bcrypt hashes at
+     * cost 10 — roughly a second of CPU — to produce recovery codes it then threw
+     * away when verification failed. That is work amplification on a path a
+     * caller drives: the attempt counters bound how many GUESSES somebody gets,
+     * not what the server spends on each, so five wrong codes bought fifty bcrypt
+     * operations. It also made the latency of the COMMON case — one mistyped
+     * digit — a second longer than it needed to be.
+     *
+     * ── And it narrows a real race ──
+     *
+     * `verifyTotp` runs with zero epoch tolerance, so only the current 30-second
+     * step is accepted. Hashing first meant a code generated near a boundary was
+     * verified about a second later, in the NEXT step, and a CORRECT code was
+     * refused; `routes.2faEnrolment.test.js` failed roughly one run in three on
+     * exactly that. Checking first shrinks the window to the request's own
+     * latency. It does not close it — that needs a ±1 step tolerance, which is a
+     * decision about the accept window and is recorded as an open question rather
+     * than taken quietly here.
+     *
+     * The secret is read twice on purpose. This read is advisory; the one below is
+     * the one that counts. Collapsing them into a value carried across the
+     * `await` would make the authoritative check read stale state.
+     */
+    const enrolling = db.prepare('SELECT tfa_secret FROM users WHERE id = ?').get(req.user.id);
+    if (!enrolling?.tfa_secret) {
+      return res.status(400).json({ error: 'No 2FA secret found. Generate one first.' });
+    }
+    /**
+     * `verifyTotp`, the BOOLEAN form — deliberately not `verifyTotpOnce`.
+     *
+     * This is the advisory pre-check. `verifyTotpOnce` records the time step it
+     * accepted, and if this call recorded it then the authoritative check inside
+     * the transaction below would see its own code as already spent and refuse a
+     * correct one. The pre-check must observe without marking; only the
+     * authoritative check marks.
+     */
+    if (!verifyTotp(token, enrolling.tfa_secret)) {
+      return res.status(400).json({ error: 'Invalid token' });
+    }
+
     const recoveryCodes = Array.from({ length: 10 }, () => generateRecoveryCode());
 
     /**
@@ -125,17 +174,43 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
     inTransaction(() => {
       spendChallenge(db, req, '2fa.enable', {});
 
-      const user = db.prepare('SELECT tfa_secret FROM users WHERE id = ?').get(req.user.id);
+      const user = db.prepare('SELECT id, tfa_secret, tfa_last_counter FROM users WHERE id = ?').get(req.user.id);
       if (!user.tfa_secret) throw new Error('No 2FA secret found. Generate one first.');
 
       /* `verifyTotp` returns a real boolean. otplib's `verifySync` returns an
          OBJECT — `{ valid: false }` for a wrong code — which is truthy, so the
          previous `if (!isValid)` never fired and enrolment could be confirmed
          with a code the authenticator never showed. See cryptoUtils.js. */
+      /**
+       * `verifyTotp`, not `verifyTotpOnce` — single-use is enforced on the
+       * SIGN-IN path only, and deliberately not here. See the scope note in
+       * server/totpReplay.js: reaching this line already requires a live session
+       * AND a spent step-up grant, so anybody able to replay a code here holds
+       * everything the code was protecting. Marking the step here would instead
+       * mean an account could not sign in and finish enrolling inside the same
+       * thirty seconds, which is friction bought for nothing.
+       */
       if (!verifyTotp(token, user.tfa_secret)) throw new Error('Invalid token');
 
       db.prepare('UPDATE users SET tfa_enabled = 1 WHERE id = ?').run(req.user.id);
-      
+
+      /**
+       * The previous set is REPLACED, not added to.
+       *
+       * This handler inserted ten codes unconditionally. An account that had
+       * already enrolled email 2FA — which issues its own ten — came out of TOTP
+       * enrolment holding twenty live codes, and the response below shows the
+       * reader only the ten it just made. The other ten stayed valid, unseen,
+       * on a printout or in a password manager from the earlier enrolment,
+       * indefinitely.
+       *
+       * That is the wrong direction for a recovery credential: the set a person
+       * believes they hold must be the set that works, or "I have destroyed my
+       * old codes" is not something they can make true. `regenerate` below
+       * already deletes first; this is the same rule.
+       */
+      db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
+
       /* `datetime('now')`, single quotes. Double quotes make SQLite parse `now` as an
          IDENTIFIER, and `node:sqlite` does not enable the legacy fallback that treats
          an unresolvable identifier as a string — so this fails at runtime with
@@ -174,7 +249,7 @@ router.post('/api/2fa/disable', authenticateToken, requireAAL2('2fa.disable'), (
       spendChallenge(db, req, '2fa.disable', {});
 
       const user = db.prepare(
-        'SELECT tfa_secret, tfa_enabled, tfa_email_enabled, role FROM users WHERE id = ?'
+        'SELECT id, tfa_secret, tfa_enabled, tfa_email_enabled, role, tfa_last_counter FROM users WHERE id = ?'
       ).get(req.user.id);
       if (!user.tfa_enabled) throw new Error('2FA is not enabled');
 
@@ -192,12 +267,15 @@ router.post('/api/2fa/disable', authenticateToken, requireAAL2('2fa.disable'), (
        * handler switches that off too, so the honest rule is that an
        * administrator disables nothing here until the policy stops applying.
        */
-      if (requiresSecondFactor(user.role)) throw new Error('role_requires_2fa');
+      if (secondFactorRequiredFor(user.role)) throw new Error('role_requires_2fa');
 
       if (!token) throw new Error('Token is required to disable 2FA');
       /* Same object-is-truthy defect as enable, and worse here: anybody holding
          the session could TURN 2FA OFF with any six digits, which is the whole
          protection removed by the person it was protecting against. */
+      /* Plain verification — see the note on enrolment above and the scope
+         section in server/totpReplay.js. Disabling already requires a session and
+         a spent step-up grant. */
       if (!verifyTotp(token, user.tfa_secret)) throw new Error('Invalid token');
 
       db.prepare('UPDATE users SET tfa_enabled = 0, tfa_secret = NULL, tfa_email_enabled = 0 WHERE id = ?').run(req.user.id);
@@ -302,7 +380,7 @@ router.post('/api/2fa/email/disable', authenticateToken, requireAAL2('2fa.disabl
 
       const user = db.prepare('SELECT tfa_enabled, role FROM users WHERE id = ?').get(req.user.id);
       
-      const requires2FA = requiresSecondFactor(user.role);
+      const requires2FA = secondFactorRequiredFor(user.role);
       if (requires2FA && user.tfa_enabled !== 1) {
         throw new Error('role_requires_2fa');
       }
@@ -327,18 +405,40 @@ router.post('/api/2fa/email/disable', authenticateToken, requireAAL2('2fa.disabl
  */
 router.get('/api/2fa/status', authenticateToken, (req, res) => {
   try {
-    const user = db.prepare('SELECT tfa_enabled, tfa_email_enabled FROM users WHERE id = ?').get(req.user.id);
+    const user = db.prepare(
+      'SELECT tfa_enabled, tfa_email_enabled, role FROM users WHERE id = ?'
+    ).get(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    
+
     const countRow = db.prepare('SELECT COUNT(*) as count FROM recovery_codes WHERE user_id = ?').get(req.user.id);
-    
+
     const totp = user.tfa_enabled === 1;
     const email = user.tfa_email_enabled === 1;
-    
+
     res.json({
       enabled: totp || email,
       methods: { totp, email },
-      recoveryCodesRemaining: countRow ? countRow.count : 0
+      recoveryCodesRemaining: countRow ? countRow.count : 0,
+      /**
+       * Whether the policy forbids this account from turning its factors off.
+       *
+       * Both disable routes refuse an administrator with `role_requires_2fa`,
+       * and until this field existed the client could not know that in advance:
+       * `principal.tfaRequired` is `roleRequires && nothing enabled`, so it
+       * reads false for exactly the enrolled administrator this question is
+       * about. So the settings screen offered "Disable", the user answered a
+       * password prompt to prove who they were, and the server then said no.
+       *
+       * That is the rule ENGINEERING_GUIDE states for the server — answer every
+       * refusal before spending a verification — applied on the client, which is
+       * where the offer to spend one is made. With this the Disable control is
+       * simply not shown, so there is nothing to refuse.
+       *
+       * Reported, not enforced, here: `secondFactorRequiredFor` is re-evaluated
+       * inside both disable handlers, so a client that ignores this field is
+       * still refused.
+       */
+      roleRequires2FA: secondFactorRequiredFor(user.role)
     });
   } catch (err) {
     console.error('Failed to get 2FA status:', err);
