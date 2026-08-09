@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import TwoFactorSetup from './TwoFactorSetup';
@@ -126,6 +127,91 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   sessionStorage.clear();
+});
+
+/* ── Surviving a remount ────────────────────────────────────────────────── */
+
+describe('under StrictMode', () => {
+  /**
+   * ── The bug ──
+   *
+   * `liveRef` guards every `setState` in this component so an in-flight request
+   * cannot write to an unmounted tree. It was
+   *
+   *     const liveRef = useRef(true);
+   *     useEffect(() => () => { liveRef.current = false; }, []);
+   *
+   * — cleanup only. A ref survives a remount, and StrictMode (which `main.jsx`
+   * wraps the whole application in) deliberately mounts, unmounts and remounts
+   * every component once in development. So the cleanup ran, wrote `false`, and
+   * nothing ever wrote `true` again: the ref was false for the component's entire
+   * life and every guarded write was skipped.
+   *
+   * The visible result was that authenticator enrolment did nothing in
+   * development. Pressing "Use authenticator app" asked for the password,
+   * verified it, called `POST /api/2fa/generate`, got HTTP 200 with the QR — and
+   * then returned at `if (!liveRef.current) return;`. No error, no toast, no
+   * console message. The dialog closed and the screen did not move, which is
+   * exactly how "the authenticator setup is broken" was reported and why it could
+   * not be reproduced against the API.
+   *
+   * Development-only, which is worse rather than better: broken in the only
+   * environment anybody tests in, fine in the one nobody can easily check.
+   *
+   * Rendered inside `<StrictMode>` deliberately — a plain render passes with the
+   * cleanup-only version, so this is the one shape that catches it.
+   */
+  it('still renders the QR after the double-mount', async () => {
+    mockServer();
+    mockChallenges();
+
+    render(
+      <StrictMode>
+        <TwoFactorSetup
+          currentUser={{ id: 'u1', email: 'admin@school.org', role: 'admin' }}
+          addToast={vi.fn()}
+          onSetupComplete={vi.fn()}
+        />
+      </StrictMode>
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /use authenticator app/i }));
+    await answerPassword();
+
+    /* The QR, the typed-key fallback and the confirmation field: everything the
+       user needs, none of which appeared while the ref was stuck false. */
+    await waitFor(() => expect(screen.getByAltText(/QR code/i)).toBeTruthy());
+    expect(screen.getByText('JBSWY3DPEHPK3PXP')).toBeTruthy();
+    expect(screen.getByLabelText(/six-digit code/i)).toBeTruthy();
+  });
+
+  it('still reports the status it fetched on mount', async () => {
+    /* `fetchStatus` writes through the same guard, so a stuck ref also left the
+       card claiming every method was off however the account was really set up —
+       including hiding the "Turn off" control from somebody who had 2FA on. */
+    mockServer({
+      status: {
+        enabled: true,
+        methods: { totp: true, email: false },
+        recoveryCodesRemaining: 7,
+        roleRequires2FA: false
+      }
+    });
+    mockChallenges();
+
+    render(
+      <StrictMode>
+        <TwoFactorSetup
+          currentUser={{ id: 'u1', email: 'admin@school.org', role: 'admin' }}
+          addToast={vi.fn()}
+          onSetupComplete={vi.fn()}
+        />
+      </StrictMode>
+    );
+
+    await waitFor(() => expect(screen.getByText('7 left')).toBeTruthy());
+    expect(screen.getByRole('button', { name: /turn off/i })).toBeTruthy();
+  });
 });
 
 /* ── The password step ──────────────────────────────────────────────────── */

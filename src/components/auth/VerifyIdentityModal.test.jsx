@@ -199,10 +199,18 @@ describe('VerifyIdentityModal — the password leg', () => {
   });
 });
 
-describe('VerifyIdentityModal — the countdown', () => {
-  it('shows the time remaining on the challenge, not a fixed five minutes', () => {
-    // A challenge opened four minutes ago, as a tab restored from the background
-    // would see. A timer started at mount would say 5:00 here.
+describe('VerifyIdentityModal — the expiry is invisible', () => {
+  /**
+   * There used to be a ticking "expires in 4:58" beside the password field, and
+   * the field was disabled the moment it reached zero.
+   *
+   * The number was true and it was the wrong thing to show: a five-minute limit on
+   * ENTERING a password is a limit on going to find one, and an unexplained
+   * password box with a countdown is the pattern people are taught to read as a
+   * scam. The deadline belongs to the grant, so it is handled by reopening rather
+   * than by being displayed.
+   */
+  it('shows no countdown', () => {
     render(
       <VerifyIdentityModal
         challenge={challenge({ expiresAt: new Date(Date.now() + 61 * 1000).toISOString() })}
@@ -211,10 +219,103 @@ describe('VerifyIdentityModal — the countdown', () => {
       />
     );
 
-    expect(document.body.textContent).toMatch(/1:0\d/);
+    expect(document.body.textContent).not.toMatch(/\d:\d\d/);
+    expect(document.body.textContent).not.toMatch(/expires in/i);
   });
 
-  it('refuses to submit once it has expired, and says so', () => {
+  it('stays usable after the challenge has expired', () => {
+    render(
+      <VerifyIdentityModal
+        challenge={challenge({ expiresAt: new Date(Date.now() - 1000).toISOString() })}
+        onGranted={() => {}}
+        onCancel={() => {}}
+        onReopen={async () => challenge({ challengeId: 'reauth-fresh' })}
+      />
+    );
+
+    // Neither disabled nor scolding. The old dialog said "timed out" and locked
+    // the field, which left the user nothing to do but close it and start over.
+    expect(screen.getByLabelText(/your password/i).disabled).toBe(false);
+    expect(document.body.textContent).not.toMatch(/timed out/i);
+  });
+
+  it('reopens an expired challenge and grants the new one', async () => {
+    const grant = vi.spyOn(api, 'grantReauthByPassword').mockResolvedValue({ granted: true });
+    const onReopen = vi.fn().mockResolvedValue(challenge({ challengeId: 'reauth-fresh' }));
+    const onGranted = vi.fn();
+
+    render(
+      <VerifyIdentityModal
+        challenge={challenge({ expiresAt: new Date(Date.now() - 1000).toISOString() })}
+        onGranted={onGranted}
+        onCancel={() => {}}
+        onReopen={onReopen}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText(/your password/i), { target: { value: 'hunter2' } });
+    fireEvent.click(screen.getByRole('button', { name: /^verify$/i }));
+
+    await waitFor(() => expect(onGranted).toHaveBeenCalled());
+    expect(onReopen).toHaveBeenCalledTimes(1);
+    // The dead id was never presented, and the caller is handed the live one —
+    // spending the original would be refused as `not_found`.
+    expect(grant).toHaveBeenCalledWith('reauth-fresh', 'hunter2');
+    expect(grant).not.toHaveBeenCalledWith('reauth-abc', 'hunter2');
+    expect(onGranted).toHaveBeenCalledWith('reauth-fresh', {});
+  });
+
+  it('reopens once when the server says the challenge expired mid-submit', async () => {
+    /* The clock does not stop while the password manager opens, so a challenge
+       that looked live at render can be gone by the time the request lands. */
+    const grant = vi.spyOn(api, 'grantReauthByPassword')
+      .mockRejectedValueOnce(
+        Object.assign(new Error('expired'), { status: 400, data: { code: 'expired', error: 'expired' } })
+      )
+      .mockResolvedValueOnce({ granted: true });
+    const onReopen = vi.fn().mockResolvedValue(challenge({ challengeId: 'reauth-second' }));
+    const onGranted = vi.fn();
+
+    render(
+      <VerifyIdentityModal challenge={challenge()} onGranted={onGranted} onCancel={() => {}} onReopen={onReopen} />
+    );
+
+    fireEvent.change(screen.getByLabelText(/your password/i), { target: { value: 'hunter2' } });
+    fireEvent.click(screen.getByRole('button', { name: /^verify$/i }));
+
+    await waitFor(() => expect(onGranted).toHaveBeenCalledWith('reauth-second', {}));
+    expect(grant).toHaveBeenCalledTimes(2);
+    expect(onReopen).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT reopen on a wrong password', async () => {
+    /* A new challenge does not fix a wrong password, and retrying against one
+       would spend two of the five attempts the account gets per quarter hour. */
+    const grant = vi.spyOn(api, 'grantReauthByPassword').mockRejectedValue(
+      Object.assign(new Error('Incorrect password.'), {
+        status: 401,
+        data: { code: 'invalid_password', error: 'Incorrect password.', attemptsRemaining: 4 }
+      })
+    );
+    const onReopen = vi.fn().mockResolvedValue(challenge({ challengeId: 'reauth-nope' }));
+
+    render(
+      <VerifyIdentityModal challenge={challenge()} onGranted={() => {}} onCancel={() => {}} onReopen={onReopen} />
+    );
+
+    fireEvent.change(screen.getByLabelText(/your password/i), { target: { value: 'wrong' } });
+    fireEvent.click(screen.getByRole('button', { name: /^verify$/i }));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/incorrect password/i));
+    expect(onReopen).not.toHaveBeenCalled();
+    expect(grant).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the challenge it has when no reopen is available', async () => {
+    /* An older caller that passes no `onReopen`. The stale id produces an honest
+       server refusal, which beats a dialog that will not submit at all. */
+    const grant = vi.spyOn(api, 'grantReauthByPassword').mockResolvedValue({ granted: true });
+
     render(
       <VerifyIdentityModal
         challenge={challenge({ expiresAt: new Date(Date.now() - 1000).toISOString() })}
@@ -223,8 +324,10 @@ describe('VerifyIdentityModal — the countdown', () => {
       />
     );
 
-    expect(document.body.textContent).toMatch(/timed out/i);
-    expect(screen.getByLabelText(/your password/i).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/your password/i), { target: { value: 'x' } });
+    fireEvent.click(screen.getByRole('button', { name: /^verify$/i }));
+
+    await waitFor(() => expect(grant).toHaveBeenCalledWith('reauth-abc', 'x'));
   });
 });
 
@@ -254,6 +357,9 @@ describe('VerifyIdentityModal — the provider leg', () => {
 
       fireEvent.click(google);
 
+      /* `startOAuth` is async — it reopens an expired challenge before leaving,
+         because the provider round trip is the longest leg in the flow. */
+      await waitFor(() => expect(sessionStorage.getItem('wev_reauth_pending')).toBeTruthy());
       const pending = JSON.parse(sessionStorage.getItem('wev_reauth_pending'));
       expect(pending).toMatchObject({
         provider: 'google',
@@ -261,9 +367,9 @@ describe('VerifyIdentityModal — the provider leg', () => {
         action: 'account.delete',
         returnTo: '/settings?section=security'
       });
-      expect(assign).toHaveBeenCalledWith(
+      await waitFor(() => expect(assign).toHaveBeenCalledWith(
         '/api/auth/reauth/oauth/google?challengeId=reauth-abc'
-      );
+      ));
     } finally {
       window.location = original;
     }

@@ -77,22 +77,33 @@ export function useStepUp() {
    * cannot forget which entry point returns which. `challengeId` is null when
    * the user dismissed it.
    */
-  const promptFor = useCallback((opened, alsoGrant = []) => new Promise((resolve) => {
+  const promptFor = useCallback((opened, alsoGrant = [], spec = null) => new Promise((resolve) => {
     // A second request while one is already up would orphan the first promise.
     // Resolving it as a dismissal keeps the caller from hanging.
     resolverRef.current?.({ challengeId: null, extras: {} });
     resolverRef.current = resolve;
-    setPrompt({ challenge: opened, alsoGrant });
+    setPrompt({ challenge: opened, alsoGrant, spec });
   }), []);
 
   /** The single-challenge shape `withStepUp` and `verifyFirst` expect. */
   const present = useCallback(
-    async (opened) => (await promptFor(opened)).challengeId,
+    async (opened, spec = null) => (await promptFor(opened, [], spec)).challengeId,
     [promptFor]
   );
 
+  /**
+   * `withStepUp` hands `present` the opened challenge and nothing else, so the
+   * action and params it used are re-attached here. The dialog needs them to
+   * reopen an expired challenge without showing the user a deadline — see the
+   * header in VerifyIdentityModal.jsx.
+   */
   const run = useCallback(
-    (action, params, attempt) => withStepUp(action, params, attempt, present),
+    (action, params, attempt) => withStepUp(
+      action,
+      params,
+      attempt,
+      opened => present(opened, { action, params })
+    ),
     [present]
   );
 
@@ -105,7 +116,7 @@ export function useStepUp() {
     if (ready) return ready;
 
     const opened = await openChallenge(action, params);
-    return present(opened);
+    return present(opened, { action, params });
   }, [present]);
 
   /**
@@ -159,9 +170,11 @@ export function useStepUp() {
     }
 
     const [primary, ...extras] = opened;
+    const primarySpec = needed.find(n => n.action === primary.action);
     const { challengeId, extras: granted } = await promptFor(
       primary.challenge,
-      extras.map(e => ({ action: e.action, challengeId: e.challenge.challengeId }))
+      extras.map(e => ({ action: e.action, challengeId: e.challenge.challengeId })),
+      { action: primary.action, params: primarySpec?.params ?? {} }
     );
 
     // Dismissed. The caller returns to what it was showing; nothing was spent.
@@ -174,6 +187,20 @@ export function useStepUp() {
     return grants;
   }, [promptFor]);
 
+  /**
+   * Opens a replacement challenge for the SAME action and arguments.
+   *
+   * Handed to the dialog so that a grant which expired while the user was finding
+   * their password is replaced silently rather than reported. It cannot broaden
+   * anything: the action and params are the ones this hook was called with, the
+   * server re-derives the account's methods, and the new challenge is bound to the
+   * same session like any other.
+   */
+  const reopen = useCallback(async () => {
+    if (!prompt?.spec?.action) return null;
+    return openChallenge(prompt.spec.action, prompt.spec.params ?? {});
+  }, [prompt]);
+
   const modal = prompt
     ? (
       <VerifyIdentityModal
@@ -181,6 +208,7 @@ export function useStepUp() {
         alsoGrant={prompt.alsoGrant}
         onGranted={settle}
         onCancel={() => settle(null)}
+        onReopen={reopen}
       />
     )
     : null;

@@ -122,7 +122,37 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
    * enrolment can easily arrive after this component has gone.
    */
   const liveRef = useRef(true);
-  useEffect(() => () => { liveRef.current = false; }, []);
+  /**
+   * Set to true on MOUNT, not only false on unmount.
+   *
+   * ── The bug this fixes ──
+   *
+   * It was `useEffect(() => () => { liveRef.current = false; }, [])` — cleanup
+   * only. A ref survives a remount, and React StrictMode (which `main.jsx` wraps
+   * the whole application in) deliberately mounts, unmounts and remounts every
+   * component once in development. So the cleanup ran, wrote `false`, and nothing
+   * ever wrote `true` again: `liveRef.current` was false for the entire life of
+   * the component.
+   *
+   * Every state write in this file is guarded by it. The consequence was that
+   * authenticator enrolment was silently dead in development — pressing "Use
+   * authenticator app" asked for the password, verified it, called
+   * `POST /api/2fa/generate`, received the QR code with HTTP 200, and then
+   * returned at `if (!liveRef.current) return;` without rendering anything. No
+   * error, no toast, no console message; the dialog just closed and the screen
+   * did not move. That is exactly how "the authenticator setup is broken" was
+   * reported, and why it could not be reproduced against the API, which was
+   * answering correctly the whole time.
+   *
+   * It is a development-only symptom — StrictMode does not double-invoke in a
+   * production build — which is worse rather than better: the flow was broken in
+   * the only environment anybody was testing it in, and looked fine in the one
+   * nobody could easily check.
+   */
+  useEffect(() => {
+    liveRef.current = true;
+    return () => { liveRef.current = false; };
+  }, []);
 
   const fetchStatus = async () => {
     try {
