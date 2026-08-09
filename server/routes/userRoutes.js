@@ -12,6 +12,10 @@ import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearC
 
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
 import { can } from '../authz.js';
+/* The milestone ladder. One definition, in a module — it was inline here, and
+   duplicated byte-for-byte in utils.js where nothing imported it. See
+   server/milestones.js for the badge/milestone boundary this sits on. */
+import { buildMilestones } from '../milestones.js';
 import { db, initDatabase } from '../db.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
@@ -137,28 +141,6 @@ function formatServiceRow(r) {
   };
 }
 
-/**
- * Milestones mark real service already completed — they are never targets to
- * chase, and there are no points or streaks. Each one is either earned or not.
- */
-const MILESTONE_TIERS = [
-  { id: 'first-shift', label: 'First shift', hint: 'Completed your first volunteer shift', test: (h, e) => e >= 1 },
-  { id: 'ten-hours', label: '10 hours', hint: 'Ten hours of service', test: (h) => h >= 10 },
-  { id: 'five-events', label: '5 events', hint: 'Helped at five different events', test: (h, e) => e >= 5 },
-  { id: 'silver', label: 'Silver Award', hint: '25 hours — the district Silver Award target', test: (h) => h >= 25 },
-  { id: 'fifty-hours', label: '50 hours', hint: 'Fifty hours of service', test: (h) => h >= 50 },
-  { id: 'ten-events', label: '10 events', hint: 'Helped at ten different events', test: (h, e) => e >= 10 },
-  { id: 'century', label: '100 hours', hint: 'One hundred hours of service', test: (h) => h >= 100 }
-];
-
-function buildMilestones(hours, events) {
-  return MILESTONE_TIERS.map(m => ({
-    id: m.id,
-    label: m.label,
-    hint: m.hint,
-    earned: m.test(hours, events)
-  }));
-}
 
 // ── Certificates ────────────────────────────────────────────────────
 // One certificate per completed event. The verification code is derived

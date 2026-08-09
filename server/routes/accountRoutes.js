@@ -25,6 +25,10 @@ import {
 } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
 import { OAUTH_ONLY, issueSession, clearLoginFailuresForUser } from './authRoutes.js';
+// The one safe way anything in this application deletes an uploaded file. It
+// lives with the module that owns public/uploads/ and writes into it — read its
+// header before calling it, and never hand-roll a second unlink beside it.
+import { deleteUploadedFile } from './profilePictureRoutes.js';
 
 const router = express.Router();
 
@@ -177,9 +181,27 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
         ? `${nameParts[0]} ${nameParts[nameParts.length - 1].charAt(0)}.`
         : `${nameParts[0]}`;
 
+      /**
+       * `profile_picture_url` is nulled here with the rest of the profile, and
+       * the FILE it named is unlinked after this transaction commits (below).
+       *
+       * It was omitted from this statement entirely: `avatar` (the emoji) and
+       * `bio` and `school` were cleared, the photograph was not, and nothing
+       * ever removed it from `public/uploads/`. So a deleted student's
+       * photograph stayed on disk and stayed served, unauthenticated, at the
+       * URL it had always had — one that had already been handed out to
+       * everybody who had loaded their profile. The Data Deletion Policy tells
+       * them in plain words that "we permanently delete: your profile picture,
+       * bio, and school". Two of those three were true.
+       *
+       * `profile_picture_uploaded_at` goes with it: a timestamp for a picture
+       * that no longer exists is a fact about a deleted account and nothing
+       * else.
+       */
       db.prepare(`
-        UPDATE users 
-        SET name = ?, email = ?, username = ?, avatar = NULL, bio = NULL, school = NULL, 
+        UPDATE users
+        SET name = ?, email = ?, username = ?, avatar = NULL, bio = NULL, school = NULL,
+            profile_picture_url = NULL, profile_picture_uploaded_at = NULL,
             account_status = 'deleted', deleted_at = ?, token_version = token_version + 1
         WHERE id = ?
       `).run(anonymizedName, deletedEmail, deletedUsername, now, req.user.id);
@@ -224,6 +246,22 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
         );
       }
     });
+
+    /**
+     * The photograph itself, after the commit.
+     *
+     * Deliberately outside the transaction: an unlink cannot be rolled back, so
+     * doing it inside would mean a transaction that fails at any later step
+     * leaves a live account whose picture has already been destroyed. Ordering
+     * it here makes the only possible mismatch the harmless one — a committed
+     * deletion with a file still on disk, if the process dies in between.
+     *
+     * `deleteUploadedFile` is the shared safe-unlink helper: it refuses any
+     * stored path that resolves outside `public/uploads/`, and it never throws,
+     * so an already-missing file (ENOENT) cannot turn a completed account
+     * deletion into a 500.
+     */
+    deleteUploadedFile(userRow.profile_picture_url);
 
     res.clearCookie(COOKIE_NAME, clearCookieOptions());
     res.json({ success: true });

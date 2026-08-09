@@ -52,8 +52,38 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
       return;
     }
     setSaving(true);
+
+    /**
+     * Whatever the server has most recently confirmed, so it can be pushed into
+     * session state even if a later step fails. Declared outside the try for
+     * exactly that reason — see the catch.
+     */
+    let latestUser = null;
+
     try {
-      let latestUser = null;
+      /**
+       * The PICTURE goes first, before the text fields.
+       *
+       * It used to go last, and the picture is the only part of this form the
+       * server can refuse: over 5 MB, not an image, or bytes that will not
+       * decode. So the ordinary failure — a student picking a photo straight off
+       * their phone — happened AFTER the name, school, bio and skills had already
+       * been written. They were told "Could not save", the modal stayed open, and
+       * the fields on screen agreed with neither the database (which had the new
+       * text) nor the session (which still had the old): reloading appeared to
+       * undo an edit that had in fact been saved.
+       *
+       * Sending the refusable part first means a rejected photograph costs
+       * nothing and changes nothing.
+       */
+      if (profileFile) {
+        const picRes = await api.uploadProfilePicture(profileFile);
+        latestUser = picRes.user;
+      } else if (removePicture && user.profile_picture_url) {
+        const picRes = await api.deleteProfilePicture();
+        latestUser = picRes.user;
+      }
+
       const res = await api.updateProfile({
         name: form.name.trim(),
         avatar: form.avatar,
@@ -65,18 +95,27 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
       });
       latestUser = res.user;
 
-      if (profileFile) {
-        const picRes = await api.uploadProfilePicture(profileFile);
-        latestUser = picRes.user;
-      } else if (removePicture && user.profile_picture_url) {
-        const picRes = await api.deleteProfilePicture();
-        latestUser = picRes.user;
-      }
-
       addToast('Profile updated.', 'success');
-      onSave(latestUser);
+      /**
+       * `onSave` is SessionProvider's `setCurrentUser`, and this response is the
+       * whole reason the new avatar appears without a reload: both picture
+       * endpoints and PATCH /api/auth/profile return the user as
+       * `formatUserResponse` renders it, `profile_picture_url` included, so there
+       * is nothing to re-fetch. Guarded because a falsy value here would blank
+       * the session and take the shell down on the next render.
+       */
+      if (latestUser) onSave(latestUser);
       onClose();
     } catch (err) {
+      /**
+       * Report whatever DID land before reporting the failure.
+       *
+       * A picture that uploaded and then lost its text write is stored and being
+       * served — leaving the session unaware of it puts an emoji in the sidebar
+       * for a photograph that exists, until the next full reload. The modal stays
+       * open either way, because something the user asked for did not happen.
+       */
+      if (latestUser) onSave(latestUser);
       addToast(`Could not save: ${err.message}`, 'error');
     } finally {
       setSaving(false);
