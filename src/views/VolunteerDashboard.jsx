@@ -10,8 +10,6 @@ import { BarChart, DonutChart } from '../components/BarChart';
 import { DateChip } from '../components/Seats';
 import EmptyState from '../components/common/EmptyState';
 
-const HOUR_GOAL = 25;
-
 export default function VolunteerDashboard({
   currentUser, events = [], applications = [], addToast, setActiveTab, refreshEvents, refreshApplications, onViewDetails
 }) {
@@ -59,6 +57,14 @@ export default function VolunteerDashboard({
 
   const nextShift = upcoming[0];
   const totalHours = currentUser.volunteeredHours || 0;
+  /* The district's Silver Award threshold, from the server. It was
+     `const HOUR_GOAL = 25` here and again in VolunteerProfile.jsx — two copies
+     of a number the server uses to decide whether the milestone is earned, so
+     the meter could contradict the milestone beside it. See
+     server/milestones.js. The `|| 25` is not a second copy: it is the value for
+     a session payload predating this field, and it goes when nothing can be
+     holding one. */
+  const HOUR_GOAL = currentUser.serviceHourGoal || 25;
   const goalPct = Math.min(100, (totalHours / HOUR_GOAL) * 100);
   const goalMet = totalHours >= HOUR_GOAL;
   const progressTone = goalPct < 33 ? 'danger' : goalPct < 100 ? 'warn' : 'ok';

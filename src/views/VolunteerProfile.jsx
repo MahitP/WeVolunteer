@@ -11,8 +11,6 @@ import CertificateModal from '../components/CertificateModal';
 import BadgesList from '../components/BadgesList';
 import { Link } from 'react-router-dom';
 
-const HOUR_GOAL = 25;
-
 /**
  * A volunteer's record of service.
  *
@@ -76,6 +74,9 @@ export default function VolunteerProfile({
   const { volunteer, stats, milestones, byCategory, completed, upcoming } = data;
   const earned = milestones.filter(m => m.earned);
   const next = milestones.find(m => !m.earned);
+  /* From the server, not a local constant — see the note in
+     VolunteerDashboard.jsx and server/milestones.js. */
+  const HOUR_GOAL = currentUser?.serviceHourGoal || 25;
   const goalPct = Math.min(100, (stats.hours / HOUR_GOAL) * 100);
   const progressTone = goalPct < 33 ? 'danger' : goalPct < 100 ? 'warn' : 'ok';
 
