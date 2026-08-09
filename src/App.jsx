@@ -12,6 +12,7 @@ import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
 import useOnline from './hooks/useOnline';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
 import PersonaPreviewBanner from './components/admin/PersonaPreviewBanner';
+import OwnerProfile from './views/OwnerProfile';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
 import Toasts from './components/common/Toasts';
@@ -147,16 +148,16 @@ const DASHBOARD_NAV = {
  * per-user grant, so no amount of granting turns an admin into a match. It is
  * tested first because super_admin's wildcard matches every row beneath it too.
  *
- * super_admin resolves to 'none' rather than to the organizer view because BOTH
- * profile endpoints filter by role in SQL — GET /api/users/:id/profile requires
- * role = 'student', GET /api/organizers/:id/profile requires role IN
- * ('organizer','admin') — so either view would render a 404 error state for the
- * platform owner. An honest "this account has no service record" page is a
- * working page; a 404 dressed as a profile is not. Widening those queries is a
- * server change, which this task may not make.
+ * super_admin resolves to its OWN view. Both existing profile endpoints filter by
+ * role in SQL — GET /api/users/:id/profile requires role = 'student', GET
+ * /api/organizers/:id/profile requires role IN ('organizer','admin') — so either
+ * would render a 404 dressed as a profile for the owner. That is why this used to
+ * resolve to 'none' and an honest empty state; `OwnerProfile` replaces it with a
+ * page built from `/api/auth/me`, which the shell already holds, so it needs
+ * neither a new endpoint nor a widening of the two that exist.
  */
 const SELF_PROFILE = [
-  { cap: 'admin.create', view: 'none' },        // super_admin
+  { cap: 'admin.create', view: 'owner' },       // super_admin
   { cap: 'event.moderate', view: 'denied' },    // admin — no profile view has ever existed
   { cap: 'event.create', view: 'host' },        // organizer
   { cap: 'portfolio.write', view: 'volunteer' } // student
@@ -1317,11 +1318,8 @@ function AppShell({ toasts, addToast, removeToast }) {
                     userId={currentUser.id}
                     onViewEvent={openEventById}
                   />
-                ) : selfProfile === 'none' ? (
-                  <EmptyState
-                    title="No service record for this account"
-                    message="Profiles show a volunteer's service record or an organizer's hosting record. This account has neither — your account details live in Settings."
-                  />
+                ) : selfProfile === 'owner' ? (
+                  <OwnerProfile currentUser={currentUser} />
                 ) : deniedFallback()
               } />
 

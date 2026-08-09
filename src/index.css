@@ -2836,6 +2836,35 @@ time { font-variant-numeric: tabular-nums; }
 /* ── Starting a preview, on the Moderation Center ─────────────────────────── */
 .persona-picker { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
 .persona-picker-label { font-size: 0.875rem; color: var(--ink-2); }
+
+/* ── The platform owner's profile ─────────────────────────────────────────── */
+.owner-card { display: flex; gap: var(--s5); align-items: flex-start; flex-wrap: wrap; }
+/* Sized in one place for both arms — an <img> and an emoji <span> have to agree,
+   or the card reflows depending on whether a picture has been uploaded. */
+.owner-avatar {
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.25rem;
+  background: var(--surface-2);
+}
+.owner-facts { flex: 1 1 18rem; display: grid; gap: var(--s3); margin: 0; }
+.owner-facts dt {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+.owner-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.owner-links { display: flex; gap: var(--s3); flex-wrap: wrap; margin-top: var(--s4); }
+.owner-note { margin-top: var(--s4); font-size: 0.8125rem; color: var(--ink-2); }
 .alert-brand { background: var(--brand-tint); border-color: var(--brand-tint-2); color: var(--brand-ink); }
 .alert-title { font-weight: 600; }
 
