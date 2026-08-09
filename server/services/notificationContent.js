@@ -125,6 +125,12 @@ export const EVENT_CATEGORIES = {
   HOURS_ADJUSTED: 'VOLUNTEER',
   CERTIFICATE_AVAILABLE: 'VOLUNTEER',
   CERTIFICATE_REVOKED: 'VOLUNTEER',
+  // A badge award. VOLUNTEER, alongside hours and certificates, because it is a
+  // statement about the recipient's service record — so a volunteer who has
+  // turned that category off is not told about badges either, which is the
+  // point: badgeService used to INSERT into `notifications` directly and no
+  // preference reached it at all.
+  BADGE_EARNED: 'VOLUNTEER',
 
   // ACCOUNT
   ORGANIZER_APPROVED: 'ACCOUNT',
@@ -613,6 +619,28 @@ export function getInAppContent(event, payload) {
         title: payload.title,
         body: payload.body,
         link: payload.link
+      };
+    /**
+     * A badge was awarded.
+     *
+     * NORMAL priority, and that is deliberate rather than an oversight: a badge
+     * is the least consequential thing this system says to anybody, and the
+     * 30-day retention sweep clearing it is correct. The badge itself is
+     * permanent and visible on the profile; only the congratulation expires.
+     *
+     * `/profile`, not `/profile?tab=badges`. There is no `tab` query handling in
+     * VolunteerProfile, so the parameter was decoration on a link that already
+     * went to the right page — and decoration that reads like a promise.
+     */
+    case 'BADGE_EARNED':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: 'You earned a badge',
+        body: payload.badgeName
+          ? `Your profile now shows the "${payload.badgeName}" badge.`
+          : 'Your profile now shows a new badge.',
+        link: '/profile'
       };
     case 'CERTIFICATE_AVAILABLE':
       return {
