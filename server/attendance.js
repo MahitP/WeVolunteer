@@ -249,10 +249,23 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
     let hoursOverridden = false;
 
     if (awardsHours && hoursMap && Object.hasOwn(hoursMap, applicationId)) {
-      const raw = Number(hoursMap[applicationId]);
+      const supplied = hoursMap[applicationId];
+      /**
+       * `null` is refused rather than coerced.
+       *
+       * `Number(null)` is 0, and 0 is a legitimate value here — an organizer
+       * may credit nothing for a shift somebody turned up to and did not
+       * complete. So a null arriving from a client bug, or from a JSON
+       * round-trip that turned a NaN into a null, would silently write a real
+       * decision nobody made, onto a student's graduation record. A number, or
+       * a string that is one, or nothing at all.
+       */
+      const raw = (supplied === null || supplied === '' || typeof supplied === 'boolean')
+        ? NaN
+        : Number(supplied);
       if (!Number.isFinite(raw) || raw < 0 || raw > MAX_CREDITABLE_HOURS) {
         invalidHours.push({
-          applicationId, name: app.user_name, slotName: app.slot_name, value: hoursMap[applicationId],
+          applicationId, name: app.user_name, slotName: app.slot_name, value: supplied,
         });
         continue;
       }

@@ -122,6 +122,32 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/legal/guidelines',
   '/legal/:slug',
   '/appeal/:token',
+
+  /* ── v1.3, the member directory ──────────────────────────────────────────
+   *
+   * All five are allowed, and the reasoning is the one this whole file rests
+   * on: the STORED value is the matched pattern, never the input. `/users/@ana`
+   * is stored as `/users/:handle`, so the username — which on this platform
+   * belongs to a child — cannot survive matching. That is exactly the case
+   * `/verify/:code` and `/appeal/:token` already make for a live token.
+   *
+   * The second question is whether the path SHAPE is itself sensitive: does the
+   * mere existence of a report from this route say something true about a
+   * person? It does not. "Somebody was looking at somebody's profile" names
+   * neither party once the parameter is gone, and it is a page every member can
+   * open about every other member.
+   *
+   * `/hours/external` is worth a moment's thought and lands the same way: it is
+   * a literal path with no parameter, and it says a volunteer opened the form —
+   * not what they logged, who for, or how many hours.
+   */
+  '/directory',
+  '/users/id/:id',
+  '/users/:handle',
+  '/organizations/new',
+  '/organizations/:key/edit',
+  '/organizations/:key',
+  '/hours/external',
 ]);
 
 /**

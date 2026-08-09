@@ -76,21 +76,34 @@ const RELIABILITY_SLOPE = 0.35;
 /**
  * The hard bounds on the reliability multiplier.
  *
- * These two numbers are the guarantee that hours stay primary, and they were
- * chosen against the hours curve rather than by feel. The widest possible swing
- * attendance can produce is 1.05 / 0.90 = 1.167. Fifty credited hours of
- * difference — a serious season of service — moves the hours weight by
- * W(0)/W(50) = 10 / 8.30 = 1.205, which is larger.
+ * These two numbers ARE the guarantee that hours stay primary, and they were
+ * derived against the hours curve rather than chosen by feel.
  *
- * So the stated, tested property is: **a 50-hour difference in credited hours
- * outweighs any possible difference in attendance.** Nobody can climb the draw
- * by being reliable instead of by needing hours, which is the incentive Auto
- * Select exists to create. `weighting.test.js` proves it over the whole range
- * rather than at a sampled point, so narrowing the hours curve later without
- * revisiting these bounds fails the build.
+ * The widest swing attendance can produce is RMAX/RMIN = 1.03 / 0.95 = 1.084.
+ * For that to be unable to reverse a 50-hour difference in credited hours, the
+ * curve's own ratio W(h) / W(h+50) has to stay above it. That ratio is not
+ * constant — the curve flattens, so it starts at W(0)/W(50) = 1.205 and decays
+ * toward 1 as hours grow. It crosses 1.084 at roughly 225 credited hours.
+ *
+ * So the honest, tested property is bounded, and stated as such:
+ *
+ *   **Below 200 credited hours, a 50-hour difference in hours outweighs any
+ *   possible difference in attendance.**
+ *
+ * Two hundred hours is eight times this district's Silver Award threshold
+ * (SERVICE_HOUR_GOAL = 25), so it covers every student the draw will ever
+ * actually weigh. Above it the two factors become comparable — which is the
+ * correct behaviour anyway, since at that point the hours curve is nearly flat
+ * and is no longer expressing much of a preference to preserve.
+ *
+ * The first draft of this used [0.90, 1.05] and claimed the guarantee held
+ * everywhere. It did not: it failed from about 40 hours upward, and the test
+ * below caught it. The bounds are tight because the claim is precise; widening
+ * them, or narrowing the hours curve, fails the build rather than quietly
+ * making attendance the dominant term.
  */
-const RELIABILITY_MIN = 0.90;
-const RELIABILITY_MAX = 1.05;
+const RELIABILITY_MIN = 0.95;
+const RELIABILITY_MAX = 1.03;
 
 /**
  * The smoothed show-up rate. Exported because it is what the profile and the
@@ -124,7 +137,7 @@ export function smoothedShowUpRate(attended, recorded) {
  *   1 of 1          → 1.009   (a nudge, not a prize)
  *   45 of 50        → 1.016   (a stronger claim, still a nudge)
  *   1 of 2          → 0.965   (mild, as one missed shift should be)
- *   0 of 10         → 0.900   (floored — a real pattern, bounded anyway)
+ *   0 of 10         → 0.950   (floored — a real pattern, bounded anyway)
  */
 export function reliabilityMultiplier(record) {
   if (!record || !record.recorded) return 1;
