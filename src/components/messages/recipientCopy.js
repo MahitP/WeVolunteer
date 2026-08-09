@@ -60,11 +60,11 @@ const ENTRIES = [
     cap: 'event.moderate',
     description:
       'You can message volunteers who applied to events you organize. To contact '
-      + 'someone about a report, open the conversation from the Moderation Center — '
+      + 'someone about a report, open the conversation from the Admin area — '
       + 'that way it is recorded against the case.',
     placeholder: 'Search volunteers who applied to your events…',
     empty: 'Nobody matched. Administrators reach a person about a report from the '
-      + 'Moderation Center, not from here.',
+      + 'Admin area, not from here.',
     /**
      * An administrator's threads are moderation conversations, opened from a
      * report. Calling them "volunteer opportunity conversations" — which is what

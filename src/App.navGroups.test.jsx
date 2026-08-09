@@ -2,40 +2,41 @@ import { describe, it, expect } from 'vitest';
 import { navItemsFor, navSectionsFor } from './App';
 
 /**
- * The rail's sections.
+ * The rail's two priority tiers.
  *
- * ── Why the rail is grouped ──
+ * ── What replaced grouping ──
  *
- * Flat, it reached eleven entries for the platform owner, ordered by when each
- * was added rather than by what it is for. Eleven undifferentiated rows is a list
- * read once and thereafter scanned by muscle memory — which is exactly when a
- * rarely-opened but consequential page, the audit trail, stops being noticed.
+ * The rail used to sort itself into named groups, and by the end one group held
+ * one entry: `Administration`, containing the administrative hub, with a hair rule
+ * marking it off from Messages and Calendar.
+ *
+ * The mobile bar meanwhile took `navItemsFor(...).slice(0, 4)`, so for an
+ * administrator the hub — their reason for being there — sat behind the `⋯` menu.
+ * A count of how many entries precede yours is not a statement about priority, so
+ * priority is declared instead: everything is primary unless it carries
+ * `secondary`, and exactly Notifications and My profile carry it.
  *
  * ── What these tests are actually defending ──
  *
- * Not the labels. The two properties that would break silently:
+ * Not the labels. The properties that would break silently:
  *
- *   1. **Sections and the flat list cannot disagree.** `navSectionsFor` is
- *      derived from `navItemsFor`, so every capability decision happens once. If
- *      somebody re-filters NAV a second time to build the sections, an entry can
- *      become visible on the desktop rail and invisible in the mobile "More"
- *      sheet, or the reverse — a page an administrator can reach on a phone and
- *      cannot find on a laptop. The partition test below is what catches that.
+ *   1. **The two tiers partition the flat list.** `navSectionsFor` is derived
+ *      from `navItemsFor`, so every capability decision happens once. If somebody
+ *      re-filters NAV a second time, an entry can become visible on the desktop
+ *      rail and invisible in the mobile sheet, or the reverse — a page an
+ *      administrator can reach on a phone and cannot find on a laptop. Worse, the
+ *      mobile bar now draws `primary` and the sheet draws `secondary`, so an
+ *      overlap renders twice and a gap is unreachable.
  *
- *   2. **The consolidation did not delete anything.** Six administrative pages
- *      left the rail for the Moderation Center. Deleting them would satisfy
- *      "absent from the rail" just as well, so absence is never asserted on its
- *      own here — every moved page is also checked to be offered by the hub, and
- *      openable by the owner, at the capability it always had.
+ *   2. **Admin is primary, and stays primary.** That is the regression this file
+ *      is named for on the mobile side: it is asserted for the roles that have it,
+ *      and asserted absent from the overflow.
  *
- * ── Why the rail was cut rather than grouped harder ──
- *
- * Grouping got eleven entries down to something readable, and that was the right
- * first move. It could not fix the underlying thing: the rail is the same list on
- * every page, so seven administrative rows sat permanently in front of an
- * audience that is mostly students. The pages are also related to each other in
- * ways a flat rail cannot show — an appeal is about a suspension that came out of
- * a report — and a hub page can say that.
+ *   3. **The consolidation did not delete anything.** Six administrative pages
+ *      left the rail for the hub. Deleting them would satisfy "absent from the
+ *      rail" just as well, so absence is never asserted on its own here — every
+ *      moved page is also checked to be offered by the hub, and openable by the
+ *      owner, at the capability it always had.
  */
 
 const USER = (role, extra = {}) => ({
@@ -58,45 +59,84 @@ describe('navSectionsFor', () => {
     'partitions %s\'s entries exactly, losing and inventing none', (role) => {
       const user = USER(role);
       const flat = navItemsFor(user);
-      const { primary, groups, trailing } = navSectionsFor(user);
+      const { primary, secondary } = navSectionsFor(user);
 
-      const sectioned = [...primary, ...groups.flatMap(g => g.items), ...trailing];
+      const sectioned = [...primary, ...secondary];
 
       expect(sectioned.map(n => n.id).sort()).toEqual(flat.map(n => n.id).sort());
-      /* And no entry appears twice, which `sort()` above would not catch on its own. */
+      /* And no entry appears twice, which `sort()` above would not catch on its
+         own. The mobile bar draws `primary` and the sheet draws `secondary`, so a
+         duplicate is a destination rendered in two places at once. */
       expect(new Set(sectioned.map(n => n.id)).size).toBe(sectioned.length);
     });
 
-  /* ── Who sees which group ───────────────────────────────────────────────── */
+  /* ── Which tier each entry is in ─────────────────────────────────────────── */
 
-  it('gives a student no groups at all', () => {
-    const { groups } = navSectionsFor(USER('student'));
-    expect(groups).toEqual([]);
-  });
+  /**
+   * The two entries that are deliberately NOT primary, and the reason each one
+   * can afford not to be: Notifications has the header bell (which also carries
+   * the unread count), and the profile is in the rail's own ProfileMenu and in
+   * the mobile sheet's header.
+   */
+  it.each(['student', 'organizer', 'super_admin'])(
+    'gives %s exactly Notifications and My profile as secondary', (role) => {
+      const { secondary } = navSectionsFor(USER(role));
+      expect(labelsOf(secondary)).toEqual(['Notifications', 'My profile']);
+    });
 
-  it('gives an organizer no groups at all', () => {
-    expect(navSectionsFor(USER('organizer')).groups).toEqual([]);
+  /* An ordinary administrator has no self-profile VIEW — `SELF_PROFILE` resolves
+     `event.moderate` to 'denied', because no profile page has ever existed for
+     that role — so the entry is filtered out by capability rather than by tier.
+     Unchanged by this redesign, and asserted so that a future profile page for
+     admins lands here rather than silently in the primary row. */
+  it('gives an administrator only Notifications as secondary', () => {
+    expect(labelsOf(navSectionsFor(USER('admin')).secondary)).toEqual(['Notifications']);
   });
 
   /**
-   * The Moderation Center is the whole of Administration, for both roles.
+   * The regression this file is named for.
    *
-   * The group keeps its heading over a single entry deliberately — an
-   * administrator and an owner have to be able to say "Administration →
-   * Moderation Center" to each other and both be looking at the same thing, and
-   * the heading is what marks that entry as a different kind of thing from
-   * Messages and Calendar.
+   * `Admin` is the fifth entry, and while the mobile bar was `slice(0, 4)` that
+   * put the administrative area of the product behind a menu on every phone. It
+   * is primary for both roles that have it, on every surface.
    */
-  it('gives an administrator Administration, holding only the hub', () => {
-    const { groups } = navSectionsFor(USER('admin'));
-    expect(groups.map(g => g.label)).toEqual(['Administration']);
-    expect(labelsOf(groups[0].items)).toEqual(['Moderation Center']);
+  it.each(['admin', 'super_admin'])('makes Admin primary for %s', (role) => {
+    const { primary, secondary } = navSectionsFor(USER(role));
+    expect(labelsOf(primary)).toContain('Admin');
+    expect(labelsOf(secondary), 'Admin is in the overflow again').not.toContain('Admin');
   });
 
-  it('gives the owner the same one group, not a longer rail', () => {
-    const { groups } = navSectionsFor(USER('super_admin'));
-    expect(groups.map(g => g.label)).toEqual(['Administration']);
-    expect(labelsOf(groups[0].items)).toEqual(['Moderation Center']);
+  it('gives the owner the five primary destinations in order', () => {
+    expect(labelsOf(navSectionsFor(USER('super_admin')).primary))
+      .toEqual(['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin']);
+  });
+
+  /**
+   * And nobody without the capability sees it, which is the boundary the removed
+   * "Administration" rule used to draw visually. Absence carries that on its own.
+   */
+  it.each(['student', 'organizer', 'partner'])('offers %s no Admin entry at all', (role) => {
+    const { primary, secondary } = navSectionsFor(USER(role));
+    expect(labelsOf([...primary, ...secondary])).not.toContain('Admin');
+  });
+
+  /**
+   * One name for one destination, across every surface.
+   *
+   * It was "Moderation Center" in the rail and in the page title — the longest
+   * label in the list, wrapping in the tablet rail and in a 56px mobile button.
+   * A per-breakpoint abbreviation would have been worse: two names for one place
+   * means two people cannot describe it to each other.
+   */
+  it('calls the administrative hub "Admin" everywhere', async () => {
+    const railLabel = navItemsFor(USER('admin')).find(n => n.id === 'moderation').label;
+    expect(railLabel).toBe('Admin');
+
+    const { PAGE_META } = await import('./App');
+    for (const persona of Object.keys(PAGE_META)) {
+      const meta = PAGE_META[persona].moderation;
+      if (meta) expect(meta.title, `${persona} calls it something else`).toBe('Admin');
+    }
   });
 
   /* ── The consolidation, asserted from both ends ──────────────────────────── */
@@ -177,38 +217,26 @@ describe('navSectionsFor', () => {
   /* ── Placement ──────────────────────────────────────────────────────────── */
 
   /**
-   * `My profile` is ungrouped but must not render in the ungrouped block at the
-   * top, where it would sit above "Administration" and read as the most
-   * important thing on the rail.
+   * `My profile` renders last in the rail.
+   *
+   * It used to carry a `trailing` flag for this, because it was ungrouped and
+   * would otherwise have sat ABOVE "Administration" and read as the most
+   * important thing on the page. With the group gone, `secondary` does the same
+   * job: secondary entries render after primary ones, and the profile is the last
+   * of them because it is last in the NAV table.
    */
-  it('keeps My profile trailing rather than primary', () => {
-    const { primary, trailing } = navSectionsFor(USER('student'));
-    expect(labelsOf(trailing)).toEqual(['My profile']);
+  it('renders My profile last', () => {
+    const { primary, secondary } = navSectionsFor(USER('student'));
+    expect(labelsOf(secondary).at(-1)).toBe('My profile');
     expect(labelsOf(primary)).not.toContain('My profile');
   });
 
   /**
-   * The mobile bottom bar takes `navItemsFor(...).slice(0, 4)`, so the first four
-   * of the FLAT list have to be the everyday entries — not an administrative page
-   * that happened to sort early. Pinned for the owner, who has the most entries
-   * and is therefore the one this would go wrong for.
+   * The mobile bar draws every primary entry, so the primary tier is what has to
+   * stay everyday-plus-Admin rather than acquiring an administrative sub-page
+   * that happened to sort early. Pinned for the owner, who has the most entries.
    */
-  it('keeps the owner\'s first four flat entries everyday ones', () => {
-    expect(navItemsFor(USER('super_admin')).slice(0, 4).map(n => n.label))
-      .toEqual(['Dashboard', 'Opportunities', 'Calendar', 'Messages']);
-  });
-
-  /**
-   * An empty group is dropped rather than rendered headless.
-   *
-   * A heading with nothing under it advertises a feature the reader does not
-   * have, on every page, forever.
-   */
-  it('never returns a group with no entries', () => {
-    for (const role of ['student', 'organizer', 'admin', 'super_admin', 'partner']) {
-      for (const g of navSectionsFor(USER(role)).groups) {
-        expect(g.items.length, `${role} got an empty ${g.label} group`).toBeGreaterThan(0);
-      }
-    }
+  it("keeps the owner's primary tier to the five destinations", () => {
+    expect(navSectionsFor(USER('super_admin')).primary).toHaveLength(5);
   });
 });

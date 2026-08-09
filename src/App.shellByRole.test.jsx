@@ -23,7 +23,7 @@ import React from 'react';
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import App, { navItemsFor, ROLE_LABEL, tabForPath } from './App';
+import App, { navItemsFor, navSectionsFor, ROLE_LABEL, tabForPath } from './App';
 import ProfileMenu from './components/account/ProfileMenu';
 import { ROLES } from './authz.js';
 import { api } from './utils/api';
@@ -168,7 +168,7 @@ describe('navigation, per role', () => {
      * This list is exact rather than a `toContain`, so the entry cannot return
      * unnoticed — which is exactly how it got here the first time.
      */
-    ['admin', ['Dashboard', 'Opportunities', 'Messages', 'Notifications', 'Moderation Center']]
+    ['admin', ['Dashboard', 'Opportunities', 'Messages', 'Admin', 'Notifications']]
   ])('%s nav is what its capabilities justify', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
   });
@@ -182,28 +182,35 @@ describe('navigation, per role', () => {
   it('super_admin gets a populated rail, not an empty shell', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
-      'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications',
-      /* Administration */ 'Moderation Center',
-      'My profile'
+      /* primary */ 'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin',
+      /* secondary */ 'Notifications', 'My profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
     expect(items.length).toBeGreaterThan(0);
   });
 
   /**
-   * `navItems.slice(0, 4)` is the mobile primary row, so an administrative entry
-   * inserted earlier would push `Messages` behind "More" for the platform owner
-   * — a nav regression that no assertion about the SET would catch.
+   * The administrative entry is IN the mobile primary row, which is the reverse
+   * of what this test used to assert.
    *
-   * This used to be phrased about `Errors`, the last SUPER_ONLY entry to reach
-   * the rail. Nothing SUPER_ONLY is on the rail any more, so the property is now
-   * stated about the hub, which is the only administrative entry left and the one
-   * a future addition would be inserted beside.
+   * It used to read "keeps the administrative entry out of the mobile primary
+   * row", and pinned `labels.indexOf('Moderation Center') > 3`. That was the
+   * defect, written down as a requirement: the bar was `navItems.slice(0, 4)`, so
+   * anything past the fourth entry was reachable only through the `⋯` sheet — and
+   * what sat there for administrators was the administrative area of the product.
+   *
+   * The bar now draws every primary entry and scrolls, so there is no fourth-place
+   * cliff to keep anything behind. What has to hold instead: `Admin` is primary,
+   * `Messages` did not get pushed out of primary to make room, and the overflow
+   * holds only the two entries that have another way in.
    */
-  it('keeps the administrative entry out of the mobile primary row', () => {
-    const labels = navItemsFor(USER('super_admin')).map(n => n.label);
-    expect(labels.slice(0, 4)).toEqual(['Dashboard', 'Opportunities', 'Calendar', 'Messages']);
-    expect(labels.indexOf('Moderation Center')).toBeGreaterThan(3);
+  it('keeps the administrative entry IN the mobile primary row', () => {
+    const { primary, secondary } = navSectionsFor(USER('super_admin'));
+
+    expect(primary.map(n => n.label))
+      .toEqual(['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin']);
+    expect(secondary.map(n => n.label), 'Admin is behind the ⋯ menu again')
+      .not.toContain('Admin');
   });
 
   /**
@@ -254,11 +261,11 @@ describe('navigation, per role', () => {
     signedInAs(USER('super_admin'));
     renderAt('/');
     await screen.findByTestId('admin-dash');
+    /* One list, no divider: `Admin` renders among the destinations rather than
+       under an "Administration" heading of its own. */
     expect(sidebarLabels()).toEqual([
-      'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications',
-      /* Administration — one entry, and it keeps its heading. See NAV_GROUPS. */
-      'Moderation Center',
-      'My profile'
+      'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin',
+      'Notifications', 'My profile'
     ]);
   });
 
@@ -267,9 +274,7 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
-      'Dashboard', 'Opportunities', 'Messages', 'Notifications',
-      /* Administration — one entry, and it keeps its heading. See NAV_GROUPS. */
-      'Moderation Center',
+      'Dashboard', 'Opportunities', 'Messages', 'Admin', 'Notifications',
     ]);
   });
 
@@ -456,6 +461,52 @@ describe('role labels', () => {
       </MemoryRouter>
     );
     expect(screen.getByText('Pending approval')).toBeInTheDocument();
+  });
+
+  /**
+   * ── The mobile bar, as rendered ──
+   *
+   * `navSectionsFor` is asserted directly in `App.navGroups.test.jsx`. These two
+   * check that the SHELL actually draws it that way, because the regression being
+   * guarded was a rendering decision (`navItems.slice(0, 4)`) rather than a data
+   * one — the tier information was always available and simply not used.
+   */
+  it('draws every primary destination in the mobile bar, Admin included', async () => {
+    signedInAs(USER('super_admin'));
+    renderAt('/');
+    await screen.findByTestId('admin-dash');
+
+    const bar = within(document.querySelector('.mobilenav'));
+    for (const label of ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin']) {
+      expect(bar.getByRole('button', { name: new RegExp(`^${label}$`) }),
+        `${label} is missing from the mobile bar`).toBeInTheDocument();
+    }
+
+    /* The scroller is what makes five fit without a fifth-place cliff. Its
+       absence would silently reinstate the ceiling, because the buttons would
+       still all render — just crushed or clipped. */
+    expect(document.querySelector('.mobilenav .mobilenav-scroll')).toBeTruthy();
+    /* And `⋯` is outside it, so it cannot scroll out of reach. */
+    expect(document.querySelector('.mobilenav-scroll .mobilenav-more')).toBeNull();
+    expect(document.querySelector('.mobilenav > .mobilenav-more')).toBeTruthy();
+  });
+
+  it('puts Admin in the bar and NOT in the overflow sheet', async () => {
+    signedInAs(USER('super_admin'));
+    renderAt('/');
+    await screen.findByTestId('admin-dash');
+
+    fireEvent.click(screen.getByRole('button', { name: /More/i }));
+    const sheet = within(document.querySelector('.mobile-more-sheet'));
+
+    /* The reported defect, stated as an assertion: reaching the administrative
+       area of the product must not require opening a menu. */
+    expect(sheet.queryByText('Admin'), 'Admin is behind the ⋯ menu again').toBeNull();
+
+    /* The sheet still holds the secondary destinations — "not in the overflow"
+       must not have been achieved by dropping them from the shell entirely. */
+    expect(sheet.getByText('Notifications')).toBeInTheDocument();
+    expect(sheet.getByText('My profile')).toBeInTheDocument();
   });
 
   it('the mobile sheet calls super_admin the platform administrator, not a volunteer', async () => {

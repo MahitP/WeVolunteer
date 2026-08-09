@@ -48,11 +48,29 @@ export default function PersonaPreviewBanner({ preview, onEnded }) {
     }
   };
 
+  /**
+   * "an organizer", not "a organizer".
+   *
+   * The sentence was `as a {preview.persona}`, and two of the four previewable
+   * roles begin with a vowel — so the banner that sits on every page for the
+   * duration of a preview read "as a organizer" and "as a administrator". A
+   * lookup rather than a vowel test: `PREVIEWABLE` comes from `ROLES`, so a role
+   * added later gets a readable label here or an obvious gap, instead of a
+   * heuristic quietly producing "an partner".
+   */
+  const PERSONA_PHRASE = {
+    student: 'a student',
+    organizer: 'an organizer',
+    admin: 'an administrator',
+    partner: 'a partner',
+  };
+  const phrase = PERSONA_PHRASE[preview.persona] || `a ${preview.persona}`;
+
   return (
     <div className="persona-banner" role="status">
       <Eye size={16} aria-hidden="true" />
       <span className="persona-banner-text">
-        You are previewing WeVolunteer as a <strong>{preview.persona}</strong>. Your
+        You are previewing WeVolunteer as <strong>{phrase}</strong>. Your
         own access is reduced while this is on.
       </span>
       {error && <span className="persona-banner-error">{error}</span>}

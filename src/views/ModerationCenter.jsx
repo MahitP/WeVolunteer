@@ -37,7 +37,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout,
+  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye,
 } from 'lucide-react';
 import { can } from '../authz';
 import { api } from '../utils/api';
@@ -151,15 +151,18 @@ export const AREAS = [
  * never what is allowed.
  */
 const PERSONAS = [
-  { id: 'student', label: 'a student' },
-  { id: 'organizer', label: 'an organizer' },
-  { id: 'admin', label: 'an administrator' },
-  { id: 'partner', label: 'a partner' },
+  { id: 'student', label: 'Student', blurb: 'Browse, apply, log hours' },
+  { id: 'organizer', label: 'Organizer', blurb: 'Post events, pick volunteers' },
+  { id: 'admin', label: 'Administrator', blurb: 'Reports, appeals, approvals' },
+  { id: 'partner', label: 'Partner', blurb: 'Read-only participation view' },
 ];
 
 export default function ModerationCenter({ currentUser, onPreviewStarted }) {
   const areas = AREAS.filter(a => can(currentUser, a.cap));
   const [persona, setPersona] = useState(PERSONAS[0].id);
+  /* Named in the action so the button says what pressing it will do, rather than
+     "Start preview" beside a selection the reader has to look back up at. */
+  const selectedPersona = PERSONAS.find(p => p.id === persona) ?? PERSONAS[0];
   const [previewError, setPreviewError] = useState(null);
   const [starting, setStarting] = useState(false);
 
@@ -181,38 +184,94 @@ export default function ModerationCenter({ currentUser, onPreviewStarted }) {
   return (
     <div className="page">
       <header className="page-head">
-        <h1>Moderation Center</h1>
+        {/* "Admin", matching the rail entry and PAGE_META — see the NAV table in
+            src/App.jsx. Two names for one destination means two people cannot
+            describe it to each other. */}
+        <h1>Admin</h1>
         <p className="lead">
           The administrative areas this account can open. Each one re-checks your access when you get there.
         </p>
       </header>
 
       {/*
-        * Previewing is offered only to an account that holds `persona.preview`,
-        * which is SUPER_ONLY and ungrantable. Hiding it is UX: the endpoint
-        * re-checks the capability, and the kernel makes a preview incapable of
-        * granting anything in any case — it intersects the previewed role with
-        * the real one, so the worst a forged request achieves is less access for
-        * whoever sent it.
+        * ── Previewing as somebody else ──
+        *
+        * Offered only to an account that holds `persona.preview`, which is
+        * SUPER_ONLY and ungrantable. Hiding it is UX: the endpoint re-checks the
+        * capability, and the kernel makes a preview incapable of granting
+        * anything in any case — it intersects the previewed role with the real
+        * one, so the worst a forged request achieves is less access for whoever
+        * sent it.
+        *
+        * ── Why this is a card of radios rather than a select ──
+        *
+        * It was `<label>See WeVolunteer as</label><select>…</select><button>`,
+        * three controls loose in a flex row above the tiles. Two things were
+        * wrong with it beyond the plainness.
+        *
+        * It read as a filter. A bare select sitting above a list of tiles is,
+        * everywhere else in this product and most others, a control that narrows
+        * the list — and this one drops the owner's own capabilities for fifteen
+        * minutes. The consequence has to be legible BEFORE the click, which is
+        * what the sentence under the heading is for: "Your own access is reduced"
+        * is the whole reason the control needs explaining, and a `<label>` reading
+        * "See WeVolunteer as" said none of it.
+        *
+        * And a collapsed select hides the options. There are four, they are short,
+        * and which one somebody wants depends on what each role can do — so
+        * showing all four with a line about each costs one card and removes a
+        * click plus a guess. Native `<input type="radio">` in a `radiogroup`, so
+        * arrow keys move between them and a screen reader announces "2 of 4"
+        * without any ARIA of our own.
         */}
       {can(currentUser, 'persona.preview') && (
-        <div className="persona-picker">
-          <label className="persona-picker-label" htmlFor="persona-preview">
-            See WeVolunteer as
-          </label>
-          <select
-            id="persona-preview"
-            value={persona}
-            onChange={(e) => setPersona(e.target.value)}
-            disabled={starting}
-          >
-            {PERSONAS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-          </select>
-          <button type="button" className="btn btn-secondary" onClick={startPreview} disabled={starting}>
-            {starting ? 'Starting…' : 'Start preview'}
-          </button>
-          {previewError && <span className="persona-banner-error">{previewError}</span>}
-        </div>
+        <section className="persona-preview card card-pad" aria-labelledby="persona-preview-heading">
+          <div className="persona-preview-head">
+            <span className="persona-preview-icon" aria-hidden="true"><Eye size={18} /></span>
+            <div>
+              <h2 id="persona-preview-heading" className="persona-preview-title">
+                Preview as another role
+              </h2>
+              <p className="persona-preview-lead">
+                See exactly what someone else sees. Your role does not change — your
+                own access is <strong>reduced</strong> for fifteen minutes, or until
+                you stop.
+              </p>
+            </div>
+          </div>
+
+          <div className="persona-options" role="radiogroup" aria-labelledby="persona-preview-heading">
+            {PERSONAS.map(p => (
+              <label
+                key={p.id}
+                className={`persona-option${persona === p.id ? ' is-selected' : ''}`}
+              >
+                <input
+                  type="radio"
+                  name="persona-preview"
+                  value={p.id}
+                  checked={persona === p.id}
+                  onChange={() => setPersona(p.id)}
+                  disabled={starting}
+                />
+                <span className="persona-option-text">
+                  <span className="persona-option-label">{p.label}</span>
+                  <span className="persona-option-blurb">{p.blurb}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <div className="persona-preview-foot">
+            <button type="button" className="btn btn-secondary" onClick={startPreview} disabled={starting}>
+              <Eye size={16} aria-hidden="true" />
+              {starting ? 'Starting…' : `Preview as ${selectedPersona.label.toLowerCase()}`}
+            </button>
+            {previewError && (
+              <span className="persona-banner-error" role="alert">{previewError}</span>
+            )}
+          </div>
+        </section>
       )}
 
       {/* A list, because it is one — `list-style: none` in CSS, so the semantics

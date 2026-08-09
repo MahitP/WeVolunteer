@@ -32,13 +32,18 @@ describe('recipientCopyFor', () => {
    * `e.organizer_id = ?` — applicants to events THE CALLER ORGANIZES. An
    * administrator usually organizes none, so the box searches an empty set
    * however carefully they spell the name. Contacting somebody about a report
-   * goes through the Moderation Center, which is also what records the
+   * goes through the Admin area, which is also what records the
    * `ADMIN_CONVERSATION_OPENED` audit row, so that is where they are sent.
+   *
+   * The name in the assertion followed the rail: the destination was called
+   * "Moderation Center" everywhere until the navigation redesign, and copy that
+   * points at a name the product no longer shows sends the reader looking for
+   * something they cannot find. See the NAV table in src/App.jsx.
    */
-  it('sends an administrator to the Moderation Center rather than the search box', () => {
+  it('sends an administrator to the Admin area rather than the search box', () => {
     const c = recipientCopyFor(USER('admin'));
-    expect(c.description).toMatch(/moderation center/i);
-    expect(c.empty).toMatch(/moderation center/i);
+    expect(c.description).toMatch(/admin area/i);
+    expect(c.empty).toMatch(/admin area/i);
   });
 
   /**
