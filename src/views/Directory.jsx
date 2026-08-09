@@ -69,6 +69,24 @@ export default function Directory({ currentUser }) {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  /**
+   * With no query, show the organizations that exist.
+   *
+   * "Search for someone" as the only empty state made organizations
+   * discoverable exclusively by already knowing their name, which is the
+   * opposite of what a directory is for. People are deliberately NOT listed
+   * this way — an unprompted roster of every child on the platform is not
+   * something to render by default.
+   */
+  const [browsed, setBrowsed] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.fetchOrganizations({ limit: 12 })
+      .then(res => { if (!cancelled) setBrowsed(res.organizations || []); })
+      .catch(() => { if (!cancelled) setBrowsed([]); });
+    return () => { cancelled = true; };
+  }, []);
+
   const users = results?.users ?? [];
   const organizations = results?.organizations ?? [];
   const nothing = results && !loading && users.length === 0 && organizations.length === 0;
@@ -145,11 +163,34 @@ export default function Directory({ currentUser }) {
       )}
 
       {!loading && !results && (
-        <EmptyState
-          icon={Users}
-          title="Search for someone"
-          message="Find a friend by their username, or an organization you want to join."
-        />
+        <>
+          <EmptyState
+            icon={Users}
+            title="Search for someone"
+            message="Find a friend by their name or username, or search for an organization."
+          />
+          {browsed?.length > 0 && (
+            <section className="stack-md">
+              <h2 className="section-head">Organizations to join</h2>
+              <ul className="list directory-list">
+                {browsed.map(org => (
+                  <li key={org.id} className="list-row">
+                    <Link to={`/organizations/${org.slug}`} className="card card-pad card-link directory-row">
+                      <span className="avatar directory-avatar" aria-hidden="true"><Building2 size={18} /></span>
+                      <span className="directory-body">
+                        <span className="directory-name">{org.name}</span>
+                        <span className="muted directory-meta">
+                          {org.memberCount} {org.memberCount === 1 ? 'member' : 'members'}
+                        </span>
+                      </span>
+                      <span className="tag tag-info directory-kind">Organization</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </>
       )}
 
       {!loading && organizations.length > 0 && (

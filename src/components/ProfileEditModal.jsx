@@ -16,6 +16,8 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
     school: user?.school || '',
     grade: user?.grade || '10',
     skillsInput: (user?.skills || []).join(', '),
+    hobbiesInput: (user?.hobbies || []).join(', '),
+    location: user?.location || '',
     leaderboardOptIn: user?.leaderboardOptIn || false
   });
   const [saving, setSaving] = useState(false);
@@ -91,6 +93,8 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
         school: form.school,
         grade: form.grade,
         skills: form.skillsInput.split(',').map(s => s.trim()).filter(Boolean),
+        hobbies: form.hobbiesInput.split(',').map(h => h.trim()).filter(Boolean),
+        location: form.location.trim(),
         leaderboardOptIn: form.leaderboardOptIn
       });
       latestUser = res.user;
@@ -132,6 +136,7 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
   };
 
   const skills = form.skillsInput.split(',').map(s => s.trim()).filter(Boolean);
+  const hobbies = form.hobbiesInput.split(',').map(h => h.trim()).filter(Boolean);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -224,6 +229,41 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
                 {skills.map((s, i) => <span key={i} className="tag tag-brand">{s}</span>)}
               </div>
             )}
+          </div>
+
+          <div className="field">
+            <label htmlFor="pf-hobbies">Hobbies</label>
+            <input id="pf-hobbies" className="input" value={form.hobbiesInput}
+              placeholder="Baking, football, guitar"
+              onChange={e => set('hobbiesInput', e.target.value)} />
+            <span className="field-hint">Separate with commas. Shown on your public profile.</span>
+            {hobbies.length > 0 && (
+              <div className="row row-wrap" style={{ gap: 4, marginTop: 6 }}>
+                {hobbies.map((h, i) => <span key={i} className="tag tag-accent">{h}</span>)}
+              </div>
+            )}
+          </div>
+
+          {/**
+            * Location, with the warning as the placeholder AND the hint.
+            *
+            * This field appears on a profile any member can find by searching a
+            * name. A student typing their street address into it would publish
+            * a child's home to the whole district, and the 80-character bound in
+            * accountValidation.js is a nudge, not a control — this copy is the
+            * actual mitigation, which is why it says the thing plainly rather
+            * than describing a format.
+            */}
+          <div className="field">
+            <label htmlFor="pf-location">General area <span className="muted">(optional)</span></label>
+            <input id="pf-location" className="input" value={form.location} maxLength={80}
+              placeholder="Please don't use your exact address"
+              aria-describedby="pf-location-hint"
+              onChange={e => set('location', e.target.value)} />
+            <span className="field-hint" id="pf-location-hint">
+              A town or neighbourhood is enough — &ldquo;South Brunswick, NJ&rdquo;. Never your street
+              address. This is visible to anyone who finds your profile.
+            </span>
           </div>
 
           <div className="field">

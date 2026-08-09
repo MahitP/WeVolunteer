@@ -691,14 +691,28 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
     if (organization) {
       try {
         const recipients = memberIds(db, organization.id, { excluding: [req.user.id] });
-        for (const memberId of recipients) {
-          notificationService.dispatch(
-            'ORGANIZATION_EVENT_POSTED',
-            { eventId, eventTitle: title, organizationName: organization.name, organizationSlug: organization.slug },
-            memberId,
-            `org-event:${eventId}`
-          );
-        }
+        /**
+         * One transaction around the whole fan-out.
+         *
+         * Each `dispatch` is several statements, and outside a transaction
+         * every one of them autocommits — for a three-hundred-member club that
+         * is hundreds of separate fsyncs inside the request that created the
+         * event, before the 201 is written. Wrapping them makes it one commit.
+         *
+         * Still AFTER the event's own transaction, and still inside its own
+         * try/catch: a fan-out failure must roll back only the notifications,
+         * never the event the organizer successfully created.
+         */
+        inTransaction(() => {
+          for (const memberId of recipients) {
+            notificationService.dispatch(
+              'ORGANIZATION_EVENT_POSTED',
+              { eventId, eventTitle: title, organizationName: organization.name, organizationSlug: organization.slug },
+              memberId,
+              `org-event:${eventId}`
+            );
+          }
+        });
       } catch (err) {
         console.error('Organization fan-out failed:', err);
       }

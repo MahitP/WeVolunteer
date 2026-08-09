@@ -26,6 +26,8 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
   const [confirmSignOutOthers, setConfirmSignOutOthers] = useState(false);
   const [savingPrivacy, setSavingPrivacy] = useState(false);
   const [leaderboardOptIn, setLeaderboardOptIn] = useState(Boolean(currentUser?.leaderboardOptIn));
+  const [profileVisibility, setProfileVisibility] = useState(currentUser?.profileVisibility || 'private');
+  const [friendActivityVisible, setFriendActivityVisible] = useState(currentUser?.friendActivityVisible !== false);
 
   useEffect(() => {
     setLeaderboardOptIn(Boolean(currentUser?.leaderboardOptIn));
@@ -76,6 +78,44 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
    * whether a minor's name and hours appear on a public board, showing the
    * wrong state is worse than showing no control.
    */
+  /**
+   * One handler for both v1.3 privacy switches.
+   *
+   * Optimistic, with a rollback on failure, matching the leaderboard toggle
+   * beside it — a switch that visibly moves and then silently did not save is
+   * the worst outcome for a privacy control.
+   */
+  const savePrivacy = async (patch, setter, previous, message) => {
+    setSavingPrivacy(true);
+    try {
+      await api.updateProfile(patch);
+      onProfileChange?.();
+      addToast(message, 'success');
+    } catch (err) {
+      setter(previous);
+      addToast(err.message || 'Could not save that preference.', 'error');
+    } finally {
+      setSavingPrivacy(false);
+    }
+  };
+
+  const handleVisibilityChange = (next) => {
+    const previous = profileVisibility;
+    setProfileVisibility(next);
+    savePrivacy({ profileVisibility: next }, setProfileVisibility, previous,
+      next === 'public' ? 'Your school and year are now visible on your profile.'
+        : next === 'friends' ? 'Your school and year are visible to friends only.'
+          : 'Your school and year are now hidden.');
+  };
+
+  const handleFriendActivityToggle = (next) => {
+    const previous = friendActivityVisible;
+    setFriendActivityVisible(next);
+    savePrivacy({ friendActivityVisible: next }, setFriendActivityVisible, previous,
+      next ? 'Friends will be told when you sign up for something.'
+        : 'Friends will no longer be told when you sign up.');
+  };
+
   const handleLeaderboardToggle = async (nextValue) => {
     const previous = leaderboardOptIn;
     setLeaderboardOptIn(nextValue);
@@ -155,10 +195,55 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
 
             <div className="card card-pad" style={{ marginTop: 'var(--s4)' }}>
               <h3 style={{ marginBottom: 'var(--s4)' }}>Profile visibility</h3>
+              {/**
+                * The copy here used to say that only organizers and
+                * administrators could see a profile. That stopped being true in
+                * v1.3, when profiles became findable by every member — and a
+                * privacy screen that describes a protection the product no
+                * longer provides is worse than one that says nothing.
+                *
+                * What the setting now controls is which FIELDS are shown, not
+                * whether the profile exists. That is stated plainly, including
+                * the part students most need to know: the baseline is visible
+                * either way.
+                */}
+              <div className="field">
+                <label htmlFor="pv-select">Who can see my school and year?</label>
+                <select
+                  id="pv-select"
+                  className="select"
+                  value={profileVisibility}
+                  disabled={savingPrivacy}
+                  onChange={e => handleVisibilityChange(e.target.value)}
+                >
+                  <option value="private">Only me and school staff</option>
+                  <option value="friends">My friends</option>
+                  <option value="public">Any WeVolunteer member</option>
+                </select>
+                <span className="field-hint">
+                  Your name, general area, hobbies, skills and volunteering totals are always
+                  visible to signed-in members so they can find you. This setting controls your
+                  school, year group and bio. Your email address is never shown to other students.
+                </span>
+              </div>
+            </div>
+
+            <div className="card card-pad" style={{ marginTop: 'var(--s4)' }}>
+              <h3 style={{ marginBottom: 'var(--s4)' }}>Friend activity</h3>
               <label className="row" style={{ alignItems: 'flex-start' }}>
+                <input
+                  type="checkbox"
+                  checked={friendActivityVisible}
+                  disabled={savingPrivacy}
+                  onChange={e => handleFriendActivityToggle(e.target.checked)}
+                />
                 <div className="stack-xs" style={{ flex: 1 }}>
-                  <span className="strong">Who can view my information?</span>
-                  <span className="dim small">Only verified organizers and school administrators can view your full profile and contact information. Other students can only see your name and avatar on shared shifts.</span>
+                  <span className="strong">Tell my friends when I sign up for something</span>
+                  <span className="dim small">
+                    Friends you have accepted get a notification naming the opportunity, so they
+                    can consider signing up too. It never says when or where you will be. Turning
+                    this off stops the notification being created at all.
+                  </span>
                 </div>
               </label>
             </div>

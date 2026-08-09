@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
   FileText, ArrowRight, Printer, X, Ban, Trophy, MapPin, CalendarCheck, History, ShieldCheck
+, ExternalLink
 } from 'lucide-react';
 import { APP_NAME, SCHOOL_NAME } from '../config';
 import { formatHours, formatDay, formatTimeRange, countdown } from '../utils/helpers';
@@ -382,7 +384,23 @@ export default function VolunteerDashboard({
         {/* ── Right column ── */}
         <div className="stack-lg">
           <section>
-            <div className="section-head"><h2>Service history</h2></div>
+            {/**
+              * The volunteer's counterpart to the organizer's "New event",
+              * deliberately in the same place and the same shape: a
+              * `section-action` on the heading of the section it adds to.
+              *
+              * It sits on Service history rather than at the top of the page
+              * because that is the list it writes into, and because a student
+              * looking for "where do I record the thing I did on Saturday" is
+              * already looking at their history when the question occurs to
+              * them.
+              */}
+            <div className="section-head">
+              <h2>Service history</h2>
+              <Link className="btn btn-secondary btn-sm section-action" to="/hours/external">
+                <ExternalLink size={14} /> Log external hours
+              </Link>
+            </div>
             <div className="card card-pad">
               {completed.length === 0 ? (
                 <EmptyState

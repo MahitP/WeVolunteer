@@ -163,7 +163,6 @@ describe('the social and organization features', () => {
       /* Alice's own view of Bob is unchanged — a mute is invisible. */
       const aliceView = await srv.call('GET', `/api/users/${bobId}/public-profile`, undefined, alice);
       expect(aliceView.body.viewer.muted).toBe(false);
-      expect(aliceView.body.viewer.restrictedBy).toBe(false);
     });
 
     it('stops the muter being notified about the muted account', async () => {
@@ -209,6 +208,25 @@ describe('the social and organization features', () => {
       const res = await srv.call('GET', '/api/me/relationships', undefined, bob);
       expect(res.status).toBe(200);
       expect(res.body.restricted.map(u => u.id)).toContain(aliceId);
+    });
+
+    /**
+     * The restricted party must not be able to tell.
+     *
+     * `restrictedBy` is stripped from the response rather than sent as `false`,
+     * because a key that is present-and-false is still a key somebody can watch
+     * for. To Alice, a profile she has been restricted from must be
+     * indistinguishable from one where nothing has happened — which is the
+     * difference between restricting and blocking, and the reason a student who
+     * wants distance without a confrontation has something to reach for.
+     */
+    it('never tells the restricted person they were restricted', async () => {
+      const aliceView = await srv.call('GET', `/api/users/${bobId}/public-profile`, undefined, alice);
+      expect(aliceView.status).toBe(200);
+      expect(Object.hasOwn(aliceView.body.viewer, 'restrictedBy')).toBe(false);
+      /* And a control: the same shape for somebody with no relationship at all. */
+      const carolView = await srv.call('GET', `/api/users/${carolId}/public-profile`, undefined, alice);
+      expect(Object.keys(aliceView.body.viewer).sort()).toEqual(Object.keys(carolView.body.viewer).sort());
     });
 
     it('lifts a restriction', async () => {

@@ -103,7 +103,15 @@ function ActionsMenu({ label, items }) {
 }
 
 export default function PublicProfile({ currentUser, addToast }) {
-  const { handle } = useParams();
+  /**
+   * Two routes reach this view: `/users/@name` (`:handle`) and `/users/id/:id`.
+   *
+   * The id form exists for accounts that have no username yet and for internal
+   * links that already hold an id — the organization founder link, and search
+   * rows for username-less accounts. Reading only `handle` made every one of
+   * those resolve to `GET /api/users/by-username/`, which matches no route.
+   */
+  const { handle, id } = useParams();
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -120,12 +128,12 @@ export default function PublicProfile({ currentUser, addToast }) {
     let cancelled = false;
     setLoading(true);
     setError('');
-    api.fetchPublicProfile(username)
+    (id ? api.fetchPublicProfileById(id) : api.fetchPublicProfile(username))
       .then(res => { if (!cancelled) setData(res); })
       .catch(err => { if (!cancelled) setError(err.status === 404 ? 'not_found' : err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [username]);
+  }, [username, id]);
 
   useEffect(() => load(), [load]);
 
@@ -151,7 +159,9 @@ export default function PublicProfile({ currentUser, addToast }) {
         <EmptyState
           icon={UserX}
           title="No profile here"
-          message={`There is no member with the username @${username}. They may have changed it, or the link may be wrong.`}
+          message={id
+            ? 'That account no longer exists, or its profile is not available.'
+            : `There is no member with the username @${username}. They may have changed it, or the link may be wrong.`}
           action={<Link className="btn btn-secondary" to="/directory">Search members</Link>}
         />
       </div>
@@ -210,7 +220,7 @@ export default function PublicProfile({ currentUser, addToast }) {
      * organizer's profile would see a control that silently fails.
      */
     ...(canBlock ? [viewer.blocked
-      ? { id: 'unblock', icon: UserCheck, label: 'Unblock', onSelect: () => act(() => api.unblockUser(profile.id).then(() => api.fetchPublicProfile(username).then(r => r.viewer)), 'Unblocked.') }
+      ? { id: 'unblock', icon: UserCheck, label: 'Unblock', onSelect: () => act(() => api.unblockUser(profile.id).then(() => api.fetchPublicProfileById(profile.id).then(r => r.viewer)), 'Unblocked.') }
       : {
         id: 'block',
         icon: Ban,
@@ -221,7 +231,7 @@ export default function PublicProfile({ currentUser, addToast }) {
           title: `Block ${profile.name}?`,
           body: 'They will not be able to message you. Blocking does NOT remove you from any event or affect your hours — if you are both signed up for something, you both stay signed up and your service record is untouched.',
           confirmLabel: 'Block',
-          run: () => api.blockUser(profile.id).then(() => api.fetchPublicProfile(username).then(r => r.viewer)),
+          run: () => api.blockUser(profile.id).then(() => api.fetchPublicProfileById(profile.id).then(r => r.viewer)),
           done: `${profile.name} is blocked.`,
         }),
       }] : []),
@@ -362,7 +372,9 @@ export default function PublicProfile({ currentUser, addToast }) {
       {isSelf && (
         <p className="muted profile-selfnote">
           This is how your profile looks to other members.{' '}
-          <Link to="/settings?section=privacy">Change what is visible</Link>.
+          <Link to="/settings?section=privacy">Change what is visible</Link>
+          {' · '}
+          <Link to="/hours/external">Log external hours</Link>.
         </p>
       )}
 

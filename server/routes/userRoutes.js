@@ -133,6 +133,28 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
        * Self, or staff holding `user.contact.read`, which is the capability
        * that already names the power to see a student's particulars.
        */
+      /**
+       * The itemised service record is NOT public, and the gate is
+       * `canSeeContact`.
+       *
+       * Each row carries a past event's title, its LOCATION and its exact start
+       * and end times. Before v1.3 this was returned to EVERY authenticated
+       * caller with nothing gating it — for a fifteen-year-old, a week-by-week
+       * record of where they have been, handed to anybody with a login. That is
+       * the leak this closes.
+       *
+       * `hostsApplicant` is deliberately inside the gate, and it is narrower
+       * than it looks: it requires that this student applied to an event THIS
+       * organizer hosts. An organizer cannot manufacture that. Reviewing an
+       * applicant's service history is the applicant-review workflow — it is
+       * how an organizer decides who to accept — and it is pinned by
+       * "does not regress the organizer applicant-review workflow" in
+       * routes.auth.test.js. Narrowing it would break a reviewed decision, not
+       * fix a leak.
+       *
+       * `/api/users/:id/service-record` applies the identical rule, so the two
+       * endpoints cannot disagree about the same rows.
+       */
       completed: canSeeContact ? completed.map(formatServiceRow) : [],
       completedRedacted: !canSeeContact,
       // A confirmed future shift discloses a minor's physical whereabouts at a
