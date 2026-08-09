@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import AdminDashboard from './AdminDashboard';
 
 /**
@@ -70,10 +71,26 @@ beforeEach(() => {
   });
 });
 
-const renderDash = () =>
-  render(<AdminDashboard addToast={() => {}} user={{ id: 'user-admin', role: 'admin' }} />);
+/**
+ * Wrapped in a router because the page now reads the location.
+ *
+ * The Moderation Center links to sections of this page by fragment
+ * (`/#reports`, `/#organizer-requests`) and the browser cannot resolve those
+ * itself — the sections do not exist until four fetches have returned. So the
+ * page scrolls to `useLocation().hash` once loading is over, which makes a
+ * router context a real dependency rather than test scaffolding.
+ *
+ * `initialEntries` carries a hash so the effect's happy path is exercised on
+ * every render here rather than only its early return.
+ */
+const renderDash = (path = '/#reports') =>
+  render(
+    <MemoryRouter initialEntries={[path]}>
+      <AdminDashboard addToast={() => {}} user={{ id: 'user-admin', role: 'admin' }} />
+    </MemoryRouter>
+  );
 
-describe('the Moderation Center renders', () => {
+describe('the admin Dashboard renders', () => {
   /**
    * The whole point: it mounts without throwing.
    *

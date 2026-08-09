@@ -39,7 +39,7 @@ const OrganizerProfile = React.lazy(() => import('../views/OrganizerProfile'));
 const ResetPassword = React.lazy(() => import('../views/ResetPassword'));
 const OAuthCallback = React.lazy(() => import('../views/OAuthCallback'));
 const CertificateVerification = React.lazy(() => import('../views/CertificateVerification'));
-const PublicImpact = React.lazy(() => import('../views/PublicImpact'));
+const AdminImpact = React.lazy(() => import('../views/AdminImpact'));
 const VolunteerPortfolio = React.lazy(() => import('../views/VolunteerPortfolio'));
 const CheckInView = React.lazy(() => import('../views/CheckInView'));
 const Messages = React.lazy(() => import('../views/Messages'));
@@ -53,6 +53,7 @@ const AdminAppeals = React.lazy(() => import('../views/AdminAppeals'));
 const AdminAuditExplorer = React.lazy(() => import('../views/AdminAuditExplorer'));
 const ImpactDashboard = React.lazy(() => import('../views/ImpactDashboard.jsx'));
 const AdminRoster = React.lazy(() => import('../views/AdminRoster'));
+const ModerationCenter = React.lazy(() => import('../views/ModerationCenter'));
 
 /**
  * Views App.jsx routes itself rather than through a table below.
@@ -130,10 +131,34 @@ export const APP_ROUTES = [
      consults per-user grants — no capability grant can reach this route, and
      the nav entry that points at it is hidden by the same capability. */
   { path: '/errors', element: <ErrorDashboard />, requiredCap: 'error.read' },
+  /* The hub. `report.resolve` is the capability an ordinary administrator holds
+     that makes any of this relevant to them; each tile then requires its own,
+     and each destination refuses independently. */
+  { path: '/admin/moderation', element: <ModerationCenter />, requiredCap: 'report.resolve' },
   { path: '/admin/appeals', element: <AdminAppeals />, requiredCap: 'appeal.review' },
+  /* The community impact figures. `analytics.impact` is administrative — held by
+     `admin` and `super_admin` and by nobody below — and it is the same word the
+     nav entry and `GET /api/impact` name, so the rail, this guard and the server
+     agree. The guard matters independently of the rail: hiding a nav entry is UX,
+     and typing the URL is one keystroke. `deniedRoute` refuses this before the
+     shell is built. */
   { path: '/impact', element: <ImpactDashboard />, requiredCap: 'analytics.impact' },
   { path: '/admin/audit-logs', element: <AdminAuditExplorer />, requiredCap: 'audit.read' },
   { path: '/admin/roster', element: <AdminRoster />, requiredCap: 'admin.create' },
+  /**
+   * The platform-wide impact figures. An AUTHENTICATED route, deliberately.
+   *
+   * It was briefly declared in PUBLIC_ROUTES below, carrying a `requiredCap`
+   * that nothing in that table reads. Three things were wrong with that at
+   * once: an anonymous visitor rendered the administrator's dashboard shell;
+   * `isPublicPath` returned true for it, so an owner who clicked the nav entry
+   * was dropped onto a page with no navigation and no way back; and the
+   * capability was decoration, because only APP_ROUTES is gated on one.
+   *
+   * `analytics.platform` is the same capability the nav entry and the API
+   * handler name, so the rail, the route and the server agree on one word.
+   */
+  { path: '/admin/impact', element: <AdminImpact />, requiredCap: 'analytics.platform' },
 ];
 
 /**
@@ -179,13 +204,32 @@ export const SIGNED_OUT_ROUTES = [
  * added here was silently unreachable — it would fall through to the signed-out
  * catch-all and answer 404 while looking correctly declared.
  */
+/**
+ * Legacy `/legal/*` names that were published before the registry's slugs were.
+ *
+ * The comment on `/legal` below argues against an alias LAYER, and that argument
+ * still stands: there is one canonical name per document, it comes from
+ * `server/legalDocuments.js`, and nothing in the product should be linking to a
+ * second one. These are not a second naming scheme — they are two URLs that were
+ * genuinely shipped. The signup consent block linked `/legal/terms` and
+ * `/legal/guidelines`, both of which 404'd inside the flow where somebody is
+ * being asked to agree to them, so they went out in emails and browser history
+ * before the links were corrected to the canonical slugs.
+ *
+ * A redirect rather than a second route to the same view, so the reader ends up
+ * on the canonical URL and the address bar agrees with the registry.
+ *
+ * This map is CLOSED. A new document gets its registry slug and nothing else;
+ * an entry belongs here only when a URL was already published under it.
+ * `legalContent.test.js` asserts every target below is a registered slug.
+ */
+export const LEGAL_SLUG_ALIASES = Object.freeze({
+  terms: 'terms-of-service',
+  guidelines: 'community-guidelines',
+});
+
 export const PUBLIC_ROUTES = [
   { path: '/verify/:code', element: <CertificateVerification /> },
-  /* The community figures, readable without an account — three of the four
-     reasons they exist (marketing, grant applications, community trust) are about
-     people who will never make one. The server builds a separate, smaller payload
-     for this route; see server/impact.js. */
-  { path: '/community', element: <PublicImpact /> },
   /**
    * `/privacy` redirects to the registry document rather than rendering its own page.
    *
@@ -226,6 +270,14 @@ export const PUBLIC_ROUTES = [
    * from the registry is that there is one name per document.
    */
   { path: '/legal', element: <LegalCenter /> },
+  /* The legacy short names, redirected. Declared from LEGAL_SLUG_ALIASES above
+     so the alias and its target cannot drift apart, and so a test can assert
+     every target is a slug the registry actually publishes. A static segment
+     outranks `/legal/:slug` in the router's own ranking, so these win. */
+  ...Object.entries(LEGAL_SLUG_ALIASES).map(([alias, slug]) => ({
+    path: `/legal/${alias}`,
+    element: <Navigate to={`/legal/${slug}`} replace />,
+  })),
   { path: '/legal/:slug', element: <LegalDocument /> },
   { path: '/appeal/:token', element: <Appeal /> },
 ];
@@ -245,6 +297,37 @@ export function isPublicPath(pathname) {
     if (pattern.length !== segments.length) return false;
     return pattern.every((seg, i) => seg.startsWith(':') || seg === segments[i]);
   });
+}
+
+/**
+ * Whether `pathname` is a screen that exists only for a visitor with no session.
+ *
+ * Signing in does not make `/login` disappear — it is still a URL, in a
+ * bookmark, in an autocomplete entry, in a link somebody pasted into a group
+ * chat. Before this, an authenticated reader who opened one was answered with
+ * a 404: the path is not in APP_ROUTES, so the shell had nothing to render and
+ * the unknown-URL takeover fired. "Page not found" for the sign-in page, while
+ * signed in, reads as the account being broken.
+ *
+ * DERIVED from SIGNED_OUT_ROUTES rather than restated as a list of paths. The
+ * signed-out table is the definition of "a screen for somebody with no
+ * session", and a second copy is the thing that goes stale — the same argument
+ * `isPublicPath` makes for deriving itself from PUBLIC_ROUTES.
+ *
+ * `/` is in that table too and is deliberately NOT special-cased here: the
+ * authenticated shell serves `/` (it is the dashboard), so the caller's
+ * `shellServes` test has already claimed it and this is never asked.
+ *
+ * The auth-flow paths — `/reset-password`, `/oauth/callback` — are NOT here and
+ * must never be. They are handled above the session gate (see AUTH_FLOW_PATHS
+ * and TD-9) precisely because they have to work while a stale session is still
+ * in memory: a password reset bumps `token_version`, so the tab holding the
+ * link often still believes it is signed in. Redirecting those to the dashboard
+ * would break account recovery for exactly the people who need it.
+ */
+export function isSignedOutOnlyPath(pathname) {
+  const path = String(pathname || '').split('?')[0];
+  return SIGNED_OUT_ROUTES.some(r => r.path === path);
 }
 
 /** Every declared route, for the table-wide invariants in routes.test.jsx. */

@@ -50,6 +50,14 @@ const FEATURE_NAMES = Object.freeze({
   'audit.read': 'the Audit Explorer',
   'analytics.impact': 'the community impact figures',
   'admin.create': 'the Administrator Roster',
+  /* Named distinctly from `analytics.impact` above. Both are "impact figures"
+     and they are not the same page: one is the community view an administrator
+     can open, this is the platform-wide one, which only the platform owner can.
+     A refusal that named them identically would read as the product refusing a
+     page the reader can demonstrably already see — which is exactly what an
+     administrator who holds `analytics.impact` and not `analytics.platform`
+     would experience. */
+  'analytics.platform': 'the platform-wide impact figures',
 });
 
 /**

@@ -49,6 +49,7 @@ vi.mock('./views/Login', () => stub('login'));
 vi.mock('./views/Signup', () => stub('signup'));
 vi.mock('./views/CertificateVerification', () => stub('cert'));
 vi.mock('./views/ErrorDashboard', () => stub('error-dash'));
+vi.mock('./views/ImpactDashboard', () => stub('impact'));
 // Eager shell chrome that talks to the (auto-mocked) api — not what this checks.
 vi.mock('./components/ThemeToggle', () => ({ default: () => <div data-testid="theme" /> }));
 vi.mock('./components/NotificationsBell', () => ({ default: () => <div data-testid="bell" /> }));
@@ -296,6 +297,24 @@ describe('signed-out and public routes', () => {
   });
 
   /**
+   * A visitor with no session gets nothing at `/impact`.
+   *
+   * Worth pinning separately from the per-role refusals below, because this page
+   * has a history of being reachable without one: its predecessor was served at
+   * `/community` with no session at all, and the platform view was briefly
+   * declared in `PUBLIC_ROUTES` carrying a `requiredCap` that nothing in that
+   * table reads — so an anonymous visitor rendered the administrator's shell. The
+   * community figures are administrative now, and `/impact` is an APP_ROUTES
+   * entry, which is the only table a capability means anything in.
+   */
+  it('shows a signed-out visitor nothing at /impact', async () => {
+    api.getMe.mockResolvedValue(null);
+    renderAt('/impact');
+    await findErrorKind('404');
+    expect(screen.queryByTestId('impact')).not.toBeInTheDocument();
+  });
+
+  /**
    * The error dashboard, denied by the route and not merely hidden by the nav.
    *
    * Hiding a nav entry is UX; typing the URL is one keystroke. `error.read` is
@@ -321,6 +340,36 @@ describe('signed-out and public routes', () => {
     // `withProps` clones with the map's entry; a missing entry mounts the view
     // with every prop silently absent rather than throwing.
     expect(el.dataset.props).toBe('addToast');
+  });
+
+  /**
+   * The community impact figures, denied by the ROUTE and not merely missing
+   * from the rail.
+   *
+   * These were readable by every signed-in account — `analytics.impact` was held
+   * by student, organizer, admin and partner. They are administrative now: an
+   * internal view of how the programme is doing, for the reader accountable for
+   * it. Hiding the nav entry is UX and typing the URL is one keystroke, so this
+   * asserts the guard that runs before the shell is built, per role, because the
+   * failure mode is one role slipping through rather than all of them.
+   *
+   * `partner` is included deliberately: it is the external-organization account,
+   * the audience the deleted `/api/public/impact` served.
+   */
+  it.each([['student'], ['organizer'], ['partner']])(
+    '%s is refused /impact even by typing the URL',
+    async (role) => {
+      signedInAs(USER(role));
+      renderAt('/impact');
+      await findErrorKind('403');
+      expect(screen.queryByTestId('impact')).not.toBeInTheDocument();
+    }
+  );
+
+  it.each([['admin'], ['super_admin']])('%s reaches /impact', async (role) => {
+    signedInAs(USER(role));
+    renderAt('/impact');
+    expect(await screen.findByTestId('impact')).toBeInTheDocument();
   });
 
   it('renders certificate verification for a signed-in user', async () => {

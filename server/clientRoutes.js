@@ -75,12 +75,7 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/checkin/:eventId',
   '/calendar',
   '/impact',
-  /* The public community figures. A literal path carrying no parameter, so it
-     says nothing about who was reading it — and this is the one page in the
-     product a person with no account can reach on purpose, so a crash here is
-     the crash least likely to be reported by the person who hit it. It has to
-     name itself in the error record. */
-  '/community',
+  '/admin/impact',
   '/notifications',
   '/messages',
   '/portfolio',
@@ -93,6 +88,9 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
      failure that must never report as `unknown`: it is the tool used to find
      every other failure, so a blind spot here hides all of them. */
   '/errors',
+  /* The administrative hub. A literal path with no parameter, and it fetches
+     nothing — so a report from here says only that somebody opened the index. */
+  '/admin/moderation',
   '/admin/appeals',
   '/admin/audit-logs',
   '/admin/roster',
@@ -114,6 +112,14 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
      be harmless even if it did — a policy slug is public and identical for every
      reader, so it says nothing about who was reading it. */
   '/legal',
+  /* The two legacy short names (LEGAL_SLUG_ALIASES in src/routes/index.jsx).
+     Literal paths that redirect to the canonical slug; allowed for the same
+     reason `/legal/:slug` is. They are listed rather than folded into that
+     pattern because they are static segments and the router ranks them that
+     way — a report from one of them names the URL the reader actually used,
+     which is the thing worth knowing about a link that should not exist. */
+  '/legal/terms',
+  '/legal/guidelines',
   '/legal/:slug',
   '/appeal/:token',
 ]);

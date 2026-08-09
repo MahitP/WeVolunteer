@@ -859,8 +859,6 @@ export default function Login({ onLoginSuccess, addToast }) {
         </div>
 
         <p className="auth-footer">
-          <a className="auth-link" href="/community">What this community has done</a>
-          {' · '}
           <a className="auth-link" href="/legal">Terms, privacy and safety policies</a>
         </p>
 
