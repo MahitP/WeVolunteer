@@ -19,6 +19,8 @@
  *   • per-slot hours carry a 0.1 floor, as formatSlot does
  */
 
+import { normaliseTag, MAX_TAGS_PER_EVENT } from './eventTags.js';
+
 /** Sorts the client offers, mapped to a deterministic SQL ordering. */
 const SORTS = {
   // NULL min_start sorts before every real date in SQLite, so unscheduled
@@ -45,6 +47,13 @@ export function parseEventFilters(query = {}) {
   const out = {
     q: '',
     category: null,
+    /**
+     * Selected tag keys, already normalised. Empty means "no tag filter".
+     *
+     * An ARRAY rather than a single value because the tag facet is multi-select,
+     * and the values inside it are OR-ed — see `buildWhere`.
+     */
+    tags: [],
     /**
      * 'all' by default, NOT 'listable'.
      *
@@ -82,6 +91,32 @@ export function parseEventFilters(query = {}) {
 
   if (query.q != null && String(query.q).trim()) out.q = String(query.q).trim().slice(0, 200);
   if (query.category && query.category !== 'All') out.category = String(query.category);
+
+  /**
+   * `tags` arrives as a repeated query parameter or a comma-separated list.
+   *
+   * Both, because Express gives `?tags=a&tags=b` as an array and `?tags=a,b` as a
+   * string, and a client built against either shape should work. Every value goes
+   * through `normaliseTag`, so the filter matches the same normalised keys the
+   * writer stored — a URL carrying `?tags=NHS` finds events tagged `#nhs`.
+   *
+   * Unusable values are DROPPED rather than rejected, unlike on the write path. A
+   * filter is a view: a stale or hand-edited URL should show what it can rather
+   * than answer 400, and an empty result is already the honest answer for a tag
+   * nobody used. The write path errors instead, because there an organizer needs
+   * to know their tag did not save.
+   */
+  const rawTags = Array.isArray(query.tags)
+    ? query.tags
+    : (query.tags != null && String(query.tags).trim() ? String(query.tags).split(',') : []);
+  if (rawTags.length) {
+    const keys = new Set();
+    for (const raw of rawTags.slice(0, MAX_TAGS_PER_EVENT)) {
+      const normalised = normaliseTag(String(raw));
+      if (normalised) keys.add(normalised.tag);
+    }
+    out.tags = [...keys];
+  }
   if (query.place && query.place !== 'All') out.place = String(query.place);
 
   if (query.scope != null) {
@@ -237,6 +272,44 @@ export function buildEventWhere(filters, userId) {
   }
 
   if (filters.category) { clauses.push('e.category = @category'); params.category = filters.category; }
+
+  /**
+   * Tag filtering: OR *within* the facet, AND with everything else.
+   *
+   * ── Why OR and not AND ──
+   *
+   * Every other control in the browse toolbar is a different DIMENSION — a date,
+   * a place, a category — so AND-ing them is what "narrow this down" means and is
+   * the model the whole query is built on. Multiple values of ONE dimension is a
+   * different question, and the faceted-search convention (and the one users
+   * arrive with) is that ticking a second tag widens within that facet while the
+   * facet as a whole still narrows the result set.
+   *
+   * AND-within-facet was considered and rejected on behaviour: organizer-created
+   * tags are free text, so requiring an event to carry all of `#nhs`, `#food` and
+   * `#weekend` returns nothing almost every time, and a filter that usually
+   * answers "no results" reads as broken rather than as precise.
+   *
+   * ── Why EXISTS and not a JOIN ──
+   *
+   * A join to `event_tags` multiplies the row set by the number of matching tags,
+   * which would break the `COUNT(*)` this same WHERE clause feeds for pagination
+   * and would need a DISTINCT that defeats the index. `EXISTS` is a
+   * semi-join: it stops at the first match, returns each event once, and uses
+   * `idx_event_tags_tag` directly.
+   *
+   * Placeholders are generated positionally rather than as a named parameter
+   * because SQLite has no array binding — `IN (@tags)` binds one value, silently
+   * matching only the first tag. Each key gets its own `@tag0`, `@tag1`, … which
+   * keeps every value bound rather than interpolated.
+   */
+  if (filters.tags?.length) {
+    const names = filters.tags.map((_, i) => `@tag${i}`);
+    filters.tags.forEach((tag, i) => { params[`tag${i}`] = tag; });
+    clauses.push(
+      `EXISTS (SELECT 1 FROM event_tags et WHERE et.event_id = e.id AND et.tag IN (${names.join(', ')}))`
+    );
+  }
   if (filters.place) { clauses.push('e.location = @place'); params.place = filters.place; }
 
   /**

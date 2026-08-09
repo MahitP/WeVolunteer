@@ -3,6 +3,7 @@ import { MapPin, Layers, CalendarClock, ShieldCheck, Star } from 'lucide-react';
 import { formatHours, formatDay, formatTimeRange, countdown } from '../utils/helpers';
 import { Seats, DateChip } from './Seats';
 import { LocationThumbnail } from './location';
+import TagChips from './common/TagChips';
 export default function EventCard({
   event,
   currentUser,
@@ -66,6 +67,12 @@ export default function EventCard({
             <span className="truncate">{event.organizerName}</span>
             {event.organizerVerified && <ShieldCheck size={13} aria-label="Verified organizer" className="s-733461" />}
           </p>
+          {/* Tags below the meta line, capped at three with a `+N`. A card in a
+              scanned list has room for a few words of "what is this about"; eight
+              chips wrap to three lines and push the date and spots out of view.
+              Inert here — there is no filter on a card to drive, and a chip that
+              looks clickable and is not is worse than plain metadata. */}
+          <TagChips tags={event.tags} limit={3} />
         </div>
         {currentUser?.role === 'student' && onToggleFavorite && <button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={e => {
         e.stopPropagation();

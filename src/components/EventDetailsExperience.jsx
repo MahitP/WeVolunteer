@@ -27,6 +27,7 @@ import {
 import LocationCard from './location/LocationCard';
 import WeatherSummary from './location/WeatherSummary';
 import './EventDetailsExperience.css';
+import TagChips from './common/TagChips';
 
 function totalShiftHours(event) {
   return formatHours(event.hoursAwarded || event.slots?.reduce((sum, slot) => sum + (slot.hours || 0), 0) || 0);
@@ -234,6 +235,14 @@ export default function EventDetailsExperience({
 
           <h2>{event.title}</h2>
           <p className="event-detail-summary">{shortDescription}</p>
+
+          {/* Organizer tags, BELOW the title rather than in the status row above
+              it. That row carries state a reader acts on — the category, how
+              volunteers are chosen, whether applications have closed — and mixing
+              free-text metadata into it would make "Applications closed" one chip
+              among eight. No cap here, unlike the card: a detail page has the room,
+              and somebody who opened it wants everything the organizer said. */}
+          <TagChips tags={event.tags} limit={Infinity} className="event-detail-tagchips" />
 
           <div className="event-detail-org">
             <span>Hosted by <strong>{event.organizerName}</strong></span>
