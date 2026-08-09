@@ -10,7 +10,7 @@ import {
 } from '../email.js';
 import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
-import { authenticateToken, formatUserResponse, inTransaction, revokeSession } from '../utils.js';
+import { authenticateToken, formatUserResponse, inTransaction, revokeSession, enabledSecondFactors } from '../utils.js';
 import { assertConsent, recordAcceptances, ConsentMissing } from '../consent.js';
 import { withheldCapabilitiesFor } from '../organizerAgreement.js';
 import { db, initDatabase } from '../db.js';
@@ -174,6 +174,94 @@ export function issuePreAuthSession(res, user) {
   );
   res.cookie('wev_preauth', token, { ...cookieOptions(), maxAge: PREAUTH_TTL_MS });
 }
+
+/**
+ * The accounts the demo sign-in shortcuts offer, read from the database.
+ *
+ * ── Why this endpoint exists ──
+ *
+ * The list was a literal in `src/views/Login.jsx`, duplicated with different
+ * spellings in `src/components/DemoBar.jsx`. A literal describes the seed as it
+ * was written, not the database as it is — and the two diverge the moment anybody
+ * uses the demo for what a demo is for. On the pilot deployment `user-admin` had
+ * been deleted: `account_status = 'deleted'`, address anonymised to
+ * `deleted_user-admin@system.local`. The sign-in screen went on offering "System
+ * Admin · admin@example.gov" as a one-tap demo account, and pressing it produced
+ * "No account found with that email address" — the product advertising a
+ * credential it had itself destroyed.
+ *
+ * Deleting the row from the array would have fixed that one account and left the
+ * defect: the next deletion, suspension or reseed puts it straight back. So the
+ * roster is the SEED's list of ids, and every other field — the address to sign
+ * in with, the display name, the role — is read live from the row.
+ *
+ * ── What is filtered, and why each one ──
+ *
+ *   • `account_status = 'deleted'` — a tombstone. Its address is a synthetic
+ *     `deleted_<id>@system.local` that cannot be signed in to, and showing the
+ *     name attached to it re-publishes an identity the person asked to erase.
+ *   • `system-cli` and anything else outside the roster — internal actors used to
+ *     attribute CLI-performed moderation. They are not people and have no
+ *     password; listing them discloses platform internals for no benefit.
+ *
+ * Suspended accounts are deliberately KEPT. A suspension is a demo scenario
+ * worth showing — the account signs in and lands on the suspension notice — and
+ * unlike a tombstone the credential still works.
+ *
+ * ── Why it is gated and unauthenticated ──
+ *
+ * Unauthenticated because it sits on the sign-in screen, which by definition has
+ * no session. Gated on DEMO_MODE because it publishes real addresses next to the
+ * statement that they share a published password; `server.js` refuses to boot
+ * with DEMO_MODE under NODE_ENV=production, so there is no configuration in which
+ * this is reachable on a real deployment. With the flag off it answers 404 rather
+ * than an empty list, so a client cannot tell a demo database with no accounts
+ * from a production one.
+ */
+const DEMO_ROSTER = Object.freeze([
+  'user-student-1',
+  'user-student-2',
+  'user-student-3',
+  'user-org-1',
+  'user-org-pending',
+  'user-admin'
+]);
+
+/** The label the demo picker shows beside a name. Derived, never stored. */
+function demoRoleLabel(row) {
+  if (row.role === ROLE.SUPER_ADMIN) return 'Owner';
+  if (row.role === ROLE.ADMIN) return 'Administrator';
+  if (row.role === ROLE.ORGANIZER) return row.verified === 1 ? 'Organizer' : 'Pending organizer';
+  return 'Student';
+}
+
+router.get('/api/auth/demo-accounts', (req, res) => {
+  if (!DEMO_MODE) return res.status(404).json({ error: 'Not found' });
+
+  const placeholders = DEMO_ROSTER.map(() => '?').join(', ');
+  const rows = db.prepare(
+    `SELECT id, name, email, avatar, role, verified, account_status
+       FROM users
+      WHERE id IN (${placeholders})
+        AND account_status != 'deleted'`
+  ).all(...DEMO_ROSTER);
+
+  /* Ordered by the roster rather than by whatever SQLite returns, so the picker
+     does not reshuffle itself between boots. */
+  const byId = new Map(rows.map(r => [r.id, r]));
+  const accounts = DEMO_ROSTER
+    .map(id => byId.get(id))
+    .filter(Boolean)
+    .map(row => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      avatar: row.avatar,
+      role: demoRoleLabel(row)
+    }));
+
+  res.json({ accounts });
+});
 
 /**
  * Availability check behind the live tick on the signup form.
@@ -584,11 +672,13 @@ router.post('/api/auth/login', async (req, res) => {
     
     if (userRow.tfa_enabled || userRow.tfa_email_enabled) {
       issuePreAuthSession(res, userRow);
-      const methods = [];
-      if (userRow.tfa_enabled) methods.push('totp');
-      if (userRow.tfa_email_enabled) methods.push('email');
-      methods.push('recovery'); // always available as fallback
-      return res.json({ require2FA: true, userId: userRow.id, availableMethods: methods });
+      /* Derived once in utils.js and enforced in /api/auth/login-2fa — see the
+         header there for what the inline version got wrong. */
+      return res.json({
+        require2FA: true,
+        userId: userRow.id,
+        availableMethods: enabledSecondFactors(userRow)
+      });
     }
 
     issueSession(res, user, userRow.token_version);
@@ -718,7 +808,49 @@ router.post('/api/auth/login-2fa', async (req, res) => {
     let isValid = false;
     let usedRecoveryCodeId = null;
     const effectiveMethod = method || (token ? 'totp' : (code ? 'recovery' : null));
-    
+
+    /**
+     * The method has to be one this ACCOUNT holds, not merely one the platform
+     * implements.
+     *
+     * ── The bypass this closes ──
+     *
+     * Nothing here consulted `tfa_enabled`. The TOTP branch below verifies
+     * against `users.tfa_secret`, and `POST /api/2fa/generate` writes that column
+     * while deliberately leaving `tfa_enabled` at 0 so an abandoned enrolment
+     * cannot lock anybody out. The two together meant that anyone who once opened
+     * the authenticator setup screen and walked away kept a fully working second
+     * factor derived from a secret they never confirmed — invisible in
+     * `/api/2fa/status` (which reports `totp: false`), unremovable through
+     * `/api/2fa/disable` (which refuses with "2FA is not enabled"), and accepted
+     * here in preference to the method the account actually chose.
+     *
+     * Reproduced against a scratch database before the fix: an account with
+     * `tfa_enabled = 0`, `tfa_email_enabled = 1` was told
+     * `availableMethods: ["email","recovery"]` and then signed in with a TOTP
+     * code, HTTP 200.
+     *
+     * ── Why it is refused rather than ignored ──
+     *
+     * Falling through to `isValid = false` would answer "Invalid code." for a
+     * method that was never on offer, which is the message that sends somebody
+     * round a loop retyping correct codes. Naming the methods that WOULD work
+     * costs nothing: the caller has already presented a password and holds a
+     * pre-auth grant naming this account, so it learns nothing it did not supply.
+     *
+     * Counted as neither a guess nor a success, because it is neither.
+     */
+    const offered = enabledSecondFactors(userRow);
+    if (!effectiveMethod || !offered.includes(effectiveMethod)) {
+      return res.status(400).json({
+        error: offered.length
+          ? 'That verification method is not set up on this account.'
+          : 'This account has no second factor set up. Please sign in again.',
+        code: 'method_unavailable',
+        availableMethods: offered
+      });
+    }
+
     if (effectiveMethod === 'totp' && token) {
       /**
        * The authentication bypass this replaced.

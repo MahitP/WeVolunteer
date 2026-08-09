@@ -157,7 +157,10 @@ export default function OAuthCallback({ onLoginSuccess, onLinked, addToast }) {
           navigate('/login', { 
             state: { 
               twoFactorRequired: true,
-              availableMethods: data.availableMethods || ['totp', 'recovery']
+              /* Passed through as-is. A default of ['totp','recovery'] here
+                 offered an authenticator to accounts that have none — see the
+                 note on `selected2FAMethod` in Login.jsx. */
+              availableMethods: data.availableMethods || []
             },
             replace: true 
           });

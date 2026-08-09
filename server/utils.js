@@ -90,6 +90,59 @@ export function secondFactorRequiredFor(role, user = null) {
 }
 
 /**
+ * The second factors this account can actually satisfy, in the order they should
+ * be offered.
+ *
+ * ── Why this is one function ──
+ *
+ * Three endpoints tell a half-signed-in caller which methods to present —
+ * `POST /api/auth/login` and both `require_2fa` branches in
+ * `routes/oauthRoutes.js` — and each built the list inline. All three got it
+ * wrong in the same two ways:
+ *
+ *   • `recovery` was pushed UNCONDITIONALLY, "always available as fallback".
+ *     It is not: an account holding zero recovery codes was offered a method
+ *     that cannot succeed, on the one screen where the user is already locked
+ *     out of everything else. Worse, it was the only method offered to an
+ *     account with no codes and an unreachable mailbox.
+ *
+ *   • TOTP was listed from `tfa_enabled` while the SIGN-IN path verified against
+ *     `tfa_secret` without consulting `tfa_enabled` at all. Those disagree for
+ *     any account that started an authenticator enrolment and abandoned it —
+ *     `POST /api/2fa/generate` stores the pending secret and deliberately leaves
+ *     `tfa_enabled` at 0 — so the account carried a live, working second factor
+ *     that `/api/2fa/status` reported as off, that its owner had never confirmed
+ *     and could not turn off (`/api/2fa/disable` refuses with "2FA is not
+ *     enabled"). Two accounts on the pilot deployment were in exactly that
+ *     state.
+ *
+ * So the list is derived once, here, and `POST /api/auth/login-2fa` ENFORCES it
+ * rather than trusting the method named in the request. Hiding a button is a
+ * courtesy; refusing the method is the control.
+ *
+ * @param {object} row the users row (needs `id`, `tfa_enabled`, `tfa_email_enabled`)
+ * @returns {string[]} some subset of ['totp', 'email', 'recovery'], possibly empty
+ */
+export function enabledSecondFactors(row) {
+  if (!row) return [];
+  const methods = [];
+  if (row.tfa_enabled) methods.push('totp');
+  if (row.tfa_email_enabled) methods.push('email');
+
+  /* Recovery codes are a fallback for the methods above, not a method in their
+     own right: offering them to an account that has enrolled nothing would turn
+     a leftover code set into a way past a second factor nobody switched on. */
+  if (methods.length) {
+    const held = db.prepare(
+      'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
+    ).get(row.id)?.n ?? 0;
+    if (held > 0) methods.push('recovery');
+  }
+
+  return methods;
+}
+
+/**
  * Whether this specific session has been signed out.
  *
  * Sessions are stateless JWTs, so "signed out" has to be recorded somewhere for

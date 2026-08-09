@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { db } from '../db.js';
 import { createVerifier } from '../oauth/pkce.js';
 import { JWT_SECRET, COOKIE_NAME, cookieOptions, OAUTH_PROVIDERS_ENABLED, OAUTH_PROVIDERS_CONFIGURED } from '../config.js';
-import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
+import { authenticateToken, formatUserResponse, inTransaction, enabledSecondFactors } from '../utils.js';
 import { requireAAL2 } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 // Directly, not through `spendChallenge`: that helper reads its three bindings
@@ -475,11 +475,9 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
       if (userRow.tfa_enabled || userRow.tfa_email_enabled) {
         const { issuePreAuthSession } = await import('./authRoutes.js');
         issuePreAuthSession(res, userRow);
-        const methods = [];
-        if (userRow.tfa_enabled) methods.push('totp');
-        if (userRow.tfa_email_enabled) methods.push('email');
-        methods.push('recovery');
-        return res.json({ action: 'require_2fa', availableMethods: methods });
+        /* One definition, shared with POST /api/auth/login and enforced by
+           POST /api/auth/login-2fa. See enabledSecondFactors in utils.js. */
+        return res.json({ action: 'require_2fa', availableMethods: enabledSecondFactors(userRow) });
       }
 
       const user = formatUserResponse(userRow);
@@ -673,11 +671,9 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
       if (userRow.tfa_enabled || userRow.tfa_email_enabled) {
         const { issuePreAuthSession } = await import('./authRoutes.js');
         issuePreAuthSession(res, userRow);
-        const methods = [];
-        if (userRow.tfa_enabled) methods.push('totp');
-        if (userRow.tfa_email_enabled) methods.push('email');
-        methods.push('recovery');
-        return res.json({ action: 'require_2fa', availableMethods: methods });
+        /* One definition, shared with POST /api/auth/login and enforced by
+           POST /api/auth/login-2fa. See enabledSecondFactors in utils.js. */
+        return res.json({ action: 'require_2fa', availableMethods: enabledSecondFactors(userRow) });
       }
 
       const user = formatUserResponse(userRow);

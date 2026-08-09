@@ -195,3 +195,105 @@ describe('the provider-link screen signs in, then links', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/Microsoft/);
   });
 });
+
+describe('the provider-link screen when the account has a second factor', () => {
+  /**
+   * ── The "Google sign-in is broken" defect ──
+   *
+   * `api.login()` does not always produce a session. For an account with a
+   * second factor it answers `{ require2FA: true }` and issues only the
+   * fifteen-minute `wev_preauth` cookie; the session exists only after
+   * `POST /api/auth/login-2fa`.
+   *
+   * This screen ignored that and went straight on to `POST /api/oauth/link`,
+   * which sits behind `authenticateToken`. The request was answered
+   * `401 {"error":"Access token required"}` and the user was shown
+   *
+   *     "Signed in, but we could not connect Google: Access token required."
+   *
+   * Every clause of which was wrong: they were not signed in, nothing was
+   * connected, and the missing token was this application's session rather than
+   * anything of Google's. Reproduced against a scratch database before the fix.
+   *
+   * It is the only way a provider can be adopted by an account that has 2FA on,
+   * so it locked every administrator out of provider sign-in — and both pilot
+   * super-administrators have a second factor.
+   */
+  const googleLink = { email: 'owner@school.org', provider: 'google', linkToken: 'link-token-g' };
+
+  const renderGoogleLink = (addToast = vi.fn(), onLoginSuccess = vi.fn()) => {
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/login', state: { linkData: googleLink } }]}>
+        <Login onLoginSuccess={onLoginSuccess} addToast={addToast} />
+      </MemoryRouter>
+    );
+    return { addToast, onLoginSuccess };
+  };
+
+  it('goes to the second factor instead of linking with no session', async () => {
+    vi.spyOn(api, 'login').mockResolvedValue({
+      require2FA: true, userId: 'u1', availableMethods: ['totp', 'recovery']
+    });
+    const link = vi.spyOn(api, 'linkOAuthAccount');
+    const { onLoginSuccess } = renderGoogleLink();
+
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'CorrectHorse1' } });
+    fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }));
+
+    /* The second-factor screen, showing only the methods the server offered. */
+    await waitFor(() => expect(screen.getByRole('heading', { name: /verify your identity/i })).toBeTruthy());
+
+    /* And crucially: NOT the link request. Making it here is what produced the
+       401 the user was shown as a Google failure. */
+    expect(link, 'linked before a session existed').not.toHaveBeenCalled();
+    expect(onLoginSuccess, 'handed over before the second factor').not.toHaveBeenCalled();
+  });
+
+  it('completes the link after the second factor, and only then hands over', async () => {
+    const order = [];
+    vi.spyOn(api, 'login').mockImplementation(async () => {
+      order.push('login');
+      return { require2FA: true, userId: 'u1', availableMethods: ['totp'] };
+    });
+    vi.spyOn(api, 'login2FA').mockImplementation(async () => {
+      order.push('2fa');
+      return { user: { id: 'u1', name: 'Owner Person' }, emailVerified: true };
+    });
+    mockChallenge();
+    vi.spyOn(api, 'grantReauthByPassword').mockResolvedValue({ granted: true, method: 'password' });
+    vi.spyOn(api, 'linkOAuthAccount').mockImplementation(async (token, headers) => {
+      order.push('link');
+      if (!headers?.[REAUTH_CHALLENGE_HEADER]) {
+        throw Object.assign(new Error('Identity verification required'), {
+          status: 403, data: { code: 'reauth_required', action: 'oauth.link' }
+        });
+      }
+      expect(token, 'the link token was lost across the 2FA screen').toBe('link-token-g');
+      return { linked: true };
+    });
+
+    const addToast = vi.fn();
+    const onLoginSuccess = vi.fn(() => order.push('handover'));
+    renderGoogleLink(addToast, onLoginSuccess);
+
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'CorrectHorse1' } });
+    fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }));
+
+    const codeField = await waitFor(() => screen.getByLabelText(/6-digit code/i));
+    fireEvent.change(codeField, { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: /^verify$/i }));
+
+    const pw = await waitFor(() => screen.getByLabelText(/your password/i));
+    fireEvent.change(pw, { target: { value: 'CorrectHorse1' } });
+    fireEvent.click(screen.getByRole('button', { name: /^verify$/i }));
+
+    await waitFor(() => expect(onLoginSuccess).toHaveBeenCalled());
+
+    /* Sign in, second factor, link, THEN hand over. `onLoginSuccess` unmounts
+       this component along with the token, so anything after it never runs. */
+    expect(order).toEqual(['login', '2fa', 'link', 'link', 'handover']);
+    expect(addToast).toHaveBeenCalledWith(
+      expect.stringMatching(/Google is now connected/i), 'success'
+    );
+  });
+});
