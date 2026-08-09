@@ -2,6 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { db } from '../db.js';
+import { createVerifier } from '../oauth/pkce.js';
 import { JWT_SECRET, COOKIE_NAME, cookieOptions, OAUTH_PROVIDERS_ENABLED, OAUTH_PROVIDERS_CONFIGURED } from '../config.js';
 import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
 import { requireAAL2 } from '../authz.js';
@@ -325,14 +326,36 @@ router.post('/api/oauth/:provider/url', (req, res) => {
 
   const state = jwt.sign(statePayload, JWT_SECRET, { expiresIn: '15m' });
 
+  /**
+   * The PKCE verifier, generated here and never sent to the browser.
+   *
+   * It is stored on the same row the replay check already consumes, so the
+   * verifier's lifetime is exactly the authorization's: single-use, 15 minutes,
+   * purged with the state. See ../oauth/pkce.js for why a confidential client
+   * needs this at all — short version, the authorization code is delivered to the
+   * SPA, so it passes through a place the server does not control.
+   */
+  const codeVerifier = createVerifier();
+
   // Store state on the server to prevent replay attacks
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 15 * 60 * 1000); // 15 minutes
-  db.prepare('INSERT INTO oauth_states (nonce, created_at, expires_at) VALUES (?, ?, ?)').run(nonce, now.toISOString(), expiresAt.toISOString());
+  db.prepare('INSERT INTO oauth_states (nonce, created_at, expires_at, code_verifier) VALUES (?, ?, ?, ?)')
+    .run(nonce, now.toISOString(), expiresAt.toISOString(), codeVerifier);
 
   let url;
   try {
-    url = provider.getAuthUrl(state);
+    /**
+     * The OIDC `nonce` is the SAME value as the CSRF nonce, deliberately.
+     *
+     * It is already 32 bytes of CSPRNG output, already stored server-side, and
+     * already single-use — which is every property the OIDC nonce needs. Minting
+     * a second random value to carry alongside it would double the bookkeeping to
+     * express one binding. The providers echo it into the ID token, and
+     * `verifyCallback` compares it, so an ID token minted for a different
+     * authorization cannot be replayed into this one.
+     */
+    url = provider.getAuthUrl(state, { codeVerifier, oidcNonce: nonce });
   } catch (err) {
     console.error(`Failed to build ${providerName} auth URL:`, err);
     return res.status(503).json({ error: `Signing in with ${provider.label} is unavailable right now.` });
@@ -386,16 +409,25 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
   }
 
   // Server-side state invalidation (prevents replay attacks)
-  const stateRow = db.prepare('SELECT 1 FROM oauth_states WHERE nonce = ?').get(decodedState.nonce);
+  const stateRow = db.prepare('SELECT code_verifier FROM oauth_states WHERE nonce = ?').get(decodedState.nonce);
   if (!stateRow) {
     return res.status(400).json({ error: 'Sign-in session expired or already used. Please try again.' });
   }
+  /* Read BEFORE the delete: the row is the only copy of the verifier, and the
+     delete is what makes the authorization single-use. */
+  const codeVerifier = stateRow.code_verifier || null;
   db.prepare('DELETE FROM oauth_states WHERE nonce = ?').run(decodedState.nonce);
 
   res.clearCookie(`${OAUTH_STATE_COOKIE}_${cookieId}`);
 
   try {
-    const claims = await provider.verifyCallback(code);
+    /* `expectedNonce` is what turns the ID token's `nonce` claim into a check
+       rather than a decoration; `codeVerifier` completes the PKCE exchange. Both
+       come from this server's own single-use row, never from the request. */
+    const claims = await provider.verifyCallback(code, {
+      codeVerifier,
+      expectedNonce: decodedState.nonce,
+    });
     const providerUserId = claims.sub;
     const providerEmail = String(claims.email || '').trim().toLowerCase();
     const providerNameClaim = claims.name;

@@ -1,6 +1,8 @@
 import { OAuth2Client } from 'google-auth-library';
-import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OAUTH_REDIRECT_URI, OAUTH_ALLOW_MOCK } from '../../config.js';
+import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OAUTH_REDIRECT_URI } from '../../config.js';
 import { assertProviderConfigured } from '../credentials.js';
+import { mockVerifyCallback } from '../mockTransport.js';
+import { authorizeParams } from '../pkce.js';
 
 const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OAUTH_REDIRECT_URI);
 
@@ -41,7 +43,7 @@ export default {
    * on the generated URL rather than on this call, because that is the only
    * form of the check that survives a library upgrade dropping an option.
    */
-  getAuthUrl(state, { forceReauth = false } = {}) {
+  getAuthUrl(state, { forceReauth = false, codeVerifier = null, oidcNonce = null } = {}) {
     /**
      * Same refusal as microsoft.js, and it matters here despite Google being the
      * provider that happens to be configured today. `generateAuthUrl` does not
@@ -59,30 +61,69 @@ export default {
       scope: ['https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile'],
       state,
       prompt: forceReauth ? 'login' : 'select_account',
-      ...(forceReauth ? { max_age: 0 } : {})
+      ...(forceReauth ? { max_age: 0 } : {}),
+      /* PKCE. `generateAuthUrl` passes unknown options straight into the query
+         string, which is how `max_age` above reaches Google too. Omitted rather
+         than sent empty when there is no verifier, because `code_challenge=` with
+         no value is a request Google rejects. */
+      ...(codeVerifier ? authorizeParams(codeVerifier) : {}),
+      /* Echoed into the ID token and compared in verifyCallback, which is what
+         stops an ID token obtained for one authorization being replayed into
+         another. */
+      ...(oidcNonce ? { nonce: oidcNonce } : {})
     });
   },
 
-  async verifyCallback(code) {
-    // Test transport. Gated on an explicit opt-in that config.js refuses to
-    // honour in production — never on "the client id happens to be missing",
-    // which is what turned this into an unauthenticated impersonation endpoint.
-    if (OAUTH_ALLOW_MOCK) {
-      try {
-        const parsed = JSON.parse(code);
-        return { ...parsed, emailVerified: parsed.emailVerified !== false };
-      } catch {
-        return { email: 'mock@example.com', sub: '12345', name: 'Mock User', emailVerified: true };
-      }
+  async verifyCallback(code, { codeVerifier = null, expectedNonce = null } = {}) {
+    /* Test transport, in ../mockTransport.js — gated on an explicit opt-in that
+       config.js refuses to honour in production, and which no longer invents an
+       identity when the `code` is not one. Returns null when the real exchange
+       below is what must happen. */
+    const mocked = mockVerifyCallback('google', code);
+    if (mocked) {
+      /* Google asserts `email_verified`, so an identity that does not say
+         otherwise is treated as verified — matching the real branch below. */
+      return { ...mocked, emailVerified: mocked.emailVerified !== false };
     }
 
-    const { tokens } = await client.getToken(code);
+    /* `getToken` takes an object so the verifier can travel with the code. The
+       string form (`getToken(code)`) has no way to carry it, which is why this
+       changed shape. */
+    const { tokens } = await client.getToken({
+      code,
+      ...(codeVerifier ? { codeVerifier } : {})
+    });
+
+    /**
+     * Signature, issuer and audience, all checked by the library.
+     *
+     * `verifyIdToken` fetches and caches Google's JWKS, verifies the RS256
+     * signature, requires `iss` to be accounts.google.com, enforces `exp`, and
+     * rejects any `aud` other than the value passed here. Passing
+     * `GOOGLE_CLIENT_ID` is what makes it audience validation rather than a
+     * decode: an ID token minted for a DIFFERENT Google client — trivial for
+     * anybody to obtain, since it only requires their own app — would otherwise
+     * be accepted here and would let them sign in as any address it named.
+     */
     const ticket = await client.verifyIdToken({
       idToken: tokens.id_token,
       audience: GOOGLE_CLIENT_ID
     });
 
     const payload = ticket.getPayload();
+
+    /**
+     * The nonce binding, checked when we set one.
+     *
+     * Audience validation proves the token was minted for this application; it
+     * says nothing about WHICH sign-in produced it. Without this, an ID token
+     * captured from one of our own authorizations could be presented against a
+     * different in-flight one. Compared against the value stored server-side, not
+     * against anything in the request.
+     */
+    if (expectedNonce && payload.nonce !== expectedNonce) {
+      throw new Error('Google ID token was issued for a different sign-in attempt.');
+    }
 
     if (payload.email_verified === false) {
       throw new Error('Google account email is not verified. Please verify your email with Google first.');

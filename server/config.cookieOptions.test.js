@@ -44,6 +44,7 @@ function importCookieOptions(env) {
         NODE_ENV: '',
         JWT_SECRET: 'JXAvK3n2Qp7RtY9wLmZbC4dE6fG8hJ1kN5oP0qS2uV4xA7yB9cD3eF5gH8iJ0kLm',
         TFA_ENCRYPTION_KEY: 'c3VwZXJzZWNyZXRrZXkxMjM0NTY3ODkwYWJjZGVmZ2g=',
+        REQUIRE_ADMIN_2FA: 'true',
         ...env,
       },
       stdio: 'pipe',

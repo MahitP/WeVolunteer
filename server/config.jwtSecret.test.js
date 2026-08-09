@@ -21,7 +21,7 @@ function boot(env) {
     const out = execFileSync(process.execPath, ['--input-type=module', '-e', `
       const { JWT_SECRET } = await import('${root}/server/config.js');
       console.log('BOOTED:' + JWT_SECRET.length);
-    `], { env: { ...process.env, ...env }, stdio: 'pipe', encoding: 'utf8' });
+    `], { env: { ...process.env, REQUIRE_ADMIN_2FA: 'true', ...env }, stdio: 'pipe', encoding: 'utf8' });
     return { booted: true, stdout: out };
   } catch (err) {
     return { booted: false, stderr: String(err.stderr || err.message) };
