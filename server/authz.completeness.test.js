@@ -80,6 +80,61 @@ const QUOTED_ROLE = `${QUOTE}(?:${ROLES.map(escapeRe).join('|')})\\1`;
  * blocks); handling that would mean detecting whether a `/*` sits inside a
  * quote, which this does not attempt.
  */
+/**
+ * The key a reviewed exception is recorded under: the FILE plus the exact source
+ * line, not the file plus a line NUMBER.
+ *
+ * ── Why this changed (TD-20) ──
+ *
+ * These registries were keyed `path:lineNumber`, which made every entry a
+ * reference to a coordinate rather than to a piece of code. Any edit ABOVE a
+ * declared line moved it, the guard reported the entry as stale, and the build
+ * failed on a change that had nothing to do with authorization. The comments in
+ * the registries below record that happening — one entry carries five successive
+ * re-anchorings and the note "Re-read a sixth time: unchanged". A single session
+ * hit it four times.
+ *
+ * The cost was never the thirty seconds of re-anchoring. It was that the guard
+ * cried wolf: an author who has re-pointed a line number three times for
+ * unrelated reasons learns to re-point the fourth without reading it, which is
+ * the one habit this guard cannot survive — its entire value is that a moved
+ * check gets looked at again.
+ *
+ * Keyed by content, an entry survives moving and breaks when the code CHANGES,
+ * which is exactly when a human should look. It also documents itself: the key
+ * is the check, so a reader no longer has to open the file at a line number to
+ * find out what was excused.
+ *
+ * `occurrences` guards the one thing a coordinate gave for free. Two identical
+ * matching lines in one file would otherwise both be covered by a single
+ * declaration, so a NEW copy of an excused line — which might be a genuine
+ * authorization decision this time — would arrive already forgiven. The count is
+ * declared and compared, so it does not.
+ */
+function anchorFor(fileKey, line) {
+  return `${fileKey}::${line.trim()}`;
+}
+
+/**
+ * Aggregates matching lines by content anchor.
+ *
+ * Returns `Map<anchor, {lines: number[], hits: string[], text: string}>` — the
+ * line numbers are kept only for the diagnostics, which still have to tell a
+ * human where to look.
+ */
+function groupByAnchor(fileKey, lines, hitsFor) {
+  const found = new Map();
+  lines.forEach((line, i) => {
+    const hits = hitsFor(line);
+    if (hits.length === 0) return;
+    const anchor = anchorFor(fileKey, line);
+    const entry = found.get(anchor) ?? { lines: [], hits, text: line.trim() };
+    entry.lines.push(i + 1);
+    found.set(anchor, entry);
+  });
+  return found;
+}
+
 function stripComments(src) {
   return src
     .split('\n')
@@ -238,9 +293,12 @@ describe('authorization hygiene', () => {
 
     /**
      * Reviewed, non-authorization uses of `.role` compared to a role-name
-     * literal. Pinned to an exact file:line, not a blanket exemption — moving
-     * the line forces this list to go stale (caught below) and requires
-     * re-review. Every entry here is a decision, not a formality:
+     * literal. Pinned to the exact SOURCE LINE, not a blanket exemption — and no
+     * longer to a line NUMBER; see `anchorFor` for why that changed and what the
+     * old scheme cost. CHANGING the line still forces re-review; merely moving it
+     * no longer does. The value is how many times that exact line may appear in
+     * that file, so a second copy is a new decision rather than an inherited
+     * excuse. Every entry here is a decision, not a formality:
      *
      * Both lines decide the `verified` flag for a BRAND NEW signup (an
      * organizer needs staff approval before they can host events; every
@@ -252,59 +310,24 @@ describe('authorization hygiene', () => {
      * about what deletion does... not an authorization gate"), not the
      * "may this kind of actor do X" pattern Guard 1 exists to ban.
      */
-    const REVIEWED_NON_AUTH_EXCEPTIONS = new Set([
-      // `fields.role === 'organizer' ? 0 : 1` — chooses the initial `verified`
-      // value for a brand-new account, i.e. whether staff must approve it. Not
-      // an authorization decision about a caller: there is no principal yet.
-      // Moved from :223 when the signup handler gained its server-side consent
-      // gate (recordAcceptances / assertConsent), then :257 -> :258 when
-      // `withheldCapabilitiesFor` was imported for the /api/auth/me payload, then
-      // :258 -> :259 when `isSuspended`/`liftIfExpired` were imported so the
-      // sign-in refusal could honour a suspension's end date.
-      // Re-read at every position: unchanged, and still not an authorization
-      // decision.
-      // Moved from :379 in v1.2b Task 5 when `resolveProvider` gained an
-      // export and the docstring above it explaining why; to :405 in Task 6
-      // (the local `issueSession` became an import with a docstring explaining
-      // that too); to :521 in Task 6b, which added the step-up gate to the
-      // auto-link branch above it; and to :525 when that branch's comment was
-      // corrected — `/api/oauth/link` serves the caller who is not signed in as
-      // the account, which is a difference of SESSION, not of address, and the
-      // original comment said otherwise. The line itself is unchanged in every
-      // case; re-read and re-confirmed each time as the same new-signup
-      // `verified` decision described above. That it keeps moving is the guard
-      // working as designed — a pinned line is what forces the re-read.
-      //
-      // Moved to :526 by the v1.2b audit round, which corrected the
-      // `issueSession` note further up the file (it claimed the shared helper
-      // minted no `jti`, describing a copy Task 6 had already deleted) and
-      // widened the same block's "all five sensitive actions" to name the two
-      // the audit added. Re-read once more: unchanged, and still not an
-      // authorization decision — it sets a new signup's initial approval state,
-      // which is a fact about the row being written, not about what its holder
-      // may then do.
-      //
-      // Moved to :561 by the AADSTS900144 fix, which added the
-      // OAUTH_PROVIDERS_CONFIGURED import and a comment on `/api/oauth/providers`
-      // explaining why that endpoint reports configuration rather than the
-      // mock-inclusive enablement map. Re-read again: unchanged, and still the
-      // same `verified` decision — nothing about it became an authorization
-      // check.
-      //
-      // Moved to :584 when that same endpoint gained the `state` field
-      // (available | misconfigured | coming_soon) and the comment explaining why
-      // a credential-less provider must not read as "coming soon". Re-read a
-      // fifth time: still the new-signup `verified` flag, still a fact about the
-      // row being written rather than about what its holder may do.
-      //
-      // 584 -> 606 when both sign-in branches were converted to `isSuspended()`,
-      // so a timed suspension that had expired stopped locking a provider-only
-      // account out permanently. Re-read a sixth time: unchanged, and still the
-      // `verified` flag on a row being created. Worth noting that the change which
-      // moved it IS an authorization fix, made a few lines above; this line is
-      // still not one.
-      './routes/oauthRoutes.js:648',
-    ]);
+    const REVIEWED_NON_AUTH_EXCEPTIONS = {
+      /* Chooses the initial `verified` value for a brand-new account — i.e.
+         whether staff must approve it before they can host events. Not an
+         authorization decision about a caller: there is no principal at this
+         point in the request, and nothing here decides whether the request may
+         proceed. It is a fact about the row being written, not about what its
+         holder may then do.
+
+         This entry used to carry fifty lines recording nine successive
+         re-anchorings — :223 → :257 → :258 → :259 → :379 → :405 → :521 → :525 →
+         :526 → :561 → :584 → :606 → :648 — not one of which was a change to the
+         line itself. Each one ended "re-read, unchanged, still not an
+         authorization decision". That log is why the registry is keyed by
+         content now (see `anchorFor`), and it is not reproduced here: a list of
+         coordinates the key no longer uses is exactly the kind of comment that
+         goes quietly wrong. */
+      "./routes/oauthRoutes.js::fields.role === 'organizer' ? 0 : 1,": 1,
+    };
     const consumedExceptions = new Set();
 
     const offenders = [];
@@ -313,36 +336,46 @@ describe('authorization hygiene', () => {
       const lines = src.split('\n');
       const destructured = DESTRUCTURE_RE.test(src);
 
-      lines.forEach((line, i) => {
-        const lineNo = i + 1;
-        const key = `${fileKey}:${lineNo}`;
+      const hitsFor = (line) => {
         const hits = [];
         for (const { label, re } of DIRECT_PATTERNS) if (re.test(line)) hits.push(label);
         if (destructured) {
           for (const { label, re } of BARE_ROLE_PATTERNS) if (re.test(line)) hits.push(label);
         }
-        if (hits.length === 0) return;
+        return hits;
+      };
 
-        if (REVIEWED_NON_AUTH_EXCEPTIONS.has(key)) {
-          consumedExceptions.add(key);
-          return;
+      for (const [anchor, { lines: at, hits, text }] of groupByAnchor(fileKey, lines, hitsFor)) {
+        const allowed = REVIEWED_NON_AUTH_EXCEPTIONS[anchor];
+        if (allowed !== undefined) {
+          consumedExceptions.add(anchor);
+          if (at.length !== allowed) {
+            offenders.push(
+              `${fileKey}:${at.join(',')}: an excused line now appears ${at.length} time(s), `
+              + `not ${allowed} — "${text}"\n`
+              + '    Each occurrence is its own decision, so a new copy is not covered by '
+              + 'the old review. Re-read them, then update the count or convert the new one.'
+            );
+          }
+          continue;
         }
         offenders.push(
-          `${key}: ${hits.join(', ')} — "${line.trim()}"\n`
+          `${fileKey}:${at.join(',')}: ${hits.join(', ')} — "${text}"\n`
           + '    Use requireCap()/requireCapAny() (or can() directly) for "may this '
           + 'kind of actor do X", or compare ids (e.g. resource.ownerId !== '
           + 'req.principal.userId) for "may this actor act on this row." Import role '
           + 'names from authz.js\'s ROLES rather than hardcoding them.'
         );
-      });
+      }
     }
 
     // A stale exception (no longer matching anything) is worth knowing about:
     // either the line moved and the entry needs updating, or the check it was
     // covering for was removed and the entry should go with it.
-    const staleExceptions = [...REVIEWED_NON_AUTH_EXCEPTIONS].filter((e) => !consumedExceptions.has(e));
+    const staleExceptions = Object.keys(REVIEWED_NON_AUTH_EXCEPTIONS)
+      .filter((e) => !consumedExceptions.has(e));
 
-    expect(staleExceptions, 'REVIEWED_NON_AUTH_EXCEPTIONS entries that no longer match anything — remove them').toEqual([]);
+    expect(staleExceptions, 'REVIEWED_NON_AUTH_EXCEPTIONS entries matching nothing — the line CHANGED (not merely moved) or the check was removed. Re-read it, then update or delete the entry.').toEqual([]);
     expect(offenders, 'role-string comparison(s) found').toEqual([]);
   });
 
@@ -460,118 +493,59 @@ describe('authorization hygiene', () => {
      * Adding a NEW entry to either list is a decision, not a formality: prefer
      * converting the check to `can()`.
      */
+    /**
+     * Reviewed client-side role comparisons, keyed by the exact SOURCE LINE.
+     *
+     * ── Why not by line number (TD-20) ──
+     *
+     * These were `path:lineNumber`, and the comments that used to sit in this
+     * block were a monument to the problem: one entry carried thirteen recorded
+     * re-anchorings across three releases, none of them a change to the line
+     * itself, each ending "re-read, unchanged, still not an authorization check".
+     * A previous round wrote, in this very block, that the repetition "is an
+     * argument for anchoring these on something other than a line — but not one
+     * to act on mid-change". This is that change.
+     *
+     * The cost was never the re-pointing. It was that an author who has bumped a
+     * number three times for unrelated reasons learns to bump the fourth without
+     * reading it — and a guard whose whole value is forcing a re-read cannot
+     * survive being routinely dismissed.
+     *
+     * Keyed by content, an entry survives a move and breaks when the CODE
+     * changes, which is exactly when a person should look. It also reads better:
+     * the key is the check, so the reason beside it can be checked without
+     * opening another file at a coordinate.
+     *
+     * `occurrences` defaults to 1 and is the one thing a line number gave for
+     * free. Two identical matching lines in one file would otherwise share a
+     * single declaration, so a NEW copy — possibly a real authorization decision
+     * this time — would arrive already excused.
+     */
     const CLIENT_DECLARATIONS = {
-      // ── NOT_AUTHORIZATION ──
-      /* 950 → 954 → 1008 → 1116 across the create-button move and the rail
-         grouping. Re-read at each new line before the pin moved, this time
-         included: still `viewingProfile.type === 'organizer'`, the `?type=` view
-         discriminator described below. The number has now moved four times, which
-         is an argument for anchoring these on something other than a line — but
-         not one to act on mid-change, and every move so far has been a genuine
-         re-read rather than a mechanical bump. */
-      'src/components/EventComments.jsx:112': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
-      'src/components/EventComments.jsx:113': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
-      'src/components/account/ProfileMenu.jsx:96': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
-      /**
-       * Re-anchored in v1.2c. All four still describe the same thing — the shape
-       * of a form being filled in by somebody who has no account yet, so there is
-       * no session and no principal for any of them to be an authorization
-       * decision about.
-       *
-       * The old `:96` entry is gone rather than moved: it guarded a comparison
-       * that defaulted the `grade` field from the selected role, and the grade
-       * field itself no longer exists in this form. `:255` below is its
-       * replacement and asks a different question (which class year to submit).
-       */
-      'src/views/Signup.jsx:297': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'toast tone for the account just requested (organizers await approval); form state, not an actor' },
-      'src/views/Signup.jsx:322': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'whether to submit a class year at all — organizers have no graduation year; form state, not an actor, and the server recomputes the grade from it regardless' },
-      'src/views/Signup.jsx:348': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which school value to submit for the account being created; form state, not an actor' },
-      'src/views/Signup.jsx:390': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which fields the signup form shows for the selected account type; form state, not an actor' },
+      // ── NOT_AUTHORIZATION — labelling, form state, view discriminators ──
+      'src/components/EventComments.jsx::{c.author.role === \'organizer\' && <span className="tag tag-brand">Host</span>}': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
+      'src/components/EventComments.jsx::{c.author.role === \'admin\' && <span className="tag tag-warn">Staff</span>}': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
+      'src/components/account/ProfileMenu.jsx::const displayRole = user.role === \'organizer\' && !user.verified': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
+      'src/views/Signup.jsx::addToast(successMessage, form.role === \'organizer\' ? \'info\' : \'success\');': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'toast tone for the account just requested (organizers await approval); form state, not an actor' },
+      'src/views/Signup.jsx::const classYear = form.role === \'student\' ? form.graduationYear : \'\';': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'whether to submit a class year at all — organizers have no graduation year; form state, not an actor, and the server recomputes the grade from it regardless' },
+      'src/views/Signup.jsx::school: form.role === \'student\' ? form.school : (form.school || \'Community organization\'),': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which school value to submit for the account being created; form state, not an actor' },
+      'src/views/Signup.jsx::const isStudent = form.role === \'student\';': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which fields the signup form shows for the selected account type; form state, not an actor' },
 
       // ── UNCONVERTED_UX — real role branches, out of Task 17's scope ──
-      'src/components/EventActionPanel.jsx:14': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates the apply/withdraw panel; wants can(event.apply)' },
-      'src/components/EventCard.jsx:77': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply) — no favourite.* capability exists yet' },
-      'src/components/EventComments.jsx:104': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`canDelete` is own-comment OR admin; wants can(event.moderate), which is what DELETE /api/comments/:id already enforces' },
-      'src/components/EventDetailsExperience.jsx:75': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates the apply affordances; wants can(event.apply)' },
-      // Moved 662 -> 671 by v1.2c Task 8, 671 -> 713 by Task 9.5, 713 -> 730 when
-      // the offline experience changed from REPLACING the routed view to covering
-      // it (the shell is now wrapped in `OfflineOverlay`, and the offline ternary
-      // that used to sit directly above this line is gone), then 730 -> 720 when
-      // the two boundaries' identical chunk-vs-crash closures were extracted to a
-      // shared `crashFallback`, then 720 -> 821 across the rest of v1.2c,
-      // 821 -> 826 when the public-route branch above it stopped hardcoding
-      // `/verify/` and started deriving the test from PUBLIC_ROUTES, and
-      // 826 -> 827 when `/organizer-agreement` was added to the route prop map,
-      // and 827 -> 849 when `personaFor` gained the comment explaining why it
-      // ignores the withheld set. Re-read at each of those positions: unchanged
-      // every time, and still not an authorization check. `viewingProfile.type`
-      // is set from the ?type= query parameter and decides which overlay to draw;
-      // nothing about the viewer. That the pin keeps moving is the guard working
-      // — it forces the re-read.
-      // 849 -> 902 when the 403 became a takeover: `deniedRoute()` and the
-      // pre-shell refusal that uses it were added above this point. Re-read
-      // again — unchanged, and still the ?type= view discriminator. Worth noting
-      // that the change which moved it is itself an authorization decision, made
-      // one screen earlier; this line is still not one.
-      // 902 -> 912 when the refusal gained its explanation: `deniedFallback` took
-      // a route argument so a 403 could name the feature and the remedy
-      // (denialDetail.js), and `deniedMatch` was hoisted above the early return.
-      // Re-read once more — unchanged, and still the ?type= view discriminator.
-      // 912 -> 920 when M1C added route props; 920 -> 944 when the suspension
-      // wall was inserted above the email-verification wall; 944 -> 950 when the
-      // impact route joined ROUTE_PROPS. Re-read at 950: unchanged, still the
-      // ?type= view discriminator, still grants nothing.
-      /* 950 → 954 when the Audit Explorer nav label was renamed and gained a
-         comment above it. Re-read at the new line before moving the pin: it is
-         still `viewingProfile.type === 'organizer'`, the same view discriminator
-         described below. Mechanically bumping a line number without looking is
-         how an exemption outlives the code that earned it. */
-      /* 950 → 954 → 1008 → 1116 across the create-button move and the rail
-         grouping. Re-read at each new line before the pin moved, this time
-         included: still `viewingProfile.type === 'organizer'`, the `?type=` view
-         discriminator described below. The number has now moved four times, which
-         is an argument for anchoring these on something other than a line — but
-         not one to act on mid-change, and every move so far has been a genuine
-         re-read rather than a mechanical bump. */
-      /* 1116 → 1126 when the two-factor wall was added to the shell. Re-read
-         once more at the new line: unchanged, still the ?type= view
-         discriminator, still grants nothing.
-
-         The block above was lost for one commit — swept out while this file
-         was being edited from two directions at once — and is restored here
-         deliberately. It is the record of every time this exemption was
-         re-examined, which is the only thing that distinguishes a reviewed
-         exemption from one nobody has looked at since it was written. */
-      /* 1192 → 1205 → 1211 when the community-impact nav entry and the Platform
-         Impact entry gained the comments explaining that `analytics.impact` is now
-         an administrative capability, and PAGE_META gained the `staff.impact`
-         title that entry finally justifies. Re-read at both new positions before
-         moving the pin: unchanged, still `viewingProfile.type === 'organizer'`,
-         still the ?type= view discriminator, still grants nobody anything. The
-         change that moved it IS an authorization decision — made in the NAV table
-         nine hundred lines above — and this line still is not one. */
-      'src/App.jsx:1218': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
-      'src/components/auth/TwoFactorRequiredWall.jsx:43': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'labels a role in the UX string "Your role as platform owner/administrator requires"' },
-      'src/components/EventDetailsExperience.jsx:258': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply)' },
-      'src/components/EventModal.jsx:67': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isOwner` is role AND id; the id half is the correct ownership test, the role half wants can(event.edit.own)' },
-      'src/components/EventModal.jsx:68': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isAdmin` gates the moderation surface; wants can(event.moderate)' },
-      'src/components/EventModal.jsx:90': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates apply/withdraw inside the modal; wants can(event.apply)' },
-      'src/components/EventModal.jsx:337': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply)' },
-      /* 44 → 46 when this file gained the `can`/`Link` imports for the Create
-         event button. Re-read: still `currentUser?.role === 'student'`, still
-         the same UX gate. NOT converted while here, deliberately — `isStudent`
-         also gates the credited-hours summary and favourites, and a bare
-         `can(user, 'event.apply')` is TRUE for super_admin through the wildcard,
-         which would show the platform owner a volunteer's hours line reading
-         zero. The conversion needs a most-privileged-first cascade, which is a
-         real change and not a drive-by. */
-      'src/views/BrowseEvents.jsx:47': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates favourites and apply CTAs on the browse list; wants can(event.apply)' },
-      'src/views/CalendarView.jsx:55': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isOrganizer` picks hosted-events entries over applied-shift entries; wants a can(event.create) cascade, most-privileged-first' },
-      /* 95 → 106 when this view gained the role-aware empty-state copy.
-         Re-read at the new line: still `currentUser.role === 'student'`
-         choosing which side of a new conversation is the student, still the
-         same UX gate the server re-derives anyway. */
-      'src/views/Messages.jsx:106': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'decides which side of a conversation is the student when resolving it; wants can(event.apply), and the server re-derives it anyway' },
+      'src/components/EventActionPanel.jsx::const isStudent = currentUser?.role === \'student\';': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates the apply/withdraw panel; wants can(event.apply)' },
+      'src/components/EventCard.jsx::{currentUser?.role === \'student\' && onToggleFavorite && <button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={e => {': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply) — no favourite.* capability exists yet' },
+      'src/components/EventComments.jsx::const canDelete = c.userId === currentUser?.id || currentUser?.role === \'admin\';': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`canDelete` is own-comment OR admin; wants can(event.moderate), which is what DELETE /api/comments/:id already enforces' },
+      'src/components/EventDetailsExperience.jsx::const isStudent = currentUser?.role === \'student\';': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates the apply affordances; wants can(event.apply)' },
+      'src/App.jsx::viewingProfile.type === \'organizer\' ? (': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      'src/components/auth/TwoFactorRequiredWall.jsx::Your role as {currentUser.role === \'super_admin\' ? \'platform owner\' : \'administrator\'} requires': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'labels a role in the UX string "Your role as platform owner/administrator requires"' },
+      'src/components/EventDetailsExperience.jsx::{currentUser?.role === \'student\' && onToggleFavorite && (': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply)' },
+      'src/components/EventModal.jsx::const isOwner = currentUser?.role === \'organizer\' && currentUser.id === event?.organizerId;': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isOwner` is role AND id; the id half is the correct ownership test, the role half wants can(event.edit.own)' },
+      'src/components/EventModal.jsx::const isAdmin = currentUser?.role === \'admin\';': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isAdmin` gates the moderation surface; wants can(event.moderate)' },
+      'src/components/EventModal.jsx::const isStudent = currentUser?.role === \'student\';': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates apply/withdraw inside the modal; wants can(event.apply)' },
+      'src/components/EventModal.jsx::{mode === \'view\' && currentUser?.role === \'student\' && onToggleFavorite && (': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply)' },
+      'src/views/BrowseEvents.jsx::const isStudent = currentUser?.role === \'student\';': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates favourites and apply CTAs on the browse list; wants can(event.apply)' },
+      'src/views/CalendarView.jsx::const isOrganizer = currentUser?.role === \'organizer\';': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isOrganizer` picks hosted-events entries over applied-shift entries; wants a can(event.create) cascade, most-privileged-first' },
+      'src/views/Messages.jsx::const studentId = currentUser.role === \'student\' ? currentUser.id : recipient.id;': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'decides which side of a conversation is the student when resolving it; wants can(event.apply), and the server re-derives it anyway' },
     };
 
     const validCategories = new Set(Object.values(CLIENT_CATEGORY));
@@ -580,25 +554,33 @@ describe('authorization hygiene', () => {
 
     for (const { url, key: fileKey } of collectClientFiles()) {
       const lines = stripComments(readFileSync(url, 'utf8')).split('\n');
-      lines.forEach((line, i) => {
-        const key = `${fileKey}:${i + 1}`;
-        const hits = CLIENT_PATTERNS.filter(({ re }) => re.test(line)).map(({ label }) => label);
-        if (hits.length === 0) return;
+      const hitsFor = (line) =>
+        CLIENT_PATTERNS.filter(({ re }) => re.test(line)).map(({ label }) => label);
 
-        const declared = CLIENT_DECLARATIONS[key];
+      for (const [anchor, { lines: at, hits, text }] of groupByAnchor(fileKey, lines, hitsFor)) {
+        const declared = CLIENT_DECLARATIONS[anchor];
         if (declared && validCategories.has(declared.category) && declared.reason) {
-          consumed.add(key);
-          return;
+          consumed.add(anchor);
+          const allowed = declared.occurrences ?? 1;
+          if (at.length !== allowed) {
+            offenders.push(
+              `${fileKey}:${at.join(',')}: a declared line now appears ${at.length} time(s), `
+              + `not ${allowed} — "${text}"\n`
+              + '    Each occurrence is its own decision, so a new copy is not covered by the '
+              + 'old review. Re-read them, then set `occurrences` or convert the new one.'
+            );
+          }
+          continue;
         }
         offenders.push(
-          `${key}: ${hits.join(', ')} — "${line.trim()}"\n`
+          `${fileKey}:${at.join(',')}: ${hits.join(', ')} — "${text}"\n`
           + '    Use can(user, cap) from src/authz.js (or <Can user cap fallback>) for '
           + '"may this kind of actor see X", and compare ids for "is this the actor\'s own row". '
           + 'Order any cascade most-privileged-first and end it explicitly — can() is true for '
           + 'EVERY capability when the role is super_admin. If the comparison genuinely is not '
           + 'an authorization decision, add a categorised CLIENT_DECLARATIONS entry with a reason.'
         );
-      });
+      }
     }
 
     // A file with zero matches everywhere would mean the walk found nothing —
@@ -607,7 +589,7 @@ describe('authorization hygiene', () => {
     expect(collectClientFiles().length, 'the src/ walk found no modules to scan').toBeGreaterThan(0);
 
     const stale = Object.keys(CLIENT_DECLARATIONS).filter((k) => !consumed.has(k));
-    expect(stale, 'CLIENT_DECLARATIONS entries that no longer match anything — the line moved or the check was removed; re-review and update or delete').toEqual([]);
+    expect(stale, 'CLIENT_DECLARATIONS entries matching nothing. Keyed by content, so this means the line CHANGED or was removed — not that it moved. Re-read it, then update or delete the entry.').toEqual([]);
     expect(offenders, 'undeclared role-string comparison(s) found under src/').toEqual([]);
   });
 
@@ -1190,5 +1172,79 @@ describe('authorization hygiene', () => {
         'DECLARED_DIRECT_CONSUMERS entries that no longer match anything — remove them'
       ).toEqual([]);
     });
+  });
+});
+
+/**
+ * The anchoring scheme the two registries above are keyed by (TD-20).
+ *
+ * ── Why the guard's own mechanism is tested ──
+ *
+ * Guards 1 and 3 are the reason a role comparison cannot reach `server/` or
+ * `src/` unreviewed, and they are only as good as the thing that decides whether
+ * a declaration still applies. That decision moved from a line number to the line
+ * itself, which is a change to a security control — so the four properties it
+ * has to have are asserted here rather than left to whoever next edits a file
+ * above a declared line.
+ *
+ * The two scans above exercise this against the real tree; these cover the cases
+ * a real tree does not currently contain, and must not have to contain in order
+ * to be protected from them.
+ */
+describe('the reviewed-exception anchoring', () => {
+  const hitsFor = (line) => (/role === '/.test(line) ? ['role compare'] : []);
+
+  const keysOf = (lines) => [...groupByAnchor('f.js', lines, hitsFor).keys()];
+
+  /** The property the whole change exists for: an edit above a declared line. */
+  it('gives the same key wherever the line sits in the file', () => {
+    const CHECK = "const a = role === 'admin';";
+
+    expect(keysOf([CHECK, 'x', 'y'])).toEqual(keysOf(['x', 'y', 'z', CHECK]));
+    /* And the line number is still recorded, because the diagnostics need it. */
+    expect([...groupByAnchor('f.js', ['x', 'y', 'z', CHECK], hitsFor).values()][0].lines)
+      .toEqual([4]);
+  });
+
+  /** Leading whitespace is not part of the check, so re-indenting must not break it. */
+  it('ignores indentation', () => {
+    expect(keysOf(["        const a = role === 'admin';"]))
+      .toEqual(keysOf(["const a = role === 'admin';"]));
+  });
+
+  /** A changed line is a different key, which is what forces the re-read. */
+  it('gives a different key when the line changes', () => {
+    expect(keysOf(["const a = role === 'student';"]))
+      .not.toEqual(keysOf(["const a = role === 'admin';"]));
+  });
+
+  /** The same file and the same text is one key; two files are two. */
+  it('scopes the key to its file', () => {
+    const a = [...groupByAnchor('a.js', ["const a = role === 'admin';"], hitsFor).keys()];
+    const b = [...groupByAnchor('b.js', ["const a = role === 'admin';"], hitsFor).keys()];
+    expect(a).not.toEqual(b);
+  });
+
+  /**
+   * Duplicates collapse to one key and keep BOTH line numbers.
+   *
+   * This is the case a line number handled for free: without the count, a second
+   * copy of an excused line — possibly a real authorization decision this time —
+   * would arrive already forgiven. The scans above compare `lines.length` against
+   * the declared `occurrences` for exactly this.
+   */
+  it('collapses identical lines to one key while counting them', () => {
+    const found = groupByAnchor('f.js', [
+      "const a = role === 'admin';",
+      'unrelated',
+      "const a = role === 'admin';",
+    ], hitsFor);
+
+    expect(found.size).toBe(1);
+    expect([...found.values()][0].lines).toEqual([1, 3]);
+  });
+
+  it('records nothing for a file with no matches', () => {
+    expect(groupByAnchor('f.js', ['const a = 1;', 'const b = 2;'], hitsFor).size).toBe(0);
   });
 });

@@ -1838,6 +1838,47 @@ when they are done, not when they become uncomfortable to look at.
   where anyone would look for that.
 - **Effort:** small. **Opened:** 2026-08-03.
 
+#### TD-20 — the authz guards' reviewed-exception registries were line-keyed — **resolved**
+
+- **Detail:** `REVIEWED_NON_AUTH_EXCEPTIONS` (Guard 1) and `CLIENT_DECLARATIONS`
+  (Guard 3) in `server/authz.completeness.test.js` were keyed `path:lineNumber`.
+  Every entry was therefore a reference to a coordinate rather than to a piece of
+  code, and **any edit above a declared line moved it** — the guard reported the
+  entry as stale and failed the build on a change with nothing to do with
+  authorization.
+- **How often:** constantly. The single `oauthRoutes.js` entry accumulated
+  thirteen recorded re-anchorings across three releases (`:223 → :257 → :258 →
+  :259 → :379 → :405 → :521 → :525 → :526 → :561 → :584 → :606 → :648`), not one
+  of them a change to the line itself; each was logged with a note ending
+  "re-read, unchanged, still not an authorization decision". Fifty lines of that
+  registry were the log. One session in August 2026 hit it four times in a day.
+- **Why it mattered, and it was not the wasted minutes:** the guard cried wolf.
+  An author who has re-pointed a line number three times for unrelated reasons
+  learns to re-point the fourth without reading it — and a guard whose entire
+  value is *forcing a re-read of a moved check* cannot survive being routinely
+  dismissed. A previous round noticed this and wrote so inside the registry
+  itself: the repetition "is an argument for anchoring these on something other
+  than a line — but not one to act on mid-change."
+- **Resolution:** both registries are keyed by the **exact source line** now
+  (`anchorFor`, `groupByAnchor`). An entry survives the line moving and breaks
+  when the code *changes*, which is precisely when a person should look. The keys
+  also document themselves — the key is the check, so a reason can be judged
+  without opening another file at a coordinate.
+- **What was preserved:** a line number gave one thing for free, and it is kept
+  explicitly. Two identical matching lines in one file would otherwise share a
+  single declaration, so a **new copy** of an excused line — possibly a real
+  authorization decision this time — would arrive already forgiven. Each entry
+  declares how many occurrences it covers (`occurrences`, default 1) and a
+  mismatch fails.
+- **Verified against all four behaviours**, by experiment on a real file before
+  the change was committed: a new undeclared comparison fails; a declared line
+  that merely **moves** passes; a declared line that **changes** fails as stale;
+  a **duplicated** declared line fails on the count. The mechanism itself is now
+  unit-tested in the same file ("the reviewed-exception anchoring"), because a
+  change to how a security guard decides whether a declaration still applies is a
+  change to a security control.
+- **Effort:** small. **Opened and resolved:** 2026-08-08.
+
 #### TD-17 — every gated action costs two requests
 
 - **Detail:** `withStepUp` in `src/utils/stepUp.js` attempts the request, catches
