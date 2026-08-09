@@ -1,7 +1,10 @@
 # Questions for the Owner
 
-Updated 2026-08-07 (second autonomous run). **Work continued past every one of these**
-under the stated assumption; each is cheap to reverse.
+Updated 2026-08-09. **Work continued past every one of these** under the stated assumption;
+each is cheap to reverse.
+
+**Open and needing you:** Q-1 (launch-blocking), Q-5, Q-6, Q-12, Q-13.
+**Resolved:** Q-2, Q-3, Q-4, Q-7, and Q-A/Q-D/Q-E in the table below.
 
 **Resolved since the last version** — no action needed:
 
@@ -327,22 +330,28 @@ and every privileged script now prints which database it opened.
 
 ---
 
-## Q-7 · Two `TFA_ENCRYPTION_KEY` lines in your local `.env`, with different values
+## Q-7 · ~~Two `TFA_ENCRYPTION_KEY` lines in your local `.env`~~ — RESOLVED 2026-08-09
 
-**Question.** `.env` contains `TFA_ENCRYPTION_KEY` twice, on consecutive lines, holding two
-*different* 32-byte keys. Which one do you want?
+**Question.** `.env` contained `TFA_ENCRYPTION_KEY` twice, on consecutive lines, holding two
+*different* 32-byte keys. Which one did you want?
 
-**Why it matters.** Node's `--env-file` is last-wins, so line 31 is the effective key. Any TOTP
+**Why it mattered.** Node's `--env-file` is last-wins, so line 31 was the effective key. Any TOTP
 secret encrypted while line 30 was effective would be permanently undecryptable — the affected
 user could not sign in and would have to be reset with `bin/reset-2fa.mjs`.
 
-**Current behaviour.** Harmless *today*: the active database has not yet run the migration that
-adds the column, so no secret is encrypted under either key. That stops being true the first
-time somebody enrols.
+**Correction to the earlier answer.** The previous version of this entry said it was harmless
+because no secret was encrypted under either key yet. That was true when written and was **not**
+true by 2026-08-09: `pilot.db` holds two encrypted TOTP secrets, one of them on the
+`mahitp.16@gmail.com` owner account. The window this entry described as "before anybody enrols"
+had already closed.
 
-**Recommendation.** Delete line 30, keep line 31, and do it before anybody enrols. I did not edit
-the file myself — it holds live secrets, and removing one is not a change to make on somebody's
-behalf without them looking.
+**How it was resolved.** Empirically, not by choosing. Both keys were tested against the two
+stored secrets: the line-31 key decrypts both, the line-30 key fails AES-GCM authentication on
+both — so line 31 was provably the key everything had been encrypted under, and line 30 was dead.
+Line 30 was removed, line 31 kept byte-for-byte, and both secrets re-verified as decryptable
+afterwards. `.env` was backed up to `.env.backup-20260809-preremediation` first (gitignored).
+`.env.example` now documents that the variable must appear exactly once and explains why
+deduplicating it the other way would have destroyed every enrolled authenticator.
 
 **Also worth knowing.** This key has no rotation path. Changing it makes every stored TOTP secret
 undecryptable, and the only recovery is clearing each account's enrolment one at a time. The
@@ -353,3 +362,51 @@ no enrolments to migrate.
 **Implemented meanwhile.** `TFA_ENCRYPTION_KEY` is documented in `.env.example` and
 `.env.production.example`, production refuses to boot without it, and development falls back to a
 known insecure key with a warning rather than exiting.
+
+---
+
+## Q-13 · Should a persona preview inherit the persona's eligibility conditions, or only its role?
+
+**Asked 2026-08-09. Recorded rather than implemented, because either answer is defensible and
+the choice is a product one.**
+
+**Question.** When you preview the application as an organizer, you currently see the organizer
+capabilities of an organizer who has **accepted the Organizer Agreement**. A real organizer who
+has not accepted it has some of those capabilities withheld. Should the preview show the
+withheld view, the accepted view, or let you pick?
+
+**Why it matters.** The stated purpose of the preview is that "the platform owner sees a version
+of this application almost nobody else does, which makes them the worst-placed person to notice
+that a student's view is broken." The un-accepted organizer state is exactly the kind of view you
+would never otherwise see — a brand-new organizer's first screen. If the preview cannot reach it,
+it cannot check it, which is arguably the feature's whole point. Against that: an organizer who
+has not signed the agreement is arguably mid-onboarding rather than a role, and simulating a
+half-finished account may be more confusing than useful.
+
+**This is not a security question.** `can()` intersects `effectiveRole` with `actualRole`, so a
+preview can only ever *remove* capabilities relative to what you actually hold. Showing more than
+a real un-accepted organizer sees is a fidelity gap, never an escalation — you already hold every
+one of those capabilities as `super_admin`. Nothing is exposed to anybody else either way.
+
+**Why it happens.** `buildPrincipal` computes `withheld` from your own row
+(`withheldCapabilitiesFor(db, userRow)`), and you have no organizer agreement state, so nothing
+is withheld. Only `effectiveRole` follows the persona; the eligibility conditions do not.
+
+**The decision that is yours.**
+
+- **(a) Leave it.** The preview simulates a role, not an account. Simplest, and it matches
+  "renders it as a plain member of another role". Costs you the ability to see a new organizer's
+  first view.
+- **(b) Simulate the un-accepted state too.** Highest fidelity, and it makes the onboarding view
+  reachable. Needs a decision about *which* state to simulate by default, and `withheld` would
+  have to be derived from the persona rather than the row — a change in the authorization kernel,
+  which is the most load-bearing module in the repository.
+- **(c) Make it explicit.** Offer "organizer (agreement accepted)" and "organizer (not yet
+  accepted)" as two personas. Most useful, most work.
+
+**Not launch-blocking.** Nothing is wrong today; the preview is accurate for every persona whose
+capabilities have no per-account eligibility condition, which is all of them except this one.
+
+**Implemented meanwhile.** Nothing. The behaviour is unchanged and no test asserts either
+semantics, deliberately — encoding the current behaviour would make one of the three answers
+above look like a decision that had already been taken.
