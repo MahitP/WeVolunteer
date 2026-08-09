@@ -410,3 +410,11 @@ capabilities have no per-account eligibility condition, which is all of them exc
 **Implemented meanwhile.** Nothing. The behaviour is unchanged and no test asserts either
 semantics, deliberately — encoding the current behaviour would make one of the three answers
 above look like a decision that had already been taken.
+
+**Re-verified 2026-08-09 (second pass).** The security half was re-confirmed empirically against a
+scratch database rather than left as an argument from the source: previewing as `student`,
+`organizer` and `partner` in turn, `/api/auth/me` continued to report the real role as
+`super_admin` while every administrative endpoint — `/api/admin/roster`, `/api/admin/audit-logs`,
+`/api/errors`, `/api/admin/impact` — answered 403, and ending the preview restored all four to 200.
+So the "can only ever remove capabilities" claim above holds in practice and not only in principle,
+and the outstanding decision remains purely the product one.
