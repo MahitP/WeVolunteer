@@ -903,6 +903,53 @@ export function initDatabase() {
   const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get();
   if (userCount.count > 0) {
     console.log('Database already initialized.');
+
+    /**
+     * DEMO_MODE over a database that already has accounts.
+     *
+     * The warning below this branch is louder and better known, and it only ever
+     * fires while SEEDING — that is, on an empty database. The dangerous case is
+     * the opposite one and it was silent: a real database, populated weeks ago,
+     * served by somebody running `npm run dev` because that is the command they
+     * remember. It printed "Database already initialized." and nothing else.
+     *
+     * DEMO_MODE is not cosmetic. It exempts the seeded administrator from the
+     * two-factor policy (see `isDemoExemptAccount` in utils.js), and if that
+     * account is present it holds administrative capabilities behind a password
+     * published in the README. Whether that matters depends entirely on whose
+     * data is in the file, which is a question only the operator can answer — so
+     * this states the facts and names the account rather than guessing.
+     *
+     * Not a refusal. Demo mode over a seeded database is the normal development
+     * loop, and failing it would break the everyday case in order to warn about
+     * the rare one. `server.js` already refuses the combination that is never
+     * legitimate: DEMO_MODE with NODE_ENV=production.
+     */
+    if (DEMO_MODE) {
+      const exempt = db.prepare(
+        "SELECT email FROM users WHERE email = 'admin@example.gov'"
+      ).get();
+      /* Padded rather than hand-aligned: one line carries a variable-width count,
+         and a box whose border wanders reads as a broken message rather than an
+         urgent one. */
+      const WIDTH = 60;
+      const box = (text = '') => console.warn(`  *  ${text.padEnd(WIDTH)} *`);
+      const rule = () => console.warn(`  ${'*'.repeat(WIDTH + 6)}`);
+
+      console.warn('');
+      rule();
+      box('DEMO_MODE is ON over a database that already has');
+      box(`accounts — ${userCount.count} present. Demo relaxations apply to them.`);
+      if (exempt) {
+        box();
+        box('admin@example.gov is present and is EXEMPT from the');
+        box('2FA policy while DEMO_MODE is set, and its password is');
+        box('published in the README. Remove that account, or start');
+        box('without DEMO_MODE (`npm start --prefix server`).');
+      }
+      rule();
+      console.warn('');
+    }
   } else if (DEMO_MODE) {
     // Loud on purpose. The realistic way this fires unexpectedly is an operator
     // running `npm run dev` on a server instead of `npm start` — DEMO_MODE is
