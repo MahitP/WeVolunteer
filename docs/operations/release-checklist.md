@@ -231,6 +231,13 @@ account can be used. This is not a step to defer.
       public URL.
 - [ ] Confirm `POST /api/auth/reset` returns **404** on the live host.
 - [ ] Confirm no demo account can log in (`admin@example.gov`, `password123`).
+      Expect `no_such_account`. On a database seeded in `DEMO_MODE` that account
+      is an administrator behind a published password; it was removed from
+      `pilot.db` on 2026-08-08 — see the note at step 6 of the deployment
+      runbook for how, and why not with `DELETE`.
+- [ ] Confirm the server did not print the `DEMO_MODE is ON over a database that
+      already has accounts` banner at boot. It fires whenever demo mode is set
+      over a populated database, which the seeding banner never covered.
 - [ ] `bin/seed-pilot.js` and `bin/simulate-pilot.js` refuse to run:
       ```bash
       # All three must refuse. These scripts ship to /srv/wevolunteer/bin.

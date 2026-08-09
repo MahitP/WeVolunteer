@@ -642,6 +642,8 @@ does not corrupt data, but it does spam the log. Set `RestartSec=5` and a
 | **Example** | `/var/lib/wevolunteer/wevolunteer.db` |
 | **Security** | Point it at a dedicated, backed-up volume outside the deploy directory. Leaving it inside the checkout means a careless `git clean -xdf` deletes your production data. The directory must be writable by the service user and readable by nobody else (`chmod 700`). |
 | **If missing** | Uses the path inside the checkout. **Every operational script must be run with the same value** — otherwise you will "successfully" promote an admin in a database nobody is using. |
+| **Must be absolute in production** | Enforced since 2026-08-09. A relative value is resolved against the process's working directory, so the same string names a different file depending on where the server was started from — and SQLite creates the file rather than complaining, producing a working server attached to the wrong database. `db.js` now refuses a relative `WEV_DB_PATH` when `NODE_ENV=production`, and warns (naming the working directory and the resolved path) outside it. This is not hypothetical: the development `.env` carries `WEV_DB_PATH=../pilot.db`, correct from `server/` where `npm run dev:server` runs, and one directory wrong from the repository root. |
+| **Announced at boot** | Every start prints `[db] using <absolute path>`. If that line does not name the file you expect, stop — nothing after it is meaningful. A first boot against a path with no database also prints a `WARNING` that it is creating an empty one; on anything other than a new install, that warning means the path is wrong. |
 
 #### `API_PORT`
 
@@ -1264,8 +1266,27 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://volunteers.sbschools.e
 curl -sS -X POST https://volunteers.sbschools.example.org/api/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"admin@example.gov","password":"password123"}'
-# → {"error":"Invalid email or password"}
+# → {"error":"No account found with that email address.","code":"no_such_account"}
 ```
+
+> **The demo administrator was removed from `pilot.db` on 2026-08-08.** It was
+> seeded by `db.js` with a password published in the README, and it holds the
+> `admin` role — so while `DEMO_MODE` was set it was an administrator behind a
+> known password. (`DEMO_MODE` exempts exactly that address from the two-factor
+> policy; see `isDemoExemptAccount` in `server/utils.js`.)
+>
+> It was removed using the product's OWN deletion semantics — anonymised to
+> `deleted_user-admin@system.local`, `account_status = 'deleted'`,
+> `token_version` bumped, password hash replaced, recovery codes and email codes
+> cleared — and **not** with `DELETE FROM users`. A hard delete would have
+> cascaded away five `admin_audit_logs` rows, two `security_audit_logs` rows and
+> a conversation: the audit trail is append-only, and destroying the record of
+> what an account did in order to remove the account is the opposite of what it
+> is for. `PRAGMA foreign_key_check` and `integrity_check` were both clean
+> afterwards, and the row count is unchanged at 18.
+>
+> The DEMO_MODE relaxation itself is unchanged and still correct for a freshly
+> seeded demo database, which is the only place that account should exist.
 
 ```bash
 # 7 — HTTPS redirect
@@ -2088,7 +2109,8 @@ BASE=https://volunteers.sbschools.example.org
 | B3 | Sign up with the **same username**, different case | `400 That username is already taken` |
 | B4 | Sign up with a 5-character password | `400 Password must be at least 6 characters long` |
 | B5 | Sign up with `role: "admin"` via curl | `400 Role must be student or organizer` |
-| B6 | Log in with the wrong password | `401 Invalid email or password` |
+| B6 | Log in with the wrong password | `401 Incorrect password.` (`GENERIC_LOGIN_ERRORS = false` in `server/routes/authRoutes.js`; flipping it to `true` makes this `That email or password is not correct.`) |
+| B6a | Log in with an address that has no account | `401 No account found with that email address.`, `code: "no_such_account"` |
 | B7 | Log in with the **email in a different case** | Succeeds — matching is `COLLATE NOCASE` |
 | B8 | `GET /api/auth/me` with the token | Own profile; `volunteeredHours: 0` |
 | B9 | `GET /api/auth/me` with a mangled token | `403 Invalid or expired token` |
