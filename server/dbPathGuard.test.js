@@ -125,6 +125,68 @@ describe('the database path is resolved, announced, and checked', () => {
    * The positive control, and the one that stops the two refusals above from
    * being satisfied by a `db.js` that simply throws in production.
    */
+  /**
+   * ── SQLite LOCATORS are not filesystem paths ──
+   *
+   * `:memory:` and `file:` URIs are instructions to SQLite, not paths, and the
+   * resolution above is actively destructive applied to them: `path.resolve(':memory:')`
+   * yields `<cwd>/:memory:`, so an in-memory database silently becomes a real
+   * file on disk. Dozens of test files pass `:memory:` through `WEV_DB_PATH`, and
+   * the first version of this guard did exactly that — leaving `:memory:`,
+   * `:memory:-shm` and `:memory:-wal` sitting in the repository root.
+   *
+   * Worse than the litter: a suite that believes it is running against a fresh
+   * in-memory database is instead sharing a persistent file with every other
+   * suite, so state leaks between runs and failures appear in whichever test
+   * happens to run second.
+   *
+   * Asserted by running from a scratch directory and checking that nothing was
+   * created there, which is the property that actually matters — a test that only
+   * checked the announced string would pass while the file appeared anyway.
+   */
+  it('treats :memory: as a locator and never creates a file for it', () => {
+    const dir = scratch('memory');
+    const res = boot({ dbPath: ':memory:', nodeEnv: 'development', cwd: dir });
+
+    expect(res.combined).toContain('BOOT_OK');
+    expect(res.code).toBe(0);
+    expect(
+      existsSync(path.join(dir, ':memory:')),
+      'an in-memory database was materialised as a file on disk'
+    ).toBe(false);
+    /* The sidecars WAL mode would produce beside it, for the same reason. */
+    expect(existsSync(path.join(dir, ':memory:-wal'))).toBe(false);
+    expect(existsSync(path.join(dir, ':memory:-shm'))).toBe(false);
+    /* And it must not have been resolved to an absolute path in the announcement,
+       which is what "treated as a locator" means. */
+    expect(res.combined).not.toMatch(/\[db\] using .*\/:memory:/);
+  });
+
+  /**
+   * The same rule for `file:` URIs, which carry query parameters (`?mode=ro`,
+   * `?cache=shared`) that resolution would mangle into a filename.
+   */
+  it('treats a file: URI as a locator rather than resolving it', () => {
+    const dir = scratch('fileuri');
+    const target = path.join(dir, 'via-uri.db');
+    const res = boot({ dbPath: `file:${target}`, nodeEnv: 'development', cwd: dir });
+
+    expect(res.combined).toContain('BOOT_OK');
+    /* No literal `file:...` directory appeared next to the working directory. */
+    expect(existsSync(path.join(dir, `file:${target}`))).toBe(false);
+  });
+
+  /**
+   * A locator is not a relative path, so the development warning must not fire
+   * for it — a warning that cries wolf on every `:memory:` test run is a warning
+   * nobody reads on the day it means something.
+   */
+  it('does not warn about working directories for a locator', () => {
+    const dir = scratch('memory-warn');
+    const res = boot({ dbPath: ':memory:', nodeEnv: 'development', cwd: dir });
+    expect(res.combined).not.toMatch(/resolves against the current/i);
+  });
+
   it('opens an existing absolute database in production', () => {
     const dbFile = path.join(scratch('prod-ok'), 'wevolunteer.db');
 
