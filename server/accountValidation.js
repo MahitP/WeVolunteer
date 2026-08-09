@@ -26,6 +26,7 @@ import { VALID_GRADES } from './config.js';
 /** Roles a person may give themselves. Admin is seeded or promoted, never self-assigned. */
 export const SELF_ASSIGNABLE_ROLES = ['student', 'organizer'];
 
+export const LOCATION_MAX = 80;
 export const USERNAME_MIN = 3;
 export const USERNAME_MAX = 20;
 const NAME_MAX = 100;
@@ -208,6 +209,42 @@ export function validateProfilePatch(patch) {
       return { ok: false, field: 'avatar', error: 'Pick one of the available avatars.' };
     }
     out.avatar = patch.avatar;
+  }
+
+  /**
+   * A general area, and emphatically not an address.
+   *
+   * The bound is short on purpose — 80 characters holds "South Brunswick, NJ"
+   * with room to spare and does not comfortably hold a street address. That is
+   * a nudge rather than a control, and the real work is done by the field's
+   * placeholder and hint in ProfileEditModal, which say plainly not to use an
+   * exact address. Nothing here is geocoded and there is no coordinate column
+   * on `users`: an event's coordinates are a meeting point an organizer chose
+   * to publish, a student's would be a minor's whereabouts, and no feature
+   * needs one.
+   */
+  if (patch.location !== undefined) {
+    if (patch.location !== null && typeof patch.location !== 'string') {
+      return { ok: false, field: 'location', error: 'That must be text.' };
+    }
+    const location = (patch.location ?? '').trim();
+    if (location.length > LOCATION_MAX) {
+      return { ok: false, field: 'location', error: `Keep this to ${LOCATION_MAX} characters — a town or area, not an address.` };
+    }
+    out.location = location;
+  }
+
+  if (patch.hobbies !== undefined) {
+    if (!Array.isArray(patch.hobbies)) {
+      return { ok: false, field: 'hobbies', error: 'Hobbies must be a list.' };
+    }
+    if (patch.hobbies.length > MAX_SKILLS) {
+      return { ok: false, field: 'hobbies', error: `Please list ${MAX_SKILLS} hobbies or fewer.` };
+    }
+    if (patch.hobbies.some(h => typeof h !== 'string' || h.length > SKILL_MAX)) {
+      return { ok: false, field: 'hobbies', error: `Each hobby must be text of ${SKILL_MAX} characters or fewer.` };
+    }
+    out.hobbies = patch.hobbies.map(h => h.trim()).filter(Boolean);
   }
 
   if (patch.skills !== undefined) {

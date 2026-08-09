@@ -73,15 +73,23 @@ describe('navSectionsFor', () => {
   /* ── Which tier each entry is in ─────────────────────────────────────────── */
 
   /**
-   * The two entries that are deliberately NOT primary, and the reason each one
+   * The three entries that are deliberately NOT primary, and the reason each one
    * can afford not to be: Notifications has the header bell (which also carries
-   * the unread count), and the profile is in the rail's own ProfileMenu and in
-   * the mobile sheet's header.
+   * the unread count), the profile is in the rail's own ProfileMenu and in the
+   * mobile sheet's header, and Find people is a destination you go to rather
+   * than one you pass through on the way to finishing something.
+   *
+   * Find people (v1.3) was placed here rather than in the primary row on that
+   * last argument: the primary row is the five destinations a task moves
+   * between, and displacing one of them for the directory would have cost more
+   * than it bought. Order matters — it sits ABOVE Notifications because the
+   * secondary tier is read top-down and the directory is the one entry with no
+   * second way in.
    */
   it.each(['student', 'organizer', 'super_admin'])(
-    'gives %s exactly Notifications and My profile as secondary', (role) => {
+    'gives %s exactly Find people, Notifications and My profile as secondary', (role) => {
       const { secondary } = navSectionsFor(USER(role));
-      expect(labelsOf(secondary)).toEqual(['Notifications', 'My profile']);
+      expect(labelsOf(secondary)).toEqual(['Find people', 'Notifications', 'My profile']);
     });
 
   /* An ordinary administrator has no self-profile VIEW — `SELF_PROFILE` resolves
@@ -89,8 +97,8 @@ describe('navSectionsFor', () => {
      that role — so the entry is filtered out by capability rather than by tier.
      Unchanged by this redesign, and asserted so that a future profile page for
      admins lands here rather than silently in the primary row. */
-  it('gives an administrator only Notifications as secondary', () => {
-    expect(labelsOf(navSectionsFor(USER('admin')).secondary)).toEqual(['Notifications']);
+  it('gives an administrator Find people and Notifications as secondary', () => {
+    expect(labelsOf(navSectionsFor(USER('admin')).secondary)).toEqual(['Find people', 'Notifications']);
   });
 
   /**

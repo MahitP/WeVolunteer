@@ -120,7 +120,21 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
       },
       milestones: buildMilestones(Number(totals.hours) || 0, totals.events || 0),
       byCategory: byCategory.map(c => ({ category: c.category, hours: Number(c.hours) })),
-      completed: completed.map(formatServiceRow),
+      /**
+       * The itemised service record is NOT public.
+       *
+       * Each row carries a past event's title, its LOCATION and its exact start
+       * and end times. For a fifteen-year-old that is a week-by-week record of
+       * where they have been, and it was returned to every authenticated caller
+       * with nothing gating it — the single most sensitive thing this endpoint
+       * disclosed. The counts above say how much somebody has volunteered
+       * without saying where they were on Saturday.
+       *
+       * Self, or staff holding `user.contact.read`, which is the capability
+       * that already names the power to see a student's particulars.
+       */
+      completed: canSeeContact ? completed.map(formatServiceRow) : [],
+      completedRedacted: !canSeeContact,
       // A confirmed future shift discloses a minor's physical whereabouts at a
       // known time — visible to the student themselves only, never to other
       // students, organizers, or admins.
@@ -270,6 +284,31 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
     }
     if (check.value.skills !== undefined) {
       updates.push('skills = ?'); values.push(JSON.stringify(check.value.skills));
+    }
+    if (check.value.hobbies !== undefined) {
+      updates.push('hobbies = ?'); values.push(JSON.stringify(check.value.hobbies));
+    }
+    if (check.value.location !== undefined) {
+      updates.push('location = ?'); values.push(check.value.location || null);
+    }
+
+    /**
+     * The two privacy switches this screen owns.
+     *
+     * `profileVisibility` had no write path at all before v1.3 — the column
+     * existed, defaulted to 'private', and nothing could change it or read it.
+     * Validated against the same closed set as the column's CHECK, so an
+     * unexpected value is a 400 rather than a constraint error surfacing as a
+     * 500.
+     */
+    if (req.body.profileVisibility !== undefined) {
+      if (!['private', 'friends', 'public'].includes(req.body.profileVisibility)) {
+        return res.status(400).json({ error: 'Choose private, friends, or public.', field: 'profileVisibility' });
+      }
+      updates.push('profile_visibility = ?'); values.push(req.body.profileVisibility);
+    }
+    if (req.body.friendActivityVisible !== undefined) {
+      updates.push('friend_activity_visible = ?'); values.push(req.body.friendActivityVisible ? 1 : 0);
     }
 
     if (grade !== undefined) {

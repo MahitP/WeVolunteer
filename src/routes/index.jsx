@@ -29,6 +29,11 @@ const Welcome = React.lazy(() => import('../views/Welcome'));
 const Signup = React.lazy(() => import('../views/Signup'));
 const BrowseEvents = React.lazy(() => import('../views/BrowseEvents'));
 const CreateEvent = React.lazy(() => import('../views/CreateEvent'));
+const Directory = React.lazy(() => import('../views/Directory'));
+const PublicProfile = React.lazy(() => import('../views/PublicProfile'));
+const OrganizationPage = React.lazy(() => import('../views/OrganizationPage'));
+const OrganizationForm = React.lazy(() => import('../views/OrganizationForm'));
+const LogExternalHours = React.lazy(() => import('../views/LogExternalHours'));
 const VolunteerDashboard = React.lazy(() => import('../views/VolunteerDashboard'));
 const OrganizerDashboard = React.lazy(() => import('../views/OrganizerDashboard'));
 const AdminDashboard = React.lazy(() => import('../views/AdminDashboard'));
@@ -116,6 +121,30 @@ export const APP_ROUTES = [
   { path: '/notifications', element: <Notifications /> },
   { path: '/messages', element: <Messages />, requiredCap: 'message.send' },
   { path: '/portfolio', element: <VolunteerPortfolio />, requiredCap: 'portfolio.write' },
+  /**
+   * The member directory.
+   *
+   * `/users/:handle` carries the `@`. React Router does not allow a parameter
+   * that spans only part of a segment, so the path cannot be written
+   * `/users/@:username` — the `@` is part of the parameter's VALUE and is
+   * stripped by the view. `/users/id/:id` is the fallback for an internal link
+   * that holds an id and for the rare account with no username yet; it is
+   * declared BEFORE the `:handle` route so that "id" is never read as a handle.
+   *
+   * All of these are authenticated app routes, not PUBLIC_ROUTES. "Public
+   * profile" means visible to the school community somebody volunteers
+   * alongside, not to the open internet: this platform's members are children,
+   * and a signed-out, crawlable index of minors by name and area is not
+   * something the word should be allowed to smuggle in.
+   */
+  { path: '/directory', element: <Directory />, requiredCap: 'directory.read' },
+  { path: '/users/id/:id', element: <PublicProfile />, requiredCap: 'directory.read' },
+  { path: '/users/:handle', element: <PublicProfile />, requiredCap: 'directory.read' },
+  /* Declared BEFORE `/organizations/:key`, so "new" is never matched as a slug. */
+  { path: '/organizations/new', element: <OrganizationForm />, requiredCap: 'organization.create', requiresVerified: true },
+  { path: '/organizations/:key/edit', element: <OrganizationForm />, requiredCap: 'organization.manage.own' },
+  { path: '/organizations/:key', element: <OrganizationPage />, requiredCap: 'directory.read' },
+  { path: '/hours/external', element: <LogExternalHours />, requiredCap: 'portfolio.write', requiresVerified: true },
   { path: '/settings', element: <Settings /> },
   /**
    * Declared with NO `requiredCap`, deliberately.
