@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync, readdirSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
@@ -38,28 +38,26 @@ const DESTRUCTIVE_TOOLS = [
 /**
  * Runs a tool and captures the outcome without throwing.
  *
- * `execFileSync` throws on a non-zero exit, which is the expected result for most
- * of these cases, so the status and both streams are normalised here instead of
- * being wrapped in try/catch at every call site.
+ * `spawnSync` rather than `execFileSync` because `combined` has to include
+ * stderr on a *successful* exit too. `execFileSync` only surfaces stderr by
+ * throwing, so on exit 0 it returns stdout alone — which silently made
+ * `combined` mean "both streams on failure, one stream on success". A warning
+ * printed before a tool proceeds anyway (the real-data override) lands on stderr
+ * with exit 0, so under the old helper any assertion about it could never match:
+ * a vacuous test of exactly the kind this suite exists to prevent.
  */
 function run(script, { env = {}, args = [], cwd = ROOT } = {}) {
-  try {
-    const stdout = execFileSync(process.execPath, [script, ...args], {
-      cwd,
-      stdio: 'pipe',
-      encoding: 'utf8',
-      // stdin is a pipe here, never a TTY — which is itself part of what is being
-      // tested: a tool with no --yes and no terminal must refuse, not hang.
-      env: { ...process.env, ...env }
-    });
-    return { code: 0, out: stdout, combined: stdout };
-  } catch (err) {
-    return {
-      code: err.status ?? 1,
-      out: String(err.stdout || ''),
-      combined: String(err.stdout || '') + String(err.stderr || '')
-    };
-  }
+  const res = spawnSync(process.execPath, [script, ...args], {
+    cwd,
+    // stdin is a pipe here, never a TTY — which is itself part of what is being
+    // tested: a tool with no --yes and no terminal must refuse, not hang.
+    stdio: 'pipe',
+    encoding: 'utf8',
+    env: { ...process.env, ...env }
+  });
+
+  const out = String(res.stdout || '');
+  return { code: res.status ?? 1, out, combined: out + String(res.stderr || '') };
 }
 
 /** A throwaway directory under the OS temp root, which the guard must permit. */
@@ -128,6 +126,124 @@ describe('destructive CLIs refuse a production-looking database path', () => {
 
     expect(res.code).not.toBe(0);
     expect(untouched).toBe(true);
+  });
+});
+
+/**
+ * Regression cover for the demo-reset landmine.
+ *
+ * The path checks above ask where a database sits and what it is called. The
+ * pilot database sits at the repository root and is called `pilot.db`, so it
+ * passes both — and `docs/operations/demo-reset.md` described that exact file as
+ * disposable and told the operator to run `bin/seed-pilot.js` against it. The
+ * typed confirmation was no help either: the operator types the filename because
+ * they believe the file is scratch. A prompt cannot correct a false belief about
+ * what a file is, so the guard has to look at what is inside it.
+ */
+describe('destructive CLIs refuse a database that holds real data', () => {
+  /**
+   * Builds a database that looks real: a seeded demo database plus the one
+   * marker a seed never produces, an owner account.
+   *
+   * Seeding first matters — the guard must be shown rejecting a database that is
+   * otherwise byte-for-byte what the demo tooling itself creates, so the test
+   * proves the marker is doing the work rather than some incidental difference.
+   */
+  function seedThenPromoteAnOwner(dir) {
+    const dbFile = path.join(dir, 'pilot.db');
+    const seeded = run('bin/seed-pilot.js', {
+      env: { NODE_ENV: 'development', WEV_DB_PATH: dbFile, JWT_SECRET: 'x'.repeat(48) },
+      args: ['--yes']
+    });
+    if (seeded.code !== 0) throw new Error(`fixture seed failed\n${seeded.combined}`);
+
+    execFileSync(process.execPath, ['--input-type=module', '-e', `
+      const { DatabaseSync } = await import('node:sqlite');
+      const db = new DatabaseSync(${JSON.stringify(dbFile)});
+      db.prepare("UPDATE users SET role = 'super_admin' WHERE id = (SELECT id FROM users LIMIT 1)").run();
+    `], { cwd: ROOT, stdio: 'pipe', encoding: 'utf8' });
+
+    return dbFile;
+  }
+
+  for (const tool of DESTRUCTIVE_TOOLS) {
+    it(`${tool} refuses a database containing owner accounts, and leaves it untouched`, () => {
+      const dir = scratchDir('realdata');
+      const dbFile = seedThenPromoteAnOwner(dir);
+      const before = readFileSync(dbFile);
+
+      const res = run(tool, {
+        env: { NODE_ENV: 'development', WEV_DB_PATH: dbFile, JWT_SECRET: 'x'.repeat(48) },
+        args: ['--yes']
+      });
+
+      const after = existsSync(dbFile) ? readFileSync(dbFile) : null;
+      rmSync(dir, { recursive: true, force: true });
+
+      expect(res.code, `expected a refusal\n${res.combined}`).not.toBe(0);
+      expect(res.combined).toMatch(/REFUS/i);
+      // It must name what it found, so the operator learns the file is not what
+      // they thought rather than that some check failed.
+      expect(res.combined).toMatch(/super_admin|owner/i);
+      expect(after, 'the database was deleted').not.toBeNull();
+      expect(Buffer.compare(before, after), 'the database was modified').toBe(0);
+    });
+  }
+
+  /**
+   * The guard must not break the thing it protects.
+   *
+   * A demo database has to stay resettable indefinitely, so seeding twice over
+   * the same file must work. This is the assertion that would have caught using
+   * `hours_ledger` as a marker: a fresh seed writes five rows to it, so that
+   * choice would have refused every legitimate reset from the second one onward.
+   */
+  it('a freshly seeded demo database can still be reset again', () => {
+    const dir = scratchDir('reseed');
+    const dbFile = path.join(dir, 'demo.db');
+    const env = { NODE_ENV: 'development', WEV_DB_PATH: dbFile, JWT_SECRET: 'x'.repeat(48) };
+
+    const first = run('bin/seed-pilot.js', { env, args: ['--yes'] });
+    const second = run('bin/seed-pilot.js', { env, args: ['--yes'] });
+
+    rmSync(dir, { recursive: true, force: true });
+
+    expect(first.code, `first seed failed\n${first.combined}`).toBe(0);
+    expect(second.code, `re-seeding a demo database was refused\n${second.combined}`).toBe(0);
+  });
+
+  it('an absent database is not mistaken for a real one', () => {
+    const dir = scratchDir('absent');
+    const dbFile = path.join(dir, 'does-not-exist-yet.db');
+
+    const res = run('bin/seed-pilot.js', {
+      env: { NODE_ENV: 'development', WEV_DB_PATH: dbFile, JWT_SECRET: 'x'.repeat(48) },
+      args: ['--yes']
+    });
+
+    rmSync(dir, { recursive: true, force: true });
+    expect(res.code, `creating a new database was refused\n${res.combined}`).toBe(0);
+  });
+
+  it('the override proceeds, but only when set explicitly', () => {
+    const dir = scratchDir('override');
+    const dbFile = seedThenPromoteAnOwner(dir);
+
+    const res = run('bin/seed-pilot.js', {
+      env: {
+        NODE_ENV: 'development',
+        WEV_DB_PATH: dbFile,
+        JWT_SECRET: 'x'.repeat(48),
+        WEV_ALLOW_DESTROYING_REAL_DATA: '1'
+      },
+      args: ['--yes']
+    });
+
+    rmSync(dir, { recursive: true, force: true });
+
+    expect(res.code, `the documented override did not work\n${res.combined}`).toBe(0);
+    // It still has to say what it is doing — an override is not a silent mode.
+    expect(res.combined).toMatch(/WARNING/i);
   });
 });
 

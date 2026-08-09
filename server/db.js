@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
@@ -24,8 +25,86 @@ import { recordAudit } from './auditLog.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-// WEV_DB_PATH lets tests point at a throwaway file. Unset in normal operation.
-const dbPath = process.env.WEV_DB_PATH || path.join(__dirname, 'wevolunteer.db');
+/**
+ * WEV_DB_PATH lets tests point at a throwaway file. Unset in normal operation.
+ *
+ * ── Why the path is resolved and announced rather than passed through ──
+ *
+ * A relative WEV_DB_PATH means a different file from every working directory,
+ * and SQLite resolves it silently against `process.cwd()` — so the mistake
+ * produces a working server attached to the wrong database rather than an error.
+ * This deployment has a live instance of that trap: `.env` carries
+ * `WEV_DB_PATH=../pilot.db`, which is correct because `npm run dev:server` runs
+ * with the workspace directory as its cwd. Run the same server from the
+ * repository root and `../pilot.db` resolves one level higher, onto a stale
+ * database that still has fourteen accounts and fifteen migrations — plausible
+ * enough to work, wrong enough to lose every write made against it.
+ *
+ * So: resolve explicitly, print the absolute result at startup, and refuse the
+ * ambiguous form outright where being wrong is unrecoverable.
+ */
+const rawDbPath = process.env.WEV_DB_PATH;
+
+/**
+ * `:memory:` and `file:` URIs are SQLite locators, not filesystem paths.
+ *
+ * Resolving them is actively destructive: `path.resolve(':memory:')` yields
+ * `<cwd>/:memory:`, so an in-memory database silently becomes a real file — and
+ * dozens of test files pass `:memory:` through WEV_DB_PATH. The first version of
+ * this guard did exactly that and left `:memory:`, `:memory:-shm` and
+ * `:memory:-wal` sitting in the repository root.
+ */
+const isSqliteLocator = p => p === ':memory:' || p.startsWith('file:');
+
+const dbPath = rawDbPath
+  ? (isSqliteLocator(rawDbPath) ? rawDbPath : path.resolve(rawDbPath))
+  : path.join(__dirname, 'wevolunteer.db');
+
+if (rawDbPath && !isSqliteLocator(rawDbPath) && !path.isAbsolute(rawDbPath)) {
+  const detail = `WEV_DB_PATH="${rawDbPath}" is relative, so it resolves against the current\n`
+    + `  working directory (${process.cwd()})\n`
+    + `  and currently means: ${dbPath}`;
+
+  if (process.env.NODE_ENV === 'production') {
+    // Fail closed, consistent with the other production boot guards: a
+    // production process attached to the wrong file is not recoverable by
+    // noticing later.
+    throw new Error(
+      `FATAL: WEV_DB_PATH must be an absolute path in production.\n  ${detail}\n`
+      + '  Set it to an absolute path (the deployment runbook uses '
+      + '/var/lib/wevolunteer/wevolunteer.db).'
+    );
+  }
+  console.warn(`[db] ${detail}`);
+}
+
+/**
+ * Creating a database in production is announced, not refused.
+ *
+ * `new DatabaseSync()` creates the file when it is missing, so a typo in the
+ * path yields an empty database that boots cleanly, seeds nothing, and serves a
+ * platform with no accounts on it — indistinguishable from total data loss until
+ * somebody checks the path.
+ *
+ * This was a refusal in its first version, and that was wrong: a genuinely new
+ * deployment has no database yet, so refusing breaks the first boot of every
+ * install — the one case where creating the file is exactly right. Three test
+ * suites that boot a production-mode server against a fresh temp file caught it,
+ * and they were correct to. A warning names the risk without standing in front
+ * of a legitimate first run, and the relative-path refusal above still covers
+ * the ambiguity that has no correct production use.
+ */
+if (process.env.NODE_ENV === 'production' && !isSqliteLocator(dbPath) && !fs.existsSync(dbPath)) {
+  console.warn(
+    `[db] WARNING: no database at ${dbPath} — creating an empty one.\n`
+    + '     If this is not a first-time install, stop the server now: the path is\n'
+    + '     wrong and the real database is somewhere else. Check WEV_DB_PATH, or\n'
+    + '     restore from a backup (docs/operations/pilot-deployment-runbook.md\n'
+    + '     § Backup strategy).'
+  );
+}
+
+console.log(`[db] using ${dbPath}`);
 
 const db = new DatabaseSync(dbPath);
 
