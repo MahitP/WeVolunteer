@@ -35,8 +35,16 @@ import { fileURLToPath } from 'node:url';
  *
  * The second is what the migration registry already does with `canonicalSource`
  * and `schema_migrations.checksum`, for the same reason, so this follows it.
- * `server/legalDocuments.test.js` is the verifier; `bin/legal-hashes.mjs`
- * prints refreshed values when a document legitimately changes.
+ *
+ * The verifier is `server/consent.test.js` — the "pins a content hash that
+ * matches the published file" case in its `the document registry` block, which
+ * is `skipIf`'d while `LEGAL_HASHES_ENFORCED` is false and re-arms itself the
+ * moment it is flipped. `bin/legal-hashes.mjs` prints refreshed values when a
+ * document legitimately changes, and reports drift in both modes.
+ * There is no `server/legalDocuments.test.js`, and there never was — this
+ * comment named one for a while, and so did the policy README. A pointer to a
+ * verifier that does not exist is worse than no pointer: it reads as "this is
+ * already covered" to the next person deciding whether to add the coverage.
  *
  * ── Versioning ──
  *
@@ -185,7 +193,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'The agreement between you and WeVolunteer: what you may do here, what we owe you, and how an account ends.',
     effectiveAt: '2026-08-06',
     file: '02-terms-of-service.md',
-    contentHash: '52f852c6c9cf9241b9e6ccfe259878ac62683063e9e16b0834cf14561a662118',
+    contentHash: '59dd2cb44ced3c5ee4e3a983ef868fc85c79ddcb990a37abf3cb574a496f5242',
     /** Presented with, and accepted by, the same control as the Terms. */
     bundledWith: null,
   },
@@ -198,7 +206,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'How people are expected to behave here, what is not allowed, and what happens when someone breaks the rules.',
     effectiveAt: '2026-08-06',
     file: '03-community-guidelines.md',
-    contentHash: '632c21160309e04e4eafcca28637564c42ac3407850ca7a4a3276846854c29a3',
+    contentHash: '46dccf33eb7e17ba2ba1b13296299470c8b034d53ea251b5568382e9fbbbacef',
     bundledWith: 'terms-of-service',
   },
   {
@@ -210,7 +218,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What we collect, why, who can see it, how long we keep it, and how to get it back or have it deleted.',
     effectiveAt: '2026-08-06',
     file: '01-privacy-policy.md',
-    contentHash: '005878c3ad6ab36af5b45bf9e86f5f0851c13e0d274100bc1220cb62d6ab6d80',
+    contentHash: '0bfc976497fadbc231138363c73e556d21860435c4d1673d827536533c1a0c33',
     bundledWith: null,
   },
   {
@@ -234,7 +242,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'How to stay safe volunteering, what an adult here should never ask you for, and how to report it when they do.',
     effectiveAt: '2026-08-06',
     file: '08-youth-safety-guidelines.md',
-    contentHash: '05543a4b597a0ab5918cb44b302e5732bb0ac89c6e62350938a0b8e672bf8e8c',
+    contentHash: '4b4cd1aaf9e8e6b0da562e81a6e0357690307db50187da90ca955960164c4471',
     bundledWith: null,
   },
   {
@@ -246,7 +254,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What a WeVolunteer certificate proves, what it does not, and how anyone can check whether one is real.',
     effectiveAt: '2026-08-06',
     file: '06-certificate-verification-policy.md',
-    contentHash: 'ad0fd900b512dcc58cfa4d73be4daab2a974350e96736ae7d3d92ba93ba44d03',
+    contentHash: 'a8c022d0813d685eab3cbd491238a8b875ab98dc89cb98ea4d416486ffa747db',
     bundledWith: null,
   },
   {
@@ -258,7 +266,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'How your service hours are recorded, why a confirmed hour is never re-priced, and what happens if a record is wrong.',
     effectiveAt: '2026-08-06',
     file: '07-volunteer-record-policy.md',
-    contentHash: 'c63f6f9995c4cb8509a4ba14b414be2914f1227fadd5995e38171c6f1240127f',
+    contentHash: 'dad12b591672a520b1cedf94a43ce0bf28af2fddf55273e0d13cd5a6faffcbbf',
     bundledWith: null,
   },
   {
@@ -270,7 +278,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What deleting your account removes, what survives and why, and how to ask for something to be erased.',
     effectiveAt: '2026-08-06',
     file: '04-data-deletion-policy.md',
-    contentHash: 'a8064397ac6d1af7eb2c198839ea6d13c1fe482000c26716faa331ebeb06949b',
+    contentHash: 'f80350653dd607035aaf08fd6fa2e9c1b5815533145d8d3a45ec995df132e653',
     bundledWith: null,
   },
   {
@@ -282,7 +290,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'The cookies this site sets, all of which are needed to keep you signed in. No advertising or analytics trackers.',
     effectiveAt: '2026-08-06',
     file: '05-cookie-and-tracking-notice.md',
-    contentHash: '1a25e8c6e2013c2749a21ed93a62c560983cfdda1fa3ac6f1640419b5b3eb1e1',
+    contentHash: '10e7ed5f16f6c1773f41a8c52ce8611174dea13029c67f99ae179f863815cf1b',
     bundledWith: null,
   },
   {

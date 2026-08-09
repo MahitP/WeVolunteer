@@ -94,7 +94,7 @@ They stay attached to your scrambled name, not your full one.
 
 **These are kept indefinitely.** That is a deliberate choice: people come back for their
 service record years later, and a record that expires is not a record. See the
-[Volunteer Record Policy](07-volunteer-record-policy.md).
+[Volunteer Record Policy](/legal/volunteer-record-policy).
 
 ### Your certificates
 
@@ -168,7 +168,7 @@ the messages saved with it — that is enforced by the database, not by a rule w
 follow.
 
 **How long.** Indefinitely today, and we say why, and what we are doing about it, in the
-[Privacy Policy](01-privacy-policy.md#how-long-we-keep-things).
+[Privacy Policy](/legal/privacy-policy#how-long-we-keep-things).
 
 **If you delete your account while a report is open**, the account is deleted and scrambled
 straight away, as always. The empty shell that is left behind is normally removed after three

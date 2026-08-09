@@ -23,7 +23,7 @@ indefinite certificates are lawful only while no under-13 account can exist (re-
 scheduled later in this programme; the block holds the drafted text for when it ships and blocks
 publication until then, which is correct — a document that offered the choice today would be
 describing a feature that does not exist. Whoever ships voiding removes this marker and the twin
-in [`04-data-deletion-policy.md`](04-data-deletion-policy.md) in the same pull request, and
+in [`04-data-deletion-policy.md`](/legal/data-deletion-policy) in the same pull request, and
 updates the Privacy Policy paragraph that currently states plainly that no such option exists.
 
 **One thing corrected in this pass.** "If a code does not work" listed an expired verification
@@ -154,7 +154,7 @@ deleting your account does not remove it.**
 There is no option to void a certificate. We would like to add one, and cannot promise a date,
 so the sentence above is the whole of the current position rather than a summary of it.
 
-See the [Data Deletion Policy](04-data-deletion-policy.md).
+See the [Data Deletion Policy](/legal/data-deletion-policy).
 
 ### If your certificate is wrong
 
@@ -181,6 +181,6 @@ If we ever detect systematic guessing, we will tighten the limits, and we will s
 
 Do not use verification to try to find out whether a particular person volunteers, to collect
 students' names, or to test codes at scale. That is a breach of the
-[Terms of Service](02-terms-of-service.md) and we will block it.
+[Terms of Service](/legal/terms-of-service) and we will block it.
 
 Questions: **wevolunteer.platform@gmail.com**

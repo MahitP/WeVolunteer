@@ -164,7 +164,7 @@ Diagnostics are used only to fix bugs, and they are deleted on a schedule:
 
 An unfixed problem is still true, which is why its summary lasts longer than the individual
 records behind it. The same schedule is in the
-[Privacy Policy](01-privacy-policy.md#how-long-we-keep-things).
+[Privacy Policy](/legal/privacy-policy#how-long-we-keep-things).
 
 ## Other companies
 
