@@ -384,4 +384,51 @@ describe('the safety gate cannot be skipped by a new tool', () => {
     }
     expect(offenders, 'these delete data without the shared safety gate').toEqual([]);
   });
+
+  /**
+   * Importing the gate is not running the gate.
+   *
+   * `bin/reset-dev-db.mjs` imported `db-safety.mjs` and satisfied the check
+   * above while composing the gate out of its individual pieces rather than
+   * calling `guardDestructive`. So when the real-data content check was added to
+   * that function, it did not reach this script — and it went on deleting a
+   * database the other two tools refused. The import-only assertion could not
+   * see the difference, because the import was there the whole time.
+   *
+   * This asserts the property that actually matters: whatever else a destructive
+   * tool does, the content check runs. A script may reach it either through
+   * `guardDestructive` or by calling `refuseNonDisposableDatabase` directly, so
+   * both spellings count — the requirement is that the check happens, not which
+   * function name gets it there.
+   */
+  it('every bin/ script that deletes a file actually RUNS the content check', () => {
+    const offenders = [];
+    let scanned = 0;
+
+    for (const name of readdirSync(path.join(ROOT, 'bin'))) {
+      if (!/\.(mjs|js)$/.test(name)) continue;
+      const src = readFileSync(path.join(ROOT, 'bin', name), 'utf8');
+      if (!/unlinkSync|rmSync|rimraf|DROP TABLE/i.test(src)) continue;
+
+      scanned++;
+      // Comments are stripped: these files document the gate at length, and the
+      // prose names the very functions being searched for.
+      const code = src
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+
+      const runsCheck = /guardDestructive\s*\(/.test(code)
+        || /refuseNonDisposableDatabase\s*\(/.test(code);
+      if (!runsCheck) offenders.push(name);
+    }
+
+    expect(scanned, 'the scan found no destructive scripts — it is testing nothing')
+      .toBeGreaterThan(0);
+    expect(
+      offenders,
+      'these delete a database file without ever running the real-data content check. '
+      + 'Call guardDestructive(), or refuseNonDisposableDatabase() if the script '
+      + 'composes the gate itself.'
+    ).toEqual([]);
+  });
 });
