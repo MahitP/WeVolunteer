@@ -39,6 +39,9 @@ import appealsRoutes from './routes/appealsRoutes.js';
 import profilePictureRoutes, { UPLOADS_ROOT } from './routes/profilePictureRoutes.js';
 import badgeRoutes from './routes/badgeRoutes.js';
 import twoFactorRoutes from './routes/twoFactorRoutes.js';
+import directoryRoutes from './routes/directoryRoutes.js';
+import organizationRoutes from './routes/organizationRoutes.js';
+import externalHoursRoutes from './routes/externalHoursRoutes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -631,6 +634,12 @@ app.use('/api', apiLimiter);
 app.use(authRoutes);
 app.use(accountRoutes);
 app.use(userRoutes);
+/* The v1.3 member directory. Mounted after userRoutes so that its
+   `/api/users/by-username/:username` and `/api/users/:id/public-profile` paths
+   sit alongside the existing `/api/users/:id/profile` rather than shadowing it. */
+app.use(directoryRoutes);
+app.use(organizationRoutes);
+app.use(externalHoursRoutes);
 app.use(oauthRoutes);
 app.use(reauthRoutes);
 app.use(personaRoutes);

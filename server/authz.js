@@ -128,6 +128,33 @@ export const CAPABILITIES = {
     // rather than being widened to organizer as well.
     'stats.self',
     /**
+     * The v1.3 member directory: reading another member's public profile, and
+     * searching people and organizations.
+     *
+     * One capability rather than `profile.view` plus `user.search`, because
+     * they are the same power. Search returns the public profile fields in a
+     * list; the profile returns them one at a time. Splitting them would name a
+     * distinction the serializer does not make, and would invite a future route
+     * to hold one and leak the other.
+     *
+     * It grants nothing about a *private* profile. What `private` withholds is
+     * withheld from every holder of this capability equally, including
+     * organizers — see publicProfile() in profileSerializer.js, where the
+     * decision is made once for all callers.
+     */
+    'directory.read',
+    /**
+     * Friending, muting, and restricting another member.
+     *
+     * Blocking is deliberately not in here: it is already gated by `event.apply`
+     * on the existing route, and the asymmetry documented in blocking.js (that
+     * students block and organizers do not) is a safety property that folding
+     * it into a capability every role holds would quietly undo.
+     */
+    'relationship.manage',
+    /** Joining and leaving an organization. */
+    'organization.join',
+    /**
      * `analytics.impact` is deliberately NOT here — it became an administrative
      * capability, and this is the role it was taken from.
      *
@@ -166,6 +193,19 @@ export const CAPABILITIES = {
     // scoped to the events they ran. `analytics.impact` — the whole community —
     // is not theirs to read; see the note in the `admin` list below.
     'analytics.own_events',
+    // The member directory, on the same terms as a student — see the note there.
+    'directory.read', 'relationship.manage', 'organization.join',
+    /**
+     * Creating an organization, and managing one this account created or was
+     * made a manager of.
+     *
+     * `organization.manage.own` is the capability; *which* organization is an
+     * ownership question the route answers against `organization_members`, in
+     * exactly the way `event.edit.own` is paired with an `organizer_id` check.
+     * A capability cannot express "this one and not that one", and pretending
+     * otherwise is how a scoped permission becomes a global one.
+     */
+    'organization.create', 'organization.manage.own',
   ],
   admin: [
     'event.view', 'event.moderate', 'organizer.approve', 'user.suspend',
@@ -317,6 +357,19 @@ export const CAPABILITIES = {
      * of that being impossible or done by promoting somebody to admin.
      */
     'analytics.impact',
+    // The member directory, on the same terms as every other member.
+    'directory.read', 'relationship.manage', 'organization.join',
+    /**
+     * Administrators create and manage organizations too, and additionally hold
+     * `organization.moderate` — the unscoped power to edit or archive an
+     * organization they did not create.
+     *
+     * Split from `organization.manage.own` for the same reason `event.moderate`
+     * is split from `event.edit.own`: the route's ownership check is what makes
+     * "own" mean something, and the moderator's bypass of that check has to be a
+     * capability somebody can be seen to hold.
+     */
+    'organization.create', 'organization.manage.own', 'organization.moderate',
   ],
   /* Holds everything, including `persona.preview.exit` — which is the role a
      preview is always started FROM, so it is the one that must never lose it. */
@@ -327,6 +380,17 @@ export const CAPABILITIES = {
   // 'admin'/'organizer', so partner already passes both. Granting the
   // capabilities keeps that unchanged now that the routes ask `can()` instead
   // of comparing role strings.
+  //
+  // `directory.read` is deliberately NOT here, and it is the same decision as
+  // `analytics.impact` below applied to individuals instead of aggregates. A
+  // partner is an EXTERNAL organization. The member directory is a searchable
+  // list of schoolchildren by name, with their service history and general
+  // location attached; "the profiles are public to members" answers the wrong
+  // question, because the point of the public baseline is that it is visible to
+  // the school community a student volunteers alongside, not to every outside
+  // body holding a login. `relationship.manage`, `organization.join` and
+  // `organization.create` are absent for the same reason: none of them is a
+  // thing an external partner does.
   //
   // `analytics.impact` is deliberately NOT here, and partner is the role where
   // the decision needed making rather than following. A partner is an EXTERNAL

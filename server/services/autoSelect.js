@@ -26,6 +26,7 @@
  * instanceLock.js, so nothing here depends on module-load order.
  */
 import { createRandom, performWeightedSelection } from '../weighting.js';
+import { attendanceRecordsFor } from '../volunteerStats.js';
 import { notificationService } from './notificationService.js';
 import { inTransaction } from '../utils.js';
 
@@ -47,9 +48,27 @@ export function computeDraw(db, eventId, { runNumber }) {
   const waitlistIds = [];
 
   for (const slot of slots) {
+    /**
+     * `totalHours`, not `total_hours`.
+     *
+     * The alias here used to be snake_case while `performWeightedSelection`
+     * reads `a.totalHours`, so every applicant arrived at the curve with
+     * `undefined` hours, `Number(undefined) || 0` made that 0, and every
+     * applicant was handed the identical maximum weight of 10.0. The draw was a
+     * uniform lottery for as long as that mismatch stood — the hours weighting
+     * the organizer UI describes, and that
+     * docs/legal/policies/07-volunteer-record-policy.md publishes as policy, was
+     * not happening at all.
+     *
+     * Nothing failed, because the one determinism test builds its applicants by
+     * hand in camelCase and no test asserted that a lower-hours volunteer
+     * actually wins more often. `weighting.test.js` now makes that assertion
+     * directly, over the real curve, so the two names cannot drift apart again
+     * without the build going red.
+     */
     const pendingApps = db.prepare(`
       SELECT a.id, a.user_id,
-             COALESCE(SUM(att.hours_awarded), 0) as total_hours
+             COALESCE(SUM(att.hours_awarded), 0) as totalHours
       FROM applications a
       LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
       WHERE a.slot_id = ? AND a.status = 'pending'
@@ -57,6 +76,18 @@ export function computeDraw(db, eventId, { runNumber }) {
     `).all(slot.id);
 
     if (pendingApps.length === 0) continue;
+
+    /**
+     * Attendance reliability for the whole pool in one query, then attached.
+     *
+     * One aggregate for the slot rather than one per applicant: a popular shift
+     * draws forty applications, and the draw already runs once per slot inside
+     * a transaction. A miss in this Map means "no recorded history", which
+     * `reliabilityMultiplier` treats as neutral — deliberately not as zero
+     * attendance.
+     */
+    const records = attendanceRecordsFor(db, pendingApps.map(a => a.user_id));
+    for (const app of pendingApps) app.attendance = records.get(app.user_id) ?? null;
 
     // Capacity already consumed by hand-accepted volunteers. This is what keeps a
     // draw from ever exceeding a slot's spots, and from reconsidering anyone who is

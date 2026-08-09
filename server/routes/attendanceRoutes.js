@@ -62,7 +62,7 @@ router.get('/api/events/:id/checkin', authenticateToken, requireCap('attendance.
 // explicit instruction that carries a reason.
 router.post('/api/events/:id/attendance', authenticateToken, requireCap('attendance.mark'), (req, res) => {
   const eventId = req.params.id;
-  const { attendanceMap, reason } = req.body;
+  const { attendanceMap, hoursMap, reason } = req.body;
 
   if (!attendanceMap || typeof attendanceMap !== 'object' || Array.isArray(attendanceMap)) {
     return res.status(400).json({ error: 'attendanceMap is required' });
@@ -86,7 +86,7 @@ router.post('/api/events/:id/attendance', authenticateToken, requireCap('attenda
     let outcome;
 
     inTransaction(() => {
-      outcome = finalizeAttendance(db, { event, attendanceMap, reason, actor: req.user, now });
+      outcome = finalizeAttendance(db, { event, attendanceMap, hoursMap, reason, actor: req.user, now });
       if (!outcome.ok) throw new AttendanceRefused(outcome);
 
       // Completion is what makes an event immutable, so it is only reached when
@@ -133,7 +133,11 @@ router.post('/api/events/:id/attendance', authenticateToken, requireCap('attenda
   } catch (error) {
     if (error instanceof AttendanceRefused) {
       const { error: code, message, ...rest } = error.outcome;
-      return res.status(code === 'reason_required' ? 400 : 409).json({ error: message, code, ...rest });
+      /* `reason_required` and `invalid_hours` are both malformed submissions —
+         400. `shift_not_ended` is a well-formed request refused by the state of
+         the world — 409. */
+      const badRequest = code === 'reason_required' || code === 'invalid_hours';
+      return res.status(badRequest ? 400 : 409).json({ error: message, code, ...rest });
     }
     console.error('Confirm attendance error:', error);
     res.status(500).json({ error: 'Internal server error confirming attendance records' });

@@ -6,6 +6,7 @@ import {
 } from '../utils.js';
 import { can, requireCap, requireCapAny } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
+import { friendsToNotify } from '../relationships.js';
 import { db } from '../db.js';
 
 const router = express.Router();
@@ -242,6 +243,41 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
 
     // Notify organizer
     notificationService.dispatch('NEW_APPLICATION', { eventId: event.id, eventTitle: event.title }, event.organizer_id);
+
+    /**
+     * Tell this volunteer's friends, if this volunteer allows it.
+     *
+     * The privacy decision is made entirely inside `friendsToNotify`, which
+     * returns an empty list unless the signer-up has `friend_activity_visible`
+     * on AND the friendship is accepted on both sides AND the recipient has not
+     * muted them AND neither has restricted or blocked the other. The list is
+     * built before any row exists, so a notification that should not be sent is
+     * never written — there is nothing for a later endpoint to leak by
+     * forgetting to re-filter, and nothing for an audit to find.
+     *
+     * Dedupe key is per (friend, event), NOT per application. A volunteer who
+     * signs up for three shifts of the same festival is one piece of news, and
+     * three identical bell entries is how a useful feature becomes one people
+     * turn off.
+     *
+     * Wrapped in its own try/catch and placed after every write: a signup must
+     * never fail because a notification could not be created.
+     */
+    try {
+      const recipients = friendsToNotify(db, req.user.id);
+      if (recipients.length > 0) {
+        const actor = db.prepare('SELECT name, username FROM users WHERE id = ?').get(req.user.id);
+        const payload = {
+          actorName: actor?.name, actorUsername: actor?.username,
+          eventId: event.id, eventTitle: event.title,
+        };
+        for (const friendId of recipients) {
+          notificationService.dispatch('FRIEND_SIGNED_UP', payload, friendId, `friend-signup:${req.user.id}:${event.id}`);
+        }
+      }
+    } catch (err) {
+      console.error('Friend signup fan-out failed:', err);
+    }
 
     res.status(201).json({
       success: true,
