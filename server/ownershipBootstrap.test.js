@@ -28,11 +28,30 @@ beforeEach(async () => {
   
   // initDatabase creates tables on the cached db instance, so we can't use it directly if cached.
   // Actually, we can just run a child process to initialize the DB!
-  spawnSync(process.execPath, ['-e', `
+  const init = spawnSync(process.execPath, ['-e', `
     process.env.WEV_DB_PATH = '${dbPath}';
     const { initDatabase } = require('./server/db.js');
     initDatabase();
-  `], { cwd: path.join(__dirname, '..') });
+  `], { cwd: path.join(__dirname, '..'), encoding: 'utf8' });
+
+  /**
+   * The child's exit status is CHECKED, because it silently was not.
+   *
+   * When `db.js` briefly acquired a top-level `await` in its module graph — via a
+   * new import of `scripts/seed_badges.js`, whose CLI guard used one — this
+   * `require()` started failing with `ERR_REQUIRE_ASYNC_MODULE`. The child died
+   * before creating a single table, nothing looked at that, and all nine cases
+   * below failed with `no such table: users`: a message that points at the
+   * fixture on line 37 and says nothing about the child process on line 30.
+   *
+   * Asserting the status here turns a five-minute hunt into the actual error.
+   */
+  if (init.status !== 0) {
+    throw new Error(
+      `database initialisation child failed (status ${init.status}).\n`
+      + `stderr: ${init.stderr}\nstdout: ${init.stdout}`
+    );
+  }
 
   db.exec(`
     INSERT INTO users (id, name, username, email, password_hash, role, verified, account_status, grade, created_at, token_version)

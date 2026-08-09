@@ -79,6 +79,7 @@ function bootProdAndProbe() {
       env: {
         ...process.env,
         NODE_ENV: 'production',
+        REQUIRE_ADMIN_2FA: 'true',
         WEV_DB_PATH: dbFile,
         DEMO_MODE: '',
         JWT_SECRET: 'JXAvK3n2Qp7RtY9wLmZbC4dE6fG8hJ1kN5oP0qS2uV4xA7yB9cD3eF5gH8iJ0kLm',

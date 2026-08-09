@@ -207,7 +207,8 @@ describe('the bind address is configurable', () => {
         SMTP_PASS: 'p',
         APP_URL: 'https://volunteers.example.org',
         // Fatal boot guard in production, same class as JWT_SECRET above.
-        TFA_ENCRYPTION_KEY: 'c3VwZXJzZWNyZXRrZXkxMjM0NTY3ODkwYWJjZGVmZ2g='
+        TFA_ENCRYPTION_KEY: 'c3VwZXJzZWNyZXRrZXkxMjM0NTY3ODkwYWJjZGVmZ2g=',
+        REQUIRE_ADMIN_2FA: 'true'
       }
     });
 

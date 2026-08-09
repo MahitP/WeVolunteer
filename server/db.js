@@ -8,6 +8,10 @@ import { createCheckinTable } from './attendance.js';
 import { createInstanceLockTable } from './instanceLock.js';
 import { DEMO_MODE, REQUIRE_EMAIL_VERIFICATION } from './config.js';
 import { runMigrations } from './migrations/index.js';
+/* Safe to import here: seed_badges.js keeps its own `db.js` import inside its
+   CLI guard precisely so requiring the catalogue cannot open a connection, so
+   there is no cycle at module scope. */
+import { reconcileBadgeCatalogue } from './scripts/seed_badges.js';
 import { syncLegalDocuments } from './consent.js';
 // Same reasoning as auditLog.js below: organizerAgreement.js takes `db` as an
 // argument and reaches only consent.js and legalDocuments.js, neither of which
@@ -414,6 +418,35 @@ export function initDatabase() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
+
+  /**
+   * Organizer-created event tags. See server/eventTags.js for the model.
+   *
+   * `tag` is the normalised key (lower-cased, `#` stripped, whitespace collapsed)
+   * and `label` is what the organizer typed. The composite primary key is what
+   * makes a duplicate tag on one event impossible in the DATA rather than only in
+   * the validator — `#NHS` and `#nhs` normalise to the same key and the second
+   * insert is refused by the engine.
+   *
+   * `ON DELETE CASCADE` so deleting an event takes its tags with it. Without it
+   * the table would accumulate rows pointing at nothing, and `tagVocabulary`
+   * would keep suggesting tags whose only event was removed.
+   *
+   * The index on `tag` is the one that matters: tag filtering is an
+   * `EXISTS (SELECT 1 FROM event_tags WHERE event_id = e.id AND tag IN (…))`
+   * inside the browse query's WHERE clause, which without it is a table scan per
+   * candidate event on the endpoint the browse screen calls on every keystroke.
+   */
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS event_tags (
+      event_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      label TEXT NOT NULL,
+      PRIMARY KEY (event_id, tag),
+      FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_event_tags_tag ON event_tags(tag)');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS oauth_accounts (
@@ -928,6 +961,36 @@ export function initDatabase() {
   addColumnIfMissing('certificates', 'hours_snapshot', 'REAL');
   addColumnIfMissing('certificates', 'completed_at_snapshot', 'TEXT');
 
+  /**
+   * The PKCE code verifier for an in-flight OAuth authorization.
+   *
+   * ── Why it lives HERE and not in the signed `state` ──
+   *
+   * PKCE's whole premise is that whoever holds the authorization code cannot
+   * redeem it without a secret they never saw. The `state` parameter travels
+   * through the browser and back, so a verifier carried in it would be visible to
+   * exactly the party PKCE exists to defend against, and the protection would be
+   * decorative. It is stored server-side against the same single-use nonce row
+   * the replay check already reads, and it never leaves this process.
+   *
+   * ── Why PKCE at all, for a confidential client ──
+   *
+   * `OAUTH_REDIRECT_URI` points at the SPA (`/oauth/callback`), not at the API —
+   * so the authorization code is delivered to the BROWSER and posted to the
+   * server afterwards. That is the deployment where an intercepted code (a
+   * malicious extension, a referrer leak, a shared machine's history) is
+   * redeemable by whoever picks it up, because the client secret alone is not
+   * bound to the request that started the flow. PKCE binds them.
+   *
+   * Nullable, and the callback treats a missing value as "this flow began before
+   * PKCE existed" rather than as a failure — an authorization already in flight
+   * across the deploy must not break. Rows are short-lived (15 minutes) and
+   * purged, so the tolerance closes by itself.
+   */
+  addColumnIfMissing('oauth_states', 'code_verifier', 'TEXT');
+
+
+
   // Versioned migrations run last: they may rebuild tables the bootstrap above
   // just created, and they assume the pre-v1.2 schema is fully in place.
   runMigrations(db);
@@ -946,6 +1009,37 @@ export function initDatabase() {
    * actually agreed to.
    */
   syncLegalDocuments(db);
+
+  /**
+   * Reconcile the badge catalogue, for the same reason and in the same way.
+   *
+   * ── Why at init rather than in a migration ──
+   *
+   * The argument on `syncLegalDocuments` above transfers exactly: a catalogue of
+   * definitions changes far more often than the schema does, and freezing it into
+   * a migration would mean a new migration file every time a badge is added,
+   * reworded or retired. `reconcileBadgeCatalogue` is idempotent and derived from
+   * `scripts/seed_badges.js`, so it converges on every boot.
+   *
+   * ── Why it MUST run automatically ──
+   *
+   * Migration 024 seeds seven badges on a fresh database, four of which are hour
+   * thresholds that duplicate a milestone: a 10-hour "Helping Hand" beside the
+   * 10-hour milestone, a 50-hour "Community Champion" beside the 50-hour one. The
+   * reconciliation that retires them existed as a hand-run CLI script wired into
+   * no npm script, so on every database that nobody remembered to run it against
+   * — which is all of them, including a fresh test database — the volunteer
+   * profile still showed the same achievement twice under two names.
+   *
+   * A correction that only lands where somebody remembers to apply it has not
+   * landed. This is what makes the catalogue in source the catalogue in the
+   * database.
+   *
+   * It never touches `user_badges`: retiring a definition sets `active = 0`,
+   * which freezes the awards already made under it. Somebody's earned badge is
+   * their history, and a catalogue clean-up is not a reason to take it.
+   */
+  reconcileBadgeCatalogue(db);
   seedOrganizerAcceptance();
   assertNoDemoOwner();
 }
