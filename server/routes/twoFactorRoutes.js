@@ -125,14 +125,24 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
      *
      * ── And it narrows a real race ──
      *
-     * `verifyTotp` runs with zero epoch tolerance, so only the current 30-second
-     * step is accepted. Hashing first meant a code generated near a boundary was
-     * verified about a second later, in the NEXT step, and a CORRECT code was
-     * refused; `routes.2faEnrolment.test.js` failed roughly one run in three on
-     * exactly that. Checking first shrinks the window to the request's own
-     * latency. It does not close it — that needs a ±1 step tolerance, which is a
-     * decision about the accept window and is recorded as an open question rather
-     * than taken quietly here.
+     * `verifyTotp` used to run with ZERO epoch tolerance, so only the current
+     * 30-second step was accepted. Hashing first meant a code generated near a
+     * boundary was verified about a second later, in the NEXT step, and a CORRECT
+     * code was refused; `routes.2faEnrolment.test.js` failed roughly one run in
+     * three on exactly that. Checking first shrinks the window to the request's
+     * own latency.
+     *
+     * That was a mitigation, and the open question it named — whether to widen
+     * the accept window — has since been answered: `TOTP_EPOCH_TOLERANCE` is now
+     * `[30, 0]`, one previous step and no future one, shipped together with the
+     * single-use high-water mark that makes a wider window safe (see
+     * `server/totpReplay.js`). So the race this ordering narrowed is closed at
+     * the source now.
+     *
+     * The ordering stays anyway. It is still a second of bcrypt not spent on a
+     * request that is about to be refused for a wrong code, and reverting it
+     * would put the boundary back in reach of any future change to the
+     * tolerance.
      *
      * The secret is read twice on purpose. This read is advisory; the one below is
      * the one that counts. Collapsing them into a value carried across the
