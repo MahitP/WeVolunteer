@@ -48,7 +48,7 @@ bin/install-hooks.sh                               # required after clone — in
 
 ### Backend (`server/`)
 
-`server.js` (startup guards, listener, scheduler) → `app.js` (middleware order: compression → helmet → CORS on `/api` → json → rate limiters → 14 route modules → `/health` → static `dist/` + SPA fallback → error handler last).
+`server.js` (startup guards, listener, scheduler) → `app.js` (middleware order: compression → helmet → CORS on `/api` → json → rate limiters → 24 route modules → `/health` → static `dist/` + SPA fallback → error handler last).
 
 Domain logic lives in modules, not route handlers: `attendance.js`, `hoursLedger.js`, `certificates.js`, `weighting.js` (Auto Select draw), `validation.js`, `eventQuery.js`. `config.js` is side-effect-free by design — that is what lets a route module be imported by a test without booting a listener or touching the production database.
 
