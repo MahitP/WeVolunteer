@@ -203,3 +203,98 @@ describe('TOTP tolerance and single use', () => {
     expect(owner).toBeTruthy();
   });
 });
+
+/**
+ * The replay scope rests on a compensating control. Assert the control.
+ *
+ * Single use is enforced on the sign-in path and deliberately not on enrolment
+ * or disable. `totpReplay.js` explains why at length, and the argument is sound
+ * — but it is only sound while its premise holds: those routes are reachable
+ * ONLY with a live session AND a step-up grant that is itself single-use and
+ * bound to one action. That premise is what makes a replayed code there worth
+ * nothing, because anybody who can present one already controls the account.
+ *
+ * Nothing asserted the premise. Remove `requireAAL2` from one of those routes —
+ * a plausible edit, since the friction it adds is exactly what somebody
+ * simplifying a 2FA flow would target — and the route keeps working, every
+ * functional test stays green, and the replay-scope reasoning silently becomes
+ * false. Guard 5 in authz.completeness.test.js pairs each `requireAAL2` with a
+ * `spendChallenge`, which is a different property: it constrains the gates that
+ * exist rather than requiring these particular routes to have one.
+ *
+ * This is a source scan because the property is structural. A functional test
+ * could show one route refusing without a grant; it could not show that no
+ * TOTP-checking route anywhere has lost its gate.
+ */
+describe('the premise behind scoping replay protection to sign-in', () => {
+  const TWO_FACTOR_ROUTES = new URL('./routes/twoFactorRoutes.js', import.meta.url);
+
+  /** Every `router.<verb>('<path>', ...)` head, up to the handler body. */
+  function routeDeclarations(source) {
+    const decls = [];
+    const re = /router\.(get|post|put|patch|delete)\(\s*'([^']+)'([\s\S]*?)=>\s*\{/g;
+    let m;
+    while ((m = re.exec(source)) !== null) {
+      decls.push({ verb: m[1], path: m[2], middleware: m[3] });
+    }
+    return decls;
+  }
+
+  it('every 2FA enrolment and disable route is behind a step-up grant', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(TWO_FACTOR_ROUTES, 'utf8');
+    const decls = routeDeclarations(source);
+
+    // Anti-vacuity: if the scan stops matching, it must fail rather than pass
+    // over an empty list.
+    expect(decls.length, 'the route scan matched nothing — it is testing nothing').toBeGreaterThan(4);
+
+    const ungated = decls
+      .filter(d => d.verb !== 'get')
+      .filter(d => !d.middleware.includes('requireAAL2'))
+      .map(d => `${d.verb.toUpperCase()} ${d.path}`);
+
+    expect(
+      ungated,
+      'These routes change 2FA state without a step-up grant. TOTP replay protection '
+      + 'is deliberately NOT applied to enrolment/disable (see server/totpReplay.js), '
+      + 'and that is only safe because a single-use grant already stands in front of '
+      + 'them. Restore the gate, or extend verifyTotpOnce to cover this route.'
+    ).toEqual([]);
+  });
+
+  /**
+   * Comments are stripped before matching.
+   *
+   * `twoFactorRoutes.js` documents, twice and by name, that it calls `verifyTotp`
+   * and deliberately NOT `verifyTotpOnce`. A raw substring scan counts that
+   * explanation as the thing it is warning about — which is precisely the
+   * failure this suite exists to catch, so it is worth having hit it here. The
+   * assertion is about executable code; the prose has to come out first.
+   */
+  function codeOnly(source) {
+    return source
+      .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
+      .replace(/^\s*\/\/.*$/gm, '');      // whole-line comments
+  }
+
+  it('single-use verification is used on the sign-in path and nowhere else', async () => {
+    const { readFileSync } = await import('node:fs');
+    const authSource = codeOnly(readFileSync(new URL('./routes/authRoutes.js', import.meta.url), 'utf8'));
+    const twoFactorSource = codeOnly(readFileSync(TWO_FACTOR_ROUTES, 'utf8'));
+
+    // The sign-in path must keep it: this is the case where a replayed code buys
+    // a session the attacker does not already have.
+    expect(authSource, 'the sign-in path stopped enforcing single use').toContain('verifyTotpOnce');
+
+    // And the enrolment/disable routes must not adopt it silently: a shared
+    // high-water mark would stop an account signing in and then changing its 2FA
+    // settings inside the same 30-second step.
+    expect(
+      twoFactorSource.includes('verifyTotpOnce'),
+      'twoFactorRoutes.js now marks the counter. That is a real behaviour change — '
+      + 'it makes sign-in and a 2FA settings change in the same step mutually '
+      + 'exclusive. If it is intended, update the scope note in server/totpReplay.js.'
+    ).toBe(false);
+  });
+});

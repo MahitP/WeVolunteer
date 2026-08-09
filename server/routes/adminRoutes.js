@@ -176,10 +176,22 @@ router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('org
 
 router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school'), (req, res) => {
   try {
+    /**
+     * Deleted accounts are excluded from the role counts, and only from those.
+     *
+     * A tombstone keeps its `role`, so `role = 'student'` also counts every
+     * deleted student and the reserved `system-cli` actor. That inflates the
+     * headcount — and because `participationRate` divides real volunteers by
+     * `totals.students`, an inflated denominator silently UNDERSTATES
+     * participation, which is the figure this page exists to report.
+     *
+     * `users` is left as a raw count of rows on purpose: it is the size of the
+     * table, not a population, and the two tombstone rows belong in it.
+     */
     const totals = {
       users: db.prepare('SELECT COUNT(*) as c FROM users').get().c,
-      students: db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'student'").get().c,
-      organizers: db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'organizer'").get().c,
+      students: db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'student' AND account_status <> 'deleted'").get().c,
+      organizers: db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'organizer' AND account_status <> 'deleted'").get().c,
       events: db.prepare('SELECT COUNT(*) as c FROM events').get().c,
       applications: db.prepare('SELECT COUNT(*) as c FROM applications').get().c,
       hours: db.prepare('SELECT COALESCE(SUM(hours_awarded),0) as h FROM attendance WHERE present = 1').get().h,
@@ -222,7 +234,9 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
     // Volunteers joining over time
     const signupsByMonth = db.prepare(`
       SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as c
-      FROM users WHERE role = 'student' AND created_at >= date('now', '-6 months')
+      FROM users
+      WHERE role = 'student' AND account_status <> 'deleted'
+        AND created_at >= date('now', '-6 months')
       GROUP BY month ORDER BY month ASC
     `).all();
 
@@ -932,7 +946,11 @@ router.get('/api/admin/reports/export', authenticateToken, requireCap('report.re
         COALESCE(SUM(at.hours_awarded), 0) as total_hours
       FROM users u
       LEFT JOIN attendance at ON at.user_id = u.id AND at.present = 1
-      WHERE u.role = 'student'
+      -- Deleted accounts keep their row and their role, so the role predicate
+      -- alone also matches every tombstone and the reserved system-cli actor.
+      -- Without this the export ships anonymised deleted_user-... rows to
+      -- whoever asked for a list of volunteers.
+      WHERE u.role = 'student' AND u.account_status <> 'deleted'
       GROUP BY u.id
       ORDER BY u.name ASC
     `).all();
