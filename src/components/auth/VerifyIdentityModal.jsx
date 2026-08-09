@@ -33,13 +33,34 @@ import { savePendingReauth } from '../../utils/stepUp';
  * a modal with no controls and a five-minute countdown is the worst possible
  * thing to render if that ever changes.
  *
- * ── Why the countdown is real ──
+ * ── Why there is no countdown on the password field ──
  *
- * A grant expires five minutes after it is opened, and the failure it prevents is
- * someone typing a password into a dialog that has already died. The countdown
- * comes from `expiresAt` on the challenge rather than from a local timer started
- * at mount, so a tab that was backgrounded shows the truth rather than five
- * minutes from whenever it woke up.
+ * There used to be: "This verification expires in 4:58", ticking, with the field
+ * and button disabled the moment it reached zero. A grant genuinely does expire
+ * five minutes after it is opened, so the number was true — and it was still the
+ * wrong thing to show.
+ *
+ * A five-minute deadline on ENTERING A PASSWORD is a deadline on going to find
+ * one. People keep passwords in a manager, in another tab, in another room, on a
+ * piece of paper; the ones who take longest are the ones who did not reuse
+ * something memorable. Timing that is pure hostility, and it reads as a scam
+ * prompt on top of it: an unexplained password box with a countdown is the exact
+ * pattern people are taught to distrust. It was reported as such during 2FA
+ * enrolment.
+ *
+ * The deadline is a property of the GRANT, not of the person's typing, so it is
+ * handled where it belongs — invisibly. `onReopen` gets a fresh challenge for the
+ * same action and arguments, and this dialog uses it in two places: before
+ * submitting against a challenge whose time has passed, and once in response to a
+ * server refusal that says the challenge is expired, consumed or gone. Nothing
+ * about the security model changes: each challenge is still opened server-side,
+ * bound to one action, one set of params and one session, verified against the
+ * real password hash, and spent once. The user just does not have to race it.
+ *
+ * A timer still belongs on a SHORT-LIVED CODE — an emailed six digits, a TOTP
+ * window — because there the deadline is on the credential itself and the person
+ * cannot go and fetch a fresh one without being told to. Those live in
+ * `Login.jsx` and `TwoFactorSetup.jsx`, not here.
  *
  * ── Where the provider leg comes back to ──
  *
@@ -104,18 +125,39 @@ import { savePendingReauth } from '../../utils/stepUp';
  */
 
 
-function secondsLeft(expiresAt) {
-  const ms = new Date(expiresAt).getTime() - Date.now();
-  return Math.max(0, Math.round(ms / 1000));
+/** Whether a challenge's five minutes have already run out. */
+function isStale(expiresAt) {
+  const at = new Date(expiresAt).getTime();
+  return Number.isFinite(at) && at <= Date.now();
 }
 
-function formatCountdown(seconds) {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
+/**
+ * The refusals that mean "that particular challenge is no longer usable" — as
+ * opposed to "your password is wrong", which a new challenge would not fix.
+ *
+ * Reopening on `not_found` as well as `expired` is deliberate: the sweep removes
+ * expired rows an hour later, so a dialog left open long enough sees the row
+ * vanish rather than expire, and both are the same situation to the person in
+ * front of it.
+ */
+const REOPENABLE = new Set(['expired', 'consumed', 'not_found', 'missing_challenge']);
 
-export default function VerifyIdentityModal({ challenge, alsoGrant = [], onGranted, onCancel }) {
+export default function VerifyIdentityModal({
+  challenge: initialChallenge,
+  alsoGrant = [],
+  onGranted,
+  onCancel,
+  onReopen
+}) {
+  /**
+   * The challenge is state, not a prop read directly.
+   *
+   * Reopening replaces it in place, so the dialog stays up and the user never
+   * learns that the thing behind their password prompt was swapped. `alsoGrant`
+   * is deliberately NOT reopened: those are extras, and `useStepUp`'s caller
+   * already falls back to an ordinary step-up for any that do not come back.
+   */
+  const [challenge, setChallenge] = useState(initialChallenge);
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   /**
@@ -131,32 +173,68 @@ export default function VerifyIdentityModal({ challenge, alsoGrant = [], onGrant
     challenge.attemptsRemaining ?? null
   );
   const [busy, setBusy] = useState(false);
-  const [remaining, setRemaining] = useState(() => secondsLeft(challenge.expiresAt));
 
   const methods = challenge.methods ?? [];
   const canPassword = methods.includes('password');
   const canOAuth = methods.includes('oauth');
-  const expired = remaining === 0;
 
-  /* ── The countdown ──────────────────────────────────────────────────── */
-  useEffect(() => {
-    // Recomputed from `expiresAt` on every tick rather than decremented, so a
-    // throttled background tab cannot drift into showing time that has gone.
-    const tick = () => setRemaining(secondsLeft(challenge.expiresAt));
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [challenge.expiresAt]);
+  /**
+   * A live challenge to submit against, reopening first if this one has gone.
+   *
+   * Returns the id, or null when there is nothing to reopen with — an
+   * `onReopen`-less caller, or a reopen that itself failed. Callers treat null as
+   * "use what we have and let the server say", because a stale id producing an
+   * honest refusal beats a dialog that refuses to submit anything.
+   */
+  const freshChallengeId = async () => {
+    if (!isStale(challenge.expiresAt) || typeof onReopen !== 'function') {
+      return challenge.challengeId;
+    }
+    try {
+      const reopened = await onReopen();
+      if (!reopened?.challengeId) return challenge.challengeId;
+      setChallenge(reopened);
+      setAttemptsRemaining(reopened.attemptsRemaining ?? null);
+      return reopened.challengeId;
+    } catch {
+      return challenge.challengeId;
+    }
+  };
 
   /* ── The password leg ───────────────────────────────────────────────── */
   const submitPassword = async (e) => {
     e.preventDefault();
-    if (busy || expired) return;
+    if (busy) return;
 
     setBusy(true);
     setError(null);
     try {
-      await api.grantReauthByPassword(challenge.challengeId, password);
+      let challengeId = await freshChallengeId();
+
+      /**
+       * One transparent retry, and exactly one.
+       *
+       * A grant can die between the last render and this request — five minutes
+       * is five minutes, and the clock does not stop while the password manager
+       * opens. Reopening once and resubmitting the SAME password turns that into
+       * a slightly slower success instead of an error message about a deadline
+       * the user was never shown. A second failure is reported: at that point
+       * something other than the clock is wrong.
+       */
+      try {
+        await api.grantReauthByPassword(challengeId, password);
+      } catch (err) {
+        const code = err?.data?.code;
+        if (!REOPENABLE.has(code) || typeof onReopen !== 'function') throw err;
+
+        const reopened = await onReopen();
+        if (!reopened?.challengeId) throw err;
+        setChallenge(reopened);
+        setAttemptsRemaining(reopened.attemptsRemaining ?? null);
+        challengeId = reopened.challengeId;
+        await api.grantReauthByPassword(challengeId, password);
+      }
+
 
       /**
        * The extras, after the primary has succeeded and never before it.
@@ -183,7 +261,10 @@ export default function VerifyIdentityModal({ challenge, alsoGrant = [], onGrant
         }
       }
 
-      onGranted(challenge.challengeId, extras);
+      /* `challengeId`, not `challenge.challengeId`: after a reopen the granted
+         challenge is not the one this dialog was handed, and spending the
+         original would be refused as `not_found`. */
+      onGranted(challengeId, extras);
     } catch (err) {
       /**
        * A wrong password leaves the dialog open.
@@ -211,15 +292,26 @@ export default function VerifyIdentityModal({ challenge, alsoGrant = [], onGrant
    * `/settings`, so a verification started from anywhere comes back to the same
    * place — including the `?section=` the settings screen uses to pick a panel.
    */
-  const startOAuth = (provider) => {
+  const startOAuth = async (provider) => {
+    /**
+     * A fresh challenge first if this one has run out.
+     *
+     * The provider round trip is the longest leg in the flow — a consent screen,
+     * possibly a sign-in, possibly a second factor at the provider — so leaving
+     * with a challenge that has minutes left is how somebody comes back to
+     * `expired` having done everything right. Reopening costs one request and is
+     * bound to the same action and arguments.
+     */
+    const challengeId = await freshChallengeId();
+
     savePendingReauth({
       provider,
-      challengeId: challenge.challengeId,
+      challengeId,
       action: challenge.action,
       expiresAt: challenge.expiresAt,
       returnTo: `${window.location.pathname}${window.location.search}`
     });
-    window.location.assign(api.reauthOAuthUrl(provider, challenge.challengeId));
+    window.location.assign(api.reauthOAuthUrl(provider, challengeId));
   };
 
   const nothingToOffer = methods.length === 0;
@@ -253,11 +345,18 @@ export default function VerifyIdentityModal({ challenge, alsoGrant = [], onGrant
       <div className="modal-body stack-md">
         <p className="lead" id="reauth-why">{because}</p>
 
+        {/*
+          Reassurance, not a deadline.
+
+          This line used to be the countdown. What the reader actually needs to
+          know here is that the password is not going anywhere — the prompt looks
+          like a phishing box precisely because nothing on it says who is asking
+          or what happens to the answer.
+        */}
         <p className="lead row" style={{ gap: 'var(--s2)' }}>
           <ShieldCheck size={16} aria-hidden="true" />
-          {expired
-            ? 'This verification has timed out. Close this and try again.'
-            : <>This verification expires in <strong>{formatCountdown(remaining)}</strong>.</>}
+          Your password is checked against this account and is not stored or sent
+          anywhere else.
         </p>
 
         {nothingToOffer && (
@@ -265,7 +364,7 @@ export default function VerifyIdentityModal({ challenge, alsoGrant = [], onGrant
            * The account can prove nothing: no password, no linked provider.
            * That is a recovery problem rather than a verification problem, and
            * the only honest answer is who to ask. Rendering an empty dialog
-           * with a countdown would be worse than an error.
+           * would be worse than an error.
            */
           <div className="alert alert-danger" role="alert">
             This account has no way to verify your identity. Please contact your
@@ -315,10 +414,10 @@ export default function VerifyIdentityModal({ challenge, alsoGrant = [], onGrant
                 aria-invalid={error ? 'true' : undefined}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                disabled={busy || expired}
+                disabled={busy}
               />
             </div>
-            <button type="submit" className="btn btn-primary" disabled={busy || expired || !password}>
+            <button type="submit" className="btn btn-primary" disabled={busy || !password}>
               {busy ? 'Verifying…' : 'Verify'}
             </button>
           </form>
@@ -337,7 +436,7 @@ export default function VerifyIdentityModal({ challenge, alsoGrant = [], onGrant
            */
           <ProviderButtons
             onSelect={startOAuth}
-            disabled={busy || expired}
+            disabled={busy}
             showUnavailable={false}
             labelFor={label => `Verify with ${label}`}
           />
