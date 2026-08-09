@@ -51,25 +51,37 @@ export const MAX_ATTEMPTS = 5;
 /**
  * Guesses allowed against one ACCOUNT before every challenge it holds is dead.
  *
- * MAX_ATTEMPTS on its own bounds nothing an attacker cares about. Opening a
- * fresh challenge costs one request and starts a new counter at zero, so a
- * holder of a stolen session guesses indefinitely at one extra round trip per
- * attempt — the per-challenge limit measures a challenge, not a password.
+ * ── Why this equals MAX_ATTEMPTS, and used to be three times it ──
  *
- * `app.js`'s `reauthLimiter` closes the same hole per IP; this closes it per
- * account, which is the half an attacker with more than one address still has.
- * Both are needed and neither subsumes the other.
+ * `MAX_ATTEMPTS` on its own bounds nothing an attacker cares about: opening a
+ * fresh challenge costs one request and starts a new counter at zero, so a holder
+ * of a stolen session guesses indefinitely at one extra round trip per attempt.
+ * That is why an account-level budget exists at all, and it is still the half
+ * `app.js`'s per-IP `reauthLimiter` cannot cover for an attacker with more than
+ * one address.
  *
- * Three challenges' worth, over a window three times a challenge's own life.
- * Someone who mistypes a password, gives up, reopens the modal and mistypes
- * again has two more full challenges before this fires; a guesser has fifteen
- * tries per quarter hour, which is not a search.
+ * It was 15 — "three challenges' worth" — and that produced a user-visible lie.
+ * The dialog counts down from five, says "locked out" at zero, and a page refresh
+ * opens a new challenge whose counter starts again: the account really did have
+ * ten guesses left, so the refresh really did work. A lockout somebody can clear
+ * by pressing F5 teaches that lockouts are decorative, which is worse than either
+ * a stricter or a looser limit honestly stated.
  *
- * Tripping it is not a denial-of-service worth worrying about: opening a
- * challenge requires an authenticated session, so anyone who can reach this
- * already holds the thing step-up exists to contain.
+ * So the two are the same number and there is one budget: five wrong answers per
+ * account per window, whichever challenges they were spread across. A refresh now
+ * inherits the spent count instead of resetting it, and the number the dialog
+ * shows is the number the server enforces.
+ *
+ * Five is not a tightening in practice — `reauthLimiter` already allows five
+ * failures per IP per fifteen minutes, so five was the effective ceiling for a
+ * single-address caller before this. What changed is that the account budget no
+ * longer exceeds the one the interface promises.
+ *
+ * Tripping it is not a denial-of-service worth worrying about: opening a challenge
+ * requires an authenticated session, so anyone who can reach this already holds the
+ * thing step-up exists to contain.
  */
-export const MAX_ACCOUNT_ATTEMPTS = 15;
+export const MAX_ACCOUNT_ATTEMPTS = MAX_ATTEMPTS;
 
 /**
  * The window the account-level count is taken over.
@@ -203,7 +215,7 @@ function notGrantable(row, nowIso) {
  * statement names the account it is charging, in the file where every other
  * write already does.
  */
-function recordFailedAttempt(db, { row, userId, error }) {
+function recordFailedAttempt(db, { row, userId, error, nowIso }) {
   const updated = db.prepare(`
     UPDATE reauth_challenges
        SET attempts = attempts + 1
@@ -218,8 +230,34 @@ function recordFailedAttempt(db, { row, userId, error }) {
    * not exist would send the user to account recovery for no reason.
    */
   const attempts = updated ? updated.attempts : row.attempts;
+
+  /**
+   * Remaining is the ACCOUNT's budget, not this row's.
+   *
+   * This is the whole fix for the refresh bypass. Reporting `MAX_ATTEMPTS -
+   * attempts` described one challenge, so a new challenge reported a full five
+   * again while the account had already spent them — the number the dialog showed
+   * was not the number the server would enforce, and refreshing appeared to work
+   * because it did.
+   *
+   * Read AFTER the increment above, so the figure already includes this guess.
+   */
+  const remaining = accountAttemptsRemaining(db, userId, nowIso ?? new Date().toISOString());
+
+  /**
+   * ACCOUNT_LOCKED, not LOCKED, when the budget that is actually spent is the
+   * account's — because the two say different things and only one of them is
+   * true here. `LOCKED` reads "Please start again", which was correct when a new
+   * challenge really did restore five guesses; now that it does not, sending the
+   * user to start again would be the same misdirection in a different sentence.
+   * `ACCOUNT_LOCKED` says to wait, which is the thing that helps.
+   *
+   * `LOCKED` is still right for a dead row whose account budget has since aged
+   * out of the window: there, starting again genuinely does work.
+   */
+  if (remaining <= 0) return fail(E.ACCOUNT_LOCKED, { attemptsRemaining: 0 });
   if (attempts >= MAX_ATTEMPTS) return fail(E.LOCKED, { attemptsRemaining: 0 });
-  return fail(error, { attemptsRemaining: MAX_ATTEMPTS - attempts });
+  return fail(error, { attemptsRemaining: remaining });
 }
 
 /**
@@ -231,14 +269,23 @@ function recordFailedAttempt(db, { row, userId, error }) {
  * retention window is longer than this one, so every row that should be counted
  * is still present to count.
  */
-function accountAttemptsExhausted(db, userId, nowIso) {
+function accountAttemptsSpent(db, userId, nowIso) {
   const since = new Date(new Date(nowIso).getTime() - ACCOUNT_ATTEMPT_WINDOW_MS).toISOString();
   const { spent } = db.prepare(`
     SELECT COALESCE(SUM(attempts), 0) AS spent
       FROM reauth_challenges
      WHERE user_id = ? AND created_at > ?
   `).get(userId, since);
-  return spent >= MAX_ACCOUNT_ATTEMPTS;
+  return Number(spent) || 0;
+}
+
+/** What the caller may still spend. Never negative, so the client can render it. */
+function accountAttemptsRemaining(db, userId, nowIso) {
+  return Math.max(0, MAX_ACCOUNT_ATTEMPTS - accountAttemptsSpent(db, userId, nowIso));
+}
+
+function accountAttemptsExhausted(db, userId, nowIso) {
+  return accountAttemptsSpent(db, userId, nowIso) >= MAX_ACCOUNT_ATTEMPTS;
 }
 
 /**
@@ -327,7 +374,26 @@ export function openChallenge({ db, userId, action, params = {}, sessionJti, ipH
     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL, 0, ?)
   `).run(id, userId, action, paramsHash(action, params), sessionJti, nowIso, expiresAt, ipHash);
 
-  return { id, methods, expiresAt };
+  /**
+   * The account's remaining budget travels with the new challenge.
+   *
+   * A fresh row always has `attempts = 0`, so anything derived from the row
+   * alone would tell a refreshed dialog it has a full five guesses when the
+   * account has none left — the exact lie this module used to tell. The count
+   * is the account's, so opening a challenge cannot launder a spent budget into
+   * an unspent one.
+   *
+   * Opening is still ALLOWED at zero rather than refused: the grant paths below
+   * answer with `ACCOUNT_LOCKED` before doing any work, and a challenge that
+   * exists and reports nothing left is easier to render honestly than an
+   * open call that fails.
+   */
+  return {
+    id,
+    methods,
+    expiresAt,
+    attemptsRemaining: accountAttemptsRemaining(db, userId, nowIso)
+  };
 }
 
 /** Whether the action still permits this verification method. */
@@ -348,15 +414,33 @@ function methodAllowed(row, method) {
 export async function grantByPassword({ db, challengeId, userId, password }) {
   const nowIso = new Date().toISOString();
   const row = load(db, challengeId, userId);
+  if (!row) return fail(E.NOT_FOUND);
+
+  /**
+   * The account ceiling outranks every per-challenge diagnosis except "no such
+   * challenge", and the ORDER is a correctness detail rather than a preference.
+   *
+   * `notGrantable` reports `LOCKED` for a row at its own limit, which the client
+   * renders as "Please start again". Diagnosed first, the fifth wrong answer
+   * says "wait a few minutes" (the account budget just emptied) and a sixth on
+   * the same open dialog says "start again" — two different instructions for one
+   * situation, one of which does not work. That contradiction is the same class
+   * of defect as the refresh bypass itself, so the dominant fact is reported
+   * first.
+   *
+   * `NOT_FOUND` still wins: a challenge id that names nothing is not a statement
+   * about the account, and answering it with a lockout would be a worse
+   * diagnosis, not a better one.
+   */
+  if (accountAttemptsExhausted(db, userId, nowIso)) return fail(E.ACCOUNT_LOCKED);
 
   const blocked = notGrantable(row, nowIso);
   if (blocked) return fail(blocked);
   if (!methodAllowed(row, 'password')) return fail(E.METHOD_NOT_ALLOWED);
 
-  // Before bcrypt, so an exhausted account costs no CPU, and before the
-  // sentinel check would tell an attacker anything about the account's shape.
-  if (accountAttemptsExhausted(db, userId, nowIso)) return fail(E.ACCOUNT_LOCKED);
-
+  /* The ceiling was already checked above — before bcrypt, so an exhausted
+     account costs no CPU, and before the sentinel check could tell an attacker
+     anything about the account's shape. */
   const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(userId);
   if (!user) return fail(E.NOT_FOUND);
 
@@ -377,11 +461,11 @@ export async function grantByPassword({ db, challengeId, userId, password }) {
   // bcryptjs throws on a non-string, and an empty password is a guess like any
   // other — both are wrong answers, not crashes.
   if (typeof password !== 'string' || password.length === 0) {
-    return recordFailedAttempt(db, { row, userId, error: E.INVALID_PASSWORD });
+    return recordFailedAttempt(db, { row, userId, error: E.INVALID_PASSWORD, nowIso });
   }
 
   const matches = await bcrypt.compare(password, user.password_hash);
-  if (!matches) return recordFailedAttempt(db, { row, userId, error: E.INVALID_PASSWORD });
+  if (!matches) return recordFailedAttempt(db, { row, userId, error: E.INVALID_PASSWORD, nowIso });
 
   return commitGrant(db, { challengeId, userId, method: 'password', nowIso });
 }
@@ -404,14 +488,29 @@ export async function grantByPassword({ db, challengeId, userId, password }) {
 export async function grantByOAuth({ db, challengeId, userId, provider, subject }) {
   const nowIso = new Date().toISOString();
   const row = load(db, challengeId, userId);
+  if (!row) return fail(E.NOT_FOUND);
+
+  /**
+   * The account ceiling outranks every per-challenge diagnosis except "no such
+   * challenge", and the ORDER is a correctness detail rather than a preference.
+   *
+   * `notGrantable` reports `LOCKED` for a row at its own limit, which the client
+   * renders as "Please start again". Diagnosed first, the fifth wrong answer
+   * says "wait a few minutes" (the account budget just emptied) and a sixth on
+   * the same open dialog says "start again" — two different instructions for one
+   * situation, one of which does not work. That contradiction is the same class
+   * of defect as the refresh bypass itself, so the dominant fact is reported
+   * first.
+   *
+   * `NOT_FOUND` still wins: a challenge id that names nothing is not a statement
+   * about the account, and answering it with a lockout would be a worse
+   * diagnosis, not a better one.
+   */
+  if (accountAttemptsExhausted(db, userId, nowIso)) return fail(E.ACCOUNT_LOCKED);
 
   const blocked = notGrantable(row, nowIso);
   if (blocked) return fail(blocked);
   if (!methodAllowed(row, 'oauth')) return fail(E.METHOD_NOT_ALLOWED);
-
-  // Same budget as the password path. A sub mismatch costs an attempt, so it is
-  // a guessable answer and belongs under the same account-level ceiling.
-  if (accountAttemptsExhausted(db, userId, nowIso)) return fail(E.ACCOUNT_LOCKED);
 
   const link = db.prepare(
     'SELECT provider_user_id FROM oauth_accounts WHERE user_id = ? AND provider = ?'
@@ -424,7 +523,7 @@ export async function grantByOAuth({ db, challengeId, userId, provider, subject 
   // A mismatch IS a wrong answer — it is the guessable half of this path, so it
   // costs an attempt exactly like a wrong password does.
   if (!subject || String(subject) !== String(link.provider_user_id)) {
-    return recordFailedAttempt(db, { row, userId, error: E.PROVIDER_MISMATCH });
+    return recordFailedAttempt(db, { row, userId, error: E.PROVIDER_MISMATCH, nowIso });
   }
 
   return commitGrant(db, { challengeId, userId, method: 'oauth', nowIso });

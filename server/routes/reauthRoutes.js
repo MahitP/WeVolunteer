@@ -169,7 +169,10 @@ router.post('/api/auth/reauth/challenge', authenticateToken, (req, res) => {
     label: SENSITIVE_ACTIONS[action].label,
     methods: opened.methods,
     expiresAt: opened.expiresAt,
-    expiresInSeconds: Math.round(CHALLENGE_TTL_MS / 1000)
+    expiresInSeconds: Math.round(CHALLENGE_TTL_MS / 1000),
+    /* The ACCOUNT's remaining guesses, not this row's — so a dialog reopened by
+       a page refresh states the budget the server will actually enforce. */
+    attemptsRemaining: opened.attemptsRemaining
   });
 });
 
