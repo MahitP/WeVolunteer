@@ -24,7 +24,15 @@ const router = express.Router();
 
 router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
   try {
-    const row = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'student'").get(req.params.id);
+    // `account_status <> 'deleted'` is part of the identity check, not a filter
+    // bolted on afterwards: a deleted account is anonymised in place rather than
+    // removed — the row survives so that audit history and foreign keys still
+    // resolve — so without this a tombstone answers 200 as a live profile.
+    // Suspended is deliberately NOT excluded: a suspended member still exists
+    // and their profile is still theirs.
+    const row = db.prepare(
+      "SELECT * FROM users WHERE id = ? AND role = 'student' AND account_status <> 'deleted'"
+    ).get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Volunteer not found' });
 
     const isSelf = req.params.id === req.principal.userId;
@@ -163,7 +171,14 @@ function formatServiceRow(r) {
  */
 router.get('/api/organizers/:id/profile', authenticateToken, (req, res) => {
   try {
-    const row = db.prepare("SELECT * FROM users WHERE id = ? AND role IN ('organizer','admin')").get(req.params.id);
+    // See the sibling volunteer profile above: a deleted account keeps its row
+    // and its role, so the role predicate alone matches tombstones. The demo
+    // administrator removed from the pilot database is exactly such a row — it
+    // is `account_status = 'deleted'` and still `role = 'admin'`, and without
+    // this it answered 200 here instead of 404.
+    const row = db.prepare(
+      "SELECT * FROM users WHERE id = ? AND role IN ('organizer','admin') AND account_status <> 'deleted'"
+    ).get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Organizer not found' });
 
     const totals = db.prepare(`

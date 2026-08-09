@@ -73,11 +73,26 @@ try {
   const { db } = openPrivilegedDb('bin/make-admin.mjs');
   assertSystemActor(db);
 
-  const user = db.prepare('SELECT id, role FROM users WHERE email = ?').get(email);
+  const user = db.prepare('SELECT id, role, account_status FROM users WHERE email = ?').get(email);
 
   if (!user) {
     console.error(`Error: User with email ${email} not found.`);
     console.error('Please have the user sign up first before promoting them.');
+    process.exit(1);
+  }
+
+  /**
+   * Deleted accounts are anonymised in place, not removed, so a lookup by email
+   * still finds one — and this CLI would then promote an account nobody can sign
+   * in to, recording it in the audit trail as a genuine promotion. The web
+   * endpoint refuses the same case; this is the second door into it.
+   */
+  if (user.account_status === 'deleted') {
+    console.error(`Refused: the account for ${email} has been deleted.`);
+    console.error('');
+    console.error('  Deleted accounts keep their row so audit history and foreign');
+    console.error('  keys still resolve, but they cannot be signed in to and must');
+    console.error('  not hold administrative roles.');
     process.exit(1);
   }
 
