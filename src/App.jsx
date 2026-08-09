@@ -11,6 +11,7 @@ import { ERROR_ROUTES } from './views/ErrorExperience/kinds';
 import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
 import useOnline from './hooks/useOnline';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
+import PersonaPreviewBanner from './components/admin/PersonaPreviewBanner';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
 import Toasts from './components/common/Toasts';
@@ -1056,7 +1057,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/admin/audit-logs': {},
     '/admin/roster': {},
     '/admin/impact': {},
-    '/admin/moderation': { currentUser }
+    '/admin/moderation': { currentUser, onPreviewStarted: refreshAll }
   };
 
   /** Where a route the user cannot reach sends them. Unchanged from the ternaries. */
@@ -1203,6 +1204,10 @@ function AppShell({ toasts, addToast, removeToast }) {
         </header>
 
         <main className="page" id="main-content" tabIndex={-1}>
+          {/* Above the route content and inside every page, because a preview
+              narrows capabilities — so the surfaces that would otherwise host the
+              way out are the first ones it removes. See the component header. */}
+          <PersonaPreviewBanner preview={currentUser.preview} onEnded={refreshAll} />
           {/* Inside the shell boundary above, so a chunk that fails to load is
               caught alongside a view that throws while rendering — and covering
               both arms of the ternary below, since the profile views are lazy

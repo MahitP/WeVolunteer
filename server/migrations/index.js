@@ -37,6 +37,8 @@ import tfaHardening from './025_tfa_hardening.js';
 import securityAuditLogs from './026_security_audit_logs.js';
 import encryptTfaSecrets from './027_encrypt_tfa_secrets.js';
 import moderationActionNote from './028_moderation_action_note.js';
+import totpReplayHighWater from './029_totp_replay_high_water.js';
+import personaPreview from './030_persona_preview.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -116,7 +118,12 @@ export const MIGRATIONS = [
    * 028 gives `moderation_actions` a `note` column, so reopening a report keeps
    * the withdrawn decision's reasoning instead of destroying it.
    */
-  moderationActionNote,
+  moderationActionNote, totpReplayHighWater,
+  /**
+   * 030 adds the two columns a persona preview lives in. Additive, nullable, and
+   * order-independent: nothing reads them during migration.
+   */
+  personaPreview
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

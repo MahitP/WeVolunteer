@@ -17,7 +17,7 @@ import { db, initDatabase } from '../db.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
 import { isSuspended, liftIfExpired, suspensionNotice } from '../suspension.js';
-import { ROLE } from '../authz.js';
+import { ROLE, previewPersonaOf } from '../authz.js';
 import { decryptSecret } from '../cryptoUtils.js';
 import { verifyTotpOnce } from '../totpReplay.js';
 import { recordSecurityEvent } from '../securityAudit.js';
@@ -988,6 +988,23 @@ router.get('/api/auth/me', authenticateToken, (req, res) => {
        * than a presence check on a key that is sometimes absent.
        */
       suspension: req.suspension ?? null,
+      /**
+       * The persona preview in force, or null.
+       *
+       * Taken from `req.principal`, which `buildPrincipal` already resolved for
+       * this request — not recomputed from the row. Asking twice is how the gate
+       * and the disclosure come to disagree, and the direction they would
+       * disagree in here is an interface that shows an owner their real
+       * navigation while the server answers as a student.
+       *
+       * `role` is deliberately still the REAL role in this payload. The client's
+       * `can()` reads `preview.persona` to narrow itself in step with the server;
+       * rewriting `role` instead would make every other consumer of this payload
+       * — "you are signed in as" among them — quietly say something untrue.
+       */
+      preview: previewPersonaOf(req.principal)
+        ? { persona: previewPersonaOf(req.principal), expiresAt: userRow.preview_expires_at }
+        : null,
     });
   } catch (error) {
     console.error('Auth check error:', error);

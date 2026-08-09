@@ -264,17 +264,24 @@ describe('the Organizer Agreement', () => {
        */
       const { CAPABILITIES } = await import('./authz.js');
       /**
-       * `analytics.impact` joins the escape hatch rather than the withheld set.
+       * `analytics.impact` was on this escape-hatch list and is gone from it,
+       * because it is gone from the organizer role entirely — the community impact
+       * figures became an administrative capability. Nothing to withhold and
+       * nothing to exempt: an organizer never holds it, signed or unsigned.
        *
-       * The withheld list exists to stop an organizer who has not signed the
-       * agreement reaching a student or a student's record. The impact figures
-       * reach neither: they are platform-wide aggregates with every small bucket
-       * suppressed, and they name nobody — the same class of thing as
-       * `event.view`. Withholding them would hide a page about the community
-       * from somebody who is part of it, for a reason that does not apply.
+       * The four that remain are what an organizer needs in order to sign in, read
+       * their own account, and reach the agreement. Withholding any of those would
+       * lock them out of the one action that unlocks the rest.
+       *
+       * `persona.preview.exit` is the fifth, and it is exempt for the same reason
+       * it is held by every role: it reaches no student and no student's record.
+       * It clears the CALLER'S OWN two preview columns and does nothing else, so
+       * for an organizer — who cannot start a preview, since `persona.preview` is
+       * SUPER_ONLY — it is an action with no effect at all. Withholding a no-op
+       * would only make the withheld list harder to read.
        */
       const ALLOWED_WHILE_UNACCEPTED = [
-        'event.view', 'self.read', 'self.write', 'geocode.use', 'analytics.impact',
+        'event.view', 'self.read', 'self.write', 'geocode.use', 'persona.preview.exit',
       ];
 
       const unclassified = CAPABILITIES.organizer.filter(

@@ -714,14 +714,15 @@ time { font-variant-numeric: tabular-nums; }
   gap: 2px;
 }
 
-.nav-section + .nav-section { margin-top: var(--s5); }
-.nav-section-label {
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  padding: 0 var(--s2) var(--s2);
+/* A hair rule instead of a heading bar — see NAV_GROUPS in src/App.jsx. The
+   group keeps its name for assistive technology; sighted readers get a
+   separator that costs one pixel instead of a row that looks clickable and is
+   not. Drawn on the section itself rather than on `+ .nav-section` so the FIRST
+   group is divided from the ungrouped entries above it too. */
+.nav-section {
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--rule);
 }
 
 .nav-item {
@@ -2792,6 +2793,49 @@ time { font-variant-numeric: tabular-nums; }
 .alert-danger { background: var(--danger-tint); border-color: var(--danger-border); color: var(--danger-ink); }
 .alert-warn { background: var(--warn-tint); border-color: var(--warn-border); color: var(--warn-ink); }
 .alert-info { background: var(--info-tint); border-color: var(--info-border); color: var(--info-ink); }
+
+/* ── The persona preview banner ──────────────────────────────────────────────
+   Built from the warn tokens rather than the info ones on purpose: it is not a
+   piece of information, it is a state the reader has to be able to notice and
+   leave. It sits at the top of every page for as long as a preview is on, so it
+   is deliberately the loudest thing that is not an error. */
+.persona-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s4);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--r-sm);
+  background: var(--warn-tint);
+  color: var(--warn-ink);
+  font-size: 0.875rem;
+}
+/* Takes the free space so the exit button is pushed to the trailing edge, and
+   wraps rather than truncating — the sentence explains a reduced-access state
+   and a clipped version of it would be worse than none. */
+.persona-banner-text { flex: 1 1 16rem; }
+.persona-banner-error { color: var(--danger-ink); font-weight: 600; }
+.persona-banner-exit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--warn-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.persona-banner-exit:hover:not(:disabled) { background: var(--warn-tint); }
+.persona-banner-exit:disabled { opacity: 0.6; cursor: progress; }
+
+/* ── Starting a preview, on the Moderation Center ─────────────────────────── */
+.persona-picker { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.persona-picker-label { font-size: 0.875rem; color: var(--ink-2); }
 .alert-brand { background: var(--brand-tint); border-color: var(--brand-tint-2); color: var(--brand-ink); }
 .alert-title { font-weight: 600; }
 
@@ -4568,49 +4612,24 @@ input:disabled + .premium-slider {
   }
 }
 
-/* Horizontal Scrollable Mobile Navigation */
-@media (max-width: 700px) {
-  .mobilenav {
-    display: flex !important;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: var(--surface);
-    border-top: 1px solid var(--rule);
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: env(safe-area-inset-bottom);
-    z-index: 100;
-  }
-  .mobilenav::-webkit-scrollbar { display: none; }
-  
-  .mobilenav-item {
-    flex: 0 0 auto;
-    min-width: 72px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    padding: var(--s2) var(--s3);
-    color: var(--ink-muted);
-    font-size: 0.75rem;
-    font-weight: 500;
-    scroll-snap-align: start;
-    transition: color var(--t-fast);
-  }
-  
-  .mobilenav-item[aria-current="page"] {
-    color: var(--brand);
-  }
-  
-  /* Ensure page content isn't hidden behind the fixed nav */
-  .app {
-    padding-bottom: calc(56px + env(safe-area-inset-bottom));
-  }
-}
+/* A second `@media (max-width: 700px)` block used to re-declare `.mobilenav`
+   here as a horizontally scrolling strip, winning on source order with
+   `display: flex !important`. It is deleted rather than reconciled:
+
+     - It was solving a problem that does not exist. App.jsx caps the bar at
+       `navItems.slice(0, 4)` plus "More", so there are never more than five
+       buttons and nothing to scroll to. What it actually produced was a bar
+       whose items sat left-aligned at `min-width: 72px` with dead space on the
+       right, and a horizontal scroll gesture that did nothing.
+     - It dropped `min-height: 56px` from `.mobilenav-item`, leaving the primary
+       navigation on a phone below the 44px touch-target floor that the
+       "Better Touch Targets" block immediately above sets for every other
+       control.
+     - `!important` in a stylesheet with no other use of it makes the real rule,
+       200 lines up, unoverridable and invisible.
+
+   The grid declaration at the top of this file's mobile block is the intended
+   one: equal-width columns, five at most, each a full-height target. */
 
 /* Mobile More Sheet */
 .mobile-more-backdrop {
@@ -4632,6 +4651,13 @@ input:disabled + .premium-slider {
   z-index: 1001;
   animation: slide-up var(--t-fast) forwards;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.1);
+  /* The sheet had no height bound and no scroll container. The platform owner's
+     sheet carries eight navigation entries plus Edit Profile, Settings and Sign
+     Out — Sign Out, the one somebody opens this sheet in a hurry to reach, fell
+     off the bottom of a phone screen with no way to scroll to it. */
+  max-height: 85dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 [data-theme='dark'] .mobile-more-sheet {
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.5);
@@ -7261,26 +7287,13 @@ input:disabled + .premium-slider {
   gap: var(--s3);
 }
 
-/* A page shown to somebody with no account and no shell around them — the public
-   community figures today. Written as two rules rather than the inline styles
-   the certificate page uses, because a second public page is exactly when that
-   pattern stops being a one-off. `min-height: 100dvh` rather than `100vh`: on a
-   phone `vh` counts the space behind the browser's own chrome, which pushes the
-   footer link below the fold on the viewport where this page is most often
-   opened — a link in a text message. */
-.public-page {
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  background-color: var(--surface-2);
-}
-
-.public-main {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  padding: var(--s6) var(--s4);
-}
+/* `.public-page` and `.public-main` were here, the chrome-less layout for the
+   public community figures at `/community`. That page is gone — the figures are
+   an internal view, not a marketing page — and PublicImpact.jsx was its only
+   user, so the rules are deleted with it rather than left as two blocks nobody
+   can find a reference for.
+   The dangling-class guard would not have caught this: it checks that a class
+   NAME in JSX has a rule, not that a rule has a reference. */
 
 .impact-figure {
   display: grid;
@@ -7430,3 +7443,527 @@ input:disabled + .premium-slider {
   }
   .invite-revoke { justify-self: start; }
 }
+
+/* ── Moderation Center ─────────────────────────────────────────────────────
+   The administrative index (src/views/ModerationCenter.jsx). Tiles rather than
+   a list because each carries a sentence of explanation, and rather than cards
+   because a card's padding for one line of text is most of the reason the old
+   grouped rail felt heavy. */
+.mod-areas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--s3);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.mod-area {
+  display: flex;
+  gap: var(--s3);
+  height: 100%;
+  padding: var(--s4);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  color: inherit;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.mod-area:hover {
+  background: var(--surface-2);
+  border-color: var(--brand);
+}
+/* The focus ring is on the tile, not inside it: the whole tile is the link, so
+   the whole tile is what a keyboard reader has landed on. */
+.mod-area:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.mod-area-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--r-sm);
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+
+.mod-area-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  min-width: 0;
+}
+
+.mod-area-title {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--ink);
+}
+
+.mod-area-blurb {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+/* ── Platform Impact charts ────────────────────────────────────────────────
+   src/views/AdminImpact.jsx. Every colour is a token, so the charts follow the
+   theme without a second dark-mode palette to keep in step — and the SVG export
+   reads the same tokens back out of the document (see `token()` there), which is
+   what makes a dark-theme snapshot actually dark. */
+.impact-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+/* Scales proportionally (the SVG uses `preserveAspectRatio="xMidYMid meet"`),
+   so `height: auto` is what keeps the drawing undistorted. `max-width` stops a
+   wide desktop card from inflating a 720×220 chart to the point where the
+   labels are larger than the body text around them. */
+.chart {
+  display: block;
+  width: 100%;
+  max-width: 45rem;
+  height: auto;
+  margin-top: var(--s3);
+  overflow: visible;
+}
+
+/* Recessive: the grid is a reference, not a mark. */
+.chart-grid {
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+
+.chart-axis-text {
+  fill: var(--ink-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-area {
+  fill: var(--brand);
+  opacity: 0.12;
+}
+
+.chart-line {
+  fill: none;
+  stroke: var(--brand);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* A surface-coloured ring so a marker sitting on the line stays a distinct mark
+   where points crowd together. */
+.chart-dot {
+  fill: var(--brand);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.chart-bars {
+  list-style: none;
+  margin: var(--s3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.chart-bar-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 9rem) minmax(0, 1fr) auto;
+  gap: var(--s3);
+  align-items: center;
+}
+
+.chart-bar-label {
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-bar-track {
+  display: block;
+  height: 0.625rem;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+/* 4px rounded data-end anchored to the baseline — square where it meets the
+   axis, rounded where the value ends, so the bar reads as a measurement from
+   zero rather than a floating capsule. */
+.chart-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+}
+
+.chart-bar-value {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.chart-bar-unit { color: var(--ink-3); font-weight: 400; }
+
+.chart-table { margin-top: var(--s4); }
+.chart-table > summary {
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  padding: var(--s1) 0;
+}
+.chart-table > summary:hover { color: var(--ink); }
+.chart-table .table { margin-top: var(--s3); }
+
+@media (max-width: 700px) {
+  /* Labels get their own row: at phone width a 9rem label column leaves the bar
+     too short to compare against its neighbours. */
+  .chart-bar-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .chart-bar-label { grid-column: 1 / -1; }
+
+  /* The chart scales with its viewBox, so at ~350px wide everything inside it
+     renders at roughly half size — including 11px axis labels, which land at
+     about five. The font-size here is in SVG user units, so enlarging it
+     compensates for the scale factor rather than fighting it. */
+  .chart-axis-text { font-size: 18px; }
+}
+
+/* ── Badge awards ──────────────────────────────────────────────────────────
+   src/components/BadgesList.jsx. The component previously used five class names
+   with no rules at all, allowlisted in noDanglingClasses.test.js rather than
+   styled; these are those rules. */
+.badge-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: var(--s3);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.badge-award {
+  display: grid;
+  gap: var(--s1);
+  padding: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  text-align: center;
+}
+
+.badge-award-icon { font-size: 2rem; line-height: 1.1; }
+.badge-award-name { font-size: 0.875rem; font-weight: 600; color: var(--ink); }
+.badge-award-desc { font-size: 0.75rem; line-height: 1.4; color: var(--ink-2); }
+.badge-award-date { font-size: 0.6875rem; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+/* ==========================================================================
+   Date picker — src/components/common/DatePicker.jsx
+   ==========================================================================
+
+   The app's one date control, replacing five `<input type="date">`. A native
+   date input renders as a different widget in every engine and takes none of
+   these tokens, so the sign-up form's date of birth — the one field a student
+   cannot skip — was also the only one that looked like the browser rather than
+   the product, and its picker chrome stayed light in dark mode.
+
+   Every colour below is a token, so `[data-theme='dark']` supplies the dark
+   variant with no second code path and nothing here to keep in sync.
+
+   Print: deliberately no `@media print` block. There is exactly one in this
+   stylesheet (certificates and transcripts depend on it) and a second one is how
+   two sets of print rules start disagreeing. The picker is a form control; it
+   never appears on a printed certificate.
+   ========================================================================== */
+
+.dp { display: flex; flex-direction: column; gap: 0.375rem; }
+.dp-label { font-size: 0.8125rem; font-weight: 600; color: var(--ink); }
+
+/* Anchors the popup and the toggle to the INPUT, not to the field, so a field
+   that caps its input's width (`.field-dob`) does not strand the toggle at the
+   far right of the row. */
+.dp-control { position: relative; display: block; width: 100%; }
+
+/* Room for the toggle, so a typed date cannot run underneath it. */
+.dp-input { padding-right: 2.25rem; }
+
+.dp-toggle {
+  position: absolute;
+  right: 0.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.375rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.dp-toggle:hover:not(:disabled) { background: var(--surface-hover); color: var(--ink-2); }
+.dp-toggle:focus-visible { outline: none; box-shadow: var(--focus); }
+.dp-toggle:disabled { cursor: not-allowed; opacity: 0.5; }
+
+/* z-index 200 matches `.popover`: above the form, below every dialog, and inside
+   a modal's own stacking context when the picker is used in one. */
+.dp-pop {
+  position: absolute;
+  z-index: 200;
+  top: calc(100% + var(--s1));
+  left: 0;
+  min-width: 17.5rem;
+  padding: var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-popover);
+}
+
+.dp-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+}
+
+.dp-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.dp-nav-btn:hover { background: var(--surface-hover); color: var(--ink); border-color: var(--rule-strong); }
+.dp-nav-btn:focus-visible { outline: none; box-shadow: var(--focus); }
+
+.dp-nav-selects { display: flex; gap: var(--s1); flex: 1 1 auto; min-width: 0; }
+
+.dp-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.3125rem 1.75rem 0.3125rem 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dp-select-year { flex: 0 0 5.25rem; }
+
+.dp-grid {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.dp-weekday {
+  padding: var(--s1) 0;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+.dp-cell {
+  padding: 1px;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+}
+.dp-cell:focus-visible { outline: none; }
+
+/* The number carries the hit area and the state, so the focus ring hugs the day
+   rather than the table cell's full width. */
+.dp-cell-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  min-height: 2rem;
+  margin: 0 auto;
+  border-radius: var(--r-sm);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.dp-cell:hover .dp-cell-num { background: var(--surface-hover); }
+.dp-cell:focus-visible .dp-cell-num { box-shadow: var(--focus); }
+
+/* Days spilling in from the neighbouring months. Dimmed but still selectable —
+   they are real dates, and refusing the 1st of next month because it happens to
+   sit in this month's last row is a puzzle, not a safeguard. */
+.dp-cell-outside .dp-cell-num { color: var(--ink-3); }
+
+.dp-cell-today .dp-cell-num { box-shadow: inset 0 0 0 1px var(--brand); color: var(--brand-ink); }
+
+.dp-cell-selected .dp-cell-num {
+  background: var(--brand);
+  color: var(--ink-inv);
+  font-weight: 700;
+}
+.dp-cell-selected:hover .dp-cell-num { background: var(--brand); }
+
+/* `aria-disabled`, not `disabled` — a `<td>` cannot be disabled, and the grid
+   pattern wants the cell reachable so a keyboard user can tell an unavailable
+   day from one that does not exist. */
+.dp-cell-off { cursor: not-allowed; }
+.dp-cell-off .dp-cell-num { color: var(--ink-3); opacity: 0.45; text-decoration: line-through; }
+.dp-cell-off:hover .dp-cell-num { background: transparent; }
+
+.dp-foot {
+  display: flex;
+  gap: var(--s2);
+  margin-top: var(--s2);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--rule);
+}
+
+.dp-quick {
+  padding: 0.25rem var(--s2);
+  border: 0;
+  background: transparent;
+  border-radius: var(--r-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--brand-ink);
+  cursor: pointer;
+}
+.dp-quick:hover:not(:disabled) { background: var(--brand-tint); }
+.dp-quick:focus-visible { outline: none; box-shadow: var(--focus); }
+.dp-quick:disabled { color: var(--ink-3); cursor: not-allowed; }
+
+/* Signup's DOB field caps the measure at 12rem via `.field-dob .input`. The text
+   input now sits inside `.dp-control`, which also carries the toggle, so capping
+   the input alone would leave the toggle at the field's full width. Cap the
+   control and let the input fill it — the rendered width is unchanged. */
+.field-dob .dp-control { max-width: 12rem; }
+.field-dob .dp .input { max-width: none; }
+
+@media (max-width: 480px) {
+  .field-dob .dp-control { max-width: none; }
+
+  /* 44px, the minimum comfortable touch target. A 2rem day is fine under a
+     mouse and a coin-toss under a thumb, and this grid has 42 of them one pixel
+     apart. */
+  .dp-cell-num { min-width: 2.75rem; min-height: 2.75rem; font-size: 0.875rem; }
+  .dp-nav-btn { width: 2.75rem; height: 2.75rem; }
+  .dp-pop { min-width: 20.5rem; }
+}
+
+/* ── Event tags ────────────────────────────────────────────────────────────
+   Organizer-created tags: chips on cards and in the event form. See
+   server/eventTags.js for the data model and src/components/common/TagChips.jsx
+   for why the hash is decoration rather than stored.
+
+   Every colour is a token, so both themes come from the same rules — there is no
+   dark-mode block here because there is nothing hardcoded to override. */
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  list-style: none;
+  margin: var(--s1) 0 0;
+  padding: 0;
+  /* `min-width: 0` so a long tag ellipsises inside a card instead of forcing the
+     card wider than its grid column. */
+  min-width: 0;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  max-width: 12rem;
+  padding: 0.0625rem 0.4375rem;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Only the interactive variants get affordances. An inert chip that lights up on
+   hover is a promise the card cannot keep. */
+.tag-chip-action:hover,
+.tag-chip-more:hover {
+  background: var(--brand-tint);
+  color: var(--brand-ink);
+}
+.tag-chip-action:focus-visible,
+.tag-chip-more:focus-visible,
+.tag-chip-remove:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.tag-chip-more { font-variant-numeric: tabular-nums; }
+
+/* ── The editor ── */
+.tag-chips-editable { margin-bottom: var(--s2); }
+
+.tag-chip-editable {
+  gap: var(--s1);
+  padding-right: 0.1875rem;
+  background: var(--brand-tint);
+  color: var(--brand-ink);
+  font-size: 0.75rem;
+}
+
+.tag-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 1.25rem is small for a touch target, so the padding on the parent chip is
+     what makes the whole chip comfortable to hit; the icon is the visual mark
+     rather than the entire hit area. */
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: var(--r-full);
+  color: var(--brand-ink);
+  opacity: 0.7;
+}
+.tag-chip-remove:hover { opacity: 1; background: var(--surface); }
+
+@media (max-width: 700px) {
+  /* Chips are read on a phone more than anywhere else, and 0.6875rem is below
+     comfortable reading size on a card somebody is scanning at arm's length. */
+  .tag-chip { font-size: 0.75rem; padding: 0.125rem var(--s2); }
+  .tag-chip-remove { width: 1.5rem; height: 1.5rem; }
+}
+
+/* The detail page's tag row sits under the summary rather than in the status row
+   above the title, so it needs its own top margin — `.tag-chips` assumes it is
+   tucked directly beneath the line it annotates on a card. */
+.event-detail-tagchips { margin-top: var(--s2); }
