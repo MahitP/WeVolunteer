@@ -595,6 +595,14 @@ export function formatUserResponse(row) {
     bio: row.bio,
     school: row.school,
     skills: row.skills ? JSON.parse(row.skills) : [],
+    hobbies: row.hobbies ? JSON.parse(row.hobbies) : [],
+    location: row.location || null,
+    username: row.username || null,
+    /* The two privacy switches, so Settings can render their current state
+       without a second request. This serializer is self-only — see the note at
+       the top of profileSerializer.js about why nothing else may use it. */
+    profileVisibility: row.profile_visibility || 'private',
+    friendActivityVisible: row.friend_activity_visible !== 0,
     createdAt: row.created_at
   };
 }

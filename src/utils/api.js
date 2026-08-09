@@ -642,6 +642,55 @@ export const api = {
   fetchVolunteerProfile: async (userId) => apiFetch(`/api/users/${userId}/profile`),
   fetchOrganizerProfile: async (userId) => apiFetch(`/api/organizers/${userId}/profile`),
 
+  // ── Directory ──────────────────────────────────
+  /**
+   * Public profiles are addressed by username, which is what the `/users/@name`
+   * URL carries. The `@` is a display convention and belongs in the URL, not in
+   * the stored value — it is stripped before it reaches the API.
+   */
+  fetchPublicProfile: async (username) =>
+    apiFetch(`/api/users/by-username/${encodeURIComponent(String(username).replace(/^@/, ''))}`),
+  fetchPublicProfileById: async (userId) => apiFetch(`/api/users/${userId}/public-profile`),
+  fetchServiceRecord: async (userId) => apiFetch(`/api/users/${userId}/service-record`),
+  searchDirectory: async (q, { type = 'all', limit = 20, signal } = {}) =>
+    apiFetch(`/api/directory/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}`, { signal }),
+
+  // ── Relationships ──────────────────────────────
+  addFriend: async (userId) => apiFetch(`/api/users/${userId}/friend`, { method: 'POST' }),
+  acceptFriend: async (userId) => apiFetch(`/api/users/${userId}/friend/accept`, { method: 'POST' }),
+  removeFriend: async (userId) => apiFetch(`/api/users/${userId}/friend`, { method: 'DELETE' }),
+  setRelationship: async (userId, kind) => apiFetch(`/api/users/${userId}/${kind}`, { method: 'POST' }),
+  clearRelationship: async (userId, kind) => apiFetch(`/api/users/${userId}/${kind}`, { method: 'DELETE' }),
+  fetchFriends: async () => apiFetch('/api/me/friends'),
+  fetchMyRelationships: async () => apiFetch('/api/me/relationships'),
+  /**
+   * Blocking predates the directory and keeps its own endpoints under
+   * `/api/blocks`. It is gated on `event.apply` rather than
+   * `relationship.manage`, which preserves the asymmetry documented in
+   * server/blocking.js: students block, organizers do not.
+   */
+  blockUser: async (userId) => apiFetch(`/api/blocks/${userId}`, { method: 'POST' }),
+  unblockUser: async (userId) => apiFetch(`/api/blocks/${userId}`, { method: 'DELETE' }),
+
+  // ── Organizations ──────────────────────────────
+  fetchOrganizations: async ({ mine = false, limit = 20, offset = 0 } = {}) =>
+    apiFetch(`/api/organizations?mine=${mine}&limit=${limit}&offset=${offset}`),
+  fetchOrganization: async (key) => apiFetch(`/api/organizations/${encodeURIComponent(key)}`),
+  createOrganization: async (body) => apiFetch('/api/organizations', { method: 'POST', body: JSON.stringify(body) }),
+  updateOrganization: async (key, body) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  joinOrganization: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/membership`, { method: 'POST' }),
+  leaveOrganization: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/membership`, { method: 'DELETE' }),
+
+  // ── External hours ─────────────────────────────
+  fetchExternalHours: async () => apiFetch('/api/external-hours'),
+  createExternalHours: async (body) => apiFetch('/api/external-hours', { method: 'POST', body: JSON.stringify(body) }),
+  updateExternalHours: async (id, body) =>
+    apiFetch(`/api/external-hours/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteExternalHours: async (id) => apiFetch(`/api/external-hours/${id}`, { method: 'DELETE' }),
+
   // ── Certificates ───────────────────────────────
   fetchCertificates: async () => apiFetch('/api/certificates'),
 

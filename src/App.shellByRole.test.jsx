@@ -135,8 +135,8 @@ describe('navigation, per role', () => {
    * back unnoticed.
    */
   it.each([
-    ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'My profile']],
-    ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'My profile']],
+    ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Find people', 'Notifications', 'My profile']],
+    ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Find people', 'Notifications', 'My profile']],
     /**
      * Admin GAINED `Messages`, and this pin was updated deliberately rather than
      * relaxed.
@@ -168,7 +168,7 @@ describe('navigation, per role', () => {
      * This list is exact rather than a `toContain`, so the entry cannot return
      * unnoticed — which is exactly how it got here the first time.
      */
-    ['admin', ['Dashboard', 'Opportunities', 'Messages', 'Admin', 'Notifications']]
+    ['admin', ['Dashboard', 'Opportunities', 'Messages', 'Admin', 'Find people', 'Notifications']]
   ])('%s nav is what its capabilities justify', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
   });
@@ -183,6 +183,7 @@ describe('navigation, per role', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
       /* primary */ 'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin',
+      /* secondary, v1.3 */ 'Find people',
       /* secondary */ 'Notifications', 'My profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
@@ -265,7 +266,7 @@ describe('navigation, per role', () => {
        under an "Administration" heading of its own. */
     expect(sidebarLabels()).toEqual([
       'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin',
-      'Notifications', 'My profile'
+      'Find people', 'Notifications', 'My profile'
     ]);
   });
 
@@ -274,7 +275,7 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
-      'Dashboard', 'Opportunities', 'Messages', 'Admin', 'Notifications',
+      'Dashboard', 'Opportunities', 'Messages', 'Admin', 'Find people', 'Notifications',
     ]);
   });
 

@@ -44,6 +44,12 @@ const FEATURE_NAMES = Object.freeze({
   'attendance.mark': 'the check-in scanner',
   'message.send': 'messages',
   'portfolio.write': 'your volunteer portfolio',
+  /* Named for the thing the reader was trying to do, not for the capability.
+     "the member directory" would be accurate and would tell a fifteen-year-old
+     refused at /users/@someone nothing at all. */
+  'directory.read': 'member profiles and search',
+  'organization.create': 'creating an organization',
+  'organization.manage.own': 'managing an organization',
   'error.read': 'the error dashboard',
   'appeal.review': 'the appeals queue',
   /* "the Admin area", matching the rail entry, the page title and the page's own

@@ -69,6 +69,28 @@ export const ORGANIZER_GATED_CAPABILITIES = Object.freeze([
   'message.send',
   // Aggregates over their events, which are aggregates over students.
   'analytics.own_events',
+  /**
+   * The v1.3 directory, all of it.
+   *
+   * `directory.read` is the clearest case on this list after `applicant.review`:
+   * it is the power to search schoolchildren by name and open their profiles.
+   * An adult who has not yet agreed to the terms under which they may deal with
+   * students must not have it, and the fact that the profiles are "public to
+   * members" changes nothing — the agreement is what makes them a member with
+   * that standing.
+   *
+   * `relationship.manage` sends friend requests to students. `organization.*`
+   * creates a body students join and publishes events that notify all of them
+   * at once. `organization.join` is the weakest of the five, and it is here
+   * anyway: it places the account in a member roster beside students, and the
+   * test's own instruction is that a new organizer capability is student-facing
+   * until somebody argues otherwise.
+   */
+  'directory.read',
+  'relationship.manage',
+  'organization.create',
+  'organization.manage.own',
+  'organization.join',
 ]);
 
 /**

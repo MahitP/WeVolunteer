@@ -8148,3 +8148,344 @@ input:disabled + .premium-slider {
    above the title, so it needs its own top margin — `.tag-chips` assumes it is
    tucked directly beneath the line it annotates on a card. */
 .event-detail-tagchips { margin-top: var(--s2); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   v1.3 — the member directory: public profiles, search, organizations, and
+   external hours.
+
+   Everything here composes existing primitives (.card, .list, .avatar, .chip,
+   .stat, .tag) and adds only the layout those primitives cannot express. No
+   colour literal appears below: the three static guards over src/ require every
+   colour to be a token defined in this file, and every class here to be
+   referenced from JSX.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Shared: a larger avatar for page headers ─────────────────────────────── */
+
+.avatar-lg {
+  width: 4.5rem;
+  height: 4.5rem;
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+/* An uploaded picture fills the circle the emoji fallback would have occupied,
+   so the two never change the layout around them. */
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--r-full);
+}
+
+/* ── Public profile ───────────────────────────────────────────────────────── */
+
+.profile-header { position: relative; }
+
+/* Wraps on narrow screens so the action row drops below the identity rather
+   than crushing a long name into two characters per line. */
+.profile-header-top {
+  gap: var(--s3);
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.profile-identity {
+  gap: var(--s3);
+  align-items: center;
+  min-width: 0;
+}
+
+.profile-name {
+  margin: 0;
+  font-family: var(--font-display);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.profile-handle { margin: 0; font-size: 0.9rem; }
+
+.profile-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  margin: 0;
+  font-size: 0.875rem;
+  flex-wrap: wrap;
+}
+
+.profile-actions {
+  gap: var(--s2);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.profile-bio {
+  margin: var(--s3) 0 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.profile-privacy-note,
+.profile-selfnote {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  margin: var(--s3) 0 0;
+  font-size: 0.875rem;
+}
+
+.profile-stats { margin-bottom: var(--s2); }
+
+.profile-awaiting,
+.profile-external {
+  margin: var(--s2) 0 0;
+  font-size: 0.875rem;
+}
+
+/* Joined / last volunteered. A definition list because that is what it is: two
+   labelled facts, which a screen reader then reads as pairs. */
+.profile-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--s3);
+  margin: var(--s4) 0 0;
+  padding-top: var(--s3);
+  border-top: 1px solid var(--rule);
+}
+
+.profile-facts dt {
+  font-size: 0.8125rem;
+  color: var(--ink-3);
+  margin-bottom: var(--s1);
+}
+
+.profile-facts dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.profile-orgs { gap: var(--s1); }
+
+/* ── The three-dot actions menu ───────────────────────────────────────────── */
+
+.profile-menu { position: relative; }
+
+.profile-menu-list {
+  position: absolute;
+  top: calc(100% + var(--s1));
+  right: 0;
+  z-index: 30;
+  min-width: 17rem;
+  margin: 0;
+  padding: var(--s1);
+  list-style: none;
+  background: var(--popover-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-popover);
+}
+
+.profile-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  /* 2.75rem is the tap target the skip link already uses; a destructive control
+     in a popover is the last place to make somebody aim. */
+  min-height: 2.75rem;
+  padding: var(--s2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-menu-item:hover,
+.profile-menu-item:focus-visible { background: var(--surface-hover); }
+
+.profile-menu-item-danger { color: var(--danger); }
+
+/* ── Directory search ─────────────────────────────────────────────────────── */
+
+.directory-list {
+  gap: var(--s2);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.directory-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+}
+
+.directory-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* min-width:0 is what lets the long name below actually truncate — without it a
+   flex child refuses to shrink past its content and pushes the badge off. */
+.directory-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.directory-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  flex-wrap: wrap;
+}
+
+.directory-kind { flex-shrink: 0; }
+
+/* ── Organization page ────────────────────────────────────────────────────── */
+
+.org-header-top {
+  gap: var(--s3);
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.org-identity {
+  gap: var(--s3);
+  align-items: center;
+  min-width: 0;
+}
+
+.org-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  margin: 0;
+  font-size: 0.875rem;
+  flex-wrap: wrap;
+}
+
+.org-actions {
+  gap: var(--s2);
+  flex-shrink: 0;
+}
+
+.org-description {
+  margin: var(--s3) 0 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.org-founder,
+.org-joinnote {
+  margin: var(--s3) 0 0;
+  font-size: 0.875rem;
+}
+
+.org-eventgroup + .org-eventgroup { margin-top: var(--s4); }
+
+.org-event {
+  width: 100%;
+  gap: var(--s2);
+}
+
+.org-event-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-shrink: 0;
+}
+
+.org-members {
+  gap: var(--s1);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.org-member {
+  gap: var(--s2);
+  align-items: center;
+  width: 100%;
+}
+
+.org-member-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.org-member-handle { font-size: 0.8125rem; }
+
+/* ── External hours ───────────────────────────────────────────────────────── */
+
+.ext-list {
+  gap: var(--s2);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.ext-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+
+.ext-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.ext-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ext-meta,
+.ext-note { font-size: 0.8125rem; }
+
+/* ── Narrow screens ───────────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .avatar-lg {
+    width: 3.5rem;
+    height: 3.5rem;
+    font-size: 1.5rem;
+  }
+
+  /* The action row goes full width and its buttons share it, rather than
+     stacking into a column of three tiny targets. */
+  .profile-actions,
+  .org-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  /* Anchored to the LEFT on mobile, because the trigger has moved to the left
+     of a full-width row and a right-anchored popover would open off-screen. */
+  .profile-menu-list {
+    right: auto;
+    left: 0;
+    min-width: 14rem;
+  }
+
+  .ext-row { gap: var(--s2); }
+}

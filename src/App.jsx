@@ -30,7 +30,7 @@ import {
 } from './routes/index.jsx';
 import {
   LayoutDashboard, Compass, ShieldCheck, LogOut, CalendarDays,
-  UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon
+  UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon, Search
 } from 'lucide-react';
 
 // The two heaviest modals. EventModal pulls in the whole organizer surface —
@@ -264,6 +264,17 @@ const NAV = [
      count; the profile is in the ProfileMenu at the foot of the rail and in the
      header of the mobile sheet. Neither is a place people navigate to as the
      next step in a task, which is what the primary row is for. */
+  /**
+   * The member directory. SECONDARY, deliberately.
+   *
+   * Finding a person is not a step in the task the primary row is shaped
+   * around — browsing opportunities, checking a calendar, answering a message.
+   * It is something you go and do, from the same place you reach your own
+   * profile. Making it primary would also displace one of the five destinations
+   * `App.navGroups.test.jsx` pins in order, which is a change worth making
+   * only for something people navigate to on the way to somewhere else.
+   */
+  { id: 'directory', path: '/directory', label: 'Find people', icon: Search, requiredCap: 'directory.read', secondary: true },
   { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, requiredCap: 'self.read', secondary: true },
   { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS, secondary: true }
 ];
@@ -310,6 +321,13 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/calendar')) return 'calendar';
   if (pathname.startsWith('/notifications')) return 'notifications';
   if (pathname.startsWith('/profile')) return 'profile';
+  /* `/users` and `/organizations` both light the directory entry: they are where
+     the directory takes you, and a rail that goes dark when you follow a search
+     result reads as having navigated away from the app. */
+  if (pathname.startsWith('/directory')) return 'directory';
+  if (pathname.startsWith('/users')) return 'directory';
+  if (pathname.startsWith('/organizations')) return 'directory';
+  if (pathname.startsWith('/hours/external')) return 'externalHours';
   if (pathname.startsWith('/settings')) return 'settings';
   if (pathname.startsWith('/messages')) return 'messages';
   if (pathname.startsWith('/admin/appeals')) return 'appeals';
@@ -1011,6 +1029,13 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/notifications': { onViewEvent: openEventById, onCountChange: () => setNotifKey(k => k + 1) },
     '/messages': {},
     '/portfolio': { currentUser },
+    '/directory': { currentUser },
+    '/users/id/:id': { currentUser, addToast },
+    '/users/:handle': { currentUser, addToast },
+    '/organizations/new': { addToast },
+    '/organizations/:key/edit': { addToast },
+    '/organizations/:key': { addToast },
+    '/hours/external': { addToast },
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
     '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
     '/errors': { addToast },
