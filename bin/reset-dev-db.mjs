@@ -47,7 +47,12 @@ import { existsSync, rmSync } from 'fs';
 import path from 'path';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
-import { resolveDbPath, refuseProduction, refuseProductionLikePath } from './lib/db-safety.mjs';
+import {
+  resolveDbPath,
+  refuseProduction,
+  refuseProductionLikePath,
+  refuseNonDisposableDatabase
+} from './lib/db-safety.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -73,6 +78,23 @@ refuseProduction({
   effect: 'delete that database and reseed demo accounts'
 });
 refuseProductionLikePath({ tool: 'The development database reset', dbPath });
+
+/**
+ * The content check has to be repeated here rather than inherited.
+ *
+ * This script composes the gate out of its individual pieces instead of calling
+ * `guardDestructive`, so a check added to that function does not reach this file.
+ * That is exactly how the shared gate drifts back into three different gates, and
+ * the first version of this check missed this script for precisely that reason —
+ * caught by the parameterised refusal test in
+ * server/tooling.scriptSafety.test.js, which runs against every destructive tool
+ * rather than against seed-pilot.js alone.
+ */
+refuseNonDisposableDatabase({
+  tool: 'The development database reset',
+  dbPath,
+  effect: 'delete that database and reseed demo accounts'
+});
 
 console.log('WeVolunteer — development database reset');
 console.log('');

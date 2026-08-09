@@ -28,6 +28,7 @@
 import { existsSync } from 'fs';
 import path from 'path';
 import readline from 'readline';
+import { DatabaseSync } from 'node:sqlite';
 
 /**
  * Roots that indicate a real deployment rather than a workstation.
@@ -93,6 +94,125 @@ export function describeProductionLikePath(dbPath) {
   }
 
   return null;
+}
+
+/**
+ * Content markers that identify a database as real rather than disposable.
+ *
+ * ── Why a path heuristic was not enough ──
+ *
+ * `describeProductionLikePath` asks where a file sits and what it is called. The
+ * pilot database sits at the repository root and is called `pilot.db`, so it
+ * answers "workstation, innocuous name" to both questions and every check above
+ * waves it through. `docs/operations/demo-reset.md` then described that exact
+ * file as disposable and told the operator to run `bin/seed-pilot.js` against it.
+ * Following the documentation as written would have deleted both owner accounts,
+ * the demo-administrator tombstone, and the append-only administrative audit
+ * trail — and the typed confirmation would not have helped, because the operator
+ * types the filename believing the file is disposable. A prompt cannot correct a
+ * false belief about what the file *is*.
+ *
+ * So this check asks the only question that actually distinguishes them: what is
+ * *in* it. The three markers below were chosen by seeding a scratch database with
+ * `bin/seed-pilot.js` and diffing it against the live pilot database, because
+ * guessing produces a guard that blocks ordinary development:
+ *
+ *   marker                      fresh demo seed   live pilot
+ *   super_admin accounts              0               2
+ *   non-system tombstones             0               2
+ *   admin_audit_logs rows             0               5
+ *
+ * `hours_ledger` deliberately is NOT a marker. A fresh seed writes five rows to
+ * it, so using it would refuse every legitimate demo reset — which is how a
+ * safety guard gets disabled by the people it protects.
+ */
+const NON_DISPOSABLE_MARKERS = [
+  {
+    sql: "SELECT COUNT(*) AS c FROM users WHERE role = 'super_admin'",
+    describe: c => `${c} owner (super_admin) account${c === 1 ? '' : 's'}`
+  },
+  {
+    // `system-cli` is a reserved actor row seeded by migration 022 and is
+    // deliberately `account_status = 'deleted'`, so it must be excluded or every
+    // freshly seeded database looks like it has deletion history.
+    sql: "SELECT COUNT(*) AS c FROM users WHERE account_status = 'deleted' AND id <> 'system-cli'",
+    describe: c => `${c} deleted-account tombstone${c === 1 ? '' : 's'}`
+  },
+  {
+    sql: 'SELECT COUNT(*) AS c FROM admin_audit_logs',
+    describe: c => `${c} administrative audit record${c === 1 ? '' : 's'}`
+  }
+];
+
+/**
+ * Describes why a database holds real data, or null if it looks disposable.
+ *
+ * Read-only and forgiving by design: a missing file, an empty file, or a schema
+ * without these tables all mean "nothing here to protect", which is the correct
+ * answer for a database that is about to be created for the first time.
+ */
+export function describeNonDisposableContent(dbPath) {
+  if (!existsSync(dbPath)) return null;
+
+  let db;
+  try {
+    db = new DatabaseSync(`file:${path.resolve(dbPath)}?mode=ro`, {});
+  } catch {
+    // Not a readable SQLite database — nothing to protect.
+    return null;
+  }
+
+  const found = [];
+  try {
+    for (const marker of NON_DISPOSABLE_MARKERS) {
+      try {
+        const { c } = db.prepare(marker.sql).get();
+        if (c > 0) found.push(marker.describe(c));
+      } catch {
+        // Table absent on this schema version. Absence is not evidence of real
+        // data, so it is skipped rather than treated as either answer.
+      }
+    }
+  } finally {
+    try { db.close(); } catch { /* already closed */ }
+  }
+
+  return found.length ? found.join(', ') : null;
+}
+
+/**
+ * Refuses a database whose contents say it is not disposable.
+ *
+ * The override is an environment variable rather than a flag because it must be
+ * impossible to reach by pasting a documented command line. `--yes` appears in
+ * the documentation for legitimate reasons; this must not.
+ */
+export function refuseNonDisposableDatabase({ tool, dbPath, effect }) {
+  const reason = describeNonDisposableContent(dbPath);
+  if (!reason) return;
+
+  if (process.env.WEV_ALLOW_DESTROYING_REAL_DATA === '1') {
+    console.warn(`WARNING: ${dbPath} contains real data (${reason}).`);
+    console.warn('Proceeding only because WEV_ALLOW_DESTROYING_REAL_DATA=1 is set.');
+    return;
+  }
+
+  console.error(`REFUSING: ${dbPath}`);
+  console.error('');
+  console.error(`  That database contains real data — ${reason}.`);
+  console.error(`  ${tool} only ever runs against a disposable demo database.`);
+  console.error('');
+  console.error(`  What it would have done: ${effect}`);
+  console.error('');
+  console.error('  A demo database seeded by this tool has none of those records, so');
+  console.error('  this file is a pilot or production database, not a scratch one.');
+  console.error('');
+  console.error('  To reset a demo environment, point WEV_DB_PATH at a throwaway file:');
+  console.error(`    WEV_DB_PATH=/tmp/wevolunteer-demo.db node ${tool === 'pilot data seed' ? 'bin/seed-pilot.js' : '<tool>'}`);
+  console.error('');
+  console.error('  To restore a real deployment, restore from a backup instead:');
+  console.error('  docs/operations/pilot-deployment-runbook.md § Backup strategy.');
+  process.exit(1);
 }
 
 /**
@@ -203,6 +323,10 @@ export function hasYesFlag(argv = process.argv.slice(2)) {
 export async function guardDestructive({ tool, dbPath, effect, assumeYes = hasYesFlag() }) {
   refuseProduction({ tool, effect });
   refuseProductionLikePath({ tool, dbPath });
+  // Content check runs before the prompt, not after: the prompt asks the operator
+  // to confirm a belief, and this is the check that tests whether the belief is
+  // true. It must also sit ahead of `--yes`, which skips the prompt entirely.
+  refuseNonDisposableDatabase({ tool, dbPath, effect });
   announce({ tool, dbPath, effect });
   if (!(await confirmDestructive({ dbPath, assumeYes }))) process.exit(1);
 }
