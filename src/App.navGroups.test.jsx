@@ -22,9 +22,20 @@ import { navItemsFor, navSectionsFor } from './App';
  *      sheet, or the reverse — a page an administrator can reach on a phone and
  *      cannot find on a laptop. The partition test below is what catches that.
  *
- *   2. **The Platform group stays owner-only.** Its three entries are SUPER_ONLY
- *      capabilities. A group is a promise about who sees it, and a heading that
- *      appears for an administrator would be a false one.
+ *   2. **The consolidation did not delete anything.** Six administrative pages
+ *      left the rail for the Moderation Center. Deleting them would satisfy
+ *      "absent from the rail" just as well, so absence is never asserted on its
+ *      own here — every moved page is also checked to be offered by the hub, and
+ *      openable by the owner, at the capability it always had.
+ *
+ * ── Why the rail was cut rather than grouped harder ──
+ *
+ * Grouping got eleven entries down to something readable, and that was the right
+ * first move. It could not fix the underlying thing: the rail is the same list on
+ * every page, so seven administrative rows sat permanently in front of an
+ * audience that is mostly students. The pages are also related to each other in
+ * ways a flat rail cannot show — an appeal is about a suspension that came out of
+ * a report — and a hub page can say that.
  */
 
 const USER = (role, extra = {}) => ({
@@ -68,43 +79,98 @@ describe('navSectionsFor', () => {
   });
 
   /**
-   * An administrator gets Administration and NOT Platform.
+   * The Moderation Center is the whole of Administration, for both roles.
    *
-   * The single-entry Administration group keeps its heading deliberately — an
-   * administrator and an owner have to be able to say "Administration → Appeals"
-   * to each other and both be looking at the same thing. A rail that reshapes
-   * itself by item count makes that conversation impossible.
+   * The group keeps its heading over a single entry deliberately — an
+   * administrator and an owner have to be able to say "Administration →
+   * Moderation Center" to each other and both be looking at the same thing, and
+   * the heading is what marks that entry as a different kind of thing from
+   * Messages and Calendar.
    */
-  it('gives an administrator Administration only', () => {
+  it('gives an administrator Administration, holding only the hub', () => {
     const { groups } = navSectionsFor(USER('admin'));
     expect(groups.map(g => g.label)).toEqual(['Administration']);
-    expect(labelsOf(groups[0].items)).toEqual(['Appeals']);
+    expect(labelsOf(groups[0].items)).toEqual(['Moderation Center']);
   });
 
-  it('gives the owner both groups, Platform last', () => {
+  it('gives the owner the same one group, not a longer rail', () => {
     const { groups } = navSectionsFor(USER('super_admin'));
-    expect(groups.map(g => g.label)).toEqual(['Administration', 'Platform']);
-    expect(labelsOf(groups[1].items)).toEqual(['Admin Roster', 'Audit Explorer', 'Errors']);
+    expect(groups.map(g => g.label)).toEqual(['Administration']);
+    expect(labelsOf(groups[0].items)).toEqual(['Moderation Center']);
+  });
+
+  /* ── The consolidation, asserted from both ends ──────────────────────────── */
+
+  /**
+   * ── The six pages that left the rail ──
+   *
+   * They were REMOVED FROM THE NAVIGATION, not removed. This is the half of that
+   * sentence a test can get wrong in the expensive direction: deleting the pages
+   * would also make this assertion pass, and nobody would notice until an owner
+   * went looking for the audit trail.
+   *
+   * So it is asserted against ModerationCenter's own table, which is what the
+   * hub renders — the pages have to be absent from the rail AND offered by the
+   * hub, and the second half is what makes the first half safe.
+   */
+  const MOVED = [
+    { label: 'Community impact', to: '/impact' },
+    { label: 'Appeals', to: '/admin/appeals' },
+    { label: 'Admin Roster', to: '/admin/roster' },
+    { label: 'Audit Explorer', to: '/admin/audit-logs' },
+    { label: 'Errors', to: '/errors' },
+    { label: 'Platform Impact', to: '/admin/impact' },
+  ];
+
+  it.each(MOVED)('keeps $label off the rail entirely', ({ label }) => {
+    for (const role of ['student', 'organizer', 'admin', 'super_admin', 'partner']) {
+      expect(labelsOf(navItemsFor(USER(role))), `${role} still has a ${label} rail entry`)
+        .not.toContain(label);
+    }
+  });
+
+  it.each(MOVED)('still offers $label from the Moderation Center', async ({ to }) => {
+    const { AREAS } = await import('./views/ModerationCenter.jsx');
+    expect(AREAS.map(a => a.to), `nothing on the hub leads to ${to}`).toContain(to);
   });
 
   /**
-   * The Platform group is SUPER_ONLY, asserted against the capability table
-   * rather than by naming roles.
+   * And the owner can actually open every one of them.
    *
-   * `admin.create`, `audit.read` and `error.read` are all in `SUPER_ONLY`, which
-   * `can()` consults BEFORE per-user grants — so no grant can put an
-   * administrator in this section. Reading it from the table means the test
-   * follows the kernel if the kernel changes, instead of pinning today's answer.
+   * The tile table is filtered by `can(user, area.cap)`, so a tile whose
+   * capability nobody holds is as unreachable as a deleted page while looking
+   * present in the source. This reads the capabilities the hub declares and
+   * checks the owner against the real kernel.
    */
-  it('puts nothing in Platform that an administrator could ever hold', async () => {
-    const { SUPER_ONLY } = await import('./authz');
-    const { groups } = navSectionsFor(USER('super_admin'));
-    const platform = groups.find(g => g.id === 'platform');
+  it('leaves every moved page reachable by the owner', async () => {
+    const { AREAS } = await import('./views/ModerationCenter.jsx');
+    const { can } = await import('./authz');
+    const owner = USER('super_admin');
 
-    for (const item of platform.items) {
-      const caps = item.requiredCapAny ?? [item.requiredCap];
-      expect(caps.every(c => SUPER_ONLY.includes(c)),
-        `${item.label} is in Platform but ${caps.join('/')} is not SUPER_ONLY`).toBe(true);
+    for (const { to } of MOVED) {
+      const area = AREAS.find(a => a.to === to);
+      expect(can(owner, area.cap), `the owner cannot open ${to} (${area.cap})`).toBe(true);
+    }
+  });
+
+  /**
+   * The SUPER_ONLY pages stayed SUPER_ONLY.
+   *
+   * Moving a page off the rail and onto a hub must not change who can open it.
+   * `admin.create`, `audit.read` and `error.read` are in `SUPER_ONLY`, which
+   * `can()` consults BEFORE per-user grants — so no grant reaches them. Read
+   * from the table rather than by naming roles, so the test follows the kernel
+   * instead of pinning today's answer.
+   */
+  it('did not widen the pages that were owner-only on the rail', async () => {
+    const { SUPER_ONLY, can } = await import('./authz');
+    const { AREAS } = await import('./views/ModerationCenter.jsx');
+    const admin = USER('admin');
+
+    for (const to of ['/admin/roster', '/admin/audit-logs', '/errors', '/admin/impact']) {
+      const area = AREAS.find(a => a.to === to);
+      expect(SUPER_ONLY, `${to} is no longer behind a SUPER_ONLY capability`).toContain(area.cap);
+      expect(can(admin, area.cap), `an administrator can now open ${to}`).toBe(false);
     }
   });
 
@@ -129,7 +195,7 @@ describe('navSectionsFor', () => {
    */
   it('keeps the owner\'s first four flat entries everyday ones', () => {
     expect(navItemsFor(USER('super_admin')).slice(0, 4).map(n => n.label))
-      .toEqual(['Moderation Center', 'Opportunities', 'Calendar', 'Messages']);
+      .toEqual(['Dashboard', 'Opportunities', 'Calendar', 'Messages']);
   });
 
   /**

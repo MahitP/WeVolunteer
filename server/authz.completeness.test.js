@@ -303,7 +303,7 @@ describe('authorization hygiene', () => {
       // `verified` flag on a row being created. Worth noting that the change which
       // moved it IS an authorization fix, made a few lines above; this line is
       // still not one.
-      './routes/oauthRoutes.js:616',
+      './routes/oauthRoutes.js:648',
     ]);
     const consumedExceptions = new Set();
 
@@ -471,7 +471,7 @@ describe('authorization hygiene', () => {
          re-read rather than a mechanical bump. */
       'src/components/EventComments.jsx:112': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Host" tag beside a comment author — labels a THIRD PARTY\'s role for the reader; grants the viewer nothing' },
       'src/components/EventComments.jsx:113': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'renders a "Staff" tag beside a comment author — same: labelling, not gating' },
-      'src/components/account/ProfileMenu.jsx:48': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
+      'src/components/account/ProfileMenu.jsx:96': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'picks the display string "Pending approval" over the ROLE_LABEL entry; labelling a role is the one thing a role name is legitimately for' },
       /**
        * Re-anchored in v1.2c. All four still describe the same thing — the shape
        * of a form being filled in by somebody who has no account yet, so there is
@@ -483,16 +483,16 @@ describe('authorization hygiene', () => {
        * field itself no longer exists in this form. `:255` below is its
        * replacement and asks a different question (which class year to submit).
        */
-      'src/views/Signup.jsx:296': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'toast tone for the account just requested (organizers await approval); form state, not an actor' },
-      'src/views/Signup.jsx:321': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'whether to submit a class year at all — organizers have no graduation year; form state, not an actor, and the server recomputes the grade from it regardless' },
-      'src/views/Signup.jsx:347': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which school value to submit for the account being created; form state, not an actor' },
-      'src/views/Signup.jsx:389': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which fields the signup form shows for the selected account type; form state, not an actor' },
+      'src/views/Signup.jsx:297': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'toast tone for the account just requested (organizers await approval); form state, not an actor' },
+      'src/views/Signup.jsx:322': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'whether to submit a class year at all — organizers have no graduation year; form state, not an actor, and the server recomputes the grade from it regardless' },
+      'src/views/Signup.jsx:348': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which school value to submit for the account being created; form state, not an actor' },
+      'src/views/Signup.jsx:390': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'which fields the signup form shows for the selected account type; form state, not an actor' },
 
       // ── UNCONVERTED_UX — real role branches, out of Task 17's scope ──
       'src/components/EventActionPanel.jsx:14': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates the apply/withdraw panel; wants can(event.apply)' },
-      'src/components/EventCard.jsx:70': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply) — no favourite.* capability exists yet' },
+      'src/components/EventCard.jsx:77': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply) — no favourite.* capability exists yet' },
       'src/components/EventComments.jsx:104': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`canDelete` is own-comment OR admin; wants can(event.moderate), which is what DELETE /api/comments/:id already enforces' },
-      'src/components/EventDetailsExperience.jsx:74': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates the apply affordances; wants can(event.apply)' },
+      'src/components/EventDetailsExperience.jsx:75': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates the apply affordances; wants can(event.apply)' },
       // Moved 662 -> 671 by v1.2c Task 8, 671 -> 713 by Task 9.5, 713 -> 730 when
       // the offline experience changed from REPLACING the routed view to covering
       // it (the shell is now wrapped in `OfflineOverlay`, and the offline ternary
@@ -542,9 +542,17 @@ describe('authorization hygiene', () => {
          deliberately. It is the record of every time this exemption was
          re-examined, which is the only thing that distinguishes a reviewed
          exemption from one nobody has looked at since it was written. */
-      'src/App.jsx:1126': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
-      'src/components/auth/TwoFactorRequiredWall.jsx:25': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'labels a role in the UX string "Your role as platform owner/administrator requires"' },
-      'src/components/EventDetailsExperience.jsx:249': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply)' },
+      /* 1192 → 1205 → 1211 when the community-impact nav entry and the Platform
+         Impact entry gained the comments explaining that `analytics.impact` is now
+         an administrative capability, and PAGE_META gained the `staff.impact`
+         title that entry finally justifies. Re-read at both new positions before
+         moving the pin: unchanged, still `viewingProfile.type === 'organizer'`,
+         still the ?type= view discriminator, still grants nobody anything. The
+         change that moved it IS an authorization decision — made in the NAV table
+         nine hundred lines above — and this line still is not one. */
+      'src/App.jsx:1212': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'compares `viewingProfile.type`, the ?type=organizer|volunteer query parameter that picks which profile overlay to render — a view discriminator, not anybody\'s role' },
+      'src/components/auth/TwoFactorRequiredWall.jsx:43': { category: CLIENT_CATEGORY.NOT_AUTHORIZATION, reason: 'labels a role in the UX string "Your role as platform owner/administrator requires"' },
+      'src/components/EventDetailsExperience.jsx:258': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply)' },
       'src/components/EventModal.jsx:67': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isOwner` is role AND id; the id half is the correct ownership test, the role half wants can(event.edit.own)' },
       'src/components/EventModal.jsx:68': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isAdmin` gates the moderation surface; wants can(event.moderate)' },
       'src/components/EventModal.jsx:90': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates apply/withdraw inside the modal; wants can(event.apply)' },
@@ -557,7 +565,7 @@ describe('authorization hygiene', () => {
          which would show the platform owner a volunteer's hours line reading
          zero. The conversion needs a most-privileged-first cascade, which is a
          real change and not a drive-by. */
-      'src/views/BrowseEvents.jsx:46': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates favourites and apply CTAs on the browse list; wants can(event.apply)' },
+      'src/views/BrowseEvents.jsx:47': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates favourites and apply CTAs on the browse list; wants can(event.apply)' },
       'src/views/CalendarView.jsx:55': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isOrganizer` picks hosted-events entries over applied-shift entries; wants a can(event.create) cascade, most-privileged-first' },
       /* 95 → 106 when this view gained the role-aware empty-state copy.
          Re-read at the new line: still `currentUser.role === 'student'`
@@ -821,11 +829,32 @@ describe('authorization hygiene', () => {
        */
       'POST /api/auth/accept-invitation': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'redeems an invitation token; the caller holds no capability yet by definition, and authority comes from the token plus a VERIFIED address match rather than from a role' },
       'GET /api/events': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'public browse listing; every role\'s CAPABILITIES entry includes event.view, so no role is ever denied' },
+      'GET /api/events/tags': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'the tag vocabulary in use, for the event form\'s suggestions and the browse filter bar. Discloses only words organizers put on events that GET /api/events already shows every signed-in role, so a capability would gate a strictly smaller disclosure than the listing beside it. Authenticated rather than public purely so no event endpoint answers anonymously' },
       'GET /api/organizers/:id/profile': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'an organizer\'s public-facing hosting record (events hosted, volunteers helped, hours awarded) — no PII beyond what the profile already publishes, and no role has ever been denied it; previously carried requireCap(\'event.view\'), a capability all five roles hold, which read as a gate while discriminating against nobody' },
       'GET /api/events/:eventId/slots/:slotId/ics': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may download; title/description/location are no more sensitive than GET /api/events already returns to everyone' },
       'GET /api/events/:id/comments': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may read any event\'s comments; no ownership/capability distinction by design' },
       'POST /api/events/:id/comments': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may post a comment on any event; no ownership/capability distinction by design' },
       'GET /api/leaderboard': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'requires login only to prevent public scraping of opted-in student stats (in-file comment); no role distinction' },
+      /**
+       * ── Both of these were UNAUTHENTICATED, and therefore invisible here ──
+       *
+       * The walk above collects routes that ARE authenticated and carry no
+       * capabilityGate. A route with no `authenticateToken` is not in the set
+       * it examines, so the two weakest routes in the application — one of them
+       * serving a named minor's achievement history and award timestamps to the
+       * open internet — could never appear in this registry to be questioned.
+       * They now carry `authenticateToken`, which is what brings them under
+       * review; that is the point of the entries below, not a formality.
+       *
+       * The per-user list takes the posture `GET /api/users/:id/profile` above
+       * already takes for this class of data rather than a new one: that route
+       * returns `milestones` (earned achievements) and the completed-service
+       * history to any authenticated caller and gates only contact PII and
+       * future whereabouts. A badge carries neither, and `BadgesList` renders
+       * on that same profile page.
+       */
+      'GET /api/badges': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'the badge DEFINITION catalogue (name, icon, criteria) — no personal data about anyone; a session is required only to keep it off the open internet, the same reason GET /api/leaderboard gives' },
+      'GET /api/users/:userId/badges': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'earned achievements for one person, matching GET /api/users/:id/profile\'s posture for the same class of data (milestones and completed service are returned there to any authenticated caller); no contact PII and no future whereabouts, which are the two things that route does gate' },
       'POST /api/reports': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may file a report against any event/comment; no capability distinction by design (abuse-reporting entry point)' },
       'POST /api/messages/:id/report': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may file a report against any message; no capability distinction by design (abuse-reporting entry point)' },
     };

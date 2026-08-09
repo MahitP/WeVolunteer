@@ -120,9 +120,23 @@ describe('navigation, per role', () => {
    * that splits primary from "More" on mobile makes the ORDER load-bearing, not
    * just the set.
    */
+  /**
+   * `Community impact` left the student and organizer rails, and this pin was
+   * updated deliberately rather than relaxed.
+   *
+   * `analytics.impact` was held by every signed-in role, and the NAV comment said
+   * so as an intent: "the student quoting a figure on a college application and
+   * the organizer writing a grant report are looking at the same page". The
+   * capability is administrative now — the figures are an internal view of how
+   * the programme is doing, which is the same conclusion that deleted the public
+   * impact page instead of re-gating it.
+   *
+   * These lists are exact rather than a `toContain`, so the entry cannot come
+   * back unnoticed.
+   */
   it.each([
-    ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Community impact', 'My profile']],
-    ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Community impact', 'My profile']],
+    ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'My profile']],
+    ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'My profile']],
     /**
      * Admin GAINED `Messages`, and this pin was updated deliberately rather than
      * relaxed.
@@ -154,17 +168,22 @@ describe('navigation, per role', () => {
      * This list is exact rather than a `toContain`, so the entry cannot return
      * unnoticed — which is exactly how it got here the first time.
      */
-    ['admin', ['Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Community impact', 'Appeals']]
+    ['admin', ['Dashboard', 'Opportunities', 'Messages', 'Notifications', 'Moderation Center']]
   ])('%s nav is what its capabilities justify', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
   });
 
+  /**
+   * The owner's rail is now the same length as an ordinary volunteer's, plus the
+   * hub. Six administrative pages moved to the Moderation Center — they were not
+   * deleted, and `App.navGroups.test.jsx` is where that half is asserted, tile by
+   * tile, against ModerationCenter's own table.
+   */
   it('super_admin gets a populated rail, not an empty shell', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
-      'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Community impact',
-      /* Administration */ 'Appeals',
-      /* Platform */ 'Admin Roster', 'Audit Explorer', 'Errors',
+      'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications',
+      /* Administration */ 'Moderation Center',
       'My profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
@@ -172,15 +191,19 @@ describe('navigation, per role', () => {
   });
 
   /**
-   * `Errors` is the only SUPER_ONLY entry in the rail, and the ordering above is
-   * not incidental. `navItems.slice(0, 4)` is the mobile primary row, so an
-   * entry inserted earlier would push `Messages` behind "More" for the platform
-   * owner — a nav regression that no assertion about the SET would catch.
+   * `navItems.slice(0, 4)` is the mobile primary row, so an administrative entry
+   * inserted earlier would push `Messages` behind "More" for the platform owner
+   * — a nav regression that no assertion about the SET would catch.
+   *
+   * This used to be phrased about `Errors`, the last SUPER_ONLY entry to reach
+   * the rail. Nothing SUPER_ONLY is on the rail any more, so the property is now
+   * stated about the hub, which is the only administrative entry left and the one
+   * a future addition would be inserted beside.
    */
-  it('adds Errors without disturbing the mobile primary row', () => {
+  it('keeps the administrative entry out of the mobile primary row', () => {
     const labels = navItemsFor(USER('super_admin')).map(n => n.label);
-    expect(labels.slice(0, 4)).toEqual(['Moderation Center', 'Opportunities', 'Calendar', 'Messages']);
-    expect(labels.indexOf('Errors')).toBeGreaterThan(3);
+    expect(labels.slice(0, 4)).toEqual(['Dashboard', 'Opportunities', 'Calendar', 'Messages']);
+    expect(labels.indexOf('Moderation Center')).toBeGreaterThan(3);
   });
 
   /**
@@ -195,10 +218,16 @@ describe('navigation, per role', () => {
     }
   );
 
-  it('partner gets only what analytics.public/event.view justify', () => {
+  it('partner gets only what event.view justifies', () => {
     // No dashboard entry, because partner has no dashboard to be sent to —
     // an entry pointing at a page that says "nothing here" is worse than none.
-    expect(navItemsFor(USER('partner')).map(n => n.label)).toEqual(['Opportunities', 'Community impact']);
+    //
+    // And no `Community impact`: the figures are an internal view of how the
+    // programme is doing, and a partner is an external organization — the
+    // audience the deleted public impact page served. `analytics.public` is still
+    // registered and still reads nothing, which is where a figure chosen FOR a
+    // partner would go.
+    expect(navItemsFor(USER('partner')).map(n => n.label)).toEqual(['Opportunities']);
   });
 
   /**
@@ -226,9 +255,9 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
-      'Moderation Center', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Community impact',
-      /* Administration */ 'Appeals',
-      /* Platform */ 'Admin Roster', 'Audit Explorer', 'Errors',
+      'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications',
+      /* Administration — one entry, and it keeps its heading. See NAV_GROUPS. */
+      'Moderation Center',
       'My profile'
     ]);
   });
@@ -238,9 +267,9 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
-      'Moderation Center', 'Opportunities', 'Messages', 'Notifications', 'Community impact',
+      'Dashboard', 'Opportunities', 'Messages', 'Notifications',
       /* Administration — one entry, and it keeps its heading. See NAV_GROUPS. */
-      'Appeals',
+      'Moderation Center',
     ]);
   });
 
@@ -371,8 +400,8 @@ describe('page titles', () => {
   it.each([
     ['student', 'Dashboard'],
     ['organizer', 'Dashboard'],
-    ['admin', 'Moderation Center'],
-    ['super_admin', 'Moderation Center'],
+    ['admin', 'Dashboard'],
+    ['super_admin', 'Dashboard'],
     ['partner', 'Dashboard']
   ])('%s reads "%s" on the dashboard', async (role, title) => {
     signedInAs(USER(role));
