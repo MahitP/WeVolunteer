@@ -22,13 +22,13 @@ import EmptyState from './components/common/EmptyState';
 import { can } from './authz.js';
 import { SessionProvider, useSession } from './session/SessionProvider.jsx';
 import {
-  APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES, isPublicPath, withProps,
+  APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES, isPublicPath, isSignedOutOnlyPath, withProps,
   AdminDashboard, VolunteerDashboard, OrganizerDashboard,
   VolunteerProfile, OrganizerProfile, OAuthCallback, ResetPassword
 } from './routes/index.jsx';
 import {
   LayoutDashboard, Compass, ShieldCheck, LogOut, CalendarDays,
-  UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon, Bug, Activity, Sprout
+  UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon
 } from 'lucide-react';
 
 // The two heaviest modals. EventModal pulls in the whole organizer surface —
@@ -118,8 +118,20 @@ const personaFor = (user) =>
  * The `/` nav entry, per persona. A persona absent from this map gets no `/`
  * entry, because it has no dashboard to send anyone to.
  */
+/* `staff` used to read "Moderation Center", and the page it opens is unchanged
+   — the reports queue, organizer approvals, platform totals and the events
+   table. Two things were wrong with the old name. It described one section of a
+   screen that is mostly not moderation, and it made `/` mean something
+   different in the rail for one persona than for the other two, so "open your
+   dashboard" was not answerable without first asking what kind of account
+   somebody had. Every persona now has a Dashboard, on the same icon; what is ON
+   it still differs by role, which is the part that should differ.
+
+   The name is not retired — it now belongs to /admin/moderation, a hub of the
+   administrative areas, which is what people were looking for when they came
+   here for it. */
 const DASHBOARD_NAV = {
-  staff: { label: 'Moderation Center', icon: ShieldCheck },
+  staff: { label: 'Dashboard', icon: LayoutDashboard },
   host: { label: 'Dashboard', icon: LayoutDashboard },
   volunteer: { label: 'Dashboard', icon: LayoutDashboard },
 };
@@ -185,14 +197,53 @@ const SELF_PROFILE_CAPS = SELF_PROFILE.filter(p => p.view !== 'denied').map(p =>
  * decorating it — an administrator seeing "Platform" absent has learned something
  * true about their account.
  *
- * A group with one visible entry still renders its heading. That is deliberate:
- * an administrator and an owner should be able to say "Administration → Appeals"
- * to each other and both be looking at the same thing. A rail that reshapes
- * itself by item count makes support conversations impossible.
+ * ── Why the labels are no longer DRAWN ──
+ *
+ * They used to render as an uppercase `<h2>` bar above each group. Two of those
+ * bars cost more vertical space than the three entries under one of them, and
+ * the rail is the one surface with no room to spare: on a phone it collapses to
+ * four buttons and a sheet, and the sheet had no scroll container, so the
+ * headings were pushing real destinations off the bottom of the screen.
+ *
+ * They also said nothing a reader could act on. "Administration" is not
+ * somewhere you can go — every heading was a row that looked like a
+ * destination, was not one, and had to be visually skipped past on the way to
+ * the entry underneath.
+ *
+ * So the grouping survives, and only its DRAWING changes: the sections are
+ * still `role="group"` and still carry the label as an accessible name, so a
+ * screen-reader user hears "Administration, group" exactly as before and the
+ * support-conversation argument above still holds. Sighted readers get a hair
+ * rule instead of a heading — one pixel where there were three lines, and a
+ * separator that survives the tablet icon rail, which used to hide the headings
+ * outright and leave the groups indistinguishable.
+ */
+/**
+ * ── One group, and why the machinery is still here for it ──
+ *
+ * There used to be two, holding seven entries between them: Appeals, Admin
+ * Roster, Audit Explorer, Errors, Platform Impact and Community Impact beside
+ * the Moderation Center. Every one of those pages still exists and every one is
+ * still reachable — they are reached THROUGH the Moderation Center now, which is
+ * the single administrative entry on the rail.
+ *
+ * The rail was the wrong index for them. It is the same list on every page, so
+ * seven administrative rows sat permanently in front of an audience that is
+ * mostly students, and the pages themselves are related to each other in ways a
+ * flat rail cannot show — an appeal is about a suspension that came out of a
+ * report. ModerationCenter.jsx is a page that can say that; a rail item cannot.
+ *
+ * `Platform` is gone rather than emptied: it grouped the SUPER_ONLY pages, and
+ * with all of them behind the hub a group definition nothing can join is a
+ * question for the next reader with no answer.
+ *
+ * The grouping mechanism stays for the one group that remains. `Administration`
+ * holds a single entry and keeps its heading — see `navSectionsFor` — because
+ * the heading is what tells an administrator that the entry beneath it is a
+ * different kind of thing from Messages and Calendar.
  */
 const NAV_GROUPS = [
   { id: 'admin', label: 'Administration' },
-  { id: 'platform', label: 'Platform' },
 ];
 
 /**
@@ -224,27 +275,31 @@ const NAV = [
      `browse`. A path with no rail item is normal here — `/settings` has never had
      one either. */
   { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, requiredCap: 'self.read' },
-  /* Held by every signed-in role, so this entry shows for everybody. That is
-     the intent: the student quoting a figure on a college application and the
-     organizer writing a grant report are looking at the same page. */
-  { id: 'impact', path: '/impact', label: 'Community impact', icon: Sprout, requiredCap: 'analytics.impact' },
-
   /* ── Administration ── what an ordinary administrator can reach ── */
-  { id: 'appeals', path: '/admin/appeals', label: 'Appeals', icon: ShieldCheck, requiredCap: 'appeal.review', group: 'admin' },
+  /* The hub, first in its group — it is the way in to the rest of them, and on
+     a phone (four buttons and a sheet) it is often the only administrative
+     entry that fits. `report.resolve` rather than a new capability: the hub
+     lists what the reader can already open, and every tile re-checks its own. */
+  { id: 'moderation', path: '/admin/moderation', label: 'Moderation Center', icon: ShieldCheck, requiredCap: 'report.resolve', group: 'admin' },
 
-  /* ── Platform ── every one of these is SUPER_ONLY ──
+  /* ── The six entries that used to follow this one ──
 
-     `admin.create`, `audit.read` and `error.read` are all in authz.js's
-     SUPER_ONLY list, which is checked BEFORE per-user grants — so no amount of
-     granting puts an administrator in this section. That is what makes the group
-     honest rather than decorative: its absence tells an administrator something
-     true about their account. */
-  { id: 'roster', path: '/admin/roster', label: 'Admin Roster', icon: UserCog, requiredCap: 'admin.create', group: 'platform' },
-  { id: 'audit', path: '/admin/audit-logs', label: 'Audit Explorer', icon: Activity, requiredCap: 'audit.read', group: 'platform' },
-  /* Error triage. Named "Errors" rather than "Developer Tools": it is one page
-     showing real failures real people hit, and dressing it up as a toolset would
-     promise more than it is. */
-  { id: 'errors', path: '/errors', label: 'Errors', icon: Bug, requiredCap: 'error.read', group: 'platform' },
+     Community impact (`/impact`), Appeals (`/admin/appeals`), Admin Roster
+     (`/admin/roster`), Audit Explorer (`/admin/audit-logs`), Errors (`/errors`)
+     and Platform Impact (`/admin/impact`) are no longer rail entries.
+
+     NONE of them was removed. Every route is still registered in
+     `routes/index.jsx`, every page still exists, every capability is unchanged,
+     and every one is listed on the Moderation Center above — which is why that
+     entry is the only administrative one left rather than the first of seven.
+     `App.navGroups.test.jsx` asserts both halves: that they are absent from the
+     rail, and that the hub still offers each of them to a reader who holds the
+     capability.
+
+     `tabForPath` deliberately still maps all six paths. It is not derived from
+     NAV and never was; a path with no rail entry still needs a tab id so the
+     page gets its own title and no rail item is wrongly highlighted. `/settings`
+     has worked that way since before any of this. */
 
   /* `trailing` keeps this last in the rail. It is ungrouped, but rendering it in
      the ungrouped block at the top would put "My profile" above
@@ -299,6 +354,8 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/settings')) return 'settings';
   if (pathname.startsWith('/messages')) return 'messages';
   if (pathname.startsWith('/admin/appeals')) return 'appeals';
+  if (pathname.startsWith('/admin/moderation')) return 'moderation';
+  if (pathname.startsWith('/admin/impact')) return 'adminImpact';
   if (pathname.startsWith('/impact')) return 'impact';
   if (pathname.startsWith('/admin/audit-logs')) return 'audit';
   if (pathname.startsWith('/admin/roster')) return 'roster';
@@ -375,11 +432,19 @@ const PAGE_META = {
     profile: { title: 'My profile', sub: 'Your public track record and organizer status' }
   },
   staff: {
-    dashboard: { title: 'Moderation Center', sub: 'Approve organizers and moderate events' },
+    dashboard: { title: 'Dashboard', sub: 'Reports waiting, organizers to approve, and how the programme is doing' },
     browse: { title: 'All events', sub: 'Everything posted across the district' },
     notifications: { title: 'Notifications', sub: 'Platform activity' },
     errors: { title: 'Errors', sub: 'Crashes and faults reported by browsers, the server, and background jobs' },
-    appeals: { title: 'Appeals', sub: 'Review and decide user suspension appeals' }
+    appeals: { title: 'Appeals', sub: 'Review and decide user suspension appeals' },
+    moderation: { title: 'Moderation Center', sub: 'Every administrative area you can open' },
+    /* `staff` only, because `staff` is now the only persona that can open the
+       page — `analytics.impact` is administrative. There was no entry for it at
+       all while every role could reach it, so the topbar fell back to the
+       application name and the one page of figures was the one page with no
+       title. */
+    impact: { title: 'Community impact', sub: 'What the programme has done, counted from confirmed attendance' },
+    adminImpact: { title: 'Platform Impact', sub: 'Programme-wide figures for the whole platform' }
   },
   partner: {
     dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
@@ -831,6 +896,17 @@ function AppShell({ toasts, addToast, removeToast }) {
      route but four regardless of what renders here (server/suspendedAccess.js),
      so deleting this component would leave the account just as locked out and
      merely uninformed. */
+  /* An earlier revision replaced this with the shell rendered underneath a
+     blurred, `inert` overlay. That is reverted, for three reasons, and the
+     ordering above is the first of them:
+       1. It moved the suspension check BELOW the two walls, so a suspended
+          account with an unconfirmed address was sent round the verification
+          loop this comment exists to prevent.
+       2. `filter: blur()` on the shell establishes a containing block for
+          every `position: fixed` descendant, which is where the toasts,
+          modals and the profile menu live.
+       3. It mounted the whole authenticated shell — nav, notification poll,
+          page data — for an account the server answers on four routes. */
   if (currentUser.suspension) {
     return (
       <>
@@ -978,7 +1054,9 @@ function AppShell({ toasts, addToast, removeToast }) {
     },
     '/impact': {},
     '/admin/audit-logs': {},
-    '/admin/roster': {}
+    '/admin/roster': {},
+    '/admin/impact': {},
+    '/admin/moderation': { currentUser }
   };
 
   /** Where a route the user cannot reach sends them. Unchanged from the ternaries. */
@@ -1010,6 +1088,12 @@ function AppShell({ toasts, addToast, removeToast }) {
      Guarded on `viewingProfile` because a profile overlay is state, not a path:
      it renders over whatever route is current, and closing it returns there. */
   if (!viewingProfile && !shellServes(currentPath)) {
+    /* …except the screens that exist only for somebody with no session. They
+       are not unknown URLs — they are the front door, answered while already
+       inside. `replace` so Back does not bounce off the same redirect. */
+    if (isSignedOutOnlyPath(currentPath)) {
+      return <Navigate to="/" replace />;
+    }
     return <ErrorExperience kind="404" />;
   }
 
@@ -1076,8 +1160,10 @@ function AppShell({ toasts, addToast, removeToast }) {
           {navSections.primary.map(renderNavItem)}
 
           {navSections.groups.map(({ id, label, items }) => (
-            <div key={id} className="nav-section" role="group" aria-labelledby={`nav-group-${id}`}>
-              <h2 className="nav-section-label" id={`nav-group-${id}`}>{label}</h2>
+            /* `aria-label` rather than a rendered `<h2>` — see NAV_GROUPS. The
+               group keeps its accessible name; the separator above it is drawn
+               by `.nav-section` in CSS, costing one pixel instead of a row. */
+            <div key={id} className="nav-section" role="group" aria-label={label}>
               {items.map(renderNavItem)}
             </div>
           ))}
@@ -1305,8 +1391,9 @@ function AppShell({ toasts, addToast, removeToast }) {
               {moreSections.primary.map(renderMoreItem)}
 
               {moreSections.groups.map(({ id, label, items }) => (
-                <div key={id} className="nav-section" role="group" aria-labelledby={`more-group-${id}`}>
-                  <h2 className="nav-section-label" id={`more-group-${id}`}>{label}</h2>
+                /* Same treatment as the rail — see NAV_GROUPS. The sheet is
+                   where the headings cost the most: it has the least room. */
+                <div key={id} className="nav-section" role="group" aria-label={label}>
                   {items.map(renderMoreItem)}
                 </div>
               ))}
