@@ -64,7 +64,7 @@ const STRONG = 'JXAvK3n2Qp7RtY9wLmZbC4dE6fG8hJ1kN5oP0qS2uV4xA7yB9cD3eF5gH8iJ0kLm
  */
 const TFA_KEY = 'c3VwZXJzZWNyZXRrZXkxMjM0NTY3ODkwYWJjZGVmZ2g=';
 
-const PROD = { NODE_ENV: 'production', JWT_SECRET: STRONG, TFA_ENCRYPTION_KEY: TFA_KEY };
+const PROD = { NODE_ENV: 'production', JWT_SECRET: STRONG, TFA_ENCRYPTION_KEY: TFA_KEY, REQUIRE_ADMIN_2FA: 'true' };
 const GOOGLE = { GOOGLE_CLIENT_ID: 'id.apps.googleusercontent.com', GOOGLE_CLIENT_SECRET: 'secret' };
 const MICROSOFT = { MICROSOFT_CLIENT_ID: 'ms-id', MICROSOFT_CLIENT_SECRET: 'ms-secret' };
 

@@ -102,3 +102,14 @@ gha-creds-*.json
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# User-uploaded files. `server/public/uploads/` is where profile pictures land
+# at runtime, and it was untracked and committable — a real student's photograph
+# one broad `git add` away from the repository, and from every clone of it
+# thereafter. Same class of mistake as the `.sqlite` rule above: a runtime
+# artefact that looks like source because it sits under `server/`.
+#
+# The directory itself is not tracked either. `profilePictureRoutes.js` creates
+# it on demand (`mkdirSync` with `recursive: true`), so nothing depends on it
+# existing in a fresh clone.
+server/public/uploads/

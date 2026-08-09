@@ -169,6 +169,47 @@ function resolveTfaKey() {
 
 export const TFA_ENCRYPTION_KEY = resolveTfaKey();
 
+/**
+ * Whether an administrator must hold a second factor to use their privileges.
+ *
+ * ── Why it defaults to ON ──
+ *
+ * It was introduced defaulting to OFF (`=== 'true'`, so `undefined` meant
+ * false), guarded by the production throw below. That made production safe and
+ * left everything that is not exactly `NODE_ENV=production` — staging, CI, a
+ * pilot deployment, a demo in front of a school district — silently running
+ * with administrator 2FA disabled, on a variable nobody had to mention.
+ *
+ * A security control whose default is "off" is off wherever somebody forgot,
+ * and the places people forget are exactly the ones with real data and no
+ * review. So `undefined` now means ENABLED, and switching it off is an explicit
+ * `REQUIRE_ADMIN_2FA=false` that a reader can see in an env file.
+ *
+ * The production throw is kept even though the default now satisfies it: it
+ * catches the case that actually matters, which is somebody setting it to
+ * `false` for a local reason and that value reaching production.
+ *
+ * ── Why the escape hatch exists at all ──
+ *
+ * `npm run dev` seeds a demo database whose administrator fixtures have no
+ * authenticator enrolled, and there is deliberately no code path that can enrol
+ * one for them (see the demo-owner guard in db.js). Without a way to say so,
+ * the seeded demo is a database nobody can sign into as an administrator.
+ * `.env.development` sets it to false for that reason and only that reason.
+ */
+const rawRequireAdmin2FA = process.env.REQUIRE_ADMIN_2FA;
+if (rawRequireAdmin2FA !== undefined && rawRequireAdmin2FA !== 'true' && rawRequireAdmin2FA !== 'false') {
+  throw new Error(`FATAL: REQUIRE_ADMIN_2FA must be "true", "false", or undefined. Got: ${rawRequireAdmin2FA}`);
+}
+export const REQUIRE_ADMIN_2FA = rawRequireAdmin2FA !== 'false';
+
+if (IS_PRODUCTION && !REQUIRE_ADMIN_2FA) {
+  throw new Error(
+    'FATAL: REQUIRE_ADMIN_2FA must not be "false" in production. '
+    + 'Administrators hold every capability on the platform; a password alone is '
+    + 'not enough to stand behind that. Remove the variable to get the safe default.'
+  );
+}
 
 export const VALID_GRADES = ['9', '10', '11', '12', 'Adult', 'N/A'];
 export const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
@@ -194,8 +235,24 @@ export const MAX_AUTO_SELECT_DRAWS = Number(process.env.MAX_AUTO_SELECT_DRAWS) |
  * The mock is now opt-in and impossible to reach in production. It requires
  * OAUTH_ALLOW_MOCK=true, and NODE_ENV must not be production. A production
  * process that sets the flag refuses to boot rather than starting insecure.
+ *
+ * ── Why the DEFAULT is now false, and not `!IS_PRODUCTION` ──
+ *
+ * It defaulted to on in every non-production process, and that turned out to be
+ * the same mistake in a smaller costume. A developer with real Google
+ * credentials in `.env` — which is the normal state for anyone testing the real
+ * flow — pressed "Continue with Google", was redirected to Google, signed in for
+ * real, came back to the callback, and got **"Mock User" / "mock@example.com"**
+ * prefilled into the signup form. `verifyCallback` checks the flag BEFORE
+ * attempting the code exchange, so the mock silently shadowed the working
+ * credentials and the real integration could not be exercised at all.
+ *
+ * "Off unless asked for" is the only default that cannot do that. The suites
+ * that genuinely need the transport set the variable themselves — see
+ * `startTestServer` — which also makes each one say out loud that it is not
+ * talking to a real provider.
  */
-export const OAUTH_ALLOW_MOCK = process.env.OAUTH_ALLOW_MOCK !== undefined ? process.env.OAUTH_ALLOW_MOCK === 'true' : !IS_PRODUCTION;
+export const OAUTH_ALLOW_MOCK = process.env.OAUTH_ALLOW_MOCK === 'true';
 if (OAUTH_ALLOW_MOCK && IS_PRODUCTION) {
   throw new Error(
     'FATAL: OAUTH_ALLOW_MOCK=true is set in a production process. The mock OAuth '
@@ -208,6 +265,23 @@ export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 export const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || '';
 export const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET || '';
+
+/**
+ * Which Microsoft directory may sign in.
+ *
+ * `common` — the default — accepts any Entra ID tenant and personal Microsoft
+ * accounts. That is right for a district that has not decided yet, and wrong for
+ * one that has: with `common`, anybody on the internet with any Microsoft account
+ * can complete the flow, and the only thing standing between them and an account
+ * here is the email-verification step (which a Microsoft sign-up still requires,
+ * because Graph's `mail` carries no proof of control — see providers/microsoft.js).
+ *
+ * Set it to the district's tenant GUID to refuse every other directory at the
+ * provider, before a token is ever minted. `providers/microsoft.js` additionally
+ * checks the `tid` claim against this value, so a tenant restriction cannot be
+ * bypassed by pointing the flow at a different authorize URL.
+ */
+export const MICROSOFT_TENANT_ID = process.env.MICROSOFT_TENANT_ID || 'common';
 export const OAUTH_REDIRECT_URI = process.env.OAUTH_REDIRECT_URI || 'http://localhost:5173/oauth/callback';
 
 /**

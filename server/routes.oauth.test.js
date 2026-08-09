@@ -372,6 +372,93 @@ describe('oauth', () => {
     expect(res.cookie).toBeNull();
   });
 
+  /**
+   * The signup form is prefilled from the PROVIDER, and never from a placeholder.
+   *
+   * ── The incident this pins ──
+   *
+   * A developer holding working Google credentials pressed "Continue with
+   * Google", authenticated with Google for real, and landed on the signup form
+   * with **"Mock User"** and **"mock@example.com"** already filled in. Two
+   * defects lined up: `OAUTH_ALLOW_MOCK` defaulted to on outside production (so
+   * the mock branch ran before the real code exchange and shadowed the real
+   * credentials), and that branch ended in a `catch` that fabricated an identity
+   * whenever the `code` was not JSON — which is exactly what a genuine opaque
+   * authorization code is.
+   *
+   * `oauth.noFakeIdentity.test.js` covers the flag's default and the removal of
+   * the fabrication. This is the other end: whatever the transport, the values
+   * the client is told to prefill are the ones the SERVER derived from the
+   * provider's claims, and nothing else. `providerEmail` and `providerNameClaim`
+   * in oauthRoutes.js come from `verifyCallback`'s return value, never from the
+   * request body — so there is no path by which a browser can propose its own
+   * name or address here.
+   */
+  it('prefills the signup form from the provider claims, not a placeholder', async () => {
+    const email = `real.person-${Math.random().toString(36).slice(2, 8)}@school.org`;
+    const { state, nonceCookie } = await begin('google');
+
+    const res = await callback('google', {
+      code: identity({ email, name: 'Real Person', sub: 'real-sub-1' }),
+      state, nonceCookie
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.action).toBe('signup_required');
+    /* Exactly what the provider asserted — lowercased, which is the server's own
+       normalisation and the only transformation applied. */
+    expect(res.body.email).toBe(email.toLowerCase());
+    expect(res.body.name).toBe('Real Person');
+    expect(res.body.provider).toBe('google');
+  });
+
+  /**
+   * The specific strings, asserted on the wire.
+   *
+   * Belt and braces beside the source scan in `oauth.noFakeIdentity.test.js`: that
+   * one proves the literals are absent from the code, this one proves nothing
+   * reconstructs them at runtime. The whole response body is stringified because
+   * the defect appeared in a field nobody was checking.
+   */
+  it('never puts a placeholder identity on the wire', async () => {
+    const { state, nonceCookie } = await begin('google');
+    const res = await callback('google', {
+      code: identity({ email: 'someone@school.org', name: 'Someone Real' }),
+      state, nonceCookie
+    });
+
+    const body = JSON.stringify(res.body);
+    expect(body).not.toContain('Mock User');
+    expect(body).not.toContain('mock@example.com');
+    expect(body).toContain('Someone Real');
+  });
+
+  /**
+   * A `code` the mock cannot read is an ERROR, not an invented account.
+   *
+   * This is the request the developer's browser actually made — a real Google
+   * authorization code, posted while the mock transport was active. It used to
+   * produce a fabricated identity and a signup form; it must now refuse, and no
+   * account may exist afterwards.
+   */
+  it('refuses a non-JSON code under the mock transport instead of inventing a user', async () => {
+    const { state, nonceCookie } = await begin('google');
+    const res = await callback('google', {
+      code: '4/0AeanS0bQ-a-real-looking-opaque-authorization-code',
+      state, nonceCookie
+    });
+
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    const body = JSON.stringify(res.body);
+    expect(body).not.toContain('Mock User');
+    expect(body).not.toContain('mock@example.com');
+
+    const db = new DatabaseSync(process.env.WEV_DB_PATH);
+    const fake = db.prepare("SELECT 1 FROM users WHERE email LIKE '%mock%'").get();
+    db.close();
+    expect(fake, 'a fabricated account was created').toBeFalsy();
+  });
+
   // ── Linking ───────────────────────────────────────────────────────
 
   /**
