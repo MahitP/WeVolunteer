@@ -18,7 +18,8 @@ import { validateAccountFields, validatePassword, validateUsername, validateEmai
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
 import { isSuspended, liftIfExpired, suspensionNotice } from '../suspension.js';
 import { ROLE } from '../authz.js';
-import { decryptSecret, verifyTotp } from '../cryptoUtils.js';
+import { decryptSecret } from '../cryptoUtils.js';
+import { verifyTotpOnce } from '../totpReplay.js';
 import { recordSecurityEvent } from '../securityAudit.js';
 
 const router = express.Router();
@@ -732,7 +733,11 @@ router.post('/api/auth/login-2fa', async (req, res) => {
        * `verifyTotp` returns a real boolean and cannot be misread. See
        * cryptoUtils.js.
        */
-      isValid = verifyTotp(token, userRow.tfa_secret);
+      /* `verifyTotpOnce` rather than `verifyTotp`: it records the time step it
+         accepted and refuses one already spent, so an intercepted code cannot be
+         replayed inside its own window to mint a second session. See
+         server/totpReplay.js. */
+      isValid = verifyTotpOnce(db, userRow, token);
     } else if (effectiveMethod === 'email' && code) {
       // Find valid codes for the user. We must bcrypt.compare each one.
       /**
@@ -904,10 +909,43 @@ router.post('/api/auth/login-2fa/email/send', async (req, res) => {
     'INSERT INTO tfa_email_codes (id, user_id, code_hash, expires_at) VALUES (?, ?, ?, ?)'
   ).run(codeId, userRow.id, codeHash, expiresAt);
 
+  /**
+   * The delivery result is the answer, not a side effect.
+   *
+   * `send2FACode` returns FALSE when the relay is unreachable — it retries three
+   * times and then gives up by design, so a dead relay cannot hang this request.
+   * The return value used to be discarded and this endpoint answered
+   * `{ sent: true }` either way.
+   *
+   * The consequences compound, because by this point the writes above have
+   * already happened. Every previous code was retired, so the working code in the
+   * user's inbox is now dead; the new one was never delivered; and the row that
+   * was just inserted arms the sixty-second cooldown. The user is told a code is
+   * on its way, has none, has lost the one they had, and must wait a minute to be
+   * told the same thing again — with the interface showing success throughout.
+   * For an account whose only second factor is email, that is a complete sign-in
+   * lockout reported as a success.
+   *
+   * The row is deliberately LEFT in place on failure. Deleting it would clear the
+   * cooldown and turn a broken relay into an endpoint that can be hammered, three
+   * SMTP attempts and two backoff sleeps at a time; the row expires in ten
+   * minutes on its own and authorises nothing, since nobody ever received it.
+   */
   const { send2FACode } = await import('../email.js');
-  await send2FACode(userRow.email, code);
+  const delivered = await send2FACode(userRow.email, code);
 
   const masked = userRow.email.replace(/^(.{2})(.*)(@.*)$/, '$1***$3');
+
+  if (!delivered) {
+    console.error(`[2FA] Failed to deliver a sign-in code to user ${userRow.id}.`);
+    return res.status(502).json({
+      error: 'We could not send your code right now. Please try again in a minute, '
+        + 'or use your authenticator app or a recovery code.',
+      code: 'delivery_failed',
+      sent: false
+    });
+  }
+
   res.json({ sent: true, maskedEmail: masked });
 });
 
