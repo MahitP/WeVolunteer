@@ -361,14 +361,22 @@ describe('five failed attempts lock the challenge', () => {
       expect(res.error, `attempt ${i}`).toBe('invalid_password');
     }
 
+    /**
+     * `account_locked`, not `locked`, since MAX_ACCOUNT_ATTEMPTS was brought
+     * down to meet MAX_ATTEMPTS: the fifth wrong answer now empties the
+     * account's budget at the same moment it kills the row, and the account is
+     * the stricter of the two facts. The distinction is not cosmetic — `locked`
+     * tells the user to start again, which is precisely what no longer helps.
+     * See reauthRefreshBypass.test.js for why that mattered.
+     */
     const fifth = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: 'Wrong5' });
-    expect(fifth.error).toBe('locked');
+    expect(fifth.error).toBe('account_locked');
     expect(row(ch.id).attempts).toBe(5);
 
     // The assertion that matters: the correct password no longer helps. A lock
     // that the right guess can still open is not a lock.
     const correct = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: PASSWORD });
-    expect(correct).toEqual({ ok: false, error: 'locked' });
+    expect(correct).toEqual({ ok: false, error: 'account_locked' });
     expect(row(ch.id).granted_at).toBe(null);
   });
 
@@ -383,7 +391,11 @@ describe('five failed attempts lock the challenge', () => {
     const res = await reauth.grantByOAuth({
       db, challengeId: ch.id, userId, provider: 'google', subject: 'right-sub'
     });
-    expect(res).toEqual({ ok: false, error: 'locked' });
+    /* `account_locked`: five mismatches is the whole account budget now, so the
+       account is what refuses the correct sub. The property under test is
+       unchanged — a mismatch costs an attempt, and the right answer arriving
+       after the budget is gone does not help. */
+    expect(res).toEqual({ ok: false, error: 'account_locked' });
     expect(row(ch.id).granted_at).toBe(null);
   });
 
@@ -419,8 +431,11 @@ describe('five failed attempts lock the challenge', () => {
       expect(res.attemptsRemaining, `attempt ${i} reported a budget that never moves`).toBe(5 - i);
     }
 
+    /* `account_locked` for the same reason as above: the fifth failure is now
+       the last one the ACCOUNT has, so that is the refusal it earns. What this
+       test is about is unchanged — the counter moved on a granted challenge. */
     const fifth = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: 'Wrong5' });
-    expect(fifth.error).toBe('locked');
+    expect(fifth.error).toBe('account_locked');
     expect(row(ch.id).attempts, 'the counter was frozen by the granted_at guard').toBe(5);
   });
 
@@ -454,31 +469,67 @@ describe('five failed attempts lock the challenge', () => {
 /**
  * Explicit budgets on this block, measured rather than guessed.
  *
- * Each of the four tests below drives the account ceiling by exhausting three whole
- * challenges, so each one performs 3 x MAX_ATTEMPTS real bcrypt comparisons — the cost is the
- * point, because the ceiling is what stops an attacker opening a fresh challenge per guess.
+ * Each test below drives the account ceiling by spending it in full, so each one performs
+ * MAX_ACCOUNT_ATTEMPTS real bcrypt comparisons — the cost is the point, because the ceiling is
+ * what stops an attacker opening a fresh challenge per guess.
  *
- * In isolation they run 1.7-2.0s against vitest's 5000ms default. Under the parallel load of
- * the full suite one of them was measured at 5094ms and timed out. Nothing was hung: the work
- * simply did not fit, which makes it a flake rather than a defect in the code under test — and
- * flakiness is a defect in its own right here, on the gate every other gate depends on.
+ * These used to spend three whole challenges, because MAX_ACCOUNT_ATTEMPTS was three times
+ * MAX_ATTEMPTS. It no longer is, and `exhaustAccountBudget` below spends the budget rather than
+ * a hardcoded number of challenges — so these tests keep testing the ceiling if the two
+ * constants ever diverge again, instead of quietly testing a third of it.
  *
- * 20s is ~10x the isolated cost. The global default stays 5000ms so a genuinely hung test still
- * fails fast, and the ceiling these tests cover is not weakened to fit a timer.
+ * In isolation they ran 1.7-2.0s against vitest's 5000ms default at the old cost. Under the
+ * parallel load of the full suite one was measured at 5094ms and timed out. Nothing was hung:
+ * the work simply did not fit, which makes it a flake rather than a defect in the code under
+ * test — and flakiness is a defect in its own right here, on the gate every other gate depends
+ * on. The generous timeout is kept: the cost fell with the constant, but the reason the
+ * default was too tight (parallel load, not the work itself) did not go away.
+ *
+ * The global default stays 5000ms so a genuinely hung test still fails fast, and the ceiling
+ * these tests cover is not weakened to fit a timer.
  */
 describe('the account-level guessing ceiling', () => {
+  /**
+   * Spends the account's whole guessing budget on wrong answers.
+   *
+   * Opens a fresh challenge whenever the current one hits its own per-challenge
+   * limit, which is what an attacker does and what a user pressing refresh does
+   * by accident. Written against the CONSTANTS rather than against a fixed
+   * number of challenges: while MAX_ACCOUNT_ATTEMPTS was 15 and MAX_ATTEMPTS was
+   * 5 this loop opened three challenges, and now it opens one — with no test
+   * below needing to know which.
+   *
+   * `verify` is the answer path being charged, so the OAuth case can spend the
+   * same budget through its own door.
+   */
+  async function exhaustAccountBudget(userId, tag, verify) {
+    const spend = verify ?? ((challengeId, i) =>
+      reauth.grantByPassword({ db, challengeId, userId, password: `Wrong-${tag}-${i}` }));
+
+    let ch = null;
+    let onThisChallenge = 0;
+    for (let i = 0; i < reauth.MAX_ACCOUNT_ATTEMPTS; i++) {
+      if (!ch || onThisChallenge >= reauth.MAX_ATTEMPTS) {
+        ch = open({ userId, sessionJti: `jti-${tag}-${i}` });
+        onThisChallenge = 0;
+      }
+      await spend(ch.id, i);
+      onThisChallenge++;
+    }
+
+    /* The budget really is gone — otherwise every assertion below passes for the
+       wrong reason, which is the failure mode this whole block exists to catch. */
+    expect(ch, `${tag}: no challenge was ever opened`).not.toBe(null);
+    expect(row(ch.id).attempts, `${tag}: the last challenge recorded no attempts`)
+      .toBeGreaterThan(0);
+  }
+
   it('stops guessing across fresh challenges, not just within one', async () => {
     const userId = makeUser();
 
-    // Three full challenges: fifteen wrong answers, each one legitimately
-    // counted, each new challenge starting its own counter at zero.
-    for (let c = 0; c < 3; c++) {
-      const ch = open({ userId, sessionJti: `jti-acct-${c}` });
-      for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
-        await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: `Wrong-${c}-${i}` });
-      }
-      expect(row(ch.id).attempts, `challenge ${c} did not reach its own limit`).toBe(reauth.MAX_ATTEMPTS);
-    }
+    // The account's whole budget, spent on wrong answers — spread over as many
+    // challenges as it takes, each new one starting its own counter at zero.
+    await exhaustAccountBudget(userId, 'acct');
 
     // A brand-new challenge, therefore un-locked by every per-challenge rule.
     const fresh = open({ userId, sessionJti: 'jti-acct-fresh' });
@@ -490,12 +541,7 @@ describe('the account-level guessing ceiling', () => {
 
   it('refuses the correct password too — a ceiling the right guess opens is not one', async () => {
     const userId = makeUser();
-    for (let c = 0; c < 3; c++) {
-      const ch = open({ userId, sessionJti: `jti-right-${c}` });
-      for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
-        await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: `Wrong-${c}-${i}` });
-      }
-    }
+    await exhaustAccountBudget(userId, 'right');
 
     const fresh = open({ userId, sessionJti: 'jti-right-fresh' });
     const res = await reauth.grantByPassword({ db, challengeId: fresh.id, userId, password: PASSWORD });
@@ -508,12 +554,7 @@ describe('the account-level guessing ceiling', () => {
     const noisy = makeUser();
     const quiet = makeUser();
 
-    for (let c = 0; c < 3; c++) {
-      const ch = open({ userId: noisy, sessionJti: `jti-noisy-${c}` });
-      for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
-        await reauth.grantByPassword({ db, challengeId: ch.id, userId: noisy, password: `Wrong-${c}-${i}` });
-      }
-    }
+    await exhaustAccountBudget(noisy, 'noisy');
 
     const ch = open({ userId: quiet, sessionJti: 'jti-quiet' });
     const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId: quiet, password: PASSWORD });
@@ -523,25 +564,21 @@ describe('the account-level guessing ceiling', () => {
 
   it('counts only the window, so an old spree does not lock an account for ever', async () => {
     const userId = makeUser();
-    const stale = open({ userId, sessionJti: 'jti-stale' });
-    for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
-      await reauth.grantByPassword({ db, challengeId: stale.id, userId, password: `Wrong${i}` });
-    }
 
-    // Age the spree past the window. Written directly because the alternative
-    // is a fifteen-minute test.
+    // A full spree: at this instant the account can do nothing.
+    await exhaustAccountBudget(userId, 'stale');
+
+    // Age it past the window. Written directly because the alternative is a
+    // fifteen-minute test.
     const old = new Date(Date.now() - reauth.ACCOUNT_ATTEMPT_WINDOW_MS - 1000).toISOString();
-    db.prepare('UPDATE reauth_challenges SET created_at = ? WHERE id = ?').run(old, stale.id);
+    db.prepare('UPDATE reauth_challenges SET created_at = ? WHERE user_id = ?').run(old, userId);
 
-    // Two more sprees inside the window: ten attempts, still under the ceiling
-    // of fifteen — but twenty if the aged one were still being counted.
-    for (let c = 0; c < 2; c++) {
-      const ch = open({ userId, sessionJti: `jti-recent-${c}` });
-      for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
-        await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: `Wrong-${c}-${i}` });
-      }
-    }
-
+    /**
+     * The lock has to lift, or the ceiling is a permanent account lockout that
+     * anyone who knows an address can trigger. The window is the entire reason
+     * the ceiling is safe to enforce, so it is asserted with the CORRECT
+     * password: the account is fully usable again, not merely counting again.
+     */
     const fresh = open({ userId, sessionJti: 'jti-window-fresh' });
     const res = await reauth.grantByPassword({ db, challengeId: fresh.id, userId, password: PASSWORD });
 
@@ -550,14 +587,10 @@ describe('the account-level guessing ceiling', () => {
 
   it('applies to the OAuth path on the same budget', async () => {
     const userId = makeUser({ providers: [['google', 'oauth-ceiling-sub']] });
-    for (let c = 0; c < 3; c++) {
-      const ch = open({ userId, sessionJti: `jti-oauth-${c}` });
-      for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
-        await reauth.grantByOAuth({
-          db, challengeId: ch.id, userId, provider: 'google', subject: `wrong-${c}-${i}`
-        });
-      }
-    }
+    await exhaustAccountBudget(userId, 'oauth', (challengeId, i) =>
+      reauth.grantByOAuth({
+        db, challengeId, userId, provider: 'google', subject: `wrong-oauth-${i}`
+      }));
 
     const fresh = open({ userId, sessionJti: 'jti-oauth-fresh' });
     const res = await reauth.grantByOAuth({

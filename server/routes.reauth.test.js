@@ -341,9 +341,12 @@ describe('POST /api/auth/reauth/password', () => {
     for (let i = 0; i < 5; i++) {
       await verifyPassword(session, opened.body.challengeId, `wrong-${i}`);
     }
+    /* 429 either way; the code is `account_locked` because five wrong guesses is
+       now the account's entire budget, not just this challenge's. The status and
+       the refusal of the correct password are what this test is about. */
     const locked = await verifyPassword(session, opened.body.challengeId, PASSWORD);
     expect(locked.status).toBe(429);
-    expect(locked.body.code).toBe('locked');
+    expect(locked.body.code).toBe('account_locked');
     expect(row(opened.body.challengeId).granted_at).toBe(null);
   });
 
