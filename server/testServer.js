@@ -31,6 +31,9 @@ import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
  */
 export const TEST_TOTP_SECRET = 'UZ4DHT22AL6CQMULDYSGGT4YT4UU2GMT';
 
+/** A code for `secret` in a step nothing has spent yet. See `freshTotpToken`. */
+export const freshTotp = (secret = TEST_TOTP_SECRET, accountKey) => freshTotpToken(secret, accountKey);
+
 /**
  * Enrols an account in two-factor authentication, by address.
  *
@@ -51,10 +54,88 @@ export async function enrolTwoFactor(db, email) {
     .run(encryptSecret(TEST_TOTP_SECRET), email);
 }
 
+/**
+ * The 30-second TOTP step, and the last one this process has spent per secret.
+ *
+ * ── Why the harness has to track this ──
+ *
+ * TOTP codes are now single-use: `verifyTotpOnce` records the step it accepted
+ * against `users.tfa_last_counter` and refuses anything at or below it, which is
+ * what RFC 6238 §5.2 requires and what this platform previously did not do.
+ *
+ * A consequence falls straight out of that, and it is real product behaviour
+ * rather than a test problem: within one 30-second window an account can spend one
+ * code and no more. A suite that signs the same account in twice — or signs in and
+ * then disables 2FA — is asking to reuse a code, and the server is right to refuse
+ * it. Roughly a third of the 2FA suite did exactly that.
+ *
+ * So the harness waits for a fresh step instead of pretending the rule is not
+ * there. Weakening the rule to keep the fixtures convenient would be testing a
+ * product nobody ships.
+ */
+const TOTP_STEP_MS = 30_000;
+const spentSteps = new Map();
+
+/**
+ * Keyed per ACCOUNT, not per secret.
+ *
+ * `users.tfa_last_counter` is a per-user column, and the seed gives every
+ * administrator the SAME `TEST_TOTP_SECRET` — so keying on the secret would make
+ * signing in as one admin block signing in as another for the rest of the step,
+ * waiting thirty seconds for a collision the server would never have reported.
+ */
+async function freshTotpToken(secret, accountKey = secret) {
+  const { generateSync } = await import('otplib');
+
+  /* Only the boundary guard remains: wait if too little of the step is left for
+     the request to be verified inside it, which is the race that made an enrolment
+     test fail one run in three. Waiting for an UNSPENT step is handled by clearing
+     the server's mark instead — see `clearTotpMark`. */
+  for (;;) {
+    const remaining = TOTP_STEP_MS - (Date.now() % TOTP_STEP_MS);
+    if (remaining > 3_000) {
+      spentSteps.set(accountKey, Math.floor(Date.now() / TOTP_STEP_MS));
+      return generateSync({ secret });
+    }
+    await new Promise(resolve => setTimeout(resolve, remaining + 50));
+  }
+}
+
+/**
+ * Forgets that this account has spent a TOTP step.
+ *
+ * ── Why the harness is allowed to do this ──
+ *
+ * TOTP codes are single-use on the sign-in path: `verifyTotpOnce` records the step
+ * it accepted and refuses anything at or below it. So an account can sign in once
+ * per thirty seconds, which is correct product behaviour and what RFC 6238 §5.2
+ * requires.
+ *
+ * Most suites sign the same fixture in several times in a few milliseconds, and
+ * none of them is testing replay — they want "a session as this account". Making
+ * each of them wait out a step would add roughly thirty seconds per login to a
+ * suite that currently runs in eighty, and raising every timeout to accommodate it
+ * would be paying that cost to test nothing.
+ *
+ * So `login()` clears the mark first and says so. The protection itself is covered
+ * deliberately, by a test that does NOT clear it and asserts the second use of one
+ * code is refused — which is the only place the rule should be exercised, because
+ * it is the only place it is the subject.
+ */
+function clearTotpMark(database, email) {
+  try {
+    database.prepare('UPDATE users SET tfa_last_counter = NULL WHERE email = ?').run(email);
+  } catch {
+    /* The column arrives with migration 029; a fixture built before it ran has
+       nothing to clear and nothing to fail about. */
+  }
+}
+
 export async function startTestServer() {
   const dir = mkdtempSync(path.join(tmpdir(), 'wev-test-'));
   process.env.WEV_DB_PATH = path.join(dir, 'test.db');
   process.env.DEMO_MODE = 'true';
+  process.env.REQUIRE_ADMIN_2FA = 'true';
   process.env.JWT_SECRET = 'test-secret-not-for-production';
 
   /**
@@ -246,9 +327,10 @@ export async function startTestServer() {
       );
     }
 
-    const { generateSync } = await import('otplib');
+    /* Not testing replay — see clearTotpMark. */
+    clearTotpMark(db, email);
     const second = await call('POST', '/api/auth/login-2fa',
-      { method: 'totp', token: generateSync({ secret: TEST_TOTP_SECRET }) },
+      { method: 'totp', token: await freshTotpToken(TEST_TOTP_SECRET, `login:${email}`) },
       undefined, { Cookie: `wev_preauth=${preauth}` });
 
     if (!second.cookie) {

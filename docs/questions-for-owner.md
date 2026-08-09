@@ -40,13 +40,25 @@ instead of a password.
 ## Q-2 · ~~Should the event taxonomy become impact-oriented?~~ — ANSWERED 2026-08-07
 
 **Owner's answer: organizer-created tags. No fixed taxonomy.** This supersedes the
-recommendation below, which proposed a curated tag vocabulary. Implementation is pending — see
-the note in `docs/audits/remaining-implementation-roadmap.md`. One consequence worth stating
-before it is built: free-form tags make the Impact Dashboard's "where the effort went" section
-harder to aggregate honestly, and organizers typing specifics is a privacy hazard on a platform
-whose users are mostly minors. The build will normalise case and whitespace, suppress tags below
-the same five-volunteer floor every other breakdown uses, and never render a tag as a heading
-without that suppression.
+recommendation below, which proposed a curated tag vocabulary.
+
+**BUILT 2026-08-08.** `event_tags(event_id, tag, label)` many-to-many, `events.category`
+kept and untouched, normalisation on `tag` (lower-cased, `#` stripped, whitespace
+collapsed) with `label` preserving the organizer's spelling — so `#NHS`, `#nhs` and
+`# NHS` are one concept that still renders the way its author wrote it. Filtering is
+server-side in the browse query, OR within the tag facet and AND with every other
+filter. See `server/eventTags.js` for the model and the limits.
+
+Two parts of the caution above are NOT yet addressed, deliberately, and are the
+follow-up work:
+
+- **Impact aggregation still reads `events.category`, not tags.** Nothing regressed —
+  the dashboard is exactly as honest as it was — but the "where the effort went"
+  improvement this answer was originally about has not been taken. When it is, tag
+  buckets must carry the same five-volunteer suppression every other breakdown uses.
+- **Tags are not suppressed anywhere yet**, because nothing aggregates them yet.
+  A tag is currently only ever shown on the event its own organizer put it on, which
+  discloses nothing about who volunteered.
 
 Original analysis kept below for the record.
 
@@ -89,22 +101,102 @@ real taxonomy. No migration was written.
 
 ---
 
-## Q-3 · ~~Should the Impact Dashboard have a public view?~~ — BUILT 2026-08-07
+## Q-12 · Activity-specific hours (NHS, clubs, school service) — DESIGNED, NOT BUILT
 
-**Answered by the mission brief's "Public Community Metrics", and built as recommended.**
-`GET /api/public/impact` and `/community` are live, unauthenticated, and linked from the sign-in
-page. They publish the four community totals plus the returning rate, and nothing else — no
-category, month, place or per-volunteer breakdown, and no filters at all.
+**Asked 2026-08-08. Recorded rather than implemented, because the architecture is
+sound and one product/legal decision is genuinely yours.**
 
-Two things went further than the recommendation below. The public payload is built by its own
-function that NAMES the fields it emits, rather than filtering the private one, so a breakdown
-added to the dashboard later cannot arrive here by inheritance. And the five-volunteer floor is
-applied to the totals themselves: a total over a whole population identifies nobody, which is the
-argument for publishing them, and that argument weakens when the population is four people at a
-named school. Below the floor the page says it is not published yet rather than showing zeros —
-"0 volunteers" is a different claim, and a false one.
+### What the audit found
 
-Original analysis kept below for the record.
+Hours live in exactly one place: `attendance(slot_id, user_id, present, hours_awarded)`,
+credited per SHIFT, and the authoritative total is derived on every read as
+`SUM(hours_awarded) WHERE present = 1` (INV-001 — never stored). Every consumer
+reads that same derivation: `server/hoursLedger.js`, the milestone ladder in
+`server/milestones.js`, `badgeService`, certificates, the transcript, the data
+export, and the Impact Dashboard.
+
+There is **no existing concept that can carry a programme**. `events.category` is a
+fixed five-value CHECK enum describing what an event IS, not who the hours count
+for. Event tags (built 2026-08-08) are organizer free text for DISCOVERY and must
+not be reused here — see Q-2 and the header of `server/eventTags.js`.
+
+### Recommended architecture
+
+**Put the programme on the ATTENDANCE row, not on the event and not on the user.**
+
+    programs(id, name, slug, created_by, active, created_at)
+    attendance.program_id  →  nullable FK, NULL meaning "General"
+
+Three reasons it belongs there:
+
+1. **The same event serves different programmes for different students.** One food
+   drive is NHS hours for one volunteer and Key Club hours for another. On the
+   event, that is unrepresentable; on the user, it cannot vary per shift.
+2. **Hours stay authoritative and singular.** `SUM(hours_awarded) WHERE present = 1`
+   is unchanged and remains the ONE total. A per-programme figure is the same sum
+   with `GROUP BY program_id` — a breakdown of the authoritative number, never a
+   second number that can disagree with it. This is the property that must not be
+   given up, and it is why a `nhs_hours` column would be wrong.
+3. **No migration per organisation.** `programs` is a table, so Key Club, Student
+   Council and "Mrs Alvarez's tutoring group" are rows. NHS is an example, not a
+   schema.
+
+`NULL` rather than a seeded "General" row: a nullable column needs no backfill, so
+every existing attendance row keeps its meaning, and "General" is a rendering
+decision rather than a piece of data somebody could delete.
+
+### The decision that is yours
+
+**Who may assert that hours count toward an external organisation, and how it is
+worded.** This platform cannot verify NHS's requirements, so it must not appear to
+certify them. The honest split:
+
+- an organizer marks an event's **eligible** programmes (a claim about intent);
+- a student's record says **"Recorded as NHS hours"**, never "Approved by NHS";
+- the transcript and certificate wording needs your sign-off, because that is the
+  artefact a college or an adviser reads.
+
+**Recommendation.** Build the schema above; let organizers nominate eligible
+programmes; render "Recorded as — not verified by —" wording everywhere it
+surfaces; and keep the platform-wide total exactly as it is. Do NOT let a tag
+become a programme automatically.
+
+**Implemented meanwhile.** Nothing. Hours remain a single undifferentiated total,
+which is correct-but-less-useful rather than wrong, so shipping the tags and the
+date picker first cost nothing here.
+
+---
+
+## Q-3 · ~~Should the Impact Dashboard have a public view?~~ — BUILT 2026-08-07, REVERSED 2026-08-08
+
+**The owner's answer was no, and the premise was wrong rather than the build.**
+
+"Public Community Metrics" was read as a page for strangers. It was not: the figures were wanted
+as an internal view of how the programme is doing, for the platform owner. So the public surface
+is REMOVED, not re-gated:
+
+- `GET /api/public/impact` is deleted. `routes.adminImpact.test.js` asserts it 404s, because a
+  route that still exists is a route somebody can still call.
+- `/community` is gone from the route table and from the sign-in page's footer.
+- The figures now live at `/admin/impact`, behind `analytics.platform` — SUPER_ONLY, so `can()`
+  refuses it before it consults per-user grants and no capability grant can reach it.
+
+**What the reversal changed about the payload.** The deliberately-small public shape was correct
+for an audience of anybody at all, and it protected nobody once the audience became the one
+account that can already read the roster and the audit trail. `/api/impact` has always served the
+full payload to `analytics.impact`, which every signed-in role holds, so a super_admin could
+already read all of it. The dashboard therefore serves the whole thing — including the month
+series, which is the only figure that answers "is participation rising" and the reason the owner
+wanted this at all. The per-bucket `MIN_BUCKET` suppression is untouched: it protects students
+from being described individually and applies to this reader exactly as it does on `/api/impact`.
+
+**What was dropped.** The availability floor that refused to publish anything below five
+volunteers. That floor was about a stranger reading a page about four named children; telling the
+owner of a four-volunteer programme "not published yet" about their own platform was a bug
+wearing a privacy argument.
+
+Original analysis kept below for the record. Note that its threat model — "a reader is a known
+account today, and would be anybody tomorrow" — is the thing that turned out not to apply.
 
 ### Original
 

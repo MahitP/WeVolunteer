@@ -7,6 +7,9 @@ import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
+/* Derived from the Silver tier, so the meter and the milestone cannot disagree
+   about what Silver means. See server/milestones.js. */
+import { SERVICE_HOUR_GOAL } from '../milestones.js';
 import { commentHasLiveReport, COMMENT_HELD_MESSAGE } from '../evidenceHolds.js';
 
 const router = express.Router();
@@ -454,7 +457,19 @@ router.get('/api/stats/volunteer', authenticateToken, requireCap('stats.self'), 
       monthlyHours: monthlyHours.map(m => ({ month: m.month, hours: Number(m.hours) })),
       categoryHours: categoryHours.map(c => ({ category: c.category, hours: Number(c.hours) })),
       applications: appStats.reduce((acc, s) => ({ ...acc, [s.status]: s.c }), {}),
-      upcomingCount: upcoming
+      upcomingCount: upcoming,
+      /**
+       * The hours figure the dashboard draws its progress meter against.
+       *
+       * Sent rather than known, because it was `const HOUR_GOAL = 25` in
+       * VolunteerDashboard.jsx and again in VolunteerProfile.jsx — two copies of
+       * the district's Silver Award threshold, in a different language from the
+       * server that decides whether the milestone is earned. Nothing could check
+       * them against it, so the meter could read "8 hours to go" beside a
+       * milestone already rendered as achieved. It is derived from the Silver
+       * tier in server/milestones.js, so there is one number.
+       */
+      serviceHourGoal: SERVICE_HOUR_GOAL
     });
   } catch (err) {
     console.error('Volunteer stats error:', err);
