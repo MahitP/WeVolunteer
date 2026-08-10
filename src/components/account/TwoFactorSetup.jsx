@@ -6,6 +6,9 @@ import { useStepUp } from '../auth/useStepUp';
 import { STEP_UP, REAUTH_CHALLENGE_HEADER, reauthHeader } from '../../utils/stepUp';
 import { downloadRecoveryCodesTxt, downloadRecoveryCodesPng } from '../../utils/recoveryCodeExport';
 
+/** How many codes a set contains. Matches the server's issuing loop. */
+const RECOVERY_SET_SIZE = 10;
+
 /**
  * Turning two-factor authentication on and off.
  *
@@ -706,10 +709,28 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
               <div className="row" style={{ marginBottom: 'var(--s2)' }}>
                 <Key size={18} aria-hidden="true" />
                 <span className="strong">Recovery codes</span>
-                <span className="dim small">{status.recoveryCodesRemaining} left</span>
+                <span className="dim small">{status.recoveryCodesRemaining} of {RECOVERY_SET_SIZE} left</span>
               </div>
               <p className="dim small" style={{ marginBottom: 'var(--s3)' }}>
                 Single-use codes for getting in if you lose your phone.
+                {/**
+                  * Says what spent the missing ones.
+                  *
+                  * A bare "9 left" is accurate and reads as alarming: somebody who
+                  * used a recovery code once, weeks ago, sees a number below ten
+                  * and reasonably concludes that an ordinary sign-in has been
+                  * quietly consuming them. It has not — only a recovery sign-in
+                  * decrements this, and the server reports the count on no other
+                  * path — but the card gave no way to know that, so the number
+                  * looked like evidence of something going wrong.
+                  *
+                  * Shown only when the set is incomplete, so the reassurance
+                  * appears exactly when there is something to explain.
+                  */}
+                {status.recoveryCodesRemaining < RECOVERY_SET_SIZE && (
+                  <> Signing in with a recovery code uses one up. Signing in with your
+                  authenticator or an email code does not.</>
+                )}
               </p>
               <button className="btn btn-secondary" onClick={() => setConfirmRegenerate(true)} disabled={busy}>
                 Create new recovery codes

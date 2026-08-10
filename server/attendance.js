@@ -127,6 +127,54 @@ export function computeEventCompletion(db, eventId, now) {
 }
 
 /**
+ * How long before a shift starts an organizer may begin marking arrivals.
+ *
+ * Two hours covers setting up early and a volunteer who turns up ahead of time,
+ * and it is short enough that "present" keeps meaning somebody was actually
+ * there. Marking a roster present days in advance is not check-in; it is a
+ * prediction, and it is the shape of an attendance record that was filled in
+ * rather than observed.
+ */
+export const CHECKIN_OPENS_BEFORE_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Whether check-in is open for this event, and when it opens if not.
+ *
+ * ── Why there is an opening time but no closing time ──
+ *
+ * The risk being closed off is marking people present for something that has
+ * not happened. That risk is entirely in the past direction, so the guard is
+ * too.
+ *
+ * A closing time would be a different thing wearing the same clothes:
+ * organizers reconcile attendance after the fact — somebody arrives late, a
+ * name is missed, a paper list gets typed up on Monday — and a deadline there
+ * would destroy an organizer's ability to correct the record without
+ * preventing a single dishonest mark. Under the decision rules that govern this
+ * repository (prefer preserving data, prefer preventing silent loss), an upper
+ * bound costs more than it protects. `finalizeAttendance` already refuses to
+ * credit a slot that has not ended, which is where the real money is.
+ *
+ * An event with no slots at all reports open: there is no time to be early
+ * relative to, and `recordCheckins` refuses every application anyway.
+ */
+export function checkinWindowState(db, event, now) {
+  const earliest = db.prepare(
+    'SELECT MIN(start_datetime) AS start FROM slots WHERE event_id = ?'
+  ).get(event.id)?.start;
+
+  if (!earliest) return { open: true, opensAt: null };
+
+  const opensAtMs = new Date(earliest).getTime() - CHECKIN_OPENS_BEFORE_MS;
+  if (!Number.isFinite(opensAtMs)) return { open: true, opensAt: null };
+
+  return {
+    open: new Date(now).getTime() >= opensAtMs,
+    opensAt: new Date(opensAtMs).toISOString(),
+  };
+}
+
+/**
  * Records check-in marks. Never touches `attendance`, never credits anything,
  * never writes to the ledger — nothing here changes anyone's hours.
  */

@@ -45,15 +45,56 @@ function messageForStatus(status) {
   return 'Something went wrong. Please try again.';
 }
 
+/**
+ * How long any single request may hang before it is treated as an outage.
+ *
+ * See the note inside `apiFetch`. Deliberately far above anything this product
+ * legitimately takes, so it only fires on something genuinely wrong.
+ */
+const REQUEST_TIMEOUT_MS = 45_000;
+
 async function apiFetch(endpoint, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
     ...(options.headers || {})
   };
 
+  /**
+   * Every request eventually gives up.
+   *
+   * ── The trap this closes ──
+   *
+   * `fetch` has no timeout of its own: a connection that is accepted and then
+   * goes quiet hangs until the OS gives up on the socket, which can be minutes.
+   * Five dialogs in this application — the two report modals, the resolution
+   * modal, `ConfirmDialog` and account deletion — deliberately refuse to close
+   * while a submission is in flight, and they refuse ALL of it: the Cancel
+   * button, the X, and Escape. That guard is right (a half-written destructive
+   * action must not be hidden behind a closed dialog) and it assumed the request
+   * would settle. If it never does, the user is sealed inside a modal with no
+   * way out and no error, on a page they cannot scroll.
+   *
+   * So the ceiling lives here, at the one place every request passes through,
+   * rather than in each dialog. An abort surfaces as the ordinary network error
+   * below, which every caller already handles by resetting its busy state and
+   * showing a message.
+   *
+   * Generous on purpose: 45 seconds is far longer than any endpoint in this
+   * product legitimately takes, including a profile-picture upload on a bad
+   * connection, so it can only ever fire on something genuinely wrong.
+   *
+   * A caller-supplied `signal` still wins — the signup form's availability
+   * probes abort on every keystroke and must keep doing so.
+   */
+  const timeout = AbortSignal.timeout ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : null;
+  const signal = options.signal && timeout
+    ? (AbortSignal.any ? AbortSignal.any([options.signal, timeout]) : options.signal)
+    : (options.signal || timeout || undefined);
+
   const config = {
     credentials: 'include',
     ...options,
+    ...(signal ? { signal } : {}),
     headers
   };
 
@@ -61,6 +102,20 @@ async function apiFetch(endpoint, options = {}) {
   try {
     response = await fetch(endpoint, config);
   } catch (err) {
+    /**
+     * A timeout is reported as an outage, not as a cancellation.
+     *
+     * `AbortSignal.timeout` rejects with `TimeoutError`, and lumping it in with
+     * the caller-initiated aborts below would rethrow it silently — which is
+     * exactly the trapped-modal state this ceiling exists to end.
+     */
+    if (err?.name === 'TimeoutError') {
+      throw new ApiError(
+        'The server took too long to respond. Check your connection and try again.',
+        { isNetworkError: true }
+      );
+    }
+
     // A cancelled request is not a failure — the live availability checks on
     // the signup form abort the previous probe on every keystroke, and
     // reporting each one as "could not reach the server" would flash an

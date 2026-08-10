@@ -235,7 +235,28 @@ const SELF_PROFILE_CAPS = SELF_PROFILE.filter(p => p.view !== 'denied').map(p =>
  * there.
  */
 const NAV = [
-  { id: 'browse', path: '/events', label: 'Opportunities', icon: Compass, requiredCap: 'event.view' },
+  /**
+   * ── "Discover", not "Opportunities" ──
+   *
+   * The page behind this entry has three sections — opportunities, people and
+   * organizations — behind one search, and its scope control offers
+   * Everything / Opportunities / People / Organizations. So the rail label
+   * "Opportunities" was the same word as ONE of the four tabs inside the page it
+   * opens: it named the whole destination and a quarter of it at once, and a
+   * reader who wanted a club had no way to tell from the rail that this was
+   * where clubs live.
+   *
+   * "Discover" names the activity all three sections share, leaves
+   * "Opportunities" free to mean events and only events, and is five characters
+   * shorter — which matters on the mobile bar, where five entries share the
+   * width of a phone.
+   *
+   * The word was chosen over "Browse" and "Explore" because it is what the
+   * reader is doing rather than how they are doing it, and over keeping
+   * "Opportunities" because the supporting copy alone could not fix a label that
+   * collides with a control on its own page.
+   */
+  { id: 'browse', path: '/events', label: 'Discover', icon: Compass, requiredCap: 'event.view' },
   { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, requiredCapAny: ['event.apply', 'event.create'] },
   { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, requiredCap: 'message.send' },
   /* "New event" is deliberately NOT a nav entry.
@@ -514,7 +535,7 @@ export const PAGE_META = {
      * search placeholder both say all three; the one sentence under the heading
      * did not.
      */
-    browse: { title: 'Opportunities', sub: 'Find a shift, a club, or someone you volunteer with' },
+    browse: { title: 'Discover', sub: 'Find a shift, a club, or someone you volunteer with' },
     calendar: { title: 'Calendar', sub: 'Your shifts and the deadlines that matter' },
     messages: { title: 'Messages', sub: 'Coordinate directly with organizers regarding your shifts' },
     notifications: { title: 'Notifications', sub: 'Replies, reminders, and event updates' },
