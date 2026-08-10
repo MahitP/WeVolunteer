@@ -283,19 +283,28 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     /* One list, no divider: `Admin` renders among the destinations rather than
-       under an "Administration" heading of its own. */
+       under an "Administration" heading of its own.
+
+       Profile is deliberately ABSENT. The rail ends in `ProfileMenu`, which
+       offers Profile / Notifications / Settings / Sign Out over the signed-in
+       user's own avatar — a rail entry as well drew the same destination twice
+       on one screen, one of them inside the control that exists to hold it. The
+       entry carries `accountOnly` and is filtered out here and only here; it is
+       still in the mobile ⋯ sheet, which IS the account control at that width. */
     expect(sidebarLabels()).toEqual([
       'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin',
-      'Notifications', 'Profile'
+      'Notifications'
     ]);
+    expect(sidebarLabels(), 'Profile belongs to the account menu').not.toContain('Profile');
   });
 
   it('renders the admin rail, including the Messages entry 018 made real', async () => {
     signedInAs(USER('admin'));
     renderAt('/');
     await screen.findByTestId('admin-dash');
+    /* Profile absent for the same reason as above — the account menu holds it. */
     expect(sidebarLabels()).toEqual([
-      'Dashboard', 'Opportunities', 'Messages', 'Admin', 'Notifications', 'Profile',
+      'Dashboard', 'Opportunities', 'Messages', 'Admin', 'Notifications',
     ]);
   });
 

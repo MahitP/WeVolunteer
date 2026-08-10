@@ -298,7 +298,29 @@ const NAV = [
    * with no rail entry of its own still needs a tab and a title.
    */
   { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, requiredCap: 'self.read', secondary: true },
-  { id: 'profile', path: '/profile', label: 'Profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS, secondary: true }
+  /**
+   * ── `accountOnly`: in the account control, never in the rail ──
+   *
+   * Profile is reached the way every other product reaches it — by pressing
+   * your own name — and the desktop rail already ends in `ProfileMenu`, which
+   * offers Profile / Notifications / Settings / Sign Out over the signed-in
+   * user's avatar. A rail entry as well meant the same destination was drawn
+   * twice on one screen, a few pixels apart, one of them inside the control
+   * that exists to hold it.
+   *
+   * `secondary` alone could not express this, because the two surfaces read
+   * that flag for different reasons: on the desktop it means "draw after the
+   * primary entries", and on mobile it means "put in the ⋯ sheet". The ⋯ sheet
+   * IS the account control on a phone — there is no avatar menu at that width —
+   * so Profile belongs in it. One flag had to say "rail: no, sheet: yes", and
+   * overloading `secondary` to mean that would have moved Notifications too.
+   *
+   * So the entry stays `secondary` (mobile keeps it) and adds `accountOnly`
+   * (the desktop rail filters it out). `navSectionsFor` is deliberately
+   * untouched: it partitions by `secondary` and nothing else, which is the
+   * property App.navGroups.test.jsx pins.
+   */
+  { id: 'profile', path: '/profile', label: 'Profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS, secondary: true, accountOnly: true }
 ];
 
 /**
@@ -1314,9 +1336,12 @@ function AppShell({ toasts, addToast, removeToast }) {
           * five or seven rows, which is a list you read rather than one you scan
           * by section.
           */}
+        {/* `accountOnly` entries are filtered out here and ONLY here: the rail
+            ends in ProfileMenu, which already offers them. See the note on the
+            profile entry in NAV. */}
         <nav className="nav" aria-label="Main">
           {navSections.primary.map(renderNavItem)}
-          {navSections.secondary.map(renderNavItem)}
+          {navSections.secondary.filter(n => !n.accountOnly).map(renderNavItem)}
         </nav>
 
         <div className="sidebar-foot">

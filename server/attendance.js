@@ -248,7 +248,26 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
     let hours = prior ? prior.hours_awarded : slotDuration(app);
     let hoursOverridden = false;
 
-    if (awardsHours && hoursMap && Object.hasOwn(hoursMap, applicationId)) {
+    /**
+     * An hours figure is only meaningful for somebody who was THERE.
+     *
+     * `present` was not part of this condition, so `{present: false, hours: 24}`
+     * wrote `attendance(present = 0, hours_awarded = 24)`. That row is excluded
+     * from every `WHERE present = 1` sum, so nothing looked wrong and the ledger
+     * stayed in parity — but the number sat there as the record's stored value.
+     * A later, entirely legitimate flip to present, carrying a reason and no
+     * `hoursMap`, then inherited it through `prior.hours_awarded` above and
+     * credited twenty-four hours for a two-hour slot, with no override appearing
+     * in any request. Two individually innocuous calls, and the slot-pricing
+     * rule bypassed between them.
+     *
+     * Ignored rather than refused: the client already declines to send hours for
+     * an absent volunteer, so anything arriving here is a bug or a hand-made
+     * request, and there is no organizer to show an error to. The stored value
+     * for an absent row stays whatever the slot said, which is the same thing it
+     * would have been had the field never been sent.
+     */
+    if (present === 1 && awardsHours && hoursMap && Object.hasOwn(hoursMap, applicationId)) {
       const supplied = hoursMap[applicationId];
       /**
        * `null` is refused rather than coerced.
@@ -378,7 +397,23 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
       name: p.app.user_name,
       slotName: p.app.slot_name,
       hours: p.hours,
-      wasCredited
+      wasCredited,
+      /**
+       * The ledger action, carried out to the caller.
+       *
+       * The route dispatches a notification per credited row and had only
+       * `hours` to go on, so it said "Volunteer hours added — you earned 1
+       * hours" to somebody whose four hours had just been CUT to one: an
+       * `adjusted` row is in `credited`, because `credited` means "ends up with
+       * a credit", not "gained one". The ledger learned this distinction in
+       * v1.3 and the notification loop was never told.
+       */
+      action,
+      /* Whether this event measures service in hours at all. A donation drive
+         credits attendance and no hours, and "you earned 0 hours" is the wrong
+         sentence for it — every other surface checks the flag first. */
+      awardsHours,
+      hoursBefore: p.prior ? p.prior.hours_awarded : null,
     });
   }
 

@@ -104,13 +104,43 @@ export default function EventAttendance({
   const submitAttendance = async () => {
     setSubmitting(true);
     try {
-      const payload = Object.fromEntries([...touchedIds].filter(id => id in attendanceMap).map(id => [id, !!attendanceMap[id]]));
-      /* Only rows that were actually edited, and only ones marked present —
-         hours on an absent volunteer are meaningless and the server ignores
-         them anyway. */
+      /**
+       * ── Only rows this screen can actually SHOW may be submitted ──
+       *
+       * `touchedIds` is seeded from `acceptedApps` — every slot of the event —
+       * while the list renders `markableApps`, the slots that have ended. A
+       * check-in mark on a shift that has not happened yet therefore entered the
+       * payload without ever appearing on screen, and the server refuses the
+       * WHOLE submission if any row's shift is still to come.
+       *
+       * On a two-day event that is a dead end with no way out of it: the
+       * organizer ticks Sunday's volunteers off at Check-In on Saturday morning,
+       * tries to credit Saturday's hours on Saturday night, and is told "2 of the
+       * shifts you submitted are still to come" — with no control on the page to
+       * untick them, because those rows are not rendered. The draft in
+       * localStorage restores the same set on reload, and it is cleared only on
+       * a successful save, so refreshing does not escape it either. Saturday's
+       * volunteers cannot be credited until Sunday is over.
+       *
+       * Filtering HERE rather than at the three places that write `touchedIds`
+       * (initial load, check-in merge, draft merge) because this is the single
+       * boundary every one of them passes through, and because a row becomes
+       * markable with the passage of time — a set filtered at load would be
+       * wrong by the end of a long session, and this is evaluated at submit.
+       */
+      const submittable = new Set(markableApps.map(a => a.id));
+      const payload = Object.fromEntries(
+        [...touchedIds]
+          .filter(id => submittable.has(id) && id in attendanceMap)
+          .map(id => [id, !!attendanceMap[id]])
+      );
+      /* Only rows that were actually edited, and only ones marked present.
+         The `attendanceMap[id]` test is what keeps hours off an absent
+         volunteer — the server accepts them on an absent row, so this is a real
+         constraint rather than a restatement of one. */
       const hours = Object.fromEntries(
         Object.entries(hoursMap)
-          .filter(([id, v]) => v !== '' && v != null && attendanceMap[id])
+          .filter(([id, v]) => v !== '' && v != null && attendanceMap[id] && submittable.has(id))
           .map(([id, v]) => [id, Number(v)])
       );
       const res = await api.submitAttendance(

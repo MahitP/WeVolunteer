@@ -249,9 +249,19 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
       addToast('Authenticator app turned on.', 'success');
 
       if (data.recoveryCodes?.length) {
-        setRecovery({ codes: data.recoveryCodes, replacedPrevious: true, complete: true });
+        /**
+         * `replacedPrevious: false` — enrolment never replaces a set now.
+         *
+         * The server issues codes here only when the account holds none, so
+         * reaching this branch means there was nothing to replace and the
+         * "your previous codes no longer work" warning would be a false
+         * statement on a screen whose entire job is to be believed. When codes
+         * already existed the server sends none and the `else` below closes the
+         * screen, leaving the set the user already wrote down alone.
+         */
+        setRecovery({ codes: data.recoveryCodes, replacedPrevious: false, complete: true });
       } else if (onSetupComplete) {
-        // No codes to show, so nothing to keep this screen up for.
+        // Codes already existed and were kept, so there is nothing to show.
         onSetupComplete();
       }
     } catch (err) {

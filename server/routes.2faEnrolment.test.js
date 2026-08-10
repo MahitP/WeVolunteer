@@ -196,13 +196,25 @@ describe('POST /api/2fa/enable — a rejected code and the grant', () => {
 
 describe('POST /api/2fa/enable — the recovery-code set it hands back', () => {
   /**
-   * The set the user is shown must be the whole set that works.
+   * ── A recovery set belongs to the ACCOUNT, not to a factor ──
    *
-   * Fixed server-side already (the handler DELETEs before inserting); asserted
-   * here because the UI now tells the reader in so many words that their earlier
-   * codes are dead, and that sentence has to be true.
+   * This handler used to issue ten codes on every enrolment and DELETE whatever
+   * was there. The concern behind that was real — inserting without deleting
+   * left an account that had already enrolled email 2FA holding twenty live
+   * codes, ten of them never shown to anybody — but the cure was worse than the
+   * disease: somebody who enrolled email first, wrote their ten codes down, and
+   * then added an authenticator had every one of them silently voided at the
+   * moment they were making the account stronger. Nothing said so, and no
+   * screen could bring them back.
+   *
+   * So enrolment issues a set only when the account has NONE. Both failure
+   * modes are then unreachable: there is never a second set to leave lying
+   * around, and there is never a deletion of one somebody is holding.
+   * Regeneration keeps its own endpoint, its own confirmation dialog and its
+   * own step-up action, because destroying recovery codes is a thing to choose
+   * on purpose.
    */
-  it('replaces every earlier code rather than adding to them', async () => {
+  it('leaves an existing set untouched, and offers no new one', async () => {
     const { cookie, user } = await srv.signupConfirmed(account());
 
     // Ten codes from an earlier enrolment, as email 2FA would have issued.
@@ -221,12 +233,115 @@ describe('POST /api/2fa/enable — the recovery-code set it hands back', () => {
       { [REAUTH_CHALLENGE_HEADER]: enableGrant });
 
     expect(res.status).toBe(200);
-    expect(res.body.recoveryCodes).toHaveLength(10);
+    /* `null`, not an array — the client shows the "save these codes" screen only
+       when a set was actually issued. */
+    expect(res.body.recoveryCodes ?? null).toBeNull();
 
     const held = db.prepare('SELECT code_hash FROM recovery_codes WHERE user_id = ?').all(user.id);
-    expect(held, 'twenty live codes, ten of them never shown').toHaveLength(10);
+    expect(held, 'the set must be neither doubled nor replaced').toHaveLength(10);
     for (const hash of stale) {
-      expect(held.some(r => r.code_hash === hash), 'a stale code survived').toBe(false);
+      expect(held.some(r => r.code_hash === hash), 'a code the user wrote down was voided').toBe(true);
     }
   }, 30000);
+
+  /** The first factor on a fresh account still gets a set — there is none to keep. */
+  it('issues a set when the account holds none', async () => {
+    const { cookie, user } = await srv.signupConfirmed(account());
+
+    const secret = await beginEnrolment(cookie);
+    const enableGrant = await srv.stepUp(cookie, '2fa.enable', { password: PW });
+    const res = await srv.call('POST', '/api/2fa/enable',
+      { token: generateSync({ secret }) }, cookie,
+      { [REAUTH_CHALLENGE_HEADER]: enableGrant });
+
+    expect(res.status).toBe(200);
+    expect(res.body.recoveryCodes).toHaveLength(10);
+    expect(
+      db.prepare('SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?').get(user.id).n
+    ).toBe(10);
+  }, 30000);
+});
+
+/**
+ * ── "Turn off the authenticator" must remove the authenticator ──
+ *
+ * `/api/2fa/disable` cleared `tfa_email_enabled` alongside `tfa_enabled` and
+ * then deleted every recovery code. The control offering it sits on the
+ * Authenticator card and reads "Turn off", so somebody removing one factor lost
+ * three things — their authenticator, their email second factor, and the ten
+ * codes they had written down — with nothing saying that would happen.
+ */
+describe('POST /api/2fa/disable — removing one factor is not removing them all', () => {
+  /** Enrols TOTP, then email 2FA, so the account holds both and one code set. */
+  async function enrolBoth() {
+    const { cookie, user } = await srv.signupConfirmed(account());
+    const secret = await beginEnrolment(cookie);
+    const enableGrant = await srv.stepUp(cookie, '2fa.enable', { password: PW });
+    const enabled = await srv.call('POST', '/api/2fa/enable',
+      { token: generateSync({ secret }) }, cookie,
+      { [REAUTH_CHALLENGE_HEADER]: enableGrant });
+    expect(enabled.status).toBe(200);
+
+    db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(user.id);
+    const emailGrant = await srv.stepUp(cookie, '2fa.enable', { password: PW });
+    const emailOn = await srv.call('POST', '/api/2fa/email/enable', {}, cookie,
+      { [REAUTH_CHALLENGE_HEADER]: emailGrant });
+    expect(emailOn.status).toBe(200);
+
+    return { cookie, user, secret };
+  }
+
+  const codeCount = (userId) => db.prepare(
+    'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
+  ).get(userId).n;
+
+  it('keeps email 2FA and the recovery codes when the authenticator is removed', async () => {
+    const { cookie, user, secret } = await enrolBoth();
+    expect(codeCount(user.id)).toBe(10);
+
+    const grant = await srv.stepUp(cookie, '2fa.disable', { password: PW });
+    const res = await srv.call('POST', '/api/2fa/disable',
+      { token: generateSync({ secret }) }, cookie,
+      { [REAUTH_CHALLENGE_HEADER]: grant });
+
+    expect(res.status).toBe(200);
+    expect(res.body.twoFactorStillOn, 'email 2FA survives, so 2FA is still on').toBe(true);
+
+    const row = db.prepare(
+      'SELECT tfa_enabled, tfa_secret, tfa_email_enabled, tfa_last_counter FROM users WHERE id = ?'
+    ).get(user.id);
+    expect(row.tfa_enabled).toBe(0);
+    expect(row.tfa_secret).toBeNull();
+    /* The high-water mark belongs to the secret; leaving it would refuse a good
+       code as a replay on the first sign-in after re-enrolling. */
+    expect(row.tfa_last_counter).toBeNull();
+    expect(row.tfa_email_enabled, 'email 2FA must survive').toBe(1);
+    expect(codeCount(user.id), 'the codes the user wrote down must survive').toBe(10);
+  }, 40000);
+
+  it('clears the codes only when the LAST factor goes', async () => {
+    const { cookie, user } = await srv.signupConfirmed(account());
+    const secret = await beginEnrolment(cookie);
+    const enableGrant = await srv.stepUp(cookie, '2fa.enable', { password: PW });
+    await srv.call('POST', '/api/2fa/enable', { token: generateSync({ secret }) }, cookie,
+      { [REAUTH_CHALLENGE_HEADER]: enableGrant });
+    expect(codeCount(user.id)).toBe(10);
+
+    const grant = await srv.stepUp(cookie, '2fa.disable', { password: PW });
+    const res = await srv.call('POST', '/api/2fa/disable',
+      { token: generateSync({ secret }) }, cookie,
+      { [REAUTH_CHALLENGE_HEADER]: grant });
+
+    expect(res.status).toBe(200);
+    expect(res.body.twoFactorStillOn).toBe(false);
+
+    const row = db.prepare(
+      'SELECT tfa_enabled, tfa_email_enabled FROM users WHERE id = ?'
+    ).get(user.id);
+    expect(row.tfa_enabled).toBe(0);
+    expect(row.tfa_email_enabled).toBe(0);
+    /* Ten live credentials on an account with no second factor would be a
+       standing bypass of the protection the user just removed. */
+    expect(codeCount(user.id), 'nothing left to recover past').toBe(0);
+  }, 40000);
 });

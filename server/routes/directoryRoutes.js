@@ -30,6 +30,9 @@ import {
   removeFriend, setUnilateral, clearUnilateral,
 } from '../relationships.js';
 import { formatOrganization } from '../organizations.js';
+/* The tag vocabulary is shared with events, so `#nhs` means the same thing in
+   both halves of discovery. */
+import { normaliseTag } from '../eventTags.js';
 import { notificationService } from '../services/notificationService.js';
 
 const router = express.Router();
@@ -249,8 +252,34 @@ router.get('/api/users/:id/service-record', authenticateToken, requireCap('direc
  * withhold. Suspended and deleted accounts are excluded outright.
  */
 router.get('/api/directory/search', authenticateToken, requireCap('directory.read'), (req, res) => {
-  const q = String(req.query.q ?? '').trim();
-  const type = ['users', 'organizations', 'all'].includes(req.query.type) ? req.query.type : 'all';
+  const raw = String(req.query.q ?? '').trim();
+
+  /**
+   * ── Two sigils, because a searcher already knows which kind they want ──
+   *
+   * `@handle` searches PEOPLE and nothing else. `#tag` searches TAGGED things —
+   * opportunities and organizations — and no people. Both are conventions
+   * borrowed from everywhere else a teenager types into a search box, so
+   * neither needs explaining, and both narrow a mixed result list that is
+   * otherwise the price of putting three kinds of thing behind one field.
+   *
+   * The sigil OVERRIDES the `type` parameter rather than combining with it: a
+   * caller that sends `?q=@alice&type=organizations` has asked two contradictory
+   * questions, and the one the user typed is the one to honour. `intent` goes
+   * back in the response so the client can label what it narrowed to.
+   *
+   * A bare `@` or `#` is not a search — the sigil with nothing after it is
+   * somebody mid-keystroke, and it falls through to the `tooShort` branch below
+   * rather than matching everything.
+   */
+  const sigil = raw.startsWith('@') ? 'users' : raw.startsWith('#') ? 'tag' : null;
+  const q = sigil ? raw.slice(1).trim() : raw;
+
+  const requestedType = ['users', 'organizations', 'all'].includes(req.query.type)
+    ? req.query.type : 'all';
+  const type = sigil === 'users' ? 'users'
+    : sigil === 'tag' ? 'organizations'
+      : requestedType;
   const limit = boundedLimit(req.query.limit);
   const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
 
@@ -269,6 +298,11 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
   }
   const term = likeTerm(q);
   const prefix = likePrefix(q);
+  /* The normalised key a `#tag` search compares against — the same form
+     `event_tags.tag` stores, so one spelling finds the same things on both
+     sides. `normaliseTag` returns null for anything that is not a usable tag,
+     which the empty-result branch below treats as "no matches". */
+  const tagKey = sigil === 'tag' ? (normaliseTag(q)?.tag ?? null) : null;
 
   let users = [];
   if (type !== 'organizations') {
@@ -302,22 +336,50 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
      * organizations, as correlated subqueries against indexed columns — not by
      * looping the results and counting each. Twenty results would otherwise be
      * forty extra queries.
+     *
+     * ── `#tag` matches TAGS, not names ──
+     *
+     * `organizations.tags` is a JSON array of the labels an organizer typed, so
+     * the match walks it with `json_each` rather than pattern-matching the
+     * serialised text: a LIKE over the raw JSON would match a tag that merely
+     * CONTAINS the query, and would also match the word appearing inside some
+     * other tag's label. Comparison is on the normalised form — lower-cased,
+     * `#` stripped, whitespace collapsed — which is exactly what `event_tags.tag`
+     * stores, so one spelling of a tag finds the same things on both sides.
      */
-    const rows = db.prepare(`
-      SELECT o.*,
-             (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS memberCount,
-             (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS eventCount
-      FROM organizations o
-      WHERE o.status = 'active' AND (o.name LIKE ? ESCAPE '\\' OR o.slug LIKE ? ESCAPE '\\')
-      ORDER BY o.name COLLATE NOCASE
-      LIMIT ? OFFSET ?
-    `).all(term, term, limit + 1, offset);
+    const rows = sigil === 'tag'
+      ? db.prepare(`
+        SELECT o.*,
+               (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS memberCount,
+               (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS eventCount
+        FROM organizations o
+        WHERE o.status = 'active'
+          AND o.tags IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM json_each(o.tags)
+            WHERE lower(trim(json_each.value)) = ?
+          )
+        ORDER BY o.name COLLATE NOCASE
+        LIMIT ? OFFSET ?
+      `).all(tagKey, limit + 1, offset)
+      : db.prepare(`
+        SELECT o.*,
+               (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS memberCount,
+               (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS eventCount
+        FROM organizations o
+        WHERE o.status = 'active' AND (o.name LIKE ? ESCAPE '\\' OR o.slug LIKE ? ESCAPE '\\')
+        ORDER BY o.name COLLATE NOCASE
+        LIMIT ? OFFSET ?
+      `).all(term, term, limit + 1, offset);
     organizations = rows.slice(0, limit).map(formatOrganization);
     res.locals.orgsHasMore = rows.length > limit;
   }
 
   res.json({
     query: q,
+    /* What the sigil narrowed to, so the client can say so rather than leaving
+       the reader to infer it from an unexpectedly short list. */
+    intent: sigil ?? 'all',
     users,
     organizations,
     hasMore: Boolean(res.locals.usersHasMore || res.locals.orgsHasMore),

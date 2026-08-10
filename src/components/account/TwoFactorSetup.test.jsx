@@ -489,7 +489,22 @@ describe('recovery codes', () => {
     expect(onSetupComplete).toHaveBeenCalledTimes(1);
   });
 
-  it('says the previous set is dead, because enabling TOTP replaces it', async () => {
+  /**
+   * ── Enrolment no longer voids a set, so it must not SAY it did ──
+   *
+   * This asserted the opposite: that turning on the authenticator warns the
+   * reader their previous codes are dead. That warning was true of the old
+   * handler, which generated ten codes and deleted whatever was there — which
+   * is exactly the behaviour that silently voided the set an email-2FA user had
+   * already written down.
+   *
+   * The server now issues codes only when the account holds none, so reaching
+   * this screen means there was nothing to replace, and "your previous codes no
+   * longer work" would be a false statement on a screen whose entire job is to
+   * be believed. When codes DO already exist the server sends none and this
+   * screen never appears — covered server-side in routes.2faEnrolment.test.js.
+   */
+  it('does not claim earlier codes are dead, because enrolment no longer replaces them', async () => {
     mockServer();
     mockChallenges();
     setup();
@@ -499,8 +514,9 @@ describe('recovery codes', () => {
     fireEvent.change(await screen.findByLabelText(/six-digit code/i), { target: { value: '123456' } });
     fireEvent.click(screen.getByRole('button', { name: /turn on authenticator app/i }));
 
-    const notice = await screen.findByRole('alert');
-    expect(notice.textContent).toMatch(/no longer work/i);
+    await screen.findByText(/save these recovery codes/i);
+    const alerts = screen.queryAllByRole('alert').map(a => a.textContent).join(' ');
+    expect(alerts).not.toMatch(/no longer work/i);
   });
 
   /**

@@ -138,9 +138,50 @@ export default function BrowseEvents({
     }, { replace: true });
   };
 
-  const showEvents = scope === 'all' || scope === 'events';
-  const showPeople = canDiscover && (scope === 'all' || scope === 'people');
-  const showOrganizations = canDiscover && (scope === 'all' || scope === 'organizations');
+  /**
+   * ── `@handle` and `#tag`, read from the one search field ──
+   *
+   * Discovery is one box over three kinds of thing, which is right for somebody
+   * who does not know which kind they want and wrong for somebody who does.
+   * The two sigils are what people already type when they do, so they cost no
+   * explaining.
+   *
+   * `#tag` is routed through the EXISTING tag filter rather than a second
+   * mechanism: the events endpoint already takes `tags` as normalised keys, the
+   * facet chips below already set it, and a parallel path would be a second tag
+   * system to keep in step with the first. `@handle` is people-only, so the
+   * opportunity query is skipped entirely rather than run with a term that can
+   * only fail to match.
+   *
+   * Normalisation matches the server's `normaliseTag`: strip the sigil,
+   * collapse whitespace, lower-case. The comparison has to agree on both sides
+   * or `#Food Drive` finds the organization and none of its events.
+   */
+  const searchIntent = useMemo(() => {
+    const raw = query.trim();
+    if (raw.startsWith('@')) return { kind: 'users', value: raw.slice(1).trim() };
+    if (raw.startsWith('#')) {
+      return { kind: 'tag', value: raw.slice(1).replace(/\s+/g, ' ').trim().toLocaleLowerCase() };
+    }
+    return { kind: 'all', value: raw };
+  }, [query]);
+
+  /**
+   * A sigil narrows the sections, and outranks the scope control.
+   *
+   * `@handle` is a question about people; `#tag` is a question about tagged
+   * things, and people are not tagged. Somebody who typed one of them has said
+   * what they want more recently and more specifically than the tab they set
+   * earlier, so the typed intent wins — and the tab is moved to match below, so
+   * the two never disagree on screen.
+   *
+   * Declared after `searchIntent` and before the sections read it.
+   */
+  const sigil = searchIntent.kind;
+  const showEvents = sigil === 'users' ? false : (scope === 'all' || scope === 'events');
+  const showPeople = canDiscover && sigil !== 'tag' && (scope === 'all' || scope === 'people');
+  const showOrganizations = canDiscover && sigil !== 'users'
+    && (scope === 'all' || scope === 'organizations' || sigil === 'tag');
 
   const [directory, setDirectory] = useState(null);
   const [directoryLoading, setDirectoryLoading] = useState(false);
@@ -204,15 +245,22 @@ export default function BrowseEvents({
 
   const PAGE_SIZE = 60;
 
+
   /** Exactly what the server needs; `undefined` values are dropped by the api layer. */
   const serverFilters = useMemo(() => ({
     scope: 'listable',
-    q: query.trim() || undefined,
+    /* A sigil is a scope instruction, not text to match against a title. */
+    q: searchIntent.kind === 'all' ? (searchIntent.value || undefined) : undefined,
     category: category !== 'All' ? category : undefined,
     /* Joined for the URL; the server also accepts a repeated parameter. Undefined
        rather than an empty string when nothing is selected, so the query does not
-       carry a filter that means nothing. */
-    tags: selectedTags.length ? selectedTags.join(',') : undefined,
+       carry a filter that means nothing. A `#tag` search adds its tag to
+       whatever the facet chips already hold. */
+    tags: (() => {
+      const fromSigil = searchIntent.kind === 'tag' && searchIntent.value ? [searchIntent.value] : [];
+      const all = [...new Set([...selectedTags, ...fromSigil])];
+      return all.length ? all.join(',') : undefined;
+    })(),
     place: place !== 'All' ? place : undefined,
     openOnly: openOnly || undefined,
     favoritesOnly: showFavoritesOnly || undefined,
@@ -226,7 +274,7 @@ export default function BrowseEvents({
     lng: (maxDistance || sortBy === 'distance') && location ? location.longitude : undefined,
     maxDistance: location ? (maxDistance || undefined) : undefined,
     sort: sortBy
-  }), [query, category, place, openOnly, showFavoritesOnly, fromDate, toDate, minHours, closingSoon, maxDistance, sortBy, location, selectedTags]);
+  }), [searchIntent, category, place, openOnly, showFavoritesOnly, fromDate, toDate, minHours, closingSoon, maxDistance, sortBy, location, selectedTags]);
 
   /**
    * Debounced, and guarded against out-of-order responses.

@@ -611,4 +611,109 @@ describe('the social and organization features', () => {
       expect(JSON.stringify(res.body).toLowerCase()).not.toContain('block');
     });
   });
+  /**
+   * ── The two search sigils ──
+   *
+   * One field over three kinds of thing is the right shape for somebody who
+   * does not know which kind they want. It is the wrong shape for somebody who
+   * does — and `@` and `#` are what everybody already types when they do.
+   */
+  describe('search syntax', () => {
+    let orgSlug;
+
+    beforeAll(async () => {
+      const created = await srv.call('POST', '/api/organizations', {
+        name: 'Search Syntax Club',
+        description: 'For the tag tests.',
+        tags: ['NHS', 'Food Drive'],
+      }, organizer);
+      expect(created.status).toBe(201);
+      orgSlug = created.body.organization.slug;
+    });
+
+    /* `@handle` is a question about PEOPLE. An organization in the results would
+       be the mixed list the sigil exists to escape. */
+    it('@ searches people only', async () => {
+      const res = await srv.call('GET', '/api/directory/search?q=%40alice', undefined, alice);
+      expect(res.status).toBe(200);
+      expect(res.body.intent).toBe('users');
+      expect(res.body.users.some(u => u.username === 'alice')).toBe(true);
+      expect(res.body.organizations).toEqual([]);
+    });
+
+    /* And the sigil beats a contradictory `type`: the user typed one of them. */
+    it('@ overrides a type parameter that disagrees with it', async () => {
+      const res = await srv.call(
+        'GET', '/api/directory/search?q=%40alice&type=organizations', undefined, alice
+      );
+      expect(res.body.intent).toBe('users');
+      expect(res.body.organizations).toEqual([]);
+      expect(res.body.users.length).toBeGreaterThan(0);
+    });
+
+    /* `#tag` is a question about TAGGED things. People are never tagged. */
+    it('# searches tags only, and never people', async () => {
+      const res = await srv.call('GET', '/api/directory/search?q=%23NHS', undefined, alice);
+      expect(res.status).toBe(200);
+      expect(res.body.intent).toBe('tag');
+      expect(res.body.users).toEqual([]);
+      expect(res.body.organizations.map(o => o.slug)).toContain(orgSlug);
+    });
+
+    /* Normalised the same way `event_tags.tag` is, so one spelling of a tag
+       finds the same things on both halves of discovery. */
+    it.each(['%23nhs', '%23NHS', '%23%20nhs%20', '%23nHs'])(
+      'matches a tag regardless of case or surrounding space (%s)', async (query) => {
+        const res = await srv.call('GET', `/api/directory/search?q=${query}`, undefined, alice);
+        expect(res.body.organizations.map(o => o.slug)).toContain(orgSlug);
+      });
+
+    /* A multi-word tag is one tag, not two words to match loosely. */
+    it('matches a multi-word tag exactly', async () => {
+      const hit = await srv.call('GET', '/api/directory/search?q=%23Food%20Drive', undefined, alice);
+      expect(hit.body.organizations.map(o => o.slug)).toContain(orgSlug);
+
+      /* "Food" alone is a DIFFERENT tag. A substring match here would make the
+         tag filter behave like the name search it exists to be distinct from. */
+      const partial = await srv.call('GET', '/api/directory/search?q=%23Food', undefined, alice);
+      expect(partial.body.organizations.map(o => o.slug)).not.toContain(orgSlug);
+    });
+
+    /* The tag search must not become the enumeration route the name search is
+       bounded to avoid. */
+    it('returns nothing for a tag nobody uses', async () => {
+      const res = await srv.call('GET', '/api/directory/search?q=%23nosuchtag', undefined, alice);
+      expect(res.body.organizations).toEqual([]);
+      expect(res.body.users).toEqual([]);
+    });
+
+    /* A lone sigil is somebody mid-keystroke, not a request for everything. */
+    it.each(['%40', '%23', '%40%20', '%23%20'])('treats a bare sigil as too short (%s)', async (query) => {
+      const res = await srv.call('GET', `/api/directory/search?q=${query}`, undefined, alice);
+      expect(res.body.tooShort).toBe(true);
+      expect(res.body.users).toEqual([]);
+      expect(res.body.organizations).toEqual([]);
+    });
+
+    /* An ordinary search is unchanged — still both kinds, still no intent. */
+    it('leaves an unsigilled search searching everything', async () => {
+      const res = await srv.call('GET', '/api/directory/search?q=Search%20Syntax', undefined, alice);
+      expect(res.body.intent).toBe('all');
+      expect(res.body.organizations.map(o => o.slug)).toContain(orgSlug);
+    });
+
+    /* The sigil must not become a way past the privacy boundary the plain
+       search is held to. */
+    it('still refuses a partner, sigil or not', async () => {
+      const partner = await srv.signupConfirmed({
+        name: 'Sigil Partner', email: 'sigil.partner@test.local', grade: 'Adult',
+        username: 'sigilpartner', role: 'student', password: PASSWORD,
+      });
+      db.prepare("UPDATE users SET role = 'partner' WHERE id = ?").run(partner.user.id);
+      for (const q of ['%40alice', '%23NHS']) {
+        const res = await srv.call('GET', `/api/directory/search?q=${q}`, undefined, partner.cookie);
+        expect(res.status).toBe(403);
+      }
+    });
+  });
 });
