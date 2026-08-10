@@ -409,8 +409,89 @@ export function validateBody(raw, { slug } = {}) {
   return { body, blocks, slug };
 }
 
-/** `YYYY-MM-DD`, matching `effectiveAt` throughout the registry. */
-function parseEffectiveAt(raw) {
+/**
+ * How far ahead a revision may be dated. One year.
+ *
+ * ── Why a bound exists, and why this one ──
+ *
+ * Under this product's model, publication is IMMEDIATE and `effective_at` is
+ * the legal date printed on the document (see `EFFECTIVE_DATE_MODEL` below). A
+ * date is therefore a claim rather than a schedule, and an unbounded claim is
+ * how `9999-12-31` gets typed into a legal record nobody can edit afterwards.
+ *
+ * The bound is set from how these are actually published:
+ *
+ *   - The overwhelmingly common date is TODAY — a correction, effective at once.
+ *   - The legitimate future case is a NOTICE PERIOD: a substantive change to the
+ *     Terms published now, effective in a few weeks so readers get warning.
+ *     Common practice is two to six weeks; nobody uses more than a quarter.
+ *   - The outer legitimate case is a date fixed by something external — a school
+ *     year, a regulation's commencement. Those are at most about twelve months.
+ *
+ * So one year clears every real case with room to spare, while still catching
+ * the error these fields actually attract: a mistyped leading digit. `2062`,
+ * `9026`, `2126` are all refused; nothing anybody meant to type is.
+ *
+ * A shorter bound (ninety days) would start refusing a genuine school-year
+ * alignment. A longer one (five years) stops catching the transposed digit,
+ * which is the entire purpose.
+ */
+const MAX_EFFECTIVE_DAYS_AHEAD = 365;
+
+/**
+ * ── The effective-date model, in one place ──
+ *
+ * Publishing makes a revision the current public text IMMEDIATELY. Resolution
+ * is by insertion order (`currentRevision`), never by date — a future-dated
+ * revision is served the moment it is saved, and the date changes only the line
+ * printed on the document. That is deliberate: making the reader wait for a
+ * date would turn publication into a scheduler, with a queue, a clock, and a
+ * window in which the catalogue and the text disagree.
+ *
+ * `effective_at` is therefore a RECORDED LEGAL FACT, not an instruction to the
+ * software. What that leaves it owing is coherence, which is what the three
+ * rules below enforce:
+ *
+ *   1. it is a real calendar date;
+ *   2. it does not precede the day it was published — a document cannot have
+ *      taken effect before it existed;
+ *   3. it does not precede the effective date of the version it replaces, so
+ *      the printed dates read as a timeline rather than as a shuffle.
+ *
+ * Rule 3 allows EQUALITY on purpose. Two corrections sharing one effective date
+ * is ordinary — a typo fixed twice in an afternoon — and a strict `>` would
+ * refuse the second one for no reason a reader would recognise.
+ */
+
+/** Today, as `YYYY-MM-DD`, from a clock the caller may pin. */
+function dayOf(instant) {
+  return new Date(instant).toISOString().slice(0, 10);
+}
+
+/**
+ * `YYYY-MM-DD`, matching `effectiveAt` throughout the registry.
+ *
+ * Exported so it can be tested directly. Every date test before this was an
+ * HTTP round trip through the adversarial suite, which is a slow way to assert
+ * a calendar rule and an easy way to leave the boundary cases untested.
+ *
+ * ── Comparisons are on DATE STRINGS, in JavaScript, never in SQL ──
+ *
+ * `effective_at` is ten characters; `created_at` and `published_at` are
+ * twenty-four-character ISO timestamps. A lexicographic comparison between the
+ * two is wrong in one specific and costly direction — `'2026-09-01'` sorts
+ * BELOW `'2026-09-01T09:00:00.000Z'`, because the date is a strict prefix of
+ * the timestamp — so a naive `effective_at >= created_at` would refuse every
+ * SAME-DAY publication, which is the normal case. Both sides are reduced to a
+ * day before anything is compared. `server/datetimeComparison.test.js` exists
+ * for the same class of mistake one column over.
+ *
+ * @param {string} raw the submitted date
+ * @param {object} [opts]
+ * @param {Date|string|number} [opts.now] the publication instant, pinnable by tests
+ * @param {string|null} [opts.previousEffectiveAt] the date of the version being replaced
+ */
+export function parseEffectiveAt(raw, { now = new Date(), previousEffectiveAt = null } = {}) {
   if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
     throw new LegalValidationError('Choose a date this version takes effect.', 'effectiveAt');
   }
@@ -419,6 +500,37 @@ function parseEffectiveAt(raw) {
   if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
     throw new LegalValidationError('That is not a real date.', 'effectiveAt');
   }
+
+  const today = dayOf(now);
+
+  /* Rule 2. Same-day passes — that is the ordinary case, not an edge one. */
+  if (value < today) {
+    throw new LegalValidationError(
+      'A version cannot take effect before it is published. '
+      + `The earliest date you can choose is ${today}.`,
+      'effectiveAt'
+    );
+  }
+
+  /* Rule 1's other half: a date so far out it is a typo rather than a plan. */
+  const latest = dayOf(new Date(new Date(today).getTime() + MAX_EFFECTIVE_DAYS_AHEAD * 86400000));
+  if (value > latest) {
+    throw new LegalValidationError(
+      'A version cannot take effect more than a year after it is published '
+      + `(the latest is ${latest}). If that really is the date, publish it closer to the time.`,
+      'effectiveAt'
+    );
+  }
+
+  /* Rule 3. Equality allowed — see the model note above. */
+  if (previousEffectiveAt && value < previousEffectiveAt) {
+    throw new LegalValidationError(
+      `The version this replaces takes effect on ${previousEffectiveAt}, so this one `
+      + 'cannot be dated earlier. Effective dates only move forward.',
+      'effectiveAt'
+    );
+  }
+
   return value;
 }
 
@@ -482,13 +594,22 @@ function highestVersion(db, slug) {
  * the publication and the proof of identity commit or roll back together.
  */
 export function publishRevision(db, { slug, version, body, effectiveAt, userId, now = null }) {
+  /**
+   * The publication instant is decided BEFORE validation, not after.
+   *
+   * `parseEffectiveAt` refuses a date earlier than the day of publication, so
+   * it has to be given the same instant that lands in `created_at` — otherwise
+   * the row could record a publication timestamp the validator never saw, and a
+   * save crossing midnight would be checked against yesterday and stored under
+   * today.
+   */
+  const at = now ?? new Date().toISOString();
+
   const { version: nextVersion, body: cleanBody, effectiveAt: effective } =
-    validatePublication(db, { slug, version, body, effectiveAt });
+    validatePublication(db, { slug, version, body, effectiveAt }, { now: at });
 
   /* Non-null: `validatePublication` refuses an unregistered slug above. */
   const doc = documentBySlug(slug);
-
-  const at = now ?? new Date().toISOString();
   const contentHash = sha256(cleanBody);
 
   db.prepare(`
@@ -548,12 +669,26 @@ export function publishRevision(db, { slug, version, body, effectiveAt, userId, 
  * Returns the normalised values, so the caller writes exactly what was checked
  * rather than re-deriving them from the request.
  */
-export function validatePublication(db, { slug, version, body, effectiveAt }) {
+export function validatePublication(db, { slug, version, body, effectiveAt }, { now = new Date() } = {}) {
   const doc = documentBySlug(slug);
   if (!doc) throw new LegalValidationError(`No such legal document: ${slug}`, 'slug');
 
   const nextVersion = parseNewVersion(version);
-  const effective = parseEffectiveAt(effectiveAt);
+
+  /**
+   * The date this revision replaces, so the printed dates read as a timeline.
+   *
+   * The current revision when there is one, and otherwise the registry's own
+   * `effectiveAt` — which is the date the reader is being shown right now, and
+   * therefore the one a new revision must not silently predate. Read from the
+   * same place `highestVersion` reads versions, and inside the same function,
+   * so the two move together and the check is atomic with the insert when
+   * `publishRevision` calls this a second time.
+   */
+  const previous = currentRevision(db, slug, { withBody: false });
+  const previousEffectiveAt = previous?.effective_at ?? doc.effectiveAt ?? null;
+
+  const effective = parseEffectiveAt(effectiveAt, { now, previousEffectiveAt });
   const { body: cleanBody } = validateBody(body, { slug });
 
   const highest = highestVersion(db, slug);

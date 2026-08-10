@@ -36,6 +36,12 @@ describe('the Legal Center editor', () => {
   const VERSIONED = 'data-deletion-policy';
   const REJECTED = 'certificate-verification-policy';
   const PUBLIC_READ = 'volunteer-record-policy';
+  /* For the effective-date rules. Its own slug, because rule 3 — effective dates
+     only move forward — means one test's date becomes the floor for every later
+     publication of the same document. `EDITABLE` is already dated 2026-09-03 by
+     the fixtures above, which is exactly that effect. Not a signup or organizer
+     document, so publishing it disturbs no consent fixture. */
+  const DATED = 'youth-safety-guidelines';
 
   const listUrl = '/api/admin/legal/documents';
   const docUrl = slug => `/api/admin/legal/documents/${slug}`;
@@ -440,6 +446,127 @@ describe('the Legal Center editor', () => {
         VALUES (?, '1.1.0', 'x', 'h', '2026-09-01', '2026-09-01T00:00:00Z', NULL)
       `).run(EDITABLE);
       expect(insert).toThrow();
+    });
+  });
+  /**
+   * ── The effective date is a recorded fact, never a schedule ──
+   *
+   * Publishing makes a revision the current public text immediately, and
+   * resolution is by insertion order — never by date. These two tests pin the
+   * halves of that which are easy to "improve" into a bug: somebody reading
+   * `effective_at` in the editor could reasonably conclude `currentRevision`
+   * ought to filter on it, and the reader would silently start serving the old
+   * text for as long as the date was in the future.
+   */
+  describe('the effective date does not gate publication', () => {
+    it('serves a future-dated revision immediately', async () => {
+      const future = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10);
+      const marker = `Dated ahead ${Date.now()}.`;
+
+      /* A slug nothing else in this file publishes to. Rule 3 — effective dates
+         only move forward — means a future-dated revision raises the floor for
+         every later publication of the SAME document, so this case has to be
+         quarantined or it silently breaks its neighbours. */
+      const res = await publishVerified(PUBLIC_READ, {
+        version: '9.0.0',
+        body: `# Volunteer record policy\n\n${marker}\n`,
+        effectiveAt: future,
+      });
+      expect(res.status).toBe(200);
+
+      /* The PUBLIC reader, not the editor's own view. */
+      const served = await srv.call('GET', `/api/legal/documents/${PUBLIC_READ}`);
+      expect(served.status).toBe(200);
+      expect(served.body.version, 'the future-dated version is live now').toBe('9.0.0');
+      expect(served.body.markdown).toContain(marker);
+      expect(served.body.effectiveAt).toBe(future);
+    });
+
+    /* Acceptance binds to (slug, version). Publishing must not rewrite what
+       somebody already agreed to — that is the one thing this subsystem exists
+       to keep true. */
+    it('leaves existing acceptance rows byte-identical', async () => {
+      const before = db.prepare(
+        'SELECT document_slug, version, content_hash, accepted_at FROM legal_acceptances ORDER BY id'
+      ).all();
+
+      const res = await publishVerified(DATED, {
+        version: '4.0.1',
+        body: `# Youth safety guidelines\n\nAnother revision ${Date.now()}.\n`,
+        effectiveAt: new Date().toISOString().slice(0, 10),
+      });
+      expect(res.status).toBe(200);
+
+      const after = db.prepare(
+        'SELECT document_slug, version, content_hash, accepted_at FROM legal_acceptances ORDER BY id'
+      ).all();
+      expect(after).toEqual(before);
+    });
+  });
+
+  /**
+   * The three date rules, through the real endpoint. The unit tests in
+   * legalStore.test.js cover the calendar arithmetic; these confirm the refusal
+   * reaches the client with the field the editor focuses on.
+   */
+  describe('effective-date refusals', () => {
+    const body = (n) => `# Youth safety guidelines\n\nRevision ${n}.\n`;
+
+    it('refuses a date before today', async () => {
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const res = await publishVerified(DATED, {
+        version: '5.0.0', body: body('past'), effectiveAt: yesterday,
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.field).toBe('effectiveAt');
+      expect(res.body.error).toMatch(/before it is published/i);
+    });
+
+    it('refuses a date more than a year ahead', async () => {
+      const far = new Date(Date.now() + 400 * 86400000).toISOString().slice(0, 10);
+      const res = await publishVerified(DATED, {
+        version: '5.0.1', body: body('far'), effectiveAt: far,
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.field).toBe('effectiveAt');
+      expect(res.body.error).toMatch(/more than a year/i);
+    });
+
+    /* Today is the ordinary case and the one a prefix-comparison bug would
+       break, so it is asserted rather than assumed. */
+    it('accepts today', async () => {
+      const res = await publishVerified(DATED, {
+        version: '5.1.0', body: body('today'), effectiveAt: new Date().toISOString().slice(0, 10),
+      });
+      expect(res.status).toBe(200);
+    });
+    /**
+     * A future-dated revision raises the floor for the ones after it.
+     *
+     * This is rule 3 doing its job rather than an awkwardness to work around.
+     * If v1.1 is published to take effect in three weeks, a correction to it
+     * cannot be dated today — the corrected text would claim to have been in
+     * force before the version it corrects. The owner dates the correction on
+     * or after the pending date, and the printed timeline stays readable.
+     */
+    it('refuses a date earlier than a pending future-dated revision', async () => {
+      const ahead = new Date(Date.now() + 45 * 86400000).toISOString().slice(0, 10);
+      expect((await publishVerified(DATED, {
+        version: '6.0.0', body: body('scheduled'), effectiveAt: ahead,
+      })).status).toBe(200);
+
+      const res = await publishVerified(DATED, {
+        version: '6.0.1', body: body('same day correction'),
+        effectiveAt: new Date().toISOString().slice(0, 10),
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.field).toBe('effectiveAt');
+      expect(res.body.error).toMatch(/only move forward/i);
+
+      /* Dated on the pending date, the correction goes through. */
+      expect((await publishVerified(DATED, {
+        version: '6.0.2', body: body('correction, dated properly'), effectiveAt: ahead,
+      })).status).toBe(200);
     });
   });
 });

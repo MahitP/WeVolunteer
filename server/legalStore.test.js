@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseVersion, compareVersions, validateBody, LegalValidationError, MAX_BODY_LENGTH,
+  parseEffectiveAt,
 } from './legalStore.js';
 import { isSafeHref } from '../src/utils/policyMarkdown.js';
 
@@ -342,5 +343,77 @@ describe('a slash-leading link must actually stay on this origin', () => {
   it('refuses such a link at save time', () => {
     expect(() => validateBody('# T\n\nRead the [rules](/\\evil.example.com/x) now.\n'))
       .toThrow(LegalValidationError);
+  });
+});
+
+/**
+ * ── The effective-date model ──
+ *
+ * Publishing makes a revision the current public text IMMEDIATELY; resolution is
+ * by insertion order and never by date. `effective_at` is therefore a recorded
+ * legal fact rather than an instruction to the software, and what it owes is
+ * coherence: a real date, not before the day it was published, not absurdly far
+ * ahead, and not before the version it replaces.
+ *
+ * These are unit tests against the parser because every date test before this
+ * was an HTTP round trip — a slow way to assert a calendar rule, and an easy way
+ * to leave the boundaries untested.
+ */
+describe('parseEffectiveAt', () => {
+  const NOW = '2026-08-10T09:00:00.000Z';
+  const on = (raw, opts = {}) => parseEffectiveAt(raw, { now: NOW, ...opts });
+
+  it('accepts a well-formed date and returns it unchanged', () => {
+    expect(on('2026-09-01')).toBe('2026-09-01');
+    expect(on('  2026-09-01  ')).toBe('2026-09-01');
+  });
+
+  /**
+   * The boundary most likely to break, and the reason the comparison is done on
+   * date strings in JavaScript rather than in SQL.
+   *
+   * `effective_at` is ten characters; `created_at` is a 24-character ISO
+   * timestamp. `'2026-08-10' < '2026-08-10T09:00:00.000Z'` is TRUE, because the
+   * date is a strict prefix — so a naive SQL `effective_at >= created_at` would
+   * refuse every same-day publication, which is the ordinary case.
+   */
+  it('accepts today — the ordinary case, not an edge one', () => {
+    expect(on('2026-08-10')).toBe('2026-08-10');
+  });
+
+  it('refuses a date before publication', () => {
+    expect(() => on('2026-08-09')).toThrow(LegalValidationError);
+    expect(() => on('1970-01-01')).toThrow(/cannot take effect before it is published/i);
+    try { on('2026-08-09'); } catch (e) { expect(e.field).toBe('effectiveAt'); }
+  });
+
+  /* A year is past every real notice period and every school-year alignment,
+     and still catches the error these fields actually attract — a mistyped
+     leading digit. */
+  it('accepts a date up to a year ahead and refuses one beyond it', () => {
+    expect(on('2027-08-10')).toBe('2027-08-10');
+    expect(() => on('2027-08-11')).toThrow(/more than a year/i);
+    for (const typo of ['2062-01-01', '9026-01-01', '2126-05-05', '9999-12-31']) {
+      expect(() => on(typo), `${typo} must be refused`).toThrow(LegalValidationError);
+    }
+  });
+
+  it('refuses a date earlier than the version it replaces', () => {
+    expect(() => on('2026-08-15', { previousEffectiveAt: '2026-09-01' }))
+      .toThrow(/only move forward/i);
+  });
+
+  /* Equality is allowed on purpose: two corrections sharing one effective date
+     is ordinary — a typo fixed twice in an afternoon. */
+  it('allows the same effective date as the version it replaces', () => {
+    expect(on('2026-09-01', { previousEffectiveAt: '2026-09-01' })).toBe('2026-09-01');
+  });
+
+  it('still refuses malformed and impossible dates', () => {
+    for (const bad of ['01/09/2026', '2026-9-1', '2026-09-01T00:00:00Z', '', 'soon', null, 42]) {
+      expect(() => on(bad), `${JSON.stringify(bad)} must be refused`).toThrow(LegalValidationError);
+    }
+    expect(() => on('2026-02-30')).toThrow(/not a real date/i);
+    expect(() => on('2026-13-01')).toThrow(LegalValidationError);
   });
 });
