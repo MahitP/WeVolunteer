@@ -497,7 +497,24 @@ export const PAGE_META = {
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
-    browse: { title: 'Opportunities', sub: 'Find a shift and apply — organizers confirm who attends' },
+    /**
+     * ── The label stays "Opportunities"; the SUBTITLE is what had to change ──
+     *
+     * The page holds three kinds of thing now — shifts, people, organizations —
+     * and the rail label named one of them. The tempting fix is to rename the
+     * entry to something that covers all three ("Discover", "Explore"), and it
+     * is the wrong one: a rail label should say what somebody GOES there for,
+     * and a student goes there for a shift. "Discover" is a category of action
+     * rather than a destination, it tells a fourteen-year-old nothing about what
+     * they will find, and it would leave the rail disagreeing with the page
+     * titles the other personas already read ("Recruit", "All events").
+     *
+     * What was genuinely wrong is this line, which described only the grid on a
+     * page that had grown two more sections above it. The scope tabs and the
+     * search placeholder both say all three; the one sentence under the heading
+     * did not.
+     */
+    browse: { title: 'Opportunities', sub: 'Find a shift, a club, or someone you volunteer with' },
     calendar: { title: 'Calendar', sub: 'Your shifts and the deadlines that matter' },
     messages: { title: 'Messages', sub: 'Coordinate directly with organizers regarding your shifts' },
     notifications: { title: 'Notifications', sub: 'Replies, reminders, and event updates' },
@@ -515,7 +532,7 @@ export const PAGE_META = {
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
     dashboard: { title: 'Dashboard', sub: 'Track your volunteers, hours, and pending reviews' },
-    browse: { title: 'Recruit', sub: 'All events visible to volunteers on the network' },
+    browse: { title: 'Recruit', sub: 'Events on the network, and the members and clubs behind them' },
     calendar: { title: 'Calendar', sub: 'Events you host and when applications close' },
     messages: { title: 'Messages', sub: 'Coordinate directly with volunteers regarding your events' },
     notifications: { title: 'Notifications', sub: 'Application updates and community alerts' },

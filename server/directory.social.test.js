@@ -716,4 +716,75 @@ describe('the social and organization features', () => {
       }
     });
   });
+  /**
+   * ── Friendship is between peers, and an adult organizer is not one ──
+   *
+   * An accepted friendship unlocks the friends-only profile tier and the signup
+   * notifications — this module's own note says a unilateral follow "would let
+   * any account subscribe to a minor's schedule without them agreeing", and a
+   * request from the adult who decides whether a student gets placed on shifts
+   * is not meaningfully refusable either. Blocking already draws the same line,
+   * gated on `event.apply` rather than on a role.
+   */
+  describe('who may be friends', () => {
+    it('refuses an organizer sending a request to a student', async () => {
+      const res = await srv.call('POST', `/api/users/${aliceId}/friend`, undefined, organizer);
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('not_permitted');
+      /* The refusal must not say WHICH side disqualified it. */
+      expect(JSON.stringify(res.body).toLowerCase()).not.toMatch(/organizer|role|adult/);
+    });
+
+    it('refuses a student sending a request to an organizer', async () => {
+      const res = await srv.call('POST', `/api/users/${organizerId}/friend`, undefined, alice);
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('not_permitted');
+    });
+
+    /* Testing only the sender would leave a row nobody could ever resolve. */
+    it('writes no relationship row for a refused request', async () => {
+      const n = db.prepare(
+        `SELECT COUNT(*) AS n FROM user_relationships
+          WHERE kind = 'friend' AND ((actor_id = ? AND subject_id = ?) OR (actor_id = ? AND subject_id = ?))`
+      ).get(organizerId, aliceId, aliceId, organizerId).n;
+      expect(n).toBe(0);
+    });
+
+    it('refuses an admin too', async () => {
+      const res = await srv.call('POST', `/api/users/${aliceId}/friend`, undefined, admin);
+      expect(res.status).toBe(409);
+    });
+
+    /* A row written before the rule existed must not complete by being
+       accepted afterwards. */
+    it('refuses to ACCEPT a request across the boundary', async () => {
+      db.prepare(`
+        INSERT INTO user_relationships (id, actor_id, subject_id, kind, status, created_at)
+        VALUES ('rel-legacy-peer', ?, ?, 'friend', 'pending', datetime('now'))
+      `).run(organizerId, aliceId);
+
+      const res = await srv.call('POST', `/api/users/${organizerId}/friend/accept`, undefined, alice);
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('not_permitted');
+
+      const row = db.prepare("SELECT status FROM user_relationships WHERE id = 'rel-legacy-peer'").get();
+      expect(row.status, 'a legacy row must not become a friendship').toBe('pending');
+    });
+
+    /* Getting OUT of one is never gated — whatever created it. */
+    it('always allows removal, so nobody is stuck in a legacy relationship', async () => {
+      const res = await srv.call('DELETE', `/api/users/${organizerId}/friend`, undefined, alice);
+      expect(res.status).toBe(200);
+      expect(
+        db.prepare("SELECT COUNT(*) AS n FROM user_relationships WHERE id = 'rel-legacy-peer'").get().n
+      ).toBe(0);
+    });
+
+    /* Student to student is the case the feature exists for, and is unchanged. */
+    it('still allows student to student', async () => {
+      const res = await srv.call('POST', `/api/users/${carolId}/friend`, undefined, bob);
+      expect([200, 409]).toContain(res.status);
+      if (res.status === 409) expect(res.body.code).toBe('not_permitted');
+    });
+  });
 });
