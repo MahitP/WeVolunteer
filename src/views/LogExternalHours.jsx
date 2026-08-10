@@ -25,7 +25,7 @@
  * application form. Every entry is self-reported, permanently, and says so —
  * which is also why the label is a constant rather than a column.
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   AlertCircle, Check, Info, Plus, Trash2, ExternalLink, CheckCircle2, NotebookPen,
@@ -88,10 +88,37 @@ export default function LogExternalHours({ addToast }) {
    * blank and clears the parameter, which is the same thing as arriving to add
    * one — better than an error about a URL the student did not type.
    */
+  const prefilledFor = useRef(null);
   useEffect(() => {
-    if (!editingId || !entries) return;
+    if (!editingId) { prefilledFor.current = null; return; }
+    if (!entries) return;
+
     const entry = entries.find(e => e.id === editingId);
-    if (!entry) { setSearchParams({}, { replace: true }); return; }
+    if (!entry) {
+      /**
+       * The entry is gone — a stale link, or it was deleted from the list below
+       * while it was open here.
+       *
+       * The form is CLEARED as well as the parameter. Leaving the fields
+       * populated made the next submit a create, which silently re-added the
+       * entry the student had just deleted.
+       */
+      setSearchParams({}, { replace: true });
+      setForm(BLANK);
+      setErrors({});
+      prefilledFor.current = null;
+      return;
+    }
+
+    /**
+     * Prefill ONCE per entry, not on every change to `entries`.
+     *
+     * `load()` builds a fresh array after any delete, so an unguarded effect
+     * re-ran and overwrote whatever the student had typed with the stored
+     * values — deleting some other row threw away their unsaved edit.
+     */
+    if (prefilledFor.current === editingId) return;
+    prefilledFor.current = editingId;
     setForm({
       organizationName: entry.organizationName,
       activityName: entry.activityName,

@@ -74,6 +74,20 @@ export const MANDATORY_NOTICE_EVENTS = new Set([
    * `reportService.alerting.test.js` pins both halves of that.
    */
   'SYSTEM_ALERT',
+  /**
+   * A recovery code was spent.
+   *
+   * This is the one signal an account takeover produces from the inside: the
+   * codes exist precisely for the case where the ordinary factors are gone, so
+   * somebody else using one is what a stolen account looks like. Suppressing it
+   * on a preference would silence the only warning the real owner gets, and the
+   * privacy policy already publishes that security email cannot be switched off.
+   *
+   * It also carries the remaining count, which is how somebody learns they have
+   * just spent their last one — before they discover it at the next sign-in with
+   * an authenticator they no longer have.
+   */
+  'RECOVERY_CODE_USED',
 ]);
 
 export const isMandatoryNotice = (event) => MANDATORY_NOTICE_EVENTS.has(event);
@@ -143,6 +157,12 @@ export const EVENT_CATEGORIES = {
   FRIEND_SIGNED_UP: 'VOLUNTEER',
   /** A new event from an organization you joined. */
   ORGANIZATION_EVENT_POSTED: 'EVENT',
+
+  /**
+   * A recovery code was spent. ACCOUNT, and a MANDATORY notice — see
+   * MANDATORY_NOTICE_EVENTS above for why a preference may not suppress it.
+   */
+  RECOVERY_CODE_USED: 'ACCOUNT',
 
   // ACCOUNT — the two relationship notices. ACCOUNT, not VOLUNTEER: these are
   // about who may see your activity, which is an account matter.
@@ -684,6 +704,20 @@ export function getInAppContent(event, payload) {
         title: `New from ${payload.organizationName || 'your organization'}`,
         body: `${payload.eventTitle} is open for applications.`,
         link: `event:${payload.eventId}`
+      };
+    case 'RECOVERY_CODE_USED':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: 'A recovery code was used to sign in',
+        body: typeof payload.remaining === 'number'
+          ? (payload.remaining === 0
+            ? 'That was your last recovery code. Generate a new set in Settings — without one you '
+              + 'cannot get back in if you lose your authenticator.'
+            : `You have ${payload.remaining} recovery code${payload.remaining === 1 ? '' : 's'} left. `
+              + 'If this was not you, change your password now.')
+          : 'If this was not you, change your password now.',
+        link: '/settings?section=security'
       };
     case 'FRIEND_REQUEST':
       return {

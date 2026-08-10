@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import { generateSecret, generateURI } from 'otplib';
 import QRCode from 'qrcode';
 import { db } from '../db.js';
-import { authenticateToken, inTransaction, secondFactorRequiredFor } from '../utils.js';
+import { authenticateToken, inTransaction, secondFactorRequiredFor, enabledSecondFactors } from '../utils.js';
 import { requireAAL2 } from '../authz.js';
 import { spendChallenge, ChallengeNotSpent, refuseReauth } from '../reauthResponses.js';
 import { encryptSecret, decryptSecret, verifyTotp } from '../cryptoUtils.js';
@@ -415,19 +415,43 @@ router.post('/api/2fa/email/disable', authenticateToken, requireAAL2('2fa.disabl
  */
 router.get('/api/2fa/status', authenticateToken, (req, res) => {
   try {
-    const user = db.prepare(
-      'SELECT tfa_enabled, tfa_email_enabled, role FROM users WHERE id = ?'
-    ).get(req.user.id);
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const countRow = db.prepare('SELECT COUNT(*) as count FROM recovery_codes WHERE user_id = ?').get(req.user.id);
 
     const totp = user.tfa_enabled === 1;
-    const email = user.tfa_email_enabled === 1;
+    const emailEnrolled = user.tfa_email_enabled === 1;
+
+    /**
+     * What the SIGN-IN screen will actually accept — not what was switched on.
+     *
+     * These two used to disagree, and the disagreement was the same defect this
+     * file's header describes fixing in the opposite direction. Since v1.3.1 a
+     * confirmed address is accepted as a second factor once the account has any
+     * factor at all, so an account that enrolled an authenticator and declined
+     * email codes could nonetheless be signed into with a mailed code — while
+     * this endpoint reported `email: false`, the Settings card showed no "On"
+     * tag and offered "Use email codes", and the disable route wrote a 0 that
+     * was already 0. A factor reported as off and impossible to turn off is
+     * exactly what `enabledSecondFactors` exists to prevent.
+     *
+     * So `available` is the derivation the login route enforces, and
+     * `enrolled` is the switch the account set. The client shows the first and
+     * only offers the enable/disable control for the second.
+     */
+    const offered = enabledSecondFactors(user);
 
     res.json({
-      enabled: totp || email,
-      methods: { totp, email },
+      enabled: totp || emailEnrolled,
+      methods: {
+        totp,
+        /* Kept as the ENROLMENT flag, because that is what the disable route
+           acts on and what this key has always meant to its callers. */
+        email: emailEnrolled,
+      },
+      /* What the second-factor step will accept for this account, right now. */
+      availableMethods: offered,
       recoveryCodesRemaining: countRow ? countRow.count : 0,
       /**
        * Whether the policy forbids this account from turning its factors off.

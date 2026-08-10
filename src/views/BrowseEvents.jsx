@@ -274,13 +274,16 @@ export default function BrowseEvents({
    */
   const [browsedOrgs, setBrowsedOrgs] = useState(null);
   useEffect(() => {
-    if (!showOrganizations) return undefined;
+    /* `scope === 'organizations'`, not `showOrganizations` — which is also true
+       under the default 'all' scope, so gating on it saved nothing on the page
+       students actually land on. The list below renders in this one scope. */
+    if (scope !== 'organizations') return undefined;
     let cancelled = false;
     api.fetchOrganizations({ limit: 8 })
       .then(res => { if (!cancelled) setBrowsedOrgs(res.organizations || []); })
       .catch(() => { if (!cancelled) setBrowsedOrgs([]); });
     return () => { cancelled = true; };
-  }, [showOrganizations]);
+  }, [scope]);
 
   const loadMore = async () => {
     if (nextOffset == null || loadingMore) return;

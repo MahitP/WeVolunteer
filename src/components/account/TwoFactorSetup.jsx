@@ -66,6 +66,8 @@ import { downloadRecoveryCodesTxt, downloadRecoveryCodesPng } from '../../utils/
 /** A blank status, so the first render never reads `methods` off undefined. */
 const EMPTY_STATUS = {
   methods: { totp: false, email: false },
+  /* Empty rather than absent, so `.includes` on the first render is safe. */
+  availableMethods: [],
   recoveryCodesRemaining: 0,
   roleRequires2FA: false
 };
@@ -410,6 +412,9 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
   /* ── Render ─────────────────────────────────────────────────────────────── */
 
   const { totp, email } = status.methods;
+  /* What the sign-in step will actually accept, as opposed to what was switched
+     on. See the note beside the Email codes card below. */
+  const emailAccepted = (status.availableMethods || []).includes('email');
   const locked = status.roleRequires2FA;
 
   return (
@@ -616,12 +621,31 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
             <div className="row" style={{ marginBottom: 'var(--s2)' }}>
               <Mail size={18} aria-hidden="true" />
               <span className="strong">Email codes</span>
-              {email ? <span className="tag tag-ok">On</span> : null}
+              {email ? <span className="tag tag-ok">On</span>
+                : emailAccepted ? <span className="tag tag-info">Available</span> : null}
             </div>
             <p className="dim small" style={{ marginBottom: 'var(--s3)' }}>
-              A code sent to your confirmed address. Needs a verified email, and is weaker
-              than an authenticator app — anyone who reaches your mailbox reaches your codes.
+              A code sent to your confirmed address. Weaker than an authenticator app —
+              anyone who reaches your mailbox reaches your codes.
             </p>
+            {/**
+              * The honest statement of what sign-in will accept.
+              *
+              * Since v1.3.1 a confirmed address is accepted as a second factor
+              * once the account has any factor at all — so for an authenticator
+              * account this card used to show no "On" tag and offer "Use email
+              * codes" while a mailed code would already have signed them in. The
+              * status endpoint now returns `availableMethods`, the same
+              * derivation the login route enforces, and this says so plainly
+              * rather than letting somebody believe they had declined it.
+              */}
+            {!email && emailAccepted && (
+              <p className="dim small" style={{ marginBottom: 'var(--s3)' }}>
+                Your address is confirmed, so you can already choose <strong>Email code</strong>
+                {' '}when you sign in — it is your way back in if you lose your authenticator.
+                Turning it on below only makes it your default.
+              </p>
+            )}
             {email ? (
               locked && !totp ? (
                 <p className="dim small">

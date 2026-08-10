@@ -359,6 +359,13 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/hours/external')) return 'externalHours';
   if (pathname.startsWith('/hours')) return 'loggedHours';
   if (pathname.startsWith('/settings')) return 'settings';
+  /* These three had no branch, so they fell through to 'dashboard' — an
+     organizer on /checkin read "Dashboard / Track your volunteers" with the
+     Dashboard rail item lit, which is byte-for-byte the /errors bug this
+     function's note above exists to prevent. */
+  if (pathname.startsWith('/portfolio')) return 'portfolio';
+  if (pathname.startsWith('/checkin')) return 'checkin';
+  if (pathname.startsWith('/organizer-agreement')) return 'organizerAgreement';
   if (pathname.startsWith('/messages')) return 'messages';
   if (pathname.startsWith('/admin/appeals')) return 'appeals';
   if (pathname.startsWith('/admin/moderation')) return 'moderation';
@@ -430,17 +437,28 @@ export function navSectionsFor(user) {
  * `admin` blocks verbatim — only the key changed, so what those three roles
  * read is byte-identical. `staff` is what super_admin sees too.
  *
- * A tab with no entry falls back to `{ title: APP_NAME, sub: '' }`, unchanged.
- * That default is the defensible one: it names the app rather than describing
- * some other persona's screen. Filling in the remaining super_admin tabs would
- * mean adding keys to the shared `staff` block, which would also change what an
- * admin reads on /calendar and /settings — and admin behaviour must not change.
+ * A tab with no entry falls back to `{ title: APP_NAME, sub: '' }`. That default
+ * names the app rather than describing some other persona's screen, which is the
+ * defensible answer — but it is a fallback, not a design, and every reachable tab
+ * should have a real entry. `settings` is now filled in for every persona
+ * (ProfileMenu offers it to every role), and the two hour pages are named under
+ * `staff` because an owner holds `'*'` and reaches both.
+ *
+ * The earlier version of this note argued against filling in the remaining
+ * super_admin tabs, on the grounds that they live in the shared `staff` block and
+ * would therefore change what an ADMIN reads. That is true and it is not a
+ * reason: an admin reaching /settings read the bare product name too, which is
+ * not behaviour worth preserving.
  */
 /* Exported for `App.navGroups.test.jsx`, which asserts that the administrative
    hub is called the same thing in the rail and in the page title — two names for
    one destination means two people cannot describe it to each other. */
 export const PAGE_META = {
   volunteer: {
+    settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
+    portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
+    organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
     browse: { title: 'Opportunities', sub: 'Find a shift and apply — organizers confirm who attends' },
     calendar: { title: 'Calendar', sub: 'Your shifts and the deadlines that matter' },
@@ -455,6 +473,11 @@ export const PAGE_META = {
     organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
   },
   host: {
+    settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
+    portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
+    organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
+    create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
     dashboard: { title: 'Dashboard', sub: 'Track your volunteers, hours, and pending reviews' },
     browse: { title: 'Recruit', sub: 'All events visible to volunteers on the network' },
     calendar: { title: 'Calendar', sub: 'Events you host and when applications close' },
@@ -465,6 +488,15 @@ export const PAGE_META = {
     organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
   },
   staff: {
+    settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
+    portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
+    organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
+    create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
+    calendar: { title: 'Calendar', sub: 'Events across the district and when they close' },
+    messages: { title: 'Messages', sub: 'Conversations with students and organizers' },
+    audit: { title: 'Audit Explorer', sub: 'Every administrative action, and who took it' },
+    roster: { title: 'Administrator roster', sub: 'Who holds administrative access' },
     dashboard: { title: 'Dashboard', sub: 'Reports waiting, organizers to approve, and how the programme is doing' },
     browse: { title: 'All events', sub: 'Everything posted across the district' },
     notifications: { title: 'Notifications', sub: 'Platform activity' },
@@ -488,14 +520,21 @@ export const PAGE_META = {
     externalHours: { title: 'Log external hours', sub: 'Volunteering done outside WeVolunteer' }
   },
   partner: {
+    settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
     browse: { title: 'All events', sub: 'Everything posted across the district' },
     /**
-     * `profile` and `notifications` were missing, and partner is the role the
-     * distinguished profile was BUILT for — so the one page it exists to serve
-     * fell through to the `{ title: APP_NAME, sub: '' }` fallback and rendered
-     * under the bare product name. `self.read` puts Notifications in a partner's
-     * rail too, which had the same gap.
+     * `profile` was missing, and partner is the role the distinguished profile
+     * was BUILT for — so the one page it exists to serve fell through to the
+     * `{ title: APP_NAME, sub: '' }` fallback and rendered under the bare product
+     * name.
+     *
+     * `notifications`, `directory` and `organizations` are here for completeness
+     * rather than because a partner reaches them today: partner holds neither
+     * `self.read` nor `directory.read` (see authz.js, where the directory is
+     * deliberately withheld from an external body). They cost nothing and mean
+     * that granting either capability later does not reintroduce an untitled
+     * page.
      */
     notifications: { title: 'Notifications', sub: 'Updates about your organization' },
     profile: { title: 'Profile', sub: 'How your organization appears on this platform' },
@@ -668,6 +707,9 @@ function AppShell({ toasts, addToast, removeToast }) {
 
   const [notifKey, setNotifKey] = useState(0);
   const [editingProfile, setEditingProfile] = useState(false);
+  /* Bumped after a profile save, to remount whichever profile view is on
+     screen. See the `onSave` on ProfileEditModal. */
+  const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
 
@@ -1114,8 +1156,21 @@ function AppShell({ toasts, addToast, removeToast }) {
      * decides, so handing the callback over discloses nothing and enables
      * nothing for anybody looking at somebody else.
      */
-    '/users/id/:id': { currentUser, addToast, onEditProfile: () => setEditingProfile(true) },
-    '/users/:handle': { currentUser, addToast, onEditProfile: () => setEditingProfile(true) },
+    /**
+     * `key` remounts the view after a profile save, so an edit made from a
+     * public profile is visible without a reload. React strips `key` from
+     * props, so this is invisible to the prop-name assertions in
+     * App.routeTable.test.jsx — which is correct: it is not a prop the view
+     * reads, it is an instruction to React.
+     */
+    '/users/id/:id': {
+      key: `profile-${profileRefreshKey}`,
+      currentUser, addToast, onEditProfile: () => setEditingProfile(true),
+    },
+    '/users/:handle': {
+      key: `profile-${profileRefreshKey}`,
+      currentUser, addToast, onEditProfile: () => setEditingProfile(true),
+    },
     '/organizations/new': { addToast },
     '/organizations/:key/edit': { addToast },
     '/organizations/:key': { addToast },
@@ -1565,7 +1620,21 @@ function AppShell({ toasts, addToast, removeToast }) {
           <ProfileEditModal
             user={currentUser}
             onClose={() => setEditingProfile(false)}
-            onSave={(updated) => { setCurrentUser(updated); refreshEvents(); }}
+            onSave={(updated) => {
+              setCurrentUser(updated);
+              refreshEvents();
+              /**
+               * Remounts any profile view currently on screen.
+               *
+               * `PublicProfile` renders from its own fetched `data` and never
+               * refetches, so editing a bio from `/users/@myhandle` — now that
+               * the button is reachable there — showed the OLD bio until a
+               * reload. Bumping a key remounts the view, which reruns its load
+               * effect; that is cheaper than threading a refresh callback
+               * through `appRouteProps` into every profile surface.
+               */
+              setProfileRefreshKey(k => k + 1);
+            }}
             addToast={addToast}
             onSignOut={() => { setEditingProfile(false); handleLogout(); }}
           />

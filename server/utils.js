@@ -656,9 +656,21 @@ export function formatUserResponse(row) {
     headline: row.profile_headline || null,
     highlights: parseHighlightsList(row.profile_highlights),
     distinction: distinctionFor(row.role),
-    /* The two privacy switches, so Settings can render their current state
-       without a second request. This serializer is self-only — see the note at
-       the top of profileSerializer.js about why nothing else may use it. */
+    /**
+     * The two privacy switches, so Settings can render their current state
+     * without a second request.
+     *
+     * This serializer is self-only WITH ONE EXCEPTION, and the exception is
+     * worth naming rather than leaving as a claim that is nearly true:
+     * `adminRoutes.js` maps it over other users' rows for the pending-organizer
+     * list. That route is gated on `organizer.approve` and already discloses
+     * email, bio, school and grade there — an approver is deciding whether to
+     * let an adult work with students and needs the particulars — so the extra
+     * fields are acceptable there and nowhere else.
+     *
+     * Every OTHER user-to-user disclosure goes through profileSerializer.js.
+     * See the note at the top of that file for why.
+     */
     profileVisibility: row.profile_visibility || 'private',
     friendActivityVisible: row.friend_activity_visible !== 0,
     createdAt: row.created_at

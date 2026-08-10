@@ -116,7 +116,16 @@ export function downloadRecoveryCodesPng(codes) {
        to write something down offline. */
     ctx.fillStyle = '#0f6b45';
     ctx.beginPath();
-    ctx.roundRect(PAD, PAD - 6, 34, 34, 8);
+    /**
+     * `roundRect` is Safari 16.4+ and Firefox 112+.
+     *
+     * Without the fallback a school iPad on iOS 15 threw `ctx.roundRect is not a
+     * function` inside this promise, so the only screen that ever shows recovery
+     * codes offered a Save button that produced an error toast and no file. A
+     * square corner on a decorative 34px tile is not worth a failed download.
+     */
+    if (typeof ctx.roundRect === 'function') ctx.roundRect(PAD, PAD - 6, 34, 34, 8);
+    else ctx.rect(PAD, PAD - 6, 34, 34);
     ctx.fill();
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 15px Helvetica, Arial, sans-serif';

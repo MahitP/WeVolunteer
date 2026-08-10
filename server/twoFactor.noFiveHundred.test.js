@@ -381,6 +381,59 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
     });
   });
 
+  describe('a spent recovery code is reported and notified', () => {
+    /**
+     * It used to be silent: the row was deleted, an audit entry was written, and
+     * the response said nothing. So somebody could sign in with their LAST code,
+     * be told nothing, and discover at the next sign-in that the only method
+     * left was the authenticator they had lost. A used recovery code is also
+     * what an account takeover looks like from the inside.
+     */
+    it('returns the remaining count and writes a notice', async () => {
+      const bcrypt = (await import('bcryptjs')).default;
+      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+      db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(userId);
+      db.prepare('DELETE FROM notifications WHERE user_id = ?').run(userId);
+      for (const plain of ['LASTBUTONE01', 'THEVERYLAST1']) {
+        db.prepare(`
+          INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, ?)
+        `).run(`rc-n-${plain}`, userId, bcrypt.hashSync(plain, 10), new Date().toISOString());
+      }
+
+      const first = await submit(await beginLogin(), { method: 'recovery', code: 'LASTBUTONE01' });
+      expect(first.status).toBe(200);
+      expect(first.body.recoveryCodesRemaining).toBe(1);
+
+      const notices = db.prepare(
+        `SELECT * FROM notifications WHERE user_id = ? AND title LIKE 'A recovery code was used%'`
+      ).all(userId);
+      expect(notices).toHaveLength(1);
+      expect(notices[0].body).toContain('1 recovery code');
+    });
+
+    it('says so plainly when the last one is spent', async () => {
+      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+      const res = await submit(await beginLogin(), { method: 'recovery', code: 'THEVERYLAST1' });
+      expect(res.status).toBe(200);
+      expect(res.body.recoveryCodesRemaining).toBe(0);
+
+      const notices = db.prepare(
+        `SELECT body FROM notifications WHERE user_id = ? AND title LIKE 'A recovery code was used%'
+         ORDER BY created_at DESC`
+      ).all(userId);
+      expect(notices[0].body).toMatch(/last recovery code/i);
+    });
+
+    /* An ordinary TOTP sign-in must not claim a count it did not spend. */
+    it('omits the count when no recovery code was used', async () => {
+      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
+      const res = await submit(await beginLogin(), { method: 'totp', token: await freshTotp() });
+      expect(res.status).toBe(200);
+      expect(res.body).not.toHaveProperty('recoveryCodesRemaining');
+    });
+  });
+
   describe('email codes', () => {
     it('offers email once the address is confirmed, even without the separate flag', async () => {
       db.prepare('UPDATE users SET tfa_email_enabled = 0, email_verified = 1 WHERE email = ?').run(EMAIL);
