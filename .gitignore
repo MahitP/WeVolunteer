@@ -48,6 +48,25 @@ SignUp Genius/
 *.db-wal
 *.db-shm
 
+# Database backups, under any suffix.
+#
+# `*.db` above stops `pilot.db`; it does not stop `pilot.db.backup-20260810`,
+# because the extension is no longer last. Taking a copy before a migration
+# repair is the correct instinct — ENGINEERING_GUIDE §8.3 requires it for a
+# rebuild — and the file it leaves behind is a full copy of a live database:
+# every student's name, address, date of birth and password hash. That must
+# never be one `git add -A` away from the history.
+#
+# Deny by default, like the env rules further down. The pattern names the CLASS
+# (anything alongside a database that looks like a copy) rather than a filename,
+# which is the rule that would have caught it.
+# No negations here: the sidecars above end in `-wal`/`-shm`, a HYPHEN, so
+# `*.db.*` (a DOT after `db`) never matches them and re-allowing them would
+# only undo the rules two lines up.
+*.db.*
+*.sqlite.*
+*.bak
+
 # Generated data-export archives. Written beside the database (see
 # exportWorker.resolveExportDir), so in development that is the repository root.
 # Each zip is one user's complete personal record — profile, messages, attendance,
