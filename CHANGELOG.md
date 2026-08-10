@@ -20,6 +20,124 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### Security and privacy — found by the pre-push audit
+
+- **The 2FA guessing budget was bypassable by not waiting for the answer.** Both
+  ceilings — five guesses per grant, twenty per account per fifteen minutes —
+  were read-only `SELECT`s, and the counter was incremented only *after* the code
+  had been checked, with `await bcrypt.compare` sitting in the gap. Requests
+  bearing the same pre-auth cookie all read `attempts = 0` before any of them
+  wrote, so all of them were allowed. Reproduced: **ten of twelve** concurrent
+  recovery-code guesses reached the verifier instead of five. The attempt is now
+  CLAIMED atomically before verification and rolled back if it exceeds the
+  ceiling — rolled back rather than kept, because a 429 that still counted would
+  refresh the rolling window on every rejected request and let anybody holding
+  the password keep the account's own owner locked out. The claim sits below
+  every 400 and above every verification: a malformed code, an omitted code and
+  a method the account does not hold each still cost nothing.
+- **Blocking did not withdraw the friendship, so it did not close the profile.**
+  Restricting — the gentler control — removed the friendship row; Block, the one
+  immediate safety control a student holds, did not. An accepted friendship is
+  what unlocks the friends-only tier, so a student who blocked somebody harassing
+  them went on publishing their school, grade and bio to that person, and both
+  stayed in each other's friend lists. Blocking now withdraws the friendship, and
+  `areFriends` independently refuses a blocked pair — the second half repairs
+  rows an earlier version already wrote.
+- **A block was announced to the person blocked.** `viewer.blocked` was symmetric
+  while `GET /api/blocks` returns outbound blocks only, so seeing the flag and
+  finding the subject absent from your own list identified, in two requests,
+  somebody who had blocked you. The same disclosure `restrictedBy` is stripped to
+  prevent, through the other flag in the same object. The wire value is now the
+  viewer's OWN block; the friend request still meets the same generic 409.
+- **Search could be paged out to the whole membership.** The 25-result ceiling
+  bounded one request and `offset` was unbounded, so `?offset=0,25,50,…` walked
+  every minor's name, handle and general area out in pages. Paging is now capped,
+  and the test that claimed to cover this was vacuous — its one-character query
+  never reached the query it was asserting about.
+- **A partner could read student profiles through the route that predates the
+  directory.** `directory.read` is withheld from `partner` deliberately, every
+  v1.3 route enforced it, and `GET /api/users/:id/profile` — name, avatar,
+  skills, credited hours, milestones, service counts — had no gate at all.
+  Neither did `GET /api/users/:userId/badges`, whose recorded posture is
+  explicitly matched to it. Both now check the capability. This also closes the
+  same route to an organizer who has not accepted the Organizer Agreement, which
+  v1.3 withheld `directory.read` for and this route ignored.
+- **A pre-auth grant completed more than one sign-in.** Success cleared the
+  cookie and nothing else, leaving the token itself valid for its full fifteen
+  minutes — replayable to mint another session, and each replay also cleared the
+  failed-attempt rows and so handed the next one a fresh budget. Nothing on that
+  path read `token_version` either, so "sign out all other devices" and a
+  password reset could not reach a sign-in already standing at the second-factor
+  step. The grant is now spent once, and refused once the account's version moves.
+- **One verification covered enrolling a factor and destroying every recovery
+  code.** Replacing recovery codes was gated on `2fa.enable`, so the grant from a
+  dialog reading "enable two-factor authentication" was spendable on the handler
+  whose first statement is `DELETE FROM recovery_codes` — and enrolment
+  deliberately holds an unspent `2fa.enable` grant for minutes while a QR code is
+  scanned. It has its own action now, `2fa.recovery.regenerate`, with its own
+  sentence.
+- **An archived organization stayed fully readable, roster included.** Browsing,
+  search and joining all excluded archived organizations; the page that lists up
+  to a hundred members did not, and slugs are derived from the name rather than
+  random. Archiving is the only withdrawal a manager is offered, so a club
+  archived to take its roster out of view had not been.
+- **The email-code cooldown failed open.** An unparseable `created_at` made
+  `elapsed` `NaN`, and `NaN < 60000` is false — so the one comparison guarding
+  the send route would have stopped guarding it silently. It now holds shut.
+- **Two second-factor tables were never swept.** `tfa_email_codes` retained a
+  bcrypt hash of every code ever mailed and `tfa_login_attempts` a row per
+  abandoned sign-in, indefinitely — credential material with no remaining
+  purpose, which is exactly what `reauth_challenges` is swept to avoid keeping.
+
+#### Correctness, mobile and records
+
+- **The Dashboard scrolled sideways on a phone, and that is what made it render
+  zoomed out.** The mobile rule stacked `.nextshift` but used
+  `align-items: flex-start`, which in a column flex container sizes each child to
+  its own max-content width rather than the container's — so the line holding an
+  event title laid out at 356px inside a 320px viewport and pushed the document
+  past the screen. `.truncate` could not help, because ellipsis needs a box that
+  has already been constrained. The fix is `stretch`; the viewport meta tag is
+  untouched and pinch-zoom stays available, because the overflow was the bug and
+  the scaling was only the report of it.
+- **The discovery live region was ungrammatical.** `role="status"` announced
+  "1 people and organizations found" — the single result that typing a name
+  usually produces — and "0 people and organizations found" for none. It is the
+  only signal a screen-reader user gets that the search finished. Each kind is
+  now pluralised on its own count and the empty case reads as a negative.
+- **Turning email codes off did not turn them off**, for an account that also has
+  an authenticator: `tfa_email_enabled = 0` demotes email from the default and
+  changes nothing the sign-in step reads. The button said "Turn off". It now says
+  what it does and confirms before it does it, naming recovery codes as the
+  factor a mailbox cannot reach. The v1.3.1 behaviour itself is unchanged — it is
+  deliberate, and documented at the head of this release.
+- **Migration 032's pragma guard failed open**, passing whenever the read
+  returned anything other than a confirmed `1` — the wrong direction for the one
+  assertion standing between a table rebuild and a cascade delete. It now matches
+  `001_authz_roles.js` and refuses anything that is not a confirmed `0`, and
+  restores the connection's prior foreign-key state rather than forcing it on.
+  **Editing 032 changes its checksum**, so a DEVELOPMENT database that already
+  applied it will refuse to boot until the recorded value is backfilled — the
+  error names the exact `UPDATE`, and `bin/migration-checksums.mjs` prints it.
+  No released database is affected: 032 is not on `main`, and on any database
+  without an `external_hours` table the migration early-returns. It was worth
+  doing now precisely because this is the last moment it is cheap — after the
+  release, editing a migration that has run against real data is a different and
+  much worse problem.
+- **The v1.3 participation-count index could have been lost permanently.**
+  `applications(user_id, status)` was created by migration 031 only, and the
+  `applications` rebuild in `db.js` recreates no indexes; the two it does lose are
+  recreated on every boot and this one was not. Not reachable today, which is why
+  nothing would have noticed.
+- **The volunteer-record policy no longer matched its pinned hash.** The v1.3
+  Auto Select section was written into the file and the constant was not moved
+  with it, so every boot warned about drift and an enforcing boot would have
+  refused to serve it.
+- **The release checklist never asked for a backup before a table rebuild.**
+  §8.3 makes that the first of six guards and the only one no code enforces —
+  the other five are assertions inside the migration. v1.3 contains a rebuild.
+
+
 - **Authenticator 2FA answered 500 on a CORRECT code** — and a clean 401 on a wrong one, which is the most confusing shape a sign-in failure can take, because every instinct says the code is the problem. The accepted TOTP time step is written to `users.tfa_last_counter` so a code cannot be replayed, and that write was the only statement in the whole TOTP login path: on a database behind migration 029 the column did not exist, the write threw, and the handler's outer catch turned it into a generic 500. A wrong code returns before reaching it. The write is now guarded, and a code that cannot be recorded as spent **refuses the sign-in** — with a named 503 pointing at recovery codes — rather than completing one the platform cannot make single-use. Silently accepting it would have turned off the replay protection on exactly the databases least likely to be watched.
 - **Two more 500s in the same handler** — `code.trim()` ran on the raw request body, so a non-string `code` threw a TypeError, and it did so *before* the failure counter was bumped, so it was not rate-limited either. Both submitted values are normalised once and a wrong type is now a 400. An empty string is a 400 too, rather than a 401 that spends one of the twenty attempts on a request that supplied no code.
 - **`/api/auth/login-2fa/email/send` had no error handling at all** despite awaiting a bcrypt hash, a dynamic import and several writes. Under Express 4 a throw there was an unhandled rejection that left the request hanging — a Send button that never came back.
@@ -29,7 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **External volunteer hours are tracking only.** The verification apparatus 1.3.0 shipped — a `status` column, an admin review queue, and the `service.verify.external` capability — is removed by migration 032, which rebuilds the table under the six guards ENGINEERING_GUIDE §8.3 requires. It was inferred from the existence of that capability rather than asked for, and the inference was wrong: these are a student's own notes about their own afternoons, and a review queue turns a notebook into an application form. Entries can now be **edited** at any time, because nobody else's judgement is stored on one. Self-reported totals are shown to the account itself and to nobody else, and `lastVolunteeredAt` no longer counts them — a figure nobody checked is not evidence that somebody is still active.
+- **External volunteer hours are tracking only.** The verification apparatus 1.3.0 introduced — a `status` column, an admin review queue, and the `service.verify.external` capability — is removed by migration 032, which rebuilds the table under the six guards ENGINEERING_GUIDE §8.3 requires. It was inferred from the existence of that capability rather than asked for, and the inference was wrong: these are a student's own notes about their own afternoons, and a review queue turns a notebook into an application form. Entries can now be **edited** at any time, because nobody else's judgement is stored on one. Self-reported totals are shown to the account itself and to nobody else, and `lastVolunteeredAt` no longer counts them — a figure nobody checked is not evidence that somebody is still active.
 - **Recovery codes can be saved as a `.txt` or a `.png`**, both generated entirely in the browser from values already on screen. No request is made, no code reaches a URL, and the object URL is revoked after the download starts. The image carries its own white background rather than reading the theme: it is opened later in a photo viewer that knows nothing about `data-theme`, and a dark-mode export would be unreadable exactly when it is needed.
 - **Discovery moved into Opportunities.** "Find people" is gone as a navigation entry; one field with a scope control now searches people, organizations and opportunities together, and `/directory` redirects so existing links still land. The two searches used to live on separate pages and answered the same question.
 - **A Logged hours page**, reached from the Dashboard, showing confirmed WeVolunteer service and self-reported external entries as two clearly separated lists. No navigation entry was added for it.

@@ -90,12 +90,28 @@ export default {
       throw new Error(`032 refuses to rebuild external_hours: missing column(s) ${missing.join(', ')}.`);
     }
 
+    /* Remembered so it can be RESTORED rather than forced on at the end. This
+       migration did not set the connection's foreign-key state and has no
+       business deciding it; 001 restores it conditionally for the same reason. */
+    const fkWasOn = db.prepare('PRAGMA foreign_keys').get()?.foreign_keys === 1;
+
     db.exec('PRAGMA foreign_keys = OFF');
-    const fkOff = db.prepare('PRAGMA foreign_keys').get();
-    /* Assert the pragma took effect. Inside a transaction it silently does not,
-       and a rebuild performed with foreign keys live would cascade-delete the
-       rows it is trying to preserve. */
-    if (fkOff && (fkOff.foreign_keys === 1 || fkOff.foreign_keys === true)) {
+    /**
+     * Assert the pragma took effect, and fail CLOSED.
+     *
+     * Inside a transaction `PRAGMA foreign_keys` is silently a no-op, and a
+     * rebuild performed with foreign keys live would cascade-delete the rows
+     * this migration exists to preserve. §8.3 lists this guard because nothing
+     * else catches that.
+     *
+     * The test is `!== 0`, not "is it 1 or true". The earlier spelling passed
+     * whenever the read returned anything unexpected — `undefined` from a
+     * missing row, a driver that answers `'0'`/`'1'` as strings — which is the
+     * wrong direction for a guard whose whole job is refusing to proceed when
+     * it cannot confirm the state. 001_authz_roles.js, the reference rebuild,
+     * asserts it this way; this one now matches.
+     */
+    if (db.prepare('PRAGMA foreign_keys').get()?.foreign_keys !== 0) {
       throw new Error('032 could not disable foreign keys; refusing to rebuild external_hours.');
     }
 
@@ -147,7 +163,9 @@ export default {
       try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
       throw err;
     } finally {
-      db.exec('PRAGMA foreign_keys = ON');
+      /* Restored, not forced. Turning it ON unconditionally would leave the
+         connection in a state this migration never found it in. */
+      if (fkWasOn) db.exec('PRAGMA foreign_keys = ON');
     }
   },
 };
