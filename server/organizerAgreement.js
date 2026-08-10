@@ -1,6 +1,7 @@
 import { ROLE } from './authz.js';
 import { ORGANIZER_DOCUMENTS } from './legalDocuments.js';
 import { recordAcceptances } from './consent.js';
+import { resolveDocument } from './legalStore.js';
 
 /**
  * The Organizer Agreement, and what an organizer cannot do until they accept it.
@@ -113,7 +114,26 @@ export function hasAcceptedOrganizerAgreement(db, userId) {
       .map(r => `${r.document_slug}@${r.version}`)
   );
 
-  return ORGANIZER_DOCUMENTS.every(d => accepted.has(`${d.slug}@${d.version}`));
+  /**
+   * Compared against the RESOLVED version, not the registry's.
+   *
+   * Since v1.4 an owner can publish a new version of the Organizer Agreement
+   * through the Legal Center editor, and `ORGANIZER_DOCUMENTS` is computed once
+   * at module load — so reading `d.version` here would keep checking against the
+   * version that shipped, forever. An organizer would be shown 1.1.0, accept
+   * 1.1.0, and be measured against 1.0.
+   *
+   * Resolving makes the gate mean what it says, and it is worth being explicit
+   * about the consequence: publishing a new version of THIS document withholds
+   * fifteen capabilities from every organizer until each one accepts again. That
+   * is correct — the agreement is what those capabilities are granted against —
+   * and it is why the editor warns before saving this particular document rather
+   * than letting a typo fix log everybody out of their own events.
+   */
+  return ORGANIZER_DOCUMENTS.every((registered) => {
+    const doc = resolveDocument(db, registered) ?? registered;
+    return accepted.has(`${doc.slug}@${doc.version}`);
+  });
 }
 
 /**
@@ -204,12 +224,19 @@ export function organizerAgreementStatus(db, userRow) {
   return {
     required: userRow.role === ROLE.ORGANIZER,
     accepted,
-    documents: ORGANIZER_DOCUMENTS.map(d => ({
-      slug: d.slug,
-      title: d.title,
-      version: d.version,
-      effectiveAt: d.effectiveAt,
-    })),
+    /* Resolved, for the reason given in `hasAcceptedOrganizerAgreement`: this is
+       the version the acceptance screen prints and the version the gate above
+       measures against, and those two disagreeing is how an organizer ends up
+       accepting a document that does not clear their block. */
+    documents: ORGANIZER_DOCUMENTS.map((registered) => {
+      const d = resolveDocument(db, registered) ?? registered;
+      return {
+        slug: d.slug,
+        title: d.title,
+        version: d.version,
+        effectiveAt: d.effectiveAt,
+      };
+    }),
     withheld: withheldCapabilitiesFor(db, userRow),
   };
 }

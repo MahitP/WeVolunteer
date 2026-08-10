@@ -36,6 +36,48 @@
  * document using something new fails the build instead of rendering oddly.
  */
 
+/**
+ * URL schemes a policy link may use.
+ *
+ * ── Why this exists now and did not before ──
+ *
+ * The header above argues that no document text ever becomes markup, and that
+ * is still true of text. It was never true of a link TARGET: the renderer puts
+ * `span.href` straight into an anchor's `href`, and `[read this](javascript:…)`
+ * is a script that runs when a reader clicks it — on `/legal/:slug`, which is
+ * unauthenticated and is where the signup form sends people.
+ *
+ * Until v1.4 the only source of policy text was this repository, so the gap was
+ * theoretical and the file said as much. The Legal Center editor makes policy
+ * text something an account can write, so it is not theoretical any more.
+ *
+ * Two layers refuse it. `validateBody` in server/legalStore.js rejects the save,
+ * which is where an owner gets a useful error message. This one is the backstop
+ * for everything that never passes through a save: the ten documents on disk,
+ * any row written before this check existed, and whatever renders policy
+ * Markdown next.
+ */
+export const ALLOWED_LINK_SCHEMES = Object.freeze(['http://', 'https://', 'mailto:']);
+
+/**
+ * True for a link a policy is allowed to contain.
+ *
+ * `//host` is refused despite starting with a slash: it is protocol-relative and
+ * leaves the site, so treating it as an internal path would be exactly backwards.
+ * A bare `#` is refused because it scrolls nowhere and reads as a dead control.
+ */
+export function isSafeHref(href) {
+  if (typeof href !== 'string') return false;
+  const value = href.trim();
+  if (value === '') return false;
+
+  if (value.startsWith('#')) return value.length > 1;
+  if (value.startsWith('/')) return !value.startsWith('//');
+
+  const lower = value.toLowerCase();
+  return ALLOWED_LINK_SCHEMES.some(scheme => lower.startsWith(scheme));
+}
+
 /** Heading text -> a stable anchor id, for deep links and the contents list. */
 export function slugifyHeading(text) {
   return String(text)

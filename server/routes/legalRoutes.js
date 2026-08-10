@@ -1,8 +1,10 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { DEMO_MODE } from '../config.js';
-import { LEGAL_DOCUMENTS, documentBySlug, publishedHash } from '../legalDocuments.js';
-import { policyContent, PolicyContentError } from '../legalContent.js';
+import { documentBySlug } from '../legalDocuments.js';
+import { PolicyContentError } from '../legalContent.js';
+import { db } from '../db.js';
+import { effectiveDocuments, resolveDocument } from '../legalStore.js';
 
 /**
  * Publishes the legal documents the product asks people to rely on.
@@ -59,7 +61,22 @@ const legalLimiter = rateLimit({
 
 router.use('/api/legal', legalLimiter);
 
-/** The public shape of a registry entry. Never leaks `file`. */
+/**
+ * The public shape of a resolved document. Never leaks `file`.
+ *
+ * Takes a document already resolved by `legalStore` rather than a raw registry
+ * entry, so `version`, `effectiveAt` and `contentHash` describe whatever is
+ * actually being served — the newest published revision, or the file when no
+ * revision exists. Reading those three off the registry here is precisely the
+ * drift `legalStore`'s header warns about: the page would print version 1.0
+ * above the text of 1.1.0.
+ *
+ * `updatedAt` is new and nullable. It is the moment a revision was published,
+ * which `effectiveAt` deliberately is not — a correction can be published on
+ * Tuesday and take effect the following Monday, and a reader is entitled to see
+ * which is which. Null means the document has never been edited through the
+ * editor, so the only honest answer is its effective date.
+ */
 function publicMeta(doc) {
   return {
     slug: doc.slug,
@@ -77,8 +94,12 @@ function publicMeta(doc) {
      * to lag the file (see LEGAL_HASHES_ENFORCED), so reporting it here would
      * print a fingerprint that does not describe the words underneath it — a
      * worse failure than no fingerprint, because it looks like verification.
+     *
+     * `resolveDocument` and `effectiveDocuments` both supply this already
+     * resolved — the revision's hash, or `publishedHash(doc)` for a file.
      */
-    contentHash: publishedHash(doc),
+    contentHash: doc.contentHash,
+    updatedAt: doc.updatedAt ?? null,
     bundledWith: doc.bundledWith,
   };
 }
@@ -91,7 +112,7 @@ function publicMeta(doc) {
  * the signed-out route test reads `PUBLIC_ROUTES`.
  */
 router.get('/api/legal/documents', (req, res) => {
-  res.json({ documents: LEGAL_DOCUMENTS.map(publicMeta) });
+  res.json({ documents: effectiveDocuments(db).map(publicMeta) });
 });
 
 /**
@@ -101,14 +122,20 @@ router.get('/api/legal/documents', (req, res) => {
  * the deployment is broken rather than the request. Answering 404 would tell a
  * user "no such policy" when the truth is "this server cannot show you the
  * policy it is holding you to", and those want opposite responses.
+ *
+ * A document served from a revision cannot raise that error at all — the text is
+ * a column, and there is no file to be missing or to have drifted. The try/catch
+ * still wraps the call because the fallback path is unchanged and is what every
+ * document uses until somebody edits it.
  */
 router.get('/api/legal/documents/:slug', (req, res) => {
-  const doc = documentBySlug(req.params.slug);
-  if (!doc) return res.status(404).json({ error: 'No such legal document.' });
+  if (!documentBySlug(req.params.slug)) {
+    return res.status(404).json({ error: 'No such legal document.' });
+  }
 
-  let markdown;
+  let resolved;
   try {
-    markdown = policyContent(doc.slug);
+    resolved = resolveDocument(db, req.params.slug, { withBody: true });
   } catch (err) {
     if (err instanceof PolicyContentError) {
       console.error(`[legal] ${err.message}`);
@@ -120,7 +147,7 @@ router.get('/api/legal/documents/:slug', (req, res) => {
     throw err;
   }
 
-  res.json({ ...publicMeta(doc), markdown });
+  res.json({ ...publicMeta(resolved), markdown: resolved.body });
 });
 
 export default router;

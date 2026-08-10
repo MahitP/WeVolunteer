@@ -460,6 +460,33 @@ export const SUPER_ONLY = [
    * it. Ungrantable means that conversation happens as a role change instead.
    */
   'persona.preview',
+  /**
+   * Editing the published text of a legal document (the Legal Center editor).
+   *
+   * ── Why owner-only rather than an administrator power ──
+   *
+   * Every other administrative capability acts on one person or one event, and
+   * an administrator who misuses it harms a bounded set of people who can be
+   * identified afterwards. This one rewrites the agreement that every account on
+   * the platform is held to, including the fourteen-year-olds who accepted it at
+   * signup and the organizers whose obligations it defines. There is no bounded
+   * blast radius and no version of "we caught it early" that undoes somebody
+   * having relied on the wrong text.
+   *
+   * ── SUPER_ONLY also makes it UNGRANTABLE, which is the larger point ──
+   *
+   * The check runs before per-user grants are consulted and `userCapabilities.js`
+   * refuses to store a grant naming one. "Let the person handling our compliance
+   * paperwork fix the Terms" is an extremely reasonable-sounding grant, and it
+   * would hand the contract to an account nobody vetted for it. Ungrantable means
+   * that conversation has to happen as a role change instead.
+   *
+   * This gates the editor SURFACE — reading the editable text as well as writing
+   * it, because the requirement is that an ordinary user cannot retrieve editable
+   * content either. The separate act of publishing additionally requires a fresh
+   * proof of identity: see `legal.publish` in sensitiveActions.js.
+   */
+  'legal.edit',
 ];
 
 export const ALL_CAPABILITIES = [...new Set([

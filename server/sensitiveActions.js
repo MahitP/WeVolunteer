@@ -119,6 +119,40 @@ export const SENSITIVE_ACTIONS = {
   '2fa.recovery.regenerate': {
     label: 'replace your recovery codes', methods: ['password', 'oauth'], bindsParams: []
   },
+  /**
+   * Publishing a new version of a legal document.
+   *
+   * ── Why this one is here and "open the editor" is not ──
+   *
+   * `legal.edit` (authz.js, SUPER_ONLY) gates the editor surface. This gates the
+   * single act that changes what a reader is shown — the same split as
+   * `data.export` versus `data.download`, and for the same reason the registry
+   * keeps having to close: gating the announcement and not the effect protects
+   * nothing. Typing in a textarea is not the sensitive act; replacing the Terms
+   * of Service every account on this platform accepted is.
+   *
+   * The precedent it most resembles is `report.evidence`, whose rationale
+   * applies here almost word for word: the accountability was already in place —
+   * this write is audited, attributed, and append-only — and what was missing is
+   * the moment of deliberation. A step-up turns an idle click on "Save changes"
+   * into an act somebody has to mean.
+   *
+   * ── Binds `slug` and `version` ──
+   *
+   * So one verification publishes ONE document at ONE version. Without the
+   * binding, an owner who verified in order to correct a typo in the Cookie
+   * Notice would hold, for five minutes, a grant spendable on the Terms of
+   * Service — which is the failure `email.change` binds `newEmail` to avoid.
+   *
+   * Both values are bound as the handler is about to WRITE them, never as the
+   * client claimed them: `version` is the normalised string that will land in
+   * the row, so a grant obtained for 1.1.0 cannot be spent publishing 2.0.0.
+   */
+  'legal.publish': {
+    label: 'publish a new version of a legal document',
+    methods: ['password', 'oauth'],
+    bindsParams: ['slug', 'version'],
+  },
 };
 
 export function isSensitiveAction(action) {

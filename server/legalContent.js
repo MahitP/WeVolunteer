@@ -39,9 +39,25 @@ import {
  *
  * ── Cached after first read ──
  *
- * The documents are immutable for the life of the process — a version bump is a
- * deploy — so re-reading and re-hashing ~8 KB of Markdown per request would buy
- * nothing. The cache is keyed by slug and populated on demand.
+ * The FILES are immutable for the life of the process, so re-reading and
+ * re-hashing ~8 KB of Markdown per request would buy nothing. The cache is keyed
+ * by slug and populated on demand.
+ *
+ * ── This module is no longer the last word (v1.4) ──
+ *
+ * It was, and the sentence above used to end "— a version bump is a deploy".
+ * That stopped being true when the Legal Center editor shipped: an owner can
+ * publish new text into `legal_document_revisions`, and a row there supersedes
+ * the file for that slug. `server/legalStore.js` owns that decision and is what
+ * routes, consent and the editor all call.
+ *
+ * The cache is nevertheless still safe without an invalidation path, and the
+ * reason is worth stating because it looks like a bug. What is cached here is
+ * the FILE, which nothing at runtime writes — the editor never rewrites
+ * `docs/legal/policies/`. Once a revision exists, `resolveDocument` returns it
+ * and never asks this module at all, so a stale entry is unreachable rather than
+ * merely unlikely. This stays the baseline and the fallback: what a document
+ * said when it was first published, and what is served until somebody edits it.
  */
 
 /** slug -> verified Markdown source. */

@@ -3,6 +3,28 @@
 Ten documents. Each file opens with a **specification block** — purpose, audience, required
 sections, and the decisions WeVolunteer must make — followed by the **draft** itself.
 
+## These files are the baseline, not always what is being served (v1.4)
+
+The Legal Center editor (`/admin/legal`, owner only) publishes revisions into
+`legal_document_revisions`, and a row there **supersedes the file** for that slug. So a
+document's live text and version may differ from what is written here.
+
+What that changes, and what it does not:
+
+- **These files stay the record of what was originally published**, and the fallback for any
+  document nobody has edited. Nothing at runtime rewrites them — the server never writes to
+  `docs/`.
+- **Editing a file still requires the version and hash procedure below**, because a file edit
+  only takes effect for documents with no revision.
+- **Editing through the editor requires a strictly greater version**, enforced on the server.
+  That is not a preference: `legal_documents` is keyed by `(slug, version)` and a published row
+  is immutable, so reusing a version makes the catalogue disagree with the acceptance records
+  pointing at it.
+- **The registry still owns everything that is not content** — slug, title, summary, scope,
+  consent type, bundling. The editor cannot change any of them.
+
+`server/legalStore.js` is the single place that decides which of the two answers applies.
+
 ## Conventions used in every draft
 
 **`[[OWNER DECISION — BLOCKS PUBLICATION: ...]]` means a fact nobody has supplied yet.** This

@@ -1,8 +1,12 @@
 import crypto from 'node:crypto';
 import {
-  LEGAL_DOCUMENTS, SIGNUP_DOCUMENTS, CONSENT_CONTROLS, documentBySlug,
-  publishedHash, LEGAL_HASHES_ENFORCED,
+  SIGNUP_DOCUMENTS, CONSENT_CONTROLS, documentBySlug, LEGAL_HASHES_ENFORCED,
 } from './legalDocuments.js';
+/* Version and content are resolved, never read off the registry — see the note
+   inside `recordAcceptances`. Neither `LEGAL_DOCUMENTS` nor `publishedHash` is
+   imported any more precisely so that a future edit cannot quietly reach past
+   the resolver and write a version the reader was not shown. */
+import { effectiveDocuments, resolveDocument } from './legalStore.js';
 
 /**
  * Recording and enforcing consent.
@@ -154,13 +158,24 @@ export function recordAcceptances(db, { userId, method, context = null, req = nu
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  for (const doc of targets) {
+  /**
+   * Resolved, so the row records the version and hash the person was SHOWN.
+   *
+   * `targets` are registry entries, and since v1.4 the registry is no longer the
+   * last word on version or content — a published revision supersedes it. Writing
+   * `doc.version` and `publishedHash(doc)` here would record an acceptance of
+   * version 1.0 for somebody who read 1.1.0, which is a consent record that is
+   * false about what was agreed to. That is the exact failure `legalStore`'s
+   * header exists to prevent, and this is the call site it was written for.
+   */
+  for (const registered of targets) {
+    const doc = resolveDocument(db, registered) ?? registered;
     insert.run(
       `acc-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
       userId,
       doc.slug,
       doc.version,
-      publishedHash(doc),
+      doc.contentHash,
       at,
       method,
       context,
@@ -197,11 +212,24 @@ export function syncLegalDocuments(db, { now = null } = {}) {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
-  for (const doc of LEGAL_DOCUMENTS) {
+  /**
+   * Resolved, so a revision published through the editor enters the catalogue.
+   *
+   * This loop is what makes an owner's save durable across a restart: the new
+   * `(slug, version)` lands as its own immutable row and the previous one stays
+   * exactly as it was, which is the version history the editor promises.
+   *
+   * It is also why the write path refuses any version that is not strictly
+   * greater than every version already recorded here. Publishing over an
+   * existing version would reach the mismatch branch below — a silent hash
+   * rewrite today, and a server that refuses to boot the day
+   * LEGAL_HASHES_ENFORCED is turned on at launch.
+   */
+  for (const doc of effectiveDocuments(db)) {
     const key = `${doc.slug}@${doc.version}`;
     const row = bySlugVersion.get(key);
 
-    const hash = publishedHash(doc);
+    const hash = doc.contentHash;
 
     if (!row) {
       insert.run(doc.slug, doc.version, doc.title, doc.consentType, hash, at, at);

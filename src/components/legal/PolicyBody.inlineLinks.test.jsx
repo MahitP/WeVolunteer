@@ -77,4 +77,49 @@ describe('PolicyBody renders links wherever they appear', () => {
     expect(heading).toHaveAttribute('id', 'how-long-we-keep-things');
     expect(heading).toHaveAttribute('tabindex', '-1');
   });
+  /**
+   * ── Unsafe link targets ──────────────────────────────────────────────────
+   *
+   * Until v1.4 the only source of policy text was this repository, so an href
+   * was trusted by provenance and this file's header said as much. The Legal
+   * Center editor makes policy text something an account can write, and
+   * `/legal/:slug` is unauthenticated and is where the signup form sends
+   * fourteen-year-olds — so a stored `javascript:` href would be a script
+   * running on the page a minor reads before agreeing to anything.
+   *
+   * `validateBody` refuses the save, which is where an owner gets a useful
+   * error. These are the backstop: the ten documents on disk never pass through
+   * that validation, and neither would a row written before the check existed.
+   */
+  describe('a link the renderer must not follow', () => {
+    it('renders javascript: as plain text rather than as a link', () => {
+      render(<PolicyBody markdown={'[Click here](javascript:alert)'} />);
+
+      expect(screen.queryByRole('link')).toBeNull();
+      expect(screen.getByRole('paragraph')).toHaveTextContent('Click here');
+    });
+
+    it('keeps the words, so a clause never silently disappears', () => {
+      // Degrading rather than dropping, for the reason the parser's header gives
+      // about unsupported syntax: a clause missing from a policy nobody noticed
+      // is the failure worth designing against.
+      render(<PolicyBody markdown={'You may [withdraw consent](javascript:steal) at any time.'} />);
+
+      expect(screen.getByRole('paragraph'))
+        .toHaveTextContent('You may withdraw consent at any time.');
+    });
+
+    it('refuses data:, vbscript: and protocol-relative targets', () => {
+      for (const href of ['data:text/html,<script>x</script>', 'vbscript:msgbox', '//evil.example']) {
+        const { unmount } = render(<PolicyBody markdown={`[x](${href})`} />);
+        expect(screen.queryByRole('link'), href).toBeNull();
+        unmount();
+      }
+    });
+
+    it('still renders the links a policy legitimately needs', () => {
+      render(<PolicyBody markdown={'[a](https://example.org) [b](mailto:x@y.org) [c](/legal/terms-of-service)'} />);
+      expect(screen.getAllByRole('link')).toHaveLength(3);
+    });
+  });
 });

@@ -52,6 +52,8 @@ const Settings = React.lazy(() => import('../views/Settings'));
 const ErrorDashboard = React.lazy(() => import('../views/ErrorDashboard'));
 const LegalCenter = React.lazy(() => import('../views/legal/LegalCenter'));
 const LegalDocument = React.lazy(() => import('../views/legal/LegalDocument'));
+const AboutUs = React.lazy(() => import('../views/AboutUs'));
+const LegalEditor = React.lazy(() => import('../views/legal/LegalEditor'));
 const OrganizerAgreement = React.lazy(() => import('../views/legal/OrganizerAgreement'));
 const Appeal = React.lazy(() => import('../views/Appeal'));
 const AdminAppeals = React.lazy(() => import('../views/AdminAppeals'));
@@ -202,6 +204,18 @@ export const APP_ROUTES = [
   { path: '/admin/audit-logs', element: <AdminAuditExplorer />, requiredCap: 'audit.read' },
   { path: '/admin/roster', element: <AdminRoster />, requiredCap: 'admin.create' },
   /**
+   * The Legal Center editor.
+   *
+   * `/admin/legal` rather than `/legal/edit`, which would be captured by
+   * `/legal/:slug` in PUBLIC_ROUTES and answer "no such legal document". The
+   * `/admin/` prefix also puts it where the other owner-only pages already are.
+   *
+   * `requiredCap` is enforced here and again on every endpoint the page calls.
+   * This one keeps a reader who typed the URL out of a shell they cannot use;
+   * the server's is the one that matters.
+   */
+  { path: '/admin/legal', element: <LegalEditor />, requiredCap: 'legal.edit' },
+  /**
    * The platform-wide impact figures. An AUTHENTICATED route, deliberately.
    *
    * It was briefly declared in PUBLIC_ROUTES below, carrying a `requiredCap`
@@ -335,6 +349,20 @@ export const PUBLIC_ROUTES = [
     element: <Navigate to={`/legal/${slug}`} replace />,
   })),
   { path: '/legal/:slug', element: <LegalDocument /> },
+  /**
+   * About Us — public, and deliberately not under `/legal`.
+   *
+   * It is reached from the same Help area of Settings and it sits beside the
+   * Legal Center in the reader's mind, but it is not a document anybody is held
+   * to and it carries no version. Putting it at `/legal/about` would also
+   * collide with `/legal/:slug`, where the parameter is matched against the
+   * registry — a reader following that URL would get "no such legal document"
+   * for a page that exists.
+   *
+   * Public because the people most likely to want it are the ones deciding
+   * whether to sign up: a parent, or a student sent a link by an organizer.
+   */
+  { path: '/about', element: <AboutUs /> },
   { path: '/appeal/:token', element: <Appeal /> },
 ];
 

@@ -67,6 +67,11 @@ const FEATURE_NAMES = Object.freeze({
      administrator who holds `analytics.impact` and not `analytics.platform`
      would experience. */
   'analytics.platform': 'the platform-wide impact figures',
+  /* Named for the destination the reader typed, which is the Settings entry
+     they would have seen if they held it. "editing legal documents" would
+     describe the power rather than the page, and somebody who reached here by
+     guessing a URL is looking for a page. */
+  'legal.edit': 'the Legal Center editor',
 });
 
 /**

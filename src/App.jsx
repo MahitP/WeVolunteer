@@ -373,6 +373,7 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/impact')) return 'impact';
   if (pathname.startsWith('/admin/audit-logs')) return 'audit';
   if (pathname.startsWith('/admin/roster')) return 'roster';
+  if (pathname.startsWith('/admin/legal')) return 'legalEditor';
   return 'dashboard';
 }
 
@@ -510,6 +511,10 @@ export const PAGE_META = {
     messages: { title: 'Messages', sub: 'Conversations with students and organizers' },
     audit: { title: 'Audit Explorer', sub: 'Every administrative action, and who took it' },
     roster: { title: 'Administrator roster', sub: 'Who holds administrative access' },
+    /* `staff` only, like `audit` and `roster` above: `legal.edit` is SUPER_ONLY,
+       so no other persona can reach the page and an entry under one would be a
+       title nobody will ever see. */
+    legalEditor: { title: 'Legal Center editor', sub: 'Publish new versions of the documents people agree to' },
     dashboard: { title: 'Dashboard', sub: 'Reports waiting, organizers to approve, and how the programme is doing' },
     browse: { title: 'All events', sub: 'Everything posted across the district' },
     notifications: { title: 'Notifications', sub: 'Platform activity' },
@@ -1202,6 +1207,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/impact': {},
     '/admin/audit-logs': {},
     '/admin/roster': {},
+    '/admin/legal': { addToast },
     '/admin/impact': {},
     '/admin/moderation': { currentUser, onPreviewStarted: refreshAll }
   };

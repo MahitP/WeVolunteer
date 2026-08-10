@@ -183,6 +183,26 @@ export const POLICY_DIR = path.join(HERE, '..', 'docs', 'legal', 'policies');
  * residue. `legalRepublish.test.js` still pins that editing a published version
  * throws. This remains available exactly once, and it has now been used.
  */
+
+/**
+ * The document registry.
+ *
+ * ── What is authoritative here, and what is not (v1.4) ──
+ *
+ * This array is still the closed set of documents and the sole owner of
+ * everything that is NOT content: `slug`, `title`, `summary`, `scope`,
+ * `consentType`, `file`, `bundledWith`. The Legal Center editor cannot change
+ * any of them, and that boundary is load-bearing rather than incidental —
+ * `SIGNUP_DOCUMENTS`, `ORGANIZER_DOCUMENTS` and `CONSENT_CONTROLS` are all
+ * computed from those fields once at module load, so a `scope` that could move
+ * at runtime would silently drop a document out of the signup consent block.
+ *
+ * `version`, `effectiveAt` and the text itself are now the value a document
+ * SHIPPED with, not necessarily the one being served. A row in
+ * `legal_document_revisions` supersedes all three, and `server/legalStore.js` is
+ * the one place that decides. Read those three fields off this array only when
+ * you specifically mean "as originally published"; everywhere else, resolve.
+ */
 export const LEGAL_DOCUMENTS = [
   {
     slug: 'terms-of-service',

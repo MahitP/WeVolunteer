@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import SettingsSidebar from '../components/account/SettingsSidebar';
 import SettingsSection from '../components/account/SettingsSection';
 import NotificationPreferences from '../components/NotificationPreferences';
@@ -14,7 +14,8 @@ import UsernameCard from '../components/account/UsernameCard';
 import { api } from '../utils/api';
 import { useTheme } from '../hooks/useTheme';
 import { APP_NAME, SCHOOL_NAME, SUPPORT_EMAIL, STUDENT_GUIDE_URL, ORGANIZER_GUIDE_URL } from '../config';
-import { Sun, Moon, SunMoon, ExternalLink, Mail, Scale } from 'lucide-react';
+import { can } from '../authz';
+import { Sun, Moon, SunMoon, ExternalLink, Mail, Scale, Heart, FileSignature } from 'lucide-react';
 
 export default function Settings({ currentUser, addToast, onProfileChange }) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -365,7 +366,8 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
           SUPPORT_EMAIL && {
             label: 'Report a problem',
             href: `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} problem report`)}`,
-            external: false
+            external: false,
+            Icon: Mail
           },
           /**
            * Unconditional, unlike the three above.
@@ -378,8 +380,48 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
            * It also has to be reachable from somewhere durable. A user looking for
            * "what did I agree to" after signup has no other route to it: the
            * signup links are behind an account they already made.
+           *
+           * ── One entry, named for the destination ──
+           *
+           * This read "Terms, privacy and safety policies" — a list of contents
+           * standing in for a place. The page it opens has been a hub with ten
+           * documents, its own search and its own grouping since v1.2; naming it
+           * after three of its documents made the other seven invisible from the
+           * only durable route to them, and left the product with no word for the
+           * thing it actually built. The description line carries the examples
+           * now, which is where an example belongs.
            */
-          { label: 'Terms, privacy and safety policies', href: '/legal', external: false, internal: true }
+          {
+            label: 'Legal Center',
+            description: 'View our Terms, Privacy Policy, and other legal documents.',
+            href: '/legal', internal: true, Icon: Scale
+          },
+          /**
+           * Owner only, and hidden rather than disabled for everyone else.
+           *
+           * `can()` here is UX — it decides whether a link is drawn. The route
+           * refuses anyone without `legal.edit`, and so does every endpoint the
+           * page calls; `legal.edit` is SUPER_ONLY, so it cannot even be granted.
+           * A reader who guesses the URL gets a refusal from the server, not from
+           * this array.
+           *
+           * Placed directly beneath the Legal Center rather than at the end of
+           * the list, because it edits the entry above it and a control separated
+           * from its subject has to be explained. Kept out of the primary
+           * navigation for the same reason the six other owner pages are: a rail
+           * entry that renders for one account on the platform is clutter for
+           * everybody else.
+           */
+          can(currentUser, 'legal.edit') && {
+            label: 'Edit Legal Center',
+            description: 'Owner access — publish new versions of these documents.',
+            href: '/admin/legal', internal: true, Icon: FileSignature
+          },
+          {
+            label: 'About Us',
+            description: 'Why WeVolunteer exists, and what we are trying to do.',
+            href: '/about', internal: true, Icon: Heart
+          }
         ].filter(Boolean);
 
         return (
@@ -387,24 +429,52 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
             {links.length > 0 ? (
               <div className="card">
                 <div className="nav">
-                  {links.map(({ label, href, external, internal }, i) => (
-                    <a
-                      key={label}
-                      className={`nav-item settings-help-link${i === links.length - 1 ? ' is-last' : ''}`}
-                      href={href}
-                      {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-                    >
-                      <span className="settings-help-label">{label}</span>
-                      {/* The icon says what will happen: a new tab, an email
-                          client, or a page in this app. Three destinations that
-                          behave differently should not look identical. */}
-                      {external
-                        ? <ExternalLink size={16} className="dim" aria-label="Opens in a new tab" />
-                        : internal
-                          ? <Scale size={16} className="dim" aria-hidden="true" />
-                          : <Mail size={16} className="dim" aria-hidden="true" />}
-                    </a>
-                  ))}
+                  {links.map(({ label, description, href, external, internal, Icon }, i) => {
+                    /**
+                     * Internal destinations are client-side navigations.
+                     *
+                     * They were `<a href>` and did a full page reload — a blank
+                     * screen and a fresh bundle parse to move between two screens
+                     * of the same app. Harmless on a laptop, and the reason the
+                     * Legal Center felt slow on the phones most of these readers
+                     * are holding.
+                     */
+                    const Tag = internal ? Link : 'a';
+                    const target = internal ? { to: href } : { href };
+                    return (
+                      <Tag
+                        key={label}
+                        className={`nav-item settings-help-link${i === links.length - 1 ? ' is-last' : ''}`}
+                        {...target}
+                        {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                      >
+                        <span className="settings-help-text">
+                          <span className="settings-help-label">{label}</span>
+                          {/* The second line is not decoration: "Legal Center" and
+                              "About Us" are both places, and without it the only
+                              way to learn which one holds the Privacy Policy is to
+                              open both. */}
+                          {description && (
+                            <span className="settings-help-description">{description}</span>
+                          )}
+                        </span>
+                        {/* The icon says what will happen: a new tab, an email
+                            client, or a page in this app. Three destinations that
+                            behave differently should not look identical. */}
+                        {external
+                          ? <>
+                              {/* The text carries it, not the icon. lucide renders a
+                                  bare <svg>, and whether an aria-label on one is
+                                  exposed varies by browser — VoiceOver drops it. The
+                                  new-tab warning is the part of this row that must
+                                  survive that. */}
+                              <span className="sr-only">Opens in a new tab</span>
+                              <ExternalLink size={16} className="dim" aria-hidden="true" />
+                            </>
+                          : <Icon size={16} className="dim" aria-hidden="true" />}
+                      </Tag>
+                    );
+                  })}
                 </div>
               </div>
             ) : (
