@@ -126,6 +126,10 @@ export default function Login({ onLoginSuccess, addToast }) {
    * move does the work of two.
    */
   const errorRef = useRef(null);
+  /* Held in a ref so the cooldown timer can be cleared on unmount — see
+     `startCooldown`. */
+  const cooldownTimer = useRef(null);
+  useEffect(() => () => { if (cooldownTimer.current) clearInterval(cooldownTimer.current); }, []);
   useEffect(() => {
     if (!error) return;
     // `?.focus()` rather than an assertion: the link screen's input is
@@ -409,22 +413,48 @@ export default function Login({ onLoginSuccess, addToast }) {
     performLogin(identifier.trim(), password);
   };
 
+  /**
+   * Starts the visible cooldown, and clears its timer on unmount.
+   *
+   * The interval used to be created inline and never cleared, so it kept
+   * ticking — and calling `setEmailCooldown` — after a successful sign-in
+   * unmounted this screen.
+   */
+  const startCooldown = (seconds) => {
+    setEmailCooldown(seconds);
+    if (cooldownTimer.current) clearInterval(cooldownTimer.current);
+    cooldownTimer.current = setInterval(() => {
+      setEmailCooldown(prev => {
+        if (prev <= 1) { clearInterval(cooldownTimer.current); cooldownTimer.current = null; return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
   const sendEmailCode = async () => {
     try {
       setLoading(true);
       const result = await api.send2FAEmailCode();
       setMaskedEmail(result.maskedEmail || '');
       setEmailCodeSent(true);
-      setEmailCooldown(60);
+      startCooldown(60);
       setLoading(false);
-      const interval = setInterval(() => {
-        setEmailCooldown(prev => {
-          if (prev <= 1) { clearInterval(interval); return 0; }
-          return prev - 1;
-        });
-      }, 1000);
     } catch (err) {
       setError(err.message || 'Could not send email code.');
+      /**
+       * A refused SEND does not mean there is no code to type.
+       *
+       * The cooldown 429 fires precisely because a code was just sent and is
+       * still live — and a delivery failure can happen after the code was
+       * stored. Leaving `emailCodeSent` false hid the input and the Verify
+       * button, so somebody holding a perfectly good code in their inbox was
+       * left on a screen offering only the button that had just refused them.
+       * The field is revealed for both, because in both cases a code may exist.
+       */
+      if (err.status === 429 || err.data?.code === 'delivery_failed') {
+        setEmailCodeSent(true);
+        if (err.data?.retryAfter) startCooldown(err.data.retryAfter);
+      }
       setLoading(false);
     }
   };
@@ -474,6 +504,18 @@ export default function Login({ onLoginSuccess, addToast }) {
       onLoginSuccess();
     } catch (err) {
       setError(err.message || 'Invalid code.');
+      /**
+       * The server corrects the method list on refusal; honour it.
+       *
+       * `method_unavailable` and `verification_unavailable` both carry
+       * `availableMethods`, precisely so the picker can re-narrow. Discarding it
+       * left the radio for a method that had just been refused still selected,
+       * so every resubmit repeated the same refusal until a reload — the exact
+       * loop the server's named refusal exists to break.
+       */
+      if (Array.isArray(err.data?.availableMethods)) {
+        setAvailableMethods(err.data.availableMethods);
+      }
       setLoading(false);
     }
   };

@@ -3358,6 +3358,18 @@ time { font-variant-numeric: tabular-nums; }
     min-width: 44px;
     min-height: 44px;
   }
+  /**
+   * Tabs, which were ~40px and in none of the three touch-target blocks.
+   *
+   * That mattered more after v1.3.1: the discovery scope tabs (Everything /
+   * Opportunities / People / Organizations) are now the ONLY route to people and
+   * organizations, since "Find people" left the rail — and they sit inside a
+   * horizontally scrolling strip, where a near-miss scrolls the strip instead of
+   * selecting anything.
+   */
+  .tab {
+    min-height: 44px;
+  }
   /* Checkboxes and radios in list rows — the check-in ticks especially. */
   .list-row input[type='checkbox'],
   .list-row input[type='radio'] {

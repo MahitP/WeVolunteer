@@ -851,6 +851,33 @@ router.post('/api/auth/login-2fa', async (req, res) => {
     const effectiveMethod = method || (tokenValue ? 'totp' : (codeValue ? 'recovery' : null));
 
     /**
+     * A submission carrying nothing to check costs nothing.
+     *
+     * The empty-string guard above covered `code: ''`; a request that omits the
+     * field entirely — `{"method":"recovery"}` — matched no branch below, fell
+     * through to `isValid = false`, and spent one of the twenty attempts an
+     * account gets in fifteen minutes. Same rationale, so the same answer: it is
+     * malformed, not wrong.
+     *
+     * `email` with no code is NOT caught here — that is how the send button
+     * asks for one, and it is a different route.
+     */
+    if (effectiveMethod && effectiveMethod !== 'email' && !tokenValue && !codeValue) {
+      return res.status(400).json({
+        error: 'Enter the code before submitting.',
+        code: 'malformed_code',
+        field: effectiveMethod === 'totp' ? 'token' : 'code',
+      });
+    }
+    if (effectiveMethod === 'email' && !codeValue) {
+      return res.status(400).json({
+        error: 'Enter the code from your email.',
+        code: 'malformed_code',
+        field: 'code',
+      });
+    }
+
+    /**
      * The method has to be one this ACCOUNT holds, not merely one the platform
      * implements.
      *
@@ -1032,8 +1059,40 @@ router.post('/api/auth/login-2fa', async (req, res) => {
     db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(payload.id);
 
     recordSecurityEvent(db, req, payload.id, '2FA_SUCCESS', { method: effectiveMethod });
+
+    /**
+     * Spending a recovery code is reported back, and told to the account holder.
+     *
+     * It used to be silent: the row was deleted, an audit entry was written, and
+     * the response said nothing. So somebody could sign in with their LAST code,
+     * be told nothing, and discover on the next attempt that the only method
+     * left was the authenticator they had lost.
+     *
+     * It is also the standard signal that somebody ELSE got in — a used recovery
+     * code is exactly what an account takeover looks like from the inside — so
+     * the notice goes to the account regardless of preferences being a courtesy
+     * elsewhere. Best-effort: a sign-in must not fail because a notification
+     * could not be written.
+     */
+    let recoveryCodesRemaining = null;
     if (usedRecoveryCodeId) {
       recordSecurityEvent(db, req, payload.id, '2FA_RECOVERY_USED', { recovery_id: usedRecoveryCodeId });
+      recoveryCodesRemaining = db.prepare(
+        'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
+      ).get(payload.id)?.n ?? 0;
+      try {
+        const { notificationService } = await import('../services/notificationService.js');
+        notificationService.dispatch(
+          'RECOVERY_CODE_USED',
+          { remaining: recoveryCodesRemaining },
+          payload.id,
+          /* One notice per code spent, so two sign-ins are two notices — the
+             point is to be told each time. */
+          `recovery-used:${usedRecoveryCodeId}`
+        );
+      } catch (err) {
+        console.error('Could not notify about a used recovery code:', err);
+      }
     }
 
     // Success!
@@ -1043,6 +1102,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
 
     res.json({
       user,
+      ...(recoveryCodesRemaining !== null && { recoveryCodesRemaining }),
       emailVerified: userRow.email_verified === 1,
       ...(userRow.email_verified !== 1 && {
         action: 'verification_required',
