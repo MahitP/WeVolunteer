@@ -94,6 +94,10 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/admin/appeals',
   '/admin/audit-logs',
   '/admin/roster',
+  /* The Legal Center editor. A literal path with no parameter, and the document
+     being edited is chosen inside the page rather than in the URL — so a report
+     from here names the editor and never which policy was open. */
+  '/admin/legal',
 
   // src/routes/index.jsx — SIGNED_OUT_ROUTES
   '/welcome',
@@ -121,6 +125,9 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/legal/terms',
   '/legal/guidelines',
   '/legal/:slug',
+  /* About Us. Allowed for the same reason as `/privacy`: a literal path with no
+     parameter, read by people who do not have an account yet. */
+  '/about',
   '/appeal/:token',
 
   /* ── v1.3, the member directory ──────────────────────────────────────────

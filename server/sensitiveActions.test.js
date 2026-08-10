@@ -28,12 +28,21 @@ describe('sensitive action registry', () => {
    * unaltered, on the handler whose first statement deletes every recovery code
    * the account has — and enrolment holds an unspent `2fa.enable` grant in
    * client state for minutes while a QR code is scanned.
+   *
+   * `legal.publish` joined in v1.4 with the Legal Center editor, and it is the
+   * first entry that is not about an account at all. Everything above concerns
+   * who can reach something — a password, a provider, an archive, a role. This
+   * one changes the document every account on the platform is held to, for
+   * everybody at once, with no notification and no undo. It follows the
+   * `report.evidence` precedent rather than the credential ones: the write was
+   * already audited and attributable, and what a step-up adds is the moment of
+   * deliberation between typing in a textarea and replacing the Terms of Service.
    */
   it('lists exactly the actions requiring step-up', () => {
     expect(Object.keys(SENSITIVE_ACTIONS).sort()).toEqual([
       '2fa.disable', '2fa.enable', '2fa.generate', '2fa.recovery.regenerate',
       'account.delete', 'admin.invite', 'admin.promote', 'admin.revoke', 'data.download', 'data.export', 'email.change',
-      'oauth.link', 'oauth.unlink', 'password.change', 'report.evidence',
+      'legal.publish', 'oauth.link', 'oauth.unlink', 'password.change', 'report.evidence',
     ]);
   });
 

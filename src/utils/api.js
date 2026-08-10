@@ -1166,5 +1166,33 @@ export const api = {
     apiFetch('/api/legal/organizer-agreement/accept', {
       method: 'POST',
       body: JSON.stringify({ acknowledged: true })
+    }),
+
+  /* ── The Legal Center editor (owner only) ────────────────────────────────
+   *
+   * Separate paths from the four above, under `/api/admin/legal`. The server
+   * gates every one of these with `legal.edit`, which lives in SUPER_ONLY and
+   * is therefore ungrantable — hiding the menu entry is convenience, and these
+   * calls are refused for anyone else regardless of what the client believes. */
+
+  /** Every document with its current version. No bodies — see the route's note. */
+  fetchEditableLegalDocuments: async () => apiFetch('/api/admin/legal/documents'),
+
+  /** One document's editable source plus every version it has had. */
+  fetchEditableLegalDocument: async (slug) =>
+    apiFetch(`/api/admin/legal/documents/${encodeURIComponent(slug)}`),
+
+  /**
+   * Publishes a new version.
+   *
+   * Takes `headers` because it is behind a step-up grant: `useStepUp`'s `run`
+   * hands the challenge header to the attempt it wraps, and a call that drops
+   * the argument silently loses the verification the user just completed.
+   */
+  publishLegalRevision: async (slug, { body, version, effectiveAt }, headers = {}) =>
+    apiFetch(`/api/admin/legal/documents/${encodeURIComponent(slug)}/revisions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ body, version, effectiveAt })
     })
 };

@@ -1,5 +1,5 @@
 import React from 'react';
-import { parsePolicyMarkdown } from '../../utils/policyMarkdown';
+import { parsePolicyMarkdown, isSafeHref } from '../../utils/policyMarkdown';
 
 /**
  * Renders a parsed policy document as React elements.
@@ -36,6 +36,17 @@ function Spans({ spans }) {
     }
     if (span.type === 'code') return <code key={i} className="policy-code">{span.text}</code>;
     if (span.type === 'link') {
+      /**
+       * An unsafe target renders as its own link text, not as a link.
+       *
+       * Degrading rather than dropping, for the reason the parser's header
+       * gives about unsupported syntax: a clause that silently disappears is
+       * the failure mode worth designing against. The reader still sees every
+       * word the document said; what they cannot do is click it.
+       */
+      if (!isSafeHref(span.href)) {
+        return <React.Fragment key={i}>{span.text}</React.Fragment>;
+      }
       const external = /^https?:\/\//.test(span.href) || span.href.startsWith('mailto:');
       return (
         <a

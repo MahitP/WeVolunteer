@@ -326,11 +326,28 @@ export default function VerifyIdentityModal({
    * action registry, so the sentence always names the operation the grant will
    * be spent on rather than a generic one.
    */
+  /**
+   * The reason has to be true of every action, not of most of them.
+   *
+   * It used to say "Because that changes how you sign in", which is true of the
+   * credential actions this dialog was first written for — password, email,
+   * provider, second factor — and false of the eight that have joined since.
+   * Exporting your data does not change how you sign in; neither does reading a
+   * report's evidence, promoting an administrator, or publishing a new version
+   * of the Terms of Service, where the sentence read as a non sequitur attached
+   * to a password prompt. A stated reason that does not match what the user just
+   * clicked is worse than no reason: it is the exact texture of a phishing
+   * prompt, which is the reaction this sentence exists to prevent.
+   *
+   * What IS true of all sixteen is the thing step-up actually checks — that the
+   * person at the keyboard is the account holder, and not somebody who found the
+   * session already signed in.
+   */
   const because = challenge.label
-    ? `You asked to ${challenge.label}. Because that changes how you sign in, `
-      + 'we need your password once more before it takes effect.'
-    : 'This action changes your account security, so we need your password once '
-      + 'more before it takes effect.';
+    ? `You asked to ${challenge.label}. Because that is something only you should `
+      + 'be able to do, we need your password once more before it takes effect.'
+    : 'This is something only you should be able to do, so we need your password '
+      + 'once more before it takes effect.';
 
   return createPortal(
     <Modal onClose={onCancel} label="Verify your identity" overlayClassName="modal-overlay-stacked">

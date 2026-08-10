@@ -1,0 +1,577 @@
+import { createHash } from 'node:crypto';
+import { LEGAL_DOCUMENTS, documentBySlug, publishedHash } from './legalDocuments.js';
+import { policyContent } from './legalContent.js';
+import { parsePolicyMarkdown, isSafeHref } from '../src/utils/policyMarkdown.js';
+
+/**
+ * The override layer that lets legal text change without a deploy.
+ *
+ * ── What this module owns ──
+ *
+ * One question, asked from four places: *what is the current text, version and
+ * effective date of this document?* Before the Legal Center editor there was one
+ * answer — the file on disk and the registry constant beside it — and each
+ * caller reached for it directly. Now there are two possible answers, and the
+ * moment more than one place decides between them they will disagree.
+ *
+ * They disagree in a specific and expensive way. `legal_acceptances` records the
+ * `(slug, version, content_hash)` a person agreed to. If the endpoint that
+ * SERVES a document resolves to the newest revision while the code that RECORDS
+ * an acceptance resolves to the registry, then every consent row written after
+ * the first edit names a version the reader was never shown. That is not a
+ * display bug; it is a consent record that is false about what somebody agreed
+ * to, which is the one thing this subsystem exists to keep true.
+ *
+ * So resolution lives here, and `legalRoutes.js`, `consent.js`,
+ * `organizerAgreement.js` and the editor all call it rather than deciding for
+ * themselves.
+ *
+ * ── The fallback is the whole install story ──
+ *
+ * With no revision rows — which is every existing database until an owner saves
+ * something — every function here returns exactly what the registry and the file
+ * returned before. There is no backfill and no seeding step, because the
+ * existing text is already the answer and a copy of it in the database would be
+ * a second thing to keep in step.
+ *
+ * ── Why the files are never rewritten ──
+ *
+ * A published revision is a database row. `docs/legal/policies/*.md` stays the
+ * originally published text and the fallback, and a server that rewrote its own
+ * repository would make the deployment self-modifying and the git history a
+ * fiction.
+ */
+
+/** Longest body accepted. The published policies run 4–12 KB; this is generous. */
+export const MAX_BODY_LENGTH = 400_000;
+
+/** Raised for any rejected save. `field` lets the editor focus the right input. */
+export class LegalValidationError extends Error {
+  constructor(message, field = null) {
+    super(message);
+    this.name = 'LegalValidationError';
+    this.field = field;
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Versions
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Parses `MAJOR.MINOR.PATCH` into comparable numbers, or returns null.
+ *
+ * Two-component versions parse as well, and that leniency is not sloppiness —
+ * it is the migration path. Every document in the registry is at `'1.0'` today,
+ * so a strict three-part parser would make the CURRENT version unreadable and
+ * the first save impossible to validate against anything. Reading `1.0` as
+ * `1.0.0` lets the existing corpus be compared without rewriting ten constants.
+ *
+ * Writes are held to the stricter rule — see `parseNewVersion`. Lenient in what
+ * we accept from the past, strict in what we let somebody create.
+ *
+ * Leading zeros are refused in both directions: `1.01.0` and `1.1.0` would
+ * compare equal while displaying differently, and a version a reader cannot
+ * distinguish from another is not a version.
+ */
+export function parseVersion(raw) {
+  if (typeof raw !== 'string') return null;
+  const parts = raw.trim().split('.');
+  if (parts.length < 2 || parts.length > 3) return null;
+
+  const nums = [];
+  for (const part of parts) {
+    if (!/^(0|[1-9]\d*)$/.test(part)) return null;
+    nums.push(Number(part));
+  }
+  while (nums.length < 3) nums.push(0);
+
+  return { major: nums[0], minor: nums[1], patch: nums[2] };
+}
+
+/** Negative, zero or positive, like every other comparator. */
+export function compareVersions(a, b) {
+  const left = parseVersion(a);
+  const right = parseVersion(b);
+  if (!left || !right) throw new Error(`compareVersions: unparseable version (${a}, ${b})`);
+  return (left.major - right.major) || (left.minor - right.minor) || (left.patch - right.patch);
+}
+
+/**
+ * Validates a version an owner is trying to publish.
+ *
+ * All three parts required here, unlike `parseVersion`. The registry's
+ * two-component versions are history; anything created from now on says which
+ * of the three kinds of change it was, because that distinction is the only
+ * thing that tells a reader whether they need to re-read the document.
+ */
+function parseNewVersion(raw) {
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    throw new LegalValidationError('Enter a version number.', 'version');
+  }
+  const trimmed = raw.trim();
+  if (trimmed.split('.').length !== 3 || !parseVersion(trimmed)) {
+    throw new LegalValidationError(
+      'Use a version number of the form MAJOR.MINOR.PATCH, such as 1.1.0. '
+      + 'Each part must be a whole number without leading zeros.',
+      'version'
+    );
+  }
+  return trimmed;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Resolution
+   ──────────────────────────────────────────────────────────────────────────── */
+
+export function sha256(text) {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/** True once the revisions table exists — false on a database mid-migration. */
+function revisionsTableExists(db) {
+  return !!db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'legal_document_revisions'"
+  ).get();
+}
+
+/**
+ * The newest revision for one slug, or null.
+ *
+ * `ORDER BY id DESC` rather than by version, because SQLite compares version
+ * strings lexicographically and would rank '1.9.0' above '1.10.0'. Insertion
+ * order is correct here by construction: `publishRevision` refuses any version
+ * that is not strictly greater than every version already recorded, so the
+ * highest id is always the highest version.
+ *
+ * `withBody` is false on the list path. Ten documents' worth of Markdown to
+ * render a hub page that shows only titles and versions is a cost with no
+ * reader on the other end of it.
+ */
+export function currentRevision(db, slug, { withBody = true } = {}) {
+  if (!revisionsTableExists(db)) return null;
+  const columns = withBody
+    ? 'id, slug, version, body, content_hash, effective_at, created_at, created_by'
+    : 'id, slug, version, content_hash, effective_at, created_at, created_by';
+  return db.prepare(
+    `SELECT ${columns} FROM legal_document_revisions WHERE slug = ? ORDER BY id DESC LIMIT 1`
+  ).get(slug) || null;
+}
+
+/**
+ * Registry metadata merged with whatever supersedes it.
+ *
+ * The registry keeps everything that is NOT content — the slug set, title,
+ * summary, scope, consentType, bundling — and the editor cannot touch any of it.
+ * That boundary is load-bearing: `SIGNUP_DOCUMENTS`, `ORGANIZER_DOCUMENTS` and
+ * `CONSENT_CONTROLS` are computed once at module load from those fields, so a
+ * document whose `scope` could change at runtime would silently stop appearing
+ * in the signup consent block. Version, effective date, body and hash are the
+ * only things a revision moves, and none of them are read at module load.
+ *
+ * `body` is omitted unless asked for; `contentHash` is always present because
+ * it is what an acceptance record points at.
+ */
+export function resolveDocument(db, slugOrDoc, { withBody = false } = {}) {
+  const doc = typeof slugOrDoc === 'string' ? documentBySlug(slugOrDoc) : slugOrDoc;
+  if (!doc) return null;
+
+  const revision = currentRevision(db, doc.slug, { withBody });
+
+  if (revision) {
+    return {
+      ...doc,
+      version: revision.version,
+      effectiveAt: revision.effective_at,
+      contentHash: revision.content_hash,
+      revisionId: revision.id,
+      updatedAt: revision.created_at,
+      source: 'revision',
+      ...(withBody ? { body: revision.body } : {}),
+    };
+  }
+
+  return {
+    ...doc,
+    revisionId: null,
+    updatedAt: null,
+    source: 'file',
+    /* `publishedHash`, never the pinned `doc.contentHash`. The two differ while
+       LEGAL_HASHES_ENFORCED is false, and that function's own header gives the
+       reason this module must respect: a stored hash copied from a stale
+       constant is a record claiming somebody agreed to bytes they never saw. */
+    contentHash: publishedHash(doc),
+    ...(withBody ? { body: policyContent(doc.slug) } : {}),
+  };
+}
+
+/**
+ * Every document, resolved. Used by the Legal Center list and by consent.
+ *
+ * One query for all revisions rather than one per document: the list endpoint is
+ * unauthenticated and rate-limited at 120/min, so ten round trips per request is
+ * ten times the database work for a page that has not changed.
+ */
+export function effectiveDocuments(db) {
+  const latest = new Map();
+
+  if (revisionsTableExists(db)) {
+    const rows = db.prepare(`
+      SELECT r.slug, r.version, r.content_hash, r.effective_at, r.created_at, r.id
+      FROM legal_document_revisions r
+      JOIN (SELECT slug, MAX(id) AS id FROM legal_document_revisions GROUP BY slug) newest
+        ON newest.slug = r.slug AND newest.id = r.id
+    `).all();
+    for (const row of rows) latest.set(row.slug, row);
+  }
+
+  return LEGAL_DOCUMENTS.map((doc) => {
+    const revision = latest.get(doc.slug);
+    if (!revision) {
+      return {
+        ...doc, revisionId: null, updatedAt: null, source: 'file',
+        contentHash: publishedHash(doc),
+      };
+    }
+    return {
+      ...doc,
+      version: revision.version,
+      effectiveAt: revision.effective_at,
+      contentHash: revision.content_hash,
+      revisionId: revision.id,
+      updatedAt: revision.created_at,
+      source: 'revision',
+    };
+  });
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Content validation
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* The link-scheme allowlist lives in the parser module, imported above, so the
+   rule that decides what the RENDERER will follow is the same object as the rule
+   that decides what a save may contain. Two copies would drift, and the copy
+   that drifted looser would be the one deciding what runs in a reader's browser. */
+
+/** Every link span in a parsed document, flattened out of bold runs. */
+function collectLinks(blocks) {
+  const links = [];
+  const walk = (spans) => {
+    for (const span of spans || []) {
+      if (span.type === 'link') links.push(span);
+      if (span.spans) walk(span.spans);
+    }
+  };
+  for (const block of blocks) {
+    if (block.spans) walk(block.spans);
+    if (block.items) block.items.forEach(walk);
+    if (block.header) block.header.forEach(walk);
+    if (block.rows) block.rows.forEach(row => row.forEach(walk));
+  }
+  return links;
+}
+
+/**
+ * Rejects a body the renderer would mangle or a reader could be harmed by.
+ *
+ * Runs at write time because the equivalent checks over the on-disk corpus live
+ * in `server/legalContent.test.js`, and a test cannot see text that arrives at
+ * runtime. Without this, an owner could publish a link to a document that does
+ * not exist and the guard that has already caught two live defects would simply
+ * stop applying to the half of the corpus that can change.
+ *
+ * Deliberately NOT a spell-check or a style guide. It refuses three things: a
+ * link that could execute, a link that goes nowhere, and a document with no
+ * content. Everything else is the owner's editorial judgement, and a legal
+ * editor that argues with the lawyer is a legal editor nobody uses.
+ */
+export function validateBody(raw, { slug } = {}) {
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    throw new LegalValidationError('This document cannot be published empty.', 'body');
+  }
+  if (raw.length > MAX_BODY_LENGTH) {
+    throw new LegalValidationError(
+      `This document is ${raw.length.toLocaleString()} characters, over the `
+      + `${MAX_BODY_LENGTH.toLocaleString()} limit.`,
+      'body'
+    );
+  }
+
+  const body = raw.replace(/\r\n/g, '\n').trim();
+
+  /**
+   * The `## Draft` marker separates a file's internal drafting brief from its
+   * published half, and only the published half is stored here. A body
+   * containing the marker means somebody pasted a whole file in, which would
+   * publish the specification notes to every reader.
+   */
+  if (/^##\s+Draft\s*$/m.test(body)) {
+    throw new LegalValidationError(
+      'This looks like a whole policy file rather than its published text — it still '
+      + 'contains the "## Draft" marker. Paste only the part below that marker.',
+      'body'
+    );
+  }
+
+  const blocks = parsePolicyMarkdown(body);
+  if (blocks.length === 0) {
+    throw new LegalValidationError('This document cannot be published empty.', 'body');
+  }
+
+  const headingIds = new Set(blocks.filter(b => b.type === 'heading').map(b => b.id));
+  const knownSlugs = new Set(LEGAL_DOCUMENTS.map(d => d.slug));
+  const problems = [];
+
+  for (const link of collectLinks(blocks)) {
+    const href = String(link.href || '');
+
+    if (!isSafeHref(href)) {
+      problems.push(
+        `“${link.text}” links to "${href}", which is not an allowed kind of link. `
+        + 'Use https://, mailto:, a path beginning with /, or a #section anchor.'
+      );
+      continue;
+    }
+
+    if (href.endsWith('.md')) {
+      problems.push(`“${link.text}” links to a file (${href}). Link to /legal/<slug> instead.`);
+      continue;
+    }
+
+    // A fragment with no matching heading scrolls nowhere, which is worse than a
+    // missing link because it looks like it worked.
+    if (href.startsWith('#') && !headingIds.has(href.slice(1))) {
+      problems.push(`“${link.text}” points at "${href}", but this document has no such heading.`);
+      continue;
+    }
+
+    if (href.startsWith('/legal/')) {
+      const target = href.slice('/legal/'.length).split('#')[0];
+      if (target && !knownSlugs.has(target)) {
+        problems.push(`“${link.text}” points at /legal/${target}, which is not a document here.`);
+      }
+    }
+  }
+
+  if (problems.length > 0) {
+    throw new LegalValidationError(
+      `${problems.length === 1 ? 'A link needs' : `${problems.length} links need`} fixing before `
+      + `this can be published:\n${problems.map(p => `• ${p}`).join('\n')}`,
+      'body'
+    );
+  }
+
+  return { body, blocks, slug };
+}
+
+/** `YYYY-MM-DD`, matching `effectiveAt` throughout the registry. */
+function parseEffectiveAt(raw) {
+  if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
+    throw new LegalValidationError('Choose a date this version takes effect.', 'effectiveAt');
+  }
+  const value = raw.trim();
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new LegalValidationError('That is not a real date.', 'effectiveAt');
+  }
+  return value;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Publishing
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The highest version this slug has ever carried, across all three records of it.
+ *
+ * All three are consulted rather than just the newest revision, and each one
+ * closes a real gap:
+ *
+ *   - the revisions table, so two saves cannot both claim 1.1.0;
+ *   - the registry, so the first save cannot land *below* the version the files
+ *     ship at — with an empty revisions table there is nothing else to compare
+ *     against, and 0.0.1 would otherwise be accepted over a published 1.0;
+ *   - `legal_documents`, because that table's primary key is `(slug, version)`
+ *     and `syncLegalDocuments` throws at boot if a published version's hash
+ *     moves. Reusing a version that table already holds is not a validation
+ *     nicety — it is a server that will not start.
+ */
+function highestVersion(db, slug) {
+  const candidates = [];
+
+  const registered = documentBySlug(slug);
+  if (registered) candidates.push(registered.version);
+
+  if (revisionsTableExists(db)) {
+    for (const row of db.prepare(
+      'SELECT version FROM legal_document_revisions WHERE slug = ?'
+    ).all(slug)) candidates.push(row.version);
+  }
+
+  const hasCatalogue = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'legal_documents'"
+  ).get();
+  if (hasCatalogue) {
+    for (const row of db.prepare(
+      'SELECT version FROM legal_documents WHERE slug = ?'
+    ).all(slug)) candidates.push(row.version);
+  }
+
+  return candidates
+    .filter(v => parseVersion(v))
+    .sort((a, b) => compareVersions(a, b))
+    .pop() || null;
+}
+
+/**
+ * Validates and inserts one revision. **Call inside the caller's transaction.**
+ *
+ * That is not a style preference. The version check reads the highest existing
+ * version and the insert writes one above it, and between those two statements a
+ * second save must not be able to land — outside a transaction, two concurrent
+ * publishes both read 1.0 and both write 1.1.0, and the `UNIQUE(slug, version)`
+ * constraint turns the loser into a 500 after its step-up grant has already been
+ * spent. Inside one, the loser is refused before it costs anything.
+ *
+ * The caller also spends the re-authentication grant in the same transaction, so
+ * the publication and the proof of identity commit or roll back together.
+ */
+export function publishRevision(db, { slug, version, body, effectiveAt, userId, now = null }) {
+  const { version: nextVersion, body: cleanBody, effectiveAt: effective } =
+    validatePublication(db, { slug, version, body, effectiveAt });
+
+  /* Non-null: `validatePublication` refuses an unregistered slug above. */
+  const doc = documentBySlug(slug);
+
+  const at = now ?? new Date().toISOString();
+  const contentHash = sha256(cleanBody);
+
+  db.prepare(`
+    INSERT INTO legal_document_revisions
+      (slug, version, body, content_hash, effective_at, created_at, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(slug, nextVersion, cleanBody, contentHash, effective, at, userId ?? null);
+
+  /**
+   * The catalogue is written here, not left to the next boot.
+   *
+   * `syncLegalDocuments` publishes the CURRENT version of each document, so a
+   * server that restarts after two revisions records only the second — and the
+   * first, which people were reading and accepting in the meantime, never
+   * appears in `legal_documents` at all. An acceptance row naming a version the
+   * catalogue has never heard of is precisely the gap that table exists to
+   * close.
+   *
+   * Writing it at publication time also means the catalogue is correct
+   * immediately rather than eventually. Sync at the next boot then finds this
+   * row already present with a matching hash and does nothing, which is the
+   * quiet no-op that branch is written for.
+   *
+   * `INSERT OR IGNORE` rather than a plain insert: the row is keyed
+   * `(slug, version)` and published rows are immutable, so if one somehow
+   * already exists it must not be rewritten from here. The version rules above
+   * make that unreachable; the clause is what keeps it unreachable rather than
+   * merely unlikely.
+   */
+  const catalogued = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'legal_documents'"
+  ).get();
+  if (catalogued) {
+    db.prepare(`
+      INSERT OR IGNORE INTO legal_documents
+        (slug, version, title, consent_type, content_hash, effective_at, published_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(slug, nextVersion, doc.title, doc.consentType, contentHash, effective, at);
+  }
+
+  return { slug, version: nextVersion, contentHash, effectiveAt: effective, createdAt: at };
+}
+
+/**
+ * Everything that can refuse a publication, and nothing that writes.
+ *
+ * Separated from the insert so a caller can answer refusals BEFORE spending a
+ * step-up grant — a request that delivers nothing must not cost a verification
+ * the owner then has to repeat. `legalAdminRoutes.js` calls this once outside its
+ * transaction for that purpose, and `publishRevision` calls it again inside,
+ * where the version comparison has to be atomic with the insert.
+ *
+ * Running it twice is deliberate and cheap: it is pure apart from two indexed
+ * reads, and the alternative — a separate `canPublish` that is supposed to agree
+ * with the real thing — is the shape that eventually disagrees with it.
+ *
+ * Returns the normalised values, so the caller writes exactly what was checked
+ * rather than re-deriving them from the request.
+ */
+export function validatePublication(db, { slug, version, body, effectiveAt }) {
+  const doc = documentBySlug(slug);
+  if (!doc) throw new LegalValidationError(`No such legal document: ${slug}`, 'slug');
+
+  const nextVersion = parseNewVersion(version);
+  const effective = parseEffectiveAt(effectiveAt);
+  const { body: cleanBody } = validateBody(body, { slug });
+
+  const highest = highestVersion(db, slug);
+  if (highest && compareVersions(nextVersion, highest) <= 0) {
+    throw new LegalValidationError(
+      compareVersions(nextVersion, highest) === 0
+        ? `Version ${nextVersion} has already been published for this document. `
+          + 'Every revision needs its own number, so that an acceptance record and the '
+          + 'text it points at can never disagree — try '
+          + `${suggestNext(highest)}.`
+        : `Version ${nextVersion} is lower than ${highest}, which is already published. `
+          + `Version numbers only move forward — try ${suggestNext(highest)}.`,
+      'version'
+    );
+  }
+
+  /**
+   * Refused rather than silently accepted as a no-op.
+   *
+   * Publishing identical text under a new version tells every reader the
+   * document changed and makes them re-read it to find out that it did not. It
+   * is also the shape of an accidental double-submit.
+   */
+  const current = currentRevision(db, slug, { withBody: true });
+  const existingBody = current ? current.body : policyContent(slug);
+  if (existingBody.replace(/\r\n/g, '\n').trim() === cleanBody) {
+    throw new LegalValidationError(
+      'This is identical to the version already published, so there is nothing to save.',
+      'body'
+    );
+  }
+
+  return { slug, version: nextVersion, body: cleanBody, effectiveAt: effective };
+}
+
+/** The next patch version, offered in the error rather than left as an exercise. */
+function suggestNext(version) {
+  const parsed = parseVersion(version);
+  if (!parsed) return '1.0.1';
+  return `${parsed.major}.${parsed.minor}.${parsed.patch + 1}`;
+}
+
+/** Every revision of one document, newest first. Bodies omitted. */
+export function revisionHistory(db, slug) {
+  if (!revisionsTableExists(db)) return [];
+  return db.prepare(`
+    SELECT r.id, r.version, r.content_hash, r.effective_at, r.created_at, r.created_by,
+           u.name AS author_name
+    FROM legal_document_revisions r
+    LEFT JOIN users u ON u.id = r.created_by
+    WHERE r.slug = ?
+    ORDER BY r.id DESC
+  `).all(slug).map(row => ({
+    id: row.id,
+    version: row.version,
+    contentHash: row.content_hash,
+    effectiveAt: row.effective_at,
+    createdAt: row.created_at,
+    /* Falls back rather than showing an empty byline: `created_by` is
+       ON DELETE SET NULL, so a published revision outlives its author's
+       account. The document is still attributable to a moment; it stops being
+       attributable to a person, and saying so is more honest than a blank. */
+    author: row.author_name || 'Account no longer on the platform',
+  }));
+}

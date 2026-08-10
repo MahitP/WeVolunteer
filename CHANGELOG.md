@@ -5,6 +5,75 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — Unreleased
+
+> **Legal text can now be changed without a deploy.** The platform owner can
+> publish new versions of any of the ten legal documents from inside the product.
+> The version number is the safety mechanism, and it is enforced on the server:
+> **a save must carry a strictly greater `MAJOR.MINOR.PATCH` version**, so a
+> published version is never rewritten and the text an acceptance record points
+> at can always be produced. This is not a preference — `legal_documents` is keyed
+> by `(slug, version)` and a published row is immutable, so reusing a version
+> would make the catalogue disagree with the consent records and, once hash
+> enforcement is switched on at launch, refuse to boot.
+>
+> **One consequence deserves calling out.** Publishing a new version of the
+> **Organizer Agreement** withholds fifteen capabilities from every organizer
+> until each accepts it again, because acceptance is matched on `(slug, version)`.
+> That is correct — the agreement is what those capabilities are granted against —
+> and the editor now warns before saving that particular document. Publishing any
+> of the other nine changes nothing for existing users; there is still no
+> re-consent flow for signup documents.
+
+### Added
+
+- **A Legal Center editor, for the platform owner only** (Settings → Help &
+  Support → Edit Legal Center). One document at a time, its name above it, a
+  preview beside it, and a version field that explains the forward-only rule in
+  place rather than only in an error. Every save keeps the version before it:
+  revisions are append-only, so no publication destroys the one it replaced.
+  Access is gated by a new `legal.edit` capability in `SUPER_ONLY`, which makes
+  it owner-only **and ungrantable** — "let the person handling our compliance
+  paperwork fix the Terms" is a reasonable-sounding grant that would hand the
+  contract to an account nobody vetted, so that conversation has to happen as a
+  role change instead.
+- **Publishing requires a fresh proof of identity** (`legal.publish`, bound to
+  the document and the version, so one verification publishes one document at one
+  version). The write was already audited and attributable; what a step-up adds
+  is the moment of deliberation between typing in a textarea and replacing the
+  document every account on the platform is held to. Changes are recorded in the
+  administrative audit trail as `LEGAL_DOCUMENT_PUBLISHED`.
+- **An About Us page** at `/about`, public and readable without an account —
+  what WeVolunteer is for, who it serves, and what it is trying to do. Reachable
+  from Settings → Help & Support.
+
+### Changed
+
+- **The Settings entry for the legal documents is now called "Legal Center".** It
+  read "Terms, privacy and safety policies" — a list of contents standing in for
+  a place. The page it opens has been a hub of ten documents with its own search
+  and grouping since v1.2, so naming it after three of them made the other seven
+  invisible from the only durable route to them: the signup links are behind an
+  account the reader has already made. The examples moved to a description line
+  underneath, which is where an example belongs.
+- Help links to pages inside the app are now client-side navigations rather than
+  full page reloads.
+- The Legal Center, the document pages and the consent records now report the
+  version, effective date and content fingerprint of **what is actually being
+  served**, resolving through the new revision layer rather than reading the
+  registry constant.
+
+### Fixed
+
+- **A policy link could specify any URL scheme, including `javascript:`.** The
+  renderer put a parsed link target straight into an anchor's `href`. That was
+  safe by provenance while policy text could only come from this repository, and
+  stopped being safe the moment an account could write it — `/legal/:slug` is
+  unauthenticated and is where the signup form sends fourteen-year-olds. Two
+  layers now refuse it: the save is rejected with a message naming the offending
+  link, and the renderer degrades an unsafe target to plain text rather than
+  dropping it, so a clause never silently disappears.
+
 ## [1.3.1] — Unreleased
 
 > **Two-factor authentication changed who can complete it.** Once an account has

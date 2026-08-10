@@ -42,6 +42,7 @@ import personaPreview from './030_persona_preview.js';
 import socialDirectory from './031_social_directory.js';
 import externalHoursTrackingOnly from './032_external_hours_tracking_only.js';
 import distinguishedProfiles from './033_distinguished_profiles.js';
+import legalDocumentRevisions from './034_legal_document_revisions.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -149,7 +150,22 @@ export const MIGRATIONS = [
    * these two are a migration rather than an `addColumnIfMissing` guard in
    * db.js, which runs before the registry. See the file's header.
    */
-  distinguishedProfiles
+  distinguishedProfiles,
+  /**
+   * 034 creates `legal_document_revisions`, the override layer that lets an
+   * owner publish new legal text without a deploy.
+   *
+   * Purely additive — one new table and its index, no rebuild — so it is
+   * order-independent with respect to everything above it. It must nonetheless
+   * stay AFTER 007, which creates the `legal_documents` catalogue the write path
+   * checks a proposed version against, and after 016, which reconciles that
+   * catalogue. Both hold by position.
+   *
+   * There is no backfill. With no rows here every read falls back to the file on
+   * disk and behaves exactly as it did before, so the existing text is already
+   * the answer and copying it in would only create a second copy to keep in step.
+   */
+  legalDocumentRevisions
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

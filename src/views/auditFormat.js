@@ -111,6 +111,14 @@ const ACTIONS = {
   ACCEPT_ORGANIZER_AGREEMENT: ['Organizer agreement accepted', TONES.ROUTINE],
   ERROR_GROUP_STATUS_CHANGED: ['Error group triaged', TONES.ROUTINE],
   USERNAME_DEDUPED:         ['Duplicate username resolved', TONES.ROUTINE],
+
+  /* GRAVE, and it is the only entry here that harms nobody in particular.
+     The tone scale is about consequence, and this one rewrites the agreement
+     every account on the platform is held to — including people who accepted a
+     different version of it years earlier and will never be asked again. There
+     is no bounded set of affected users to notify and no undo, which is the
+     definition the scale uses for its top rung. */
+  LEGAL_DOCUMENT_PUBLISHED: ['Legal document published', TONES.GRAVE],
 };
 
 /**

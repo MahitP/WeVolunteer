@@ -29,6 +29,7 @@ import reauthRoutes from './routes/reauthRoutes.js';
 import personaRoutes from './routes/personaRoutes.js';
 import errorRoutes from './routes/errorRoutes.js';
 import legalRoutes from './routes/legalRoutes.js';
+import legalAdminRoutes from './routes/legalAdminRoutes.js';
 import impactRoutes from './routes/impactRoutes.js';
 import invitationRoutes from './routes/invitationRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
@@ -654,6 +655,10 @@ app.use(messageRoutes);
 app.use(privacyRoutes);
 app.use(errorRoutes);
 app.use(legalRoutes);
+/* The owner-only editor. Its paths are `/api/admin/legal/...`, which cannot
+   collide with `legalRoutes`' `/api/legal/...`, so the order of these two is
+   free — they are adjacent because they are the same subject. */
+app.use(legalAdminRoutes);
 app.use(impactRoutes);
 app.use(invitationRoutes);
 app.use(reportRoutes);

@@ -5571,7 +5571,34 @@ input:disabled + .premium-slider {
 
 .settings-help-link.is-last { border-bottom: none; }
 
-.settings-help-label { flex: 1; color: var(--ink); }
+/* The label and its description, stacked, taking the row's free space so the
+   trailing icon stays pinned to the right edge at every width. */
+.settings-help-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-help-label { color: var(--ink); }
+
+/**
+ * The second line of a help row.
+ *
+ * `--ink-2` rather than `--ink-3`: this is a sentence a reader uses to choose
+ * between two destinations, not a timestamp, and the dimmest ink on the ramp is
+ * reserved for things nobody has to act on.
+ *
+ * Wraps rather than truncating. "View our Terms, Privacy Policy, and other legal
+ * documents." ellipsed at 40 characters on a phone is a row that has spent
+ * vertical space to say nothing.
+ */
+.settings-help-description {
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
 
 /* ==========================================================================
    Form sizing and touch targets
@@ -8817,4 +8844,554 @@ input:disabled + .premium-slider {
 
 @media (max-width: 420px) {
   .recovery-actions .btn { flex: 1 1 100%; justify-content: center; }
+}
+
+/* ==========================================================================
+   About Us
+   ==========================================================================
+
+   Shares `.legal-page` with the Legal Center, so both sit on the reading scale
+   documented in docs/legal/02-DESIGN-SYSTEM.md rather than on the dashboard
+   scale. Everything below is layout and rhythm for prose; no new colour value
+   is introduced, only existing semantic tokens.
+
+   The page alternates two widths on purpose. Running prose is capped at a
+   reading measure inside `.about-body`; the belief list and the two audience
+   panels are allowed the full column, because they are scanned rather than read
+   and a 68ch cap would leave them as a narrow ribbon down the middle of a
+   laptop screen. */
+
+/* The sentence under the title. Larger than body text and dimmer than it —
+   the lead role from the design system's type table. */
+.about-lead {
+  font-size: 1.125rem;
+  line-height: 1.6;
+  color: var(--ink-2);
+  margin: 0;
+  max-width: 60ch;
+}
+
+/**
+ * The short version.
+ *
+ * First thing after the lead, for the same reason the legal surface puts a
+ * summary card there: most readers stop after one screen, and this is the
+ * difference between a page that was published and one that was read.
+ */
+.about-summary {
+  background: var(--brand-tint);
+  border: 1px solid var(--brand-tint-2);
+  border-radius: var(--r-lg);
+  padding: var(--s6);
+}
+
+.about-summary-heading {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--brand-ink);
+  margin: 0 0 var(--s3);
+}
+
+.about-summary-list {
+  margin: 0;
+  padding-left: var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  color: var(--ink);
+  line-height: 1.6;
+}
+
+/* Running prose. The measure is the point: 68ch is the middle of the range that
+   stays comfortable, and matches `.policy-body` so a reader moving between this
+   page and a policy does not change reading posture. */
+.about-body {
+  max-width: 68ch;
+  font-size: 1.0625rem;
+  line-height: 1.7;
+  color: var(--ink);
+}
+
+.about-body p { margin: 0 0 var(--s4); }
+.about-body ul { margin: 0 0 var(--s4); padding-left: var(--s6); }
+.about-body li { margin-bottom: var(--s2); }
+
+/* More space above a heading than below it, so the heading binds to the section
+   it introduces instead of floating between two blocks. */
+.about-section + .about-section { margin-top: var(--s10); }
+
+/* Section headings, inside the prose column and out.
+   The full-width sections need the class explicitly: without it they fall back
+   to the product's `h2` at 1.0625rem, which is two pixels above body text and
+   would read as a smaller heading than the ones in the prose column above. */
+.about-body h2,
+.about-heading {
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  line-height: 1.25;
+  margin: 0 0 var(--s4);
+}
+
+.about-section-lead {
+  color: var(--ink-2);
+  margin: 0;
+  max-width: 60ch;
+}
+
+/* ── What we believe ─────────────────────────────────────────────────────── */
+
+.about-belief-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+/* A rule on the leading edge rather than a card each. Seven cards in a column
+   reads as seven separate things; seven marked paragraphs read as one list of
+   principles, which is what it is. */
+.about-belief {
+  border-left: 3px solid var(--brand-tint-2);
+  padding-left: var(--s4);
+}
+
+.about-belief-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 var(--s2);
+}
+
+.about-belief-body {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.65;
+  max-width: 62ch;
+}
+
+/* ── For volunteers / For organizers ─────────────────────────────────────── */
+
+/* Side by side above 860px, stacked below. The two are deliberately equal in
+   weight: the page argues that they are two halves of one problem, and giving
+   one of them the full width first would undercut that. */
+.about-audience-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s5);
+}
+
+/* 700px, one of the three values the legal surface already uses, rather than
+   a fourth number invented for this grid. */
+@media (min-width: 700px) {
+  .about-audience-grid { grid-template-columns: 1fr 1fr; }
+}
+
+.about-audience {
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  padding: var(--s6);
+}
+
+.about-audience-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+  color: var(--brand-ink);
+}
+
+.about-audience-head h3 {
+  font-size: 1.125rem;
+  margin: 0;
+  color: var(--ink);
+}
+
+.about-audience-lead {
+  margin: 0 0 var(--s4);
+  color: var(--ink-2);
+  line-height: 1.6;
+}
+
+/* A definition list, because that is what these are: a named outcome and what
+   it means. The term carries the meaning on its own for anyone scanning. */
+.about-point-list,
+.about-commitment-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.about-point dt {
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+
+.about-point dd {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.6;
+}
+
+.about-commitment-list { margin-top: var(--s4); }
+
+/* ── The motto ───────────────────────────────────────────────────────────── */
+
+/* Given its own block rather than trailing a paragraph, because it is the one
+   line on the page a reader is meant to carry away. Centred and spaced, not
+   enlarged into a slogan — the sentiment does the work, and setting it at
+   banner size would make it read as marketing. */
+.about-motto {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s3);
+  margin: 0;
+  padding: var(--s6);
+  background: var(--brand-tint);
+  border: 1px solid var(--brand-tint-2);
+  border-radius: var(--r-lg);
+  color: var(--brand-ink);
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* ==========================================================================
+   The Legal Center editor (owner only)
+   ==========================================================================
+
+   Wide, quiet and slow. The thing being edited is two thousand words somebody
+   will be held to, and a dense settings form invites the posture you take with
+   a settings form — change the field, click save, move on. Every measurement
+   below is chosen to make the screen feel like a document rather than a
+   control panel.
+
+   No new colour values: the save/discard pair reuses `.btn-primary` and
+   `.btn-danger`, and the tints are the existing semantic aliases. */
+
+/* No max-width of its own. `.page` already caps every screen at --content-max,
+   and an editor rule above that number would describe a width the shell makes
+   impossible. Deliberately wider than the 68ch the PUBLIC pages use: this is a
+   working surface, not a reading one, and a reading measure makes long
+   paragraphs unwieldy to edit. */
+.legal-editor-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s5);
+  align-items: start;
+}
+
+/* The rail becomes a column at 900px, which is where two columns stop squeezing
+   the editor.
+
+   `top: 100px` matches `.settings-sidebar`, the other 260px sticky rail in this
+   product, and for the same reason: `.topbar` is itself sticky at `top: 0` and
+   about 70px tall, so a rail pinned at --s6 slides underneath it.
+
+   The height cap is not decoration either. Ten documents at ~64px each plus the
+   header is roughly 700px, which does not fit a 768px laptop once the rail pins
+   — without it the last documents in the list are unreachable. */
+@media (min-width: 900px) {
+  .legal-editor-layout { grid-template-columns: 260px minmax(0, 1fr); }
+  .legal-editor-rail {
+    position: sticky;
+    top: 100px;
+    max-height: calc(100vh - 124px);
+    overflow-y: auto;
+  }
+}
+
+/* Below 900px the rail is in flow ABOVE the editor, and ten stacked buttons is
+   two screens of chrome before the thing the owner came to edit — on every
+   document switch. Capped so the list scrolls within itself and the document
+   heading stays near the top of the page. */
+@media (max-width: 899px) {
+  .legal-editor-doc-list {
+    max-height: 13rem;
+    overflow-y: auto;
+  }
+}
+
+.legal-editor-rail {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  padding: var(--s4);
+}
+
+.legal-editor-rail-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 var(--s3);
+}
+
+.legal-editor-doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.legal-editor-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--s3);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+
+.legal-editor-doc:hover { background: var(--surface-2); }
+
+.legal-editor-doc:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* The selected document is marked three ways: a tint, a border, and a heavier
+   title. Only the last two survive greyscale, and the border has to be --brand
+   rather than --brand-tint-2 — tint-on-tint is about 1.1:1 against the fill it
+   is supposed to outline, which is no outline at all. */
+.legal-editor-doc[aria-current='true'] {
+  background: var(--brand-tint);
+  border-color: var(--brand);
+}
+
+.legal-editor-doc-title { font-weight: 600; line-height: 1.35; }
+.legal-editor-doc[aria-current='true'] .legal-editor-doc-title { font-weight: 700; }
+
+.legal-editor-doc-meta {
+  font-size: 0.75rem;
+  color: var(--ink-3);
+}
+
+.legal-editor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+  min-width: 0;
+}
+
+.legal-editor-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+/* The name of the document being edited, at document scale. "Is it obvious what
+   I am changing" is the question this heading exists to answer, so it is the
+   largest thing on the panel. */
+.legal-editor-doc-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.legal-editor-current { margin: 0; }
+
+/* The re-consent warning. Icon, bold lead sentence and a tint — three signals,
+   so it survives greyscale and a screen reader. */
+.legal-editor-warning {
+  display: flex;
+  gap: var(--s3);
+  padding: var(--s4);
+  border: 1px solid var(--warn-border);
+  border-left: 3px solid var(--warn-border);
+  border-radius: var(--r-md);
+  background: var(--warn-tint);
+  color: var(--warn-ink);
+}
+
+.legal-editor-warning p { margin: 0; line-height: 1.6; }
+
+/* The word that carries the meaning. The icon is decorative and the tint does
+   not survive greyscale or a printed copy, so neither may be the only signal. */
+.legal-editor-warning .legal-editor-warning-label,
+.legal-editor-badlinks .legal-editor-warning-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.75rem;
+  /* Two classes deep rather than `!important`: `.legal-editor-warning p` is
+     (0,1,1) and would otherwise win on specificity, which is a reason to be more
+     specific, not a reason to opt out of the cascade. */
+  margin: 0 0 var(--s1);
+}
+
+/* The unsafe-link list shown under the preview. */
+.legal-editor-badlinks { margin-bottom: var(--s5); }
+.legal-editor-badlinks p { margin: 0 0 var(--s2); }
+.legal-editor-badlinks ul { margin: 0 0 var(--s2); padding-left: var(--s5); }
+
+/* Monospace, because the text is Markdown and the alignment of a table or a
+   list is part of what the author is editing. `--font-mono` is already the
+   face used wherever this product shows source. */
+.legal-editor-textarea {
+  /* `min(...)` because `resize: vertical` cannot shrink past `min-height`: a flat
+     28rem is taller than a phone in landscape and taller than what is left of a
+     portrait phone once the keyboard is up, and the user could not recover. */
+  min-height: min(28rem, 60vh);
+  font-family: var(--font-mono);
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  resize: vertical;
+  white-space: pre-wrap;
+  tab-size: 2;
+}
+
+.legal-editor-preview {
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  padding: var(--s6);
+  background: var(--surface);
+}
+
+.legal-editor-preview-note {
+  margin: 0 0 var(--s4);
+  padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--rule);
+}
+
+/* ── The action bar ───────────────────────────────────────────────────────
+ *
+ * Set apart from the text with its own surface and a rule above it, so that
+ * "the place where things happen" is visually distinct from "the place where
+ * things are typed". Reaching Discard requires travelling to a different part
+ * of the screen than the one being edited. */
+.legal-editor-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s4);
+  padding: var(--s5);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+}
+
+@media (min-width: 700px) {
+  .legal-editor-actions {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  .legal-editor-buttons,
+  .legal-editor-status,
+  .legal-editor-error { grid-column: 1 / -1; }
+}
+
+.legal-editor-version,
+.legal-editor-effective {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+.legal-editor-version p,
+.legal-editor-effective p { margin: 0; line-height: 1.5; }
+
+/* Tabular figures so 1.10.0 and 1.9.0 line up while being compared. */
+.legal-editor-version-input {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  max-width: 12rem;
+}
+
+.legal-editor-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--rule);
+}
+
+/* Full width and stacked on a phone, so neither is a small target beside the
+   other and the order — save first — is unambiguous. */
+@media (max-width: 520px) {
+  .legal-editor-buttons .btn { flex: 1 1 100%; justify-content: center; }
+}
+
+.legal-editor-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  min-height: 1.25rem;
+  font-size: 0.8125rem;
+}
+
+.legal-editor-dirty,
+.legal-editor-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.legal-editor-dirty { color: var(--ink-2); }
+.legal-editor-saved { color: var(--brand-ink); font-weight: 600; }
+
+/* Preserves the newlines the server puts between individual link problems, so a
+   document with three bad links reports three lines rather than one run-on. */
+.legal-editor-error-message { white-space: pre-line; margin: 0 0 var(--s2); }
+.legal-editor-error p:last-child { margin: 0; }
+
+/* ── History ──────────────────────────────────────────────────────────────*/
+
+.legal-editor-history {
+  border-top: 1px solid var(--rule);
+  padding-top: var(--s5);
+}
+
+.legal-editor-history-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 0.9375rem;
+  margin: 0 0 var(--s3);
+}
+
+.legal-editor-history-list {
+  list-style: none;
+  margin: 0 0 var(--s3);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.legal-editor-history-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s3);
+}
+
+.legal-editor-history-version {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--ink);
 }
