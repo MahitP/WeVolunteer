@@ -212,7 +212,6 @@ router.post(
     const version = typeof req.body?.version === 'string' ? req.body.version.trim() : '';
     const { body, effectiveAt } = req.body ?? {};
 
-    let published;
     try {
       /**
        * Refusals answered first, above the transaction and above the spend.
@@ -225,7 +224,7 @@ router.post(
        */
       validatePublication(db, { slug, version, body, effectiveAt });
 
-      published = inTransaction(() => {
+      inTransaction(() => {
         /* Bound to the values about to be WRITTEN, never the ones the client
            claimed: `version` is the string that lands in the row. A grant taken
            out for the Cookie Notice at 1.0.1 cannot publish the Terms. */
@@ -243,7 +242,6 @@ router.post(
             + `(effective ${result.effectiveAt}, content ${result.contentHash.slice(0, 16)})`,
         });
 
-        return result;
       });
     } catch (err) {
       if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
@@ -257,14 +255,21 @@ router.post(
       });
     }
 
-    /* The full resolved document, so the client can replace its state from the
-       server's answer instead of assuming its own optimistic version of it. */
+    /**
+     * The full resolved document, so the client replaces its state from the
+     * server's answer instead of its own optimistic guess at it.
+     *
+     * Exactly the same shape the GET returns, and deliberately nothing extra. An
+     * earlier version also sent a `published: { version, at }` summary, which no
+     * caller ever read — the editor takes `version` off the resolved document
+     * because that is the value the reader will actually be served. A second
+     * field carrying the same fact is a second field to keep in step.
+     */
     const doc = resolveDocument(db, slug, { withBody: true });
     res.json({
       ...editorMeta(doc),
       body: doc.body,
       history: revisionHistory(db, slug),
-      published: { version: published.version, at: published.createdAt },
     });
   }
 );

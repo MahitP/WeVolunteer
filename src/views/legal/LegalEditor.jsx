@@ -113,6 +113,7 @@ export default function LegalEditor({ addToast }) {
 
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState(null);
+  const [saveErrorField, setSaveErrorField] = React.useState(null);
   const [savedNotice, setSavedNotice] = React.useState(null);
   const [confirmDiscard, setConfirmDiscard] = React.useState(false);
   const [pendingSlug, setPendingSlug] = React.useState(null);
@@ -131,10 +132,35 @@ export default function LegalEditor({ addToast }) {
    * as the heading focus in `PolicyBody`.
    */
   const headingRef = React.useRef(null);
-  const focusHeading = React.useCallback(() => {
-    /* After the re-render that disabled the button, not during it. */
-    requestAnimationFrame(() => headingRef.current?.focus());
-  }, []);
+  const versionRef = React.useRef(null);
+  const effectiveRef = React.useRef(null);
+  const bodyRef = React.useRef(null);
+
+  /**
+   * Every focus move on this screen goes through one piece of state.
+   *
+   * They used to be imperative `requestAnimationFrame` calls at each call site,
+   * and they lost a race none of them could win: the step-up dialog is a `Modal`,
+   * and `useModal`'s cleanup restores focus to whatever opened it SYNCHRONOUSLY on
+   * unmount. A save resolves after that unmount, so the frame callback moved focus
+   * and the modal's restore moved it straight back — to a Save button that the
+   * successful save had just disabled, which browsers then blur to `<body>`. The
+   * keyboard user's next Tab restarted from the top of the page.
+   *
+   * Routing it through state means the focus happens in an effect, after React has
+   * committed the render that ended the interaction, which is strictly later than
+   * any restore belonging to a dialog that has already gone.
+   */
+  const [pendingFocus, setPendingFocus] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!pendingFocus) return;
+    const target = { heading: headingRef, version: versionRef, effectiveAt: effectiveRef, body: bodyRef }[pendingFocus];
+    target?.current?.focus();
+    /* Cleared so the same request cannot re-steal focus on a later render — for
+       instance while the owner is typing a correction into the field it named. */
+    setPendingFocus(null);
+  }, [pendingFocus]);
 
   const dirty = loaded !== null && draft !== loaded.body;
   const badLinks = React.useMemo(() => (preview ? unsafeLinksIn(draft) : []), [preview, draft]);
@@ -163,6 +189,7 @@ export default function LegalEditor({ addToast }) {
     setLoading(true);
     setLoadError(null);
     setSaveError(null);
+    setSaveErrorField(null);
     setSavedNotice(null);
     setPreview(false);
 
@@ -200,6 +227,22 @@ export default function LegalEditor({ addToast }) {
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
 
+  /**
+   * Focus follows the refusal, from an effect rather than from the catch block.
+   *
+   * It was imperative — a `requestAnimationFrame` inside `save()`'s catch — and it
+   * lost a race it could not win. The step-up dialog is a `Modal`, and
+   * `useModal`'s cleanup restores focus to whatever opened it SYNCHRONOUSLY on
+   * unmount. The save resolves after that unmount, so the frame callback moved
+   * focus to the offending field and the modal's restore promptly moved it back to
+   * the Save button, leaving `aria-invalid` set on a control nobody was standing
+   * on.
+   *
+   * An effect keyed on `saveErrorField` runs after React has committed the error
+   * state, which is strictly later than any focus restore belonging to a dialog
+   * that has already gone. Keyed on the field rather than the message so that
+   * re-reading the same error does not steal focus back while the owner is typing.
+   */
   const selectDocument = (slug) => {
     if (slug === activeSlug) return;
     if (dirty) { setPendingSlug(slug); return; }
@@ -219,14 +262,16 @@ export default function LegalEditor({ addToast }) {
     setVersion(suggestNextVersion(loaded.version));
     setEffectiveAt(todayIso());
     setSaveError(null);
+    setSaveErrorField(null);
     setConfirmDiscard(false);
     addToast?.('Your changes were discarded.', 'info');
-    focusHeading();
+    setPendingFocus('heading');
   };
 
   const save = async () => {
     setSaving(true);
     setSaveError(null);
+    setSaveErrorField(null);
     setSavedNotice(null);
     try {
       /* Bound to the document and the version, so one verification publishes one
@@ -271,7 +316,7 @@ export default function LegalEditor({ addToast }) {
         d => (d.slug === updated.slug ? { ...d, ...updated } : d)
       ));
       addToast?.(`${updated.title} version ${updated.version} published.`, 'success');
-      focusHeading();
+      setPendingFocus('heading');
     } catch (err) {
       /**
        * The draft is deliberately untouched.
@@ -280,10 +325,26 @@ export default function LegalEditor({ addToast }) {
        * exists in this tab — which is the single worst thing this screen could
        * do, and the reason the message says so out loud.
        */
-      const message = err instanceof ApiError && err.status === 400
+      const refused = err instanceof ApiError && err.status === 400;
+      const message = refused
         ? err.data?.error || err.message
         : err?.message || 'This could not be saved.';
       setSaveError(message);
+
+      /**
+       * The server says WHICH field it refused; the screen has to act on it.
+       *
+       * Without this the owner gets a paragraph at the bottom of the action bar
+       * and no indication of where to look — and a screen-reader user gets an
+       * alert naming a problem with no programmatic route to the control that
+       * caused it. `aria-invalid` marks it, `aria-errormessage` ties it to the
+       * text, and focus goes there so the fix is one keystroke away.
+       */
+      const field = refused ? err.data?.field ?? null : null;
+      setSaveErrorField(field);
+      /* Land the owner on the control that was refused, so the fix is one
+         keystroke away rather than a hunt through the action bar. */
+      if (field) setPendingFocus(field);
     } finally {
       setSaving(false);
     }
@@ -471,8 +532,11 @@ export default function LegalEditor({ addToast }) {
                   </p>
                   <textarea
                     id="legal-body"
+                    ref={bodyRef}
                     className="input legal-editor-textarea"
                     aria-describedby="legal-body-hint"
+                    aria-invalid={saveErrorField === 'body' || undefined}
+                    aria-errormessage={saveErrorField === 'body' ? 'legal-save-error' : undefined}
                     value={draft}
                     spellCheck
                     {...(maxBodyLength ? { maxLength: maxBodyLength } : {})}
@@ -487,10 +551,13 @@ export default function LegalEditor({ addToast }) {
                   <label className="label" htmlFor="legal-version">Version number</label>
                   <input
                     id="legal-version"
+                    ref={versionRef}
                     className="input legal-editor-version-input"
                     value={version}
                     onChange={e => setVersion(e.target.value)}
                     aria-describedby="legal-version-hint"
+                    aria-invalid={saveErrorField === 'version' || undefined}
+                    aria-errormessage={saveErrorField === 'version' ? 'legal-save-error' : undefined}
                     inputMode="decimal"
                     autoComplete="off"
                   />
@@ -506,11 +573,14 @@ export default function LegalEditor({ addToast }) {
                   <label className="label" htmlFor="legal-effective">Takes effect</label>
                   <input
                     id="legal-effective"
+                    ref={effectiveRef}
                     type="date"
                     className="input"
                     value={effectiveAt}
                     onChange={e => setEffectiveAt(e.target.value)}
                     aria-describedby="legal-effective-hint"
+                    aria-invalid={saveErrorField === 'effectiveAt' || undefined}
+                    aria-errormessage={saveErrorField === 'effectiveAt' ? 'legal-save-error' : undefined}
                   />
                   {/* Says what the field does, not what it sounds like it does.
                       Resolution takes the newest revision, never the one whose
@@ -579,7 +649,7 @@ export default function LegalEditor({ addToast }) {
                 </div>
 
                 {saveError && (
-                  <div className="alert alert-danger legal-editor-error" role="alert">
+                  <div className="alert alert-danger legal-editor-error" role="alert" id="legal-save-error">
                     <p className="legal-editor-error-message">{saveError}</p>
                     <p className="small">
                       Nothing was published and your text is exactly as you left it.
@@ -650,7 +720,7 @@ export default function LegalEditor({ addToast }) {
             /* The whole panel is about to be replaced. Without this the keyboard
                user is left on a dismissed dialog's trigger inside content that no
                longer exists. */
-            focusHeading();
+            setPendingFocus('heading');
           }}
           onCancel={() => setPendingSlug(null)}
         >

@@ -4,6 +4,9 @@ import { ArrowLeft, AlertTriangle } from 'lucide-react';
 import { api } from '../../utils/api';
 import { parsePolicyMarkdown, tableOfContents } from '../../utils/policyMarkdown';
 import PolicyBody from '../../components/legal/PolicyBody';
+/* Shared, so the reason it parses a plain date rather than a timestamp lives in
+   one place. See legalDates.js. */
+import { formatLegalDate } from './legalDates';
 
 /**
  * One published document, with its version, effective date and contents list.
@@ -38,15 +41,6 @@ function fragmentTarget(hash) {
   let id = hash.slice(1);
   try { id = decodeURIComponent(id); } catch { /* use the raw form */ }
   return id ? document.getElementById(id) : null;
-}
-
-function formatDate(iso) {
-  if (!iso) return null;
-  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
-    year: 'numeric', month: 'long', day: 'numeric',
-  });
 }
 
 export default function LegalDocument() {
@@ -164,7 +158,26 @@ export default function LegalDocument() {
                 rather than shrinking to `.small dim`. */}
             <p className="legal-meta">
               Version {doc.version}
-              {formatDate(doc.effectiveAt) && ` · in effect since ${formatDate(doc.effectiveAt)}`}
+              {formatLegalDate(doc.effectiveAt) && ` · in effect since ${formatLegalDate(doc.effectiveAt)}`}
+              {/**
+                * "Last revised" appears only when it says something the effective
+                * date does not.
+                *
+                * `updatedAt` is when a revision was actually published;
+                * `effectiveAt` is the date the owner put on it. They are usually
+                * the same day, and printing both then is noise that makes a reader
+                * work out whether two dates disagree for a reason. When they DO
+                * differ — a correction published on Tuesday carrying Monday's
+                * date, or a document revised long after it took effect — the gap
+                * is exactly what somebody checking whether this text is current
+                * wants to see.
+                *
+                * Null for every document nobody has edited, which is all of them
+                * until an owner uses the editor, so this adds nothing to the
+                * common case.
+                */}
+              {formatLegalDate(doc.updatedAt) && formatLegalDate(doc.updatedAt) !== formatLegalDate(doc.effectiveAt)
+                && ` · last revised ${formatLegalDate(doc.updatedAt)}`}
               {doc.consentType === 'agree' && ' · you agreed to this when you signed up'}
               {doc.consentType === 'acknowledge' && ' · shown to you when you signed up'}
             </p>

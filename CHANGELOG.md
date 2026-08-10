@@ -45,7 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   administrative audit trail as `LEGAL_DOCUMENT_PUBLISHED`.
 - **An About Us page** at `/about`, public and readable without an account —
   what WeVolunteer is for, who it serves, and what it is trying to do. Reachable
-  from Settings → Help & Support.
+  from Settings → Help & Support. It closes on a concrete, checkable decision
+  rather than on the motto alone: hours are never stored as an editable total, and
+  a running number would have been simpler to build. A page that asserts "because
+  we care" without showing anything it cost is a slogan; this one names the
+  tradeoff. It also answers the questions a parent or teacher arrives with, which
+  the first draft did not address at all.
 
 ### Changed
 
@@ -65,6 +70,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A lower version number could compare as higher, permanently.** The version
+  comparator was `(major - major) || (minor - minor) || (patch - patch)` over
+  components produced by `Number()` with no bound on length. Both halves were
+  needed and both were present: `Number('9'.repeat(400))` is `Infinity`, so two
+  long versions gave `Infinity - Infinity`, which is `NaN` — and `NaN` is falsy,
+  so the `||` cascade fell straight through it and the major number stopped
+  participating in the comparison at all. Because revisions are append-only, a
+  single publish at an absurd version would have made every later publication of
+  that document compare as not-greater for ever, recoverable only by editing
+  production SQL. Components are now length-bounded so they stay exactly
+  representable, and the comparison is key-by-key equality so no arithmetic
+  result can be falsy.
+- **Keyboard focus was dropped to the page body after a successful save.**
+  `useModal` restores focus to whatever opened a dialog *synchronously* on
+  unmount, and a save resolves after that unmount — so the editor's focus moves
+  were immediately undone, and the following Tab restarted from the top of the
+  page. It also left `aria-invalid` set on a control the user was not on. Every
+  focus move on the editor now routes through one piece of state consumed by an
+  effect, which commits strictly later than any dialog's restore.
+- **A refused save did not say which field it was about.** The server has always
+  returned the offending `field` on a 400; the editor ignored it. It now marks
+  that input with `aria-invalid` / `aria-errormessage` and moves focus to it.
+- **The "last updated" date was collected and never shown.** A document page now
+  reports "last revised", and only when it differs from the effective date —
+  they are the same day for almost every save, and printing both makes a reader
+  work out whether two dates disagree for a reason.
+- **The sign-in page still used the old wording**, linking to the Legal Center as
+  "Terms, privacy and safety policies" — a stale reference the rename missed, on
+  the one page every returning user sees.
 - **A policy link could specify any URL scheme, including `javascript:`.** The
   renderer put a parsed link target straight into an anchor's `href`. That was
   safe by provenance while policy text could only come from this repository, and

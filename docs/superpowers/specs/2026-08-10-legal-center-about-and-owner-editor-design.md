@@ -84,6 +84,14 @@ needed to answer "who changed the terms".
 A new `server/legalStore.js` owns one question: *what is the current text and
 version of this slug?*
 
+There are two ways to ask — `resolveDocument` reads one row, `effectiveDocuments`
+reads them all in one query — and both go through a single `mergeRevision`
+helper. Only the fetch differs; what a resolved document looks like must not. The
+merge was written out twice initially, which is precisely the shape that drifts:
+a field added to one branch leaves every caller of the other reading a registry
+value, and nothing fails until an acceptance record names a version nobody was
+shown.
+
 1. Newest row in `legal_document_revisions` for the slug → use its body,
    version, hash, effective date.
 2. No revision → the file via `policyContent(slug)` and the registry's version.
@@ -100,8 +108,21 @@ The file on disk is never rewritten. It remains the seed and the fallback, and
 ## 3. Versioning
 
 Format `MAJOR.MINOR.PATCH`, each part a non-negative integer without leading
-zeros. Registry versions are currently two-component (`1.0`) and are read
-leniently as `1.0.0` for comparison; saves must supply all three parts.
+zeros and **at most six digits**. Registry versions are currently two-component
+(`1.0`) and are read leniently as `1.0.0` for comparison; saves must supply all
+three parts.
+
+The digit bound and the comparator's shape are both load-bearing, and the
+hardening pass is what found out why. The comparator was
+`(major - major) || (minor - minor) || (patch - patch)` over components produced
+by `Number()` with no length limit — and `Number('9'.repeat(400))` is `Infinity`,
+so two long versions gave `Infinity - Infinity`, which is `NaN`. `NaN` is falsy,
+so the `||` cascade fell through it and the major number stopped participating in
+the comparison at all: a strictly LOWER version compared as greater. Because
+`legal_document_revisions` is append-only, one publish at an absurd version would
+have made every later publication of that document compare as not-greater for
+ever. Comparison is now key-by-key equality, so no arithmetic result can be
+falsy, and components are length-bounded so they stay exactly representable.
 
 A save is accepted only if its version is **strictly greater** than the highest
 of:
@@ -195,6 +216,40 @@ colour alone.
 
 Unsaved edits block navigation and page unload. A failed save leaves the editor
 contents exactly as typed and explains why.
+
+## 6b. What the hardening pass changed
+
+Recorded because these were not visible from the original design:
+
+- **The version comparator could rank a lower version higher** (see §3). Fixed
+  and pinned by unit tests plus an HTTP case.
+- **The merge logic existed twice** (see Resolution). Collapsed to one helper.
+- **Focus moves lost a race with the step-up dialog.** `useModal`'s cleanup
+  restores focus to the trigger *synchronously* on unmount, and a save resolves
+  after that unmount — so imperative `requestAnimationFrame` focus calls were
+  immediately undone, landing the keyboard user on `<body>` after a successful
+  save and leaving `aria-invalid` on a control nobody was standing on. All focus
+  moves now route through one piece of state consumed by an effect, which commits
+  strictly later than any dialog's restore.
+- **The server named the refused field and the client ignored it.** 400 responses
+  carry `field`; the editor now sets `aria-invalid` / `aria-errormessage` and
+  moves focus there.
+- **`updatedAt` was returned by the API and displayed nowhere.** The document page
+  now shows "last revised" — but only when it differs from the effective date,
+  because they are the same day for almost every save and printing both is noise.
+- **`Login.jsx` still used the old wording** ("Terms, privacy and safety
+  policies"), a stale reference the rename missed.
+- **A stub Settings card was also titled "About"**, directly beneath the new
+  "About Us" row. Retitled "This community" for what it actually says.
+- **About Us was rewritten.** An editorial review found the motto unearned —
+  1,900 words in which the only people shown caring were the volunteers, then a
+  closing line claiming that *we* care. It is now preceded by one concrete,
+  checkable decision (hours are derived on every read, never stored as an
+  editable total) with its cost named. A "For parents and teachers" block was
+  added; the page had addressed parents zero times despite being written for
+  them.
+- **A dead response field was removed** (`published: { version, at }`, which no
+  caller read).
 
 ## 7. Testing
 

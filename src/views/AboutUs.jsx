@@ -1,86 +1,91 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Compass, ClipboardList, HeartHandshake } from 'lucide-react';
-import { APP_NAME } from '../config';
+import { Compass, ClipboardList, Users, HeartHandshake } from 'lucide-react';
+import { APP_NAME, SUPPORT_EMAIL } from '../config';
 
 /**
- * About Us — what WeVolunteer is for, in the words of the people who built it.
+ * About Us — what WeVolunteer is for.
  *
  * ── Why this is a written page and not an editable one ──
  *
- * It sits beside the Legal Center in Settings and is reached the same way, so
- * the obvious question is why the owner editor does not manage this too. The
- * answer is that the editor exists for documents that change under pressure —
- * a regulator, a lawyer, a school district — where waiting for a deploy is the
- * problem. Nothing here is like that. This is prose about intent, it changes
- * when the intent changes, and the intent changing is exactly the occasion when
- * a considered edit in a pull request is better than a text box.
+ * It sits beside the Legal Center in Settings and is reached the same way, so the
+ * obvious question is why the owner editor does not manage this too. The answer
+ * is that the editor exists for documents that change under pressure — a
+ * regulator, a lawyer, a school district — where waiting for a deploy is the
+ * problem. Nothing here is like that. This is prose about intent, and the intent
+ * changing is exactly the occasion when a considered edit in a pull request is
+ * better than a text box.
  *
  * ── Why it renders on the legal surface's reading scale ──
  *
  * `.legal-page` and the type below come from the reading scale documented in
  * `docs/legal/02-DESIGN-SYSTEM.md`, which exists because the product's type is
- * tuned for scanning dense dashboards and this is two thousand words meant to be
- * read start to finish. Those want opposite settings, and the scale is already
- * built.
+ * tuned for scanning dense dashboards and this is prose meant to be read.
  *
- * ── What must not be added here ──
+ * ── Rules this page is held to ──
  *
- * No statistics, no partner logos, no claim of nonprofit status, certification,
- * award or institutional endorsement. None of those are established anywhere in
- * this repository, and a page whose whole job is to make the product feel
- * trustworthy is the worst possible place to say something that is not true.
- * Every concrete claim below is either about intent, or is backed by behaviour
- * the software actually has.
+ * 1. No claim that cannot be checked against this repository. No nonprofit
+ *    status, no partnerships, no certifications, no awards, no endorsements, no
+ *    user numbers, no impact figures. A page whose whole job is to earn trust is
+ *    the worst possible place to say something untrue.
+ * 2. Every substantive claim about behaviour names behaviour the software
+ *    actually has. The two load-bearing ones are the hours record (derived on
+ *    every read from `attendance`, never stored as an editable total — see
+ *    `hoursLedger.js`) and the Auto Select draw (which favours volunteers with
+ *    FEWER credited hours — see the header of `weighting.js`). If either of those
+ *    changes, this page is wrong and has to change with it.
+ * 3. No "not X, but Y". An earlier draft leaned on that construction about twenty
+ *    times in nineteen hundred words, which stops reading as emphasis and starts
+ *    reading as a tic — and once a reader notices the cadence they stop believing
+ *    any individual sentence in it.
+ * 4. Concrete nouns. The passages here that work are the ones made of flyers,
+ *    group chats and Saturday mornings; the ones that failed were made of
+ *    "meaningful engagement".
  */
 
-/** The principles section. Kept as data so the markup stays one loop. */
+/**
+ * What we believe.
+ *
+ * Five, not seven. The earlier seven included "Technology should serve people,
+ * not get in their way" and "Organizers deserve tools that make their work
+ * easier" — sentences that have been on product pages since 1998 and are true of
+ * dishwashers. Lengths vary on purpose: a list where every item is the same size
+ * is a list somebody filled in rather than wrote.
+ */
 const BELIEFS = [
   {
-    name: 'Every contribution matters.',
-    body: 'Three hours at a single event counts. So does two hundred hours over four '
-      + 'years. We are careful not to build anything that quietly ranks people by '
-      + 'volume, because the person who came once and stayed the whole time gave '
-      + 'something real.',
+    name: 'Showing up once still counts.',
+    body: 'Three hours at one event is a real contribution. When more people want a '
+      + 'place than there are places, the draw that picks them actually favours the '
+      + 'volunteers with fewer recorded hours, so turning up for the first time does '
+      + 'not put you at the back of the queue behind somebody with two hundred.',
   },
   {
-    name: 'People should be able to find meaningful ways to help.',
-    body: 'Discovery is the hardest part of volunteering and the part most often '
-      + 'ignored. If someone cannot find an opportunity that fits their time, their '
-      + 'area and the things they care about, nothing else we build matters much.',
+    name: 'Finding the opportunity is the hard part.',
+    body: 'Most volunteer coordination happens in places you have to already know '
+      + 'about. If someone cannot find something that fits the Saturday they actually '
+      + 'have free, nothing else here matters.',
   },
   {
-    name: 'Volunteering is about impact, not just hours.',
-    body: 'Hours are a record of participation, not a measure of worth. We track them '
-      + 'carefully because schools and programs need them tracked, and we try never '
-      + 'to let the number become the reason someone came.',
+    name: 'Hours are a record, not a score.',
+    body: 'We track them because schools and programs require them tracked. We try '
+      + 'not to let the number become the reason anybody came.',
   },
   {
-    name: 'Organizers deserve tools that make their work easier.',
-    body: 'Most volunteer coordination is unpaid and invisible. Somebody stays up the '
-      + 'night before making the sign-up sheet. Taking work off that person is one of '
-      + 'the most useful things a platform like this can do.',
+    name: 'Somebody stays up the night before making the sign-up sheet.',
+    body: 'That person is usually a volunteer themselves, and the work is invisible '
+      + 'until it does not get done. Taking it off their plate is one of the more '
+      + 'useful things software like this can do.',
   },
   {
-    name: 'Students should have real opportunities to contribute.',
-    body: 'A student looking for service hours is usually looking for something more '
-      + 'than that: a way to be useful, and a reason to be somewhere that matters. '
-      + 'That deserves a better answer than a stale list.',
-  },
-  {
-    name: 'Trust and responsibility matter.',
-    body: 'This platform holds records that affect graduation requirements, '
-      + 'scholarships and applications. People rely on those records being right. We '
-      + 'treat that as an obligation rather than a feature.',
-  },
-  {
-    name: 'Technology should serve people, not get in their way.',
-    body: 'The best outcome for our software is that nobody thinks about it. Someone '
-      + 'finds an event, signs up, shows up, and gets on with the actual work.',
+    name: 'These records affect real decisions.',
+    body: 'Service hours go into graduation requirements, scholarships and '
+      + 'applications. People rely on them being right, which makes accuracy an '
+      + 'obligation rather than a feature we could trade away for convenience.',
   },
 ];
 
-/** The two audiences, side by side, because they are two halves of one problem. */
+/** The two sides of the same problem. */
 const AUDIENCES = [
   {
     key: 'volunteers',
@@ -88,24 +93,22 @@ const AUDIENCES = [
     title: 'For volunteers',
     lead: 'If you are here to volunteer, this should do a few specific things for you.',
     points: [
-      ['See what is actually available', 'Real opportunities with real dates, not a list you have to ask someone about.'],
-      ['Know what you are signing up for', 'What the work involves, how long it runs, where it is, and what is expected — before you commit. Nobody should arrive to a surprise.'],
-      ['Find things that fit', 'Your schedule, your area, and the kind of work you actually want to do. Volunteering you are suited to is volunteering you come back to.'],
-      ['Keep an accurate record', 'So when a school, programme or application asks what you have done, the answer is already there and you trust it.'],
-      ['Feel that it counted', 'You gave time you were not required to give. That is worth recording properly.'],
+      ['See what is actually available', 'Real events with real dates and a spot count you can trust, without emailing somebody to ask.'],
+      ['Know what you are signing up for', 'What the work involves, how long it runs, where it is, and what to bring. Nobody should show up to a surprise.'],
+      ['Find things that fit', 'Your schedule, your area, and the kind of work you want to do.'],
+      ['Keep a record you can hand over', 'Every hour you are credited stays attached to the event and the date it came from. If a school or a program asks, you can show the work rather than just the number.'],
     ],
   },
   {
     key: 'organizers',
     Icon: ClipboardList,
     title: 'For organizers',
-    lead: 'If you are running events, this is meant to take work off your plate rather than add a system to learn.',
+    lead: 'If you run events, this is meant to take work off your plate, not add a system to learn.',
     points: [
-      ['Clearer coordination', 'One place your opportunities live, so people can find them without asking you directly.'],
-      ['Easier volunteer management', 'Who signed up, how many places are left, who confirmed, and who actually arrived.'],
-      ['Real visibility', 'What happened, not just what was planned.'],
-      ['Less administrative friction', 'Fewer reminders to send by hand, and less recordkeeping afterwards.'],
-      ['A calmer day', 'The point is that you spend the day on the work instead of on the roster.'],
+      ['One place your events live', 'People find them and sign up without going through you first.'],
+      ['A roster that stays current', 'Who signed up, how many places are left, who confirmed, and who actually arrived.'],
+      ['Less to send by hand', 'Reminders go out on their own, and the attendance record is finished when the event is.'],
+      ['A record you do not have to reconstruct', 'What happened on the day, written down while it was happening.'],
     ],
   },
 ];
@@ -115,18 +118,27 @@ const OUTCOMES = [
   'A student shows up on a Saturday morning who otherwise would not have known to.',
   'An organizer runs an event that works, because the people who said they were coming came.',
   'A community project gets the number of volunteers it actually needed.',
-  'Someone discovers they genuinely like this, and comes back without being asked.',
-  'A person feels more connected to the place they live, because they have now done something in it.',
+  'Someone finds out they like this, and comes back without being asked.',
 ];
 
+/**
+ * What we intend to hold to.
+ *
+ * Five, not seven. "Continuous improvement" and "People before the platform" are
+ * gone — the first is a values poster, and the second implied growth metrics this
+ * product does not have and a business model it is not. Each of these makes a
+ * claim a reader could hold us to.
+ */
 const COMMITMENTS = [
-  ['Responsibility', 'We hold records people depend on. We take accuracy seriously, and we build so that hours cannot be quietly changed or lost.'],
-  ['Transparency', 'We say what we do with information, in language meant to be understood rather than to satisfy a lawyer. Where we do not have an answer yet, we say so instead of leaving a gap that reads like an answer.'],
-  ['Respect', "For volunteers' time, organizers' effort, and everyone's privacy. We ask for what we need and not more."],
-  ['Accessibility', 'Volunteering should not require a particular device, a particular ability or a particular kind of attention. We build for keyboards, screen readers, small screens and slow connections, and we treat failures there as defects rather than as polish.'],
-  ['Trust', 'We would rather move slowly on something sensitive than quickly on something we would have to apologize for.'],
-  ['Continuous improvement', 'We expect to be wrong about things. When we are, we would like to find out early and fix it.'],
-  ['People before the platform', 'If a decision is good for our numbers and bad for the person in front of it, it is a bad decision.'],
+  /* Deliberately NOT the derived-total point, which the passage above the motto
+     makes at length. Two statements of the same fact in one page is how the
+     earlier draft came to say five things four times each. This is the other half
+     of the same guarantee: corrections are appended, so the history survives. */
+  ['Accuracy', 'When an hour is corrected, the correction is added to the record rather than written over it. There is a trail of what changed and when, which means a mistake can be found and fixed instead of quietly becoming the new truth.'],
+  ['Plain language', 'The Terms and the Privacy Policy are written to be understood by the fourteen-year-olds who have to agree to them. Where we do not have an answer yet, they say so instead of leaving a gap that reads like an answer.'],
+  ['Restraint', 'We ask for the information a volunteer record needs and not more. Student profiles are private by default.'],
+  ['Accessibility', 'This should not require a particular device, a particular ability, or a particular kind of attention. We build for keyboards, screen readers, small screens and slow connections, and we treat failures there as defects rather than polish.'],
+  ['Care with the sensitive parts', 'We would rather be slow about something involving a minor than quick about something we would have to apologize for.'],
 ];
 
 export default function AboutUs() {
@@ -134,15 +146,20 @@ export default function AboutUs() {
     <div className="content legal-page stack-lg">
       <div className="stack-sm">
         <h1 id="about-title" className="legal-title">About {APP_NAME}</h1>
+        {/* Says what the thing IS. An earlier draft opened with a category —
+            "a place for people who want to help" — and a table of contents, so a
+            parent finished the first screen still not knowing what they were
+            looking at. */}
         <p className="about-lead">
-          {APP_NAME} is a place for people who want to help and people who need help
-          to find each other. This page explains why we built it, who it is for, and
-          what we are trying to do.
+          {APP_NAME} is a website for finding volunteer work and keeping an honest
+          record of the hours you do. Students use it to find events near them.
+          Organizers use it to post those events, see who is coming, and confirm who
+          actually showed up.
         </p>
       </div>
 
-      {/* The short version, first, for the reader who stops after one screen —
-          the same reasoning the legal surface's SummaryCard is built on. */}
+      {/* Most readers stop after one screen. This is the difference between a page
+          that was published and one that was read. */}
       <section className="about-summary" aria-labelledby="about-summary-heading">
         <h2 id="about-summary-heading" className="about-summary-heading">The short version</h2>
         <ul className="about-summary-list">
@@ -152,10 +169,13 @@ export default function AboutUs() {
           </li>
           <li>We started because finding a way to help was harder than it should have been.</li>
           <li>
-            We think volunteering is about contribution. Hours are just how
-            contribution gets written down.
+            Volunteering is about contribution. Hours are just how a contribution gets
+            written down.
           </li>
-          <li>We are early, and we would rather say that plainly than pretend otherwise.</li>
+          <li>
+            It is new, and it is built and run by one person. That is not a slogan
+            about being small — it is who answers when you write in.
+          </li>
         </ul>
       </section>
 
@@ -166,84 +186,64 @@ export default function AboutUs() {
             {APP_NAME} exists to make volunteering easier to find, easier to organize,
             and easier to take part in.
           </p>
-          <p>That is the practical version. The reason underneath it matters more.</p>
           <p>
-            Volunteering is not really about collecting hours. Hours are a record —
-            useful, sometimes required, occasionally the reason someone shows up the
-            first time. But what actually happens when someone volunteers is that a
+            Underneath that is a simpler idea. Volunteering is not really about
+            collecting hours. What actually happens when someone volunteers is that a
             person decides to spend part of their life on something that is not about
             them. A Saturday morning goes to a food drive instead of a screen. An
             afternoon goes to a park cleanup, a tutoring session, a shelter, a
             neighbor.
           </p>
           <p>
-            Communities are not strong because of the institutions inside them. They
-            are strong because enough people care enough to take part. Every hour
-            recorded here stands for a decision somebody made to show up.
-          </p>
-          <p>
-            We built a tool for the logistics. The logistics are not the point. They
-            are what gets in the way of the point.
+            Every hour recorded here stands for a decision somebody made to show up.
+            The software only handles the scheduling around that, which is the part
+            that tends to get in the way.
           </p>
         </section>
 
         <section className="about-section" aria-labelledby="about-why">
           <h2 id="about-why">Why {APP_NAME} exists</h2>
           <p>
-            The gap we kept running into was not a shortage of people who wanted to
-            help. It was that wanting to help and actually helping were separated by a
-            surprising amount of friction.
+            The gap was never a shortage of people who wanted to help. It was that
+            wanting to help and actually helping were separated by a surprising amount
+            of friction.
           </p>
           <p>
             Opportunities live in too many places at once. A club announcement here, a
             group chat there, a flyer on a wall, an email thread three weeks old, a
-            spreadsheet somebody has to remember to update. None of that is anyone's
+            spreadsheet somebody has to remember to update. That is not anyone's
             fault. It is what happens when coordination is done by whoever has time
             that week.
           </p>
           <p>For someone who wants to volunteer, the questions are basic and often unanswerable:</p>
           <ul>
-            <li>What opportunities actually exist right now?</li>
-            <li>When are they, and can I make it?</li>
-            <li>What would I be doing, and do I need to bring or know anything?</li>
+            <li>What is happening near me, and when?</li>
+            <li>What would I actually be doing?</li>
             <li>Is there still space, or was it full a week ago?</li>
-            <li>Is this something I would be any good at, or care about?</li>
+            <li>Is this something I would be any good at?</li>
           </ul>
           <p>
-            Not knowing is enough to stop most people — not because they stopped
-            caring, but because the next step was unclear and something else was
-            clear.
+            Not knowing is enough to stop someone — not because they stopped caring,
+            but because the next step was unclear and something else was clear.
           </p>
           <p>
-            Organizers have the opposite problem, and it is just as real. They usually
-            know exactly what they need. What they lack is a dependable way to say so:
-            to reach the right people, keep track of who is coming, know who actually
-            arrived, and end up with an accurate record without spending the week
-            before the event sending reminders one at a time.
-          </p>
-          <p>
-            Both sides want the same event to happen. {APP_NAME} is meant to be the
-            bridge between them.
+            Organizers are on the other side of that same problem. They usually know
+            exactly what they need and have no dependable way to say it: to reach
+            people, keep track of who is coming, know who actually arrived, and finish
+            the day with a record they do not have to reconstruct from memory.
           </p>
         </section>
 
         <section className="about-section" aria-labelledby="about-vision">
           <h2 id="about-vision">Our vision</h2>
           <p>
-            Making sign-ups more convenient is worth doing, but it is not the
-            ambition.
+            Convenient sign-ups are worth building. They are not the ambition.
           </p>
           <p>
             What we want is for volunteering to feel like a normal, available part of
-            ordinary life — something you can find when you have a free Saturday, the
-            way you can find anything else. Not an exceptional act that requires the
-            right connections or the right mailing list, but a visible option.
-          </p>
-          <p>
-            When opportunities are easy to see, more people take them. When organizers
-            can rally people quickly and reliably, they attempt more. When
-            participation is easy to record honestly, the people who did the work get
-            credit for it.
+            an ordinary week — something you can find when you have a free Saturday,
+            the way you can find anything else. Not an exceptional act that requires
+            the right connections or the right mailing list, but a visible option.
           </p>
           <p>
             The goal is a community where the distance between “I would help if I knew
@@ -255,8 +255,8 @@ export default function AboutUs() {
       <section className="stack-md" aria-labelledby="about-beliefs">
         <h2 id="about-beliefs" className="about-heading">What we believe</h2>
         <p className="about-section-lead">
-          These are the principles we come back to when we are deciding what to build
-          and what to leave alone.
+          These are the ones we come back to when deciding what to build and what to
+          leave alone.
         </p>
         <ul className="about-belief-list">
           {BELIEFS.map(({ name, body }) => (
@@ -289,35 +289,76 @@ export default function AboutUs() {
             </section>
           ))}
         </div>
+
+        {/**
+          * Parents and teachers, who were previously addressed zero times.
+          *
+          * Most adults who reach this page arrive because a student sent them the
+          * link, and the question they came with is not "what is your mission".
+          * Every answer below is a fact about the software rather than a promise:
+          * profiles are private by default, hours are confirmed by the organizer
+          * rather than self-reported, and the Privacy Policy enumerates the fields
+          * that are visible to anyone else.
+          */}
+        <section className="about-audience about-audience-wide" aria-labelledby="about-families">
+          <div className="about-audience-head">
+            <Users size={20} aria-hidden="true" />
+            <h3 id="about-families">For parents and teachers</h3>
+          </div>
+          <p className="about-audience-lead">
+            Most people in this group arrive because a student sent them a link. The
+            short answers:
+          </p>
+          <dl className="about-point-list">
+            <div className="about-point">
+              <dt>A student profile is private unless they change it</dt>
+              <dd>
+                Private is the default, not something to go and switch on. The{' '}
+                <Link className="policy-link" to="/legal/privacy-policy">Privacy Policy</Link>{' '}
+                lists every field anyone else can see, by name.
+              </dd>
+            </div>
+            <div className="about-point">
+              <dt>Hours are confirmed by the organizer, not claimed by the student</dt>
+              <dd>
+                An hour is credited when the person running the event marks the
+                volunteer as present. Students can also log outside service
+                themselves, and that is recorded separately and labelled as
+                self-reported so nobody mistakes one for the other.
+              </dd>
+            </div>
+            <div className="about-point">
+              <dt>There is a person to contact</dt>
+              <dd>
+                Safety concerns and privacy requests reach a human, and the{' '}
+                <Link className="policy-link" to="/legal/youth-safety-guidelines">
+                  Youth Safety Guidelines
+                </Link>{' '}
+                describe what we do about them.
+              </dd>
+            </div>
+          </dl>
+        </section>
       </section>
 
       <div className="about-body">
         <section className="about-section" aria-labelledby="about-impact">
           <h2 id="about-impact">Community impact</h2>
-          <p>The important thing about {APP_NAME} happens somewhere we cannot see.</p>
           <p>
-            The website is a tool. What it does is arrange a meeting. The result is
-            somewhere else:
+            Everything that matters about {APP_NAME} happens somewhere we cannot see:
           </p>
           <ul>
             {OUTCOMES.map(outcome => <li key={outcome}>{outcome}</li>)}
           </ul>
           <p>
-            We do not measure ourselves by activity on the platform. We measure
-            ourselves by whether events happened, and whether they went well.
-          </p>
-          <p>
-            If this worked perfectly, you would barely notice it. You would notice
-            that more got done.
+            A busy week on this website is not the achievement. Events that happened,
+            and went well, are.
           </p>
         </section>
 
         <section className="about-section" aria-labelledby="about-commitment">
           <h2 id="about-commitment">Our commitment</h2>
-          <p>
-            {APP_NAME} is early, and we would rather be honest about that than
-            impressive about it. Here is what we intend to hold to as it grows.
-          </p>
+          <p>Five things we intend to hold to as this grows.</p>
           <dl className="about-commitment-list">
             {COMMITMENTS.map(([term, detail]) => (
               <div key={term} className="about-point">
@@ -330,40 +371,65 @@ export default function AboutUs() {
 
         <section className="about-section" aria-labelledby="about-ahead">
           <h2 id="about-ahead">Looking ahead</h2>
-          <p>We do not think {APP_NAME} is finished. We think it is started.</p>
           <p>
-            What it becomes should be decided largely by the people actually using it —
-            the students trying to find something worth their Saturday, the organizers
-            trying to run a good event, the schools trying to keep an honest record.
-            The best ideas about what to build next tend to arrive as somebody
-            describing a problem they had last week.
+            What this becomes should be decided mostly by the people using it — the
+            student trying to find something worth a Saturday, the organizer trying to
+            run a good event, the school trying to keep an honest record. The most
+            useful suggestions we get are somebody describing a problem they had last
+            week.
           </p>
-          <p>
-            So we intend to keep listening, keep fixing, and keep the tool out of the
-            way of the work.
-          </p>
-          <p>It all comes back to one simple reason.</p>
+          <p>So the plan is to keep listening, keep fixing, and keep the tool out of the way of the work.</p>
         </section>
       </div>
 
-      {/* The motto, given its own block rather than trailing a paragraph. It is
-          the one line on this page a reader is meant to remember. */}
+      {/**
+        * What the motto cost.
+        *
+        * The page previously asserted "because we care" after nineteen hundred
+        * words in which the only people shown caring were the volunteers. The
+        * reader had been given no evidence about us at all, so the closing line
+        * was a non sequitur wearing a slogan's clothes.
+        *
+        * This is the fix: one decision, with a price, that a reader can go and
+        * verify. Hours really are derived on every read rather than stored — see
+        * `hoursLedger.js` — and a running total really would be simpler to build.
+        */}
+      <section className="about-earned" aria-labelledby="about-earned-heading">
+        <h2 id="about-earned-heading" className="about-heading">What “because we care” has cost</h2>
+        <p>
+          It is an easy thing to put at the bottom of a page, so here is one place it
+          shows up in the work.
+        </p>
+        <p>
+          Your hours are never stored as a total. Every hour is its own record — the
+          event, the date, and the organizer who confirmed you were there — and the
+          total is added up fresh every time anybody looks at it. Keeping a running
+          number would have been faster to build and quicker to load. We do not,
+          because a student's record of what they did should never be one bad edit
+          away from being wrong.
+        </p>
+      </section>
+
       <p className="about-motto">
         <HeartHandshake size={20} aria-hidden="true" />
         <span>{APP_NAME}: because we care.</span>
       </p>
 
-      <section className="stack-sm" aria-labelledby="about-next">
-        <h2 id="about-next" className="about-heading">Where to go next</h2>
-        {/* Not `small dim`. This is the one sentence on the page a reader is
-            meant to act on, and --ink-3 is reserved for things nobody has to. */}
-        <p className="about-section-lead">
-          The <Link className="policy-link" to="/legal">Legal Center</Link> holds everything we ask you to
-          agree to and everything we promise in return — the Terms, the Privacy
-          Policy, and the safety guidelines. If something here or there is unclear,
-          that is worth telling us.
-        </p>
-      </section>
+      {/* A footer line rather than a section, so the motto is the last thing said
+          and the practical links are still one glance away. */}
+      <p className="about-footer-links small">
+        <Link className="policy-link" to="/legal">Legal Center</Link>
+        {' · '}
+        {SUPPORT_EMAIL ? (
+          <>
+            Something here unclear or wrong?{' '}
+            <a className="policy-link" href={`mailto:${SUPPORT_EMAIL}`}>Write to us</a>
+            {' — it goes to one person, and that is who will answer.'}
+          </>
+        ) : (
+          'Contact details for privacy requests and safety reports are at the end of each legal document.'
+        )}
+      </p>
     </div>
   );
 }
