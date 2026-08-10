@@ -390,7 +390,22 @@ export function tabForPath(pathname) {
  * A map rather than a second branch chain, so the two answers are visibly one
  * table apart instead of interleaved in one function.
  */
-export const RAIL_TAB = { directory: 'browse', organizations: 'browse' };
+export const RAIL_TAB = {
+  directory: 'browse',
+  organizations: 'browse',
+  /**
+   * These three have no rail entry of their own and are reached FROM one, so
+   * they borrow its highlight rather than leaving the rail dark — the same
+   * argument the two above are here for. Check-in is opened from an event,
+   * `/portfolio` and `/hours` from the dashboard, and the agreement from the
+   * dashboard an organizer is held on until they sign it.
+   */
+  checkin: 'browse',
+  portfolio: 'dashboard',
+  loggedHours: 'dashboard',
+  externalHours: 'dashboard',
+  organizerAgreement: 'dashboard',
+};
 
 /** Every nav entry the user may see, `/` first, in the order the shell renders. */
 export function navItemsFor(user) {
@@ -458,7 +473,6 @@ export const PAGE_META = {
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
-    checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
     browse: { title: 'Opportunities', sub: 'Find a shift and apply — organizers confirm who attends' },
     calendar: { title: 'Calendar', sub: 'Your shifts and the deadlines that matter' },
@@ -474,7 +488,6 @@ export const PAGE_META = {
   },
   host: {
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
-    portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
@@ -521,6 +534,10 @@ export const PAGE_META = {
   },
   partner: {
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
+    /* `/organizer-agreement` is the one route declared with NO capability, on
+       purpose — it is how an organizer accepts the terms that grant the rest —
+       so any signed-in role can open it, partner included. */
+    organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
     browse: { title: 'All events', sub: 'Everything posted across the district' },
     /**
