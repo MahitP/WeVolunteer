@@ -199,6 +199,22 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
   const canBlock = can(currentUser, 'event.apply');
 
   /**
+   * Friendship is a relation between PEERS, so the control only appears between
+   * two accounts that take part as volunteers.
+   *
+   * `event.apply` on BOTH sides — the same test the server applies, and the same
+   * one blocking already used. An organizer is an adult who decides whether a
+   * student gets placed on a shift; a friend request across that asymmetry is
+   * not meaningfully refusable, and an accepted one would open the friends-only
+   * profile tier and the signup notifications to them.
+   *
+   * UX only. The server refuses the request with a generic 409 whatever this
+   * says, which is what makes hiding the button safe rather than load-bearing —
+   * but a button that always fails is worse than an absent one.
+   */
+  const canBefriend = canBlock && can({ role: profile?.role }, 'event.apply');
+
+  /**
    * The four controls, ordered least to most severe, with Report last.
    *
    * Each is a distinct action, not a severity slider — see the header of
@@ -290,7 +306,9 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
                 <Pencil size={15} aria-hidden="true" /> Edit profile
               </button>
             )}
-            {!isSelf && <FriendButton viewer={viewer} profile={profile} busy={busy} act={act} />}
+            {!isSelf && canBefriend && (
+              <FriendButton viewer={viewer} profile={profile} busy={busy} act={act} />
+            )}
             <button
               type="button"
               className="btn btn-ghost btn-icon"

@@ -21,7 +21,7 @@
 
 import express from 'express';
 import { authenticateToken } from '../utils.js';
-import { can, requireCap } from '../authz.js';
+import { can, requireCap, principalFor } from '../authz.js';
 import { db } from '../db.js';
 import { publicProfile, profileSummary } from '../profileSerializer.js';
 import { volunteerStats } from '../volunteerStats.js';
@@ -395,12 +395,59 @@ function resolveTarget(req, res) {
     res.status(400).json({ error: 'That action does not apply to your own account.', code: 'self_target' });
     return null;
   }
-  const row = db.prepare(`SELECT id, name FROM users WHERE id = ? AND ${LIVE_USER}`).get(targetId);
+  const row = db.prepare(`SELECT id, name, role FROM users WHERE id = ? AND ${LIVE_USER}`).get(targetId);
   if (!row) {
     res.status(404).json({ error: 'No such account.', code: 'not_found' });
     return null;
   }
   return row;
+}
+
+/**
+ * ── Friendship is a relation between PEERS, and organizers are not peers ──
+ *
+ * Every role holding `relationship.manage` could send a friend request to any
+ * member, which meant an adult running events could send one to a fourteen-year-
+ * old who had applied to their shift. That is the wrong shape for this platform,
+ * for reasons the codebase already argues elsewhere:
+ *
+ *   • An accepted friendship unlocks the friends-only profile tier — school,
+ *     grade, bio — and the signup notifications. `relationships.js` says a
+ *     unilateral follow "would let any account subscribe to a minor's schedule
+ *     without them agreeing"; a request from the adult who decides whether they
+ *     get placed on shifts is not meaningfully refusable either. The consent a
+ *     request is supposed to obtain is not consent under that asymmetry.
+ *   • Blocking is already gated on `event.apply` rather than on a role, with the
+ *     note that an organizer able to block "would be able to sever the channel a
+ *     student would use to complain about them". The same asymmetry, recognised
+ *     in the same terms, one control along.
+ *   • An organizer is not short of ways to reach a volunteer: messaging is
+ *     scoped to the events they host, and applicant details are on the review
+ *     screen. Friendship adds nothing professional and carries everything social.
+ *
+ * `event.apply` is the test, and it is the right one rather than a convenient
+ * one: it means "this account takes part as a volunteer", which is exactly the
+ * population friendship is for. Organizer, admin and partner do not hold it.
+ * super_admin does — through the wildcard, and correctly, because the owner of
+ * this platform is a high-school student who volunteers (see the distinguished
+ * profile note), so their student half is a peer like any other.
+ *
+ * BOTH sides are checked. Testing only the sender would let a student send a
+ * request to an organizer that the organizer could never accept — a row nobody
+ * can resolve, and a button that appears to work.
+ */
+function refusePeerOnly(req, res, targetRow) {
+  const targetPrincipal = principalFor(targetRow);
+  if (can(req.principal, 'event.apply') && can(targetPrincipal, 'event.apply')) return false;
+
+  /* Deliberately the same generic refusal a block produces. Naming the reason
+     would tell a student which of the two accounts was disqualified, and there
+     is nothing useful they can do with that. */
+  res.status(409).json({
+    error: 'You cannot add this person as a friend.',
+    code: 'not_permitted',
+  });
+  return true;
 }
 
 /**
@@ -415,6 +462,8 @@ function resolveTarget(req, res) {
 router.post('/api/users/:id/friend', authenticateToken, requireCap('relationship.manage'), (req, res) => {
   const target = resolveTarget(req, res);
   if (!target) return;
+
+  if (refusePeerOnly(req, res, target)) return;
 
   const state = relationshipState(db, req.principal.userId, target.id);
   if (state.blocked || state.restricted || state.restrictedBy) {
@@ -448,6 +497,11 @@ router.post('/api/users/:id/friend', authenticateToken, requireCap('relationship
 router.post('/api/users/:id/friend/accept', authenticateToken, requireCap('relationship.manage'), (req, res) => {
   const target = resolveTarget(req, res);
   if (!target) return;
+  /* The same peer rule as sending. A row written before this rule existed must
+     not become a friendship by being accepted afterwards — the accept side is
+     where such a row would otherwise complete. Removal is deliberately NOT
+     gated: anybody may always get out of a relationship, whatever created it. */
+  if (refusePeerOnly(req, res, target)) return;
   const ok = acceptFriend(db, req.principal.userId, target.id);
   if (!ok) return res.status(404).json({ error: 'There is no friend request from that person.', code: 'no_request' });
   res.json(viewerRelationshipState(db, req.principal.userId, target.id));
