@@ -134,7 +134,12 @@ export function parseHighlights(raw) {
 export const PUBLIC_BASELINE_FIELDS = Object.freeze([
   'id', 'username', 'name', 'avatar', 'profilePictureUrl', 'role',
   'location', 'hobbies', 'skills', 'joinedAt', 'lastVolunteeredAt',
-  'stats', 'organizations', 'externalService', 'visibility', 'isSelf',
+  'stats', 'organizations', 'visibility', 'isSelf',
+  /* `distinction` is `role` restated in words, so it discloses nothing the
+     baseline did not already carry. `externalService` used to be here and is
+     NOT any more — it is emitted to the subject alone; see the note at its
+     emission site. */
+  'distinction',
 ]);
 
 /** Fields added only when the profile is public. */
@@ -196,6 +201,9 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
     || (stated === 'friends' && isFriend);
 
   const stats = volunteerStats(db, row.id);
+  /* Derived once: it decides both what is emitted and whether the two
+     free-text fields below are exempt from the privacy setting. */
+  const distinction = distinctionFor(row.role);
 
   const profile = {
     id: row.id,
@@ -233,15 +241,36 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
      * Always visible, at every privacy setting, because it is not a personal
      * particular: it is the answer to "what is this account", and withholding it
      * from a member who can already see the name and the role would hide nothing
-     * while making a partner organization's page unreadable. `headline` and
-     * `highlights` are written by the account holder for exactly this audience.
+     * while making a partner organization's page unreadable.
      */
-    distinction: distinctionFor(row.role),
-    headline: row.profile_headline || null,
-    highlights: parseHighlights(row.profile_highlights),
+    distinction,
     visibility: stated,
     isSelf,
   };
+
+  /**
+   * `headline` and `highlights` follow the privacy setting, EXCEPT on a
+   * distinguished account.
+   *
+   * The first version put them on the baseline, reasoning that they are written
+   * by the account holder for exactly this audience. That is true of a partner
+   * organization and false of a fourteen-year-old: they are free text under a
+   * name, which is what `bio` is, and `bio` is gated. Leaving them ungated gave
+   * a student with a PRIVATE profile a second bio that privacy did not cover —
+   * "Sophomore at SBHS, I walk home down Elm after 4pm" is the shape of the
+   * problem, and it would have been returned to every holder of
+   * `directory.read`.
+   *
+   * On an owner or partner account they stay unconditional, because there the
+   * fields are the point: an official account whose one-line introduction
+   * disappeared behind a privacy toggle would be unreadable, and such an
+   * account is an institution rather than a child. `distinctionFor` decides
+   * which case applies, from `users.role` and nothing else.
+   */
+  if (distinction || sensitiveVisible) {
+    profile.headline = row.profile_headline || null;
+    profile.highlights = parseHighlights(row.profile_highlights);
+  }
 
   /**
    * External service is emitted to the SUBJECT and to nobody else.

@@ -41,9 +41,6 @@ import { Crown, Handshake, Sparkles } from 'lucide-react';
  */
 const KIND_ICON = { owner: Crown, partner: Handshake };
 
-/** True when there is a distinguished treatment to draw at all. */
-export const hasDistinction = (profile) => Boolean(profile?.distinction?.kind);
-
 /**
  * The banner: who this account is, in its own words.
  *

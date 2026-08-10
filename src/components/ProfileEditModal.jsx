@@ -18,8 +18,22 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
     skillsInput: (user?.skills || []).join(', '),
     hobbiesInput: (user?.hobbies || []).join(', '),
     location: user?.location || '',
+    headline: user?.headline || '',
+    highlightsInput: (user?.highlights || []).join('\n'),
     leaderboardOptIn: user?.leaderboardOptIn || false
   });
+
+  /**
+   * Whether this account carries a headline at all.
+   *
+   * Read from `user.distinction`, which the server derives from `users.role` in
+   * profileSerializer.js — so this is the presentation following the data, not a
+   * role comparison in a component. An ordinary account has `bio` for the same
+   * job; the server refuses the two fields below outright for such an account
+   * (403 `not_distinguished`), and rendering inputs whose save would be refused
+   * would be a worse answer than not rendering them.
+   */
+  const isDistinguished = Boolean(user?.distinction);
   const [saving, setSaving] = useState(false);
 
   /**
@@ -95,6 +109,12 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
         skills: form.skillsInput.split(',').map(s => s.trim()).filter(Boolean),
         hobbies: form.hobbiesInput.split(',').map(h => h.trim()).filter(Boolean),
         location: form.location.trim(),
+        /* Sent only when the account may hold them, so an ordinary save is not
+           a request the server has to refuse. */
+        ...(isDistinguished ? {
+          headline: form.headline.trim(),
+          highlights: form.highlightsInput.split('\n').map(h => h.trim()).filter(Boolean),
+        } : {}),
         leaderboardOptIn: form.leaderboardOptIn
       });
       latestUser = res.user;
@@ -137,6 +157,7 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
 
   const skills = form.skillsInput.split(',').map(s => s.trim()).filter(Boolean);
   const hobbies = form.hobbiesInput.split(',').map(h => h.trim()).filter(Boolean);
+  const highlights = form.highlightsInput.split('\n').map(h => h.trim()).filter(Boolean);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -265,6 +286,44 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
               address. This is visible to anyone who finds your profile.
             </span>
           </div>
+
+          {/**
+            * The distinguished fields. Shown only on an account that has a
+            * distinction, because that is the only account the server will
+            * accept them from — see the note beside `isDistinguished`.
+            */}
+          {isDistinguished && (
+            <>
+              <div className="field">
+                <label htmlFor="pf-headline">
+                  Headline <span className="muted">({user.distinction.label})</span>
+                </label>
+                <input
+                  id="pf-headline" className="input" value={form.headline} maxLength={120}
+                  placeholder="One line under your name"
+                  aria-describedby="pf-headline-hint"
+                  onChange={e => set('headline', e.target.value)}
+                />
+                <span className="field-hint" id="pf-headline-hint">
+                  Shown to every member, at any privacy setting — this is how your account
+                  introduces itself. Up to 120 characters.
+                </span>
+              </div>
+
+              <div className="field">
+                <label htmlFor="pf-highlights">Highlights</label>
+                <textarea
+                  id="pf-highlights" className="textarea" rows={4} value={form.highlightsInput}
+                  placeholder={'One per line\ne.g. Running the district volunteering programme'}
+                  aria-describedby="pf-highlights-hint"
+                  onChange={e => set('highlightsInput', e.target.value)}
+                />
+                <span className="field-hint" id="pf-highlights-hint">
+                  One per line, up to eight. {highlights.length} of 8 used.
+                </span>
+              </div>
+            </>
+          )}
 
           <div className="field">
             <label htmlFor="pf-bio">About you</label>

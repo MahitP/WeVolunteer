@@ -36,7 +36,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowLeft, History, NotebookPen, Plus, Printer, Trash2, CalendarCheck2, ExternalLink,
+  ArrowLeft, History, NotebookPen, Pencil, Plus, Printer, Trash2, CalendarCheck2, ExternalLink,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { formatHours, formatDay } from '../utils/helpers';
@@ -230,6 +230,22 @@ export default function LoggedHours({ currentUser, addToast }) {
                       <NotebookPen size={13} aria-hidden="true" /> Self-reported
                     </span>
                     <span className="hourspill">{formatHours(entry.hours)}</span>
+                    {/**
+                      * Edit, not just delete.
+                      *
+                      * `PATCH /api/external-hours/:id` existed with no caller, so
+                      * the one thing a student could not do was fix a wrong date
+                      * without deleting the entry and retyping the rest. There is
+                      * no state in which one of these becomes uneditable —
+                      * nobody else's judgement is stored on it.
+                      */}
+                    <Link
+                      className="btn btn-ghost btn-icon"
+                      to={`/hours/external?edit=${encodeURIComponent(entry.id)}`}
+                      aria-label={`Edit ${entry.activityName}`}
+                    >
+                      <Pencil size={16} aria-hidden="true" />
+                    </Link>
                     <button
                       type="button"
                       className="btn btn-ghost btn-icon"

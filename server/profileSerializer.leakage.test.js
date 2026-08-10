@@ -92,17 +92,28 @@ const FORBIDDEN_VALUES = [
 ];
 
 /**
- * The baseline every reader gets. Adding a key here is a deliberate disclosure
- * decision about a minor's profile — make it in a review, not in a diff.
+ * The baseline every reader gets, IMPORTED rather than restated.
+ *
+ * This list used to be a local copy. That is how it came to disagree with the
+ * module: `PUBLIC_BASELINE_FIELDS` still named `externalService` after it became
+ * self-only and did not name `distinction`, and nothing failed, because the
+ * exported constant the module header points a reviewer at had no consumer at
+ * all. Importing it makes the documented allowlist and the enforced one the same
+ * object — adding a key to it is now a deliberate disclosure decision about a
+ * minor's profile that shows up in a review, which is the whole point of having
+ * it written down.
  */
-const BASELINE_KEYS = [
-  'id', 'username', 'name', 'avatar', 'profilePictureUrl', 'role', 'location',
-  'hobbies', 'skills', 'joinedAt', 'lastVolunteeredAt', 'stats', 'organizations',
-  'distinction', 'headline', 'highlights', 'visibility', 'isSelf',
-];
+let BASELINE_KEYS, SENSITIVE_KEYS, CONTACT_KEYS;
 
-const SENSITIVE_KEYS = ['bio', 'school', 'grade', 'graduationYear'];
-const CONTACT_KEYS = ['email', 'emailVerified'];
+/**
+ * The two fields a DISTINGUISHED account carries unconditionally and an ordinary
+ * account does not carry at all.
+ *
+ * They are free text under a name — the same kind of thing as `bio`, which is
+ * gated — so on a student they follow the privacy setting. On an owner or a
+ * partner they are the point of the page. See the note at their emission site.
+ */
+const DISTINGUISHED_KEYS = ['headline', 'highlights'];
 
 beforeEach(async () => {
   db?.close();
@@ -118,7 +129,11 @@ beforeEach(async () => {
 });
 
 beforeEach(async () => {
-  ({ publicProfile, profileSummary, distinctionFor } = await import('./profileSerializer.js'));
+  const mod = await import('./profileSerializer.js');
+  ({ publicProfile, profileSummary, distinctionFor } = mod);
+  BASELINE_KEYS = [...mod.PUBLIC_BASELINE_FIELDS];
+  SENSITIVE_KEYS = [...mod.PUBLIC_ONLY_FIELDS];
+  CONTACT_KEYS = mod.PRIVILEGED_FIELDS.filter(k => k !== 'friendActivityVisible');
 });
 
 afterAll(() => { db?.close(); rmSync(dir, { recursive: true, force: true }); });
@@ -130,7 +145,7 @@ const keysOf = (o) => Object.keys(o).sort();
 describe('what a public profile may contain', () => {
   it('gives a stranger exactly the baseline, plus the public-only fields', () => {
     const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
-    expect(keysOf(p)).toEqual([...BASELINE_KEYS, ...SENSITIVE_KEYS].sort());
+    expect(keysOf(p)).toEqual([...BASELINE_KEYS, ...SENSITIVE_KEYS, ...DISTINGUISHED_KEYS].sort());
   });
 
   it('withholds the public-only fields when the profile is private', () => {
@@ -140,6 +155,30 @@ describe('what a public profile may contain', () => {
     for (const k of SENSITIVE_KEYS) expect(p).not.toHaveProperty(k);
   });
 
+  /**
+   * The gap this closes: a headline is a second bio, and privacy has to cover it.
+   *
+   * A private student profile withholds `bio` — free text the account holder
+   * wrote under their own name. `headline` and `highlights` are the same kind of
+   * text and were on the baseline, so a student who set a private profile still
+   * published one line to every holder of `directory.read`.
+   */
+  it('withholds a student\'s headline and highlights when the profile is private', () => {
+    db.prepare(`UPDATE users SET profile_visibility = 'private', role = 'student'`).run();
+    const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
+    for (const k of DISTINGUISHED_KEYS) expect(p).not.toHaveProperty(k);
+  });
+
+  /* On an official account they are the page, and an institution is not a child:
+     an owner's one-line introduction must not vanish behind a privacy toggle. */
+  it.each(['super_admin', 'partner'])(
+    'keeps a %s account\'s headline and highlights at every privacy setting', (role) => {
+      db.prepare(`UPDATE users SET profile_visibility = 'private', role = ?`).run(role);
+      const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
+      for (const k of DISTINGUISHED_KEYS) expect(p).toHaveProperty(k);
+      expect(p.distinction).toBeTruthy();
+    });
+
   /* 'friends' behaves as 'private' to a stranger and as 'public' to an accepted
      friend. One decision, made here, so no consumer invents its own reading. */
   it('treats friends-only as private to a stranger and public to a friend', () => {
@@ -148,7 +187,7 @@ describe('what a public profile may contain', () => {
     expect(keysOf(publicProfile(db, row, { viewerId: 'other' })))
       .toEqual([...BASELINE_KEYS].sort());
     expect(keysOf(publicProfile(db, row, { viewerId: 'other', isFriend: true })))
-      .toEqual([...BASELINE_KEYS, ...SENSITIVE_KEYS].sort());
+      .toEqual([...BASELINE_KEYS, ...SENSITIVE_KEYS, ...DISTINGUISHED_KEYS].sort());
   });
 
   /**
@@ -163,7 +202,7 @@ describe('what a public profile may contain', () => {
     for (const k of CONTACT_KEYS) expect(stranger).not.toHaveProperty(k);
 
     const staff = publicProfile(db, row, { viewerId: 'admin', canSeeContact: true });
-    expect(keysOf(staff)).toEqual([...BASELINE_KEYS, ...SENSITIVE_KEYS, ...CONTACT_KEYS].sort());
+    expect(keysOf(staff)).toEqual([...BASELINE_KEYS, ...SENSITIVE_KEYS, ...CONTACT_KEYS, ...DISTINGUISHED_KEYS].sort());
   });
 
   /**
@@ -175,7 +214,7 @@ describe('what a public profile may contain', () => {
   it('gives the subject their own switches and their external total', () => {
     const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'u1' });
     expect(keysOf(p)).toEqual([
-      ...BASELINE_KEYS, ...SENSITIVE_KEYS, ...CONTACT_KEYS,
+      ...BASELINE_KEYS, ...SENSITIVE_KEYS, ...CONTACT_KEYS, ...DISTINGUISHED_KEYS,
       'friendActivityVisible', 'externalService',
     ].sort());
     expect(p.isSelf).toBe(true);

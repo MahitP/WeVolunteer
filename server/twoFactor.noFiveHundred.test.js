@@ -154,6 +154,25 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
       expect(res.body.field).toBe('token');
     });
 
+    /**
+     * An empty submission is malformed, and must not spend one of the twenty
+     * attempts an account gets in fifteen minutes.
+     */
+    it.each([['recovery', 'code'], ['email', 'code'], ['totp', 'token']])(
+      'refuses an empty %s submission as malformed, not as a wrong guess', async (method, field) => {
+        const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+        db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+
+        const res = await submit(await beginLogin(), { method, [field]: '   ' });
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe('malformed_code');
+
+        const spent = db.prepare(
+          'SELECT COALESCE(SUM(attempts), 0) AS n FROM tfa_login_attempts WHERE user_id = ?'
+        ).get(userId).n;
+        expect(spent, 'an empty submission must cost no attempts').toBe(0);
+      });
+
     it('still accepts a well-formed string that is simply wrong', async () => {
       const preauth = await beginLogin();
       const res = await submit(preauth, { method: 'recovery', code: 'NOTACODE' });
@@ -319,18 +338,46 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      * attacker holding the password just requests a fresh grant with a fresh
      * counter and keeps going. The refusal is a 429 and never a 500.
      */
+    /**
+     * Seeded rather than looped.
+     *
+     * The first version of this guessed 25 times and waited for a 429, which made
+     * it a timing test: every iteration is two HTTP round trips plus a bcrypt
+     * compare, and under a loaded full-suite run it could exhaust the loop
+     * without the per-account window behaving as it does in isolation. A test
+     * that passes alone and fails in the suite is a defect in the test —
+     * CLAUDE.md is explicit that flakiness is not a re-run.
+     *
+     * What matters is the RULE: attempts are summed across grants for one
+     * account, so a fresh grant does not reset the budget. Seeding the ledger to
+     * one below the ceiling asserts exactly that, in two requests, with no clock
+     * in it.
+     */
     it('throttles sustained guessing across fresh grants', async () => {
-      db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = (SELECT id FROM users WHERE email = ?)')
-        .run(EMAIL);
-      let throttled = false;
-      for (let i = 0; i < 25 && !throttled; i += 1) {
-        const res = await submit(await beginLogin(), { method: 'totp', token: '000000' });
-        expect([401, 429]).toContain(res.status);
-        if (res.status === 429) throttled = true;
-      }
-      expect(throttled, 'sustained guessing was never throttled').toBe(true);
-      db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = (SELECT id FROM users WHERE email = ?)')
-        .run(EMAIL);
+      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+      const clear = () => db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+      clear();
+
+      /* 19 attempts already spent, against a grant that no longer exists. */
+      db.prepare(`
+        INSERT INTO tfa_login_attempts (token_hash, user_id, attempts, last_attempt_at)
+        VALUES ('spent-on-an-older-grant', ?, 19, datetime('now'))
+      `).run(userId);
+
+      /* A brand-new grant, with a per-token counter of zero, is still refused on
+         the ACCOUNT budget once it crosses the ceiling. */
+      const twentieth = await submit(await beginLogin(), { method: 'totp', token: '000000' });
+      expect(twentieth.status).toBe(401);
+
+      const twentyFirst = await submit(await beginLogin(), { method: 'totp', token: '000000' });
+      expect(twentyFirst.status).toBe(429);
+
+      /* And a CORRECT code is refused too — the ceiling is not a guess filter. */
+      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
+      const withGoodCode = await submit(await beginLogin(), { method: 'totp', token: await freshTotp() });
+      expect(withGoodCode.status).toBe(429);
+
+      clear();
     });
   });
 
