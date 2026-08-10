@@ -431,6 +431,25 @@ export default function Login({ onLoginSuccess, addToast }) {
     }, 1000);
   };
 
+  /**
+   * Clears everything the second-factor screen learned about one person.
+   *
+   * Named rather than inlined because there is more than one way off this screen
+   * and every one of them owes the next person a blank slate.
+   */
+  const resetSecondFactorScreen = () => {
+    setMode('login');
+    setInternalMode(null);
+    setTfaToken('');
+    setSelected2FAMethod(null);
+    setAvailableMethods([]);
+    setEmailCodeSent(false);
+    setMaskedEmail('');
+    setEmailCooldown(0);
+    setError('');
+    if (cooldownTimer.current) { clearInterval(cooldownTimer.current); cooldownTimer.current = null; }
+  };
+
   const sendEmailCode = async () => {
     try {
       setLoading(true);
@@ -454,6 +473,13 @@ export default function Login({ onLoginSuccess, addToast }) {
       if (err.status === 429 || err.data?.code === 'delivery_failed') {
         setEmailCodeSent(true);
         if (err.data?.retryAfter) startCooldown(err.data.retryAfter);
+        /* Revealing the field is half the fix; the other half is saying why it
+           appeared. Without this the banner reads "wait 43 seconds" beside a box
+           the user has no reason to think is already usable. */
+        setError(
+          `${err.message || 'Could not send another code.'} `
+          + 'If the earlier code has arrived, you can enter it below.'
+        );
       }
       setLoading(false);
     }
@@ -501,6 +527,26 @@ export default function Login({ onLoginSuccess, addToast }) {
       } else {
         addToast(`Welcome back, ${result.user.name.split(' ')[0]}.`, 'success');
       }
+
+      /**
+       * Say on SCREEN that a recovery code was spent, not only in the bell.
+       *
+       * The server returns `recoveryCodesRemaining` precisely so this moment can
+       * mention it, and discarding it meant somebody could burn their LAST code
+       * and read "Welcome back, Ana" — learning what they had done only if they
+       * happened to open a notification. The count matters most at zero, which
+       * is exactly when the next sign-in will fail.
+       */
+      if (typeof result.recoveryCodesRemaining === 'number') {
+        addToast(
+          result.recoveryCodesRemaining === 0
+            ? 'That was your last recovery code. Create a new set in Settings — without one you '
+              + 'cannot get back in if you lose your authenticator.'
+            : `Recovery code used. You have ${result.recoveryCodesRemaining} left.`,
+          result.recoveryCodesRemaining === 0 ? 'error' : 'info'
+        );
+      }
+
       onLoginSuccess();
     } catch (err) {
       setError(err.message || 'Invalid code.');
@@ -637,7 +683,23 @@ export default function Login({ onLoginSuccess, addToast }) {
       <div className="auth">
         <main className="auth-form auth-form-narrow" aria-labelledby="tfa-heading">
           {verifyModal}
-          <button className="auth-back" onClick={() => { setMode('login'); setInternalMode(null); }}>
+          {/**
+            * Leaving the second-factor step forgets the person who started it.
+            *
+            * This used to reset `mode` and `internalMode` only, so
+            * `maskedEmail`, `emailCodeSent`, `emailCooldown` and
+            * `availableMethods` all survived. On a shared school device that
+            * meant: student A authenticates with their password, sends an email
+            * code, presses Back and walks off; student B signs in with their own
+            * password and lands on a screen reading "6-digit code sent to
+            * jo***@sbschools.org" — A's address — with the Send button hidden
+            * behind A's countdown.
+            *
+            * The pre-auth grant is a cookie the server clears on its own terms,
+            * so this is about what the SCREEN remembers. It should remember
+            * nothing about somebody who walked away.
+            */}
+          <button className="auth-back" onClick={resetSecondFactorScreen}>
             <ArrowLeft size={16} aria-hidden="true" /> Back to sign in
           </button>
           

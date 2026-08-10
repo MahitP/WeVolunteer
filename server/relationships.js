@@ -68,7 +68,17 @@ export function relationship(db, actorId, subjectId, kind) {
   `).get(actorId, subjectId, kind);
 }
 
-/** True when both directions of an accepted friendship exist. */
+/**
+ * True when an accepted friendship exists between these two, in either
+ * direction.
+ *
+ * ONE row, not two: `requestFriend` inserts a single directed row and
+ * `acceptFriend` flips its `status` to 'accepted', so the `OR` below is asking
+ * "whoever sent it, has it been accepted" — not "do both halves exist". The
+ * earlier wording said the latter, which matters because this is what unlocks
+ * `bio`, `school` and `grade` on a friends-only profile: a reader who trusted
+ * the comment would misjudge where that privacy boundary sits.
+ */
 export function areFriends(db, a, b) {
   if (!a || !b || a === b) return false;
   return Boolean(db.prepare(`
