@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-let dir, db, volunteerStats, attendanceRecordsFor, lastVolunteeredAt, externalHoursSummary;
+let dir, db, volunteerStats, attendanceRecordsFor, lastVolunteeredAt, externalHoursSummary, participationCountsFor;
 
 const PAST = '2026-01-10T12:00:00.000Z';
 const PAST_END = '2026-01-10T16:00:00.000Z';
@@ -69,7 +69,7 @@ function scenario(handle, {
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), 'wev-stats-'));
-  ({ volunteerStats, attendanceRecordsFor, lastVolunteeredAt, externalHoursSummary } = await import('./volunteerStats.js'));
+  ({ volunteerStats, attendanceRecordsFor, lastVolunteeredAt, externalHoursSummary, participationCountsFor } = await import('./volunteerStats.js'));
 });
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -316,5 +316,57 @@ describe('the batch query Auto Select uses', () => {
   it('excludes cancelled events, matching the single-user query', () => {
     scenario(db, { event: 'e1', eventStatus: 'cancelled', applicationStatus: 'accepted', present: 0 });
     expect(attendanceRecordsFor(db, ['u1']).has('u1')).toBe(false);
+  });
+});
+
+/**
+ * ── The applicants list must agree with the profile ──
+ *
+ * `participationCountsFor` exists so an organizer can see follow-through
+ * without the page issuing six queries per applicant. The risk in a second
+ * implementation of a statistic is that it drifts from the first, and the
+ * person it describes has no way to find out which one was used about them —
+ * so the definitions are shared, and this asserts they stayed shared.
+ */
+describe('participationCountsFor', () => {
+  it('agrees with volunteerStats for every user, one by one', () => {
+    const ids = db.prepare('SELECT id FROM users').all().map(r => r.id);
+    const batch = participationCountsFor(db, ids);
+
+    for (const id of ids) {
+      const single = volunteerStats(db, id);
+      const many = batch.get(id);
+      expect(many, `no batch row for ${id}`).toBeTruthy();
+      expect(many.signedUp, `signedUp drifted for ${id}`).toBe(single.eventsSignedUp);
+      expect(many.attended, `attended drifted for ${id}`).toBe(single.eventsAttended);
+      expect(many.absent, `absent drifted for ${id}`).toBe(single.eventsAbsent);
+    }
+  });
+
+  it('returns a row for every id asked about, including ones with no history', () => {
+    const ids = db.prepare('SELECT id FROM users LIMIT 3').all().map(r => r.id);
+    const counts = participationCountsFor(db, [...ids, 'user-does-not-exist']);
+    expect(counts.size).toBe(ids.length + 1);
+    expect(counts.get('user-does-not-exist')).toEqual({ signedUp: 0, attended: 0, absent: 0 });
+  });
+
+  it('is empty for an empty request, without touching the database', () => {
+    expect(participationCountsFor(db, []).size).toBe(0);
+    expect(participationCountsFor(db, [null, undefined]).size).toBe(0);
+  });
+
+  /* Two queries for the whole page, however many applicants are on it — the
+     reason this function exists rather than a loop over `volunteerStats`. */
+  it('does not scale its query count with the number of users', () => {
+    const ids = db.prepare('SELECT id FROM users').all().map(r => r.id);
+    let prepared = 0;
+    const realPrepare = db.prepare.bind(db);
+    db.prepare = (sql) => { prepared += 1; return realPrepare(sql); };
+    try {
+      participationCountsFor(db, ids);
+    } finally {
+      db.prepare = realPrepare;
+    }
+    expect(prepared, 'one aggregate per figure, not one per user').toBeLessThanOrEqual(2);
   });
 });

@@ -7,6 +7,9 @@ import {
 import { can, requireCap, requireCapAny } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
 import { friendsToNotify } from '../relationships.js';
+/* Signed-up / attended, batched, and defined identically to the profile's own
+   figures — see the header on `participationCountsFor`. */
+import { participationCountsFor } from '../volunteerStats.js';
 import { db } from '../db.js';
 
 const router = express.Router();
@@ -81,6 +84,27 @@ router.get('/api/applications', authenticateToken, (req, res) => {
       attendanceByKey.set(`${a.slot_id}:${a.user_id}`, a);
     }
 
+    /**
+     * Follow-through, at a glance, for every applicant on the page.
+     *
+     * An organizer deciding who gets a place wants one thing this list did not
+     * carry: does this person turn up? `completedEvents` above is only half of
+     * it — it counts the events somebody attended and says nothing about how
+     * many they committed to, so a volunteer with four completed events looks
+     * identical whether they signed up for four or fourteen.
+     *
+     * Two queries for the whole page rather than six per row. The definitions
+     * are the SAME ones the student sees on their own profile, which matters
+     * more than the performance: a figure used to decide who gets a place has
+     * to be a figure the person it describes can look at.
+     *
+     * Deliberately NOT a percentage. "1 of 2 — 50%" reads as a verdict on a
+     * person when the evidence behind it is one missed shift, and a reader
+     * cannot un-see the number. The same argument the profile counts are built
+     * on; see the note in volunteerStats.js.
+     */
+    const participation = participationCountsFor(db, rows.map(r => r.user_id));
+
     const conflictsByAppId = new Set();
     for (const c of db.prepare('SELECT application_id FROM application_conflicts').all()) {
       conflictsByAppId.add(c.application_id);
@@ -134,6 +158,12 @@ router.get('/api/applications', authenticateToken, (req, res) => {
           volunteeredHours: totalHours,
           completedEvents,
           lastVolunteeredDate,
+          /* Counts, never a rate — see `participationCountsFor`. `signedUp`
+             counts commitments whose shift has ENDED, so an upcoming shift is
+             not held against somebody who has not had the chance to attend it
+             yet. */
+          eventsSignedUp: participation.get(r.user_id)?.signedUp ?? 0,
+          eventsAttended: participation.get(r.user_id)?.attended ?? 0,
           bio: r.bio,
           skills: r.skills ? JSON.parse(r.skills) : []
         },
