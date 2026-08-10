@@ -140,8 +140,15 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
    * `/hours/external` is worth a moment's thought and lands the same way: it is
    * a literal path with no parameter, and it says a volunteer opened the form —
    * not what they logged, who for, or how many hours.
+   *
+   * `/hours` is the same answer again. It is the page a student's own service
+   * history is shown on, and a crash report from it carries the path and
+   * nothing else: no hours, no organization, no dates, and not even which
+   * student — the reporter attaches no identity. "Somebody opened their own
+   * hours" is not a fact about a person.
    */
   '/directory',
+  '/hours',
   '/users/id/:id',
   '/users/:handle',
   '/organizations/new',

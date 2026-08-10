@@ -264,7 +264,20 @@ export const CAPABILITIES = {
      * a separate name.
      */
     'report.evidence.read',
-    'service.verify.external', 'capability.grant',
+    /**
+     * `service.verify.external` used to sit here, and it is deliberately gone.
+     *
+     * Nothing ever checked it. Its existence was read — by the release that
+     * built external hours — as evidence that somebody intended an
+     * administrative review of a student's self-reported service, and a whole
+     * approval queue was written on the strength of the name. It was never the
+     * product; see server/routes/externalHoursRoutes.js and migration 032.
+     *
+     * A capability no route consults is not inert. It is a claim about what this
+     * platform lets an administrator do, sitting in the one file people read to
+     * find out.
+     */
+    'capability.grant',
     /**
      * Messaging, granted only now that there is a conversation shape that can
      * hold an administrator.

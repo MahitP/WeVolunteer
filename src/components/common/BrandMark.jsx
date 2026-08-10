@@ -23,11 +23,21 @@ import React from 'react';
  * so announcing "WV" as well says the same thing twice in a worse voice. It is
  * `aria-hidden` by default and takes a `label` for any future placement where
  * the mark stands alone.
+ *
+ * ── One appearance, in every theme and on every screen ──
+ *
+ * `size="lg"` adds `.brand-mark-lg`, which changes the dimensions and nothing
+ * else. It exists because the Welcome screen had its own `.welcome-mark` — a
+ * second tile with its own colours — and so the front door wore a different
+ * green from the sidebar behind it whenever dark mode was on. The colours come
+ * from `--brand-mark-bg` / `--brand-mark-ink`, the two tokens in `index.css`
+ * that deliberately do not follow the theme, so this badge matches the browser
+ * tab icon and the header of every transactional email exactly.
  */
-export default function BrandMark({ label }) {
+export default function BrandMark({ label, size }) {
   return (
     <span
-      className="brand-mark"
+      className={size === 'lg' ? 'brand-mark brand-mark-lg' : 'brand-mark'}
       aria-hidden={label ? undefined : 'true'}
       role={label ? 'img' : undefined}
       aria-label={label}

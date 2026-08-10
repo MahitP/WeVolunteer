@@ -34,10 +34,16 @@ import BrowseEvents from './BrowseEvents';
  * will refuse them — which is a product defect, not a vulnerability.
  */
 
+/* Opportunities is the discovery hub as of v1.3.1, so it also reaches the
+   directory. Both of those are mocked to empty: this file is about one button,
+   and a search that never resolves would make every assertion here depend on
+   something it is not testing. */
 vi.mock('../utils/api', () => ({
   api: {
     fetchEventsFiltered: vi.fn().mockResolvedValue({ events: [], total: 0 }),
     fetchRecommendations: vi.fn().mockResolvedValue([]),
+    fetchOrganizations: vi.fn().mockResolvedValue({ organizations: [] }),
+    searchDirectory: vi.fn().mockResolvedValue({ users: [], organizations: [] }),
   },
 }));
 

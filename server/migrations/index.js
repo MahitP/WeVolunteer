@@ -40,6 +40,8 @@ import moderationActionNote from './028_moderation_action_note.js';
 import totpReplayHighWater from './029_totp_replay_high_water.js';
 import personaPreview from './030_persona_preview.js';
 import socialDirectory from './031_social_directory.js';
+import externalHoursTrackingOnly from './032_external_hours_tracking_only.js';
+import distinguishedProfiles from './033_distinguished_profiles.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -133,7 +135,21 @@ export const MIGRATIONS = [
    * writes. It must nonetheless stay after 001, which rebuilds `users` from an
    * explicit column list and would fail on a column it does not know about.
    */
-  socialDirectory
+  socialDirectory,
+  /**
+   * 032 rebuilds `external_hours` without the review columns 031 added. It must
+   * run after 031 (which creates the table) and manages its own transaction,
+   * because a table rebuild needs `PRAGMA foreign_keys = OFF` to take effect.
+   */
+  externalHoursTrackingOnly,
+  /**
+   * 033 adds two nullable columns to `users`. It must run AFTER 001, which
+   * rebuilds that table from an explicit column list and refuses any column it
+   * does not know about — the same constraint 031 sits under, and the reason
+   * these two are a migration rather than an `addColumnIfMissing` guard in
+   * db.js, which runs before the registry. See the file's header.
+   */
+  distinguishedProfiles
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

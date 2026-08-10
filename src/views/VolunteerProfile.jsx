@@ -176,7 +176,10 @@ export default function VolunteerProfile({
         <BadgesList userId={userId} />
       </section>
 
-      <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', alignItems: 'start', gap: 'var(--s6)' }}>
+      {/* The same two-column body as the dashboard, and the same class — it had
+          the same inline `gridTemplateColumns`, so it overflowed a phone for the
+          same reason. See the note in VolunteerDashboard.jsx. */}
+      <div className="dash-split">
         <div className="stack-lg">
           {/* ── Coming up ── */}
           <section>
@@ -190,8 +193,17 @@ export default function VolunteerProfile({
               />
             ) : (
               <div className="list">
-                {upcoming.map(u => (
-                  <div key={`${u.eventId}-${u.startDatetime}`} className="list-row">
+                {/* The INDEX is in the key, and it has to be: one event can have
+                    two shifts starting at the same moment with the same name (a
+                    demo database has exactly that), so eventId, start time and
+                    slot name together are still not unique. A student accepted
+                    for both produced two rows with the same key — React's "two
+                    children with the same key" console error, and a real risk of
+                    one of them being dropped on re-render. The index is safe
+                    here because this list is never reordered and its rows hold
+                    no state of their own. */}
+                {upcoming.map((u, i) => (
+                  <div key={`${u.eventId}-${u.startDatetime}-${i}`} className="list-row">
                     <DateChip iso={u.startDatetime} />
                     <div className="truncate" style={{ flex: 1 }}>
                       <div className="person-name truncate">{u.title}</div>
@@ -224,8 +236,9 @@ export default function VolunteerProfile({
               />
             ) : (
               <div className="list">
-                {completed.map(c => (
-                  <div key={`${c.eventId}-${c.startDatetime}`} className="list-row">
+                {/* Same reason as the upcoming list above. */}
+                {completed.map((c, i) => (
+                  <div key={`${c.eventId}-${c.startDatetime}-${i}`} className="list-row">
                     <DateChip iso={c.startDatetime} />
                     <div className="truncate" style={{ flex: 1 }}>
                       <div className="person-name truncate">{c.title}</div>

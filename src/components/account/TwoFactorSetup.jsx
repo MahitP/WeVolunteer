@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Mail, Key } from 'lucide-react';
+import { Shield, Mail, Key, FileDown, ImageDown } from 'lucide-react';
 import { api } from '../../utils/api';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { useStepUp } from '../auth/useStepUp';
 import { STEP_UP, REAUTH_CHALLENGE_HEADER, reauthHeader } from '../../utils/stepUp';
+import { downloadRecoveryCodesTxt, downloadRecoveryCodesPng } from '../../utils/recoveryCodeExport';
 
 /**
  * Turning two-factor authentication on and off.
@@ -440,6 +441,44 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
           >
             {recovery.codes.map(c => <li key={c}>{c}</li>)}
           </ul>
+
+          {/**
+            * Two ways to save, because neither suits everybody. The text file is
+            * the one that pastes into a password manager; the image goes to a
+            * camera roll, which is where a student on a phone will actually find
+            * it again. Both are generated entirely in the browser from state
+            * already on screen — no request, and no code ever in a URL.
+            */}
+          <div className="row row-wrap recovery-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                try {
+                  downloadRecoveryCodesTxt(recovery.codes);
+                  addToast('Recovery codes saved as a text file.', 'success');
+                } catch {
+                  addToast('Could not save the file. Copy the codes down instead.', 'error');
+                }
+              }}
+            >
+              <FileDown size={15} aria-hidden="true" /> Save as .txt
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={async () => {
+                try {
+                  await downloadRecoveryCodesPng(recovery.codes);
+                  addToast('Recovery codes saved as an image.', 'success');
+                } catch (err) {
+                  addToast(err.message || 'Could not save the image. Copy the codes down instead.', 'error');
+                }
+              }}
+            >
+              <ImageDown size={15} aria-hidden="true" /> Save as .png
+            </button>
+          </div>
 
           <div>
             <button className="btn btn-primary" onClick={acknowledgeRecoveryCodes}>

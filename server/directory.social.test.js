@@ -370,7 +370,10 @@ describe('the social and organization features', () => {
         occurredOn: '2026-05-02', hours: 3.5, description: 'Served lunch.',
       }, alice);
       expect(res.status).toBe(201);
-      expect(res.body.entry.status).toBe('self_reported');
+      /* A constant, not a state. There is no other kind of external entry, and
+         nothing can move one out of it. */
+      expect(res.body.entry.selfReported).toBe(true);
+      expect(res.body.entry).not.toHaveProperty('status');
       entryId = res.body.entry.id;
     });
 
@@ -394,7 +397,39 @@ describe('the social and organization features', () => {
       const profile = await srv.call('GET', `/api/users/${aliceId}/public-profile`, undefined, alice);
       expect(profile.body.profile.stats.hours).toBe(0);
       expect(profile.body.profile.externalService.selfReportedHours).toBe(3.5);
-      expect(profile.body.profile.externalService.verifiedHours).toBe(0);
+      /* There is no verified total any more, on any payload. */
+      expect(profile.body.profile.externalService).not.toHaveProperty('verifiedHours');
+    });
+
+    /**
+     * A personal log is personal. Somebody else reading Alice's profile learns
+     * what this platform confirmed and nothing she typed about elsewhere.
+     */
+    it('shows the external total to its owner and to nobody else', async () => {
+      const mine = await srv.call('GET', `/api/users/${aliceId}/public-profile`, undefined, alice);
+      expect(mine.body.profile.externalService.selfReportedHours).toBe(3.5);
+
+      const theirs = await srv.call('GET', `/api/users/${aliceId}/public-profile`, undefined, bob);
+      expect(theirs.status).toBe(200);
+      expect(theirs.body.profile).not.toHaveProperty('externalService');
+
+      const staff = await srv.call('GET', `/api/users/${aliceId}/public-profile`, undefined, admin);
+      expect(staff.body.profile).not.toHaveProperty('externalService');
+    });
+
+    /* The same rule on the itemised record, which is the endpoint an organizer
+       reviewing an applicant reads. */
+    it('withholds the itemised external log from staff', async () => {
+      const mine = await srv.call('GET', `/api/users/${aliceId}/service-record`, undefined, alice);
+      expect(mine.status).toBe(200);
+      expect(mine.body.external).toHaveLength(1);
+      expect(mine.body.external[0].selfReported).toBe(true);
+      expect(mine.body.externalWithheld).toBe(false);
+
+      const staff = await srv.call('GET', `/api/users/${aliceId}/service-record`, undefined, admin);
+      expect(staff.status).toBe(200);
+      expect(staff.body.external).toEqual([]);
+      expect(staff.body.externalWithheld).toBe(true);
     });
 
     it('never appears among certificates', async () => {
@@ -426,26 +461,40 @@ describe('the social and organization features', () => {
       expect((await srv.call('DELETE', `/api/external-hours/${entryId}`, undefined, bob)).status).toBe(404);
     });
 
-    it('lets an administrator verify it', async () => {
-      const res = await srv.call('PATCH', `/api/admin/external-hours/${entryId}`, { status: 'verified' }, admin);
-      expect(res.status).toBe(200);
-      expect(res.body.entry.status).toBe('verified');
-    });
-
-    it('refuses verification to an organizer', async () => {
-      const res = await srv.call('PATCH', `/api/admin/external-hours/${entryId}`, { status: 'verified' }, organizer);
-      expect(res.status).toBe(403);
+    /**
+     * There is no review workflow, and these assertions are the pin that keeps
+     * one from coming back.
+     *
+     * The first implementation shipped `GET /api/admin/external-hours` (a queue)
+     * and `PATCH /api/admin/external-hours/:id` (verify or reject) on the
+     * reasoning that a `service.verify.external` capability existed so somebody
+     * must have meant it. Nobody did: this is a student's own note about their
+     * own afternoon, and asking an administrator to approve it makes a notebook
+     * into an application form.
+     *
+     * 404 rather than 405: nothing is mounted at these paths at all, for any
+     * caller, including the platform owner whose wildcard satisfies every
+     * capability.
+     */
+    it('has no administrative review endpoints, for anybody', async () => {
+      for (const actor of [admin, organizer, alice]) {
+        expect((await srv.call('GET', '/api/admin/external-hours', undefined, actor)).status).toBe(404);
+        expect((await srv.call(
+          'PATCH', `/api/admin/external-hours/${entryId}`, { status: 'verified' }, actor
+        )).status).toBe(404);
+      }
     });
 
     /**
-     * Editing a verified entry would launder an unverified claim through
-     * somebody else's signature. Deleting it makes no claim at all, so it stays
-     * the student's to withdraw.
+     * The owner can always edit. There is no state an entry reaches in which it
+     * stops being theirs to correct, because there is no other party's judgement
+     * recorded on it.
      */
-    it('refuses to let the owner edit a verified entry, but allows deleting it', async () => {
-      const edit = await srv.call('PATCH', `/api/external-hours/${entryId}`, { hours: 99 }, alice);
-      expect(edit.status).toBe(409);
-      expect(edit.body.code).toBe('verified');
+    it('lets the owner edit their own entry, then delete it', async () => {
+      const edit = await srv.call('PATCH', `/api/external-hours/${entryId}`, { hours: 4 }, alice);
+      expect(edit.status).toBe(200);
+      expect(edit.body.entry.hours).toBe(4);
+      expect(edit.body.entry.selfReported).toBe(true);
       expect((await srv.call('DELETE', `/api/external-hours/${entryId}`, undefined, alice)).status).toBe(200);
     });
   });

@@ -23,34 +23,34 @@ describe('user capability grants', () => {
   it('grants and reads back a capability', async () => {
     const { grantCapability, grantsFor } = await mod();
     const db = await getDb();
-    grantCapability({ db, userId: 'user-student-1', capability: 'service.verify.external', grantedBy: 'user-admin' });
-    expect(grantsFor(db, 'user-student-1')).toContain('service.verify.external');
+    grantCapability({ db, userId: 'user-student-1', capability: 'report.evidence.read', grantedBy: 'user-admin' });
+    expect(grantsFor(db, 'user-student-1')).toContain('report.evidence.read');
   });
 
   it('is idempotent — granting twice does not duplicate', async () => {
     const { grantCapability, grantsFor } = await mod();
     const db = await getDb();
-    grantCapability({ db, userId: 'user-student-2', capability: 'service.verify.external', grantedBy: 'user-admin' });
-    grantCapability({ db, userId: 'user-student-2', capability: 'service.verify.external', grantedBy: 'user-admin' });
-    expect(grantsFor(db, 'user-student-2').filter(c => c === 'service.verify.external')).toHaveLength(1);
+    grantCapability({ db, userId: 'user-student-2', capability: 'report.evidence.read', grantedBy: 'user-admin' });
+    grantCapability({ db, userId: 'user-student-2', capability: 'report.evidence.read', grantedBy: 'user-admin' });
+    expect(grantsFor(db, 'user-student-2').filter(c => c === 'report.evidence.read')).toHaveLength(1);
   });
 
   it('revokes a capability', async () => {
     const { grantCapability, revokeCapability, grantsFor } = await mod();
     const db = await getDb();
-    grantCapability({ db, userId: 'user-student-3', capability: 'service.verify.external', grantedBy: 'user-admin' });
-    revokeCapability({ db, userId: 'user-student-3', capability: 'service.verify.external' });
-    expect(grantsFor(db, 'user-student-3')).not.toContain('service.verify.external');
+    grantCapability({ db, userId: 'user-student-3', capability: 'report.evidence.read', grantedBy: 'user-admin' });
+    revokeCapability({ db, userId: 'user-student-3', capability: 'report.evidence.read' });
+    expect(grantsFor(db, 'user-student-3')).not.toContain('report.evidence.read');
   });
 
   it('excludes expired grants', async () => {
     const { grantCapability, grantsFor } = await mod();
     const db = await getDb();
     grantCapability({
-      db, userId: 'user-org-1', capability: 'service.verify.external',
+      db, userId: 'user-org-1', capability: 'report.evidence.read',
       grantedBy: 'user-admin', expiresAt: new Date(Date.now() - 1000).toISOString()
     });
-    expect(grantsFor(db, 'user-org-1')).not.toContain('service.verify.external');
+    expect(grantsFor(db, 'user-org-1')).not.toContain('report.evidence.read');
   });
 
   it('refuses an unknown capability', async () => {
@@ -72,10 +72,10 @@ describe('user capability grants', () => {
     const db = await getDb();
     const id = await makeUser('u-scope-global');
     grantCapability({
-      db, userId: id, capability: 'service.verify.external',
+      db, userId: id, capability: 'report.evidence.read',
       grantedBy: 'user-admin', scope: ''
     });
-    expect(grantsFor(db, id)).toContain('service.verify.external');
+    expect(grantsFor(db, id)).toContain('report.evidence.read');
   });
 
   it('refuses a scoped grant at write time', async () => {
@@ -117,7 +117,7 @@ describe('user capability grants', () => {
     const now = new Date().toISOString();
     db.prepare(`INSERT INTO users (id,name,email,password_hash,grade,role,created_at)
                 VALUES ('u-drop','D','drop@test.local','x','N/A','student',?)`).run(now);
-    grantCapability({ db, userId: 'u-drop', capability: 'service.verify.external', grantedBy: 'user-admin' });
+    grantCapability({ db, userId: 'u-drop', capability: 'report.evidence.read', grantedBy: 'user-admin' });
     db.prepare("DELETE FROM users WHERE id = 'u-drop'").run();
     expect(grantsFor(db, 'u-drop')).toEqual([]);
   });

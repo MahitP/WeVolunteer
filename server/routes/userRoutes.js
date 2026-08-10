@@ -310,6 +310,16 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
     if (check.value.hobbies !== undefined) {
       updates.push('hobbies = ?'); values.push(JSON.stringify(check.value.hobbies));
     }
+    /* The distinguished-profile fields. Written for any account that sends them
+       and rendered only where the presentation calls for them — see
+       `distinctionFor` in profileSerializer.js. */
+    if (check.value.headline !== undefined) {
+      updates.push('profile_headline = ?'); values.push(check.value.headline || null);
+    }
+    if (check.value.highlights !== undefined) {
+      updates.push('profile_highlights = ?');
+      values.push(check.value.highlights.length ? JSON.stringify(check.value.highlights) : null);
+    }
     if (check.value.location !== undefined) {
       updates.push('location = ?'); values.push(check.value.location || null);
     }

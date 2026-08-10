@@ -1,36 +1,46 @@
 /**
- * External volunteer hours — service done somewhere WeVolunteer does not run.
+ * External volunteer hours — a student's own record of service done elsewhere.
+ *
+ * ── What this is ──
+ *
+ * A personal log, and nothing more. A student volunteers at a food bank, a place
+ * of worship, a community clean-up — somewhere WeVolunteer does not run — and
+ * wants their volunteering history to be complete. They write it down here.
+ *
+ * It is **self-reported and unverified, by design**. There is no approval, no
+ * review queue, no verification status and no administrative workflow, and none
+ * should be added: the feature's whole purpose is personal record-keeping, and a
+ * verification pipeline would turn a notebook into an application form. An
+ * earlier version of this file carried a `service.verify.external` review flow;
+ * it was removed because it was never the product.
  *
  * ── What this is NOT ──
  *
- * It is not an event. That is worth stating loudly, because "let students
- * create their own events" is the obvious-looking implementation and it is
- * wrong in a way that is hard to walk back. An `events` row with a student as
- * its organizer would be visible in Browse Opportunities, appliable to by other
- * students, editable through the event routes, countable in organizer
- * dashboards, and — because credited hours are derived from attendance on
- * events — a way to write your own service record.
+ * It is not an event. That is worth stating loudly, because "let students create
+ * their own events" is the obvious-looking implementation and it is wrong in a
+ * way that is hard to walk back. An `events` row with a student as its organizer
+ * would be visible in Browse Opportunities, appliable to by other students,
+ * editable through the event routes, countable in organizer dashboards, and —
+ * because credited hours are derived from attendance on events — a way to write
+ * your own service record.
  *
- * So these live in their own table with no slots, no applications and no
- * roster. There is no code path by which an external record can be listed as an
+ * So these live in their own table with no slots, no applications and no roster.
+ * There is no code path by which an external record can be listed as an
  * opportunity, applied to, or attended, because the structures those things
- * require do not exist for it. The guarantee is structural, not a rule someone
+ * require do not exist for it. The guarantee is structural, not a rule somebody
  * has to remember.
  *
- * ── Self-attested, and labelled as such everywhere ──
- *
- * A student types these in. The platform already names the power to check them
- * — `service.verify.external`, held by administrators — so a record is
- * 'self_reported' until somebody exercises it, and every surface that shows one
- * says which it is. Nothing here is ever summed into credited hours, and
- * nothing here reaches Auto Select; see the header of weighting.js for why the
- * latter is a security property rather than a formatting choice.
+ * Nothing here is ever summed into credited hours, and nothing here reaches Auto
+ * Select — see the header of weighting.js for why the latter is a security
+ * property and not a formatting preference. Every surface that displays one says
+ * it is self-reported, so the number is never mistaken for one an organizer
+ * confirmed.
  */
 
 import express from 'express';
 import crypto from 'node:crypto';
 import { authenticateToken } from '../utils.js';
-import { can, requireCap } from '../authz.js';
+import { requireCap } from '../authz.js';
 import { db } from '../db.js';
 
 const router = express.Router();
@@ -118,6 +128,14 @@ export function validateExternalHours(payload, { partial = false } = {}) {
   return { ok: true, value: out };
 }
 
+/**
+ * `selfReported: true` is emitted on every entry, unconditionally.
+ *
+ * A constant rather than a stored column, because it is a fact about the whole
+ * table rather than a per-row state — there is no other kind of external entry.
+ * It is sent so no client has to remember to label these, and so a future
+ * consumer that forgets gets an obviously-true field rather than silence.
+ */
 const format = (r) => ({
   id: r.id,
   organizationName: r.organization_name,
@@ -125,10 +143,9 @@ const format = (r) => ({
   description: r.description || '',
   occurredOn: r.occurred_on,
   hours: r.hours,
-  status: r.status,
-  reviewNote: r.review_note || null,
-  reviewedAt: r.reviewed_at || null,
+  selfReported: true,
   createdAt: r.created_at,
+  updatedAt: r.updated_at,
 });
 
 /** The caller's own external records. Self-scoped by construction. */
@@ -148,8 +165,8 @@ router.post('/api/external-hours', authenticateToken, requireCap('portfolio.writ
   const id = `ext-${crypto.randomUUID()}`;
   db.prepare(`
     INSERT INTO external_hours
-      (id, user_id, organization_name, activity_name, description, occurred_on, hours, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'self_reported', ?, ?)
+      (id, user_id, organization_name, activity_name, description, occurred_on, hours, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, req.principal.userId, check.value.organizationName, check.value.activityName,
     check.value.description ?? '', check.value.occurredOn, check.value.hours, now, now);
 
@@ -157,13 +174,12 @@ router.post('/api/external-hours', authenticateToken, requireCap('portfolio.writ
 });
 
 /**
- * Edit one.
+ * Edit one. Freely, and at any time.
  *
- * A VERIFIED record cannot be edited by its owner. Somebody with
- * `service.verify.external` has put their name to that number; letting the
- * student then change it would make verification worth nothing, and would do it
- * silently. Editing a verified entry means asking for it to be looked at again,
- * which is a delete-and-relog.
+ * There is no state in which an entry becomes uneditable, because there is
+ * nobody else's judgement stored on it. It is the owner's note about their own
+ * afternoon; if they wrote down the wrong date they should be able to fix it
+ * without deleting and retyping the rest.
  */
 router.patch('/api/external-hours/:id', authenticateToken, requireCap('portfolio.write'), (req, res) => {
   const row = db.prepare('SELECT * FROM external_hours WHERE id = ?').get(req.params.id);
@@ -171,12 +187,6 @@ router.patch('/api/external-hours/:id', authenticateToken, requireCap('portfolio
      confirm the id exists. Same rule as the export download in privacyRoutes. */
   if (!row || row.user_id !== req.principal.userId) {
     return res.status(404).json({ error: 'No such entry.', code: 'not_found' });
-  }
-  if (row.status === 'verified') {
-    return res.status(409).json({
-      error: 'This entry has been verified and can no longer be edited.',
-      code: 'verified',
-    });
   }
 
   const check = validateExternalHours(req.body ?? {}, { partial: true });
@@ -192,9 +202,6 @@ router.patch('/api/external-hours/:id', authenticateToken, requireCap('portfolio
   }
   if (updates.length === 0) return res.status(400).json({ error: 'No fields to update.' });
 
-  /* A rejected entry that is edited goes back into the queue, rather than
-     staying rejected forever with new content nobody will look at. */
-  if (row.status === 'rejected') { updates.push(`status = 'self_reported'`, 'review_note = NULL'); }
   updates.push('updated_at = ?'); values.push(new Date().toISOString());
   values.push(row.id);
   db.prepare(`UPDATE external_hours SET ${updates.join(', ')} WHERE id = ?`).run(...values);
@@ -202,65 +209,14 @@ router.patch('/api/external-hours/:id', authenticateToken, requireCap('portfolio
   res.json({ entry: format(db.prepare('SELECT * FROM external_hours WHERE id = ?').get(row.id)) });
 });
 
-/** Delete one. Verified entries are the owner's to withdraw; see below. */
+/** Delete one. The owner's record, the owner's to remove. */
 router.delete('/api/external-hours/:id', authenticateToken, requireCap('portfolio.write'), (req, res) => {
   const row = db.prepare('SELECT * FROM external_hours WHERE id = ?').get(req.params.id);
   if (!row || row.user_id !== req.principal.userId) {
     return res.status(404).json({ error: 'No such entry.', code: 'not_found' });
   }
-  /**
-   * Deleting a verified entry IS allowed, where editing it is not.
-   *
-   * The asymmetry is deliberate. Editing a verified number launders an
-   * unverified claim through somebody else's signature; removing the entry
-   * makes no claim at all, and the record is the student's own to withdraw.
-   * Nothing downstream depends on it, because external hours are never summed
-   * into credited hours.
-   */
   db.prepare('DELETE FROM external_hours WHERE id = ?').run(row.id);
   res.json({ success: true });
-});
-
-/* ── Review ─────────────────────────────────────────────────────────────── */
-
-/** The queue of unreviewed entries. */
-router.get('/api/admin/external-hours', authenticateToken, requireCap('service.verify.external'), (req, res) => {
-  const status = ['self_reported', 'verified', 'rejected'].includes(req.query.status)
-    ? req.query.status : 'self_reported';
-  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
-  const rows = db.prepare(`
-    SELECT x.*, u.name AS volunteerName, u.username AS volunteerUsername
-    FROM external_hours x
-    JOIN users u ON u.id = x.user_id
-    WHERE x.status = ?
-    ORDER BY x.created_at ASC
-    LIMIT ?
-  `).all(status, limit);
-  res.json({
-    entries: rows.map(r => ({
-      ...format(r),
-      volunteer: { id: r.user_id, name: r.volunteerName, username: r.volunteerUsername },
-    })),
-  });
-});
-
-/** Verify or reject one. */
-router.patch('/api/admin/external-hours/:id', authenticateToken, requireCap('service.verify.external'), (req, res) => {
-  const status = req.body?.status;
-  if (!['verified', 'rejected'].includes(status)) {
-    return res.status(400).json({ error: 'Decision must be verified or rejected.', field: 'status' });
-  }
-  const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 1000) : null;
-  const row = db.prepare('SELECT * FROM external_hours WHERE id = ?').get(req.params.id);
-  if (!row) return res.status(404).json({ error: 'No such entry.', code: 'not_found' });
-
-  const now = new Date().toISOString();
-  db.prepare(`
-    UPDATE external_hours SET status = ?, reviewed_by = ?, reviewed_at = ?, review_note = ?, updated_at = ?
-    WHERE id = ?
-  `).run(status, req.principal.userId, now, note, now, row.id);
-
-  res.json({ entry: format(db.prepare('SELECT * FROM external_hours WHERE id = ?').get(row.id)) });
 });
 
 export default router;

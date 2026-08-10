@@ -939,6 +939,10 @@ export function initDatabase() {
   );
   addColumnIfMissing('users', 'profile_visibility', "TEXT CHECK(profile_visibility IN ('private', 'friends', 'public')) DEFAULT 'private'");
 
+  /* `profile_headline` and `profile_highlights` are deliberately NOT here.
+     They are added by migration 033 instead — see the header of that file for
+     why a nullable text column had to go through the versioned registry. */
+
   // F-11: email uniqueness was case-sensitive while forgot-password already
   // matched COLLATE NOCASE, so one person could hold leo@x and Leo@x with
   // service hours split across them. Reconcile any pre-existing case-variant

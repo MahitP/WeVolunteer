@@ -206,6 +206,36 @@ export function relationshipState(db, viewerId, subjectId) {
 }
 
 /**
+ * The same state, with `restrictedBy` removed — the ONLY shape that may be sent
+ * to the viewer it describes.
+ *
+ * ── Why this exists as its own function ──
+ *
+ * Restriction is documented above as invisible to its subject. That is the whole
+ * difference between it and blocking, and the reason a student who wants
+ * distance without a confrontation has something to reach for.
+ *
+ * `GET /api/users/:id/public-profile` knew that and stripped the flag inline.
+ * Every OTHER handler that answers with a relationship state — unfriend, accept,
+ * mute, restrict, and their clears — returned this object raw, so the flag went
+ * out on the next request the restricted person made. It was not merely on the
+ * wire: PublicProfile.jsx writes the response straight into `viewer` and hides
+ * the Add-friend button on `viewer.restrictedBy`, so muting somebody who had
+ * restricted you made your own Add-friend button disappear. That is precisely
+ * the tell the inline strip existed to remove, reached by a different door.
+ *
+ * A named function rather than a second inline destructure, because the property
+ * being protected is "no handler may forget", and five copies of a strip is five
+ * chances to forget. `relationshipState` stays exported for the INTERNAL gates
+ * that legitimately need the flag — the friend-request refusal reads it to decide
+ * whether to allow the request at all, and that decision must see the truth.
+ */
+export function viewerRelationshipState(db, viewerId, subjectId) {
+  const { restrictedBy, ...visible } = relationshipState(db, viewerId, subjectId);
+  return visible;
+}
+
+/**
  * Who should be told that `userId` signed up for something.
  *
  * The privacy decision is made HERE, in one query, before any notification row

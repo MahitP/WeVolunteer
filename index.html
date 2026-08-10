@@ -4,6 +4,31 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <!--
+      One mark, in every place the browser draws one.
+
+      `favicon.svg` is a #0f6b45 tile with white "WV" letters drawn as paths —
+      the same badge `.brand-mark` renders in the app and the same one
+      `server/email.js` builds into every transactional email header. The colour
+      is written literally in all three because none of those contexts can read
+      a CSS custom property: the tab icon is fetched outside the document, an
+      email client has no stylesheet of ours, and neither has a theme this
+      application controls. `--brand-mark-bg` in index.css is the in-app half of
+      that same pair, and it is deliberately not overridden in dark mode.
+
+      `mask-icon` covers Safari's pinned tabs, which render a monochrome mask
+      and would otherwise fall back to a screenshot of the page.
+
+      There is deliberately NO apple-touch-icon and no Open Graph image. Both
+      require a raster asset this repository does not carry, and Open Graph in
+      particular describes a page to a link preview on somebody else's service —
+      which is not something to add to a platform whose members are children and
+      whose profiles are gated behind a session for exactly that reason.
+    -->
+    <link rel="mask-icon" href="/favicon.svg" color="#0f6b45" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#0f6b45" />
+    <meta name="description" content="Volunteer scheduling and service-hour tracking for schools." />
+    <!--
       viewport-fit=cover is what makes env(safe-area-inset-*) resolve to real
       values on iOS. index.css already accounts for the notch and the home
       indicator in twelve places — including padding-bottom on .mobilenav and

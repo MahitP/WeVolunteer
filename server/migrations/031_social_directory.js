@@ -187,13 +187,23 @@ export default {
      * somebody has to remember — there is no code path by which an external
      * record can be listed, applied to, or attended.
      *
-     * `status` exists because these hours are self-attested. The platform
-     * already names the power to check them: the `service.verify.external`
-     * capability, held by administrators. Until somebody exercises it a record
-     * is 'self_reported', and every surface says so. Nothing here is ever
-     * summed into credited hours, and nothing here reaches Auto Select — see
-     * the header of weighting.js for why that one is a security property and
-     * not a formatting preference.
+     * Nothing here is ever summed into credited hours, and nothing here reaches
+     * Auto Select — see the header of weighting.js for why that one is a
+     * security property and not a formatting preference.
+     *
+     * ── The `status` / review columns below are OBSOLETE. See migration 032. ──
+     *
+     * They were added on the inference that a `service.verify.external`
+     * capability existed, so somebody must have intended an administrative
+     * review flow. That inference was wrong: external hours are a personal log,
+     * and a verification pipeline turns a notebook into an application form.
+     * 032 rebuilds this table without `status`, `reviewed_by`, `reviewed_at` or
+     * `review_note`, and the capability is gone from authz.js.
+     *
+     * The columns stay in THIS file because a migration is a historical record
+     * of what ran, and rewriting it would change its checksum and break every
+     * database that already applied it. Read 032 for the shape the table
+     * actually has today.
      */
     db.exec(`
       CREATE TABLE IF NOT EXISTS external_hours (

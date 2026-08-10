@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   FileText, ArrowRight, Printer, X, Ban, Trophy, MapPin, CalendarCheck, History, ShieldCheck
-, ExternalLink
 } from 'lucide-react';
 import { APP_NAME, SCHOOL_NAME } from '../config';
 import { formatHours, formatDay, formatTimeRange, countdown } from '../utils/helpers';
@@ -312,7 +311,26 @@ export default function VolunteerDashboard({
         </div>
       </section>
 
-      <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', alignItems: 'start', gap: 'var(--s6)' }}>
+      {/**
+        * The two-column body. A CLASS, not an inline `gridTemplateColumns`.
+        *
+        * ── The bug this fixes ──
+        *
+        * "The Dashboard is zoomed out on my phone." It was, and it was this
+        * element. The columns were declared inline as
+        * `minmax(0, 1.5fr) minmax(0, 1fr)`, and an inline style cannot be
+        * overridden by a media query — so a 375px phone laid the dashboard out
+        * in TWO columns, the narrower one about 128px wide. The "Log external
+        * hours" button in the Service history heading is 156px and does not
+        * shrink, so the page was 523px wide inside a 375px viewport. Mobile
+        * browsers answer a document wider than the viewport by scaling it down
+        * to fit, which is exactly what "zoomed out" looks like.
+        *
+        * So the fix is not `overflow-x: hidden`, which would have hidden the
+        * evidence and left the column 128px wide. `.dash-split` collapses to one
+        * column below the width where two of them fit — see index.css.
+        */}
+      <div className="dash-split">
         <div className="stack-lg">
           {/* ── Confirmed shifts ── */}
           <section>
@@ -395,10 +413,26 @@ export default function VolunteerDashboard({
               * already looking at their history when the question occurs to
               * them.
               */}
+            {/**
+              * The entry point to Logged hours — and deliberately the ONLY one
+              * in the shell.
+              *
+              * It replaced "Log external hours", which pointed straight at the
+              * form. The full log is the better destination from here: it holds
+              * the external form's own entry point, it shows this same history
+              * complete rather than truncated, and it is where the question a
+              * student has while looking at this list ("how much have I actually
+              * done?") is answered.
+              *
+              * There is no rail entry and no mobile tab for it, which is the
+              * point: the navigation should get shorter, not longer, and a page
+              * you reach from your hours does not need to be resident beside
+              * Messages and the Calendar.
+              */}
             <div className="section-head">
               <h2>Service history</h2>
-              <Link className="btn btn-secondary btn-sm section-action" to="/hours/external">
-                <ExternalLink size={14} /> Log external hours
+              <Link className="btn btn-secondary btn-sm section-action" to="/hours">
+                <History size={14} aria-hidden="true" /> My logged hours
               </Link>
             </div>
             <div className="card card-pad">

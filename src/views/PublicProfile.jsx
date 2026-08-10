@@ -27,7 +27,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   MoreHorizontal, UserPlus, UserCheck, UserX, BellOff, Bell, ShieldMinus,
-  Flag, Link2, MapPin, CalendarDays, Clock, Users, Sparkles, Lock, Check, Ban,
+  Flag, Link2, MapPin, CalendarDays, Clock, Users, Sparkles, Lock, Check, Ban, Pencil,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { can } from '../authz';
@@ -35,6 +35,7 @@ import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import ReportModal from '../components/ReportModal';
+import { DistinctionBanner, DistinctionTag } from '../components/profile/Distinction';
 
 /** "March 2025" — a joined date needs no day, and a day is more than is asked. */
 const monthYear = (iso) => (iso
@@ -102,7 +103,17 @@ function ActionsMenu({ label, items }) {
   );
 }
 
-export default function PublicProfile({ currentUser, addToast }) {
+/**
+ * `userId` and `onEditProfile` are for the SELF case.
+ *
+ * `/profile` renders this view for an account whose own profile has no
+ * role-specific screen — an owner or a partner — with the signed-in id passed
+ * directly rather than read from the URL, so one component serves "somebody
+ * else's profile" and "my own" without a second copy of the page to keep in
+ * step. `onEditProfile` is absent on the `/users/...` routes, and the edit
+ * button is gated on both it and `isSelf`.
+ */
+export default function PublicProfile({ currentUser, addToast, userId, onEditProfile }) {
   /**
    * Two routes reach this view: `/users/@name` (`:handle`) and `/users/id/:id`.
    *
@@ -123,17 +134,21 @@ export default function PublicProfile({ currentUser, addToast }) {
   /* The URL carries `@name`; the API takes the bare username. Normalising here
      means a pasted link with or without the `@` both resolve. */
   const username = String(handle || '').replace(/^@/, '');
+  /* The prop wins over the URL, because the prop is only ever supplied by
+     `/profile` — a path with no parameters at all, so there is nothing to
+     conflict with and nothing a URL could override it to. */
+  const subjectId = userId || id;
 
   const load = useCallback(() => {
     let cancelled = false;
     setLoading(true);
     setError('');
-    (id ? api.fetchPublicProfileById(id) : api.fetchPublicProfile(username))
+    (subjectId ? api.fetchPublicProfileById(subjectId) : api.fetchPublicProfile(username))
       .then(res => { if (!cancelled) setData(res); })
       .catch(err => { if (!cancelled) setError(err.status === 404 ? 'not_found' : err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [username, id]);
+  }, [username, subjectId]);
 
   useEffect(() => load(), [load]);
 
@@ -251,6 +266,10 @@ export default function PublicProfile({ currentUser, addToast }) {
             </span>
             <div className="stack-xs">
               <h1 className="profile-name">{profile.name}</h1>
+              {/* Beside the handle rather than in place of it: this account has
+                  a name and a username like everybody else, and the pill says
+                  what KIND of account it is. */}
+              <DistinctionTag distinction={profile.distinction} />
               {profile.username && <p className="muted profile-handle">@{profile.username}</p>}
               {profile.location && (
                 <p className="muted profile-meta">
@@ -261,6 +280,19 @@ export default function PublicProfile({ currentUser, addToast }) {
           </div>
 
           <div className="row profile-actions">
+            {/**
+              * Editing lives HERE, on the page that shows what is being edited.
+              *
+              * The account menu used to offer "Edit Profile" and no way to look
+              * at one, so the only route to your own profile was through a form
+              * for changing it. The menu now says Profile; this is the step from
+              * looking to changing, in the direction people actually travel.
+              */}
+            {isSelf && onEditProfile && (
+              <button type="button" className="btn btn-secondary" onClick={onEditProfile}>
+                <Pencil size={15} aria-hidden="true" /> Edit profile
+              </button>
+            )}
             {!isSelf && <FriendButton viewer={viewer} profile={profile} busy={busy} act={act} />}
             <button
               type="button"
@@ -300,7 +332,39 @@ export default function PublicProfile({ currentUser, addToast }) {
         )}
       </section>
 
-      {/* ── Volunteering ── */}
+      {/**
+        * The distinguished panel, for an owner or a partner.
+        *
+        * ADDITIVE — it sits between the identity card and the volunteering
+        * figures, and every section below it still renders. The account that
+        * runs this platform belongs to a student who volunteers; replacing
+        * their hours and interests with a job title would hide a real service
+        * record. An ordinary member has no `distinction` and the component
+        * renders nothing, so there is no branch here to get wrong.
+        */}
+      <DistinctionBanner
+        distinction={profile.distinction}
+        headline={profile.headline}
+        highlights={profile.highlights}
+      />
+
+      {/**
+        * ── Volunteering, and when it is withheld ──
+        *
+        * Shown for every ordinary member, including one with nothing on it yet:
+        * "0 events, 0 hours" is a true and useful thing to say about a student
+        * who has not started, and the empty meter is the invitation.
+        *
+        * Withheld from a distinguished account that has no record at all. For a
+        * partner organization "Events signed up: 0" is not an achievement
+        * missing, it is a category error — the account does not volunteer, it
+        * runs things. The moment such an account HAS volunteered, the section
+        * returns, which is exactly what makes the owner/student hybrid work
+        * without a rule naming anybody: the condition is the data, not the role.
+        */}
+      {(!profile.distinction
+        || stats.eventsSignedUp > 0 || stats.eventsAttended > 0
+        || stats.hours > 0 || profile.lastVolunteeredAt) && (
       <section className="card">
         <div className="card-head"><h2>Volunteering</h2></div>
         <div className="card-body">
@@ -326,13 +390,26 @@ export default function PublicProfile({ currentUser, addToast }) {
               <dd>{dayMonthYear(profile.lastVolunteeredAt) || 'Not yet'}</dd>
             </div>
           </dl>
-          {external?.verifiedHours > 0 && (
+          {/**
+            * External hours appear here for the SUBJECT only, as a pointer to
+            * their own log rather than as a figure beside the credited one.
+            *
+            * They used to be published on everybody's profile as "verified
+            * hours volunteered outside WeVolunteer". Nothing verifies them any
+            * more — nothing ever should — so what that line offered a reader
+            * was a number the subject typed, sitting one line under a number an
+            * organizer confirmed. The server withholds the field from every
+            * other reader (see profileSerializer.js); this is the matching half.
+            */}
+          {isSelf && external?.entries > 0 && (
             <p className="muted profile-external">
-              Plus {external.verifiedHours} verified hours volunteered outside WeVolunteer.
+              You have also logged {external.selfReportedHours} self-reported hours volunteered
+              outside WeVolunteer. <Link to="/hours">See your logged hours</Link>.
             </p>
           )}
         </div>
       </section>
+      )}
 
       {/* ── Interests ── */}
       {(profile.hobbies?.length > 0 || profile.skills?.length > 0) && (
@@ -374,7 +451,7 @@ export default function PublicProfile({ currentUser, addToast }) {
           This is how your profile looks to other members.{' '}
           <Link to="/settings?section=privacy">Change what is visible</Link>
           {' · '}
-          <Link to="/hours/external">Log external hours</Link>.
+          <Link to="/hours">My logged hours</Link>.
         </p>
       )}
 

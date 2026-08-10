@@ -48,7 +48,7 @@ describe('buildPrincipal — lazy, memoizing grants', () => {
 
   it('issues zero calls to the provider when grants is never read', async () => {
     const { buildPrincipal } = await freshUtils();
-    const fetchGrants = vi.fn(() => ['service.verify.external']);
+    const fetchGrants = vi.fn(() => ['report.evidence.read']);
 
     buildPrincipal(userRow, fetchGrants);
 
@@ -57,7 +57,7 @@ describe('buildPrincipal — lazy, memoizing grants', () => {
 
   it('issues exactly one call no matter how many times grants is read', async () => {
     const { buildPrincipal } = await freshUtils();
-    const fetchGrants = vi.fn(() => ['service.verify.external']);
+    const fetchGrants = vi.fn(() => ['report.evidence.read']);
     const principal = buildPrincipal(userRow, fetchGrants);
 
     void principal.grants;
