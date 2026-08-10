@@ -159,6 +159,26 @@ account can be used. This is not a step to defer.
       that your only signal is the freshness field on the admin status panel, and
       write down who checks it.
 
+### 6a — Does this release contain a table rebuild?
+
+ENGINEERING_GUIDE §8.3 makes "take a backup first" the first of the six guards a
+destructive rebuild must carry. It is also the **only one of the six that no code
+enforces**: the other five are assertions inside the migration, and this one is a
+person remembering. Migrations run automatically and unattended at boot
+(`db.js` → `runMigrations`), so by the time anybody looks, the rebuild has run.
+
+- [ ] Check whether the release adds a migration that rebuilds a table:
+      ```bash
+      git diff --name-only <last-release-tag>..HEAD -- server/migrations/ | xargs grep -l "ownTransaction" 2>/dev/null
+      ```
+      A rebuild is recognisable by `ownTransaction: true` plus a `DROP TABLE` —
+      `PRAGMA foreign_keys` is a silent no-op inside an open transaction, which
+      is the whole reason a rebuild has to manage its own.
+- [ ] **If it does:** run `bin/verify-restore.sh` (above) *for this release*, not
+      just once at first deployment. §6 is written as a first-deploy section, and
+      a rebuild is the one change where a stale rehearsal is not good enough.
+      **v1.3 contains one: migration 032 rebuilds `external_hours`.**
+
 ---
 
 ## 7 — Operational visibility

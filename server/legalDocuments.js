@@ -266,7 +266,13 @@ export const LEGAL_DOCUMENTS = [
     summary: 'How your service hours are recorded, why a confirmed hour is never re-priced, and what happens if a record is wrong.',
     effectiveAt: '2026-08-06',
     file: '07-volunteer-record-policy.md',
-    contentHash: 'dad12b591672a520b1cedf94a43ce0bf28af2fddf55273e0d13cd5a6faffcbbf',
+    /* Refreshed for the v1.3 Auto Select section — the file was edited to
+       describe the attendance term and the pinned constant was not moved with
+       it, so every boot warned about drift. Version left at 1.0: the document is
+       `notice` (no acceptance is collected) and nothing here has been published
+       to a reader yet, so this is a correction before first publication rather
+       than a revision of something somebody read. */
+    contentHash: '1c1eb6c86943378ab20dd373071fef47759951d7db5aba54603e653bb1e1406f',
     bundledWith: null,
   },
   {

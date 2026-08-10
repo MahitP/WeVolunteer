@@ -979,6 +979,23 @@ export function initDatabase() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_events_organizer ON events(organizer_id)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_event ON attendance(event_id)`);
 
+  /**
+   * applications(user_id, status) — the v1.3 participation counts.
+   *
+   * Created by migration 031, and repeated here on purpose. A migration runs
+   * ONCE; `rebuildApplicationsForWithdrawn` above does `DROP TABLE applications`
+   * and recreates no indexes, and the two indexes it does lose are recreated
+   * here on every boot. This one was not, so had that rebuild ever run after
+   * 031 was recorded the index would have been gone permanently — and silently,
+   * since the only symptom is `volunteerStats` reverting to the full table scan
+   * 031 added it to remove.
+   *
+   * Not reachable today (the rebuild is gated on a schema that predates 031),
+   * which is exactly why it would have gone unnoticed. Idempotent, so being in
+   * both places costs nothing.
+   */
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_applications_user_status ON applications(user_id, status)`);
+
   // Seed data is a demo affordance, never a production one: the seed accounts
   // share a password that is printed in the README. A real deployment comes up
   // empty, and its first admin is made with `node bin/make-admin.mjs <email>`
