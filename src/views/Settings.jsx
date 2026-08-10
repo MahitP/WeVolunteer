@@ -15,7 +15,7 @@ import { api } from '../utils/api';
 import { useTheme } from '../hooks/useTheme';
 import { APP_NAME, SCHOOL_NAME, SUPPORT_EMAIL, STUDENT_GUIDE_URL, ORGANIZER_GUIDE_URL } from '../config';
 import { can } from '../authz';
-import { Sun, Moon, SunMoon, ExternalLink, Mail, Scale, Heart, FileSignature } from 'lucide-react';
+import { Sun, Moon, SunMoon, ExternalLink, Mail, Scale, Info, FileSignature } from 'lucide-react';
 
 export default function Settings({ currentUser, addToast, onProfileChange }) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -417,10 +417,27 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
             description: 'Owner access — publish new versions of these documents.',
             href: '/admin/legal', internal: true, Icon: FileSignature
           },
+          /**
+           * ── One About Us, and not a heart ──
+           *
+           * `Heart` was the wrong glyph twice over. It reads as "favourite" or
+           * "like" everywhere else in this product's vocabulary — `BrowseEvents`
+           * uses a heart for starring an opportunity — so the same shape meant
+           * two different things on two screens, and on this one it meant the
+           * one it does NOT do: nothing here is saved, liked or favourited.
+           * `Info` says what the destination is, and sits in the same outline
+           * family as `Scale` above it, which is what makes the two read as a
+           * pair of places rather than as a place and a decoration.
+           *
+           * There is exactly ONE entry pointing at `/about`, asserted in
+           * Settings.help.test.jsx. Two links to one destination in a list this
+           * short is the kind of thing that arrives when a section is edited
+           * twice and nobody re-reads the whole array.
+           */
           {
             label: 'About Us',
             description: 'Why WeVolunteer exists, and what we are trying to do.',
-            href: '/about', internal: true, Icon: Heart
+            href: '/about', internal: true, Icon: Info
           }
         ].filter(Boolean);
 

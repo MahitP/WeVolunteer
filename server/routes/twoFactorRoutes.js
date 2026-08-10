@@ -165,7 +165,35 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
       return res.status(400).json({ error: 'Invalid token' });
     }
 
-    const recoveryCodes = Array.from({ length: 10 }, () => generateRecoveryCode());
+    /**
+     * ── Adding a factor must NOT replace codes the account already holds ──
+     *
+     * This generated ten new codes unconditionally and deleted the old set
+     * inside the transaction below. So an account that enrolled EMAIL first —
+     * receiving ten codes, and being told to write them down — silently lost
+     * every one of them the moment it added an authenticator. The paper in the
+     * drawer, the screenshot, the password-manager entry: all dead, with no
+     * message saying so, at exactly the moment the person believed they were
+     * making their account *more* secure.
+     *
+     * `/api/2fa/email/enable` has always had this right, and the reasoning in
+     * its comment applies here word for word. The two enrolment routes now
+     * agree: a set is issued when the account has none, and is otherwise left
+     * exactly as it is. Regeneration keeps its own endpoint, its own
+     * confirmation dialog and its own step-up action, because destroying
+     * recovery codes is something somebody has to choose on purpose.
+     *
+     * `null` rather than an empty array, so the client can tell "here are your
+     * new codes" from "you already have codes and they still work". The email
+     * route uses the same convention.
+     */
+    const existingCodes = db.prepare(
+      'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
+    ).get(req.user.id).n;
+
+    const recoveryCodes = existingCodes > 0
+      ? null
+      : Array.from({ length: 10 }, () => generateRecoveryCode());
 
     /**
      * Hashed BEFORE the transaction opens, not inside it.
@@ -179,7 +207,9 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
      * Doing the expensive work first and writing the finished hashes inside the
      * transaction keeps the write atomic and the loop free.
      */
-    const hashedCodes = await Promise.all(recoveryCodes.map((code) => bcrypt.hash(code, 10)));
+    const hashedCodes = recoveryCodes
+      ? await Promise.all(recoveryCodes.map((code) => bcrypt.hash(code, 10)))
+      : [];
 
     inTransaction(() => {
       spendChallenge(db, req, '2fa.enable', {});
@@ -205,33 +235,38 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
       db.prepare('UPDATE users SET tfa_enabled = 1 WHERE id = ?').run(req.user.id);
 
       /**
-       * The previous set is REPLACED, not added to.
+       * Written only when this enrolment actually issued a set.
        *
-       * This handler inserted ten codes unconditionally. An account that had
-       * already enrolled email 2FA — which issues its own ten — came out of TOTP
-       * enrolment holding twenty live codes, and the response below shows the
-       * reader only the ten it just made. The other ten stayed valid, unseen,
-       * on a printout or in a password manager from the earlier enrolment,
-       * indefinitely.
+       * Two failure modes had to be avoided here, in opposite directions, and
+       * the guard above is what makes both impossible:
        *
-       * That is the wrong direction for a recovery credential: the set a person
-       * believes they hold must be the set that works, or "I have destroyed my
-       * old codes" is not something they can make true. `regenerate` below
-       * already deletes first; this is the same rule.
+       *   • Inserting unconditionally left an account that had already enrolled
+       *     email 2FA holding TWENTY live codes, while the response showed only
+       *     the ten just made — ten valid codes on an old printout, unseen and
+       *     unrevocable. The set a person believes they hold must be the set
+       *     that works.
+       *   • Deleting unconditionally silently voided the ten they had already
+       *     written down, at the moment they were making the account stronger.
+       *
+       * Both came from this handler treating enrolment as issuance. It is not:
+       * a recovery set belongs to the ACCOUNT, not to a factor. It is issued
+       * when there is none and replaced only by `regenerate`, which asks first.
        */
-      db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
+      if (hashedCodes.length) {
+        db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
 
-      /* `datetime('now')`, single quotes. Double quotes make SQLite parse `now` as an
-         IDENTIFIER, and `node:sqlite` does not enable the legacy fallback that treats
-         an unresolvable identifier as a string — so this fails at runtime with
-         "no such column: now". It is a latent 500 in every recovery-code path. */
-      const insertRC = db.prepare("INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))");
-      for (const hash of hashedCodes) {
-        insertRC.run(`rc-${crypto.randomUUID()}`, req.user.id, hash);
+        /* `datetime('now')`, single quotes. Double quotes make SQLite parse `now` as an
+           IDENTIFIER, and `node:sqlite` does not enable the legacy fallback that treats
+           an unresolvable identifier as a string — so this fails at runtime with
+           "no such column: now". It is a latent 500 in every recovery-code path. */
+        const insertRC = db.prepare("INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))");
+        for (const hash of hashedCodes) {
+          insertRC.run(`rc-${crypto.randomUUID()}`, req.user.id, hash);
+        }
+        recordSecurityEvent(db, req, req.user.id, '2FA_RECOVERY_GENERATED');
       }
 
       recordSecurityEvent(db, req, req.user.id, '2FA_TOTP_ENABLED');
-      recordSecurityEvent(db, req, req.user.id, '2FA_RECOVERY_GENERATED');
     });
 
     res.json({ success: true, recoveryCodes });
@@ -255,29 +290,54 @@ router.post('/api/2fa/disable', authenticateToken, requireAAL2('2fa.disable'), (
   const { token } = req.body;
   
   try {
+    /* Hoisted out of the transaction so the RESPONSE can say which of the two
+       outcomes happened — one factor removed, or two-factor switched off. */
+    let twoFactorSurvives = false;
+
     inTransaction(() => {
       spendChallenge(db, req, '2fa.disable', {});
 
       const user = db.prepare(
-        'SELECT id, tfa_secret, tfa_enabled, tfa_email_enabled, role, tfa_last_counter FROM users WHERE id = ?'
+        'SELECT id, tfa_secret, tfa_enabled, tfa_email_enabled, email_verified, role, tfa_last_counter FROM users WHERE id = ?'
       ).get(req.user.id);
       if (!user.tfa_enabled) throw new Error('2FA is not enabled');
 
       /**
-       * An administrator may not remove their last factor.
+       * ── Removing the AUTHENTICATOR is not "turn off two-factor" ──
        *
-       * `/api/2fa/email/disable` has had this check; this route did not — and it
-       * is the more dangerous of the two, because it clears `tfa_email_enabled`
-       * as well as `tfa_enabled`. So an administrator could strip BOTH factors
-       * in one call and immediately be refused by `requireCap` on every
-       * administrative route: walled out of their own platform by a control
-       * offered to them as a normal setting, with no way back except a shell.
+       * This handler cleared `tfa_email_enabled` alongside `tfa_enabled` and
+       * then deleted every recovery code. The screen offering it is the
+       * authenticator card, and the button says "Turn off" beneath the heading
+       * "Authenticator app" — so a person removing one factor lost all three
+       * things: their authenticator, their email second factor, and the ten
+       * codes they had written down. Nothing said that would happen, and
+       * nothing could bring the codes back.
        *
-       * Turning TOTP off is allowed when email 2FA would survive it — but this
-       * handler switches that off too, so the honest rule is that an
-       * administrator disables nothing here until the policy stops applying.
+       * A recovery set belongs to the ACCOUNT, not to a factor. It survives as
+       * long as any factor does, exactly as it survives adding one (see the
+       * note in `/api/2fa/enable`).
+       *
+       * So: does a second factor survive this removal? Email counts only when
+       * it is switched on AND deliverable — the same pair `enabledSecondFactors`
+       * uses, because a `tfa_email_enabled` flag over an unconfirmed address is
+       * not a factor anybody can complete a sign-in with, and treating it as one
+       * here would leave the account believing it still had 2FA when sign-in
+       * would offer it nothing.
        */
-      if (secondFactorRequiredFor(user.role)) throw new Error('role_requires_2fa');
+      twoFactorSurvives = Boolean(user.tfa_email_enabled) && user.email_verified === 1;
+      const emailSurvives = twoFactorSurvives;
+
+      /**
+       * An administrator may not remove their LAST factor.
+       *
+       * Previously this refused an administrator outright, and the comment gave
+       * the honest reason: the handler switched email off too, so there was no
+       * such thing as removing only the authenticator, and any removal was a
+       * removal of everything. That is no longer true — so the rule returns to
+       * the one it always wanted to be, and matches `/api/2fa/email/disable`:
+       * refuse only when nothing would be left.
+       */
+      if (secondFactorRequiredFor(user.role) && !emailSurvives) throw new Error('role_requires_2fa');
 
       if (!token) throw new Error('Token is required to disable 2FA');
       /* Same object-is-truthy defect as enable, and worse here: anybody holding
@@ -288,13 +348,39 @@ router.post('/api/2fa/disable', authenticateToken, requireAAL2('2fa.disable'), (
          a spent step-up grant. */
       if (!verifyTotp(token, user.tfa_secret)) throw new Error('Invalid token');
 
-      db.prepare('UPDATE users SET tfa_enabled = 0, tfa_secret = NULL, tfa_email_enabled = 0 WHERE id = ?').run(req.user.id);
-      db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
+      /**
+       * `tfa_last_counter` is cleared with the secret it belongs to.
+       *
+       * It is the high-water time step of the last accepted code FOR THAT
+       * SECRET. Left behind, it would be compared against codes from a
+       * different secret after a re-enrolment, and `verifyTotpOnce` would refuse
+       * a perfectly good code as a replay — on the first sign-in after somebody
+       * set their authenticator up again, which is the worst possible moment.
+       */
+      if (emailSurvives) {
+        /* Only the authenticator. Email 2FA stays on, so the account still has
+           a second factor and the recovery set still has something to be the
+           fallback FOR. */
+        db.prepare(
+          'UPDATE users SET tfa_enabled = 0, tfa_secret = NULL, tfa_last_counter = NULL WHERE id = ?'
+        ).run(req.user.id);
+      } else {
+        /* The last factor. Two-factor is genuinely off now, so the recovery set
+           has nothing left to recover past and is destroyed with it — leaving
+           ten live credentials on an account with no second factor would be a
+           standing bypass of a protection the user believes they removed. */
+        db.prepare(
+          'UPDATE users SET tfa_enabled = 0, tfa_secret = NULL, tfa_last_counter = NULL, tfa_email_enabled = 0 WHERE id = ?'
+        ).run(req.user.id);
+        db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
+      }
 
       recordSecurityEvent(db, req, req.user.id, '2FA_TOTP_DISABLED');
     });
 
-    res.json({ success: true });
+    /* `twoFactorStillOn` so the screen can say what actually happened rather
+       than assuming everything came off. */
+    res.json({ success: true, twoFactorStillOn: twoFactorSurvives });
   } catch (err) {
     if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result || err);
     if (err.message === 'role_requires_2fa') {

@@ -60,11 +60,39 @@
 export const ALLOWED_LINK_SCHEMES = Object.freeze(['http://', 'https://', 'mailto:']);
 
 /**
+ * A host no real link can resolve to, used to ask the URL parser what a
+ * slash-leading href ACTUALLY means. `.invalid` is reserved by RFC 2606
+ * precisely so it can never be registered.
+ */
+const RESOLUTION_SENTINEL = 'https://policy.invalid';
+
+/**
  * True for a link a policy is allowed to contain.
  *
- * `//host` is refused despite starting with a slash: it is protocol-relative and
- * leaves the site, so treating it as an internal path would be exactly backwards.
  * A bare `#` is refused because it scrolls nowhere and reads as a dead control.
+ *
+ * ── Why a slash-leading href is RESOLVED rather than prefix-matched ──
+ *
+ * This used to be `return !value.startsWith('//')` — refuse the
+ * protocol-relative form, treat everything else beginning with `/` as an
+ * internal path. That is not what a browser does. In the WHATWG URL spec's
+ * relative-slash state, `\` and `/` are interchangeable for special schemes, so
+ * a SECOND character of `\` opens an authority just as a second `/` does:
+ *
+ *     new URL('/\\evil.example.com/phish', 'https://wevolunteer.example/')
+ *       -> https://evil.example.com/phish
+ *
+ * Every layer read it as internal. `validateBody` stored it, this function
+ * passed it, and `PolicyBody`'s `external` test (`/^https?:\/\//`) was false —
+ * so the anchor rendered with no `target="_blank"` and, worse, no
+ * `rel="noopener noreferrer"`: same tab, full `Referer`. On `/legal/:slug`,
+ * which is served unauthenticated and is where signup sends children.
+ *
+ * Asking the parser removes the whole class rather than the one spelling of it.
+ * `//host`, `/\host`, `/\/host` and anything else that forms an authority all
+ * resolve to an origin that is not the sentinel, and are refused by the same
+ * line. A denylist of prefixes could only ever cover the tricks somebody had
+ * already thought of.
  */
 export function isSafeHref(href) {
   if (typeof href !== 'string') return false;
@@ -72,7 +100,13 @@ export function isSafeHref(href) {
   if (value === '') return false;
 
   if (value.startsWith('#')) return value.length > 1;
-  if (value.startsWith('/')) return !value.startsWith('//');
+  if (value.startsWith('/')) {
+    try {
+      return new URL(value, `${RESOLUTION_SENTINEL}/`).origin === RESOLUTION_SENTINEL;
+    } catch {
+      return false;
+    }
+  }
 
   const lower = value.toLowerCase();
   return ALLOWED_LINK_SCHEMES.some(scheme => lower.startsWith(scheme));

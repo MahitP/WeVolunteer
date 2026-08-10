@@ -358,13 +358,35 @@ export function getInAppContent(event, payload) {
         link: `event:${payload.eventId}`
       };
     case 'HOURS_APPROVED':
-      return {
-        kind,
-        priority: NOTIFICATION_PRIORITY.NORMAL,
-        title: 'Volunteer hours added',
-        body: `You earned ${payload.hours} hours for ${payload.eventTitle}.`,
-        link: `event:${payload.eventId}`
-      };
+      /**
+       * An event that credits no hours gets a sentence with no number in it.
+       *
+       * `credits_hours = 0` means "this event does not measure service in
+       * hours" — a donation drive, a supply sort — and attendance is still
+       * recorded and still counts toward events attended. Printing the figure
+       * anyway produced "You earned 0 hours for the Winter Coat Drive", which
+       * reads as a refusal to somebody who turned up and did the work.
+       *
+       * `awardsHours !== false` rather than a truthiness test, so an older
+       * payload that predates the field keeps the hours wording it was written
+       * for instead of silently losing its number.
+       */
+      return payload.awardsHours === false
+        ? {
+          kind,
+          priority: NOTIFICATION_PRIORITY.NORMAL,
+          title: 'Attendance confirmed',
+          body: `Your attendance at ${payload.eventTitle} was confirmed. `
+            + 'This event does not award service hours.',
+          link: `event:${payload.eventId}`
+        }
+        : {
+          kind,
+          priority: NOTIFICATION_PRIORITY.NORMAL,
+          title: 'Volunteer hours added',
+          body: `You earned ${payload.hours} hours for ${payload.eventTitle}.`,
+          link: `event:${payload.eventId}`
+        };
     case 'ORGANIZER_APPROVED':
       return {
         kind,

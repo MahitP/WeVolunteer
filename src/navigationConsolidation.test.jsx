@@ -157,4 +157,43 @@ describe('the rail did not grow', () => {
       expect(secondary.map(n => n.path)).toContain('/profile');
     }
   });
+
+  /**
+   * ── Profile is in the account control, and NOT in the desktop rail ──
+   *
+   * The rail ends in `ProfileMenu`, which offers Profile / Notifications /
+   * Settings / Sign Out over the signed-in user's own avatar. A rail entry as
+   * well drew the same destination twice on one screen, one of them inside the
+   * control that exists to hold it.
+   *
+   * `accountOnly` is what expresses that, and it has to be a SECOND flag rather
+   * than a change to `secondary`, because the two surfaces read `secondary` for
+   * different reasons: on the desktop it means "draw after the primary tier",
+   * on a phone it means "put in the ⋯ sheet" — and that sheet IS the account
+   * control at that width, so Profile belongs in it. Marking Profile
+   * non-secondary would have promoted it to a fifth bottom-bar tab, which is
+   * the clutter the test above exists to prevent.
+   */
+  it.each(ROLES)('marks Profile as account-only, so the rail does not draw it for %s', (role) => {
+    const { secondary } = navSectionsFor(USER(role));
+    const profile = secondary.find(n => n.path === '/profile');
+    if (!profile) return; // a role with no self-profile view has no entry at all
+    expect(profile.accountOnly, 'Profile must be accountOnly').toBe(true);
+
+    /* The rail draws `primary` plus the secondary entries that are NOT
+       accountOnly. Nothing else may be hidden from it by accident. */
+    const railSecondary = secondary.filter(n => !n.accountOnly);
+    expect(railSecondary.map(n => n.path)).not.toContain('/profile');
+    expect(secondary.filter(n => n.accountOnly).map(n => n.path)).toEqual(['/profile']);
+  });
+
+  /* Notifications must NOT be swept up by the same flag — it is a real rail
+     destination with an unread count, and the whole reason `accountOnly` is a
+     separate flag rather than a redefinition of `secondary`. */
+  it.each(ROLES)('leaves Notifications in the rail for %s', (role) => {
+    const { secondary } = navSectionsFor(USER(role));
+    const notifications = secondary.find(n => n.path === '/notifications');
+    if (!notifications) return;
+    expect(notifications.accountOnly).toBeUndefined();
+  });
 });

@@ -205,3 +205,91 @@ describe('isSafeHref', () => {
     expect(isSafeHref('\tjavascript:alert(1)')).toBe(false);
   });
 });
+
+/**
+ * ── The two ways the version rule could be defeated ──
+ *
+ * `legal_document_revisions` is append-only: one INSERT, no UPDATE, no DELETE.
+ * So "a published version can never be reused or walked backwards" is not a
+ * validation preference — it is the only thing standing between a mistake and a
+ * row nobody can correct without hand-editing production SQL.
+ */
+describe('version comparison cannot be defeated by magnitude', () => {
+  it('refuses a component long enough to become Infinity', () => {
+    /* `Number('9'.repeat(400))` is Infinity. Two Infinities subtract to NaN,
+       NaN is falsy, and the `||` cascade the comparator used to be would fall
+       through to the next component — so the MAJOR number stopped being
+       compared at all. */
+    expect(parseVersion('9'.repeat(400) + '.0.0')).toBeNull();
+    expect(parseVersion('1000000.0.0')).toBeNull();
+    expect(parseVersion('999999.0.0')).toEqual({ major: 999999, minor: 0, patch: 0 });
+  });
+
+  it('never returns NaN, so a lower version can never compare as greater', () => {
+    for (const [a, b] of [
+      ['2.0.0', '1.9.9'], ['1.10.0', '1.9.0'], ['1.0.1', '1.0.0'], ['0.0.1', '0.0.0'],
+    ]) {
+      const forward = compareVersions(a, b);
+      const back = compareVersions(b, a);
+      expect(Number.isNaN(forward)).toBe(false);
+      expect(forward).toBeGreaterThan(0);
+      expect(back).toBeLessThan(0);
+    }
+    expect(compareVersions('1.2.3', '1.2.3')).toBe(0);
+  });
+
+  /* A comparator that is not a total order sorts unpredictably, and
+     `highestVersion` picks its answer with `.sort().pop()`. */
+  it('orders a shuffled set the same way every time', () => {
+    const versions = ['1.0.0', '1.0.1', '1.2.0', '2.0.0', '1.10.0', '0.9.9'];
+    const sorted = [...versions].sort(compareVersions);
+    expect(sorted).toEqual(['0.9.9', '1.0.0', '1.0.1', '1.2.0', '1.10.0', '2.0.0']);
+    expect([...versions].reverse().sort(compareVersions)).toEqual(sorted);
+  });
+});
+
+/**
+ * ── A link that reads as internal and is not ──
+ *
+ * `isSafeHref` treated any slash-leading href as an internal path unless it
+ * began `//`. But in the WHATWG URL spec's relative-slash state, `\` and `/`
+ * are interchangeable for special schemes, so a second character of `\` opens
+ * an authority exactly as a second `/` does:
+ *
+ *     new URL('/\\evil.example.com/x', 'https://wevolunteer.example/')
+ *       -> https://evil.example.com/x
+ *
+ * Every layer read it as internal: `validateBody` stored it, `isSafeHref`
+ * passed it, and `PolicyBody`'s external test (`/^https?:\/\//`) was false — so
+ * the anchor rendered with no `rel="noopener noreferrer"` and no new tab. Same
+ * tab, full Referer, on `/legal/:slug`, which is served unauthenticated and is
+ * where signup sends children.
+ *
+ * The check resolves the href now instead of matching prefixes, so the whole
+ * class goes rather than the one spelling somebody thought of.
+ */
+describe('a slash-leading link must actually stay on this origin', () => {
+  const ESCAPES = [
+    '/\\evil.example.com/phish',
+    '/\\/evil.example.com',
+    '//evil.example.com',
+    '/\\\\evil.example.com',
+  ];
+
+  it.each(ESCAPES)('refuses %s, which resolves off-origin', (href) => {
+    expect(isSafeHref(href)).toBe(false);
+  });
+
+  it('still allows the internal paths policies genuinely use', () => {
+    for (const href of ['/legal/privacy-policy', '/about', '/legal', '#a-section']) {
+      expect(isSafeHref(href)).toBe(true);
+    }
+  });
+
+  /* The body validator is the layer that gives the owner an error message, so
+     it has to refuse the same thing rather than relying on the renderer. */
+  it('refuses such a link at save time', () => {
+    expect(() => validateBody('# T\n\nRead the [rules](/\\evil.example.com/x) now.\n'))
+      .toThrow(LegalValidationError);
+  });
+});

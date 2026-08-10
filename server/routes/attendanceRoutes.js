@@ -101,12 +101,38 @@ router.post('/api/events/:id/attendance', authenticateToken, requireCap('attenda
     });
 
     for (const c of outcome.credited) {
+      /**
+       * Which sentence the volunteer reads, decided from what actually happened.
+       *
+       * This dispatched `HOURS_APPROVED` — "Volunteer hours added — you earned N
+       * hours" — for every row in `credited`, and `credited` means "ends up with
+       * a credit", not "gained one". Two things came out wrong:
+       *
+       *   • An organizer correcting four hours down to one sent the volunteer a
+       *     message announcing they had EARNED one hour. The `HOURS_ADJUSTED`
+       *     template already existed and said the right thing; it was reachable
+       *     only when somebody was marked absent.
+       *   • A participation event — a donation drive, `credits_hours = 0` —
+       *     told everybody who turned up "you earned 0 hours". Every other
+       *     surface in the product checks that flag before printing a number.
+       *     This loop was the one that did not.
+       */
+      const wentDown = c.action === 'adjusted'
+        && c.hoursBefore !== null && Number(c.hours) < Number(c.hoursBefore);
+
       notificationService.dispatch(
-        'HOURS_APPROVED',
-        { eventId: event.id, eventTitle: event.title, hours: Number(c.hours) },
+        wentDown ? 'HOURS_ADJUSTED' : 'HOURS_APPROVED',
+        {
+          eventId: event.id,
+          eventTitle: event.title,
+          hours: Number(c.hours),
+          /* Lets the template drop the figure entirely for an event that does
+             not measure service in hours. */
+          awardsHours: c.awardsHours !== false,
+        },
         c.userId
       );
-      
+
       // Evaluate badge eligibility with newly approved hours
       badgeService.evaluateBadges(c.userId);
       
