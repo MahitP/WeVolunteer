@@ -33,3 +33,25 @@ export function todayIso() {
   const pad = n => String(n).padStart(2, '0');
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
+
+/**
+ * The latest date the server will accept, as `YYYY-MM-DD`.
+ *
+ * Mirrors `MAX_EFFECTIVE_DAYS_AHEAD` in server/legalStore.js. The server owns
+ * the answer — this exists only so the native date picker refuses the bad range
+ * before a round trip, and so the hint can print the bound rather than describe
+ * it vaguely.
+ *
+ * A year is past every real notice period and every school-year alignment, and
+ * still catches the error these fields attract: a mistyped leading digit.
+ */
+export const MAX_EFFECTIVE_DAYS_AHEAD = 365;
+
+export function latestEffectiveIso(from = todayIso()) {
+  /* Built from the date string rather than from `Date.now()`, so it is exactly
+     N days after whatever `todayIso()` decided — the two cannot disagree across
+     a midnight boundary or a timezone. */
+  const at = new Date(`${from}T00:00:00Z`);
+  at.setUTCDate(at.getUTCDate() + MAX_EFFECTIVE_DAYS_AHEAD);
+  return at.toISOString().slice(0, 10);
+}

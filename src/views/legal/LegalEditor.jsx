@@ -9,7 +9,7 @@ import { STEP_UP } from '../../utils/stepUp';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import PolicyBody from '../../components/legal/PolicyBody';
 import { parsePolicyMarkdown, isSafeHref } from '../../utils/policyMarkdown';
-import { formatLegalDate, todayIso } from './legalDates';
+import { formatLegalDate, todayIso, latestEffectiveIso } from './legalDates';
 
 /**
  * The Legal Center editor — owner only.
@@ -578,6 +578,15 @@ export default function LegalEditor({ addToast }) {
                     className="input"
                     value={effectiveAt}
                     onChange={e => setEffectiveAt(e.target.value)}
+                    /* The native picker refuses the out-of-range dates before a
+                       round trip. UX only — the server owns the answer, and a
+                       browser without `type="date"` support simply falls back to
+                       text and meets the same refusal. Save is deliberately NOT
+                       gated on this: `dirty` means the BODY changed, and adding
+                       a second condition would make a valid save impossible to
+                       explain when the button stayed grey. */
+                    min={todayIso()}
+                    max={latestEffectiveIso()}
                     aria-describedby="legal-effective-hint"
                     aria-invalid={saveErrorField === 'effectiveAt' || undefined}
                     aria-errormessage={saveErrorField === 'effectiveAt' ? 'legal-save-error' : undefined}
@@ -591,6 +600,8 @@ export default function LegalEditor({ addToast }) {
                   <p className="dim small" id="legal-effective-hint">
                     The date printed on the document. The new text goes live as soon
                     as you save, whatever date you put here — this does not delay it.
+                    It cannot be earlier than today, earlier than the version it
+                    replaces, or more than a year ahead.
                   </p>
                 </div>
 
