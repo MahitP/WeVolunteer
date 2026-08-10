@@ -84,6 +84,30 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
   const row = loadOrganization(req, res);
   if (!row) return;
 
+  /**
+   * An archived organization is out of circulation, and that has to include
+   * this route.
+   *
+   * Browsing (`status = 'active'`) and directory search both filter on status,
+   * and joining refuses an archived organization — so archiving looked like it
+   * withdrew a club from the platform. It did not withdraw THIS page, which is
+   * the one that lists up to a hundred members. Slugs are derived from the
+   * name rather than random, so the address is guessable, and archiving is the
+   * only withdrawal mechanism a manager is offered: somebody who archived a
+   * club to take its roster of students out of view had not done so.
+   *
+   * Managers and moderators still see it, because otherwise archiving would be
+   * a one-way door — the page is where unarchiving is reached from. 404 rather
+   * than 403 for everybody else, matching `loadOrganization`: a distinguishable
+   * refusal would confirm the organization exists.
+   */
+  const mayManage = canManage(db, row.id, req.principal.userId, {
+    hasModerate: can(req.principal, 'organization.moderate'),
+  });
+  if (row.status !== 'active' && !mayManage) {
+    return res.status(404).json({ error: 'No such organization.', code: 'not_found' });
+  }
+
   const members = db.prepare(`
     SELECT u.id, u.username, u.name, u.avatar, u.profile_picture_url, u.role, u.location,
            m.member_role AS memberRole, m.joined_at AS joinedAt
@@ -120,9 +144,9 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
     viewer: {
       isMember: Boolean(membership),
       memberRole: membership?.member_role ?? null,
-      canManage: canManage(db, row.id, req.principal.userId, {
-        hasModerate: can(req.principal, 'organization.moderate'),
-      }),
+      /* Computed once, above, where the archived-organization gate also needs
+         it — the two must agree, and two calls is two chances for them not to. */
+      canManage: mayManage,
     },
   });
 });

@@ -485,7 +485,7 @@ router.get('/api/2fa/status', authenticateToken, (req, res) => {
  * 
  * Voids all previous recovery codes and returns a new set.
  */
-router.post('/api/2fa/recovery-codes/regenerate', authenticateToken, requireAAL2('2fa.enable'), async (req, res) => {
+router.post('/api/2fa/recovery-codes/regenerate', authenticateToken, requireAAL2('2fa.recovery.regenerate'), async (req, res) => {
   try {
     const recoveryCodes = Array.from({ length: 10 }, () => generateRecoveryCode());
 
@@ -504,7 +504,7 @@ router.post('/api/2fa/recovery-codes/regenerate', authenticateToken, requireAAL2
     const hashedCodes = await Promise.all(recoveryCodes.map((code) => bcrypt.hash(code, 10)));
 
     inTransaction(() => {
-      spendChallenge(db, req, '2fa.enable', {});
+      spendChallenge(db, req, '2fa.recovery.regenerate', {});
 
       db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
       

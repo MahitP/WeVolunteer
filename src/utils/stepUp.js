@@ -48,7 +48,8 @@ export const STEP_UP = Object.freeze({
   ADMIN_INVITE: 'admin.invite',
   GENERATE_2FA: '2fa.generate',
   ENABLE_2FA: '2fa.enable',
-  DISABLE_2FA: '2fa.disable'
+  DISABLE_2FA: '2fa.disable',
+  REGENERATE_RECOVERY_CODES: '2fa.recovery.regenerate'
 });
 
 // Fails at module load, not at 403 time. A name that has drifted out of the

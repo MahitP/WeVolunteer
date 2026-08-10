@@ -37,6 +37,23 @@ const router = express.Router();
 const SEARCH_MIN = 2;
 const SEARCH_MAX_LIMIT = 25;
 
+/**
+ * How deep the result set may be paged.
+ *
+ * The limit below bounds one REQUEST; without a companion bound on `offset` it
+ * bounds nothing at all, because `?offset=0,25,50,…` walks the same rows out in
+ * pages. That is the enumeration the limit exists to prevent, run twice as
+ * slowly — and on a platform whose members are schoolchildren, a complete list
+ * of names, handles and general locations is the thing worth not handing over.
+ *
+ * Eight pages is past where anybody is still reading results and well into
+ * harvesting them: a student looking for somebody they know refines the query,
+ * they do not scroll to result 300. Deeper paging answers 400 rather than an
+ * empty page, so a caller that genuinely wanted more is told to narrow the
+ * search instead of quietly receiving nothing.
+ */
+const SEARCH_MAX_OFFSET = 200;
+
 /** Live, non-deleted accounts only. A deleted account has no profile to show. */
 const LIVE_USER = `account_status = 'active'`;
 
@@ -62,7 +79,27 @@ function boundedLimit(raw, fallback = 20) {
  * prevent.
  */
 function likeTerm(q) {
-  return `%${String(q).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  return `${'%'}${likeEscape(q)}${'%'}`;
+}
+
+/** The same escaping, without the surrounding wildcards. */
+function likeEscape(q) {
+  return String(q).replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/**
+ * A prefix pattern — "starts with q" — with q escaped.
+ *
+ * The ranking clauses used to interpolate the RAW query here while the `WHERE`
+ * used the escaped one, so `likeTerm`'s whole purpose was honoured in the
+ * filter and skipped three lines later in the sort. Nothing leaked, because the
+ * rows had already been filtered on the escaped value — but it is an unescaped
+ * user string inside a LIKE in the one function whose job is escaping, and it
+ * would have become a hole the moment anybody moved that predicate up into the
+ * `WHERE`.
+ */
+function likePrefix(q) {
+  return `${likeEscape(q)}%`;
 }
 
 /* ── Profiles ───────────────────────────────────────────────────────────── */
@@ -217,10 +254,21 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
   const limit = boundedLimit(req.query.limit);
   const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
 
+  /* Refused rather than clamped: silently capping the offset would serve page 9
+     the contents of page 8, which reads as duplicated results rather than as a
+     boundary. See SEARCH_MAX_OFFSET. */
+  if (offset > SEARCH_MAX_OFFSET) {
+    return res.status(400).json({
+      error: 'That is further than search will page. Try a more specific search.',
+      code: 'offset_too_deep',
+    });
+  }
+
   if (q.length < SEARCH_MIN) {
     return res.json({ users: [], organizations: [], query: q, tooShort: true });
   }
   const term = likeTerm(q);
+  const prefix = likePrefix(q);
 
   let users = [];
   if (type !== 'organizations') {
@@ -242,7 +290,7 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
              ELSE 3 END,
         name COLLATE NOCASE
       LIMIT ? OFFSET ?
-    `).all(term, term, q, `${q}%`, `${q}%`, limit + 1, offset);
+    `).all(term, term, q, prefix, prefix, limit + 1, offset);
     users = rows.slice(0, limit).map(profileSummary);
     res.locals.usersHasMore = rows.length > limit;
   }

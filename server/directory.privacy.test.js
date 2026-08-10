@@ -216,10 +216,31 @@ describe('the member directory: what one member may learn about another', () => 
       }
     });
 
+    /**
+     * `q=a` is ONE character, which is below SEARCH_MIN — so the handler
+     * short-circuits to `{users: [], tooShort: true}` and the assertion below
+     * passed without the LIMIT clause ever running. A two-character query is
+     * what actually reaches the query this test is about.
+     */
     it('bounds the page size however large a limit is asked for', async () => {
-      const res = await srv.call('GET', '/api/directory/search?q=a&limit=100000', undefined, student);
+      const res = await srv.call('GET', '/api/directory/search?q=an&limit=100000', undefined, student);
       expect(res.status).toBe(200);
+      expect(res.body.tooShort).toBeUndefined();
       expect(res.body.users.length).toBeLessThanOrEqual(25);
+    });
+
+    /**
+     * Bounding the page size bounds one REQUEST. Without a companion bound on
+     * `offset`, `?offset=0,25,50,…` walks the same rows out in pages — the same
+     * enumeration, run more slowly, against a membership of schoolchildren.
+     */
+    it('refuses to page arbitrarily deep into the membership', async () => {
+      const shallow = await srv.call('GET', '/api/directory/search?q=an&offset=25', undefined, student);
+      expect(shallow.status).toBe(200);
+
+      const deep = await srv.call('GET', '/api/directory/search?q=an&offset=100000', undefined, student);
+      expect(deep.status).toBe(400);
+      expect(deep.body.code).toBe('offset_too_deep');
     });
 
     it('refuses the whole directory to a partner account', async () => {

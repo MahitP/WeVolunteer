@@ -10,7 +10,7 @@ import {
 } from '../email.js';
 import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
-import { authenticateToken, formatUserResponse, inTransaction, revokeSession, enabledSecondFactors } from '../utils.js';
+import { authenticateToken, formatUserResponse, inTransaction, revokeSession, isSessionRevoked, enabledSecondFactors } from '../utils.js';
 import { assertConsent, recordAcceptances, ConsentMissing } from '../consent.js';
 import { withheldCapabilitiesFor } from '../organizerAgreement.js';
 import { db, initDatabase } from '../db.js';
@@ -166,9 +166,19 @@ export function issueSession(res, user, tokenVersion) {
  */
 const PREAUTH_TTL_MS = 15 * 60 * 1000;
 
+/**
+ * The half-finished sign-in: proof of the password, not yet of the second factor.
+ *
+ * `tokenVersion` is carried for the same reason a full session carries it.
+ * `/api/auth/login-2fa` reads it back and refuses a grant issued before the
+ * account's version was bumped — which is what "sign out all other devices" and
+ * a password reset both do. Without it, a sign-in that was already half-finished
+ * when the owner hit the panic button went on to complete into a fresh, fully
+ * authenticated session, and neither control covered the one case they exist for.
+ */
 export function issuePreAuthSession(res, user) {
   const token = jwt.sign(
-    { id: user.id, preauth: true, jti: crypto.randomUUID() },
+    { id: user.id, preauth: true, jti: crypto.randomUUID(), tokenVersion: user.token_version ?? 0 },
     JWT_SECRET,
     { expiresIn: '15m' }
   );
@@ -759,50 +769,40 @@ router.post('/api/auth/login-2fa', async (req, res) => {
   try {
     const tokenHash = crypto.createHash('sha256').update(preauthToken).digest('hex');
 
-    /**
-     * Two ceilings, and the second one is the one that matters.
-     *
-     * Per TOKEN: five guesses against this particular grant. That is the obvious
-     * one, and on its own it is decorative — now that every grant carries a
-     * `jti`, an attacker guessing a six-digit code just re-posts
-     * `/api/auth/login` with the password they already have, receives a fresh
-     * token with a fresh counter, and continues. Five guesses per grant with
-     * unlimited grants is unlimited guesses.
-     *
-     * Per ACCOUNT, in a rolling window: the ceiling that actually bounds the
-     * search. A six-digit code is 10^6, so 20 attempts per 15 minutes leaves an
-     * attacker needing about a year of uninterrupted guessing per account, which
-     * is the point at which the second factor is doing its job rather than
-     * appearing to.
-     *
-     * Deliberately NOT a lockout. Refusing further attempts for a window is
-     * recoverable by waiting; disabling the account would let anybody with a
-     * stolen password lock the owner out of their own platform on purpose.
-     */
-    const ACCOUNT_WINDOW_MINUTES = 15;
-    const ACCOUNT_ATTEMPT_CEILING = 20;
-
-    const perToken = db.prepare(
-      'SELECT attempts FROM tfa_login_attempts WHERE token_hash = ?'
-    ).get(tokenHash);
-
-    const perAccount = db.prepare(
-      `SELECT COALESCE(SUM(attempts), 0) AS attempts
-         FROM tfa_login_attempts
-        WHERE user_id = ?
-          AND last_attempt_at > datetime('now', '-${ACCOUNT_WINDOW_MINUTES} minutes')`
-    ).get(payload.id);
-
-    if ((perToken && perToken.attempts >= 5)
-      || (perAccount && perAccount.attempts >= ACCOUNT_ATTEMPT_CEILING)) {
-      recordSecurityEvent(db, req, payload.id, '2FA_THROTTLED');
-      return res.status(429).json({ error: 'Too many failed attempts. Please log in again.' });
-    }
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
     if (!userRow || userRow.account_status === 'deleted' || isSuspended(userRow)) {
       res.clearCookie('wev_preauth', clearCookieOptions());
       return res.status(401).json({ error: 'Authentication failed.' });
+    }
+
+    /**
+     * ── The grant must still be live, and still be THIS account's ──
+     *
+     * Success used to `clearCookie` and nothing else, which discards the
+     * browser's copy and leaves the token itself valid for its full fifteen
+     * minutes. Two consequences, and the second is the one that matters:
+     *
+     *   • A captured preauth token could be replayed to mint an ADDITIONAL full
+     *     session — and success also clears the account's failed-attempt rows,
+     *     so each replay handed the next one a fresh guessing budget.
+     *   • Nothing on this path consulted `token_version`. "Sign out all other
+     *     devices" and a password reset both bump it, and both were invisible
+     *     here — so a sign-in that was half-finished when somebody hit the
+     *     panic button still completed into a fresh session afterwards. The
+     *     control did not cover the case it exists for.
+     *
+     * `revoked_sessions` already exists, is already swept, and is already how a
+     * full session is killed, so a preauth `jti` is recorded in the same place
+     * rather than in a table of its own.
+     */
+    if (isSessionRevoked(payload.jti)) {
+      res.clearCookie('wev_preauth', clearCookieOptions());
+      return res.status(401).json({ error: 'Session expired. Please log in again.' });
+    }
+    if ((payload.tokenVersion ?? 0) !== (userRow.token_version ?? 0)) {
+      res.clearCookie('wev_preauth', clearCookieOptions());
+      return res.status(401).json({ error: 'Session expired. Please log in again.' });
     }
 
     /**
@@ -919,6 +919,103 @@ router.post('/api/auth/login-2fa', async (req, res) => {
       });
     }
 
+    /**
+     * Two ceilings, and the second one is the one that matters.
+     *
+     * Per TOKEN: five guesses against this particular grant. That is the obvious
+     * one, and on its own it is decorative — now that every grant carries a
+     * `jti`, an attacker guessing a six-digit code just re-posts
+     * `/api/auth/login` with the password they already have, receives a fresh
+     * token with a fresh counter, and continues. Five guesses per grant with
+     * unlimited grants is unlimited guesses.
+     *
+     * Per ACCOUNT, in a rolling window: the ceiling that actually bounds the
+     * search. A six-digit code is 10^6, so 20 attempts per 15 minutes leaves an
+     * attacker needing about a year of uninterrupted guessing per account, which
+     * is the point at which the second factor is doing its job rather than
+     * appearing to.
+     *
+     * Deliberately NOT a lockout. Refusing further attempts for a window is
+     * recoverable by waiting; disabling the account would let anybody with a
+     * stolen password lock the owner out of their own platform on purpose.
+     */
+    const ACCOUNT_WINDOW_MINUTES = 15;
+    const ACCOUNT_ATTEMPT_CEILING = 20;
+    const TOKEN_ATTEMPT_CEILING = 5;
+
+    /**
+     * ── The attempt is CLAIMED before it is verified, not counted after ──
+     *
+     * Both ceilings used to be read-only SELECTs here, with the increment
+     * happening after the code had been checked — and `await bcrypt.compare`
+     * sits between the two. Nothing reserved anything, so N requests bearing
+     * the SAME preauth cookie all executed both SELECTs before any of them
+     * reached the increment: every one of them read `attempts = 0`, and every
+     * one of them was allowed.
+     *
+     * That is not a theoretical window. The recovery branch compares against up
+     * to ten bcrypt hashes at cost 10, so the gap is on the order of a second,
+     * and the per-IP limiter is the only other bound — which is precisely the
+     * limit the per-ACCOUNT ceiling exists to backstop, since an attacker with
+     * a stolen password and a spread of source addresses is the threat model.
+     * One burst was worth roughly 1% of the six-digit space instead of the 20
+     * guesses the comment above promises.
+     *
+     * Claiming first inverts it: the INSERT … ON CONFLICT is atomic, so
+     * concurrent requests are handed DISTINCT counter values and only the first
+     * five can ever read one at or under the ceiling.
+     *
+     * ── Where "first" is ──
+     *
+     * Below every 400, and above every verification. That boundary is the whole
+     * placement question, and the four refusals above it are the reason: a
+     * malformed code, an omitted code and a method this account does not hold
+     * are each documented up there as costing nothing, and moving the claim any
+     * earlier silently charged a guess for all three. `twoFactor.noFiveHundred`
+     * caught exactly that. Everything from here down either checks a secret or
+     * has already decided the request was worth checking.
+     *
+     * A refused claim is ROLLED BACK rather than kept. Throwing out of
+     * `inTransaction` restores `attempts` and `last_attempt_at` exactly, which
+     * matters for more than tidiness: a 429 that still counted would refresh the
+     * rolling window on every rejected request, so an attacker holding the
+     * password could hold the account's own owner out indefinitely. This
+     * endpoint is deliberately not a lockout, and it stays that way.
+     */
+    try {
+      inTransaction(() => {
+        db.prepare(`
+          INSERT INTO tfa_login_attempts (token_hash, user_id, attempts, last_attempt_at)
+          VALUES (?, ?, 1, datetime('now'))
+          ON CONFLICT(token_hash) DO UPDATE SET
+            attempts = attempts + 1,
+            last_attempt_at = datetime('now')
+        `).run(tokenHash, payload.id);
+
+        const forToken = db.prepare(
+          'SELECT attempts FROM tfa_login_attempts WHERE token_hash = ?'
+        ).get(tokenHash)?.attempts ?? 0;
+
+        const forAccount = db.prepare(
+          `SELECT COALESCE(SUM(attempts), 0) AS attempts
+             FROM tfa_login_attempts
+            WHERE user_id = ?
+              AND last_attempt_at > datetime('now', '-${ACCOUNT_WINDOW_MINUTES} minutes')`
+        ).get(payload.id)?.attempts ?? 0;
+
+        /* Strictly greater: this request's own claim is already included, so
+           `> 5` is the fifth guess allowed and the sixth refused — the same
+           budget the read-only version expressed as `>= 5` before the fact. */
+        if (forToken > TOKEN_ATTEMPT_CEILING || forAccount > ACCOUNT_ATTEMPT_CEILING) {
+          throw new Error('tfa_throttled');
+        }
+      });
+    } catch (err) {
+      if (err.message !== 'tfa_throttled') throw err;
+      recordSecurityEvent(db, req, payload.id, '2FA_THROTTLED');
+      return res.status(429).json({ error: 'Too many failed attempts. Please log in again.' });
+    }
+
     if (effectiveMethod === 'totp' && tokenValue) {
       /**
        * The authentication bypass this replaced.
@@ -1029,34 +1126,42 @@ router.post('/api/auth/login-2fa', async (req, res) => {
     }
 
     /**
-     * Only FAILURES are counted.
+     * The attempt was already counted, at the top, before the code was checked.
      *
-     * This ran unconditionally, before `isValid` was consulted, so a successful
-     * sign-in incremented the failed-attempt counter. With the per-account
-     * ceiling that means an administrator who signs in twenty times in a quarter
-     * of an hour locks themselves out of their own platform — having done
-     * nothing wrong and having got the code right every time. A rate limit on
-     * guessing must count guesses, not authentications.
+     * There is deliberately no increment here any more. The counter used to be
+     * bumped at this point — after `await bcrypt.compare` — which is what made
+     * the two ceilings bypassable by simple concurrency; see the claim block
+     * beside `TOKEN_ATTEMPT_CEILING` for the full argument. Re-counting here
+     * would now charge two guesses for one.
      *
-     * On success the account's recent failures are cleared. Somebody who has
-     * just proved possession of the second factor is not mid-attack, and leaving
-     * a fat-fingered code earlier in the window counting against their next
-     * sign-in is the behaviour that teaches people to disable 2FA.
+     * What that claim CANNOT express, and what this branch still owes, is the
+     * distinction the original comment here was about: a rate limit must count
+     * guesses, not authentications. So a success releases the whole budget
+     * below, and only a failure leaves its claim standing. An administrator who
+     * signs in twenty times in a quarter of an hour still never approaches the
+     * per-account ceiling, because each success clears it — and somebody who
+     * has just proved possession of the second factor is not mid-attack, so a
+     * fat-fingered code earlier in the window does not count against their next
+     * sign-in either.
      */
     if (!isValid) {
-      db.prepare(`
-        INSERT INTO tfa_login_attempts (token_hash, user_id, attempts, last_attempt_at) 
-        VALUES (?, ?, 1, datetime('now'))
-        ON CONFLICT(token_hash) DO UPDATE SET 
-          attempts = attempts + 1,
-          last_attempt_at = datetime('now')
-      `).run(tokenHash, payload.id);
-
       recordSecurityEvent(db, req, payload.id, '2FA_FAILED', { method: effectiveMethod });
       return res.status(401).json({ error: 'Invalid code.' });
     }
 
     db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(payload.id);
+
+    /**
+     * The grant is spent, once, here — before any session is minted.
+     *
+     * A second factor answered correctly completes ONE sign-in. Recording the
+     * preauth `jti` as revoked is what makes that true of the token as well as
+     * of the cookie: the `clearCookie` below only takes the browser's copy
+     * away, and a copy taken from anywhere else stayed valid for the rest of
+     * the fifteen minutes. Spending it before `issueSession` also means the
+     * budget-clearing DELETE above cannot be re-run by a replay.
+     */
+    revokeSession({ jti: payload.jti, userId: payload.id, expSeconds: payload.exp });
 
     recordSecurityEvent(db, req, payload.id, '2FA_SUCCESS', { method: effectiveMethod });
 
@@ -1158,9 +1263,23 @@ router.post('/api/auth/login-2fa/email/send', async (req, res) => {
     'SELECT created_at FROM tfa_email_codes WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
   ).get(userRow.id);
   if (recent) {
+    /**
+     * An unreadable timestamp holds the cooldown SHUT, not open.
+     *
+     * `created_at` is `DEFAULT (datetime('now'))` and this route does not supply
+     * it, so today the value is `2026-08-10 12:00:00` and appending `Z` parses.
+     * The day any other path writes an ISO string there, the concatenation
+     * becomes `…000ZZ`, `getTime()` returns NaN, and `NaN < 60000` is FALSE —
+     * so the one comparison guarding this endpoint would silently stop guarding
+     * it, leaving the send route bounded only by the per-IP mail ceiling.
+     *
+     * A rate limit whose failure mode is "no rate limit" is the wrong way
+     * round, and the failure is invisible: nothing errors, codes simply start
+     * flowing. `Number.isFinite` is the difference between the two directions.
+     */
     const elapsed = Date.now() - new Date(recent.created_at + 'Z').getTime();
-    if (elapsed < 60000) {
-      const wait = Math.ceil((60000 - elapsed) / 1000);
+    if (!Number.isFinite(elapsed) || elapsed < 60000) {
+      const wait = Number.isFinite(elapsed) ? Math.ceil((60000 - elapsed) / 1000) : 60;
       return res.status(429).json({ error: `Please wait ${wait} seconds before requesting another code.`, retryAfter: wait });
     }
   }

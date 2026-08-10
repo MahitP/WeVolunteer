@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import { db } from '../db.js';
 import { authenticateToken, inTransaction } from '../utils.js';
-import { requireCap } from '../authz.js';
+import { can, requireCap } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 import { BADGE_CRITERIA_TYPES, isKnownCriteriaType } from '../services/badgeService.js';
 
@@ -54,8 +54,20 @@ router.get('/api/badges', authenticateToken, (req, res) => {
   }
 });
 
-// GET user's earned badges
+/**
+ * GET one person's earned badges.
+ *
+ * `directory.read` for the same reason `GET /api/users/:id/profile` now carries
+ * it, and stated here rather than inherited: this route's recorded posture is
+ * explicitly "matching that route's posture for the same class of data", so the
+ * two have to move together or the registry entry stops being true. A partner
+ * is an external organization and is deliberately outside the member directory;
+ * one student's achievement history is inside it.
+ */
 router.get('/api/users/:userId/badges', authenticateToken, (req, res) => {
+  if (!can(req.principal, 'directory.read')) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
   try {
     const userBadges = db.prepare(`
       SELECT b.*, ub.earned_at

@@ -531,4 +531,84 @@ describe('the social and organization features', () => {
       expect((await srv.call('DELETE', `/api/external-hours/${entryId}`, undefined, alice)).status).toBe(200);
     });
   });
+  /**
+   * ── Blocking, and the two things it must also do ──
+   *
+   * Both of these were found by audit rather than by a failure, and both are
+   * the same shape: the control worked for the job everybody pictured it doing
+   * (stop the messages) and quietly did not do the job nobody pictured.
+   */
+  describe('blocking', () => {
+    /**
+     * The severity ordering the product documents was inverted in practice.
+     *
+     * `restrict` — the gentler control, the one for getting distance without a
+     * confrontation — withdrew the friendship. Block, the one immediate safety
+     * control a student holds, did not. An accepted friendship is what unlocks
+     * the friends-only tier of a profile, so a student who blocked somebody
+     * harassing them went on handing that person their school, grade and bio.
+     */
+    it('withdraws the friendship, so the friends-only tier closes with it', async () => {
+      await srv.call('POST', `/api/users/${carolId}/friend`, undefined, alice);
+      await srv.call('POST', `/api/users/${aliceId}/friend/accept`, undefined, carol);
+
+      /* Carol's sensitive fields are open to a friend, and only to a friend. */
+      await srv.call('PATCH', '/api/auth/profile', { profileVisibility: 'friends' }, carol);
+      db.prepare("UPDATE users SET bio = ?, school = ?, grade = '12' WHERE id = ?")
+        .run('Private note.', 'South Brunswick High', carolId);
+
+      const asFriend = await srv.call('GET', `/api/users/${carolId}/public-profile`, undefined, alice);
+      expect(asFriend.body.profile.bio).toBe('Private note.');
+      expect(asFriend.body.profile.school).toBe('South Brunswick High');
+
+      const blocked = await srv.call('POST', `/api/blocks/${aliceId}`, undefined, carol);
+      expect(blocked.status).toBe(200);
+
+      /* Withheld means ABSENT, not null — the serializer never emits the key.
+         See PRIVATE_FIELDS in directory.privacy.test.js. */
+      const after = await srv.call('GET', `/api/users/${carolId}/public-profile`, undefined, alice);
+      expect(after.status).toBe(200);
+      for (const field of ['bio', 'school', 'grade', 'graduationYear']) {
+        expect(after.body.profile[field]).toBeUndefined();
+      }
+
+      /* And they are no longer in each other's friend lists. */
+      const carolFriends = await srv.call('GET', '/api/me/friends', undefined, carol);
+      expect(carolFriends.body.friends.some(f => f.id === aliceId)).toBe(false);
+      const aliceFriends = await srv.call('GET', '/api/me/friends', undefined, alice);
+      expect(aliceFriends.body.friends.some(f => f.id === carolId)).toBe(false);
+    });
+
+    /**
+     * A block must not be announced back to the person blocked.
+     *
+     * `GET /api/blocks` returns OUTBOUND blocks only, so a symmetric `blocked`
+     * flag on the profile payload was a two-request oracle: see the flag, find
+     * the subject absent from your own list, conclude they blocked you. That is
+     * the same disclosure `restrictedBy` is stripped to prevent, reached
+     * through the other flag in the same object.
+     */
+    it('does not tell the blocked party who blocked them', async () => {
+      const seenByBlocked = await srv.call('GET', `/api/users/${carolId}/public-profile`, undefined, alice);
+      expect(seenByBlocked.body.viewer.blocked).toBe(false);
+      expect(seenByBlocked.body.viewer.blockedByViewer).toBeUndefined();
+      expect(seenByBlocked.body.viewer.restrictedBy).toBeUndefined();
+
+      /* The blocker still sees their OWN block, because the Unblock control is
+         built from it and they plainly already know. */
+      const seenByBlocker = await srv.call('GET', `/api/users/${aliceId}/public-profile`, undefined, carol);
+      expect(seenByBlocker.body.viewer.blocked).toBe(true);
+    });
+
+    /**
+     * The refusal stays generic, so the button the blocked party can still see
+     * does not become the oracle the flag used to be.
+     */
+    it('refuses a friend request from the blocked party without saying why', async () => {
+      const res = await srv.call('POST', `/api/users/${carolId}/friend`, undefined, alice);
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('not_permitted');
+      expect(JSON.stringify(res.body).toLowerCase()).not.toContain('block');
+    });
+  });
 });

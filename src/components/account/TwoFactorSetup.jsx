@@ -114,6 +114,17 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
   const [recovery, setRecovery] = useState(null);
 
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  /**
+   * Only asked when turning email off will NOT stop email working.
+   *
+   * Since v1.3.1 a confirmed address is accepted as a second factor once the
+   * account holds any factor at all, so for an account that also has an
+   * authenticator, `tfa_email_enabled = 0` demotes email from the default and
+   * changes nothing the sign-in step reads. The button still said "Turn off".
+   * The card explains the situation accurately once the state has changed — but
+   * that is after the press, and a security control has to be honest before it.
+   */
+  const [confirmDisableEmail, setConfirmDisableEmail] = useState(false);
 
   const { run, verifyOnceFor, modal } = useStepUp();
 
@@ -353,6 +364,7 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
   };
 
   const disableEmail = async () => {
+    setConfirmDisableEmail(false);
     if (busy) return;
     setBusy(true);
     try {
@@ -362,7 +374,13 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
 
       if (!liveRef.current) return;
       await fetchStatus();
-      addToast('Email codes turned off.', 'info');
+      /* Deliberately not "turned off" when a factor remains: an emailed code
+         still signs this account in, and a toast saying otherwise is the lie
+         the confirmation below exists to prevent. */
+      addToast(
+        totp ? 'Email codes are no longer your default.' : 'Email codes turned off.',
+        'info'
+      );
     } catch (err) {
       addToast(err.message || 'Could not turn off email codes.', 'error');
     } finally {
@@ -378,17 +396,22 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
     setBusy(true);
     try {
       /**
-       * `2fa.enable`, not `2fa.generate`.
+       * `2fa.recovery.regenerate` — this operation's own action.
        *
-       * `/api/2fa/recovery-codes/regenerate` is gated on `2fa.enable`, and this
-       * declared `2fa.generate`. `withStepUp` compares the action it was given
-       * against the one the refusal names and throws when they disagree — by
-       * design, because opening a challenge for the wrong action produces a
-       * grant the endpoint will never accept. So regenerating recovery codes
-       * could not succeed at all: it put a developer-facing sentence about
-       * mismatched actions into a toast, every time, for every user.
+       * It was `2fa.generate` once, which could not work at all: `withStepUp`
+       * compares the action it was given against the one the refusal names and
+       * throws when they disagree, so every attempt put a developer-facing
+       * sentence about mismatched actions into a toast. The repair pointed it
+       * at `2fa.enable`, which the route was gated on.
+       *
+       * That worked and was still wrong, because it meant one grant covered
+       * both enrolling a factor and DESTROYING the recovery code set — and
+       * enrolment deliberately holds an unspent `2fa.enable` grant in state for
+       * minutes while the user scans a QR code. The action registry now names
+       * this operation separately, so the sentence the user reads in the dialog
+       * is the thing their answer authorises.
        */
-      const data = await run(STEP_UP.ENABLE_2FA, {}, headers =>
+      const data = await run(STEP_UP.REGENERATE_RECOVERY_CODES, {}, headers =>
         api.apiFetch('/api/2fa/recovery-codes/regenerate', { method: 'POST', headers }));
       if (data === undefined) return;
 
@@ -653,8 +676,12 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
                   factor — set up an authenticator app first.
                 </p>
               ) : (
-                <button className="btn btn-danger" onClick={disableEmail} disabled={busy}>
-                  Turn off
+                <button
+                  className="btn btn-danger"
+                  onClick={() => (totp ? setConfirmDisableEmail(true) : disableEmail())}
+                  disabled={busy}
+                >
+                  {totp ? 'Stop using by default' : 'Turn off'}
                 </button>
               )
             ) : (
@@ -680,6 +707,26 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
             </div>
           )}
         </div>
+      )}
+
+      {confirmDisableEmail && (
+        <ConfirmDialog
+          title="Email codes will still work"
+          confirmLabel="Stop using by default"
+          busy={busy}
+          onConfirm={disableEmail}
+          onCancel={() => setConfirmDisableEmail(false)}
+        >
+          <p>
+            Your email address is confirmed, so a mailed code can still sign you in —
+            that is deliberate, and it is how you get back in if you lose your
+            authenticator.
+          </p>
+          <p>
+            This only stops email being the method offered first. To have a factor
+            your mailbox cannot reach, use your recovery codes.
+          </p>
+        </ConfirmDialog>
       )}
 
       {confirmRegenerate && (

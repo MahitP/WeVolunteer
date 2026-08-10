@@ -516,6 +516,13 @@ function FriendButton({ viewer, profile, busy, act }) {
    * precise tell that fix removed. Reading a key that is never sent is dead code
    * that would silently restore the tell the day anybody re-added the field, so
    * the read is gone rather than left as `undefined`.
+   *
+   * `viewer.blocked` means "I blocked them", and only that. The server narrowed
+   * it for the same reason it strips `restrictedBy`: the symmetric answer told
+   * the blocked party who had blocked them. So somebody who has BEEN blocked
+   * still sees this button, and pressing it meets the same generic 409 a
+   * restriction produces — the refusal says the request is not permitted and
+   * declines to say why, which is the whole point.
    */
   if (viewer.blocked) return null;
 

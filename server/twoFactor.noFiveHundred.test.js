@@ -557,4 +557,161 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
       expect(res.status).toBe(401);
     });
   });
+  /**
+   * ── The guessing budget must survive concurrency ──
+   *
+   * Both ceilings were read-only SELECTs, and the increment happened only after
+   * the code had been checked — with `await bcrypt.compare` sitting between the
+   * two. Requests bearing the SAME preauth cookie therefore all read
+   * `attempts = 0` before any of them wrote, and all of them were allowed.
+   *
+   * That made the per-account ceiling — the one the comments call "the ceiling
+   * that actually bounds the search" — worth nothing against an attacker who
+   * simply does not wait for a reply. The per-IP limiter is not a substitute:
+   * it is exactly the limit the account ceiling exists to backstop.
+   *
+   * The recovery branch is the sharpest version, because one guess there costs
+   * the server up to ten bcrypt comparisons at cost 10 — roughly a second of
+   * wall time in which every other request is free to read a stale counter.
+   */
+  describe('the guessing budget', () => {
+    it('is not bypassable by firing attempts concurrently on one grant', async () => {
+      const preauth = await beginLogin();
+      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+      db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+
+      /**
+       * The RECOVERY method, deliberately — not TOTP.
+       *
+       * `verifyTotp` is synchronous, so the authenticator path never yields
+       * between reading the counter and writing it and a single-threaded
+       * handler cannot interleave with itself. The race needs a real await in
+       * that gap, and `bcrypt.compare` is the one that was there: this branch
+       * awaits once per stored code. A test written against TOTP passes on the
+       * unfixed handler and proves nothing.
+       */
+      const bcrypt = (await import('bcryptjs')).default;
+      db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(userId);
+      for (const plain of ['RACECODEAAAA', 'RACECODEBBBB', 'RACECODECCCC']) {
+        db.prepare(`
+          INSERT INTO recovery_codes (id, user_id, code_hash, created_at)
+          VALUES (?, ?, ?, ?)
+        `).run(`rc-race-${plain}`, userId, bcrypt.hashSync(plain, 10), new Date().toISOString());
+      }
+
+      /* Fired together, deliberately not awaited in turn: the whole point is
+         that they interleave at the bcrypt await. */
+      const results = await Promise.all(
+        Array.from({ length: 12 }, () => submit(preauth, { method: 'recovery', code: 'WRONGCODEZZZZ' }))
+      );
+
+      const checked = results.filter(r => r.status === 401).length;
+      const refused = results.filter(r => r.status === 429).length;
+
+      expect(checked + refused).toBe(12);
+      expect(checked, 'no more than five guesses may reach the verifier').toBeLessThanOrEqual(5);
+      expect(refused, 'the rest must be throttled').toBeGreaterThan(0);
+    });
+
+    /**
+     * A refused request must not extend the window.
+     *
+     * The claim is rolled back when it exceeds the ceiling, so a 429 leaves the
+     * counter exactly where it was. Without that, every rejected request would
+     * refresh `last_attempt_at`, and somebody holding the password could keep
+     * the account's own owner throttled indefinitely — which is precisely the
+     * lockout this endpoint is documented as refusing to be.
+     */
+    it('does not count the attempts it refuses', async () => {
+      const preauth = await beginLogin();
+      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+      db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+
+      for (let i = 0; i < 5; i++) {
+        expect((await submit(preauth, { method: 'totp', token: '000000' })).status).toBe(401);
+      }
+      const atCeiling = db.prepare(
+        'SELECT COALESCE(SUM(attempts), 0) AS n FROM tfa_login_attempts WHERE user_id = ?'
+      ).get(userId).n;
+      expect(atCeiling).toBe(5);
+
+      for (let i = 0; i < 4; i++) {
+        expect((await submit(preauth, { method: 'totp', token: '000000' })).status).toBe(429);
+      }
+      const afterRefusals = db.prepare(
+        'SELECT COALESCE(SUM(attempts), 0) AS n FROM tfa_login_attempts WHERE user_id = ?'
+      ).get(userId).n;
+      expect(afterRefusals, 'a refused request costs nothing').toBe(5);
+    });
+
+    /**
+     * A success releases the budget, so getting the code right repeatedly is
+     * never what locks somebody out. The original counter was bumped
+     * unconditionally and this was the bug that fixed; claiming before
+     * verification must not quietly bring it back.
+     */
+    it('clears the budget on a successful sign-in', async () => {
+      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+      db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+
+      const failing = await beginLogin();
+      expect((await submit(failing, { method: 'totp', token: '000000' })).status).toBe(401);
+
+      /* Earlier tests in this file have already signed in on the current time
+         step, and a spent step is correctly refused as a replay. Clearing the
+         high-water mark is what makes THIS test about the attempt counter
+         rather than about `tfa_last_counter`. */
+      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
+
+      const preauth = await beginLogin();
+      expect((await submit(preauth, { method: 'totp', token: await freshTotp() })).status).toBe(200);
+
+      const left = db.prepare(
+        'SELECT COALESCE(SUM(attempts), 0) AS n FROM tfa_login_attempts WHERE user_id = ?'
+      ).get(userId).n;
+      expect(left).toBe(0);
+    });
+  });
+  /**
+   * ── A preauth grant completes ONE sign-in ──
+   *
+   * Success used to clear the cookie and stop there, which takes away the
+   * browser's copy and leaves the token valid for the rest of its fifteen
+   * minutes. And nothing on that path read `token_version`, so the two controls
+   * that bump it — "sign out all other devices" and a password reset — could not
+   * reach a sign-in that was already half-finished.
+   */
+  describe('the pre-auth grant', () => {
+    it('cannot be replayed to mint a second session', async () => {
+      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+      db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
+
+      const preauth = await beginLogin();
+      const first = await submit(preauth, { method: 'totp', token: await freshTotp() });
+      expect(first.status).toBe(200);
+
+      /* The same cookie again. A fresh code is used so the refusal cannot be
+         the replay guard on the TOTP step standing in for this one. */
+      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
+      const replay = await submit(preauth, { method: 'totp', token: await freshTotp() });
+      expect(replay.status).toBe(401);
+    });
+
+    /**
+     * Signing out everywhere, or resetting the password, must also cancel a
+     * sign-in that is standing at the second-factor step.
+     */
+    it('is refused once the account token version moves', async () => {
+      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+      db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+
+      const preauth = await beginLogin();
+      db.prepare('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?').run(userId);
+
+      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
+      const res = await submit(preauth, { method: 'totp', token: await freshTotp() });
+      expect(res.status).toBe(401);
+    });
+  });
 });
