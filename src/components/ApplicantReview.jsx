@@ -143,8 +143,25 @@ export default function ApplicantReview({
                 {isNew ? <span className="tag tag-brand">
                     <Sparkles size={10} /> First event
                   </span> : <>
+                    {/**
+                      * Signed up versus attended — the follow-through question.
+                      *
+                      * "3 events" alone said how many somebody had ATTENDED and
+                      * nothing about how many they had committed to, so a
+                      * volunteer who turned up to three of three looked exactly
+                      * like one who turned up to three of eleven. That is the
+                      * one thing an organizer holding twenty places actually
+                      * wants to know.
+                      *
+                      * Two counts and deliberately never a percentage: "1 of 2
+                      * — 50%" reads as a verdict on a person when the evidence
+                      * is one missed shift, and a reader cannot un-see the
+                      * number. `signedUp` counts only commitments whose shift
+                      * has ENDED, so an upcoming one is never held against
+                      * somebody who has not had the chance to attend it yet.
+                      */}
                     <div className="small tnum">
-                      {v.completedEvents} event{v.completedEvents !== 1 ? 's' : ''}
+                      {v.eventsAttended ?? v.completedEvents} of {v.eventsSignedUp ?? v.completedEvents} attended
                     </div>
                     <div className="small dim tnum">
                       last {formatDay(v.lastVolunteeredDate)}

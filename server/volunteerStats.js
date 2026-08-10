@@ -231,3 +231,57 @@ export function attendanceRecordsFor(db, userIds) {
   }
   return out;
 }
+
+/**
+ * `eventsSignedUp` and `eventsAttended` for MANY volunteers, in two queries.
+ *
+ * ── Why this exists beside `volunteerStats` ──
+ *
+ * The applicants list shows an organizer, at a glance, whether somebody
+ * generally turns up — and it renders forty rows on a popular shift. Calling
+ * `volunteerStats` per row is six queries per applicant; the whole point of the
+ * screen is that it loads while the organizer is deciding.
+ *
+ * The DEFINITIONS are the shared ones, deliberately. `DUE_COMMITMENTS` is
+ * interpolated here exactly as it is there, so "signed up" means the same thing
+ * on the profile and in this list: an ACCEPTED application to a non-cancelled
+ * event whose shift has ended. Being turned down never appears on a student's
+ * record, and withdrawing in time — which the API already refuses to allow late
+ * — is not counted against them. Attendance reuses `attendanceRecordsFor`, so
+ * missing attendance is never read as absence in either place.
+ *
+ * A statistic an organizer uses to decide who gets a place has to be the same
+ * number the student can see on their own profile. Two implementations of
+ * "signed up" would eventually disagree, and the student would have no way to
+ * find out which one was used about them.
+ *
+ * @returns {Map<string, {signedUp:number, attended:number, absent:number}>}
+ */
+export function participationCountsFor(db, userIds, { now = new Date().toISOString() } = {}) {
+  const ids = [...new Set(userIds)].filter(Boolean);
+  if (ids.length === 0) return new Map();
+
+  const placeholders = ids.map(() => '?').join(',');
+
+  /* `DUE_COMMITMENTS` is written for one user; widened to a set here by
+     replacing its equality with an IN, which is the only difference between the
+     two — asserted by volunteerStats.test.js. */
+  const signedUpRows = db.prepare(`
+    SELECT a.user_id, COUNT(DISTINCT a.event_id) AS n
+    ${DUE_COMMITMENTS.replace('a.user_id = ?', `a.user_id IN (${placeholders})`)}
+    GROUP BY a.user_id
+  `).all(...ids, now);
+
+  const attendance = attendanceRecordsFor(db, ids);
+
+  const out = new Map();
+  for (const id of ids) {
+    const record = attendance.get(id);
+    out.set(id, {
+      signedUp: signedUpRows.find(r => r.user_id === id)?.n ?? 0,
+      attended: record?.attended ?? 0,
+      absent: record?.absent ?? 0,
+    });
+  }
+  return out;
+}
