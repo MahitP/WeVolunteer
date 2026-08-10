@@ -58,6 +58,75 @@
 import { volunteerStats, externalHoursSummary } from './volunteerStats.js';
 
 /**
+ * The distinguished presentation an account carries, or null for a member.
+ *
+ * ── Derived from role, never from an identity ──
+ *
+ * The platform owner's profile and a partner organization's profile need to look
+ * and read differently from a student's: they are not people with a service
+ * record, they are the platform and the organizations it works with, and a
+ * student profile with a badge stuck on it says neither thing. The obvious wrong
+ * way to build this is a check on a name — the account that prompted it belongs
+ * to a real person — and that would be a rule nobody else can inherit, invisible
+ * to `authz.js`, and wrong the day the account changes hands.
+ *
+ * So it is a pure function of `users.role`, which is the same field every gate in
+ * this application already reads. A second owner, a tenth partner, or a change of
+ * role tomorrow all get the right presentation with nothing to remember.
+ *
+ * ── It is presentation, and nothing else ──
+ *
+ * No capability is derived from this, no gate consults it, and a client that
+ * ignores it is not thereby allowed to do anything. `authz.js` remains the only
+ * answer to what an account may DO; this answers only how it is introduced.
+ *
+ * ── Why a member profile is still rendered underneath ──
+ *
+ * The distinction is additive. The owner of this platform is a high-school
+ * student who volunteers, so their hours, skills and hobbies are real and belong
+ * on their profile exactly as anybody else's do. Returning a distinction instead
+ * of the member fields would hide a genuine service record behind a job title;
+ * returning it alongside is what makes one page describe one person.
+ */
+const DISTINCTIONS = {
+  super_admin: {
+    kind: 'owner',
+    label: 'Platform owner',
+    blurb: 'Runs WeVolunteer for the district.',
+  },
+  partner: {
+    kind: 'partner',
+    label: 'Community partner',
+    blurb: 'An outside organization that works with WeVolunteer.',
+  },
+};
+
+export function distinctionFor(role) {
+  return DISTINCTIONS[role] ?? null;
+}
+
+/**
+ * `profile_highlights` as an array of short strings, defensively.
+ *
+ * Stored as JSON in a TEXT column, so a hand-edited row or a half-written value
+ * has to be survivable: a profile that throws is a profile nobody can look at,
+ * including the moderator who came to look at it.
+ */
+export function parseHighlights(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(h => typeof h === 'string' && h.trim())
+      .slice(0, 8)
+      .map(h => h.trim().slice(0, 160));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Fields a caller may read about someone else regardless of that person's
  * privacy setting. Kept as an exported constant because the leakage test
  * asserts against it rather than against a hand-copied list.
@@ -158,10 +227,39 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
       hours: stats.hoursCredited,
     },
     organizations: organizationsFor(db, row.id),
-    externalService: externalHoursSummary(db, row.id),
+    /**
+     * How the account is INTRODUCED, for every reader.
+     *
+     * Always visible, at every privacy setting, because it is not a personal
+     * particular: it is the answer to "what is this account", and withholding it
+     * from a member who can already see the name and the role would hide nothing
+     * while making a partner organization's page unreadable. `headline` and
+     * `highlights` are written by the account holder for exactly this audience.
+     */
+    distinction: distinctionFor(row.role),
+    headline: row.profile_headline || null,
+    highlights: parseHighlights(row.profile_highlights),
     visibility: stated,
     isSelf,
   };
+
+  /**
+   * External service is emitted to the SUBJECT and to nobody else.
+   *
+   * It used to be on every profile, split into a verified figure and a
+   * self-reported one — and the verified half is gone, because nobody reviews
+   * these any more. What is left is a number the subject typed in, which does
+   * not belong on a page other people read as a record of what somebody has
+   * done: an unverifiable total sitting beside a credited one invites exactly
+   * the reading the two are kept apart to prevent, and it would reward typing.
+   *
+   * The student's own log is where a complete personal history belongs, and it
+   * is reached from their dashboard. This field stays on the payload for the
+   * subject so their own profile can link there with a count.
+   */
+  if (isSelf) {
+    profile.externalService = externalHoursSummary(db, row.id);
+  }
 
   if (sensitiveVisible) {
     profile.bio = row.bio || '';
@@ -210,5 +308,9 @@ export function profileSummary(row) {
     profilePictureUrl: row.profile_picture_url || null,
     role: row.role,
     location: row.location || null,
+    /* Derived from `role`, which is already on this shape — so it discloses
+       nothing new, and it lets a search result show a partner organization as
+       one rather than as an unexplained account among schoolchildren. */
+    distinction: distinctionFor(row.role),
   };
 }

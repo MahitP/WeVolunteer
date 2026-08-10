@@ -121,6 +121,31 @@
   --rule-strong: var(--border-hover);
 
   /* — Brand: service green —————————————————————— */
+  /**
+   * The mark's own two colours, and the ONE thing in this file that is
+   * deliberately not theme-aware.
+   *
+   * `--brand` is a theme colour: #0f6b45 in light, a lighter #2fa873 in dark, so
+   * that a green button and a green link stay legible against either paper. The
+   * WV tile was painted from it, and two more rules repainted it translucent on
+   * the auth panel and the splash screen — so the logo had four appearances, and
+   * which one you saw depended on your theme and which screen you were on.
+   *
+   * A logo is not a theme colour. It is the one thing on a page that must be the
+   * same everywhere, and it already IS the same everywhere the app does not
+   * control: `public/favicon.svg` draws a #0f6b45 tile with white letters, and
+   * `server/email.js` builds the header from the identical pair, because neither
+   * a browser tab nor an email client has a theme this application can read.
+   *
+   * These two tokens are that pair, named, so the in-app mark agrees with the
+   * favicon and the emails instead of drifting from them. They are declared here
+   * and NOT overridden under `[data-theme='dark']` — that omission is the whole
+   * point. #0f6b45 is dark enough to carry white text and dark enough to sit on
+   * white paper, which is why one value serves both.
+   */
+  --brand-mark-bg: var(--green-600);
+  --brand-mark-ink: #ffffff;
+
   --brand-primary-light: var(--green-600);
   --brand-hover-light: var(--green-700);
   --brand-soft-light: var(--green-50);
@@ -673,12 +698,14 @@ time { font-variant-numeric: tabular-nums; }
 }
 .brand:hover { text-decoration: none; }
 
+/* One mark, one appearance, everywhere. See --brand-mark-bg for why these two
+   colours are the only ones in this stylesheet that do not follow the theme. */
 .brand-mark {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: var(--brand);
-  color: var(--ink-inv);
+  background: var(--brand-mark-bg);
+  color: var(--brand-mark-ink);
   display: grid;
   place-items: center;
   flex-shrink: 0;
@@ -686,6 +713,17 @@ time { font-variant-numeric: tabular-nums; }
   font-weight: 800;
   font-size: 0.9375rem;
   letter-spacing: -0.02em;
+}
+
+/* The same mark at the size the Welcome and splash screens want it. A modifier
+   rather than a second class with its own colours — `.welcome-mark` was that
+   second class, and it is what let the front door wear a different logo from
+   the sidebar. */
+.brand-mark-lg {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--r-lg);
+  font-size: 1.5rem;
 }
 
 .brand-text {
@@ -1026,6 +1064,47 @@ time { font-variant-numeric: tabular-nums; }
 }
 
 .grid { display: grid; gap: var(--s4); }
+
+/**
+ * The dashboard/profile two-column body — a wide main column and a narrower
+ * sidebar column, collapsing to one column when two will not fit.
+ *
+ * ── Why this is a class and not an inline style ──
+ *
+ * It was `style={{ gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)' }}` in
+ * VolunteerDashboard.jsx and VolunteerProfile.jsx. An inline declaration wins
+ * over every rule in this file, media query included, so there was no width at
+ * which those two columns stopped being two columns. On a 375px phone that left
+ * the right-hand column about 128px wide, and the 156px "Log external hours"
+ * button inside it pushed the document out to 523px — 148px past the viewport.
+ *
+ * A mobile browser's answer to a document wider than the viewport is to scale
+ * the page down until it fits, which is what was reported as the Dashboard being
+ * "zoomed out". The cause was a layout that could not reflow, not the browser
+ * and not the viewport meta tag — so the fix is to let it reflow, and emphatically
+ * NOT `overflow-x: hidden`, which would have left the 128px column exactly as it
+ * was and merely clipped the proof.
+ *
+ * `minmax(0, …)` on both tracks, kept from the inline version: a grid track's
+ * default minimum is `auto`, which refuses to shrink below its content — so a
+ * long event title or a wide button would push the track wider than its share
+ * and reintroduce the same overflow at any width.
+ */
+.dash-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--s6);
+}
+
+/* One column below the width where the narrow track stops being usable. 900px
+   rather than the shell's 700px breakpoint: between the two, the sidebar is an
+   icon rail and the content column is ~640px, which splits into a 380px and a
+   250px column — and 250px is already too narrow for a heading with an action
+   button beside it. */
+@media (max-width: 900px) {
+  .dash-split { grid-template-columns: minmax(0, 1fr); }
+}
 .grid-2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 .grid-3 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 
@@ -2730,11 +2809,13 @@ time { font-variant-numeric: tabular-nums; }
 .auth-pitch .brand-name,
 .auth-pitch .brand-sub { color: var(--ink-inv); }
 .auth-pitch .brand-sub { opacity: 0.72; }
-.auth-pitch .brand-mark { background: var(--brand-translucent); }
+/* The mark is deliberately NOT restyled here.
 
-[data-theme='dark'] .auth-pitch .brand-mark {
-  background: rgba(0, 0, 0, 0.25);
-}
+   These two rules used to repaint it — `--brand-translucent` on the auth panel,
+   and a black wash again under `[data-theme='dark']` — so the sign-in screen
+   showed a fourth version of the logo, and a different one per theme. A green
+   tile on a green panel is quieter than a translucent one and it is the same
+   badge as the sidebar, the tab icon and every email. */
 
 
 
@@ -2923,34 +3004,10 @@ time { font-variant-numeric: tabular-nums; }
   flex-wrap: wrap;
 }
 
-/* ── The platform owner's profile ─────────────────────────────────────────── */
-.owner-card { display: flex; gap: var(--s5); align-items: flex-start; flex-wrap: wrap; }
-/* Sized in one place for both arms — an <img> and an emoji <span> have to agree,
-   or the card reflows depending on whether a picture has been uploaded. */
-.owner-avatar {
-  width: 4.5rem;
-  height: 4.5rem;
-  border-radius: 50%;
-  object-fit: cover;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 2.25rem;
-  background: var(--surface-2);
-}
-.owner-facts { flex: 1 1 18rem; display: grid; gap: var(--s3); margin: 0; }
-.owner-facts dt {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--ink-2);
-}
-.owner-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
-.owner-links { display: flex; gap: var(--s3); flex-wrap: wrap; margin-top: var(--s4); }
-.owner-note { margin-top: var(--s4); font-size: 0.8125rem; color: var(--ink-2); }
+/* The platform owner's bespoke profile card is gone: `/profile` now renders the
+   generalized AccountProfile for the owner, an administrator and a partner
+   alike, out of the same `.profile-header` and `.profile-facts` rules a member
+   profile uses. One set of rules for one kind of page. */
 .alert-brand { background: var(--brand-tint); border-color: var(--brand-tint-2); color: var(--brand-ink); }
 .alert-title { font-weight: 600; }
 
@@ -4918,7 +4975,7 @@ input:disabled + .premium-slider {
     transform: scale(1.5);
   }
   .splash-screen .brand-sub { color: var(--ink-inv); opacity: 0.8; }
-  .splash-screen .brand-mark { background: var(--brand-translucent); }
+  /* No `.brand-mark` override here either — same reason as `.auth-pitch`. */
   .splash-screen svg.spin { color: var(--ink-inv) !important; }
 }
 
@@ -5229,19 +5286,10 @@ input:disabled + .premium-slider {
 
 /* ── Welcome ────────────────────────────────────────────────────────── */
 
-.welcome-mark {
-  width: 64px;
-  height: 64px;
-  font-size: 1.5rem;
-  border-radius: var(--r-lg);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--brand);
-  color: var(--ink-inv);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
+/* `.welcome-mark` is gone. It was a second WV tile with its own size, weight and
+   colours, painted from `--brand` — so the front door wore a lighter green logo
+   in dark mode than the sidebar behind it. Welcome.jsx renders `<BrandMark
+   size="lg" />` now, which is `.brand-mark` plus `.brand-mark-lg`. */
 
 .welcome-points {
   list-style: none;
@@ -8483,8 +8531,205 @@ input:disabled + .premium-slider {
   overflow-wrap: anywhere;
 }
 
-.ext-meta,
-.ext-note { font-size: 0.8125rem; }
+.ext-meta { font-size: 0.8125rem; }
+
+/* ── Unified discovery, on Opportunities ──────────────────────────────────── */
+
+/* The search field and its scope control, as one block. They are one control in
+   the reader's head — "what am I looking for, and for what" — so they sit
+   together above the filters rather than in the filter toolbar, which is about
+   the opportunity list only. */
+.discovery {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+}
+
+/* Wider than the toolbar's affix, because this field now searches three things
+   and its placeholder says so. */
+.discovery-field { width: 100%; }
+.discovery-field .input { width: 100%; }
+
+/* Scrolls rather than wraps: four scopes fit on a laptop and not on a narrow
+   phone, and a second row of tabs reads as a different control. */
+.discovery-scopes {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.discovery-scopes::-webkit-scrollbar { display: none; }
+.discovery-scopes .tab { flex-shrink: 0; }
+
+.discovery-results { margin-bottom: var(--s5); }
+
+/* ── Distinguished profiles: owner and partner ────────────────────────────── */
+
+/* A tinted panel rather than a coloured one. The page has to keep reading as
+   WeVolunteer — a partner's profile is part of this product, not a landing page
+   that wandered in — so the treatment is the brand's own tint, a stronger left
+   edge, and the same radius and spacing as every other card. */
+.distinction {
+  padding: var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  background: var(--brand-tint);
+  border-color: var(--brand-tint-2);
+  border-left: 3px solid var(--brand);
+}
+
+/* The owner and a partner are different KINDS of account, not different ranks,
+   so they differ in hue rather than in weight. */
+.distinction[data-kind='partner'] {
+  background: var(--info-tint);
+  border-left-color: var(--info);
+  border-color: var(--info-tint);
+}
+
+.distinction-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+}
+
+.distinction-mark {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--r-lg);
+  background: var(--brand);
+  color: var(--ink-inv);
+}
+.distinction[data-kind='partner'] .distinction-mark { background: var(--info); }
+
+.distinction-titles { min-width: 0; }
+
+.distinction-label {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.distinction-blurb {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+}
+
+/* The account holder's own line. Larger than the blurb above it, because this
+   is the sentence they chose and the one above is the platform's boilerplate. */
+.distinction-headline {
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.distinction-highlights {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.distinction-highlight {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+  font-size: 0.875rem;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.distinction-highlight svg { flex-shrink: 0; margin-top: 0.2em; }
+
+.distinction-tag {
+  gap: var(--s1);
+  background: var(--brand-tint-2);
+  color: var(--brand-ink);
+}
+.distinction-tag[data-kind='partner'] {
+  background: var(--info-tint);
+  color: var(--info);
+}
+
+/* ── Logged hours ─────────────────────────────────────────────────────────── */
+
+/* Pulled up and left so it reads as a way back out of the page rather than as
+   the first action on it — the same relationship `.section-action` has to the
+   heading it sits beside. */
+.loggedhours-back {
+  margin: 0 0 var(--s2) calc(var(--s3) * -1);
+}
+
+.loggedhours-totals { align-items: stretch; }
+
+.loggedhours-heading { gap: var(--s2); }
+
+.loggedhours-list {
+  gap: var(--s2);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.loggedhours-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+
+/* Tabular figures and a fixed column so the dates form a straight edge down the
+   list; a ragged one makes two sections of different lengths look unrelated. */
+.loggedhours-date {
+  flex-shrink: 0;
+  width: 6.5rem;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+
+.loggedhours-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.loggedhours-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.loggedhours-meta { font-size: 0.8125rem; }
+
+.loggedhours-note { margin: 0; }
+
+@media (max-width: 640px) {
+  /* The date stops being a column and becomes the first line of the row: at
+     this width a 6.5rem gutter leaves the title about eight characters. */
+  .loggedhours-date { width: 100%; }
+}
+
+/* The permanent "Self-reported" label on an external entry.
+
+   A neutral tag rather than one of the `.status-*` tones on purpose. Those read
+   as a state something moves out of — this is a fact about every row in the
+   table and always will be, and colouring it green or amber would restate the
+   review workflow that was removed. */
+.ext-kind {
+  flex-shrink: 0;
+  gap: var(--s1);
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
 
 /* ── Narrow screens ───────────────────────────────────────────────────────── */
 
@@ -8525,3 +8770,12 @@ input:disabled + .premium-slider {
 }
 
 .attendance-hourshint { margin: var(--s2) 0 0; }
+
+/* The two save-your-recovery-codes buttons. A plain row that wraps rather than a
+   grid: on a narrow phone the two sit one above the other at full width, which
+   is the width a thumb wants on the one screen a person must not mis-tap. */
+.recovery-actions { gap: var(--s2); }
+
+@media (max-width: 420px) {
+  .recovery-actions .btn { flex: 1 1 100%; justify-content: center; }
+}

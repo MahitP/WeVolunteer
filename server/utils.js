@@ -13,6 +13,12 @@ import { sendErrorAlerts } from './alerting.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
 import { isSuspended, liftIfExpired, suspensionNotice } from './suspension.js';
 import { suspendedMayReach } from './suspendedAccess.js';
+/* The distinguished-profile presentation, from the one module that decides it.
+   Restated here would be a second answer to "what kind of account is this",
+   which is how the self payload and a member's view of the same account come to
+   disagree. profileSerializer imports only volunteerStats, so this is not a
+   cycle. */
+import { distinctionFor, parseHighlights as parseHighlightsList } from './profileSerializer.js';
 
 /**
  * The seeded demo administrator, and the ONLY account that may skip the policy.
@@ -120,14 +126,52 @@ export function secondFactorRequiredFor(role, user = null) {
  * rather than trusting the method named in the request. Hiding a button is a
  * courtesy; refusing the method is the control.
  *
- * @param {object} row the users row (needs `id`, `tfa_enabled`, `tfa_email_enabled`)
+ * ── Email is offered whenever it can actually work ──
+ *
+ * `tfa_email_enabled` used to be the sole test, and it disagreed with the send
+ * route, which additionally requires `email_verified`. An account with the flag
+ * set and an unconfirmed address was TOLD email was available, shown the radio,
+ * and met a 400 when it pressed send.
+ *
+ * The fix goes the other way round rather than just adding the missing
+ * condition, because the product intent is that email is the fallback a person
+ * reaches for when their authenticator is gone: once an account has a second
+ * factor at all, a CONFIRMED address is enough to receive a code, whether or not
+ * anybody separately switched "email 2FA" on. `tfa_email_enabled` therefore
+ * still turns email on by itself (it may be somebody's only factor), but it is
+ * no longer required when another factor already exists.
+ *
+ * This does not widen who can sign in. Delivery goes to the address on the
+ * account — the same address that could already reset the password — so an
+ * attacker who controls the mailbox was never being stopped by this flag. What
+ * it changes is that a locked-out owner has a route back in before they have to
+ * spend a recovery code.
+ *
+ * @param {object} row the users row (needs `id`, `tfa_enabled`, `tfa_email_enabled`,
+ *   `email_verified`)
  * @returns {string[]} some subset of ['totp', 'email', 'recovery'], possibly empty
  */
 export function enabledSecondFactors(row) {
   if (!row) return [];
   const methods = [];
   if (row.tfa_enabled) methods.push('totp');
-  if (row.tfa_email_enabled) methods.push('email');
+
+  /**
+   * Email is offered when a code can actually be delivered AND there is a
+   * reason to deliver one.
+   *
+   * Two conditions, stated as two conditions rather than as a cascade:
+   *
+   *   deliverable — the address has been CONFIRMED. Without this, "email" is a
+   *     method whose first action is a 400 from the send route, which is the
+   *     defect this whole derivation was written to close.
+   *   wanted — either the account switched email 2FA on (it may be its only
+   *     factor), or it already holds some other factor and email is the fallback
+   *     it reaches for when that factor is gone.
+   */
+  const deliverable = row.email_verified === 1 || row.email_verified === true;
+  const wanted = Boolean(row.tfa_email_enabled) || methods.length > 0;
+  if (deliverable && wanted) methods.push('email');
 
   /* Recovery codes are a fallback for the methods above, not a method in their
      own right: offering them to an account that has enrolled nothing would turn
@@ -597,6 +641,21 @@ export function formatUserResponse(row) {
     skills: row.skills ? JSON.parse(row.skills) : [],
     hobbies: row.hobbies ? JSON.parse(row.hobbies) : [],
     location: row.location || null,
+    /**
+     * The distinguished-profile fields, and the presentation derived from role.
+     *
+     * On the SELF payload so the profile editor can render what is currently
+     * written without a second request, and so `/profile` can draw the
+     * distinguished header on its first frame for an account — a partner — that
+     * does not hold `directory.read` and therefore cannot fetch a profile
+     * payload at all, not even its own.
+     *
+     * `distinction` is a pure function of `role`, which is three lines above.
+     * It grants nothing; see the note on `distinctionFor`.
+     */
+    headline: row.profile_headline || null,
+    highlights: parseHighlightsList(row.profile_highlights),
+    distinction: distinctionFor(row.role),
     /* The two privacy switches, so Settings can render their current state
        without a second request. This serializer is self-only — see the note at
        the top of profileSerializer.js about why nothing else may use it. */

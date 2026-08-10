@@ -26,8 +26,8 @@ import { db } from '../db.js';
 import { publicProfile, profileSummary } from '../profileSerializer.js';
 import { volunteerStats } from '../volunteerStats.js';
 import {
-  areFriends, relationshipState, requestFriend, acceptFriend, removeFriend,
-  setUnilateral, clearUnilateral,
+  areFriends, relationshipState, viewerRelationshipState, requestFriend, acceptFriend,
+  removeFriend, setUnilateral, clearUnilateral,
 } from '../relationships.js';
 import { formatOrganization } from '../organizations.js';
 import { notificationService } from '../services/notificationService.js';
@@ -105,23 +105,19 @@ function buildProfileResponse(req, row) {
      * sibling key rather than merged into `profile` so that no caller can
      * mistake "you have muted this person" for something the subject published.
      *
-     * `restrictedBy` is STRIPPED before it goes over the wire. Restriction is
-     * documented in relationships.js as invisible to its subject — that is the
-     * whole difference between it and blocking, and the reason a student who
-     * wants distance without a confrontation has something to reach for. Sending
-     * the flag told the restricted person directly, and the client rendered it
-     * as a missing Add-friend button that appears on every other profile. To the
-     * restricted party this must be indistinguishable from no relationship,
-     * which is what deleting the key achieves.
+     * `restrictedBy` is STRIPPED before it goes over the wire — by
+     * `viewerRelationshipState`, which is now the ONLY shape any handler in this
+     * file sends to the viewer it describes. It used to be an inline destructure
+     * here and nowhere else, so the flag went out unmodified on unfriend,
+     * accept, mute, restrict and their clears: muting somebody who had
+     * restricted you made your own Add-friend button vanish, which is exactly
+     * the tell this strip exists to remove.
      *
      * The 409 on a friend request is a knowable signal and a deliberate
      * trade-off — refusing silently would be a worse lie. Leaking the state on
-     * every profile GET was not a trade-off, just an oversight.
+     * every other relationship response was not a trade-off, just an oversight.
      */
-    viewer: (() => {
-      const { restrictedBy, ...visible } = relationshipState(db, viewerId, row.id);
-      return visible;
-    })(),
+    viewer: viewerRelationshipState(db, viewerId, row.id),
   };
 }
 
@@ -175,15 +171,29 @@ router.get('/api/users/:id/service-record', authenticateToken, requireCap('direc
     LIMIT 200
   `).all(targetId);
 
-  const external = db.prepare(`
+  /**
+   * The external log is returned to the SUBJECT and to nobody else — not to
+   * staff, and not to the organizer reviewing their application.
+   *
+   * It used to be on this payload for every reader the record is disclosed to,
+   * along with a `status` and a `reviewNote` that no longer exist. Both halves
+   * were wrong. External entries are a personal note about service somebody did
+   * elsewhere: nobody checked them, so they are not evidence, and putting them
+   * in front of an organizer deciding whether to accept an applicant turns a
+   * private log into part of an application — which is the one thing this
+   * feature is not. Where an organizer needs a record, `completed` is the record:
+   * it is the service this platform can actually vouch for.
+   */
+  const external = isSelf ? db.prepare(`
     SELECT id, organization_name AS organizationName, activity_name AS activityName,
-           description, occurred_on AS occurredOn, hours, status, review_note AS reviewNote
+           description, occurred_on AS occurredOn, hours
     FROM external_hours WHERE user_id = ? ORDER BY occurred_on DESC LIMIT 200
-  `).all(targetId);
+  `).all(targetId).map(r => ({ ...r, selfReported: true })) : [];
 
   res.json({
     completed: completed.map(r => ({ ...r, present: r.present === 1, creditsHours: r.creditsHours !== 0 })),
     external,
+    externalWithheld: !isSelf,
     stats: volunteerStats(db, targetId),
   });
 });
@@ -321,7 +331,7 @@ router.post('/api/users/:id/friend', authenticateToken, requireCap('relationship
     }
   } catch { /* best effort — see above */ }
 
-  res.json({ status: result.status, ...relationshipState(db, req.principal.userId, target.id) });
+  res.json({ status: result.status, ...viewerRelationshipState(db, req.principal.userId, target.id) });
 });
 
 /** Accept a pending inbound request explicitly. */
@@ -330,7 +340,7 @@ router.post('/api/users/:id/friend/accept', authenticateToken, requireCap('relat
   if (!target) return;
   const ok = acceptFriend(db, req.principal.userId, target.id);
   if (!ok) return res.status(404).json({ error: 'There is no friend request from that person.', code: 'no_request' });
-  res.json(relationshipState(db, req.principal.userId, target.id));
+  res.json(viewerRelationshipState(db, req.principal.userId, target.id));
 });
 
 /** Unfriend, decline, or withdraw — all the same removal. */
@@ -338,7 +348,7 @@ router.delete('/api/users/:id/friend', authenticateToken, requireCap('relationsh
   const target = resolveTarget(req, res);
   if (!target) return;
   removeFriend(db, req.principal.userId, target.id);
-  res.json(relationshipState(db, req.principal.userId, target.id));
+  res.json(viewerRelationshipState(db, req.principal.userId, target.id));
 });
 
 /**
@@ -353,14 +363,14 @@ router.post('/api/users/:id/:kind(mute|restrict)', authenticateToken, requireCap
   const target = resolveTarget(req, res);
   if (!target) return;
   setUnilateral(db, req.principal.userId, target.id, req.params.kind);
-  res.json(relationshipState(db, req.principal.userId, target.id));
+  res.json(viewerRelationshipState(db, req.principal.userId, target.id));
 });
 
 router.delete('/api/users/:id/:kind(mute|restrict)', authenticateToken, requireCap('relationship.manage'), (req, res) => {
   const target = resolveTarget(req, res);
   if (!target) return;
   clearUnilateral(db, req.principal.userId, target.id, req.params.kind);
-  res.json(relationshipState(db, req.principal.userId, target.id));
+  res.json(viewerRelationshipState(db, req.principal.userId, target.id));
 });
 
 /** The caller's own friends and pending requests. */

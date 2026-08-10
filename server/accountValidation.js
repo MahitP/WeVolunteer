@@ -33,6 +33,11 @@ const NAME_MAX = 100;
 const BIO_MAX = 500;
 const SCHOOL_MAX = 200;
 const SKILL_MAX = 50;
+/* One line under a name, and a short list beside it. Both are read at a glance
+   on a profile header, which is what bounds them rather than storage. */
+const HEADLINE_MAX = 120;
+const HIGHLIGHT_MAX = 160;
+const MAX_HIGHLIGHTS = 8;
 const MAX_SKILLS = 20;
 const EMAIL_MAX = 254; // RFC 5321 practical maximum.
 
@@ -258,6 +263,40 @@ export function validateProfilePatch(patch) {
       return { ok: false, field: 'skills', error: `Each skill must be text of ${SKILL_MAX} characters or fewer.` };
     }
     out.skills = patch.skills.map(s => s.trim()).filter(Boolean);
+  }
+
+  /**
+   * The two fields a distinguished profile is written with.
+   *
+   * Validated for everybody rather than only for the roles whose profile
+   * renders them. A rule that applies to some accounts is a rule with a role
+   * comparison in it, which is the thing this codebase does not do outside
+   * `authz.js` — and the value is bounded and escaped identically either way, so
+   * there is nothing to gain by refusing it selectively. What decides whether it
+   * is SHOWN is the presentation, in profileSerializer.js.
+   */
+  if (patch.headline !== undefined) {
+    if (patch.headline !== null && typeof patch.headline !== 'string') {
+      return { ok: false, field: 'headline', error: 'That must be text.' };
+    }
+    const headline = (patch.headline ?? '').trim();
+    if (headline.length > HEADLINE_MAX) {
+      return { ok: false, field: 'headline', error: `Keep this to ${HEADLINE_MAX} characters — it is one line under your name.` };
+    }
+    out.headline = headline;
+  }
+
+  if (patch.highlights !== undefined) {
+    if (!Array.isArray(patch.highlights)) {
+      return { ok: false, field: 'highlights', error: 'Highlights must be a list.' };
+    }
+    if (patch.highlights.length > MAX_HIGHLIGHTS) {
+      return { ok: false, field: 'highlights', error: `Please list ${MAX_HIGHLIGHTS} highlights or fewer.` };
+    }
+    if (patch.highlights.some(h => typeof h !== 'string' || h.length > HIGHLIGHT_MAX)) {
+      return { ok: false, field: 'highlights', error: `Each highlight must be text of ${HIGHLIGHT_MAX} characters or fewer.` };
+    }
+    out.highlights = patch.highlights.map(h => h.trim()).filter(Boolean);
   }
 
   return { ok: true, value: out };

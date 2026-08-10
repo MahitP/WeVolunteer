@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UserCog, Settings, Bell, LogOut, ChevronsUpDown } from 'lucide-react';
+import { UserRound, Settings, Bell, LogOut, ChevronsUpDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 /**
@@ -68,7 +68,22 @@ function Avatar({ user, className, failedUrl, onFailed }) {
   return <span className={className} aria-hidden="true">{user.avatar || '👤'}</span>;
 }
 
-export default function ProfileMenu({ user, onEditProfile, onSignOut }) {
+/**
+ * ── The menu offers Profile, not Edit Profile ──
+ *
+ * It used to open the edit MODAL directly, which meant the only way to reach
+ * your own profile from the account menu was through a form for changing it —
+ * and there was no way at all to simply look at it. Worse, the menu was the one
+ * place editing was offered to an organizer or an administrator, so "where do I
+ * see my profile" and "where do I change it" had the same answer and it was the
+ * wrong one for the first question.
+ *
+ * `/profile` renders the reader's own profile for their role (see SELF_PROFILE
+ * in App.jsx), and every one of those views carries its own Edit profile
+ * button. Viewing and editing are then one step apart in the direction people
+ * actually travel — look first, change if you meant to — instead of the reverse.
+ */
+export default function ProfileMenu({ user, onSignOut }) {
   const [isOpen, setIsOpen] = useState(false);
   const [failedUrl, setFailedUrl] = useState(null);
   const navigate = useNavigate();
@@ -126,8 +141,8 @@ export default function ProfileMenu({ user, onEditProfile, onSignOut }) {
           
           <div className="menu-sep" />
           
-          <button className="menu-item" role="menuitem" onClick={() => { onEditProfile(); setIsOpen(false); }}>
-            <UserCog size={15} /> Edit Profile
+          <button className="menu-item" role="menuitem" onClick={() => handleNavigate('/profile')}>
+            <UserRound size={15} /> Profile
           </button>
           
           <button className="menu-item" role="menuitem" onClick={() => handleNavigate('/settings?section=notifications')}>

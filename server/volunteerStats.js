@@ -148,52 +148,44 @@ export function volunteerStats(db, userId, { now = new Date().toISOString() } = 
  * reader of a volunteer profile legitimately wants to know is whether this
  * person is still volunteering.
  *
- * Verified external service counts. It is service, it has been checked by
- * somebody holding `service.verify.external`, and excluding it would show a
- * student who volunteers weekly outside the platform as inactive. Self-reported
- * external hours do NOT count, because "last volunteered" would then be a date
- * anybody could set to today by typing it in.
+ * ── External entries deliberately do NOT count ──
+ *
+ * They are self-reported and unverifiable, so including them would make "last
+ * volunteered" a date anybody can set to today by typing it into a form. This
+ * figure appears on a public profile, where a reader takes it as evidence that
+ * somebody is still active; evidence nobody checked is not evidence. The
+ * student's own log shows their external entries in full — that is where a
+ * complete personal history belongs.
  */
 export function lastVolunteeredAt(db, userId) {
-  const internal = db.prepare(`
+  return db.prepare(`
     SELECT MAX(s.end_datetime) AS t
     FROM attendance at
     JOIN slots s ON s.id = at.slot_id
     WHERE at.user_id = ? AND at.present = 1
   `).get(userId)?.t ?? null;
-
-  const external = db.prepare(`
-    SELECT MAX(occurred_on) AS t
-    FROM external_hours WHERE user_id = ? AND status = 'verified'
-  `).get(userId)?.t ?? null;
-
-  if (!internal) return external;
-  if (!external) return internal;
-  /* Lexicographic comparison is correct here and only here: both are ISO-8601,
-     and `occurred_on` is a date whose YYYY-MM-DD prefix sorts consistently
-     against a full timestamp's. */
-  return external > internal ? external : internal;
 }
 
 /**
- * External service totals for one volunteer, split by whether anybody checked.
+ * External service totals for one volunteer.
  *
- * Kept apart from `hoursCredited` at every layer — the two are never added
+ * Every external entry is self-reported — that is the whole feature, and there
+ * is no verification state to split on. `selfReportedHours` is named rather than
+ * being a bare `hours` so that no caller can read it as a credited figure by
+ * accident.
+ *
+ * Kept apart from `hoursCredited` at every layer: the two are never added
  * together by this module, and no caller should either. Credited hours are what
  * an organizer confirmed on a WeVolunteer event; these are what a student says
  * they did somewhere else.
  */
 export function externalHoursSummary(db, userId) {
   const row = db.prepare(`
-    SELECT
-      COALESCE(SUM(CASE WHEN status = 'verified'      THEN hours END), 0) AS verified,
-      COALESCE(SUM(CASE WHEN status = 'self_reported' THEN hours END), 0) AS selfReported,
-      COUNT(CASE WHEN status <> 'rejected' THEN 1 END) AS entries
+    SELECT COALESCE(SUM(hours), 0) AS total, COUNT(*) AS entries
     FROM external_hours WHERE user_id = ?
   `).get(userId) ?? {};
   return {
-    verifiedHours: Number((row.verified ?? 0).toFixed(2)),
-    selfReportedHours: Number((row.selfReported ?? 0).toFixed(2)),
+    selfReportedHours: Number((row.total ?? 0).toFixed(2)),
     entries: row.entries ?? 0,
   };
 }

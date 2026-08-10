@@ -16,11 +16,19 @@
  * structurally true on the server — external records live in their own table
  * with no slots, no applications and no roster, so there is no code path that
  * could list one as an event. See server/routes/externalHoursRoutes.js.
+ *
+ * ── And nobody reviews it ──
+ *
+ * There is no approval, no queue and no verified state. An earlier version of
+ * this screen showed each entry as "Awaiting review", which promised an
+ * administrative decision that was never the product: this is a notebook, not an
+ * application form. Every entry is self-reported, permanently, and says so —
+ * which is also why the label is a constant rather than a column.
  */
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertCircle, Info, Plus, Trash2, ExternalLink, CheckCircle2, Clock, ShieldCheck,
+  AlertCircle, Info, Plus, Trash2, ExternalLink, CheckCircle2, NotebookPen,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import EmptyState from '../components/common/EmptyState';
@@ -29,12 +37,6 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 
 const BLANK = {
   organizationName: '', activityName: '', occurredOn: '', hours: '', description: '',
-};
-
-const STATUS_LABEL = {
-  self_reported: { label: 'Awaiting review', tone: 'status-pending', icon: Clock },
-  verified: { label: 'Verified', tone: 'status-ok', icon: ShieldCheck },
-  rejected: { label: 'Not accepted', tone: 'status-danger', icon: AlertCircle },
 };
 
 export default function LogExternalHours({ addToast }) {
@@ -148,7 +150,8 @@ export default function LogExternalHours({ addToast }) {
           confirmed by an organizer here.
         </p>
         <p>
-          An administrator can verify an entry. Until then it is shown as self-reported.
+          Nobody reviews these. They are <strong>your own record</strong>, kept for your history,
+          and they are labelled self-reported wherever they appear.
         </p>
       </div>
 
@@ -224,7 +227,7 @@ export default function LogExternalHours({ addToast }) {
             <label htmlFor="ext-desc">Notes <span className="muted">(optional)</span></label>
             <textarea
               id="ext-desc" className="textarea" rows={3} value={form.description}
-              placeholder="Anything that would help somebody verify this later — a supervisor's name, what the work involved."
+              placeholder="Anything you'd want to remember later — who you worked with, what the work involved."
               onChange={e => set('description', e.target.value)}
             />
             {errors.description && (
@@ -232,8 +235,11 @@ export default function LogExternalHours({ addToast }) {
             )}
           </div>
         </div>
-        <div className="card-foot row-between">
-          <Link to="/profile" className="btn btn-ghost">Back to my profile</Link>
+        {/* `row-wrap`, because these two buttons together are wider than a
+            375px phone and `row-between` alone does not wrap — which pushed the
+            submit button 25px past the right edge and widened the document. */}
+        <div className="card-foot row-between row-wrap">
+          <Link to="/hours" className="btn btn-ghost">Back to my logged hours</Link>
           <button type="submit" className="btn btn-primary" disabled={submitting}>
             <Plus size={16} aria-hidden="true" /> {submitting ? 'Adding…' : 'Add to my log'}
           </button>
@@ -253,32 +259,30 @@ export default function LogExternalHours({ addToast }) {
           )}
           {!loading && entries?.length > 0 && (
             <ul className="list ext-list">
-              {entries.map(entry => {
-                const meta = STATUS_LABEL[entry.status] ?? STATUS_LABEL.self_reported;
-                const StatusIcon = meta.icon;
-                return (
-                  <li key={entry.id} className="list-row ext-row">
-                    <div className="stack-xs ext-body">
-                      <span className="ext-title">{entry.activityName}</span>
-                      <span className="muted ext-meta">
-                        {entry.organizationName} · {entry.occurredOn} · {entry.hours} hrs
-                      </span>
-                      {entry.reviewNote && <span className="muted ext-note">{entry.reviewNote}</span>}
-                    </div>
-                    <span className={`status ${meta.tone}`}>
-                      <StatusIcon size={13} aria-hidden="true" /> {meta.label}
+              {entries.map(entry => (
+                <li key={entry.id} className="list-row ext-row">
+                  <div className="stack-xs ext-body">
+                    <span className="ext-title">{entry.activityName}</span>
+                    <span className="muted ext-meta">
+                      {entry.organizationName} · {entry.occurredOn} · {entry.hours} hrs
                     </span>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-icon"
-                      aria-label={`Remove ${entry.activityName}`}
-                      onClick={() => setDeleting(entry)}
-                    >
-                      <Trash2 size={16} aria-hidden="true" />
-                    </button>
-                  </li>
-                );
-              })}
+                  </div>
+                  {/* Not a status — a permanent statement about what the entry
+                      is. Every row carries it, because a row that sometimes
+                      carried it would read as a state the others had left. */}
+                  <span className="tag ext-kind">
+                    <NotebookPen size={13} aria-hidden="true" /> Self-reported
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-icon"
+                    aria-label={`Remove ${entry.activityName}`}
+                    onClick={() => setDeleting(entry)}
+                  >
+                    <Trash2 size={16} aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
             </ul>
           )}
         </div>

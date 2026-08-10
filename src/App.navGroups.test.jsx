@@ -73,32 +73,33 @@ describe('navSectionsFor', () => {
   /* ── Which tier each entry is in ─────────────────────────────────────────── */
 
   /**
-   * The three entries that are deliberately NOT primary, and the reason each one
+   * The two entries that are deliberately NOT primary, and the reason each one
    * can afford not to be: Notifications has the header bell (which also carries
-   * the unread count), the profile is in the rail's own ProfileMenu and in the
-   * mobile sheet's header, and Find people is a destination you go to rather
-   * than one you pass through on the way to finishing something.
+   * the unread count), and the profile is in the rail's own ProfileMenu and in
+   * the mobile sheet.
    *
-   * Find people (v1.3) was placed here rather than in the primary row on that
-   * last argument: the primary row is the five destinations a task moves
-   * between, and displacing one of them for the directory would have cost more
-   * than it bought. Order matters — it sits ABOVE Notifications because the
-   * secondary tier is read top-down and the directory is the one entry with no
-   * second way in.
+   * ── "Find people" is gone from this list, and from the rail ──
+   *
+   * It was a third secondary entry pointing at `/directory`, and v1.3.1 removed
+   * it. Two top-level destinations that both mean "look for something here" made
+   * a reader choose a kind before they had typed anything, and a student
+   * searching "NHS" does not know whether they want a club, a person or the food
+   * drive they run. Discovery is one search on Opportunities now; `/directory`
+   * redirects there. Asserted as an exact list, so re-adding it as a rail entry
+   * fails here rather than quietly reintroducing the split.
    */
   it.each(['student', 'organizer', 'super_admin'])(
-    'gives %s exactly Find people, Notifications and My profile as secondary', (role) => {
+    'gives %s exactly Notifications and Profile as secondary', (role) => {
       const { secondary } = navSectionsFor(USER(role));
-      expect(labelsOf(secondary)).toEqual(['Find people', 'Notifications', 'My profile']);
+      expect(labelsOf(secondary)).toEqual(['Notifications', 'Profile']);
     });
 
-  /* An ordinary administrator has no self-profile VIEW — `SELF_PROFILE` resolves
-     `event.moderate` to 'denied', because no profile page has ever existed for
-     that role — so the entry is filtered out by capability rather than by tier.
-     Unchanged by this redesign, and asserted so that a future profile page for
-     admins lands here rather than silently in the primary row. */
-  it('gives an administrator Find people and Notifications as secondary', () => {
-    expect(labelsOf(navSectionsFor(USER('admin')).secondary)).toEqual(['Find people', 'Notifications']);
+  /* An administrator now HAS a self-profile view — `SELF_PROFILE` resolves
+     `event.moderate` to the generalized `account` page, because the account menu
+     offers "Profile" to everybody and a 403 from your own account is not an
+     answer. */
+  it('gives an administrator Notifications and Profile as secondary', () => {
+    expect(labelsOf(navSectionsFor(USER('admin')).secondary)).toEqual(['Notifications', 'Profile']);
   });
 
   /**
@@ -225,7 +226,7 @@ describe('navSectionsFor', () => {
   /* ── Placement ──────────────────────────────────────────────────────────── */
 
   /**
-   * `My profile` renders last in the rail.
+   * `Profile` renders last in the rail.
    *
    * It used to carry a `trailing` flag for this, because it was ungrouped and
    * would otherwise have sat ABOVE "Administration" and read as the most
@@ -233,10 +234,10 @@ describe('navSectionsFor', () => {
    * job: secondary entries render after primary ones, and the profile is the last
    * of them because it is last in the NAV table.
    */
-  it('renders My profile last', () => {
+  it('renders Profile last', () => {
     const { primary, secondary } = navSectionsFor(USER('student'));
-    expect(labelsOf(secondary).at(-1)).toBe('My profile');
-    expect(labelsOf(primary)).not.toContain('My profile');
+    expect(labelsOf(secondary).at(-1)).toBe('Profile');
+    expect(labelsOf(primary)).not.toContain('Profile');
   });
 
   /**

@@ -12,7 +12,7 @@ import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
 import useOnline from './hooks/useOnline';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
 import PersonaPreviewBanner from './components/admin/PersonaPreviewBanner';
-import OwnerProfile from './views/OwnerProfile';
+import AccountProfile from './views/AccountProfile';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
 import Toasts from './components/common/Toasts';
@@ -148,19 +148,37 @@ const DASHBOARD_NAV = {
  * per-user grant, so no amount of granting turns an admin into a match. It is
  * tested first because super_admin's wildcard matches every row beneath it too.
  *
- * super_admin resolves to its OWN view. Both existing profile endpoints filter by
- * role in SQL — GET /api/users/:id/profile requires role = 'student', GET
- * /api/organizers/:id/profile requires role IN ('organizer','admin') — so either
- * would render a 404 dressed as a profile for the owner. That is why this used to
- * resolve to 'none' and an honest empty state; `OwnerProfile` replaces it with a
- * page built from `/api/auth/me`, which the shell already holds, so it needs
- * neither a new endpoint nor a widening of the two that exist.
+ * ── Nothing resolves to 'denied' any more ──
+ *
+ * `admin` did, and `partner` fell through to the same place: two roles whose
+ * own profile page answered 403. That was survivable while the only way to the
+ * page was a rail entry nobody used, and it stopped being survivable the moment
+ * the account menu started offering "Profile" — the menu every signed-in person
+ * opens to find their own account.
+ *
+ * `account` is the generalized view those three now share. It renders from
+ * `/api/auth/me`, which the shell already holds, so it needs no endpoint and no
+ * capability: that matters for `partner`, which deliberately does NOT hold
+ * `directory.read` (see the note in server/authz.js) and therefore cannot fetch
+ * a profile payload at all, not even its own.
+ *
+ * The two role-specific views are unchanged. A student's profile is a service
+ * record and an organizer's is a track record; those are different pages, not
+ * different data in one.
+ *
+ * `admin.create` is a SUPER_ONLY capability, so it identifies the platform owner
+ * and nobody else — `can()` refuses to satisfy a SUPER_ONLY capability from a
+ * per-user grant. It is listed first because super_admin's wildcard matches every
+ * row beneath it too, and `event.view` is listed LAST for the same reason from
+ * the other end: every role holds it, so it can only ever be reached by a role
+ * that matched nothing above.
  */
 const SELF_PROFILE = [
-  { cap: 'admin.create', view: 'owner' },       // super_admin
-  { cap: 'event.moderate', view: 'denied' },    // admin — no profile view has ever existed
-  { cap: 'event.create', view: 'host' },        // organizer
-  { cap: 'portfolio.write', view: 'volunteer' } // student
+  { cap: 'admin.create', view: 'account' },      // super_admin
+  { cap: 'event.moderate', view: 'account' },    // admin
+  { cap: 'event.create', view: 'host' },         // organizer
+  { cap: 'portfolio.write', view: 'volunteer' }, // student
+  { cap: 'event.view', view: 'account' }         // partner, and any later role
 ];
 
 const selfProfileFor = (user) => SELF_PROFILE.find(p => can(user, p.cap))?.view ?? 'denied';
@@ -265,18 +283,22 @@ const NAV = [
      header of the mobile sheet. Neither is a place people navigate to as the
      next step in a task, which is what the primary row is for. */
   /**
-   * The member directory. SECONDARY, deliberately.
+   * ── "Find people" is deliberately NOT an entry ──
    *
-   * Finding a person is not a step in the task the primary row is shaped
-   * around — browsing opportunities, checking a calendar, answering a message.
-   * It is something you go and do, from the same place you reach your own
-   * profile. Making it primary would also displace one of the five destinations
-   * `App.navGroups.test.jsx` pins in order, which is a change worth making
-   * only for something people navigate to on the way to somewhere else.
+   * It was one, secondary, pointing at `/directory`. Two destinations that both
+   * mean "look for something on this platform" is a question asked of the reader
+   * before they have typed anything: is an NHS food drive an opportunity, an
+   * organization, or the person who runs it? A student searching does not know,
+   * and should not have to.
+   *
+   * Discovery is now one search on Opportunities, across opportunities, people
+   * and organizations at once — see the `scope` control in BrowseEvents.jsx.
+   * `/directory` redirects there, so the shipped URL still works; `tabForPath`
+   * still maps `/users` and `/organizations` (to `browse`, now) because a path
+   * with no rail entry of its own still needs a tab and a title.
    */
-  { id: 'directory', path: '/directory', label: 'Find people', icon: Search, requiredCap: 'directory.read', secondary: true },
   { id: 'notifications', path: '/notifications', label: 'Notifications', icon: Bell, requiredCap: 'self.read', secondary: true },
-  { id: 'profile', path: '/profile', label: 'My profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS, secondary: true }
+  { id: 'profile', path: '/profile', label: 'Profile', icon: UserRound, requiredCapAny: SELF_PROFILE_CAPS, secondary: true }
 ];
 
 /**
@@ -321,13 +343,21 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/calendar')) return 'calendar';
   if (pathname.startsWith('/notifications')) return 'notifications';
   if (pathname.startsWith('/profile')) return 'profile';
-  /* `/users` and `/organizations` both light the directory entry: they are where
-     the directory takes you, and a rail that goes dark when you follow a search
-     result reads as having navigated away from the app. */
+  /* The discovery destinations keep tab ids of their OWN, because this function
+     answers two questions at once and they have different answers here: what to
+     TITLE the page (a member's profile is not "Opportunities") and which rail
+     item to light (Opportunities, because that is where discovery lives and a
+     rail that goes dark when you follow a search result reads as having left the
+     app). `RAIL_TAB` below is the second answer; PAGE_META is the first.
+
+     `/directory` is a redirect and never renders, but it is mapped anyway: the
+     tab is read during the frame the redirect is resolved in. */
   if (pathname.startsWith('/directory')) return 'directory';
   if (pathname.startsWith('/users')) return 'directory';
-  if (pathname.startsWith('/organizations')) return 'directory';
+  if (pathname.startsWith('/organizations')) return 'organizations';
+  /* Before `/hours`, which is a prefix of it. */
   if (pathname.startsWith('/hours/external')) return 'externalHours';
+  if (pathname.startsWith('/hours')) return 'loggedHours';
   if (pathname.startsWith('/settings')) return 'settings';
   if (pathname.startsWith('/messages')) return 'messages';
   if (pathname.startsWith('/admin/appeals')) return 'appeals';
@@ -338,6 +368,22 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/admin/roster')) return 'roster';
   return 'dashboard';
 }
+
+/**
+ * Which RAIL entry a tab lights, when that is not the tab itself.
+ *
+ * `tabForPath` names the page — that is what PAGE_META is keyed on — and for
+ * almost every path the rail entry has the same name. The discovery
+ * destinations are the exception: a member's profile and an organization page
+ * are their own pages with their own titles, and they are reached from
+ * Opportunities, which is where finding a person now lives. Without this the
+ * rail would go dark on every search result, which reads as having navigated
+ * out of the application.
+ *
+ * A map rather than a second branch chain, so the two answers are visibly one
+ * table apart instead of interleaved in one function.
+ */
+export const RAIL_TAB = { directory: 'browse', organizations: 'browse' };
 
 /** Every nav entry the user may see, `/` first, in the order the shell renders. */
 export function navItemsFor(user) {
@@ -400,7 +446,13 @@ export const PAGE_META = {
     calendar: { title: 'Calendar', sub: 'Your shifts and the deadlines that matter' },
     messages: { title: 'Messages', sub: 'Coordinate directly with organizers regarding your shifts' },
     notifications: { title: 'Notifications', sub: 'Replies, reminders, and event updates' },
-    profile: { title: 'My profile', sub: 'Your service record, milestones, and certificates' }
+    profile: { title: 'Profile', sub: 'Your service record, milestones, and certificates' },
+    loggedHours: { title: 'Logged hours', sub: 'Everything you have volunteered, confirmed and self-reported' },
+    externalHours: { title: 'Log external hours', sub: 'Volunteering you did somewhere WeVolunteer does not run' },
+    /* Reached from the search on Opportunities, and titled for what is on the
+       page rather than for where the reader came from. */
+    directory: { title: 'Member profile', sub: 'Someone you volunteer alongside' },
+    organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
   },
   host: {
     dashboard: { title: 'Dashboard', sub: 'Track your volunteers, hours, and pending reviews' },
@@ -408,7 +460,9 @@ export const PAGE_META = {
     calendar: { title: 'Calendar', sub: 'Events you host and when applications close' },
     messages: { title: 'Messages', sub: 'Coordinate directly with volunteers regarding your events' },
     notifications: { title: 'Notifications', sub: 'Application updates and community alerts' },
-    profile: { title: 'My profile', sub: 'Your public track record and organizer status' }
+    profile: { title: 'Profile', sub: 'Your public track record and organizer status' },
+    directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
+    organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
   },
   staff: {
     dashboard: { title: 'Dashboard', sub: 'Reports waiting, organizers to approve, and how the programme is doing' },
@@ -425,7 +479,10 @@ export const PAGE_META = {
        application name and the one page of figures was the one page with no
        title. */
     impact: { title: 'Community impact', sub: 'What the programme has done, counted from confirmed attendance' },
-    adminImpact: { title: 'Platform Impact', sub: 'Programme-wide figures for the whole platform' }
+    adminImpact: { title: 'Platform Impact', sub: 'Programme-wide figures for the whole platform' },
+    directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
+    organizations: { title: 'Organization', sub: 'A club or group posting opportunities' },
+    profile: { title: 'Profile', sub: 'Your account on this platform' }
   },
   partner: {
     dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
@@ -987,7 +1044,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     <button
       key={id + label}
       className="nav-item"
-      aria-current={activeTab === id ? 'page' : undefined}
+      aria-current={(RAIL_TAB[activeTab] ?? activeTab) === id ? 'page' : undefined}
       onClick={() => { setViewingProfileState(null); navigate(path); }}
     >
       <Icon size={17} strokeWidth={2} />
@@ -1029,13 +1086,16 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/notifications': { onViewEvent: openEventById, onCountChange: () => setNotifKey(k => k + 1) },
     '/messages': {},
     '/portfolio': { currentUser },
-    '/directory': { currentUser },
+    /* A redirect element, so it takes nothing — declared `{}` rather than
+       omitted, because `withProps` treats an omission as a forgotten entry. */
+    '/directory': {},
     '/users/id/:id': { currentUser, addToast },
     '/users/:handle': { currentUser, addToast },
     '/organizations/new': { addToast },
     '/organizations/:key/edit': { addToast },
     '/organizations/:key': { addToast },
     '/hours/external': { addToast },
+    '/hours': { currentUser, addToast },
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
     '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
     '/errors': { addToast },
@@ -1159,7 +1219,6 @@ function AppShell({ toasts, addToast, removeToast }) {
         <div className="sidebar-foot">
           <ProfileMenu
             user={currentUser}
-            onEditProfile={() => setEditingProfile(true)}
             onSignOut={handleLogout}
           />
         </div>
@@ -1299,10 +1358,14 @@ function AppShell({ toasts, addToast, removeToast }) {
                 ) : selfProfile === 'host' ? (
                   <OrganizerProfile
                     userId={currentUser.id}
+                    onEditProfile={() => setEditingProfile(true)}
                     onViewEvent={openEventById}
                   />
-                ) : selfProfile === 'owner' ? (
-                  <OwnerProfile currentUser={currentUser} />
+                ) : selfProfile === 'account' ? (
+                  <AccountProfile
+                    currentUser={currentUser}
+                    onEditProfile={() => setEditingProfile(true)}
+                  />
                 ) : deniedFallback()
               } />
 
@@ -1343,7 +1406,7 @@ function AppShell({ toasts, addToast, removeToast }) {
             <button
               key={id + label}
               className="mobilenav-item"
-              aria-current={activeTab === id ? 'page' : undefined}
+              aria-current={(RAIL_TAB[activeTab] ?? activeTab) === id ? 'page' : undefined}
               onClick={() => { setViewingProfileState(null); navigate(path); }}
             >
               <Icon size={19} strokeWidth={2} />
@@ -1394,24 +1457,18 @@ function AppShell({ toasts, addToast, removeToast }) {
               * would be furniture.
               */}
             <div className="mobile-more-menu">
+              {/**
+                * The SECONDARY nav entries — which include Profile — and then
+                * the account actions.
+                *
+                * There is deliberately no "Edit Profile" button here any more,
+                * and no Profile TAB in the bar below either. Profile is reached
+                * from this sheet, which is the account menu on a phone, and
+                * editing is a button on the profile page itself. A second
+                * persistent tab for something you visit occasionally is exactly
+                * the clutter the bar is scrolled rather than sliced to avoid.
+                */}
               {moreItems.map(renderMoreItem)}
-              {/* Only for someone whose own profile page has no edit button of
-                  its own — the volunteer profile carries one, so offering a
-                  second here would be a duplicate affordance. Derived from the
-                  same SELF_PROFILE cascade that decides the route, so the two
-                  cannot drift apart. */}
-              {selfProfile !== 'volunteer' && (
-                <button
-                  className="mobile-more-btn"
-                  onClick={() => {
-                    setShowMobileMore(false);
-                    setEditingProfile(true);
-                  }}
-                >
-                  <UserCog size={20} />
-                  <span>Edit Profile</span>
-                </button>
-              )}
 
               <button
                 className="mobile-more-btn"

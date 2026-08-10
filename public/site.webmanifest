@@ -1,0 +1,24 @@
+{
+  "name": "WeVolunteer",
+  "short_name": "WeVolunteer",
+  "description": "Volunteer scheduling and service-hour tracking for schools.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f6b45",
+  "theme_color": "#0f6b45",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "maskable"
+    }
+  ]
+}

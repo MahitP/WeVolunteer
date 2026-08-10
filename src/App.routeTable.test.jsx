@@ -221,7 +221,17 @@ describe('authenticated route table', () => {
     expect(await screen.findByTestId('browse')).toBeInTheDocument();
   });
 
-  it('/profile is per role, and admin is redirected', async () => {
+  /**
+   * `/profile` is per role, and every role now HAS one.
+   *
+   * An administrator used to reach a 403 here: `SELF_PROFILE` resolved
+   * `event.moderate` to 'denied', on the accurate grounds that no profile page
+   * had ever been built for the role. That stopped being tolerable when the
+   * account menu started offering "Profile" — the entry every signed-in person
+   * opens to find their own account — so the generalized `AccountProfile` now
+   * serves the roles that have no record-based view of their own.
+   */
+  it('/profile is per role, and every role gets one', async () => {
     signedInAs(USER('student'));
     const a = renderAt('/profile');
     expect(await screen.findByTestId('vol-profile')).toBeInTheDocument();
@@ -232,11 +242,13 @@ describe('authenticated route table', () => {
     expect(await screen.findByTestId('org-profile')).toBeInTheDocument();
     b.unmount();
 
-    // admin has no profile view — SELF_PROFILE marks it 'denied', so this is a
-    // capability refusal and now says so instead of bouncing.
     signedInAs(USER('admin'));
-    renderAt('/profile');
-    await findErrorKind('403');
+    const c = renderAt('/profile');
+    expect(await screen.findByRole('button', { name: /edit profile/i })).toBeInTheDocument();
+    /* And not either record-based view, whose endpoints filter by role in SQL. */
+    expect(screen.queryByTestId('vol-profile')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('org-profile')).not.toBeInTheDocument();
+    c.unmount();
   });
 
   it('/events/:id/edit redirects to the event on browse', async () => {

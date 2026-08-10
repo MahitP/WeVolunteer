@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CalendarClock, MapPin, Mail, Globe, Lock, ShieldCheck, Phone, ShieldAlert, ArrowLeft, Award } from 'lucide-react';
+import { CalendarClock, MapPin, Mail, Globe, Lock, ShieldCheck, Phone, ShieldAlert, ArrowLeft, Award, Pencil } from 'lucide-react';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import { api } from '../utils/api';
@@ -12,8 +12,13 @@ import { DateChip } from '../components/Seats';
  * Every figure here is evidence of a track record: how many events this person
  * has actually run, how many volunteers they worked with, and how many hours
  * they have credited. Verification status is stated plainly either way.
+ *
+ * `onEditProfile` is supplied only when this is the organizer's OWN profile —
+ * `/profile` passes it, the overlay opened from an event does not. It is what
+ * replaced "Edit Profile" in the account menu: viewing comes first, and the way
+ * to change a page is a button on the page it changes.
  */
-export default function OrganizerProfile({ userId, onBack, onViewEvent }) {
+export default function OrganizerProfile({ userId, onBack, onEditProfile, onViewEvent }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -84,12 +89,19 @@ export default function OrganizerProfile({ userId, onBack, onViewEvent }) {
           </span>
 
           <div style={{ flex: 1, minWidth: 200 }}>
-            <div className="row row-wrap" style={{ gap: 'var(--s2)' }}>
-              <h1 style={{ fontSize: '1.375rem' }}>{organizer.name}</h1>
-              {organizer.verified ? (
-                <span className="tag tag-ok"><ShieldCheck size={11} /> Verified organizer</span>
-              ) : (
-                <span className="tag tag-warn"><ShieldAlert size={11} /> Not yet verified</span>
+            <div className="row-between row-wrap" style={{ gap: 'var(--s2)' }}>
+              <div className="row row-wrap" style={{ gap: 'var(--s2)' }}>
+                <h1 style={{ fontSize: '1.375rem' }}>{organizer.name}</h1>
+                {organizer.verified ? (
+                  <span className="tag tag-ok"><ShieldCheck size={11} /> Verified organizer</span>
+                ) : (
+                  <span className="tag tag-warn"><ShieldAlert size={11} /> Not yet verified</span>
+                )}
+              </div>
+              {onEditProfile && (
+                <button type="button" className="btn btn-secondary btn-sm" onClick={onEditProfile}>
+                  <Pencil size={14} aria-hidden="true" /> Edit profile
+                </button>
               )}
             </div>
 

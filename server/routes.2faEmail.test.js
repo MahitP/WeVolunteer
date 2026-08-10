@@ -143,12 +143,37 @@ describe('POST /api/auth/login-2fa/email/send', () => {
     expect(row.code_hash).not.toMatch(/^\d{6}$/);
   });
 
-  it('refuses an account that is not enrolled in email 2FA', async () => {
+  /**
+   * Email is a fallback for an account that already has a second factor, even
+   * when nobody separately switched "email 2FA" on.
+   *
+   * This test previously asserted the opposite. The product rule changed
+   * deliberately in v1.3.1: email is the thing a person reaches for when their
+   * authenticator is gone, and requiring them to have pre-enabled it is
+   * requiring foresight exactly where they have none left. The gate that still
+   * matters — a CONFIRMED address — is asserted immediately below, and is what
+   * stops a code going somewhere nobody has proved they can read.
+   *
+   * It does not widen who can sign in: delivery goes to the address on the
+   * account, which could already reset the password.
+   */
+  it('offers email to an authenticator account with a confirmed address', async () => {
     const preauth = await beginLogin();
-    db.prepare('UPDATE users SET tfa_email_enabled = 0, tfa_enabled = 1 WHERE email = ?').run(EMAIL);
+    db.prepare('UPDATE users SET tfa_email_enabled = 0, tfa_enabled = 1, email_verified = 1 WHERE email = ?')
+      .run(EMAIL);
+
+    const res = await sendCode(preauth);
+    expect(res.status).toBe(200);
+    expect(liveCodes()).toHaveLength(1);
+  });
+
+  it('refuses an account with no second factor at all', async () => {
+    const preauth = await beginLogin();
+    db.prepare('UPDATE users SET tfa_email_enabled = 0, tfa_enabled = 0 WHERE email = ?').run(EMAIL);
 
     const res = await sendCode(preauth);
     expect(res.status).toBe(400);
+    expect(res.body.code).toBe('method_unavailable');
     expect(liveCodes()).toHaveLength(0);
   });
 

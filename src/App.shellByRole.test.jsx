@@ -56,9 +56,24 @@ vi.mock('./views/CertificateVerification', () => stub('cert'));
 vi.mock('./components/ThemeToggle', () => ({ default: () => <div data-testid="theme" /> }));
 vi.mock('./components/NotificationsBell', () => ({ default: () => <div data-testid="bell" /> }));
 
+/**
+ * `distinction` is included because the server always sends it.
+ *
+ * `formatUserResponse` derives it from `users.role` on every `/api/auth/me`
+ * (see `distinctionFor` in server/profileSerializer.js), so a fixture that
+ * carried a role WITHOUT it would be a shape the server cannot produce — and the
+ * shell would be tested against a payload that does not exist. Derived here from
+ * the same role for the same reason, rather than pinned per test.
+ */
+const DISTINCTION = {
+  super_admin: { kind: 'owner', label: 'Platform owner', blurb: 'Runs WeVolunteer for the district.' },
+  partner: { kind: 'partner', label: 'Community partner', blurb: 'An outside organization that works with WeVolunteer.' },
+};
+
 const USER = (role, extra = {}) => ({
   id: `${role}-1`, name: 'Test Person', email: 't@e.org', username: 't', role,
-  verified: true, emailVerified: true, hasPassword: true, avatar: '🧑', skills: [], ...extra
+  verified: true, emailVerified: true, hasPassword: true, avatar: '🧑', skills: [],
+  distinction: DISTINCTION[role] ?? null, highlights: [], ...extra
 });
 
 function signedInAs(user) {
@@ -135,8 +150,8 @@ describe('navigation, per role', () => {
    * back unnoticed.
    */
   it.each([
-    ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Find people', 'Notifications', 'My profile']],
-    ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Find people', 'Notifications', 'My profile']],
+    ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Profile']],
+    ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Profile']],
     /**
      * Admin GAINED `Messages`, and this pin was updated deliberately rather than
      * relaxed.
@@ -168,7 +183,7 @@ describe('navigation, per role', () => {
      * This list is exact rather than a `toContain`, so the entry cannot return
      * unnoticed — which is exactly how it got here the first time.
      */
-    ['admin', ['Dashboard', 'Opportunities', 'Messages', 'Admin', 'Find people', 'Notifications']]
+    ['admin', ['Dashboard', 'Opportunities', 'Messages', 'Admin', 'Notifications', 'Profile']]
   ])('%s nav is what its capabilities justify', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
   });
@@ -183,8 +198,7 @@ describe('navigation, per role', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
       /* primary */ 'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin',
-      /* secondary, v1.3 */ 'Find people',
-      /* secondary */ 'Notifications', 'My profile'
+      /* secondary */ 'Notifications', 'Profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
     expect(items.length).toBeGreaterThan(0);
@@ -235,7 +249,13 @@ describe('navigation, per role', () => {
     // audience the deleted public impact page served. `analytics.public` is still
     // registered and still reads nothing, which is where a figure chosen FOR a
     // partner would go.
-    expect(navItemsFor(USER('partner')).map(n => n.label)).toEqual(['Opportunities']);
+    //
+    // `Profile` IS here as of v1.3.1. A partner used to have no self-profile view
+    // at all — `SELF_PROFILE` matched nothing and `/profile` answered 403 — which
+    // stopped being tolerable when the account menu started offering Profile to
+    // everybody. It resolves to the generalized account page, which is built from
+    // `/api/auth/me` and so needs no `directory.read`.
+    expect(navItemsFor(USER('partner')).map(n => n.label)).toEqual(['Opportunities', 'Profile']);
   });
 
   /**
@@ -266,7 +286,7 @@ describe('navigation, per role', () => {
        under an "Administration" heading of its own. */
     expect(sidebarLabels()).toEqual([
       'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin',
-      'Find people', 'Notifications', 'My profile'
+      'Notifications', 'Profile'
     ]);
   });
 
@@ -275,7 +295,7 @@ describe('navigation, per role', () => {
     renderAt('/');
     await screen.findByTestId('admin-dash');
     expect(sidebarLabels()).toEqual([
-      'Dashboard', 'Opportunities', 'Messages', 'Admin', 'Find people', 'Notifications',
+      'Dashboard', 'Opportunities', 'Messages', 'Admin', 'Notifications', 'Profile',
     ]);
   });
 
@@ -391,21 +411,59 @@ describe('/profile, per role', () => {
    * A page, not a redirect loop — which is what `denied` gave the platform owner
    * before, and not the empty state that replaced it either.
    *
-   * It is deliberately NOT one of the two real profile views: both endpoints
-   * filter by role in SQL (`role = 'student'`, `role IN ('organizer','admin')`),
-   * so either would render a 404 dressed as a profile for a super_admin.
-   * `OwnerProfile` is built from `/api/auth/me`, which the shell already holds,
-   * so it needs no endpoint and no widening of the two that exist.
+   * It is deliberately NOT one of the two role-specific profile views: both of
+   * their endpoints filter by role in SQL (`role = 'student'`,
+   * `role IN ('organizer','admin')`), so either would render a 404 dressed as a
+   * profile for a super_admin. `AccountProfile` is built from `/api/auth/me`,
+   * which the shell already holds, so it needs no endpoint and no widening of
+   * the two that exist — and that is also what makes it work for `partner`,
+   * which deliberately holds no `directory.read`.
    */
   it('super_admin gets a real page instead of being bounced to `/`', async () => {
     signedInAs(USER('super_admin'));
     renderAt('/profile');
-    expect(await screen.findByText(/This account administers WeVolunteer/i)).toBeInTheDocument();
-    expect(screen.getByText(/Platform owner/i)).toBeInTheDocument();
+    /* The distinguished presentation, derived from role and from nothing else —
+       no name is compared anywhere in it. */
+    /* Twice, deliberately: the pill beside the name and the heading of the
+       distinguished panel. `getAllByText` rather than a narrower query, because
+       the assertion is that the presentation rendered at all. */
+    expect(await screen.findAllByText(/Platform owner/i)).not.toHaveLength(0);
+    expect(screen.getByRole('button', { name: /edit profile/i })).toBeInTheDocument();
     expect(screen.queryByTestId('admin-dash')).not.toBeInTheDocument();
     /* And not either of the record-based views, which would 404 for this role. */
     expect(screen.queryByTestId('org-profile')).not.toBeInTheDocument();
     expect(screen.queryByTestId('vol-profile')).not.toBeInTheDocument();
+  });
+
+  /**
+   * The role that had no profile at all, and the reason it matters now.
+   *
+   * `partner` matched nothing in `SELF_PROFILE` and fell through to `denied`, so
+   * `/profile` answered 403. That was survivable while the only route to the
+   * page was a rail entry; the account menu now says "Profile", and a 403 from
+   * your own account is not an answer.
+   */
+  it('partner gets the generalized account profile, not a refusal', async () => {
+    signedInAs(USER('partner'));
+    renderAt('/profile');
+    expect(await screen.findAllByText(/Community partner/i)).not.toHaveLength(0);
+    expect(screen.queryByTestId('vol-profile')).not.toBeInTheDocument();
+  });
+
+  /**
+   * An administrator's profile, for the same reason.
+   *
+   * `event.moderate` resolved to `denied` too — the comment where it did said
+   * "no profile view has ever existed" — and one does now.
+   */
+  it('admin gets the generalized account profile', async () => {
+    signedInAs(USER('admin'));
+    renderAt('/profile');
+    expect(await screen.findByRole('button', { name: /edit profile/i })).toBeInTheDocument();
+    /* No distinguished banner: an administrator is staff, not the platform and
+       not an outside organization. */
+    expect(screen.queryAllByText(/Platform owner/i)).toHaveLength(0);
+    expect(screen.queryAllByText(/Community partner/i)).toHaveLength(0);
   });
 });
 
@@ -507,7 +565,7 @@ describe('role labels', () => {
     /* The sheet still holds the secondary destinations — "not in the overflow"
        must not have been achieved by dropping them from the shell entirely. */
     expect(sheet.getByText('Notifications')).toBeInTheDocument();
-    expect(sheet.getByText('My profile')).toBeInTheDocument();
+    expect(sheet.getByText('Profile')).toBeInTheDocument();
   });
 
   it('the mobile sheet calls super_admin the platform administrator, not a volunteer', async () => {

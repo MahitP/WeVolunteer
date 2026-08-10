@@ -805,9 +805,32 @@ router.post('/api/auth/login-2fa', async (req, res) => {
       return res.status(401).json({ error: 'Authentication failed.' });
     }
 
+    /**
+     * The two submitted values are normalised to strings ONCE, here.
+     *
+     * `code.trim()` was called directly on the raw body value in the email and
+     * recovery branches, so `{"method":"recovery","code":123456}` threw
+     * `code.trim is not a function` and answered 500 — an unauthenticated-ish
+     * crash (it needs only a pre-auth grant) that fired BEFORE the failure
+     * counter was bumped, so it was not rate-limited either. A wrong TYPE is a
+     * malformed request, and malformed requests are 400s.
+     */
+    const badField = (v, name) => (v !== undefined && v !== null && typeof v !== 'string')
+      ? name : null;
+    const wrongType = badField(token, 'token') || badField(code, 'code');
+    if (wrongType) {
+      return res.status(400).json({
+        error: 'That verification code could not be read. Please retype it.',
+        code: 'malformed_code',
+        field: wrongType,
+      });
+    }
+    const codeValue = typeof code === 'string' ? code : null;
+    const tokenValue = typeof token === 'string' ? token : null;
+
     let isValid = false;
     let usedRecoveryCodeId = null;
-    const effectiveMethod = method || (token ? 'totp' : (code ? 'recovery' : null));
+    const effectiveMethod = method || (tokenValue ? 'totp' : (codeValue ? 'recovery' : null));
 
     /**
      * The method has to be one this ACCOUNT holds, not merely one the platform
@@ -869,8 +892,31 @@ router.post('/api/auth/login-2fa', async (req, res) => {
          accepted and refuses one already spent, so an intercepted code cannot be
          replayed inside its own window to mint a second session. See
          server/totpReplay.js. */
-      isValid = verifyTotpOnce(db, userRow, token);
-    } else if (effectiveMethod === 'email' && code) {
+      /**
+       * A STORAGE failure here is reported as its own condition, not as a 500.
+       *
+       * `verifyTotpOnce` records the accepted time step so a code cannot be
+       * replayed, and that write used to be unguarded — on a database whose
+       * schema was behind (no `tfa_last_counter`), a *correct* code threw and
+       * became "Internal server error during 2FA login" while a *wrong* one
+       * answered a clean 401. Right code fails, wrong code works-as-expected is
+       * the most confusing failure this flow can present, and it is exactly what
+       * was reported.
+       *
+       * The replay guard is not silently skipped: `verifyTotpOnce` now reports
+       * the distinction, and this refuses the sign-in rather than completing one
+       * it cannot make single-use. See server/totpReplay.js.
+       */
+      const totpResult = verifyTotpOnce(db, userRow, tokenValue);
+      if (totpResult === 'unavailable') {
+        return res.status(503).json({
+          error: 'Verification is temporarily unavailable. Please try again, or use a recovery code.',
+          code: 'verification_unavailable',
+          availableMethods: offered,
+        });
+      }
+      isValid = totpResult === true;
+    } else if (effectiveMethod === 'email' && codeValue) {
       // Find valid codes for the user. We must bcrypt.compare each one.
       /**
        * The expiry is bound as an ISO string, not compared against
@@ -901,7 +947,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
        */
       let matched = null;
       for (const emailCode of validEmailCodes) {
-        if (await bcrypt.compare(code.trim(), emailCode.code_hash)) {
+        if (await bcrypt.compare(codeValue.trim(), emailCode.code_hash)) {
           matched = emailCode;
           break;
         }
@@ -915,7 +961,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
           db.prepare('UPDATE tfa_email_codes SET attempts = attempts + 1 WHERE id = ?').run(emailCode.id);
         }
       }
-    } else if (effectiveMethod === 'recovery' && code) {
+    } else if (effectiveMethod === 'recovery' && codeValue) {
       // Find all recovery codes for the user. We must bcrypt.compare each one.
       const recoveryCodes = db.prepare('SELECT id, code_hash FROM recovery_codes WHERE user_id = ?').all(payload.id);
       
@@ -928,7 +974,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
        * process, not just the one guessing.
        */
       for (const rc of recoveryCodes) {
-        if (await bcrypt.compare(code.trim().toUpperCase(), rc.code_hash)) {
+        if (await bcrypt.compare(codeValue.trim().toUpperCase(), rc.code_hash)) {
           isValid = true;
           usedRecoveryCodeId = rc.id;
           db.prepare('DELETE FROM recovery_codes WHERE id = ?').run(rc.id);
@@ -991,7 +1037,16 @@ router.post('/api/auth/login-2fa', async (req, res) => {
   }
 });
 
+/**
+ * Send a sign-in code to the address on the account.
+ *
+ * The whole body is inside a try/catch. It was not: it awaits a bcrypt hash, a
+ * dynamic import and several writes, and under Express 4 a rejection there is an
+ * unhandled rejection that leaves the request hanging rather than answering —
+ * which the user experiences as a Send button that never comes back.
+ */
 router.post('/api/auth/login-2fa/email/send', async (req, res) => {
+ try {
   const preauthToken = req.cookies.wev_preauth;
   if (!preauthToken) return res.status(401).json({ error: 'Session expired. Please log in again.' });
   
@@ -1003,9 +1058,22 @@ router.post('/api/auth/login-2fa/email/send', async (req, res) => {
     return res.status(401).json({ error: 'Session expired. Please log in again.' });
   }
 
-  const userRow = db.prepare('SELECT id, email, email_verified, tfa_email_enabled FROM users WHERE id = ?').get(payload.id);
-  if (!userRow || !userRow.tfa_email_enabled || !userRow.email_verified) {
-    return res.status(400).json({ error: 'Email verification is not available for this account.' });
+  /**
+   * Gated on `enabledSecondFactors`, not on `tfa_email_enabled` directly.
+   *
+   * The two used to disagree — the list said email was available whenever the
+   * flag was set, this route additionally demanded a confirmed address — so an
+   * account with an unconfirmed address was offered a method that answered 400
+   * the moment it was used. One derivation now answers the question for the
+   * screen that offers the choice AND for the route that honours it.
+   */
+  const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
+  if (!userRow || !enabledSecondFactors(userRow).includes('email')) {
+    return res.status(400).json({
+      error: 'Email codes are not available for this account. Use your authenticator app or a recovery code.',
+      code: 'method_unavailable',
+      availableMethods: userRow ? enabledSecondFactors(userRow) : [],
+    });
   }
 
   const recent = db.prepare(
@@ -1079,6 +1147,13 @@ router.post('/api/auth/login-2fa/email/send', async (req, res) => {
   }
 
   res.json({ sent: true, maskedEmail: masked });
+ } catch (error) {
+   console.error('2FA email send error:', error);
+   res.status(500).json({
+     error: 'We could not send your code right now. Please try again, or use a recovery code.',
+     code: 'send_failed',
+   });
+ }
 });
 
 /**

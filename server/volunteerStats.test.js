@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-let dir, db, volunteerStats, attendanceRecordsFor, lastVolunteeredAt;
+let dir, db, volunteerStats, attendanceRecordsFor, lastVolunteeredAt, externalHoursSummary;
 
 const PAST = '2026-01-10T12:00:00.000Z';
 const PAST_END = '2026-01-10T16:00:00.000Z';
@@ -40,8 +40,10 @@ function schema(handle) {
       event_id TEXT, slot_id TEXT, user_id TEXT, present INTEGER, hours_awarded REAL,
       PRIMARY KEY (slot_id, user_id)
     );
+    /* No status column: an external entry is self-reported and there is nothing
+       else it can be. Mirrors migration 032's rebuild of the real table. */
     CREATE TABLE external_hours (
-      id TEXT PRIMARY KEY, user_id TEXT, occurred_on TEXT, hours REAL, status TEXT
+      id TEXT PRIMARY KEY, user_id TEXT, occurred_on TEXT, hours REAL
     );
   `);
   handle.prepare('INSERT INTO users (id, name) VALUES (?, ?)').run('u1', 'Volunteer');
@@ -67,7 +69,7 @@ function scenario(handle, {
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), 'wev-stats-'));
-  ({ volunteerStats, attendanceRecordsFor, lastVolunteeredAt } = await import('./volunteerStats.js'));
+  ({ volunteerStats, attendanceRecordsFor, lastVolunteeredAt, externalHoursSummary } = await import('./volunteerStats.js'));
 });
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -218,11 +220,11 @@ describe('credited hours', () => {
    * because the Auto Select curve rewards FEWER hours, could also sabotage a
    * rival's odds by inflating theirs.
    */
-  it('never includes external hours, verified or not', () => {
-    db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours, status) VALUES (?, ?, ?, ?, ?)')
-      .run('x1', 'u1', '2026-03-01', 40, 'verified');
-    db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours, status) VALUES (?, ?, ?, ?, ?)')
-      .run('x2', 'u1', '2026-03-02', 900, 'self_reported');
+  it('never includes external hours', () => {
+    db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
+      .run('x1', 'u1', '2026-03-01', 40);
+    db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
+      .run('x2', 'u1', '2026-03-02', 900);
     expect(stats().hoursCredited).toBe(0);
   });
 });
@@ -242,17 +244,46 @@ describe('last volunteered', () => {
     expect(lastVolunteeredAt(db, 'u1')).toBeNull();
   });
 
-  it('counts VERIFIED external service', () => {
-    db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours, status) VALUES (?, ?, ?, ?, ?)')
-      .run('x1', 'u1', '2026-05-20', 3, 'verified');
-    expect(lastVolunteeredAt(db, 'u1')).toBe('2026-05-20');
+  /**
+   * Otherwise the date would be one anybody could set to today by typing it —
+   * on a figure that appears on a public profile, where a reader takes it as
+   * evidence that somebody is still active.
+   */
+  it('ignores external service entirely', () => {
+    db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
+      .run('x1', 'u1', '2099-05-20', 3);
+    expect(lastVolunteeredAt(db, 'u1')).toBeNull();
   });
 
-  /* Otherwise the date would be one anybody could set to today by typing it. */
-  it('ignores SELF-REPORTED external service', () => {
-    db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours, status) VALUES (?, ?, ?, ?, ?)')
-      .run('x1', 'u1', '2099-05-20', 3, 'self_reported');
-    expect(lastVolunteeredAt(db, 'u1')).toBeNull();
+  it('is unmoved by an external entry when real attendance exists', () => {
+    scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 1 });
+    db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
+      .run('x1', 'u1', '2099-05-20', 3);
+    expect(lastVolunteeredAt(db, 'u1')).toBe(PAST_END);
+  });
+});
+
+describe('the external summary', () => {
+  it('is zero and empty for somebody with no entries', () => {
+    expect(externalHoursSummary(db, 'u1')).toEqual({ selfReportedHours: 0, entries: 0 });
+  });
+
+  /* One total, because there is one kind of entry. A `verifiedHours` half would
+     be a review workflow reappearing as a field name. */
+  it('totals every entry as self-reported, with no verified split', () => {
+    db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
+      .run('x1', 'u1', '2026-05-20', 3.25);
+    db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
+      .run('x2', 'u1', '2026-05-21', 1.5);
+    const summary = externalHoursSummary(db, 'u1');
+    expect(summary).toEqual({ selfReportedHours: 4.75, entries: 2 });
+    expect(summary).not.toHaveProperty('verifiedHours');
+  });
+
+  it('counts only the volunteer asked about', () => {
+    db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
+      .run('x1', 'u2', '2026-05-20', 8);
+    expect(externalHoursSummary(db, 'u1')).toEqual({ selfReportedHours: 0, entries: 0 });
   });
 });
 

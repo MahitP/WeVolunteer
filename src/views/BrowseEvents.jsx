@@ -1,15 +1,62 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+/**
+ * Opportunities — and, since v1.3.1, the whole of discovery.
+ *
+ * ── Why finding a person happens here ──
+ *
+ * There were two search boxes on two top-level destinations: this one, over
+ * events, and "Find people", over members and organizations. That split asked a
+ * reader to answer a question before they had typed anything — is "NHS" a club,
+ * a person, or the food drive they run? — and the honest answer for a student is
+ * usually "I don't know, that's why I'm searching".
+ *
+ * So there is one field, one query, and a `scope` control that FILTERS the
+ * result rather than choosing where the query goes. "All" runs both searches at
+ * once and shows people and organizations above the opportunity grid, because
+ * they are the short list and the grid is the long one.
+ *
+ * ── What deliberately did not change ──
+ *
+ * The opportunities experience underneath. The category chips, the tag facet,
+ * the advanced filters, the sort, the windowed grid and the paging are all
+ * exactly as they were, and they are hidden only in the two scopes where they
+ * would be filtering nothing. Folding discovery in must not cost a student the
+ * screen they came for.
+ */
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import EventCard from '../components/EventCard';
 import { can } from '../authz';
-import { Search, Sparkles, SlidersHorizontal, CalendarX2, Star, Filter, X, Plus } from 'lucide-react';
+import {
+  Search, Sparkles, SlidersHorizontal, CalendarX2, Star, Filter, X, Plus,
+  Building2, UserRound, MapPin, Users,
+} from 'lucide-react';
 import { formatHours } from '../utils/helpers';
 import { api } from '../utils/api';
 import EmptyState from '../components/common/EmptyState';
 import { useLocationContext } from '../contexts/LocationContext';
 import { useWindowedRows } from '../hooks/useWindowedRows';
+import { useDebounce } from '../hooks/useDebounce';
 import DatePicker from '../components/common/DatePicker';
+import { DistinctionTag } from '../components/profile/Distinction';
 const CATEGORIES = ['All', 'School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
+
+/**
+ * What the reader is looking for.
+ *
+ * A filter over one search, not a router for three. `all` is the default and
+ * runs everything, so the control is something you reach for when the results
+ * are too broad rather than something you must set before you begin.
+ */
+const SCOPES = [
+  { id: 'all', label: 'Everything' },
+  { id: 'events', label: 'Opportunities' },
+  { id: 'people', label: 'People' },
+  { id: 'organizations', label: 'Organizations' },
+];
+
+/** Two characters, matching the server's own `SEARCH_MIN` in directoryRoutes.js. */
+const DIRECTORY_MIN = 2;
 export default function BrowseEvents({
   currentUser,
   applications = [],
@@ -45,6 +92,75 @@ export default function BrowseEvents({
   const { location, requestLocation, loading: locLoading, permissionDenied } = useLocationContext();
 
   const isStudent = currentUser?.role === 'student';
+
+  /* ── Discovery: people and organizations, over the same query ────────────
+     `directory.read` is what the endpoint requires, and a partner deliberately
+     does not hold it (see server/authz.js). Everything below is gated on the
+     capability rather than on the response, so a role that cannot search the
+     directory never sees a control that would answer 403. */
+  const canDiscover = can(currentUser, 'directory.read');
+
+  /**
+   * The scope lives in the URL.
+   *
+   * `/directory` was a shipped path and redirects to `/events?find=people`, so
+   * a bookmark or a link in a group chat still lands on the people results
+   * rather than on an unexplained grid of events. It is also what makes a
+   * search shareable at all.
+   */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const scopeParam = searchParams.get('find');
+  const scope = canDiscover && SCOPES.some(s => s.id === scopeParam) ? scopeParam : 'all';
+  const setScope = (next) => {
+    setSearchParams(prev => {
+      const params = new URLSearchParams(prev);
+      if (next === 'all') params.delete('find');
+      else params.set('find', next);
+      return params;
+    }, { replace: true });
+  };
+
+  const showEvents = scope === 'all' || scope === 'events';
+  const showPeople = canDiscover && (scope === 'all' || scope === 'people');
+  const showOrganizations = canDiscover && (scope === 'all' || scope === 'organizations');
+
+  const [directory, setDirectory] = useState(null);
+  const [directoryLoading, setDirectoryLoading] = useState(false);
+  const directoryAbort = useRef(null);
+
+  /**
+   * Debounced AND aborted, which are two different fixes.
+   *
+   * The debounce stops "volunteer" being nine requests. The abort stops a slow
+   * response for "vol" landing after a fast one for "volunteer" and replacing
+   * newer results with older ones — a correctness problem the debounce narrows
+   * but does not close.
+   */
+  const runDirectory = useCallback((q, kind) => {
+    directoryAbort.current?.abort();
+    if (!canDiscover || kind === 'events' || q.trim().length < DIRECTORY_MIN) {
+      setDirectory(null);
+      setDirectoryLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    directoryAbort.current = controller;
+    setDirectoryLoading(true);
+    const type = kind === 'people' ? 'users' : kind === 'organizations' ? 'organizations' : 'all';
+    api.searchDirectory(q.trim(), { type, signal: controller.signal })
+      .then(res => { setDirectory(res); setDirectoryLoading(false); })
+      .catch(err => {
+        /* An abort is this component cancelling itself, not a failure to report.
+           A real failure leaves the people section absent rather than replacing
+           the opportunity grid with an error — the two searches fail
+           independently and one of them working is still a useful page. */
+        if (err.name === 'AbortError') return;
+        setDirectory(null);
+        setDirectoryLoading(false);
+      });
+  }, [canDiscover]);
+
+  const debouncedDirectory = useDebounce(runDirectory, 250);
 
   /* ── Server-driven results ────────────────────────────────────────────────
      Every filter, the sort and the distance calculation run in SQL. They used
@@ -134,6 +250,30 @@ export default function BrowseEvents({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverFilters]);
 
+  useEffect(() => {
+    debouncedDirectory(query, scope);
+  }, [query, scope, debouncedDirectory]);
+
+  useEffect(() => () => directoryAbort.current?.abort(), []);
+
+  /**
+   * Organizations to browse when nothing has been typed.
+   *
+   * People are deliberately NOT listed this way. An unprompted roster of every
+   * child on the platform is not a thing to render by default, and it is the
+   * whole reason the directory search has a two-character minimum; an
+   * organization is a club that WANTS to be found.
+   */
+  const [browsedOrgs, setBrowsedOrgs] = useState(null);
+  useEffect(() => {
+    if (!canDiscover) return undefined;
+    let cancelled = false;
+    api.fetchOrganizations({ limit: 8 })
+      .then(res => { if (!cancelled) setBrowsedOrgs(res.organizations || []); })
+      .catch(() => { if (!cancelled) setBrowsedOrgs([]); });
+    return () => { cancelled = true; };
+  }, [canDiscover]);
+
   const loadMore = async () => {
     if (nextOffset == null || loadingMore) return;
     const generation = searchGeneration.current;
@@ -190,6 +330,9 @@ export default function BrowseEvents({
      `requiresVerified` has no capability of its own — no capability expresses
      "approved yet" — so it stays a separate flag here exactly as it is in NAV. */
   const canCreate = can(currentUser, 'event.create') && Boolean(currentUser?.verified);
+  /* Same shape, same reasoning: `/organizations/new` enforces both conditions
+     itself, and so does every server route behind it. */
+  const canCreateOrganization = can(currentUser, 'organization.create') && Boolean(currentUser?.verified);
 
   const hasFilters = query || category !== 'All' || !openOnly || showFavoritesOnly || selectedTags.length > 0 || advancedCount > 0;
   const clearFilters = () => {
@@ -235,13 +378,26 @@ export default function BrowseEvents({
       {/* `row-between row-wrap` is the same pair the student summary above uses —
           no new class, because this needs no layout the shell does not already
           have, and an undefined class fails `noDanglingClasses.test.js`. */}
-      {canCreate && <div className="row-between row-wrap">
+      {(canCreate || canCreateOrganization) && <div className="row-between row-wrap">
           <p className="lead">
             {total} opportunit{total === 1 ? 'y' : 'ies'} posted
           </p>
-          <Link to="/events/new" className="btn btn-primary">
-            <Plus size={16} aria-hidden="true" /> Create event
-          </Link>
+          <div className="row row-wrap">
+            {/* "New organization" moved here with the search it belongs beside.
+                It was the header action on the Find people page, and deleting
+                that page without it would have left creating a club reachable
+                from nowhere at all. */}
+            {canCreateOrganization && (
+              <Link to="/organizations/new" className="btn btn-secondary">
+                <Building2 size={16} aria-hidden="true" /> New organization
+              </Link>
+            )}
+            {canCreate && (
+              <Link to="/events/new" className="btn btn-primary">
+                <Plus size={16} aria-hidden="true" /> Create event
+              </Link>
+            )}
+          </div>
         </div>}
 
       {/* Suggestions come before the firehose — they're the shortest path to a
@@ -269,12 +425,180 @@ export default function BrowseEvents({
             <span>{error}</span>
           </div>}
 
-        <div className="toolbar">
-          <div className="input-affix">
-            <Search size={15} />
-            <input type="search" className="input" placeholder="Search events, places, organizers…" value={query} onChange={e => setQuery(e.target.value)} aria-label="Search opportunities" />
+        {/**
+          * One field for everything, with the scope control directly under it.
+          *
+          * The control is `role="tablist"` rather than a `<select>`: there are
+          * four options, they are the primary way to narrow a result, and a
+          * select would hide three of them behind a tap on the surface where
+          * this matters most. Each button reports its own `aria-selected`, and
+          * the live region below announces the counts once rather than per row.
+          */}
+        <div className="discovery">
+          <div className="input-affix discovery-field">
+            <Search size={15} aria-hidden="true" />
+            <input
+              type="search"
+              className="input"
+              placeholder={canDiscover
+                ? 'Search opportunities, people, and organizations…'
+                : 'Search events, places, organizers…'}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              aria-label={canDiscover
+                ? 'Search opportunities, people, and organizations'
+                : 'Search opportunities'}
+            />
           </div>
 
+          {canDiscover && (
+            <div className="tabs discovery-scopes" role="tablist" aria-label="What to search for">
+              {SCOPES.map(s => (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={scope === s.id}
+                  className={scope === s.id ? 'tab tab-active' : 'tab'}
+                  onClick={() => setScope(s.id)}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {canDiscover && (
+          <p className="sr-only" role="status" aria-live="polite">
+            {directoryLoading
+              ? 'Searching people and organizations'
+              : directory
+                ? `${(directory.users?.length ?? 0) + (directory.organizations?.length ?? 0)} people and organizations found`
+                : ''}
+          </p>
+        )}
+
+        {/* ── People and organizations ─────────────────────────────────────
+            Above the grid, because they are the short list and the grid is the
+            long one — and because somebody who typed a person's name has
+            already scrolled past everything else if these come after. */}
+        {showPeople && directory?.users?.length > 0 && (
+          <section className="stack-md discovery-results">
+            <h2 className="section-head">People</h2>
+            <ul className="list directory-list">
+              {directory.users.map(user => (
+                <li key={user.id} className="list-row">
+                  <Link
+                    to={user.username ? `/users/@${user.username}` : `/users/id/${user.id}`}
+                    className="card card-pad card-link directory-row"
+                  >
+                    <span className="avatar directory-avatar" aria-hidden="true">
+                      {user.profilePictureUrl
+                        ? <img src={user.profilePictureUrl} alt="" className="avatar-img" />
+                        : (user.avatar || <UserRound size={18} />)}
+                    </span>
+                    <span className="directory-body">
+                      <span className="directory-name">{user.name}</span>
+                      <span className="muted directory-meta">
+                        {user.username && `@${user.username}`}
+                        {user.location && (
+                          <>
+                            {user.username && ' · '}
+                            <MapPin size={12} aria-hidden="true" /> {user.location}
+                          </>
+                        )}
+                      </span>
+                    </span>
+                    {/* A partner or the platform owner says so, rather than
+                        appearing as an unexplained account among students. */}
+                    {user.distinction
+                      ? <DistinctionTag distinction={user.distinction} />
+                      : <span className="tag tag-brand directory-kind">Member</span>}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {showOrganizations && directory?.organizations?.length > 0 && (
+          <section className="stack-md discovery-results">
+            <h2 className="section-head">Organizations</h2>
+            <ul className="list directory-list">
+              {directory.organizations.map(org => (
+                <li key={org.id} className="list-row">
+                  <Link to={`/organizations/${org.slug}`} className="card card-pad card-link directory-row">
+                    <span className="avatar directory-avatar" aria-hidden="true"><Building2 size={18} /></span>
+                    <span className="directory-body">
+                      <span className="directory-name">{org.name}</span>
+                      <span className="muted directory-meta">
+                        {org.memberCount} {org.memberCount === 1 ? 'member' : 'members'}
+                        {org.eventCount > 0 && ` · ${org.eventCount} ${org.eventCount === 1 ? 'event' : 'events'}`}
+                      </span>
+                    </span>
+                    <span className="tag tag-info directory-kind">Organization</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {/* With nothing typed and the reader looking for organizations, show the
+            ones that exist — otherwise a club is discoverable only by somebody
+            who already knows its name, which is the opposite of a directory.
+            Scoped to that tab rather than shown under "Everything": on the
+            default view this list would sit between the search box and the
+            opportunities, pushing the thing most people came for down the page
+            to answer a question they did not ask. */}
+        {scope === 'organizations' && !directory && !query.trim() && browsedOrgs?.length > 0 && (
+          <section className="stack-md discovery-results">
+            <h2 className="section-head">Organizations to join</h2>
+            <ul className="list directory-list">
+              {browsedOrgs.map(org => (
+                <li key={org.id} className="list-row">
+                  <Link to={`/organizations/${org.slug}`} className="card card-pad card-link directory-row">
+                    <span className="avatar directory-avatar" aria-hidden="true"><Building2 size={18} /></span>
+                    <span className="directory-body">
+                      <span className="directory-name">{org.name}</span>
+                      <span className="muted directory-meta">
+                        {org.memberCount} {org.memberCount === 1 ? 'member' : 'members'}
+                      </span>
+                    </span>
+                    <span className="tag tag-info directory-kind">Organization</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {/* A scope with nothing in it says so, rather than leaving the reader on
+            an opportunity grid wondering whether their search ran. */}
+        {(scope === 'people' || scope === 'organizations') && !directoryLoading && (
+          (query.trim().length < DIRECTORY_MIN
+            ? (scope === 'people' && (
+              <EmptyState
+                icon={Users}
+                title="Search for someone"
+                message="Type at least two characters of a name or a username."
+              />
+            ))
+            : !directory?.users?.length && !directory?.organizations?.length && (
+              <EmptyState
+                icon={Search}
+                title="Nothing matched"
+                message={`No ${scope === 'people' ? 'people' : 'organizations'} matched “${query.trim()}”. Check the spelling, or try part of a name.`}
+              />
+            ))
+        )}
+
+        {/* Everything below is the opportunities experience, unchanged. It is
+            hidden only in the two scopes where every one of these controls
+            would be filtering a list that is not on screen. */}
+        {showEvents && (<>
+        <div className="toolbar">
           <label className="row small s-a19c85">
             <SlidersHorizontal size={14} className="s-c4c3e3" />
             <span className="dim nowrap">Sort</span>
@@ -471,6 +795,7 @@ export default function BrowseEvents({
                 </button>
               </div>}
           </>}
+        </>)}
       </section>
     </div>;
 }

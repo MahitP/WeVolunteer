@@ -59,7 +59,12 @@ import { verifyTotpStep } from './cryptoUtils.js';
  * @param {object} db      an open database handle
  * @param {object} user    a row carrying at least `id`, `tfa_secret`, `tfa_last_counter`
  * @param {string} token   the six digits the caller supplied
- * @returns {boolean}      true only if the code is valid AND not previously used
+ * @returns {true|false|'unavailable'}
+ *   `true`  — valid and not previously used, and the high-water mark is stored.
+ *   `false` — the code is wrong, or has already been spent.
+ *   `'unavailable'` — the code looked right but the high-water mark could NOT be
+ *   stored, so single-use cannot be guaranteed. The caller must refuse the
+ *   sign-in and say so; see the note on the write below.
  */
 export function verifyTotpOnce(db, user, token) {
   const result = verifyTotpStep(token, user?.tfa_secret);
@@ -77,6 +82,44 @@ export function verifyTotpOnce(db, user, token) {
   const last = user.tfa_last_counter;
   if (last != null && result.counter <= Number(last)) return false;
 
-  db.prepare('UPDATE users SET tfa_last_counter = ? WHERE id = ?').run(result.counter, user.id);
+  /**
+   * The write is guarded, and a failure is neither swallowed nor allowed to
+   * become a 500.
+   *
+   * This statement is the ONLY write in the whole TOTP login path, which gave
+   * the failure a memorable shape: on a database missing `tfa_last_counter`
+   * (schema behind migration 029), a *correct* code threw here and surfaced as
+   * "Internal server error during 2FA login", while a *wrong* code answered a
+   * clean 401. Right code fails, wrong code behaves — reported as "Authenticator
+   * 2FA produces Internal Server Error".
+   *
+   * Three behaviours were possible and only one is defensible:
+   *
+   *   - Let it throw (what it did). A user with a correct code and a healthy
+   *     authenticator cannot sign in and is told nothing useful.
+   *   - Catch and return true. The sign-in completes, but the accepted step was
+   *     never recorded, so the same intercepted code can be replayed for the
+   *     rest of its window. That is silently turning off the control this file
+   *     exists to provide, on exactly the databases least likely to be watched.
+   *   - Catch and report that verification is unavailable. The sign-in is
+   *     refused, the operator gets a loud log line naming the cause, and the
+   *     user is pointed at their recovery codes — which is what recovery codes
+   *     are for.
+   *
+   * The third. Failing closed on a control that cannot be enforced is the same
+   * call `reauth.js` makes about an unspendable grant.
+   */
+  try {
+    db.prepare('UPDATE users SET tfa_last_counter = ? WHERE id = ?').run(result.counter, user.id);
+  } catch (err) {
+    console.error(
+      '[2fa] Could not record the TOTP replay high-water mark; refusing the sign-in '
+      + 'rather than accepting a code that cannot be made single-use. '
+      + 'If this names a missing column, the database schema is behind — run the server '
+      + 'once through initDatabase() to apply pending migrations.',
+      err
+    );
+    return 'unavailable';
+  }
   return true;
 }

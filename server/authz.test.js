@@ -43,9 +43,9 @@ describe('can()', () => {
   });
 
   it('honours a per-user grant for a capability the role lacks', () => {
-    const withGrant = { ...p('organizer'), grants: ['service.verify.external'] };
-    expect(can(withGrant, 'service.verify.external')).toBe(true);
-    expect(can(p('organizer'), 'service.verify.external')).toBe(false);  // without the grant
+    const withGrant = { ...p('organizer'), grants: ['report.evidence.read'] };
+    expect(can(withGrant, 'report.evidence.read')).toBe(true);
+    expect(can(p('organizer'), 'report.evidence.read')).toBe(false);  // without the grant
   });
 
   /**

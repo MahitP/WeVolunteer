@@ -51,6 +51,20 @@ function offenders() {
       if (entry.name.endsWith('.test.js') || entry.name.endsWith('.test.jsx')) continue;
       // Skip brand colors in OAuth buttons
       if (full.includes('components/auth/') || full.includes('components\\auth\\')) continue;
+      /**
+       * `utils/recoveryCodeExport.js` draws a PNG the user saves to a camera
+       * roll.
+       *
+       * It is excluded for the same class of reason the QR quiet zone in
+       * TwoFactorSetup is a literal `white`: the colours are a function of the
+       * ARTEFACT, not of the theme. A recovery-code image is opened later in a
+       * photo viewer that knows nothing about `data-theme`, and reading the
+       * app's tokens at draw time would produce dark grey on darker grey for
+       * every dark-mode user — unreadable exactly when it is needed, and
+       * unprintable. The file draws to a canvas, so there is no stylesheet for
+       * these to live in either.
+       */
+      if (full.includes('utils/recoveryCodeExport.js') || full.includes('utils\\recoveryCodeExport.js')) continue;
 
       const text = fs.readFileSync(full, 'utf8');
       text.split('\n').forEach((line, i) => {

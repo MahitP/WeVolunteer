@@ -29,11 +29,11 @@ const Welcome = React.lazy(() => import('../views/Welcome'));
 const Signup = React.lazy(() => import('../views/Signup'));
 const BrowseEvents = React.lazy(() => import('../views/BrowseEvents'));
 const CreateEvent = React.lazy(() => import('../views/CreateEvent'));
-const Directory = React.lazy(() => import('../views/Directory'));
 const PublicProfile = React.lazy(() => import('../views/PublicProfile'));
 const OrganizationPage = React.lazy(() => import('../views/OrganizationPage'));
 const OrganizationForm = React.lazy(() => import('../views/OrganizationForm'));
 const LogExternalHours = React.lazy(() => import('../views/LogExternalHours'));
+const LoggedHours = React.lazy(() => import('../views/LoggedHours'));
 const VolunteerDashboard = React.lazy(() => import('../views/VolunteerDashboard'));
 const OrganizerDashboard = React.lazy(() => import('../views/OrganizerDashboard'));
 const AdminDashboard = React.lazy(() => import('../views/AdminDashboard'));
@@ -137,14 +137,41 @@ export const APP_ROUTES = [
    * and a signed-out, crawlable index of minors by name and area is not
    * something the word should be allowed to smuggle in.
    */
-  { path: '/directory', element: <Directory />, requiredCap: 'directory.read' },
+  /**
+   * `/directory` is a REDIRECT now, not a page.
+   *
+   * Finding people and organizations was its own top-level destination, beside
+   * Opportunities, which asked a student to decide which kind of thing they were
+   * looking for before they had typed anything. Discovery now lives on
+   * Opportunities as one search across all three — see the `scope` control in
+   * BrowseEvents.jsx.
+   *
+   * Kept as a declared redirect rather than deleted because the path was
+   * shipped: it is in browser histories, and PublicProfile linked to it. The
+   * capability is unchanged, so somebody who could not reach the directory still
+   * cannot reach what it redirects to.
+   */
+  { path: '/directory', element: <Navigate to="/events?find=people" replace />, requiredCap: 'directory.read' },
   { path: '/users/id/:id', element: <PublicProfile />, requiredCap: 'directory.read' },
   { path: '/users/:handle', element: <PublicProfile />, requiredCap: 'directory.read' },
   /* Declared BEFORE `/organizations/:key`, so "new" is never matched as a slug. */
   { path: '/organizations/new', element: <OrganizationForm />, requiredCap: 'organization.create', requiresVerified: true },
   { path: '/organizations/:key/edit', element: <OrganizationForm />, requiredCap: 'organization.manage.own' },
   { path: '/organizations/:key', element: <OrganizationPage />, requiredCap: 'directory.read' },
+  /* Declared BEFORE `/hours`, so "external" is never matched as part of the log
+     page — React Router ranks static segments first, but the ordering is stated
+     rather than relied upon. */
   { path: '/hours/external', element: <LogExternalHours />, requiredCap: 'portfolio.write', requiresVerified: true },
+  /**
+   * The student's own volunteering history, WeVolunteer and external together.
+   *
+   * `portfolio.write` rather than a capability of its own: it is the same power
+   * — a student's own service record — that `/portfolio` and `/hours/external`
+   * are already gated on, and inventing a third name for it would mean three
+   * things to keep in step. Deliberately NOT `requiresVerified`: reading your
+   * own history is not a thing anybody needs approval for.
+   */
+  { path: '/hours', element: <LoggedHours />, requiredCap: 'portfolio.write' },
   { path: '/settings', element: <Settings /> },
   /**
    * Declared with NO `requiredCap`, deliberately.

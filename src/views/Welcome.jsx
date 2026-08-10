@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { APP_NAME, SCHOOL_NAME, PRIVACY_URL } from '../config';
 import { ArrowRight, Search, CalendarCheck, Award, Lock } from 'lucide-react';
+import BrandMark from '../components/common/BrandMark';
 
 /**
  * What the three things the product actually does are, in the order a student
@@ -46,7 +47,7 @@ export default function Welcome() {
   return (
     <div className="auth">
       <main className="auth-form auth-centered" aria-labelledby="welcome-heading">
-        <span className="welcome-mark" aria-hidden="true">WV</span>
+        <BrandMark size="lg" />
 
         <div className="auth-head" style={{ marginTop: 'var(--s6)' }}>
           <h1 id="welcome-heading" className="auth-title">Volunteering, organized.</h1>

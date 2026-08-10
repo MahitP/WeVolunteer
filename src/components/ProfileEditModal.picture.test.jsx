@@ -250,13 +250,22 @@ describe('removing a picture', () => {
  * corner shows the photograph at the end of this test it did so from a state
  * update alone.
  */
+/**
+ * `ProfileMenu` no longer opens the editor — it navigates to `/profile`, which
+ * is where the Edit profile button lives as of v1.3.1. This shell therefore
+ * drives the second half of the test through a plain button standing in for
+ * that one: what is under test is that the chip re-renders from state when a
+ * picture is saved or removed, and routing to a profile page to press a
+ * different button would test the router instead.
+ */
 function Shell() {
   const [currentUser, setCurrentUser] = useState(USER);
   const [editing, setEditing] = useState(true);
   return (
     <MemoryRouter>
       <div className="sidebar-foot">
-        <ProfileMenu user={currentUser} onEditProfile={() => setEditing(true)} onSignOut={vi.fn()} />
+        <ProfileMenu user={currentUser} onSignOut={vi.fn()} />
+        <button type="button" onClick={() => setEditing(true)}>Edit profile</button>
       </div>
       {editing && (
         <ProfileEditModal
@@ -292,9 +301,8 @@ describe('the bottom-left corner of the shell', () => {
     save();
     await waitFor(() => expect(document.querySelector('.userchip img')).not.toBeNull());
 
-    // Through the menu, the way the user reaches it: open the chip, then Edit.
-    fireEvent.click(document.querySelector('.userchip'));
-    fireEvent.click(screen.getByRole('menuitem', { name: /edit profile/i }));
+    // Reopen the editor the way the profile page does — with a button.
+    fireEvent.click(screen.getByRole('button', { name: /edit profile/i }));
     fireEvent.click(screen.getByRole('button', { name: /^remove$/i }));
     save();
 
