@@ -268,12 +268,15 @@ export function validateProfilePatch(patch) {
   /**
    * The two fields a distinguished profile is written with.
    *
-   * Validated for everybody rather than only for the roles whose profile
-   * renders them. A rule that applies to some accounts is a rule with a role
-   * comparison in it, which is the thing this codebase does not do outside
-   * `authz.js` — and the value is bounded and escaped identically either way, so
-   * there is nothing to gain by refusing it selectively. What decides whether it
-   * is SHOWN is the presentation, in profileSerializer.js.
+   * SHAPE is validated for everybody; whether the account may HOLD one at all is
+   * decided by the route, from `distinctionFor(role)`.
+   *
+   * The split is deliberate. This function answers "is this a well-formed
+   * headline", which does not depend on who is asking, and keeping a role
+   * comparison out of it is the same discipline the rest of the repository
+   * keeps. The route then refuses the write for an account with no distinction —
+   * see the note there for why a student must not have one of these at all
+   * rather than merely have it hidden.
    */
   if (patch.headline !== undefined) {
     if (patch.headline !== null && typeof patch.headline !== 'string') {

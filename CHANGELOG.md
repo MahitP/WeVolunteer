@@ -5,6 +5,38 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] — Unreleased
+
+> **Two-factor authentication changed who can complete it.** Once an account has
+> any second factor, a **confirmed email address is now accepted as one** — even
+> for an account that enrolled an authenticator and never switched email codes
+> on. This is deliberate: email is what somebody reaches for when their
+> authenticator is gone, and requiring them to have pre-enabled it demands
+> foresight exactly where they have none left. It does not widen who can sign in
+> — delivery goes to the address that could already reset the password — but it
+> does mean that **for an authenticator-only account, 2FA no longer resists a
+> compromised school mailbox.** An account that wants a factor independent of
+> its mailbox should rely on its recovery codes, which are unchanged.
+
+### Fixed
+
+- **Authenticator 2FA answered 500 on a CORRECT code** — and a clean 401 on a wrong one, which is the most confusing shape a sign-in failure can take, because every instinct says the code is the problem. The accepted TOTP time step is written to `users.tfa_last_counter` so a code cannot be replayed, and that write was the only statement in the whole TOTP login path: on a database behind migration 029 the column did not exist, the write threw, and the handler's outer catch turned it into a generic 500. A wrong code returns before reaching it. The write is now guarded, and a code that cannot be recorded as spent **refuses the sign-in** — with a named 503 pointing at recovery codes — rather than completing one the platform cannot make single-use. Silently accepting it would have turned off the replay protection on exactly the databases least likely to be watched.
+- **Two more 500s in the same handler** — `code.trim()` ran on the raw request body, so a non-string `code` threw a TypeError, and it did so *before* the failure counter was bumped, so it was not rate-limited either. Both submitted values are normalised once and a wrong type is now a 400. An empty string is a 400 too, rather than a 401 that spends one of the twenty attempts on a request that supplied no code.
+- **`/api/auth/login-2fa/email/send` had no error handling at all** despite awaiting a bcrypt hash, a dynamic import and several writes. Under Express 4 a throw there was an unhandled rejection that left the request hanging — a Send button that never came back.
+- **Email codes were offered to accounts that could not receive them.** `enabledSecondFactors` tested `tfa_email_enabled` alone while the send route also required `email_verified`, so an unconfirmed address was shown the radio and met a 400 on pressing send. One derivation now answers both for the screen that offers a method and for the route that honours it.
+- **A restriction told its subject it existed.** Restriction is invisible to the restricted party by design — that is the whole difference between it and blocking. `GET /api/users/:id/public-profile` stripped the flag, but every *other* handler returning a relationship state sent it raw, so muting somebody who had restricted you made your own Add-friend button disappear. `viewerRelationshipState` is now the only shape a handler may send; `relationshipState` remains for the internal gates that must see the truth.
+- **A profile headline escaped the privacy setting.** `profile_headline` and `profile_highlights` shipped on the public baseline while `bio` sat behind `profile_visibility` — and they are the same kind of thing, free text under the account holder's own name. So a student with a private profile still published one line to every member. They are now furniture of a *distinguished* account: refused outright for an ordinary one, and gated by the privacy setting even if a value reaches the column another way.
+
+### Changed
+
+- **External volunteer hours are tracking only.** The verification apparatus 1.3.0 shipped — a `status` column, an admin review queue, and the `service.verify.external` capability — is removed by migration 032, which rebuilds the table under the six guards ENGINEERING_GUIDE §8.3 requires. It was inferred from the existence of that capability rather than asked for, and the inference was wrong: these are a student's own notes about their own afternoons, and a review queue turns a notebook into an application form. Entries can now be **edited** at any time, because nobody else's judgement is stored on one. Self-reported totals are shown to the account itself and to nobody else, and `lastVolunteeredAt` no longer counts them — a figure nobody checked is not evidence that somebody is still active.
+- **Recovery codes can be saved as a `.txt` or a `.png`**, both generated entirely in the browser from values already on screen. No request is made, no code reaches a URL, and the object URL is revoked after the download starts. The image carries its own white background rather than reading the theme: it is opened later in a photo viewer that knows nothing about `data-theme`, and a dark-mode export would be unreadable exactly when it is needed.
+- **Discovery moved into Opportunities.** "Find people" is gone as a navigation entry; one field with a scope control now searches people, organizations and opportunities together, and `/directory` redirects so existing links still land. The two searches used to live on separate pages and answered the same question.
+- **A Logged hours page**, reached from the Dashboard, showing confirmed WeVolunteer service and self-reported external entries as two clearly separated lists. No navigation entry was added for it.
+- **The account menu is Profile / Notifications / Settings / Sign Out.** Edit profile moved onto the profile page it edits, and is now reachable from a student's own public profile too. On mobile, Profile lives in the existing account sheet rather than a fifth tab.
+- **Owner and partner accounts get a distinguished profile**, derived from `users.role` alone — no username is special-cased, and the leakage suite asserts the name and username are ignored entirely. The treatment is **additive**: the platform's owner is a high-school student who volunteers, so their hours, skills and hobbies render exactly as anybody else's do.
+- **One mark everywhere.** `--brand-mark-bg` / `--brand-mark-ink` are declared once and deliberately not overridden under dark mode, so the in-app badge matches `favicon.svg`, the new web manifest, the Safari mask icon and the header of every transactional email — none of which has a theme this application can read.
+
 ## [1.3.0] — Unreleased
 
 > **The member directory.** Every profile is now discoverable by any signed-in

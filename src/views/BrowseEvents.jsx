@@ -23,8 +23,7 @@
  * screen they came for.
  */
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import EventCard from '../components/EventCard';
 import { can } from '../authz';
 import {
@@ -264,15 +263,24 @@ export default function BrowseEvents({
    * whole reason the directory search has a two-character minimum; an
    * organization is a club that WANTS to be found.
    */
+  /**
+   * Fetched only in the scope that renders it.
+   *
+   * The effect used to run on every mount of this view, and this view is the
+   * landing page a student opens most — so it was one wasted round trip per page
+   * load, platform-wide, for a list only shown under the Organizations scope.
+   * `showOrganizations` already means "this scope displays organizations", so
+   * gating on it keeps the fetch and the render in step by construction.
+   */
   const [browsedOrgs, setBrowsedOrgs] = useState(null);
   useEffect(() => {
-    if (!canDiscover) return undefined;
+    if (!showOrganizations) return undefined;
     let cancelled = false;
     api.fetchOrganizations({ limit: 8 })
       .then(res => { if (!cancelled) setBrowsedOrgs(res.organizations || []); })
       .catch(() => { if (!cancelled) setBrowsedOrgs([]); });
     return () => { cancelled = true; };
-  }, [canDiscover]);
+  }, [showOrganizations]);
 
   const loadMore = async () => {
     if (nextOffset == null || loadingMore) return;

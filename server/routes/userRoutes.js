@@ -17,6 +17,7 @@ import { can } from '../authz.js';
    server/milestones.js for the badge/milestone boundary this sits on. */
 import { buildMilestones } from '../milestones.js';
 import { db, initDatabase } from '../db.js';
+import { distinctionFor } from '../profileSerializer.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
 
@@ -313,6 +314,32 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
     /* The distinguished-profile fields. Written for any account that sends them
        and rendered only where the presentation calls for them — see
        `distinctionFor` in profileSerializer.js. */
+    /**
+     * The headline and highlights belong to a DISTINGUISHED account.
+     *
+     * They are the one-line introduction and the short list under an official
+     * account's name. Refused for everybody else rather than merely hidden,
+     * because a field that stores what it will not show is a field somebody
+     * will later decide to show: the safe version of "a student's headline is
+     * private" is a student having no headline at all. Ordinary accounts have
+     * `bio`, which is the same kind of text and is gated by
+     * `profile_visibility`.
+     *
+     * Derived from `distinctionFor(role)` — the same single source the profile
+     * presentation reads — so this is not a role comparison living in a route.
+     */
+    const writingDistinguishedFields =
+      check.value.headline !== undefined || check.value.highlights !== undefined;
+    if (writingDistinguishedFields) {
+      const self = db.prepare('SELECT role FROM users WHERE id = ?').get(req.user.id);
+      if (!distinctionFor(self?.role)) {
+        return res.status(403).json({
+          error: 'Your account does not have a profile headline. Use "About you" instead.',
+          field: check.value.headline !== undefined ? 'headline' : 'highlights',
+          code: 'not_distinguished',
+        });
+      }
+    }
     if (check.value.headline !== undefined) {
       updates.push('profile_headline = ?'); values.push(check.value.headline || null);
     }

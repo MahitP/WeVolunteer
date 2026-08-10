@@ -438,6 +438,39 @@ describe('the social and organization features', () => {
       expect(JSON.stringify(items)).not.toContain('Soup kitchen');
     });
 
+    /**
+     * Editing is unconditional, and the endpoint has a caller.
+     *
+     * `PATCH /api/external-hours/:id` existed with no UI behind it, so the one
+     * thing a student could not do was correct a wrong date without deleting the
+     * entry and retyping the rest. There is no state in which one of these
+     * becomes uneditable — nobody else's judgement is stored on it, which is the
+     * whole point of the feature being tracking-only.
+     */
+    it('lets the owner correct an entry, at any time', async () => {
+      const res = await srv.call('PATCH', `/api/external-hours/${entryId}`, {
+        occurredOn: '2026-05-03', hours: 4,
+      }, alice);
+      expect(res.status).toBe(200);
+      expect(res.body.entry.occurredOn).toBe('2026-05-03');
+      expect(res.body.entry.hours).toBe(4);
+      /* Still self-reported, because there is no other kind. */
+      expect(res.body.entry.selfReported).toBe(true);
+      expect(res.body.entry).not.toHaveProperty('status');
+    });
+
+    it('validates an edit the same way it validates a new entry', async () => {
+      const future = await srv.call('PATCH', `/api/external-hours/${entryId}`, {
+        occurredOn: '2099-01-01',
+      }, alice);
+      expect(future.status).toBe(400);
+      expect(future.body.field).toBe('occurredOn');
+
+      const tooMany = await srv.call('PATCH', `/api/external-hours/${entryId}`, { hours: 500 }, alice);
+      expect(tooMany.status).toBe(400);
+      expect(tooMany.body.field).toBe('hours');
+    });
+
     it('refuses a future date', async () => {
       const res = await srv.call('POST', '/api/external-hours', {
         organizationName: 'x', activityName: 'y', occurredOn: '2099-01-01', hours: 1,

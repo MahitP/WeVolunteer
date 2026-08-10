@@ -825,8 +825,26 @@ router.post('/api/auth/login-2fa', async (req, res) => {
         field: wrongType,
       });
     }
-    const codeValue = typeof code === 'string' ? code : null;
-    const tokenValue = typeof token === 'string' ? token : null;
+    /**
+     * Empty is malformed, not wrong.
+     *
+     * An empty string passed the type check, matched no branch, fell through to
+     * `isValid = false` and answered 401 "Invalid code." — for a request that
+     * supplied no code at all, while spending one of the twenty attempts an
+     * account gets in fifteen minutes. A submission with nothing in it costs
+     * nothing to refuse, so it is refused as malformed and charged for nothing.
+     */
+    const nonEmpty = (v) => (typeof v === 'string' && v.trim() ? v : null);
+    const codeValue = nonEmpty(code);
+    const tokenValue = nonEmpty(token);
+    if ((code !== undefined && code !== null && !codeValue)
+      || (token !== undefined && token !== null && !tokenValue)) {
+      return res.status(400).json({
+        error: 'Enter the code before submitting.',
+        code: 'malformed_code',
+        field: codeValue === null && code !== undefined ? 'code' : 'token',
+      });
+    }
 
     let isValid = false;
     let usedRecoveryCodeId = null;
@@ -874,7 +892,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
       });
     }
 
-    if (effectiveMethod === 'totp' && token) {
+    if (effectiveMethod === 'totp' && tokenValue) {
       /**
        * The authentication bypass this replaced.
        *

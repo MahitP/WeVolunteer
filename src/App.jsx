@@ -30,7 +30,7 @@ import {
 } from './routes/index.jsx';
 import {
   LayoutDashboard, Compass, ShieldCheck, LogOut, CalendarDays,
-  UserCog, X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon, Search
+  X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon
 } from 'lucide-react';
 
 // The two heaviest modals. EventModal pulls in the whole organizer surface —
@@ -482,11 +482,25 @@ export const PAGE_META = {
     adminImpact: { title: 'Platform Impact', sub: 'Programme-wide figures for the whole platform' },
     directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
     organizations: { title: 'Organization', sub: 'A club or group posting opportunities' },
-    profile: { title: 'Profile', sub: 'Your account on this platform' }
+    profile: { title: 'Profile', sub: 'Your account on this platform' },
+    /* An owner holds '*', so both hour pages are reachable from this persona. */
+    loggedHours: { title: 'Logged hours', sub: 'Confirmed service and self-reported entries' },
+    externalHours: { title: 'Log external hours', sub: 'Volunteering done outside WeVolunteer' }
   },
   partner: {
     dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
-    browse: { title: 'All events', sub: 'Everything posted across the district' }
+    browse: { title: 'All events', sub: 'Everything posted across the district' },
+    /**
+     * `profile` and `notifications` were missing, and partner is the role the
+     * distinguished profile was BUILT for — so the one page it exists to serve
+     * fell through to the `{ title: APP_NAME, sub: '' }` fallback and rendered
+     * under the bare product name. `self.read` puts Notifications in a partner's
+     * rail too, which had the same gap.
+     */
+    notifications: { title: 'Notifications', sub: 'Updates about your organization' },
+    profile: { title: 'Profile', sub: 'How your organization appears on this platform' },
+    directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
+    organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
   }
 };
 
@@ -1089,8 +1103,19 @@ function AppShell({ toasts, addToast, removeToast }) {
     /* A redirect element, so it takes nothing — declared `{}` rather than
        omitted, because `withProps` treats an omission as a forgotten entry. */
     '/directory': {},
-    '/users/id/:id': { currentUser, addToast },
-    '/users/:handle': { currentUser, addToast },
+    /**
+     * `onEditProfile` is passed to the PUBLIC profile routes too, not only to
+     * `/profile`.
+     *
+     * A student who reaches their own page from a search result, or from a link
+     * they copied to share, is looking at their own profile — and had no way to
+     * edit it from there, because the button was gated on a prop only `/profile`
+     * supplied. `PublicProfile` gates it on `profile.isSelf`, which the SERVER
+     * decides, so handing the callback over discloses nothing and enables
+     * nothing for anybody looking at somebody else.
+     */
+    '/users/id/:id': { currentUser, addToast, onEditProfile: () => setEditingProfile(true) },
+    '/users/:handle': { currentUser, addToast, onEditProfile: () => setEditingProfile(true) },
     '/organizations/new': { addToast },
     '/organizations/:key/edit': { addToast },
     '/organizations/:key': { addToast },

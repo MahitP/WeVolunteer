@@ -104,16 +104,16 @@ function ActionsMenu({ label, items }) {
 }
 
 /**
- * `userId` and `onEditProfile` are for the SELF case.
+ * `onEditProfile` opens the edit modal when the profile being viewed is the
+ * caller's own.
  *
- * `/profile` renders this view for an account whose own profile has no
- * role-specific screen — an owner or a partner — with the signed-in id passed
- * directly rather than read from the URL, so one component serves "somebody
- * else's profile" and "my own" without a second copy of the page to keep in
- * step. `onEditProfile` is absent on the `/users/...` routes, and the edit
- * button is gated on both it and `isSelf`.
+ * It matters on the `/users/@name` routes and not only on `/profile`: a student
+ * who reaches their own page from a search result, or from a link they copied to
+ * share, is looking at their profile and had no way to edit it from there. The
+ * button is gated on `isSelf`, which is decided by the SERVER (`profile.isSelf`)
+ * rather than by comparing ids here.
  */
-export default function PublicProfile({ currentUser, addToast, userId, onEditProfile }) {
+export default function PublicProfile({ currentUser, addToast, onEditProfile }) {
   /**
    * Two routes reach this view: `/users/@name` (`:handle`) and `/users/id/:id`.
    *
@@ -134,10 +134,7 @@ export default function PublicProfile({ currentUser, addToast, userId, onEditPro
   /* The URL carries `@name`; the API takes the bare username. Normalising here
      means a pasted link with or without the `@` both resolve. */
   const username = String(handle || '').replace(/^@/, '');
-  /* The prop wins over the URL, because the prop is only ever supplied by
-     `/profile` — a path with no parameters at all, so there is nothing to
-     conflict with and nothing a URL could override it to. */
-  const subjectId = userId || id;
+  const subjectId = id;
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -511,7 +508,16 @@ function ChipRow({ title, items, icon: Icon }) {
  * three of them on screen doing nothing.
  */
 function FriendButton({ viewer, profile, busy, act }) {
-  if (viewer.blocked || viewer.restrictedBy) return null;
+  /**
+   * `restrictedBy` is deliberately NOT consulted.
+   *
+   * The server strips it from every response (`viewerRelationshipState`), because
+   * a restriction is invisible to its subject — hiding this button on it was the
+   * precise tell that fix removed. Reading a key that is never sent is dead code
+   * that would silently restore the tell the day anybody re-added the field, so
+   * the read is gone rather than left as `undefined`.
+   */
+  if (viewer.blocked) return null;
 
   if (viewer.friendship === 'friends') {
     return (

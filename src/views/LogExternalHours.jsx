@@ -26,9 +26,9 @@
  * which is also why the label is a constant rather than a column.
  */
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
-  AlertCircle, Info, Plus, Trash2, ExternalLink, CheckCircle2, NotebookPen,
+  AlertCircle, Check, Info, Plus, Trash2, ExternalLink, CheckCircle2, NotebookPen,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import EmptyState from '../components/common/EmptyState';
@@ -40,6 +40,22 @@ const BLANK = {
 };
 
 export default function LogExternalHours({ addToast }) {
+  /**
+   * `?edit=<id>` puts this form into edit mode.
+   *
+   * The same form, because it is the same fields — a second screen would be two
+   * places to add a field to. The id lives in the URL rather than in state so
+   * that the Logged hours page can link straight here, and so a reload keeps you
+   * where you were.
+   *
+   * There is no state in which an entry becomes uneditable. Nobody else's
+   * judgement is stored on one of these; if a student wrote down the wrong date
+   * they should be able to fix it without deleting the entry and retyping the
+   * rest.
+   */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const editingId = searchParams.get('edit');
+
   const [form, setForm] = useState(BLANK);
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -61,6 +77,29 @@ export default function LogExternalHours({ addToast }) {
   };
 
   useEffect(load, []);
+
+  /**
+   * Prefills the form from the entry being edited, once the list has arrived.
+   *
+   * Reads from the loaded list rather than fetching the single entry: the list
+   * is already on this page, and `GET /api/external-hours` is self-scoped, so
+   * there is no id here that could address somebody else's row. An `edit`
+   * pointing at nothing (a stale link, a deleted entry) silently leaves the form
+   * blank and clears the parameter, which is the same thing as arriving to add
+   * one — better than an error about a URL the student did not type.
+   */
+  useEffect(() => {
+    if (!editingId || !entries) return;
+    const entry = entries.find(e => e.id === editingId);
+    if (!entry) { setSearchParams({}, { replace: true }); return; }
+    setForm({
+      organizationName: entry.organizationName,
+      activityName: entry.activityName,
+      occurredOn: entry.occurredOn,
+      hours: String(entry.hours),
+      description: entry.description || '',
+    });
+  }, [editingId, entries, setSearchParams]);
 
   /**
    * Mirrors the server's rules rather than replacing them. The server validates
@@ -99,8 +138,16 @@ export default function LogExternalHours({ addToast }) {
     }
     setSubmitting(true);
     try {
-      await api.createExternalHours({ ...form, hours: Number(form.hours) });
-      addToast?.('Added to your volunteer log.', 'success');
+      const payload = { ...form, hours: Number(form.hours) };
+      if (editingId) {
+        await api.updateExternalHours(editingId, payload);
+        addToast?.('Entry updated.', 'success');
+        /* Leaving edit mode is a URL change, so Back does what it looks like. */
+        setSearchParams({}, { replace: true });
+      } else {
+        await api.createExternalHours(payload);
+        addToast?.('Added to your volunteer log.', 'success');
+      }
       setForm(BLANK);
       load();
     } catch (err) {
@@ -156,7 +203,9 @@ export default function LogExternalHours({ addToast }) {
       </div>
 
       <form onSubmit={handleSubmit} className="card">
-        <div className="card-head"><h2>Add an entry</h2></div>
+        <div className="card-head">
+          <h2>{editingId ? 'Edit this entry' : 'Add an entry'}</h2>
+        </div>
         <div className="card-body stack-md">
           <div className="field">
             <label htmlFor="ext-org">Organization</label>
@@ -240,8 +289,19 @@ export default function LogExternalHours({ addToast }) {
             submit button 25px past the right edge and widened the document. */}
         <div className="card-foot row-between row-wrap">
           <Link to="/hours" className="btn btn-ghost">Back to my logged hours</Link>
+          {editingId && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => { setSearchParams({}, { replace: true }); setForm(BLANK); setErrors({}); }}
+            >
+              Cancel edit
+            </button>
+          )}
           <button type="submit" className="btn btn-primary" disabled={submitting}>
-            <Plus size={16} aria-hidden="true" /> {submitting ? 'Adding…' : 'Add to my log'}
+            {editingId
+              ? <><Check size={16} aria-hidden="true" /> {submitting ? 'Saving…' : 'Save changes'}</>
+              : <><Plus size={16} aria-hidden="true" /> {submitting ? 'Adding…' : 'Add to my log'}</>}
           </button>
         </div>
       </form>
