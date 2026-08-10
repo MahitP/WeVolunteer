@@ -505,8 +505,19 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
               </div>
             )}
 
+            {/**
+              * "This community", not "About".
+              *
+              * This card predates the About Us page and was headed "About". Now
+              * that an "About Us" row sits directly above it, two adjacent things
+              * called About is a reader asking which one is which — and the answer
+              * is unguessable, because the row is a link to prose about the product
+              * and the card is a static line naming which school this installation
+              * serves. Retitled for what it actually says rather than removed: the
+              * community name appears nowhere else in Settings.
+              */}
             <div className="card card-pad settings-card-spaced">
-              <h3 className="stack-heading">About</h3>
+              <h3 className="stack-heading">This community</h3>
               <p className="dim small">{APP_NAME} — volunteer coordination for {SCHOOL_NAME}.</p>
             </div>
           </SettingsSection>

@@ -1149,8 +1149,13 @@ export default function Login({ onLoginSuccess, addToast }) {
           <button className="auth-link" onClick={() => navigate('/signup')}>Create one</button>
         </div>
 
+        {/* "Legal Center", matching the Settings entry and the page's own title.
+            This said "Terms, privacy and safety policies" — the old wording, which
+            named three of ten documents and did not match the destination. A link
+            whose label differs from the heading it lands on makes a reader wonder
+            whether they arrived somewhere else. */}
         <p className="auth-footer">
-          <a className="auth-link" href="/legal">Terms, privacy and safety policies</a>
+          <a className="auth-link" href="/legal">Legal Center</a>
         </p>
 
         <span className="sr-only" role="status" aria-live="polite">

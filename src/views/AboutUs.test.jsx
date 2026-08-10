@@ -50,9 +50,47 @@ describe('AboutUs', () => {
     }
   });
 
+  /**
+   * The motto is the last thing SAID, and it is preceded by something that earns
+   * it.
+   *
+   * An earlier draft asserted "because we care" after nineteen hundred words in
+   * which the only people shown caring were the volunteers — the reader had been
+   * given no evidence about the operator at all. The fix was a concrete,
+   * checkable decision immediately above it, so both halves are pinned: the
+   * claim's presence, and its position relative to the motto.
+   */
   it('ends on the motto', () => {
+    const { container } = renderAbout();
+    const motto = container.querySelector('.about-motto');
+    expect(motto).toHaveTextContent(/because we care\./i);
+
+    const earned = container.querySelector('.about-earned');
+    expect(earned).toBeTruthy();
+    /* DOCUMENT_POSITION_FOLLOWING: the motto comes after the passage that earns it. */
+    expect(earned.compareDocumentPosition(motto) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('backs the motto with a decision a reader could go and check', () => {
     renderAbout();
-    expect(screen.getByText(/because we care/i)).toBeInTheDocument();
+    /* The derived-hours invariant: real behaviour (hoursLedger.js), stated in
+       plain words, with the tradeoff named. If this claim is ever removed the
+       motto goes back to being unearned. */
+    expect(screen.getByText(/never stored as a total/i)).toBeInTheDocument();
+  });
+
+  /**
+   * Parents and teachers were addressed zero times in the first draft, despite
+   * being named in the audience the page is written for. Most adults who reach
+   * this page arrive because a student sent them the link.
+   */
+  it('answers the questions a parent or teacher arrives with', () => {
+    renderAbout();
+    expect(screen.getByRole('heading', { name: /For parents and teachers/i })).toBeInTheDocument();
+    expect(screen.getByText(/private unless they change it/i)).toBeInTheDocument();
+    expect(screen.getByText(/confirmed by the organizer/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Privacy Policy' }))
+      .toHaveAttribute('href', '/legal/privacy-policy');
   });
 
   it('points the reader at the Legal Center', () => {

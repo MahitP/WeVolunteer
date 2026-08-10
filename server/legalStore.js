@@ -74,6 +74,15 @@ export class LegalValidationError extends Error {
  * compare equal while displaying differently, and a version a reader cannot
  * distinguish from another is not a version.
  */
+/**
+ * The most digits one MAJOR.MINOR.PATCH component may carry.
+ *
+ * Not style — see the note inside `parseVersion`. Beyond about 308 digits
+ * `Number()` returns `Infinity`, and two of those make the comparator return
+ * `NaN`, which silently disables the component it was comparing.
+ */
+const MAX_VERSION_COMPONENT_DIGITS = 6;
+
 export function parseVersion(raw) {
   if (typeof raw !== 'string') return null;
   const parts = raw.trim().split('.');
@@ -82,6 +91,28 @@ export function parseVersion(raw) {
   const nums = [];
   for (const part of parts) {
     if (!/^(0|[1-9]\d*)$/.test(part)) return null;
+    /**
+     * Each component is LENGTH-BOUNDED, and that bound is load-bearing.
+     *
+     * The pattern above admits digits without limit, and `Number('9'.repeat(400))`
+     * is `Infinity`. Two Infinities then made `compareVersions` return
+     * `Infinity - Infinity`, which is `NaN` — and `NaN` is falsy, so the
+     * `||` cascade below fell straight through to `minor` and `patch` and the
+     * major number stopped participating in the comparison at all. A strictly
+     * LOWER version compared as greater, which is the one thing this comparator
+     * exists to make impossible.
+     *
+     * The consequence was worse than a mis-sort. `legal_document_revisions` is
+     * append-only — there is no UPDATE and no DELETE against it anywhere — so a
+     * single publish at a 400-digit version made every later publication of that
+     * document compare as not-greater, for ever, recoverable only by hand-editing
+     * production SQL.
+     *
+     * Six digits is a hundred thousand major versions past anything a legal
+     * document will ever carry, and it keeps every component exactly
+     * representable.
+     */
+    if (part.length > MAX_VERSION_COMPONENT_DIGITS) return null;
     nums.push(Number(part));
   }
   while (nums.length < 3) nums.push(0);
@@ -89,12 +120,25 @@ export function parseVersion(raw) {
   return { major: nums[0], minor: nums[1], patch: nums[2] };
 }
 
-/** Negative, zero or positive, like every other comparator. */
+/**
+ * Negative, zero or positive, like every other comparator.
+ *
+ * Written as explicit branches rather than as a chain of subtractions. The
+ * subtraction form is the idiomatic one and it has a failure mode this
+ * comparator cannot afford: any pair that subtracts to `NaN` is falsy, so the
+ * `||` silently moves on to the next component instead of returning an answer.
+ * `parseVersion` now bounds the inputs so that cannot arise — this is the second
+ * lock on the same door, because what it protects is the rule that a published
+ * legal version can never be reused or walked backwards.
+ */
 export function compareVersions(a, b) {
   const left = parseVersion(a);
   const right = parseVersion(b);
   if (!left || !right) throw new Error(`compareVersions: unparseable version (${a}, ${b})`);
-  return (left.major - right.major) || (left.minor - right.minor) || (left.patch - right.patch);
+  for (const key of ['major', 'minor', 'patch']) {
+    if (left[key] !== right[key]) return left[key] < right[key] ? -1 : 1;
+  }
+  return 0;
 }
 
 /**
@@ -172,12 +216,21 @@ export function currentRevision(db, slug, { withBody = true } = {}) {
  * `body` is omitted unless asked for; `contentHash` is always present because
  * it is what an acceptance record points at.
  */
-export function resolveDocument(db, slugOrDoc, { withBody = false } = {}) {
-  const doc = typeof slugOrDoc === 'string' ? documentBySlug(slugOrDoc) : slugOrDoc;
-  if (!doc) return null;
-
-  const revision = currentRevision(db, doc.slug, { withBody });
-
+/**
+ * The merge, in one place, because there are two ways to ask for it.
+ *
+ * `resolveDocument` reads one row; `effectiveDocuments` reads them all in a
+ * single query. Only the FETCH differs — what a resolved document looks like
+ * must not. This was written out twice, and two copies of "which fields a
+ * revision overrides" is exactly the shape that drifts: somebody adds a field to
+ * one branch, every caller of the other keeps reading a registry value, and
+ * nothing fails until an acceptance record names a version nobody was shown.
+ *
+ * `withBody` is false on the list path — ten documents' worth of Markdown to
+ * render a page that shows only titles and versions is cost with no reader on
+ * the other end of it.
+ */
+function mergeRevision(doc, revision, { withBody = false } = {}) {
   if (revision) {
     return {
       ...doc,
@@ -205,6 +258,12 @@ export function resolveDocument(db, slugOrDoc, { withBody = false } = {}) {
   };
 }
 
+export function resolveDocument(db, slugOrDoc, { withBody = false } = {}) {
+  const doc = typeof slugOrDoc === 'string' ? documentBySlug(slugOrDoc) : slugOrDoc;
+  if (!doc) return null;
+  return mergeRevision(doc, currentRevision(db, doc.slug, { withBody }), { withBody });
+}
+
 /**
  * Every document, resolved. Used by the Legal Center list and by consent.
  *
@@ -225,24 +284,9 @@ export function effectiveDocuments(db) {
     for (const row of rows) latest.set(row.slug, row);
   }
 
-  return LEGAL_DOCUMENTS.map((doc) => {
-    const revision = latest.get(doc.slug);
-    if (!revision) {
-      return {
-        ...doc, revisionId: null, updatedAt: null, source: 'file',
-        contentHash: publishedHash(doc),
-      };
-    }
-    return {
-      ...doc,
-      version: revision.version,
-      effectiveAt: revision.effective_at,
-      contentHash: revision.content_hash,
-      revisionId: revision.id,
-      updatedAt: revision.created_at,
-      source: 'revision',
-    };
-  });
+  /* Same merge as the single-document path, so the two cannot describe a
+     resolved document differently. */
+  return LEGAL_DOCUMENTS.map(doc => mergeRevision(doc, latest.get(doc.slug)));
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

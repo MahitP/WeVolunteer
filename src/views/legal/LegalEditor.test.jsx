@@ -230,6 +230,57 @@ describe('LegalEditor', () => {
       expect(screen.getByText(/your text is exactly as you left it/)).toBeInTheDocument();
     });
 
+    /**
+     * The server names the field it refused; the screen has to act on it.
+     *
+     * Without this the owner reads a paragraph at the bottom of the action bar
+     * and has to guess which control caused it, and a screen-reader user gets an
+     * alert with no programmatic route to the offending input at all.
+     */
+    it('marks and focuses the field the server refused', async () => {
+      api.publishLegalRevision.mockRejectedValue(new ApiError('Version 1.0.1 is lower than 1.2.0.', {
+        status: 400, data: { error: 'Version 1.0.1 is lower than 1.2.0.', field: 'version' },
+      }));
+      renderEditor();
+      await waitFor(() => expect(textarea()).toHaveValue(BODY));
+      type('# Changed\n\nNew.\n');
+      fireEvent.click(screen.getByRole('button', { name: /Save changes/ }));
+
+      const versionInput = await screen.findByLabelText('Version number');
+      await waitFor(() => expect(versionInput).toHaveAttribute('aria-invalid', 'true'));
+      expect(versionInput).toHaveAttribute('aria-errormessage', 'legal-save-error');
+      expect(screen.getByRole('alert')).toHaveAttribute('id', 'legal-save-error');
+      await waitFor(() => expect(versionInput).toHaveFocus());
+    });
+
+    it('marks the date field when that is what was refused', async () => {
+      api.publishLegalRevision.mockRejectedValue(new ApiError('That is not a real date.', {
+        status: 400, data: { error: 'That is not a real date.', field: 'effectiveAt' },
+      }));
+      renderEditor();
+      await waitFor(() => expect(textarea()).toHaveValue(BODY));
+      type('# Changed\n\nNew.\n');
+      fireEvent.click(screen.getByRole('button', { name: /Save changes/ }));
+
+      const dateInput = await screen.findByLabelText('Takes effect');
+      await waitFor(() => expect(dateInput).toHaveAttribute('aria-invalid', 'true'));
+      expect(screen.getByLabelText('Version number')).not.toHaveAttribute('aria-invalid');
+    });
+
+    /* A 500 names no field, so nothing should be marked invalid — the text is not
+       what was wrong. */
+    it('marks no field when the failure was not about one', async () => {
+      api.publishLegalRevision.mockRejectedValue(new ApiError('The server is having trouble.', { status: 500 }));
+      renderEditor();
+      await waitFor(() => expect(textarea()).toHaveValue(BODY));
+      type('# Changed\n\nNew.\n');
+      fireEvent.click(screen.getByRole('button', { name: /Save changes/ }));
+
+      await screen.findByRole('alert');
+      expect(screen.getByLabelText('Version number')).not.toHaveAttribute('aria-invalid');
+      expect(textarea()).not.toHaveAttribute('aria-invalid');
+    });
+
     it('reports a server error without blaming the text', async () => {
       api.publishLegalRevision.mockRejectedValue(new ApiError('The server is having trouble right now.', { status: 500 }));
       renderEditor();

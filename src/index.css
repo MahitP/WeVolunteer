@@ -9041,6 +9041,40 @@ input:disabled + .premium-slider {
 
 .about-commitment-list { margin-top: var(--s4); }
 
+/* The parents-and-teachers block, which sits below the two-column grid rather
+   than inside it. The two audiences above are deliberately paired — the copy
+   argues they are two sides of one problem — and a third card in that row would
+   break the pairing and leave an orphan at half width. */
+.about-audience-wide { margin-top: var(--s5); }
+
+/**
+ * "What 'because we care' has cost".
+ *
+ * Set apart because it is the one passage on the page making a specific,
+ * checkable claim about a decision, and it is what the motto immediately below
+ * rests on. Left-ruled rather than boxed: a card would read as a callout to skim
+ * past, and this is meant to be read.
+ */
+.about-earned {
+  border-left: 3px solid var(--brand);
+  padding-left: var(--s5);
+  max-width: 68ch;
+}
+
+.about-earned p {
+  margin: 0 0 var(--s4);
+  line-height: 1.7;
+}
+
+.about-earned p:last-child { margin-bottom: 0; }
+
+/* Practical links after the motto. Centred to sit under it without competing. */
+.about-footer-links {
+  margin: 0;
+  text-align: center;
+  color: var(--ink-2);
+}
+
 /* ── The motto ───────────────────────────────────────────────────────────── */
 
 /* Given its own block rather than trailing a paragraph, because it is the one

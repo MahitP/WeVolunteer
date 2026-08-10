@@ -2,6 +2,9 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { FileText, Search, ShieldCheck, Handshake, BookOpen } from 'lucide-react';
 import { api } from '../../utils/api';
+/* Shared, so the reason it parses a plain date rather than a timestamp lives in
+   one place. See legalDates.js. */
+import { formatLegalDate } from './legalDates';
 
 /**
  * The Legal Center hub: every published document, in one place, reachable
@@ -92,17 +95,6 @@ function matches(doc, query) {
   );
 }
 
-function formatDate(iso) {
-  if (!iso) return null;
-  // Parsed as a plain date, not a timestamp: `new Date('2026-08-05')` is
-  // midnight UTC, which prints as the 4th for any reader west of Greenwich.
-  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
-    year: 'numeric', month: 'long', day: 'numeric',
-  });
-}
-
 export default function LegalCenter() {
   const [documents, setDocuments] = React.useState(null);
   const [error, setError] = React.useState(null);
@@ -181,7 +173,7 @@ export default function LegalCenter() {
                   {doc.summary && <span className="legal-doc-summary">{doc.summary}</span>}
                   <span className="legal-doc-meta small dim">
                     Version {doc.version}
-                    {formatDate(doc.effectiveAt) && ` · in effect since ${formatDate(doc.effectiveAt)}`}
+                    {formatLegalDate(doc.effectiveAt) && ` · in effect since ${formatLegalDate(doc.effectiveAt)}`}
                   </span>
                 </Link>
               </li>

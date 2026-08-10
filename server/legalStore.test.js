@@ -79,6 +79,57 @@ describe('legal document version numbers', () => {
          any other context — as a constant expression somebody left behind. */
       expect(tenth > ninth).toBe(false);
     });
+
+    /**
+     * ── The bug this comparator was rewritten to remove ──
+     *
+     * It used to be `(major - major) || (minor - minor) || (patch - patch)`, over
+     * components produced by `Number()` with no bound on digits. Both halves were
+     * needed to break it and both were present:
+     *
+     *   - `Number('9'.repeat(400))` is `Infinity`, so two long versions gave
+     *     `Infinity - Infinity`, which is `NaN`;
+     *   - `NaN` is falsy, so the `||` cascade fell through it and the major
+     *     number stopped participating in the comparison at all.
+     *
+     * A strictly LOWER version then compared as greater, which is the one thing
+     * this function exists to make impossible — and because
+     * `legal_document_revisions` is append-only, a single publish at an absurd
+     * version would have made every later publication of that document compare
+     * as not-greater for ever, recoverable only by editing production SQL.
+     *
+     * Fixed in two places, and both are asserted: components are length-bounded
+     * so they stay exactly representable, and the comparison is key-by-key
+     * equality rather than arithmetic, so no arithmetic result can be falsy.
+     */
+    it('bounds each component so it stays exactly representable', () => {
+      expect(parseVersion('999999.0.0')).toEqual({ major: 999999, minor: 0, patch: 0 });
+      expect(parseVersion('1000000.0.0')).toBeNull();
+      expect(parseVersion(`${'9'.repeat(400)}.0.0`)).toBeNull();
+    });
+
+    it('never reports a lower version as greater, however large the components', () => {
+      expect(compareVersions('999999.0.0', '1.0.0')).toBeGreaterThan(0);
+      expect(compareVersions('1.0.0', '999999.0.0')).toBeLessThan(0);
+      /* The precise shape of the old defect: equal-length huge majors differing
+         only in a later component. Under `Infinity - Infinity` this returned NaN
+         and the minor comparison silently decided the answer. */
+      expect(compareVersions('999999.1.0', '999999.0.0')).toBeGreaterThan(0);
+      expect(compareVersions('999999.0.0', '999999.1.0')).toBeLessThan(0);
+    });
+
+    /* No comparison may ever return a falsy non-zero — that is what let the old
+       `||` cascade skip a component. */
+    it('returns a usable sign for every ordered pair', () => {
+      for (const [a, b] of [
+        ['1.0.0', '2.0.0'], ['2.0.0', '1.0.0'], ['999999.0.0', '999998.0.0'],
+        ['1.2.3', '1.2.4'], ['1.0', '1.0.1'],
+      ]) {
+        const result = compareVersions(a, b);
+        expect(Number.isNaN(result), `${a} vs ${b}`).toBe(false);
+        expect(result === 0 || Math.abs(Math.sign(result)) === 1).toBe(true);
+      }
+    });
   });
 });
 
