@@ -56,6 +56,25 @@ const SCOPES = [
 
 /** Two characters, matching the server's own `SEARCH_MIN` in directoryRoutes.js. */
 const DIRECTORY_MIN = 2;
+
+/**
+ * What the live region says when a directory search settles.
+ *
+ * Exported for its test. The counts are pluralised independently and the empty
+ * case is phrased as a negative rather than as "0 …", because this string is
+ * read aloud and is the only signal a screen-reader user gets that the search
+ * finished at all.
+ */
+export function discoveryAnnouncement(directory) {
+  const people = directory?.users?.length ?? 0;
+  const orgs = directory?.organizations?.length ?? 0;
+  if (people === 0 && orgs === 0) return 'No people or organizations found';
+
+  const parts = [];
+  if (people > 0) parts.push(`${people} ${people === 1 ? 'person' : 'people'}`);
+  if (orgs > 0) parts.push(`${orgs} ${orgs === 1 ? 'organization' : 'organizations'}`);
+  return `${parts.join(' and ')} found`;
+}
 export default function BrowseEvents({
   currentUser,
   applications = [],
@@ -480,12 +499,24 @@ export default function BrowseEvents({
           )}
         </div>
 
+        {/**
+          * The only announcement a screen-reader user gets that the search
+          * returned anything, so it has to read as a sentence.
+          *
+          * It was `${people + orgs} people and organizations found`, which says
+          * "1 people and organizations found" for the single result that is by
+          * far the most common outcome of typing somebody's name — and says
+          * "0 people and organizations found" for none, where the natural
+          * phrasing is a negative. The two kinds are counted separately and each
+          * is pluralised on its own count, because "1 person and 2
+          * organizations" is one sentence with two different plurals in it.
+          */}
         {canDiscover && (
           <p className="sr-only" role="status" aria-live="polite">
             {directoryLoading
               ? 'Searching people and organizations'
               : directory
-                ? `${(directory.users?.length ?? 0) + (directory.organizations?.length ?? 0)} people and organizations found`
+                ? discoveryAnnouncement(directory)
                 : ''}
           </p>
         )}
