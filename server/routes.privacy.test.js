@@ -21,7 +21,26 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
   beforeAll(async () => {
     leoToken = await srv.login('leo.chen28@gmail.com');
     hostingOrgToken = await srv.login('jkatzenback@vikings.org'); // hosts event-softball
-    unrelatedOrgToken = await srv.login('rmiller@sbpl.info'); // pending, hosts nothing
+    unrelatedOrgToken = await srv.login('rmiller@sbpl.info'); // hosts nothing
+
+    /**
+     * The agreement is accepted so this fixture tests what it says it tests.
+     *
+     * These cases are about FIELD scoping — which columns an organizer who does
+     * not host the student's event may see — and the seeded `rmiller` is a
+     * pending organizer. Since v1.3, `directory.read` is one of the capabilities
+     * withheld until the Organizer Agreement is accepted (see
+     * ORGANIZER_GATED_CAPABILITIES), and `GET /api/users/:id/profile` now
+     * enforces it, so an un-agreed organizer is refused the request outright.
+     *
+     * That refusal is correct and is deliberately NOT what these tests assert:
+     * an adult who has not undertaken the terms for handling students' details
+     * should not be reading student profiles at all. Accepting the agreement
+     * here restores the intended fixture — an organizer who legitimately holds
+     * the capability and simply hosts nothing this student applied to — so the
+     * assertions below stay about the fields rather than about the gate.
+     */
+    await srv.call('POST', '/api/legal/organizer-agreement/accept', { acknowledged: true }, unrelatedOrgToken);
     adminToken = await srv.login('admin@example.gov');
 
     // A fresh student who applies to a freshly created event hosted by

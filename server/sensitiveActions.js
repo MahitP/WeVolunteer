@@ -97,6 +97,28 @@ export const SENSITIVE_ACTIONS = {
   '2fa.generate':     { label: 'set up two-factor authentication', methods: ['password', 'oauth'], bindsParams: [] },
   '2fa.enable':       { label: 'enable two-factor authentication', methods: ['password', 'oauth'], bindsParams: [] },
   '2fa.disable':      { label: 'disable two-factor authentication', methods: ['password', 'oauth'], bindsParams: [] },
+  /**
+   * Replacing recovery codes has its OWN action, and is not `2fa.enable`.
+   *
+   * It used to share it, and that made one grant fungible across three
+   * different effects. The dialog a user answers says "enable two-factor
+   * authentication"; the grant it produced was spendable, unaltered, on the
+   * handler whose first statement is `DELETE FROM recovery_codes` — destroying
+   * the one credential the product tells people is their only way back in.
+   *
+   * That was concretely reachable rather than theoretical: enrolling an
+   * authenticator opens `2fa.generate` and `2fa.enable` from a single password
+   * entry and holds the unspent `2fa.enable` grant in client state for up to
+   * five minutes while the user scans a QR code.
+   *
+   * The same asymmetry `oauth.unlink` was registered to close — removing a
+   * credential is a credential change, exactly as adding one is — and the same
+   * remedy: its own name, so the sentence in the dialog is the operation the
+   * grant can be spent on.
+   */
+  '2fa.recovery.regenerate': {
+    label: 'replace your recovery codes', methods: ['password', 'oauth'], bindsParams: []
+  },
 };
 
 export function isSensitiveAction(action) {

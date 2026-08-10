@@ -774,7 +774,8 @@ describe('authorization hygiene', () => {
       // ── INLINE_GATED — genuinely gated in the handler body (an inline
       // can()/ownership/participant check the middleware-stack walk cannot
       // see). See each entry's reason for the actual check and file:line. ──
-      'GET /api/users/:id/profile': { category: CATEGORY.INLINE_GATED, reason: 'canSeeContact = isSelf || can(user.contact.read) || hostsApplicant gates PII fields (userRoutes.js:39); non-PII stats intentionally open to any authenticated caller' },
+
+      'GET /api/users/:id/profile': { category: CATEGORY.INLINE_GATED, reason: 'can(directory.read) at the top, else 403 (userRoutes.js) — this is what keeps partner, an EXTERNAL organization deliberately outside the member directory, off it; then canSeeContact = isSelf || can(user.contact.read) || hostsApplicant gates the PII fields' },
       'GET /api/events/:id': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = can(event.moderate) || organizer_id === caller, else 403 (eventRoutes.js:392-394)' },
       'GET /api/applications': { category: CATEGORY.INLINE_GATED, reason: 'deny-by-default cascade can(user.contact.read) -> can(applicant.review) -> can(application.withdraw) -> [] (applicationRoutes.js:45-60); covered by authz.matrix.test.js' },
       'DELETE /api/comments/:id': { category: CATEGORY.INLINE_GATED, reason: 'own comment (user_id === caller) OR can(event.moderate), else 403 (contentRoutes.js:135)' },
@@ -836,7 +837,8 @@ describe('authorization hygiene', () => {
        * on that same profile page.
        */
       'GET /api/badges': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'the badge DEFINITION catalogue (name, icon, criteria) — no personal data about anyone; a session is required only to keep it off the open internet, the same reason GET /api/leaderboard gives' },
-      'GET /api/users/:userId/badges': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'earned achievements for one person, matching GET /api/users/:id/profile\'s posture for the same class of data (milestones and completed service are returned there to any authenticated caller); no contact PII and no future whereabouts, which are the two things that route does gate' },
+
+      'GET /api/users/:userId/badges': { category: CATEGORY.INLINE_GATED, reason: 'can(directory.read) at the top, else 403 (badgeRoutes.js) — moved with GET /api/users/:id/profile, whose posture for this class of data it is explicitly matched to; no contact PII and no future whereabouts' },
       'POST /api/reports': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may file a report against any event/comment; no capability distinction by design (abuse-reporting entry point)' },
       'POST /api/messages/:id/report': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may file a report against any message; no capability distinction by design (abuse-reporting entry point)' },
     };

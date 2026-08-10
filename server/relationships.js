@@ -55,6 +55,10 @@
  */
 
 import crypto from 'node:crypto';
+/* `user_blocks` is blocking.js's table, and a block is an answer this module has
+   to respect — see `areFriends`. blocking.js imports nothing but node:crypto, so
+   this direction cannot become a cycle. */
+import { isBlockedBetween } from './blocking.js';
 
 export const RELATIONSHIP_KINDS = Object.freeze(['friend', 'mute', 'restrict']);
 
@@ -78,9 +82,29 @@ export function relationship(db, actorId, subjectId, kind) {
  * earlier wording said the latter, which matters because this is what unlocks
  * `bio`, `school` and `grade` on a friends-only profile: a reader who trusted
  * the comment would misjudge where that privacy boundary sits.
+ *
+ * ── A block ends the friendship, for disclosure purposes, immediately ──
+ *
+ * `block()` now withdraws the friendship row as `restrict` always has, so in a
+ * database written by this version the second clause below never fires. It is
+ * here for the databases written by the version before it, where blocking left
+ * the row standing: a student blocked their harasser, `areFriends` kept
+ * returning true, and `profile_visibility = 'friends'` kept handing that person
+ * the blocker's school, grade and bio for as long as the row survived.
+ *
+ * Enforced HERE rather than at each call site on purpose. This function is the
+ * single gate that unlocks the friends-only tier, so one check covers every
+ * present and future consumer — the same argument `viewerRelationshipState`
+ * makes for being the only shape a handler may send. A block is never a state
+ * in which two accounts should be treated as friends by anything, so there is
+ * no caller that would legitimately want the unfiltered answer.
+ *
+ * The extra read costs one indexed lookup on a table that is empty for almost
+ * every pair, on a path that already runs `volunteerStats`.
  */
 export function areFriends(db, a, b) {
   if (!a || !b || a === b) return false;
+  if (isBlockedBetween(db, a, b)) return false;
   return Boolean(db.prepare(`
     SELECT 1 FROM user_relationships
     WHERE kind = 'friend' AND status = 'accepted'
@@ -188,7 +212,10 @@ export function clearUnilateral(db, actorId, subjectId, kind) {
  */
 export function relationshipState(db, viewerId, subjectId) {
   if (!viewerId || !subjectId || viewerId === subjectId) {
-    return { friendship: 'none', muted: false, restricted: false, blocked: false, restrictedBy: false };
+    return {
+      friendship: 'none', muted: false, restricted: false,
+      blocked: false, blockedByViewer: false, restrictedBy: false
+    };
   }
   const rows = db.prepare(`
     SELECT actor_id, subject_id, kind, status FROM user_relationships
@@ -207,12 +234,28 @@ export function relationshipState(db, viewerId, subjectId) {
     }
   }
 
-  const blocked = Boolean(db.prepare(`
-    SELECT 1 FROM user_blocks
-    WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?) LIMIT 1
-  `).get(viewerId, subjectId, subjectId, viewerId));
+  /**
+   * Blocking is read in BOTH directions, and reported as two separate facts.
+   *
+   * `blocked` — either party has blocked the other. This is what the internal
+   *   gates want: a block suppresses messaging, notifications and the
+   *   friends-only tier no matter who pressed the button.
+   * `blockedByViewer` — the viewer blocked the subject. This is the only half
+   *   that may be shown to the viewer, because it is the only half describing
+   *   something they did themselves.
+   *
+   * Two columns rather than one, because `viewerRelationshipState` cannot
+   * derive the safe answer from the symmetric one — see its header.
+   */
+  const blockRows = db.prepare(`
+    SELECT blocker_id FROM user_blocks
+    WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)
+  `).all(viewerId, subjectId, subjectId, viewerId);
 
-  return { friendship, muted, restricted, restrictedBy, blocked };
+  const blocked = blockRows.length > 0;
+  const blockedByViewer = blockRows.some(r => r.blocker_id === viewerId);
+
+  return { friendship, muted, restricted, restrictedBy, blocked, blockedByViewer };
 }
 
 /**
@@ -241,8 +284,28 @@ export function relationshipState(db, viewerId, subjectId) {
  * whether to allow the request at all, and that decision must see the truth.
  */
 export function viewerRelationshipState(db, viewerId, subjectId) {
-  const { restrictedBy, ...visible } = relationshipState(db, viewerId, subjectId);
-  return visible;
+  const { restrictedBy, blockedByViewer, ...visible } = relationshipState(db, viewerId, subjectId);
+
+  /**
+   * ── `blocked` is narrowed to the viewer's OWN block ──
+   *
+   * `relationshipState.blocked` is symmetric, and sending it raw told the
+   * blocked party they had been blocked — the same disclosure `restrictedBy`
+   * is stripped to prevent, reached through the other flag in the same object.
+   * It was not even ambiguous: `GET /api/blocks` returns the viewer's OUTBOUND
+   * blocks only, so a viewer seeing `blocked: true` for somebody absent from
+   * that list learns, in two requests, that the subject blocked them.
+   *
+   * Blocking is not secret the way restriction is — the blocked party finds out
+   * the moment they try to message — but "they cannot reach you" and "here is a
+   * definitive list of everyone who has blocked you" are different disclosures,
+   * and only the first is a consequence anybody chose. The second is an
+   * enumeration tool, and on a platform of minors that is worth refusing.
+   *
+   * The viewer's own block survives, because the Unblock control is built from
+   * it (PublicProfile.jsx) and the viewer plainly already knows.
+   */
+  return { ...visible, blocked: blockedByViewer };
 }
 
 /**

@@ -352,11 +352,15 @@ const EXPECTED = [
 
   // ── userRoutes.js (Task 7d) ──
 
-  // No role check at all — canSeeContact only toggles which FIELDS are
-  // visible, it never denies the request. Real id so the response isn't a
-  // trivial 404 for everyone.
+  // `canSeeContact` only toggles which FIELDS are visible; the request itself is
+  // now denied to a role without `directory.read`, which is partner and only
+  // partner. That capability is withheld from partner deliberately (authz.js: a
+  // partner is an EXTERNAL organization and this is a list of schoolchildren),
+  // and every v1.3 directory route enforced it while this older route — name,
+  // avatar, skills, credited hours, milestones, service counts — did not.
+  // Real id so the response isn't a trivial 404 for everyone.
   ['GET', '/api/users/user-student-1/profile',
-    { student: 'allow', organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 'allow' }],
+    { student: 'allow', organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
 
   ['GET', '/api/organizers/user-org-1/profile',
     { student: 'allow', organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 'allow' }],

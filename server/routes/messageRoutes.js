@@ -5,6 +5,9 @@ import { createReport } from '../reportService.js';
 import { can, requireCap, principalFor } from '../authz.js';
 import { grantsFor } from '../userCapabilities.js';
 import { isBlockedBetween, block, unblock } from '../blocking.js';
+/* Blocking withdraws the friendship, exactly as restricting does — see the note
+   in the block handler below. */
+import { removeFriend } from '../relationships.js';
 import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
@@ -574,6 +577,24 @@ router.post('/api/blocks/:userId', authenticateToken, requireCap('event.apply'),
   try {
     inTransaction(() => {
       created = block(db, { blockerId: req.user.id, blockedId: targetId });
+
+      /**
+       * Blocking also withdraws any friendship between the two.
+       *
+       * Without this the severity ordering the product documents was inverted
+       * in practice: `restrict` — the gentler, quieter control — withdrew the
+       * friendship (relationships.js), while Block, the one immediate safety
+       * control a student holds, left it standing. An accepted friendship is
+       * what unlocks the friends-only tier of a profile, so a student who
+       * blocked somebody harassing them kept handing that person their school,
+       * grade and bio, and both stayed in each other's friend lists.
+       *
+       * Unconditional rather than gated on `created`: a block recorded by an
+       * earlier version left the friendship behind, so a second tap is the only
+       * moment this platform gets to repair that row. `removeFriend` is a
+       * no-op when there is nothing to remove.
+       */
+      removeFriend(db, req.user.id, targetId);
 
       /**
        * A block against an adult is a safety signal, not a preference.

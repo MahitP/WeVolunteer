@@ -23,7 +23,41 @@ import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationT
 
 const router = express.Router();
 
+/**
+ * ── Why `directory.read`, on a route that predates the directory ──
+ *
+ * This handler carried no capability gate at all: the PII fields are gated
+ * inline by `canSeeContact`, and the reasoning recorded in the completeness
+ * registry was that the remaining stats are non-PII and may be read by any
+ * authenticated caller.
+ *
+ * That reasoning had one hole, and v1.3 opened it. `partner` is deliberately
+ * denied `directory.read` (see the note in authz.js: a partner is an EXTERNAL
+ * organization and the member directory is a searchable list of schoolchildren)
+ * — and every NEW directory route enforces that, while this older one, which
+ * returns a student's name, avatar, skills, credited hours, milestones and
+ * service counts, did not. The exclusion was therefore a front door that was
+ * locked while this window stood open beside it.
+ *
+ * The capability is held by student, organizer and admin, and by super_admin
+ * through its wildcard, so this narrows exactly one role — the one it was
+ * supposed to narrow.
+ *
+ * ── An inline `can()`, deliberately, and not `requireCap` ──
+ *
+ * `requireCap` refuses on `principal.tfaRequired` as well as on the capability,
+ * so mounting it here would ALSO make this route unreadable to an organizer or
+ * administrator who has not yet enrolled a second factor. That may well be
+ * right, but it is a different decision about a different role, and quietly
+ * attaching it to a partner fix would change behaviour nobody reviewed — a
+ * pending organizer reading a volunteer's profile is not the hole being closed.
+ * The route was already registered INLINE_GATED for its `canSeeContact` logic,
+ * so this is the gate joining the one that is there rather than a new layer.
+ */
 router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
+  if (!can(req.principal, 'directory.read')) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
   try {
     // `account_status <> 'deleted'` is part of the identity check, not a filter
     // bolted on afterwards: a deleted account is anonymised in place rather than

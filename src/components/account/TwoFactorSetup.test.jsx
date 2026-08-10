@@ -55,7 +55,7 @@ function mockServer({ status = STATUS_OFF, enable, generate } = {}) {
     }
 
     if (url === '/api/2fa/recovery-codes/regenerate') {
-      if (!grant) throw reauthRequired('2fa.enable');
+      if (!grant) throw reauthRequired('2fa.recovery.regenerate');
       return { success: true, recoveryCodes: CODES };
     }
 
@@ -315,6 +315,25 @@ describe('the password step during authenticator enrolment', () => {
     expect(container.querySelector('.modal-overlay'), 'still inside the card').toBeNull();
   });
 
+  /**
+   * The Escape assertion is SYNCHRONOUS, and that is the point.
+   *
+   * It was `await waitFor(() => expect(queryByRole('dialog')).toBeNull())`, and
+   * it failed roughly one full-suite run in two — never on its own (0/25), never
+   * in the client project alone (3/3), only with all 289 files in flight.
+   *
+   * `waitFor` spends a 1000ms WALL-CLOCK budget, and under that much parallel
+   * load its polling can be starved past the deadline. But nothing here is
+   * asynchronous: `useModal`'s keydown handler calls `onClose` directly,
+   * `settle` calls `setPrompt(null)`, and `fireEvent` is act-wrapped, so React
+   * has flushed the unmount before the next line runs. A timeout was therefore
+   * never evidence about the component — only about how busy the machine was.
+   *
+   * Asserting synchronously removes the clock from the test and makes it
+   * STRICTER: a dialog that closes a tick late now fails immediately instead of
+   * being waited into passing. That is the opposite of raising a timeout, which
+   * would have hidden a real defect in the same place.
+   */
   it('moves focus into the dialog and closes on Escape', async () => {
     mockServer();
     mockChallenges();
@@ -326,7 +345,7 @@ describe('the password step during authenticator enrolment', () => {
     expect(document.activeElement).toBe(field);
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
 
@@ -487,12 +506,19 @@ describe('recovery codes', () => {
   /**
    * Regression: the action name was wrong, so this could never succeed.
    *
-   * `/api/2fa/recovery-codes/regenerate` is gated on `2fa.enable`; the client
+   * `/api/2fa/recovery-codes/regenerate` was gated on `2fa.enable`; the client
    * declared `2fa.generate`. `withStepUp` throws when the refusal names a
    * different action than the caller did — deliberately, because a challenge for
    * the wrong action produces a grant the endpoint will not accept — so every
    * attempt put a developer-facing sentence about mismatched actions into a
    * toast.
+   *
+   * The action it agrees on is now `2fa.recovery.regenerate` rather than
+   * `2fa.enable`, and that is a security fix rather than a rename: sharing
+   * `2fa.enable` made ONE grant cover both enrolling a factor and destroying
+   * the recovery code set, and enrolment deliberately holds an unspent
+   * `2fa.enable` grant for minutes while a QR code is scanned. The assertion
+   * below is what stops the two being merged again for tidiness.
    */
   it('regenerating verifies the action the endpoint actually gates', async () => {
     mockServer({ status: { ...STATUS_OFF, enabled: true, methods: { totp: true, email: false }, recoveryCodesRemaining: 10 } });
@@ -505,7 +531,8 @@ describe('recovery codes', () => {
     await answerPassword();
 
     await screen.findByText(/save these recovery codes/i);
-    expect(api.openReauthChallenge).toHaveBeenCalledWith('2fa.enable', {});
+    expect(api.openReauthChallenge).toHaveBeenCalledWith('2fa.recovery.regenerate', {});
+    expect(api.openReauthChallenge).not.toHaveBeenCalledWith('2fa.enable', {});
     expect(addToast).not.toHaveBeenCalled();
   });
 });

@@ -231,6 +231,49 @@ export function purgeExpiredRevocations(now = new Date()) {
 }
 
 /**
+ * Expired second-factor codes and stale login-attempt counters.
+ *
+ * Neither table was swept by anything, and both hold material that is worthless
+ * the moment it ages out: `tfa_email_codes` a bcrypt hash of every code ever
+ * mailed, `tfa_login_attempts` one row per pre-auth grant anybody ever failed a
+ * code against. `reauth_challenges` is swept for exactly this reason and these
+ * two were simply missed.
+ *
+ * ── The two columns are in DIFFERENT formats, and that decides the comparison ──
+ *
+ * `tfa_email_codes.expires_at` is written by the send route as
+ * `new Date(...).toISOString()` — `2026-08-10T12:00:00.000Z`. So it is compared
+ * against an ISO string.
+ *
+ * `tfa_login_attempts.last_attempt_at` is written as `datetime('now')` —
+ * `2026-08-10 12:00:00`. So it is compared against `datetime(...)`, IN SQL.
+ * Comparing the two formats to each other is a string comparison in which `T`
+ * sorts after a space and the `Z` suffix has no counterpart, which is the class
+ * of bug `datetimeComparison.test.js` exists for. Mixing them here would delete
+ * either everything or nothing, and both failures are silent.
+ *
+ * An hour, not fifteen minutes: the ceiling that reads `tfa_login_attempts`
+ * only ever looks back fifteen, so anything older is already invisible to it,
+ * and the extra margin means a sweep can never race a live window.
+ */
+export function sweepTwoFactorRemnants(dbHandle = db, now = new Date()) {
+  let removed = 0;
+  try {
+    removed += dbHandle.prepare('DELETE FROM tfa_email_codes WHERE expires_at < ?')
+      .run(now.toISOString()).changes;
+    removed += dbHandle.prepare(
+      "DELETE FROM tfa_login_attempts WHERE last_attempt_at < datetime('now', '-1 hour')"
+    ).run().changes;
+  } catch {
+    /* Caught rather than thrown, like `sweepErrors`: this runs inside one
+       shared try block with the other sweep tasks, and a table missing on an
+       old database must not abandon the ones above it. */
+    return removed;
+  }
+  return removed;
+}
+
+/**
  * Builds the request principal with `grants` attached as a lazy, memoizing
  * getter rather than an eagerly-fetched array.
  *
@@ -922,6 +965,24 @@ export function runNotificationSweep() {
     // every abandoned one, each carrying an ip_hash. Worthless once expired.
     const challenges = sweepExpiredChallenges(db, now);
     if (challenges > 0) console.log(`[Reauth] Purged ${challenges} spent step-up challenge(s).`);
+
+    /**
+     * The two second-factor tables, on the same reasoning as the line above.
+     *
+     * Neither was swept by anything. `tfa_email_codes` keeps a bcrypt hash of
+     * every code ever mailed, and rows are only ever read while unexpired — so
+     * what accumulates is credential material with no remaining purpose, which
+     * is precisely what `reauth_challenges` is swept to avoid keeping.
+     *
+     * `tfa_login_attempts` was deleted only by that user's own SUCCESSFUL
+     * sign-in, so every abandoned attempt — the failure that made somebody give
+     * up and reset their password instead — left a row keyed by a token hash
+     * for ever. The counters are read against a fifteen-minute window, so
+     * anything older than the widest window is already invisible to the ceiling
+     * that reads it; an hour is a generous margin on that.
+     */
+    const tfa = sweepTwoFactorRemnants(db, now);
+    if (tfa > 0) console.log(`[2FA] Purged ${tfa} expired code and attempt row(s).`);
 
     /**
      * Error records: aged evidence, closed groups, and the single-occurrence

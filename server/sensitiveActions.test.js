@@ -19,10 +19,19 @@ describe('sensitive action registry', () => {
    * private messages, and that somebody is usually a minor. Downloading your own
    * data archive required a fresh verification while reading a child's messages
    * required only a session.
+   *
+   * `2fa.recovery.regenerate` joined in the v1.3.1 audit round, and it is the
+   * third instance of the `data.download` / `oauth.unlink` shape: the operation
+   * that DESTROYS a credential shared an action with the one that adds it.
+   * Replacing recovery codes was gated on `2fa.enable`, so the grant obtained
+   * from a dialog reading "enable two-factor authentication" was spendable,
+   * unaltered, on the handler whose first statement deletes every recovery code
+   * the account has — and enrolment holds an unspent `2fa.enable` grant in
+   * client state for minutes while a QR code is scanned.
    */
   it('lists exactly the actions requiring step-up', () => {
     expect(Object.keys(SENSITIVE_ACTIONS).sort()).toEqual([
-      '2fa.disable', '2fa.enable', '2fa.generate',
+      '2fa.disable', '2fa.enable', '2fa.generate', '2fa.recovery.regenerate',
       'account.delete', 'admin.invite', 'admin.promote', 'admin.revoke', 'data.download', 'data.export', 'email.change',
       'oauth.link', 'oauth.unlink', 'password.change', 'report.evidence',
     ]);
