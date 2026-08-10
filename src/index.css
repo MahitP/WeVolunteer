@@ -3301,7 +3301,34 @@ time { font-variant-numeric: tabular-nums; }
   .sheet-action { align-items: stretch; }
   .sheet-action .btn { width: 100%; }
 
-  .nextshift { flex-direction: column; align-items: flex-start; gap: var(--s4); }
+  /**
+   * `stretch`, not `flex-start` — this is what made the Dashboard scroll
+   * sideways on a phone.
+   *
+   * Stacking the card was right; `align-items: flex-start` was the part that
+   * was not. In a column flex container that setting sizes each child to its
+   * own MAX-CONTENT width instead of the container's, so `.nextshift-what` —
+   * one line holding an event title and a slot name — laid itself out at
+   * whatever width that string wanted and pushed the document past the
+   * viewport. Measured at 320px: `scrollWidth` 394 against a 320 client width,
+   * from a text block asking for 356.
+   *
+   * `.truncate` could not save it, because ellipsis needs an element that has
+   * already been constrained — the box itself was 356 wide, so there was
+   * nothing to overflow. With `stretch` the block is 246 and truncation does
+   * what it was put there to do.
+   *
+   * The visible symptom was not a scrollbar. A phone browser fits `width=device-width`
+   * to the widest content, so the whole Dashboard rendered zoomed OUT and every
+   * other page — none of which overflow — looked correct next to it. Worth
+   * stating because the instinct is to reach for the viewport meta tag, and
+   * `user-scalable=no` would have hidden this while taking pinch-zoom away from
+   * everybody who needs it. The overflow is the bug; the scaling was the report.
+   *
+   * The button is unaffected: `width: 100%` below already made it full-bleed,
+   * which is what `flex-start` was presumably protecting it from.
+   */
+  .nextshift { flex-direction: column; align-items: stretch; gap: var(--s4); }
   .nextshift .btn { width: 100%; }
 
   .auth { grid-template-columns: 1fr; }
