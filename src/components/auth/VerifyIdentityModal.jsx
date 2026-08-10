@@ -292,26 +292,58 @@ export default function VerifyIdentityModal({
    * `/settings`, so a verification started from anywhere comes back to the same
    * place — including the `?section=` the settings screen uses to pick a panel.
    */
+  /**
+   * The provider leg.
+   *
+   * ── Why this holds `busy` and catches, when it is about to navigate away ──
+   *
+   * It used to do neither, on the assumption that `window.location.assign` ends
+   * the story. Two things happen before that line, and both can fail or stall:
+   * `freshChallengeId()` is a network round trip, and `savePendingReauth` writes
+   * to storage — which throws outright in Safari's private mode, where
+   * `setItem` is not available.
+   *
+   * With no `busy` the button stayed live through the round trip, so a second
+   * press opened a second challenge; and with no `catch`, a throw left the
+   * dialog exactly as it was, with no error, no navigation and no explanation.
+   * The user is left pressing a button that visibly does nothing — which is the
+   * shape of "it got stuck" even though nothing is technically frozen.
+   *
+   * `busy` is deliberately NOT cleared on success: the page is navigating, and
+   * re-enabling the button during that window is an invitation to press it
+   * again.
+   */
   const startOAuth = async (provider) => {
-    /**
-     * A fresh challenge first if this one has run out.
-     *
-     * The provider round trip is the longest leg in the flow — a consent screen,
-     * possibly a sign-in, possibly a second factor at the provider — so leaving
-     * with a challenge that has minutes left is how somebody comes back to
-     * `expired` having done everything right. Reopening costs one request and is
-     * bound to the same action and arguments.
-     */
-    const challengeId = await freshChallengeId();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      /**
+       * A fresh challenge first if this one has run out.
+       *
+       * The provider round trip is the longest leg in the flow — a consent
+       * screen, possibly a sign-in, possibly a second factor at the provider —
+       * so leaving with a challenge that has minutes left is how somebody comes
+       * back to `expired` having done everything right. Reopening costs one
+       * request and is bound to the same action and arguments.
+       */
+      const challengeId = await freshChallengeId();
 
-    savePendingReauth({
-      provider,
-      challengeId,
-      action: challenge.action,
-      expiresAt: challenge.expiresAt,
-      returnTo: `${window.location.pathname}${window.location.search}`
-    });
-    window.location.assign(api.reauthOAuthUrl(provider, challengeId));
+      savePendingReauth({
+        provider,
+        challengeId,
+        action: challenge.action,
+        expiresAt: challenge.expiresAt,
+        returnTo: `${window.location.pathname}${window.location.search}`
+      });
+      window.location.assign(api.reauthOAuthUrl(provider, challengeId));
+    } catch (err) {
+      setBusy(false);
+      setError(
+        err?.message
+        || 'We could not start that sign-in. Try your password instead, or try again.'
+      );
+    }
   };
 
   const nothingToOffer = methods.length === 0;
@@ -460,8 +492,25 @@ export default function VerifyIdentityModal({
         )}
       </div>
 
+      {/**
+        * Cancel is never disabled.
+        *
+        * It was `disabled={busy}`, which produced the one failure a verification
+        * dialog must not have: a user who picked the provider option — the
+        * longest leg, and the one that leaves the page — pressed Cancel and got
+        * nothing back. The dialog was not frozen, and `Modal`'s own `onClose`
+        * (Escape, and the X in the header) was never gated, so the way out
+        * existed and the control that names it was the one control that refused.
+        * Somebody who trusts the button rather than guessing at Escape concludes
+        * the screen is stuck.
+        *
+        * There is nothing to protect here either. Cancelling spends nothing and
+        * writes nothing — the challenge is simply left unused and expires on its
+        * own. Blocking the exit bought no safety and cost the only obvious way
+        * out.
+        */}
       <div className="modal-foot">
-        <button className="btn" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button className="btn" onClick={onCancel}>Cancel</button>
       </div>
     </Modal>,
     document.body

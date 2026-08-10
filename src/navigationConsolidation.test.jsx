@@ -63,7 +63,7 @@ describe('Find people is no longer a destination', () => {
    * names the PAGE (so the title is right) and `RAIL_TAB` maps that to the
    * entry that lights — two answers to two different questions.
    */
-  it('lights Opportunities for every destination discovery reaches', () => {
+  it('lights Discover for every destination discovery reaches', () => {
     for (const path of ['/directory', '/users/@alice', '/users/id/u1', '/organizations/nhs']) {
       const tab = tabForPath(path);
       expect(RAIL_TAB[tab] ?? tab, `${path} lights the wrong rail entry`).toBe('browse');
@@ -142,7 +142,7 @@ describe('the rail did not grow', () => {
     const items = navItemsFor(USER('student'));
     expect(items).toHaveLength(6);
     expect(items.map(n => n.label)).toEqual([
-      'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Profile',
+      'Dashboard', 'Discover', 'Calendar', 'Messages', 'Notifications', 'Profile',
     ]);
   });
 

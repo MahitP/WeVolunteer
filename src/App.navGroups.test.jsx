@@ -117,7 +117,7 @@ describe('navSectionsFor', () => {
 
   it('gives the owner the five primary destinations in order', () => {
     expect(labelsOf(navSectionsFor(USER('super_admin')).primary))
-      .toEqual(['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin']);
+      .toEqual(['Dashboard', 'Discover', 'Calendar', 'Messages', 'Admin']);
   });
 
   /**

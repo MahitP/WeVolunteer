@@ -1,6 +1,6 @@
 import express from 'express';
 
-import { recordCheckins, getCheckins, finalizeAttendance, computeEventCompletion } from '../attendance.js';
+import { recordCheckins, checkinWindowState, getCheckins, finalizeAttendance, computeEventCompletion } from '../attendance.js';
 import { authenticateToken, inTransaction } from '../utils.js';
 import { can, requireCap } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
@@ -21,11 +21,41 @@ router.post('/api/events/:id/checkin', authenticateToken, requireCap('attendance
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
 
+    /**
+     * A cancelled event has no attendance to take.
+     *
+     * The finalise route below has refused this since it was written; check-in
+     * did not, which left the two halves of one workflow disagreeing about
+     * whether a cancelled event is still happening. Nothing here credits hours,
+     * so the immediate cost was low — but it let a roster be marked present for
+     * an event nobody held, and that record is what finalisation reads from if
+     * the event is ever reinstated.
+     */
+    if (event.status === 'cancelled') {
+      return res.status(409).json({
+        error: 'This event was cancelled, so attendance cannot be taken for it.',
+        code: 'event_cancelled',
+      });
+    }
+
+    const now = new Date().toISOString();
+
+    /* Marking a roster present before the shift exists is a prediction, not
+       attendance. See `checkinWindowState` for why there is no closing time. */
+    const window = checkinWindowState(db, event, now);
+    if (!window.open) {
+      return res.status(409).json({
+        error: 'Check-in opens two hours before the first shift starts.',
+        code: 'checkin_not_open',
+        opensAt: window.opensAt,
+      });
+    }
+
     const result = recordCheckins(db, {
       event,
       checkinMap: req.body.checkinMap,
       actor: req.user,
-      now: new Date().toISOString()
+      now
     });
 
     res.json({ success: true, ...result });

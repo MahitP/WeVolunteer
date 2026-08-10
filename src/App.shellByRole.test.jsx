@@ -150,8 +150,8 @@ describe('navigation, per role', () => {
    * back unnoticed.
    */
   it.each([
-    ['student', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Profile']],
-    ['organizer', ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Notifications', 'Profile']],
+    ['student', ['Dashboard', 'Discover', 'Calendar', 'Messages', 'Notifications', 'Profile']],
+    ['organizer', ['Dashboard', 'Discover', 'Calendar', 'Messages', 'Notifications', 'Profile']],
     /**
      * Admin GAINED `Messages`, and this pin was updated deliberately rather than
      * relaxed.
@@ -183,7 +183,7 @@ describe('navigation, per role', () => {
      * This list is exact rather than a `toContain`, so the entry cannot return
      * unnoticed — which is exactly how it got here the first time.
      */
-    ['admin', ['Dashboard', 'Opportunities', 'Messages', 'Admin', 'Notifications', 'Profile']]
+    ['admin', ['Dashboard', 'Discover', 'Messages', 'Admin', 'Notifications', 'Profile']]
   ])('%s nav is what its capabilities justify', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
   });
@@ -197,7 +197,7 @@ describe('navigation, per role', () => {
   it('super_admin gets a populated rail, not an empty shell', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
-      /* primary */ 'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin',
+      /* primary */ 'Dashboard', 'Discover', 'Calendar', 'Messages', 'Admin',
       /* secondary */ 'Notifications', 'Profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
@@ -223,7 +223,7 @@ describe('navigation, per role', () => {
     const { primary, secondary } = navSectionsFor(USER('super_admin'));
 
     expect(primary.map(n => n.label))
-      .toEqual(['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin']);
+      .toEqual(['Dashboard', 'Discover', 'Calendar', 'Messages', 'Admin']);
     expect(secondary.map(n => n.label), 'Admin is behind the ⋯ menu again')
       .not.toContain('Admin');
   });
@@ -255,7 +255,7 @@ describe('navigation, per role', () => {
     // stopped being tolerable when the account menu started offering Profile to
     // everybody. It resolves to the generalized account page, which is built from
     // `/api/auth/me` and so needs no `directory.read`.
-    expect(navItemsFor(USER('partner')).map(n => n.label)).toEqual(['Opportunities', 'Profile']);
+    expect(navItemsFor(USER('partner')).map(n => n.label)).toEqual(['Discover', 'Profile']);
   });
 
   /**
@@ -292,7 +292,7 @@ describe('navigation, per role', () => {
        entry carries `accountOnly` and is filtered out here and only here; it is
        still in the mobile ⋯ sheet, which IS the account control at that width. */
     expect(sidebarLabels()).toEqual([
-      'Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin',
+      'Dashboard', 'Discover', 'Calendar', 'Messages', 'Admin',
       'Notifications'
     ]);
     expect(sidebarLabels(), 'Profile belongs to the account menu').not.toContain('Profile');
@@ -304,7 +304,7 @@ describe('navigation, per role', () => {
     await screen.findByTestId('admin-dash');
     /* Profile absent for the same reason as above — the account menu holds it. */
     expect(sidebarLabels()).toEqual([
-      'Dashboard', 'Opportunities', 'Messages', 'Admin', 'Notifications',
+      'Dashboard', 'Discover', 'Messages', 'Admin', 'Notifications',
     ]);
   });
 
@@ -391,7 +391,7 @@ describe('the `/` dashboard, per role', () => {
        that a withheld `event.create` also removes the Create event BUTTON — lives
        in `BrowseEvents.createAction.test.jsx`, which is where the affordance is. */
     expect(labels).not.toContain('Messages');
-    expect(labels).toContain('Opportunities');
+    expect(labels).toContain('Discover');
   });
 });
 
@@ -545,7 +545,7 @@ describe('role labels', () => {
     await screen.findByTestId('admin-dash');
 
     const bar = within(document.querySelector('.mobilenav'));
-    for (const label of ['Dashboard', 'Opportunities', 'Calendar', 'Messages', 'Admin']) {
+    for (const label of ['Dashboard', 'Discover', 'Calendar', 'Messages', 'Admin']) {
       expect(bar.getByRole('button', { name: new RegExp(`^${label}$`) }),
         `${label} is missing from the mobile bar`).toBeInTheDocument();
     }

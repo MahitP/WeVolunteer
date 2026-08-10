@@ -209,7 +209,11 @@ describe('under StrictMode', () => {
       </StrictMode>
     );
 
-    await waitFor(() => expect(screen.getByText('7 left')).toBeTruthy());
+    /* "7 of 10", not a bare "7 left". A count below the set size with no
+       denominator and no explanation reads as an unexplained loss — which is
+       exactly how a user who spent one recovery code weeks ago came to believe
+       ordinary sign-ins were consuming them. */
+    await waitFor(() => expect(screen.getByText('7 of 10 left')).toBeTruthy());
     expect(screen.getByRole('button', { name: /turn off/i })).toBeTruthy();
   });
 });
