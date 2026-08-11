@@ -1,17 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Users, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Users, AlertTriangle, QrCode } from 'lucide-react';
 import { api } from '../utils/api';
 import { formatTimeRange } from '../utils/helpers';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
+import CheckInScanner from '../components/CheckInScanner';
 
 /**
  * Mobile-first day-of check-in view for organizers.
  * This does not finalize hours — it only records check-in status (present=null) 
  * so the organizer can see who showed up. Hours are finalized later via EventModal.
  */
-export default function CheckInView({ currentUser }) {
+export default function CheckInView({ currentUser, addToast }) {
   const { eventId } = useParams();
   const navigate = useNavigate();
 
@@ -23,6 +24,7 @@ export default function CheckInView({ currentUser }) {
   
   // Mobile check-in organizes by shift if there are multiple, or shows a flat list if there's only one.
   const [selectedSlotId, setSelectedSlotId] = useState(null);
+  const [scanning, setScanning] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,7 +72,10 @@ export default function CheckInView({ currentUser }) {
       }
     } catch (err) {
       setCheckins(prev => new Map(prev).set(key, currentlyPresent));
-      alert(`Could not save check-in: ${err.message}`);
+      /* This screen was the only one in the app using window.alert. It blocks
+         the thread, cannot be styled, is not announced as an alert, and jsdom
+         does not implement it — so it also broke any test that rendered here. */
+      addToast?.(`Could not save check-in: ${err.message}`, 'error');
     }
   };
 
@@ -93,7 +98,7 @@ export default function CheckInView({ currentUser }) {
       }
     } catch (err) {
       setCheckins(previous);
-      alert(`Could not save check-ins: ${err.message}`);
+      addToast?.(`Could not save check-ins: ${err.message}`, 'error');
     }
   };
 
@@ -117,6 +122,18 @@ export default function CheckInView({ currentUser }) {
   const appsForCurrentSlot = applications.filter(a => a.slotId === currentSlot?.id);
   const presentCount = appsForCurrentSlot.filter(a => checkins.get(`${a.slotId}:${a.userId}`)).length;
 
+  /**
+   * A successful scan writes straight into the roster's own state.
+   *
+   * `setCheckins` is the only write path this screen has, so going through it
+   * means a scanned volunteer appears ticked in the list immediately, with no
+   * refresh and no second source of truth about who is present.
+   */
+  const applyScan = (res) => {
+    if (!res?.volunteer || !res?.slot) return;
+    setCheckins(prev => new Map(prev).set(`${res.slot.id}:${res.volunteer.id}`, true));
+  };
+
   return (
     <div style={{ backgroundColor: 'var(--paper)', minHeight: '100vh', paddingBottom: 'var(--s8)' }}>
       {/* ── Top Bar ── */}
@@ -133,6 +150,18 @@ export default function CheckInView({ currentUser }) {
       <div className="mx-auto" style={{ maxWidth: 600, padding: 'var(--s4)' }}>
         <div className="alert alert-info" style={{ marginBottom: 'var(--s4)' }}>
           <strong>Check-in doesn't finalize hours.</strong> Use this during the event to track who showed up. Finalize hours later on a computer.
+        </div>
+
+        {/* Scanning and the roster are two ways to do one thing, presented as
+            equals. Not every volunteer has a phone, and an attendance system
+            that assumes one excludes exactly the students least able to argue
+            about it — so the roster below is never a fallback, it is the other
+            option. */}
+        <div className="row" style={{ gap: 'var(--s2)', marginBottom: 'var(--s4)' }}>
+          <button className="btn btn-primary" type="button" onClick={() => setScanning(true)}>
+            <QrCode size={16} aria-hidden="true" /> Scan QR code
+          </button>
+          <span className="small dim">or check people in by name below</span>
         </div>
 
         {hasMultipleSlots && (
@@ -225,6 +254,13 @@ export default function CheckInView({ currentUser }) {
           </div>
         )}
       </div>
+      {scanning && (
+        <CheckInScanner
+          eventId={eventId}
+          onClose={() => setScanning(false)}
+          onCheckedIn={applyScan}
+        />
+      )}
     </div>
   );
 }

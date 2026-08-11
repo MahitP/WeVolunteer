@@ -1251,7 +1251,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/events': {},
     '/events/new': { onSubmitEvent: handleCreateEvent, addToast, setActiveTab },
     '/events/:id/edit': {},
-    '/checkin/:eventId': { currentUser },
+    '/checkin/:eventId': { currentUser, addToast },
     '/calendar': { currentUser, events, applications, onViewEvent: openEventById },
     '/notifications': { onViewEvent: openEventById, onCountChange: () => setNotifKey(k => k + 1) },
     '/messages': {},

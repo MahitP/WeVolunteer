@@ -1,8 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Info, CalendarClock, MapPin, Users, Check, Clock, Edit2 } from 'lucide-react';
 import { formatDay, formatTime, formatHours, usesAutoSelect } from '../utils/helpers';
 import { Seats } from './Seats';
 import EmptyState from './common/EmptyState';
+import CheckInCodeModal from './CheckInCodeModal';
 
 /**
  * How long before a shift the downloaded calendar entry should sound an alarm.
@@ -33,6 +34,10 @@ export default function EventShiftsTab({
   submitting,
   onRelease
 }) {
+  /* The slot whose code is being shown, or null. Per slot, so a two-day event
+     cannot present Saturday's code on Sunday. */
+  const [qrFor, setQrFor] = useState(null);
+
   const days = useMemo(() => {
     if (!event?.slots) return [];
     const grouped = {};
@@ -190,6 +195,20 @@ export default function EventShiftsTab({
                                 Add to Calendar
                               </a>
                             )}
+                            {/* Per slot, because check-in is per slot: on a
+                                two-day festival a Sunday volunteer's code must
+                                not work on Saturday. The button is always
+                                offered; the server decides whether a code can
+                                exist yet and says so in the dialog. */}
+                            {mine.status === 'accepted' && (
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                type="button"
+                                onClick={() => setQrFor({ application: mine, slot })}
+                              >
+                                Check in with QR
+                              </button>
+                            )}
                             {(mine.status === 'accepted' || mine.status === 'pending' || mine.status === 'waitlisted') && (
                               <button className="btn btn-ghost btn-sm"
                                 disabled={submitting}
@@ -225,6 +244,14 @@ export default function EventShiftsTab({
             {formatHours(selectedSlots.reduce((sum, id) => sum + (event.slots.find(s => s.id === id)?.hours || 0), 0))} total
           </span>
         </div>
+      )}
+      {qrFor && (
+        <CheckInCodeModal
+          application={qrFor.application}
+          slot={qrFor.slot}
+          event={event}
+          onClose={() => setQrFor(null)}
+        />
       )}
     </>
   );

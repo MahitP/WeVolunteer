@@ -716,6 +716,21 @@ export const api = {
     body: JSON.stringify({ checkinMap })
   }),
 
+  /**
+   * Mints a five-minute check-in code for one of the caller's own shifts.
+   *
+   * POST because it creates a token and retires the previous one — and because
+   * a GET would put the code in browser history and make it prefetchable.
+   */
+  createCheckinCode: async (applicationId) =>
+    apiFetch(`/api/applications/${applicationId}/checkin-code`, { method: 'POST' }),
+
+  /** Redeems a scanned code. The token is the only field the server reads. */
+  scanCheckinCode: async (eventId, token) => apiFetch(`/api/events/${eventId}/checkin/scan`, {
+    method: 'POST',
+    body: JSON.stringify({ token })
+  }),
+
   // Removed: resetDatabase(). `POST /api/auth/reset` no longer exists — a
   // reachable endpoint that dropped tables destroyed the database rather than
   // resetting it (it died partway through a hand-maintained DROP list, before
