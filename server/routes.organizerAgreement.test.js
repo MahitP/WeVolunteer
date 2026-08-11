@@ -22,7 +22,7 @@ import { startTestServer } from './testServer.js';
  * and specifically about `applicant.review`, which is the capability the finding
  * is about.
  *
- * Nothing that reaches `db.js` is statically imported — see CLAUDE.md's testing
+ * Nothing that reaches `db.js` is statically imported — see docs/ENGINEERING_GUIDE.md's testing
  * section.
  */
 describe('the Organizer Agreement', () => {

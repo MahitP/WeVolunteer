@@ -22,7 +22,7 @@ import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
  * thing this design is arranged to prevent.
  *
  * Nothing is statically imported from anything that reaches `db.js` — see the
- * testing section of CLAUDE.md. `sensitiveActions.js` imports only `crypto`.
+ * testing section of docs/ENGINEERING_GUIDE.md. `sensitiveActions.js` imports only `crypto`.
  */
 describe('the Legal Center editor', () => {
   let srv, db, owner, admin, student;

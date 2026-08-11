@@ -208,7 +208,7 @@ comment asserting the opposite of the code.
 
 So:
 
-1. **Write the test first, and watch it fail.** `CLAUDE.md` requires this for
+1. **Write the test first, and watch it fail.** `docs/ENGINEERING_GUIDE.md` requires this for
    any bug fix, and requires a test at all for any auth/authz change, anything
    touching credited hours, any migration, any new boot guard, any security fix.
 2. **Mutation-test every guard you add.** Delete the check, confirm its test
@@ -295,7 +295,7 @@ depends on, with the assumption it proceeds under if unanswered.
    stop and ask.
 2. `bin/install-hooks.sh` — required after a clone; installs the pre-commit
    secret scan.
-3. Read `CLAUDE.md`, then `docs/ENGINEERING_GUIDE.md` §6 (security) and §7
+3. Read `docs/ENGINEERING_GUIDE.md`, then `docs/ENGINEERING_GUIDE.md` §6 (security) and §7
    (testing). The guide is the authoritative process document and **every rule
    in it is annotated with the incident that produced it** — read the reasoning
    before overriding anything.

@@ -132,3 +132,20 @@ gha-creds-*.json
 # it on demand (`mkdirSync` with `recursive: true`), so nothing depends on it
 # existing in a fresh clone.
 server/public/uploads/
+
+# AI/editor assistant working directories.
+#
+# These are ignored by the machine's GLOBAL gitignore here, which is the problem:
+# a global rule protects this checkout and nobody else's. A collaborator cloning
+# the repository, or CI, or this same machine after a config reset, would see
+# `.claude/settings.local.json` and `.claude/worktrees/` offered as new files —
+# local tool configuration, session state, and paths naming the assistant, in a
+# repository that should read as one person's project.
+#
+# Listed here so the rule travels with the repository rather than with the laptop.
+# Nothing under these paths is part of the product; none of it is currently
+# tracked, and this keeps it that way.
+.claude/
+.cursor/
+CLAUDE.md
+AGENTS.md

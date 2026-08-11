@@ -17,7 +17,7 @@
  *
  * ── Why not `addColumnIfMissing` in db.js ──
  *
- * That is the normal home for an additive column (CLAUDE.md, "still correct for
+ * That is the normal home for an additive column (docs/ENGINEERING_GUIDE.md, "still correct for
  * almost everything") and it was where these two started. It does not work here,
  * and the reason is worth writing down because the next person will reach for it
  * too.

@@ -11,7 +11,7 @@ import { startTestServer } from './testServer.js';
  * directly rather than left implied by the other tests passing.
  *
  * Nothing is statically imported from anything that reaches `db.js` — see the
- * testing section of CLAUDE.md. `legalDocuments.js` imports only node builtins,
+ * testing section of docs/ENGINEERING_GUIDE.md. `legalDocuments.js` imports only node builtins,
  * so it is safe, but it is loaded through the harness anyway for consistency.
  */
 describe('legal document endpoints', () => {

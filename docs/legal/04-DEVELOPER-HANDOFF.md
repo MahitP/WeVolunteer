@@ -21,7 +21,7 @@ warnings; they fail `npm test`.
 
 **Order of work: tokens → CSS rules → components.** Any other order fails the suite mid-way.
 
-Two more from `CLAUDE.md` that apply:
+Two more from `docs/ENGINEERING_GUIDE.md` that apply:
 - Every `NAV` entry must declare `requiredCap` or a non-empty `requiredCapAny` — a boot-time
   loop throws otherwise. The legal routes are **public**, so they go in `PUBLIC_ROUTES`, not
   `NAV`.
@@ -281,7 +281,7 @@ forgery.
 
 ## 8. Tests required
 
-`CLAUDE.md` requires tests for any new endpoint, any auth/authz change, any boot guard, and any
+`docs/ENGINEERING_GUIDE.md` requires tests for any new endpoint, any auth/authz change, any boot guard, and any
 security fix. These follow from that policy plus the guards.
 
 **Client (`--project=client`)**

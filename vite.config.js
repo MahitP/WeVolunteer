@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
  * Where `/api` and `/socket.io` are forwarded in development.
  *
  * `API_PORT` for the same reason `PORT` is honoured below: the server reads
- * `API_PORT` (never `PORT` — see the gotchas in CLAUDE.md), so a second stack
+ * `API_PORT` (never `PORT` — see the gotchas in docs/ENGINEERING_GUIDE.md), so a second stack
  * pointed at a throwaway database needs both halves to agree, and hardcoding 5050
  * here meant the client could only ever talk to the FIRST server on the machine.
  *

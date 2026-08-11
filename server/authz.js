@@ -78,7 +78,7 @@ export const ROLE = Object.freeze({
  * ── Why it lives here rather than being spelled out at each site ──
  *
  * It was written inline as `['admin', 'super_admin'].includes(role)` in four
- * places — twice in `utils.js`, twice in `twoFactorRoutes.js`. CLAUDE.md's rule
+ * places — twice in `utils.js`, twice in `twoFactorRoutes.js`. docs/ENGINEERING_GUIDE.md's rule
  * is that route files never compare a role string, and the sanctioned remedy
  * (see this file's header) is that role names live in ONE file. That spelling
  * also happens to be one the completeness guard cannot see, so it passed the
