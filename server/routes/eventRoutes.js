@@ -830,6 +830,61 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
       });
     }
 
+    /**
+     * ── Times are locked on a shift somebody has already been credited for ──
+     *
+     * The guard below covers slot REMOVAL only. Changing the times on a slot
+     * that was kept was completely unguarded, and the comment above already
+     * explains why that matters: credited hours are priced from the slot's
+     * duration at the moment attendance is confirmed. Editing the times
+     * afterwards leaves the stored credit describing a shift that did not
+     * happen — the certificate prints dates the volunteer was not there, and any
+     * volunteer on the same slot not yet finalised is priced from the NEW
+     * duration, so two people on one shift get different hours with nothing
+     * anywhere to explain it. No ledger row is written, because from the
+     * ledger's point of view nothing happened.
+     *
+     * An incidental brake existed — an edit naming a slot that has already
+     * started fails the deadline rule — but that is a side effect of a rule
+     * about deadlines, phrased in terms of deadlines, which would vanish the day
+     * anybody relaxed it. This is the explicit version.
+     *
+     * Keyed on attendance EXISTING, so a slot with none stays fully editable:
+     * fixing a typo before anybody is credited is the common case and is
+     * untouched. Only the times are locked — a name, description or spot count
+     * can still be corrected on a finalised shift.
+     */
+    const retained = slots.filter(sl => sl.id && existingIds.includes(sl.id));
+    const storedById = new Map(
+      db.prepare('SELECT id, name, start_datetime, end_datetime FROM slots WHERE event_id = ?')
+        .all(eventId).map(row => [row.id, row])
+    );
+    const retimed = retained.filter(sl => {
+      const stored = storedById.get(sl.id);
+      if (!stored) return false;
+      /* Compared as INSTANTS, not as strings: the client may legitimately send
+         `2026-06-01T09:00` where the column holds `2026-06-01T09:00:00.000Z`,
+         and a string comparison would report a change nobody made. */
+      const sameStart = Date.parse(sl.startDatetime) === Date.parse(stored.start_datetime);
+      const sameEnd = Date.parse(sl.endDatetime) === Date.parse(stored.end_datetime);
+      return !(sameStart && sameEnd);
+    }).map(sl => sl.id);
+
+    const lockedRows = attendanceOnSlots(db, retimed);
+    if (lockedRows.length > 0) {
+      const names = [...new Set(lockedRows.map(r => r.user_name).filter(Boolean))];
+      return res.status(409).json({
+        error: 'Those shifts already have attendance recorded, so their times cannot be changed. '
+          + `${names.length} volunteer${names.length === 1 ? '' : 's'} ${names.length === 1 ? 'was' : 'were'} `
+          + `credited from the times as they stand: ${names.join(', ')}. `
+          + 'Correct the hours on the attendance screen instead.',
+        code: 'attendance_exists',
+        reason: 'slot_times_locked',
+        volunteers: names,
+        slots: [...new Set(lockedRows.map(r => r.slot_name).filter(Boolean))],
+      });
+    }
+
     const protectedRows = attendanceOnSlots(db, removedIds);
 
     if (protectedRows.length > 0) {

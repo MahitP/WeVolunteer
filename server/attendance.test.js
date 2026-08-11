@@ -63,9 +63,34 @@ const ledgerRows = (db) => db.prepare('SELECT rowid AS seq, * FROM hours_ledger 
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('slotDuration & slotHasEnded', () => {
-  it('prices a slot from its duration with a floor', () => {
+  it('prices a slot from its duration', () => {
     expect(slotDuration({ start_datetime: PAST_START, end_datetime: PAST_END })).toBe(3);
-    expect(slotDuration({ start_datetime: PAST_START, end_datetime: PAST_START })).toBe(0.1);
+  });
+
+  /**
+   * ── `null`, not a floor ──
+   *
+   * This used to return `Math.max(0.1, …)`, and the floor was doing more than
+   * rounding: it turned every unusable slot into a plausible six-minute shift
+   * and wrote that onto a service record. `end === start` and `end < start`
+   * were indistinguishable from a real short shift, and a null start date came
+   * back as roughly 490,000 hours — because `new Date(null)` is the epoch
+   * rather than an invalid date, so nothing ever went near a NaN a guard could
+   * have caught.
+   *
+   * A slot that cannot price itself now says so, and `finalizeAttendance`
+   * refuses the credit and names the shift instead of inventing a number.
+   */
+  it.each([
+    ['equal times', { start_datetime: PAST_START, end_datetime: PAST_START }],
+    ['end before start', { start_datetime: PAST_END, end_datetime: PAST_START }],
+    ['unparseable end', { start_datetime: PAST_START, end_datetime: 'not a date' }],
+    ['unparseable start', { start_datetime: 'nonsense', end_datetime: PAST_END }],
+    ['null start', { start_datetime: null, end_datetime: PAST_END }],
+    ['null end', { start_datetime: PAST_START, end_datetime: null }],
+    ['missing slot', undefined],
+  ])('returns null for a slot that cannot price itself: %s', (_label, slot) => {
+    expect(slotDuration(slot)).toBeNull();
   });
 
   it('treats a slot as ended only once its end time has passed', () => {
@@ -448,5 +473,106 @@ describe('request hygiene', () => {
     });
     expect(result.ok).toBe(true);
     expect(result.credited).toEqual([]);
+  });
+});
+
+/**
+ * ── Hour integrity: a slot cannot credit more than it can account for ──
+ *
+ * `MAX_CREDITABLE_HOURS` was the only ceiling on an override, and it bounded
+ * nothing that mattered: a six-minute slot accepted a 24-hour credit — 240× the
+ * shift — and the automatically computed default was not bounded at all, so a
+ * mistyped year credited thousands of hours without the cap ever seeing the
+ * number.
+ */
+describe('hour integrity', () => {
+  const finalize = (db, event, opts = {}) => finalizeAttendance(db, {
+    event, attendanceMap: { a1: true }, actor: { id: 'org', role: 'organizer' }, now: NOW, ...opts,
+  });
+
+  /* An organizer whose volunteers stayed late must still be able to say so —
+     the grace margin is what separates "ran over" from "wrong number". */
+  it('accepts an override within the shift plus the grace margin', () => {
+    const db = makeDb();
+    const event = scenario(db);           // a three-hour slot
+    const res = finalize(db, event, { hoursMap: { a1: 5 } });
+    expect(res.ok).toBe(true);
+    expect(hoursOf(db, 'u1')).toBe(5);
+  });
+
+  it('refuses an override far beyond what the shift can account for', () => {
+    const db = makeDb();
+    const event = scenario(db);           // three hours, so the ceiling is five
+    const res = finalize(db, event, { hoursMap: { a1: 24 } });
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('invalid_hours');
+    expect(res.invalidHours[0].scheduledHours).toBe(3);
+    expect(res.invalidHours[0].maxHours).toBe(5);
+    /* Nothing written — a refused submission is refused whole. */
+    expect(hoursOf(db, 'u1')).toBe(0);
+  });
+
+  /**
+   * The bypass this closes. A slot floored to 0.1 hours accepted a 24-hour
+   * override, because the only ceiling was the absolute cap.
+   */
+  it('refuses a large override on a slot with no real duration', () => {
+    const db = makeDb();
+    const event = scenario(db, { slotStart: PAST_END, slotEnd: PAST_END });
+    const res = finalize(db, event, { hoursMap: { a1: 24 } });
+    expect(res.ok).toBe(false);
+    expect(hoursOf(db, 'u1')).toBe(0);
+  });
+
+  /**
+   * And the other half: with no override, such a slot used to fabricate 0.1
+   * hours or write a NaN that failed NOT NULL and surfaced as a 500.
+   */
+  it('refuses to price a credit from a slot whose times are unusable', () => {
+    const db = makeDb();
+    const event = scenario(db, { slotStart: PAST_END, slotEnd: PAST_END });
+    const res = finalize(db, event);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('slot_unpriceable');
+    expect(res.unpriceable[0].slotName).toBe('Box Packer');
+    expect(hoursOf(db, 'u1')).toBe(0);
+    expect(ledgerRows(db)).toHaveLength(0);
+  });
+
+  /**
+   * ── Historical safety ──
+   *
+   * Stronger validation protects FUTURE operations. A credit already written
+   * keeps its stored value even if the slot it came from would now be refused —
+   * that is the snapshot invariant, and it is what stops this work reaching back
+   * and rewriting records that were valid when they were made.
+   */
+  it('leaves an existing credit alone when the slot has since become unusable', () => {
+    const db = makeDb();
+    const event = scenario(db);
+    expect(finalize(db, event).ok).toBe(true);
+    expect(hoursOf(db, 'u1')).toBe(3);
+
+    /* The slot's times are broken afterwards. */
+    db.prepare('UPDATE slots SET end_datetime = start_datetime WHERE id = ?').run('s1');
+
+    /* Re-finalising the same record is a no-op, not a refusal: `prior` exists,
+       so nothing is re-priced and the unpriceable guard never applies. */
+    const again = finalize(db, event);
+    expect(again.ok).toBe(true);
+    expect(hoursOf(db, 'u1'), 'the original credit survives').toBe(3);
+  });
+
+  /* A participation event credits no hours, so a broken slot cannot misprice
+     anything and must not block recording who turned up. */
+  it('still records attendance on a no-hours event with an unusable slot', () => {
+    const db = makeDb();
+    const event = scenario(db, { slotStart: PAST_END, slotEnd: PAST_END });
+    /* `credits_hours` is read off the event object the caller passes, and this
+       file's minimal schema has no such column — the flag is the input, not a
+       lookup. */
+    const res = finalize(db, { ...event, credits_hours: 0 });
+    expect(res.ok).toBe(true);
+    expect(hoursOf(db, 'u1')).toBe(0);
   });
 });

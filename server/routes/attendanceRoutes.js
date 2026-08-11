@@ -190,7 +190,11 @@ router.post('/api/events/:id/attendance', authenticateToken, requireCap('attenda
     if (error instanceof AttendanceRefused) {
       const { error: code, message, ...rest } = error.outcome;
       /* `reason_required` and `invalid_hours` are both malformed submissions —
-         400. `shift_not_ended` is a well-formed request refused by the state of
+         400. `shift_not_ended` and `slot_unpriceable` are well-formed requests
+         refused by the state of the world — the shift has not happened yet, or
+         the event's own times are broken — so both are 409s. The distinction is
+         whether the caller could fix it by resending different values.
+         `shift_not_ended` is a well-formed request refused by the state of
          the world — 409. */
       const badRequest = code === 'reason_required' || code === 'invalid_hours';
       return res.status(badRequest ? 400 : 409).json({ error: message, code, ...rest });

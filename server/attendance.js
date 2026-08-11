@@ -58,9 +58,49 @@ export function createCheckinTable(db) {
  */
 export const MAX_CREDITABLE_HOURS = 24;
 
+/**
+ * How far past a shift's scheduled length an organizer may still credit.
+ *
+ * Volunteers stay late, events overrun, and the scheduled duration is a plan
+ * rather than a measurement — so an override has to be able to exceed it. Two
+ * hours covers a genuine overrun on any shift this product models while still
+ * refusing the numbers that indicate something is wrong rather than long.
+ *
+ * Absolute, not proportional: a multiplier would grant twelve hours of slack on
+ * a long shift, where the schedule is most reliable, and almost none on a short
+ * one, where running over is most likely.
+ */
+export const OVERRIDE_GRACE_HOURS = 2;
+
+/**
+ * The scheduled length of a shift, in hours, or `null` when the slot cannot say.
+ *
+ * ── Why `null` rather than a floor ──
+ *
+ * This returned `Math.max(0.1, …)`, and that floor was doing more than
+ * rounding: it turned every unusable slot into a plausible-looking 0.1-hour
+ * shift. `end < start` came back 0.1, indistinguishable from a six-minute
+ * shift. `end == start` came back 0.1. A null `start_datetime` came back
+ * ~490,000 — because `new Date(null)` is the epoch rather than an invalid date,
+ * so the sign never went near a NaN anybody could have caught.
+ *
+ * A slot that cannot price itself must SAY so, so the caller can refuse the
+ * credit and name the slot to the organizer. The alternative is what was there:
+ * fabricating 0.1 hours onto a student's service record, or writing a NaN that
+ * fails the NOT NULL constraint and surfaces as a 500 nobody can act on.
+ *
+ * Callers that only need a number for DISPLAY keep their own floor — see
+ * `formatSlot` in eventRoutes.js. This one feeds `hours_awarded`, and a service
+ * record is not a display.
+ */
 export function slotDuration(slot) {
-  const ms = new Date(slot.end_datetime) - new Date(slot.start_datetime);
-  return Math.max(0.1, Number((ms / 3600000).toFixed(2)));
+  const startMs = Date.parse(slot?.start_datetime);
+  const endMs = Date.parse(slot?.end_datetime);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
+
+  const hours = Number(((endMs - startMs) / 3600000).toFixed(2));
+  if (!Number.isFinite(hours) || hours <= 0) return null;
+  return hours;
 }
 
 export const slotHasEnded = (slot, now) => new Date(slot.end_datetime) <= new Date(now);
@@ -225,6 +265,8 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
   const skipped = [];
   const notEnded = [];
   const invalidHours = [];
+  /* Slots whose stored times cannot produce a duration — see the refusal below. */
+  const unpriceable = [];
 
   /**
    * The event may not measure service in hours at all.
@@ -293,7 +335,38 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
      * the slot. That invariant is what stops an edit to a slot's times
      * re-pricing service somebody already performed.
      */
-    let hours = prior ? prior.hours_awarded : slotDuration(app);
+    /**
+     * The slot's own scheduled length, or `null` when it cannot say.
+     *
+     * Needed for two separate decisions below: pricing a NEW credit, and
+     * bounding an override. Computed once so the two cannot disagree.
+     */
+    const scheduled = slotDuration(app);
+
+    /**
+     * A slot that cannot price itself does not get to price a service record.
+     *
+     * `slotDuration` used to floor at 0.1, which meant a slot with reversed,
+     * equal or unparseable times produced a plausible-looking six-minute shift
+     * and wrote it to a student's record — or produced a NaN that failed the
+     * NOT NULL constraint and surfaced as a 500 with nothing an organizer could
+     * act on. Neither is a decision anybody made.
+     *
+     * Only NEW credits are affected. An existing credit keeps its stored value
+     * whatever the slot says now, which is the snapshot invariant, and is also
+     * what stops this refusal reaching back through history: a record already
+     * written stays written.
+     */
+    if (!prior && awardsHours && scheduled === null) {
+      unpriceable.push({
+        applicationId, name: app.user_name, slotName: app.slot_name,
+        startDatetime: app.start_datetime ?? null,
+        endDatetime: app.end_datetime ?? null,
+      });
+      continue;
+    }
+
+    let hours = prior ? prior.hours_awarded : (scheduled ?? 0);
     let hoursOverridden = false;
 
     /**
@@ -330,9 +403,35 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
       const raw = (supplied === null || supplied === '' || typeof supplied === 'boolean')
         ? NaN
         : Number(supplied);
-      if (!Number.isFinite(raw) || raw < 0 || raw > MAX_CREDITABLE_HOURS) {
+      /**
+       * ── An override is bounded by the SHIFT, not only by the absolute cap ──
+       *
+       * `MAX_CREDITABLE_HOURS` is 24, and it was the only ceiling. So a
+       * six-minute slot accepted a 24-hour credit — 240 times what the shift was
+       * worth — and a slot with an unparseable start date accepted one too,
+       * because `NaN !== 4` marked it "overridden" and the fabricated value
+       * became the record. That is the override rescuing data the pricing rule
+       * had already refused to touch.
+       *
+       * The bound is the slot's own length plus a grace margin rather than the
+       * length itself, because staying late is the case this feature exists for:
+       * the module's own note says a volunteer rostered for four hours who works
+       * five did five. What must be refused is 24 hours on a six-minute slot,
+       * not four hours on a three-hour one.
+       *
+       * `OVERRIDE_GRACE_HOURS` is absolute rather than proportional on purpose.
+       * A multiplier scales the wrong way — it grants 12 hours of slack on a
+       * long shift, where the schedule is most reliable, and almost none on a
+       * short one, where running over is most likely.
+       */
+      const ceiling = scheduled === null
+        ? MAX_CREDITABLE_HOURS
+        : Math.min(MAX_CREDITABLE_HOURS, scheduled + OVERRIDE_GRACE_HOURS);
+
+      if (!Number.isFinite(raw) || raw < 0 || raw > ceiling) {
         invalidHours.push({
           applicationId, name: app.user_name, slotName: app.slot_name, value: supplied,
+          scheduledHours: scheduled, maxHours: Number(ceiling.toFixed(2)),
         });
         continue;
       }
@@ -359,8 +458,30 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
     return {
       ok: false,
       error: 'invalid_hours',
-      message: `Hours must be a number between 0 and ${MAX_CREDITABLE_HOURS}.`,
+      message: 'Those hours are more than the shift can account for. '
+        + `An entry may be between 0 and the shift's scheduled length plus ${OVERRIDE_GRACE_HOURS} hours, `
+        + `and never more than ${MAX_CREDITABLE_HOURS}.`,
       invalidHours
+    };
+  }
+
+  /**
+   * A slot whose times cannot produce a duration is a broken event, not a
+   * broken request — so it is a 409 naming the shift, not a 400.
+   *
+   * Previously this path either fabricated 0.1 hours onto a service record or
+   * wrote a NaN that failed the NOT NULL constraint and surfaced as a 500 with
+   * nothing an organizer could act on. Naming the slot is what lets somebody go
+   * and fix the event, which is the only real remedy.
+   */
+  if (unpriceable.length > 0) {
+    return {
+      ok: false,
+      error: 'slot_unpriceable',
+      message: `${unpriceable.length === 1 ? 'A shift has' : `${unpriceable.length} shifts have`} `
+        + 'start and end times that do not describe a real span, so hours cannot be worked out '
+        + 'from them. Correct the shift times on the event, then finalise again.',
+      unpriceable
     };
   }
 

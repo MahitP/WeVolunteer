@@ -18,6 +18,18 @@ const MAX_SLOT_DESCRIPTION_LENGTH = 1000;
 const MIN_MAX_SPOTS = 1;
 const MAX_MAX_SPOTS = 100;
 
+/**
+ * The longest a single shift may be.
+ *
+ * Exported so `attendance.js` can assert it equals `MAX_CREDITABLE_HOURS` —
+ * these two numbers are the same rule seen from two sides (what a shift may be
+ * worth, and what may be credited for one), and if they ever drift apart a slot
+ * becomes creatable whose own default credit the cap would refuse. See the note
+ * at the duration check below.
+ */
+export const MAX_SLOT_HOURS = 24;
+const MAX_SLOT_DURATION_MS = MAX_SLOT_HOURS * 3600000;
+
 export function validateEventPayload({ title, description, location, instructions, applicationDeadline, slots, address, latitude, longitude }) {
   const deadlineMs = Date.parse(applicationDeadline);
   if (isNaN(deadlineMs)) {
@@ -46,6 +58,39 @@ export function validateEventPayload({ title, description, location, instruction
     }
     if (endMs <= startMs) {
       return { ok: false, error: 'Each shift must end after it starts.' };
+    }
+    /**
+     * ── A shift has a maximum length, and it is the same number as the cap on
+     *    the hours it can credit ──
+     *
+     * `end > start` was the whole duration rule, so the API accepted a slot of
+     * any span up to the ECMAScript date range. That is not an attack surface,
+     * it is a typo surface: a shift entered as `2026-06-01 09:00 →
+     * 2027-06-01 11:00` — one wrong digit in the year — is accepted, and the
+     * moment it ends it credits about seventeen thousand hours to every
+     * volunteer on it. `MAX_CREDITABLE_HOURS` never sees that number, because it
+     * only ever bounded an organizer's manual OVERRIDE; the automatically
+     * computed default was unbounded.
+     *
+     * So the two constants are made to agree. A slot longer than the most hours
+     * that can be credited for it is incoherent by construction — its default
+     * credit could never be awarded — and refusing it here is the one place that
+     * catches the typo before anybody is priced from it.
+     *
+     * Twenty-four hours is a genuine bound rather than a convenient one: the
+     * longest shift in the pilot data is fifteen hours, and a single person's
+     * single shift running beyond a day is not a thing this product models. A
+     * multi-day event is several slots, which is what the slot list is FOR.
+     *
+     * Refused rather than clamped. A clamped duration is a number nobody
+     * decided, written onto a student's service record.
+     */
+    if (endMs - startMs > MAX_SLOT_DURATION_MS) {
+      return {
+        ok: false,
+        error: `A single shift cannot be longer than ${MAX_SLOT_HOURS} hours. `
+          + 'For an event running over several days, add one shift per day.',
+      };
     }
 
     const maxSpotsNum = Number(slot.maxSpots);

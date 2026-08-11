@@ -251,3 +251,56 @@ describe('POST/PUT /api/events: server-side validation wiring', () => {
     expect(res.status).toBe(400);
   });
 });
+
+/**
+ * ── A shift has a maximum length ──
+ *
+ * `end > start` was the whole duration rule, so a slot of any span was
+ * accepted. That is a typo surface rather than an attack surface: one wrong
+ * digit in a year turns a two-hour shift into a year-long one, and the moment
+ * it ends it credits about seventeen thousand hours to everybody on it.
+ * `MAX_CREDITABLE_HOURS` never saw that number — it only ever bounded a manual
+ * override, never the automatically computed default.
+ */
+describe('slot duration bounds', () => {
+  const at = (iso) => new Date(iso).toISOString();
+  const base = (startIso, endIso) => ({
+    title: 'T', description: 'D', location: 'L',
+    applicationDeadline: at('2030-01-01T00:00:00.000Z'),
+    slots: [{
+      name: 'Shift', description: '', maxSpots: 5,
+      startDatetime: at(startIso), endDatetime: at(endIso),
+    }],
+  });
+
+  it('accepts a shift of ordinary length', () => {
+    expect(validateEventPayload(base('2030-06-01T09:00:00.000Z', '2030-06-01T12:00:00.000Z')).ok).toBe(true);
+  });
+
+  /* The longest shift in the pilot data is fifteen hours, so the bound has to
+     clear that comfortably — an overnight event is a real thing. */
+  it('accepts a long but plausible shift, and the boundary exactly', () => {
+    expect(validateEventPayload(base('2030-06-01T18:00:00.000Z', '2030-06-02T09:00:00.000Z')).ok).toBe(true);
+    expect(validateEventPayload(base('2030-06-01T00:00:00.000Z', '2030-06-02T00:00:00.000Z')).ok).toBe(true);
+  });
+
+  it('refuses a shift longer than a day', () => {
+    const res = validateEventPayload(base('2030-06-01T00:00:00.000Z', '2030-06-02T00:00:01.000Z'));
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/cannot be longer than 24 hours/i);
+    expect(res.error, 'says what to do instead').toMatch(/one shift per day/i);
+  });
+
+  /* The error this rule exists for: a mistyped year. */
+  it('refuses the year typo that motivated the rule', () => {
+    const res = validateEventPayload(base('2030-06-01T09:00:00.000Z', '2031-06-01T11:00:00.000Z'));
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/longer than 24 hours/i);
+  });
+
+  it('still refuses a shift that ends before it starts', () => {
+    const res = validateEventPayload(base('2030-06-01T12:00:00.000Z', '2030-06-01T09:00:00.000Z'));
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/end after it starts/i);
+  });
+});
