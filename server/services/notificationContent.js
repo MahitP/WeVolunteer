@@ -325,20 +325,45 @@ export function getInAppContent(event, payload) {
         body: `"${payload.eventTitle}" stops accepting applications ${payload.countdownPhrase}.`,
         link: `event:${payload.eventId}`
       };
+    /**
+     * `slotName` is a SHIFT NAME, not a time.
+     *
+     * This read "Food Drive starts at Morning Setup in Community Center" —
+     * grammar written for a value that never went in that slot. The shift name
+     * belongs in apposition, and the place belongs after "at".
+     */
     case 'EVENT_REMINDER_24H':
       return {
         kind,
         priority: NOTIFICATION_PRIORITY.IMPORTANT,
         title: 'Your shift starts tomorrow',
-        body: `${payload.eventTitle} starts at ${payload.slotName} in ${payload.location}.`,
+        body: [
+          `${payload.eventTitle}`,
+          payload.slotName ? ` (${payload.slotName})` : '',
+          ' is tomorrow',
+          payload.location ? ` at ${payload.location}` : '',
+          '.',
+        ].join(''),
         link: `event:${payload.eventId}`
       };
+    /**
+     * The two-hour reminder never named the place, though the one the day
+     * before did — so the message that arrives when somebody is deciding
+     * whether to set off was the one carrying least. It also arrives at exactly
+     * the moment check-in opens (`CHECKIN_OPENS_BEFORE_MS` is the same two
+     * hours), which is worth saying out loud rather than leaving as a
+     * coincidence only the code knows about.
+     */
     case 'EVENT_REMINDER_2H':
       return {
         kind,
         priority: NOTIFICATION_PRIORITY.IMPORTANT,
         title: 'Your shift starts soon',
-        body: `${payload.eventTitle} is starting in less than 2 hours.`,
+        body: [
+          `${payload.eventTitle} starts in under 2 hours`,
+          payload.location ? ` at ${payload.location}` : '',
+          '. Check-in is open.',
+        ].join(''),
         link: `event:${payload.eventId}`
       };
     case 'SCHEDULE_CONFLICT_WARNING':

@@ -4,6 +4,21 @@ import { formatDay, formatTime, formatHours, usesAutoSelect } from '../utils/hel
 import { Seats } from './Seats';
 import EmptyState from './common/EmptyState';
 
+/**
+ * How long before a shift the downloaded calendar entry should sound an alarm.
+ *
+ * A fixed default rather than a picker in the row. That row already carries the
+ * seat count, the status pill, this button and Release; a fifth control for a
+ * decision most people will not make is clutter — and the one place changing an
+ * alert is genuinely easy is the calendar application it just landed in.
+ *
+ * The .ics also carries GEO, so on a calendar that supports departure alerts
+ * (iOS "Time to Leave") the device works out the real leaving time from live
+ * traffic and the volunteer's actual position, which is something this
+ * application cannot do and should not pretend to.
+ */
+const CALENDAR_REMINDER_MINUTES = 60;
+
 export default function EventShiftsTab({
   event,
   eventApps,
@@ -142,7 +157,7 @@ export default function EventShiftsTab({
                         )}
                         {(isOwner || isAdmin) && (
                           <a 
-                            href={`/api/events/${event.id}/slots/${slot.id}/ics`} 
+                            href={`/api/events/${event.id}/slots/${slot.id}/ics?remind=${CALENDAR_REMINDER_MINUTES}`} 
                             className="btn btn-ghost btn-sm" 
                             style={{ marginTop: 4 }}
                             download
@@ -168,7 +183,7 @@ export default function EventShiftsTab({
                             </span>
                             {mine.status === 'accepted' && (
                               <a 
-                                href={`/api/events/${event.id}/slots/${slot.id}/ics`} 
+                                href={`/api/events/${event.id}/slots/${slot.id}/ics?remind=${CALENDAR_REMINDER_MINUTES}`} 
                                 className="btn btn-secondary btn-sm" 
                                 download
                               >

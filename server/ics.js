@@ -74,11 +74,54 @@ export function formatIcsDate(value) {
 }
 
 /**
+ * A whole number of minutes, or null. Used for the alarm lead time.
+ *
+ * Rejects negatives (an alarm after the shift starts is not a reminder),
+ * fractions (RFC 5545 durations are integral), and anything beyond a week —
+ * past which a reminder is noise somebody will turn off along with the useful
+ * ones.
+ */
+function normaliseReminderMinutes(value) {
+  if (value == null) return null;
+  const minutes = Number(value);
+  if (!Number.isInteger(minutes) || minutes <= 0 || minutes > 7 * 24 * 60) return null;
+  return minutes;
+}
+
+/**
  * Builds a single-event VCALENDAR for one shift.
+ *
+ * ── GEO, and why it is the closest thing to an ETA this app can honestly ship ──
+ *
+ * A calendar application that knows an event's coordinates can do something no
+ * web page can: iOS Calendar's "Time to Leave" alert routes from wherever the
+ * volunteer actually is, at the actual time, with live traffic, on the device,
+ * and tells them when to leave. WeVolunteer cannot compute that — there is no
+ * routing provider here, the Content-Security-Policy forbids calling one from
+ * the browser, and the server has no origin to route from because student
+ * coordinates are deliberately never stored.
+ *
+ * So the honest answer to "give volunteers an ETA" is to hand the question to
+ * the one piece of software already holding every input, and this is the line
+ * that does it. Two properties, no new vendor, nothing sent anywhere.
+ *
+ * GEO is a float pair separated by a semicolon (§3.8.1.6) and is NOT a TEXT
+ * property, so it must not be run through `escapeText` — that would turn the
+ * separator into `\;` and make the value unparseable.
+ *
+ * ── VALARM ──
+ *
+ * `reminderMinutes` emits a DISPLAY alarm that many minutes before the start.
+ * The lead time comes from the volunteer rather than from a guess: we know how
+ * far away the event is, we do not know whether they walk, cycle, take a bus or
+ * get driven, and the difference between those is a factor of five.
  *
  * @returns {string} a complete .ics document, CRLF-delimited and CRLF-terminated
  */
-export function buildShiftIcs({ uid, start, end, summary, description, location, stamp }) {
+export function buildShiftIcs({
+  uid, start, end, summary, description, location, stamp,
+  latitude, longitude, reminderMinutes,
+}) {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -93,9 +136,26 @@ export function buildShiftIcs({ uid, start, end, summary, description, location,
     `SUMMARY:${escapeText(summary)}`,
     `DESCRIPTION:${escapeText(description)}`,
     `LOCATION:${escapeText(location)}`,
-    'END:VEVENT',
-    'END:VCALENDAR'
   ];
+
+  /* Both or neither: a lone coordinate is not a place, and a GEO with one
+     number is a malformed property rather than a partial one. */
+  if (Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude))) {
+    lines.push(`GEO:${Number(latitude)};${Number(longitude)}`);
+  }
+
+  const minutes = normaliseReminderMinutes(reminderMinutes);
+  if (minutes) {
+    lines.push(
+      'BEGIN:VALARM',
+      'ACTION:DISPLAY',
+      `TRIGGER:-PT${minutes}M`,
+      `DESCRIPTION:${escapeText(summary)}`,
+      'END:VALARM',
+    );
+  }
+
+  lines.push('END:VEVENT', 'END:VCALENDAR');
 
   // Fold each line, join with real CRLF, and terminate with CRLF per §3.1.
   return lines.map(l => foldLine(l)).join('\r\n') + '\r\n';
