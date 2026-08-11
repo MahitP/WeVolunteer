@@ -1096,8 +1096,26 @@ router.post('/api/auth/login-2fa', async (req, res) => {
       }
 
       if (matched) {
-        isValid = true;
-        db.prepare("UPDATE tfa_email_codes SET used_at = datetime('now') WHERE id = ?").run(matched.id);
+        /**
+         * The UPDATE is the claim, and the row count is the answer.
+         *
+         * `AND used_at IS NULL` plus `changes === 1` is what makes spending a
+         * code atomic. Without it this was a read-then-write straddling
+         * `await bcrypt.compare`: N concurrent submissions of the SAME emailed
+         * code all read it as unused, all matched, and all completed — four
+         * parallel redemptions produced four sessions in the stress harness.
+         * The row was marked used exactly once and nothing noticed, because
+         * nobody asked whether this request was the one that marked it.
+         *
+         * Losing the race is a 401, not an error: the code WAS spent, just not
+         * by this request, and "invalid" is the honest answer to a second
+         * presentation of a single-use credential. Same shape as the recovery
+         * branch below, for the same reason.
+         */
+        const claimed = db.prepare(
+          "UPDATE tfa_email_codes SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL"
+        ).run(matched.id);
+        isValid = claimed.changes === 1;
       } else {
         for (const emailCode of validEmailCodes) {
           db.prepare('UPDATE tfa_email_codes SET attempts = attempts + 1 WHERE id = ?').run(emailCode.id);
@@ -1117,9 +1135,27 @@ router.post('/api/auth/login-2fa', async (req, res) => {
        */
       for (const rc of recoveryCodes) {
         if (await bcrypt.compare(codeValue.trim().toUpperCase(), rc.code_hash)) {
-          isValid = true;
-          usedRecoveryCodeId = rc.id;
-          db.prepare('DELETE FROM recovery_codes WHERE id = ?').run(rc.id);
+          /**
+           * The DELETE is the claim, and its row count decides the sign-in.
+           *
+           * A recovery code is single-use, and until this line said so, it was
+           * not. The SELECT above and this write straddle `await
+           * bcrypt.compare`, so concurrent submissions of the SAME code all
+           * read the row, all matched it, and all deleted it — every one of
+           * them getting a session. In the stress harness eight independent
+           * pre-auth grants presenting one code produced five sign-ins, and the
+           * account was told it had spent one.
+           *
+           * `changes === 1` identifies the single request that actually removed
+           * the row; every other one lost the race and gets the same 401 a
+           * replayed code has always got. Nothing else is needed: DELETE is
+           * atomic in SQLite, so exactly one caller can ever see 1 here.
+           */
+          const claimed = db.prepare('DELETE FROM recovery_codes WHERE id = ?').run(rc.id);
+          if (claimed.changes === 1) {
+            isValid = true;
+            usedRecoveryCodeId = rc.id;
+          }
           break;
         }
       }
