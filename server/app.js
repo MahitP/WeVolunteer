@@ -312,6 +312,97 @@ export const authLimiter = rateLimit({
   handler: limitHandler('Too many sign-in attempts from this device.'),
 });
 
+/**
+ * The sign-in limiter, keyed on the DEVICE **and the account being tried**.
+ *
+ * ── The lockout this replaces ──
+ *
+ * `authLimiter` above is keyed on the device address alone at ten failures per
+ * fifteen minutes. A school leaves through one public address, so those ten were
+ * shared by the whole building: ten different students each mistyping their
+ * password once exhausted the budget, and the eleventh student — typing the
+ * CORRECT password — was refused with 429 for the rest of the window. Measured
+ * exactly that way, with production limits, before this existed. On signup day
+ * that is not an edge case, it is the morning.
+ *
+ * ── Why the key gains the identifier ──
+ *
+ * The thing being protected is an account, so the budget belongs to the pair.
+ * One student's typos can no longer spend another student's allowance, while a
+ * single account still tolerates only ten failures from a given device — and
+ * `loginFailures` in authRoutes.js independently caps that same account at ten
+ * failures across ALL devices, which is what actually bounds brute force.
+ *
+ * The identifier is normalised and hashed. Normalised because `Leo@x.com` and
+ * `leo@x.com` are one account and two spellings must not buy two budgets — the
+ * same reasoning as `throttleKey`. Hashed because a limiter key lives in memory
+ * and can surface in diagnostics, and these keys would otherwise be a list of
+ * who tried to sign in.
+ *
+ * ── What still stops spraying ──
+ *
+ * Nothing here, deliberately: per-pair keying is blind to one device working
+ * through a thousand accounts one attempt each, which is the shape `authLimiter`
+ * caught by accident. `loginIpCeilingLimiter` below is the replacement, and it
+ * is the reason this change is not a net loss of protection.
+ *
+ * Requests with no identifier (a malformed body) fall back to the address alone,
+ * so a caller cannot buy an unlimited budget by omitting the field.
+ */
+function loginKeyGenerator(req, res) {
+  const raw = req.body?.email;
+  const identifier = typeof raw === 'string' && raw.trim()
+    ? createHash('sha256').update(raw.trim().toLowerCase()).digest('hex').slice(0, 32)
+    : null;
+  const ip = ipKeyGenerator(req, res);
+  return identifier ? `login:${ip}:${identifier}` : `login:${ip}`;
+}
+
+export const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.LOGIN_RATE_LIMIT) || (DEMO_MODE ? 1000 : 10),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: loginKeyGenerator,
+  handler: limitHandler('Too many sign-in attempts for that account from this device.'),
+});
+
+/**
+ * The per-address ceiling underneath the per-account limiter above.
+ *
+ * This is the anti-spray bound, and it is the whole reason keying the limiter on
+ * the account pair is safe. One device may accumulate this many FAILED sign-ins
+ * across however many accounts it likes, and then it is done for the window.
+ *
+ * ── Choosing the number ──
+ *
+ * It has to sit above what a school generates and below what an attacker needs.
+ * A two-thousand-student building on signup morning, at a few percent mistyping
+ * once, is on the order of a hundred failures per quarter hour; a password spray
+ * worth running wants thousands. 200 clears the former with room and still costs
+ * an attacker fifteen minutes per two hundred guesses from each address they
+ * control — against accounts that `loginFailures` independently caps at ten
+ * failures each, so the spray cannot come back to the same account tomorrow and
+ * continue.
+ *
+ * Generous rather than tight on purpose, for the reason recorded on
+ * `mailIpCeilingLimiter`: it must never be the thing a legitimate campus hits,
+ * only the thing an address-rotating attack hits. `LOGIN_IP_CEILING` overrides
+ * it for a deployment that knows its own population.
+ *
+ * Successes are skipped here too. A building signing in all morning is not an
+ * attack, and counting successes would reintroduce the lockout by another route.
+ */
+export const loginIpCeilingLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.LOGIN_IP_CEILING) || (DEMO_MODE ? 10000 : 200),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  handler: limitHandler('Too many failed sign-in attempts from this network.'),
+});
+
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: DEMO_MODE ? 10000 : 600,
@@ -525,7 +616,7 @@ export const lookupLimiter = rateLimit({
   handler: limitHandler('Too many lookups from this device.'),
 });
 
-app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/login', loginIpCeilingLimiter, loginLimiter);
 /**
  * The second factor, limited SEPARATELY — `/api/auth/login` does not cover it.
  *
@@ -545,7 +636,7 @@ app.use('/api/auth/login', authLimiter);
  * Listed as two explicit mounts rather than a `/api/auth/login-2fa` prefix plus
  * a hope, because the prefix behaviour above is exactly what went wrong here.
  */
-app.use('/api/auth/login-2fa', authLimiter);
+app.use('/api/auth/login-2fa', loginIpCeilingLimiter, loginLimiter);
 /**
  * Sending an emailed code is a MAIL endpoint, and authLimiter above does not
  * bound it: `skipSuccessfulRequests` means a successful send costs nothing, and
