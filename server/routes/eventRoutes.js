@@ -1553,6 +1553,16 @@ router.get('/api/events/:eventId/slots/:slotId/ics', authenticateToken, (req, re
      * inline here joined its lines with a literal `\r\n` TEXT sequence and
      * produced a one-line file no calendar application could parse.
      */
+    /**
+     * `?remind=<minutes>` adds a VALARM that many minutes before the shift.
+     *
+     * The volunteer chooses it, because they are the only one who knows whether
+     * they walk, cycle, take a bus or get driven — a difference of a factor of
+     * five that no distance we hold can resolve. Absent or unparseable means no
+     * alarm, so a bookmarked URL without the parameter behaves as it always did.
+     */
+    const reminderMinutes = Number.parseInt(req.query.remind, 10);
+
     const icsContent = buildShiftIcs({
       uid: `${slot.id}@wevolunteer.org`,
       start: slot.start_datetime,
@@ -1561,7 +1571,12 @@ router.get('/api/events/:eventId/slots/:slotId/ics', authenticateToken, (req, re
       // A blank line between the event blurb and the shift-specific note. The
       // escaping in buildShiftIcs turns these into the `\n` TEXT escape.
       description: `${event.description}\n\n${slot.description}`,
-      location: event.location
+      /* The street address was being dropped, so a calendar entry said
+         "Reichler Park" and left the volunteer to work out which one. */
+      location: [event.location, event.address].filter(Boolean).join(', '),
+      latitude: event.latitude,
+      longitude: event.longitude,
+      reminderMinutes: Number.isFinite(reminderMinutes) ? reminderMinutes : null,
     });
 
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
