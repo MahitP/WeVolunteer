@@ -109,7 +109,7 @@ describe('the profile headline', () => {
     });
 
     it('withholds it from an organizer too', async () => {
-      const organizer = await srv.login('jkatzenback@vikings.org');
+      const organizer = await srv.login('jordan.whitfield@example.org');
       const res = await srv.call('GET', '/api/users/by-username/headliner', undefined, organizer);
       expect(res.body.profile).not.toHaveProperty('headline');
     });

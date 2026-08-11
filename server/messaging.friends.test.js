@@ -67,9 +67,9 @@ describe('friend messaging', () => {
     ben = await make('Ben Friend', 'ben_friend');
     cleo = await make('Cleo Friend', 'cleo_friend');
 
-    organizerToken = await srv.login('jkatzenback@vikings.org');
+    organizerToken = await srv.login('jordan.whitfield@example.org');
     organizerId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('jkatzenback@vikings.org').id;
+      .get('jordan.whitfield@example.org').id;
   });
 
   afterAll(async () => { await srv.close(); });

@@ -35,7 +35,7 @@ describe('2FA Security Hardening Regressions', () => {
 
   describe('Pre-auth bypass', () => {
     it('rejects a preauth token on protected endpoints', async () => {
-      const preauthToken = jwt.sign({ id: 'user-student-1', email: 'leo.chen28@gmail.com', preauth: true }, JWT_SECRET, { expiresIn: '15m' });
+      const preauthToken = jwt.sign({ id: 'user-student-1', email: 'leo.chen@example.com', preauth: true }, JWT_SECRET, { expiresIn: '15m' });
       
       const res = await srv.call('GET', '/api/auth/me', undefined, preauthToken);
       
@@ -44,7 +44,7 @@ describe('2FA Security Hardening Regressions', () => {
     });
 
     it('rejects a modified preauth token (tampered signature)', async () => {
-      const forgedToken = jwt.sign({ id: 'user-student-1', email: 'leo.chen28@gmail.com' }, 'wrong-secret');
+      const forgedToken = jwt.sign({ id: 'user-student-1', email: 'leo.chen@example.com' }, 'wrong-secret');
       
       const res = await srv.call('GET', '/api/auth/me', undefined, forgedToken);
       
@@ -54,7 +54,7 @@ describe('2FA Security Hardening Regressions', () => {
 
   describe('TOTP encryption and migration', () => {
     it('encrypts newly generated secrets', async () => {
-      const sessionToken = await srv.login('leo.chen28@gmail.com');
+      const sessionToken = await srv.login('leo.chen@example.com');
       console.log('Session token:', sessionToken);
       const challengeId = await srv.stepUp(sessionToken, '2fa.generate');
       
@@ -63,7 +63,7 @@ describe('2FA Security Hardening Regressions', () => {
       expect(generateRes.status).toBe(200);
       expect(generateRes.body.secret).toBeDefined();
 
-      const userRow = db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get('leo.chen28@gmail.com');
+      const userRow = db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get('leo.chen@example.com');
       expect(userRow.tfa_secret.startsWith('v1:')).toBe(true);
       expect(decryptSecret(userRow.tfa_secret)).toBe(generateRes.body.secret);
     });
@@ -78,7 +78,7 @@ describe('2FA Security Hardening Regressions', () => {
      * fails its neighbours rather than itself, which is the hardest kind to read.
      */
     it('migrates legacy plaintext secrets cleanly without corruption', async () => {
-      const MIGRATION_SUBJECT = 'priya.patel.nhs@outlook.com';
+      const MIGRATION_SUBJECT = 'priya.patel@example.com';
       const plaintextSecret = 'JBSWY3DPEHPK3PXP';
       db.prepare('UPDATE users SET tfa_secret = ? WHERE email = ?').run(plaintextSecret, MIGRATION_SUBJECT);
 
@@ -153,7 +153,7 @@ describe('2FA Security Hardening Regressions', () => {
        * administrator the exemption cannot reach, and the exempt account gets its
        * own case below asserting the opposite.
        */
-      const email = 'leo.chen28@gmail.com';
+      const email = 'leo.chen@example.com';
       const token = await srv.login(email);
 
       db.prepare(
@@ -220,7 +220,7 @@ describe('2FA Security Hardening Regressions', () => {
      * the platform at all.
      */
     it('does not apply the rule to an ordinary volunteer', async () => {
-      const token = await srv.login('leo.chen28@gmail.com');
+      const token = await srv.login('leo.chen@example.com');
       const res = await srv.call('GET', '/api/auth/me', undefined, token);
       expect(res.status).toBe(200);
     });

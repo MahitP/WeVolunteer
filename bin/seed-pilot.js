@@ -117,7 +117,7 @@ insertUser.run('admin-1', 'Pilot Admin', 'admin@sbvolunteers.org', passwordHash,
 
 // 5 Organizers
 insertUser.run('org-1', 'Sarah Jenkins', 'sjenkins@hs.org', passwordHash, 'Adult', 'organizer', 1, '👩‍🏫', 'Student Council Advisor', 'High School', '[]', nowStr);
-insertUser.run('org-2', 'Mark Robinson', 'mrobinson@sbpl.info', passwordHash, 'Adult', 'organizer', 1, '📚', 'Library Coordinator', 'Public Library', '[]', nowStr);
+insertUser.run('org-2', 'Mark Robinson', 'second.organizer@example.org', passwordHash, 'Adult', 'organizer', 1, '📚', 'Library Coordinator', 'Public Library', '[]', nowStr);
 insertUser.run('org-3', 'Elena Rodriguez', 'erodriguez@foodpantry.org', passwordHash, 'Adult', 'organizer', 1, '🥫', 'Community Food Pantry Director', 'Food Pantry', '[]', nowStr);
 insertUser.run('org-4', 'David Kim', 'dkim@parks.gov', passwordHash, 'Adult', 'organizer', 1, '🌳', 'Parks & Rec Coordinator', 'Township', '[]', nowStr);
 insertUser.run('org-5', 'Pending Organizer', 'pending@org.com', passwordHash, 'Adult', 'organizer', 0, '⏳', 'Awaiting approval', 'Unknown', '[]', nowStr);
@@ -147,7 +147,7 @@ const students = [
 ];
 
 for (const s of students) {
-  insertUser.run(s.id, s.name, s.email, passwordHash, s.grade, 'student', 1, '🧑‍🎓', 'High School Student', 'South Brunswick HS', '[]', nowStr);
+  insertUser.run(s.id, s.name, s.email, passwordHash, s.grade, 'student', 1, '🧑‍🎓', 'High School Student', 'Example Valley HS', '[]', nowStr);
 }
 
 // --- Events ---

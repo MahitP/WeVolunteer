@@ -49,8 +49,8 @@ let srv, owner, other, ownerId;
 
 beforeAll(async () => {
   srv = await startTestServer();
-  owner = await srv.login('leo.chen28@gmail.com');
-  other = await srv.login('emiller2027@gmail.com');
+  owner = await srv.login('leo.chen@example.com');
+  other = await srv.login('ethan.miller@example.com');
   ownerId = (await srv.call('GET', '/api/auth/me', undefined, owner)).body.id;
 }, 60000);
 afterAll(async () => { await srv?.close(); });

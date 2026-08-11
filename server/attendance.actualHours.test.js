@@ -58,12 +58,12 @@ describe('actual hours, and events that credit none', () => {
 
   beforeAll(async () => {
     srv = await startTestServer();
-    organizer = await srv.login('jkatzenback@vikings.org');
+    organizer = await srv.login('jordan.whitfield@example.org');
     admin = await srv.login('admin@example.gov');
-    student = await srv.login('leo.chen28@gmail.com');
+    student = await srv.login('leo.chen@example.com');
     ({ db } = await import('./db.js'));
-    studentId = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen28@gmail.com').id;
-    organizerId = db.prepare('SELECT id FROM users WHERE email = ?').get('jkatzenback@vikings.org').id;
+    studentId = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com').id;
+    organizerId = db.prepare('SELECT id FROM users WHERE email = ?').get('jordan.whitfield@example.org').id;
   }, 60000);
 
   afterAll(async () => { await srv?.close(); });
@@ -179,7 +179,7 @@ describe('actual hours, and events that credit none', () => {
     it('refuses an organizer who does not host the event', async () => {
       const { eventId, appId } = await pastEventWithApplicant({ hours: 4 });
       const other = await srv.signupConfirmed({
-        name: 'Other Organizer', username: 'otherorg', email: 'otherorg@vikings.org',
+        name: 'Other Organizer', username: 'otherorg', email: 'other.org.contact@example.net',
         grade: 'Adult', role: 'organizer', password: 'TestPass123!',
       });
       const res = await srv.call('POST', `/api/events/${eventId}/attendance`, {

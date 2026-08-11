@@ -23,7 +23,7 @@ let srv;
 beforeAll(async () => { srv = await startTestServer(); });
 afterAll(async () => { await srv.close(); });
 
-const STUDENT = 'leo.chen28@gmail.com';
+const STUDENT = 'leo.chen@example.com';
 
 /** Inserts an event directly, so it can be placed in the past. */
 async function insertEvent({ id, title, deadlineDaysAgo, shiftEndedDaysAgo, status = 'open', maxSpots = 10, category = 'Other', description = 'Litter cleanup work.' }) {

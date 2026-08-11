@@ -23,10 +23,10 @@ describe('the social and organization features', () => {
 
   beforeAll(async () => {
     srv = await startTestServer();
-    organizer = await srv.login('jkatzenback@vikings.org');
+    organizer = await srv.login('jordan.whitfield@example.org');
     admin = await srv.login('admin@example.gov');
     ({ db } = await import('./db.js'));
-    organizerId = db.prepare('SELECT id FROM users WHERE email = ?').get('jkatzenback@vikings.org').id;
+    organizerId = db.prepare('SELECT id FROM users WHERE email = ?').get('jordan.whitfield@example.org').id;
 
     const make = async (name, username) => {
       const r = await srv.signupConfirmed({
@@ -555,11 +555,11 @@ describe('the social and organization features', () => {
       /* Carol's sensitive fields are open to a friend, and only to a friend. */
       await srv.call('PATCH', '/api/auth/profile', { profileVisibility: 'friends' }, carol);
       db.prepare("UPDATE users SET bio = ?, school = ?, grade = '12' WHERE id = ?")
-        .run('Private note.', 'South Brunswick High', carolId);
+        .run('Private note.', 'Example Valley High', carolId);
 
       const asFriend = await srv.call('GET', `/api/users/${carolId}/public-profile`, undefined, alice);
       expect(asFriend.body.profile.bio).toBe('Private note.');
-      expect(asFriend.body.profile.school).toBe('South Brunswick High');
+      expect(asFriend.body.profile.school).toBe('Example Valley High');
 
       const blocked = await srv.call('POST', `/api/blocks/${aliceId}`, undefined, carol);
       expect(blocked.status).toBe(200);

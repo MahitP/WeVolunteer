@@ -40,10 +40,10 @@ describe('the audit.read capability split keeps administrators whole', () => {
   beforeAll(async () => {
     srv = await startTestServer();
     admin = await srv.login('admin@example.gov');
-    student = await srv.login('leo.chen28@gmail.com');
+    student = await srv.login('leo.chen@example.com');
     const { db } = await import('./db.js');
     studentId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('leo.chen28@gmail.com').id;
+      .get('leo.chen@example.com').id;
   }, 60000);
 
   afterAll(async () => { await srv?.close(); });

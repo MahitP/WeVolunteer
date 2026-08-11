@@ -401,4 +401,4 @@ deliberate rather than an oversight.
 
 ## Acknowledgements
 
-Built for South Brunswick, New Jersey. The interaction model — claiming individual time slots rather than registering for an event — is drawn from how paper sign-up sheets already work, on the view that a digital system should not require volunteers to learn a new mental model.
+Built for Example Valley, New Jersey. The interaction model — claiming individual time slots rather than registering for an event — is drawn from how paper sign-up sheets already work, on the view that a digital system should not require volunteers to learn a new mental model.

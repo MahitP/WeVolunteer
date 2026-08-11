@@ -10,12 +10,12 @@ import { startTestServer } from './testServer.js';
  * what was decided, and that one organizer cannot retag another's event.
  */
 
-const ORGANIZER = 'jkatzenback@vikings.org';
+const ORGANIZER = 'jordan.whitfield@example.org';
 /* The only other seeded organizer. Approval-pending, which does not matter
    here: `verified` gates event CREATION, and what this exercises is the
    ownership refusal on edit. */
-const OTHER_ORGANIZER = 'rmiller@sbpl.info';
-const STUDENT = 'leo.chen28@gmail.com';
+const OTHER_ORGANIZER = 'robin.ellery@example.org';
+const STUDENT = 'leo.chen@example.com';
 
 describe('event tags', () => {
   let srv;
@@ -33,7 +33,7 @@ describe('event tags', () => {
     title: `Tagged event ${Math.random().toString(36).slice(2, 8)}`,
     description: 'A description long enough to pass validation for this event.',
     category: 'School',
-    location: 'South Brunswick High School',
+    location: 'Example Valley High School',
     applicationDeadline: '2027-01-01',
     slots: [{
       name: 'Morning', description: 'The morning shift',

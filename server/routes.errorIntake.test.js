@@ -66,7 +66,7 @@ describe('intake: accepts a report without a session', () => {
     await report({ message: 'anon report' });
     expect(events()[0].user_hash).toBeNull();
 
-    const cookie = await srv.login('leo.chen28@gmail.com');
+    const cookie = await srv.login('leo.chen@example.com');
     const res = await fetch(`${srv.base}/api/errors/report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: `wev_session=${cookie}` },
@@ -170,9 +170,9 @@ describe('intake: route privacy, asserted on stored values', () => {
   });
 
   it('never persists an email carried in a route', async () => {
-    await report({ route: '/login?email=leo.chen28@gmail.com' });
+    await report({ route: '/login?email=leo.chen@example.com' });
     expect(storedRoute()).toBe('/login');
-    expect(JSON.stringify([...groups(), ...events()])).not.toContain('leo.chen28@gmail.com');
+    expect(JSON.stringify([...groups(), ...events()])).not.toContain('leo.chen@example.com');
   });
 
   it('never persists a token carried in a route', async () => {

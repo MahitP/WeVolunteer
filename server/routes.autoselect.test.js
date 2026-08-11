@@ -42,7 +42,7 @@ describe('auto-select: deadline guard, re-draw reasons, and draw cap', () => {
   // has `applicants` seeded students apply, all while the deadline is still
   // in the future (so both event creation and the applications succeed).
   const seedDrawEvent = async (maxSpots, applicants) => {
-    const orgToken = await srv.login('jkatzenback@vikings.org');
+    const orgToken = await srv.login('jordan.whitfield@example.org');
     const deadline = new Date(Date.now() + 20 * 864e5).toISOString();
     const start = new Date(Date.now() + 30 * 864e5).toISOString();
     const end = new Date(Date.now() + 30 * 864e5 + 108e5).toISOString();
@@ -64,7 +64,7 @@ describe('auto-select: deadline guard, re-draw reasons, and draw cap', () => {
     return { evId, slotId: slot.id, orgToken };
   };
 
-  const applicants = ['leo.chen28@gmail.com', 'priya.patel.nhs@outlook.com', 'emiller2027@gmail.com'];
+  const applicants = ['leo.chen@example.com', 'priya.patel@example.com', 'ethan.miller@example.com'];
 
   let evId, orgToken, secondReason;
 

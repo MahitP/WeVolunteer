@@ -20,10 +20,10 @@ const PLACES = ['Reichler Park', 'Community Center', 'Library'];
 
 beforeAll(async () => {
   srv = await startTestServer();
-  organizer = await srv.login('jkatzenback@vikings.org');
+  organizer = await srv.login('jordan.whitfield@example.org');
   // srv.login resolves with an undefined cookie on failure rather than
   // rejecting, so the seeded address has to be exact.
-  student = await srv.login('leo.chen28@gmail.com');
+  student = await srv.login('leo.chen@example.com');
   if (!student) throw new Error('student login failed — check the seeded address');
 
   const iso = (mins) => new Date(Date.now() + mins * 60000).toISOString();
@@ -77,7 +77,7 @@ describe('text search', () => {
   });
 
   it('matches the organizer name', async () => {
-    expect(await totalOf('scope=listable&limit=5&q=Katzenback')).toBeGreaterThan(0);
+    expect(await totalOf('scope=listable&limit=5&q=Whitfield')).toBeGreaterThan(0);
   });
 
   /**

@@ -30,7 +30,7 @@ let srv;
 beforeAll(async () => { srv = await startTestServer(); }, 60000);
 afterAll(async () => { await srv?.close(); });
 
-const STUDENT = 'leo.chen28@gmail.com';
+const STUDENT = 'leo.chen@example.com';
 
 describe('logout revokes only the session that logged out', () => {
   it('the session works before logging out', async () => {

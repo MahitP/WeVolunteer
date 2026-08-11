@@ -12,7 +12,7 @@ describe('Admin CSV Export Route', () => {
   });
 
   it('rejects student requests', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const res = await fetch(srv.base + '/api/admin/reports/export', {
       headers: { Cookie: `wev_session=${token}` }
     });
@@ -20,7 +20,7 @@ describe('Admin CSV Export Route', () => {
   });
 
   it('rejects organizer requests', async () => {
-    const token = await srv.login('jkatzenback@vikings.org');
+    const token = await srv.login('jordan.whitfield@example.org');
     const res = await fetch(srv.base + '/api/admin/reports/export', {
       headers: { Cookie: `wev_session=${token}` }
     });

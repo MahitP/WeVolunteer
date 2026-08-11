@@ -12,7 +12,7 @@ import { startTestServer } from './testServer.js';
  * `srv.loginAsOwner` runs the same UPDATE `bin/grant-ownership.mjs` runs,
  * against this suite's throwaway database.
  */
-const OWNER_EMAIL = 'dsanger@outlook.com';
+const OWNER_EMAIL = 'derek.sorensen@example.com';
 
 /**
  * `audit.read` is SUPER_ONLY as of M1c, so every success case below signs in as
@@ -32,13 +32,13 @@ describe('Admin Audit Explorer API', () => {
     srv = await startTestServer();
     owner = await srv.loginAsOwner(OWNER_EMAIL);
     admin = await srv.login('admin@example.gov');
-    student = await srv.login('leo.chen28@gmail.com');
+    student = await srv.login('leo.chen@example.com');
     const dbModule = await import('./db.js');
     db = dbModule.db;
 
     // Seed some specific audit logs for testing filtering and pagination
     const testAdmin = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@example.gov');
-    const testTarget = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen28@gmail.com');
+    const testTarget = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com');
     
     const insertLog = db.prepare(`
       INSERT INTO ` + `admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)

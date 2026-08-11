@@ -46,7 +46,7 @@ const USER = {
   verified: true,
   avatar: '🦊',
   bio: 'Likes clearing trails',
-  school: 'South Brunswick High',
+  school: 'Example Valley High',
   grade: '11',
   skills: ['Tutoring'],
   leaderboardOptIn: false,

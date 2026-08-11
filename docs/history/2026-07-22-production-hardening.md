@@ -24,7 +24,7 @@
 
 `server/testServer.js` exports `startTestServer()` → `{ base, call, login, close }`, where `call(method, path, body?, token?) → { status, body }` and `login(email, password='password123') → JWT`. The harness sets `DEMO_MODE=true`, so seeded fixtures exist. **Exactly one `startTestServer()` per test file**, in a single file-level `beforeAll`, because `db.js` is module-cached. A test file that needs a config flag (e.g. `REQUIRE_EMAIL_VERIFICATION`) sets `process.env` **before** the dynamic `await import('./testServer.js')` inside `beforeAll` — see `server/routes.verification.test.js` for the pattern.
 
-Seeded accounts (password `password123`): students `leo.chen28@gmail.com`, `priya.patel.nhs@outlook.com`, `emiller2027@gmail.com`, `colin.carbin29@outlook.com`; organizers `jkatzenback@vikings.org` (approved, hosts seeded events), `rmiller@sbpl.info` (pending); admin `admin@example.gov`.
+Seeded accounts (password `password123`): students `leo.chen@example.com`, `priya.patel@example.com`, `ethan.miller@example.com`, `cameron.caldwell@example.com`; organizers `jordan.whitfield@example.org` (approved, hosts seeded events), `robin.ellery@example.org` (pending); admin `admin@example.gov`.
 
 ---
 
@@ -260,7 +260,7 @@ Seeded accounts (password `password123`): students `leo.chen28@gmail.com`, `priy
 
 **Tests required.**
 1. Signing up `alex@x.com`, then `ALEX@x.com`, is refused with a 400 naming email.
-2. A user who registered `leo.chen28@gmail.com` can log in with `LEO.CHEN28@GMAIL.COM`.
+2. A user who registered `leo.chen@example.com` can log in with `LEO.CHEN28@GMAIL.COM`.
 3. The dedupe migration, run against a DB with two case-variant emails where one account has MORE credited hours, keeps the higher-hours account's email unchanged (survivor), renames the other to the `+dup-` form, bumps the renamed account's `token_version`, and afterwards the unique index exists (assert via `PRAGMA index_list`). Assert BOTH accounts' `attendance` rows still exist and neither account was deleted (no data loss).
 4. `forgot-password` with a case-variant address issues a token for the single surviving account.
 5. Idempotency: running the migration a second time (via a second `initDatabase()`) changes nothing and does not error.

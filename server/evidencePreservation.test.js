@@ -91,8 +91,8 @@ describe('evidence under a live report cannot be destroyed by the reported party
    */
   async function groomingScenario() {
     const dayOffset = nextDayOffset++;
-    const organizer = await session('jkatzenback@vikings.org');
-    const student = await session('colin.carbin29@outlook.com');
+    const organizer = await session('jordan.whitfield@example.org');
+    const student = await session('cameron.caldwell@example.com');
 
     const start = new Date(Date.now() + dayOffset * 864e5).toISOString();
     const made = await srv.call('POST', '/api/events', {
@@ -209,7 +209,7 @@ describe('evidence under a live report cannot be destroyed by the reported party
   it('still lets an ordinary unreported event be deleted', async () => {
     // The guard must not become "organizers cannot delete events". A refusal
     // that fires on everything gets removed.
-    const organizer = await session('jkatzenback@vikings.org');
+    const organizer = await session('jordan.whitfield@example.org');
     const dayOffset = nextDayOffset++;
     const start = new Date(Date.now() + dayOffset * 864e5).toISOString();
     const made = await srv.call('POST', '/api/events', {
@@ -453,8 +453,8 @@ describe('a moderator can still read what was preserved', () => {
      * the messages in a reported conversation … and it is logged" described
      * something that could not happen, and consequently was not logged either.
      */
-    const organizer = await session('jkatzenback@vikings.org');
-    const student = await session('colin.carbin29@outlook.com');
+    const organizer = await session('jordan.whitfield@example.org');
+    const student = await session('cameron.caldwell@example.com');
     const admin = await session('admin@example.gov');
 
     const start = new Date(Date.now() + 200 * 864e5).toISOString();
@@ -511,7 +511,7 @@ describe('a moderator can still read what was preserved', () => {
   });
 
   it('refuses a student who asks for the evidence route directly', async () => {
-    const student = await session('colin.carbin29@outlook.com');
+    const student = await session('cameron.caldwell@example.com');
     const res = await srv.call('GET', '/api/admin/reports/anything/evidence',
       undefined, student);
     expect(res.status).toBe(403);

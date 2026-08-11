@@ -63,9 +63,9 @@ describe('organizer may only message students who applied to their own event', (
   let orgToken, studentToken, otherStudentToken, adminToken;
 
   beforeAll(async () => {
-    orgToken = await srv.login('jkatzenback@vikings.org');
-    studentToken = await srv.login('leo.chen28@gmail.com');
-    otherStudentToken = await srv.login('priya.patel.nhs@outlook.com');
+    orgToken = await srv.login('jordan.whitfield@example.org');
+    studentToken = await srv.login('leo.chen@example.com');
+    otherStudentToken = await srv.login('priya.patel@example.com');
     adminToken = await srv.login('admin@example.gov');
   });
 
@@ -113,7 +113,7 @@ describe('organizer may only message students who applied to their own event', (
     await srv.call('POST', `/api/events/${eventId}/apply`, { slotId }, studentToken);
 
     // A second organizer account, approved, who hosts nothing here.
-    const outsider = await srv.login('rmiller@sbpl.info').catch(() => null);
+    const outsider = await srv.login('robin.ellery@example.org').catch(() => null);
     if (!outsider) return; // pending organizer cannot sign in; ownership is covered below
 
     const res = await resolve(eventId, 'user-student-1', outsider);
@@ -151,7 +151,7 @@ describe('the organizer path does not leak which user ids are students', () => {
   let orgToken, eventId;
 
   beforeAll(async () => {
-    orgToken = await srv.login('jkatzenback@vikings.org');
+    orgToken = await srv.login('jordan.whitfield@example.org');
     ({ eventId } = await createEvent(orgToken, 'Enumeration Probe Event'));
   });
 

@@ -29,7 +29,7 @@ describe('two-factor controls cannot lock somebody out', () => {
   let srv, db;
 
   const ADMIN = 'admin@example.gov';
-  const STUDENT = 'leo.chen28@gmail.com';
+  const STUDENT = 'leo.chen@example.com';
 
   const stepUpHeader = async (token, action) =>
     srv.reauthHeader(await srv.stepUp(token, action));

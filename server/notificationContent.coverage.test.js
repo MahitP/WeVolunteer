@@ -126,7 +126,7 @@ const SAMPLE = {
   volunteerName: 'Priya Patel',
   changes: ['location'],
   conversationId: 'conv-1',
-  senderName: 'Jacquelyn Katzenback',
+  senderName: 'Jordan Whitfield',
   title: 'Operational alert',
   body: 'Something happened that you should know about.',
   link: '/settings?section=privacy',

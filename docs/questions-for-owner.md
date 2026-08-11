@@ -342,7 +342,7 @@ user could not sign in and would have to be reset with `bin/reset-2fa.mjs`.
 **Correction to the earlier answer.** The previous version of this entry said it was harmless
 because no secret was encrypted under either key yet. That was true when written and was **not**
 true by 2026-08-09: `pilot.db` holds two encrypted TOTP secrets, one of them on the
-`mahitp.16@gmail.com` owner account. The window this entry described as "before anybody enrols"
+`not.the.owner@example.com` owner account. The window this entry described as "before anybody enrols"
 had already closed.
 
 **How it was resolved.** Empirically, not by choosing. Both keys were tested against the two

@@ -94,7 +94,7 @@ async function freshTotp(secret, needMs = 5_000) {
 
 describe('GET /api/2fa/status — roleRequires2FA', () => {
   it('is false for an account the policy does not apply to', async () => {
-    const session = await srv.login('leo.chen28@gmail.com');
+    const session = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', '/api/2fa/status', undefined, session);
 
     expect(res.status).toBe(200);
@@ -134,7 +134,7 @@ describe('GET /api/2fa/status — roleRequires2FA', () => {
   });
 
   it('still reports the enabled methods and the remaining recovery codes', async () => {
-    const session = await srv.login('leo.chen28@gmail.com');
+    const session = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', '/api/2fa/status', undefined, session);
 
     expect(res.body).toMatchObject({

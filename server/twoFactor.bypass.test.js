@@ -37,7 +37,7 @@ import { startTestServer } from './testServer.js';
 describe('two-factor authentication refuses a wrong code', () => {
   let srv, db, secret;
 
-  const EMAIL = 'leo.chen28@gmail.com';
+  const EMAIL = 'leo.chen@example.com';
 
   beforeAll(async () => {
     srv = await startTestServer();

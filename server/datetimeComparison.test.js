@@ -88,7 +88,7 @@ describe('a shift that ended earlier today is not reported as upcoming', () => {
 
   beforeAll(async () => {
     srv = await startTestServer();
-    student = await srv.login('leo.chen28@gmail.com');
+    student = await srv.login('leo.chen@example.com');
   }, 60000);
   afterAll(async () => { await srv?.close(); });
 

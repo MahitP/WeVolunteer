@@ -226,7 +226,7 @@ export const VALID_GRADES = ['9', '10', '11', '12', 'Adult', 'N/A'];
 export const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 
 export const APP_NAME = process.env.APP_NAME || 'WeVolunteer';
-export const SCHOOL_NAME = process.env.SCHOOL_NAME || 'South Brunswick, NJ';
+export const SCHOOL_NAME = process.env.SCHOOL_NAME || 'Example Valley, NJ';
 export const MAX_AUTO_SELECT_APPLICANTS = Number(process.env.MAX_AUTO_SELECT_APPLICANTS) || 100;
 export const DEFAULT_EMAIL_FROM = `"${APP_NAME}" <noreply@wevolunteer.org>`;
 
@@ -480,11 +480,11 @@ describe('route test harness', () => {
   });
 
   it('authenticates a seeded user', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     expect(token).toBeTruthy();
     const me = await srv.call('GET', '/api/auth/me', undefined, token);
     expect(me.status).toBe(200);
-    expect(me.body.email).toBe('leo.chen28@gmail.com');
+    expect(me.body.email).toBe('leo.chen@example.com');
   });
 
   it('does not touch the real database file', () => {
@@ -693,10 +693,10 @@ try {
 ```bash
 rm -rf /tmp/wev-admin-check && mkdir -p /tmp/wev-admin-check
 WEV_DB_PATH=/tmp/wev-admin-check/a.db DEMO_MODE=true node -e "import('./server/db.js').then(m => m.initDatabase())"
-WEV_DB_PATH=/tmp/wev-admin-check/a.db node bin/make-admin.mjs leo.chen28@gmail.com
+WEV_DB_PATH=/tmp/wev-admin-check/a.db node bin/make-admin.mjs leo.chen@example.com
 ```
 
-Expected: `Successfully promoted leo.chen28@gmail.com to admin.` (No `ERR_MODULE_NOT_FOUND`.)
+Expected: `Successfully promoted leo.chen@example.com to admin.` (No `ERR_MODULE_NOT_FOUND`.)
 
 - [ ] **Step 7: Document the production bootstrap in README.md**
 
@@ -780,14 +780,14 @@ afterAll(async () => { await srv.close(); });
 
 describe('auth: email verification state', () => {
   it('returns emailVerified on the user object', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const me = await srv.call('GET', '/api/auth/me', undefined, token);
     expect(me.status).toBe(200);
     expect(me.body).toHaveProperty('emailVerified');
   });
 
   it('marks a seeded user verified when verification is not required', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const me = await srv.call('GET', '/api/auth/me', undefined, token);
     expect(me.body.emailVerified).toBe(true);
   });
@@ -915,7 +915,7 @@ Expected: PASS, 3 tests.
 npm run dev
 ```
 
-Sign in at `http://localhost:5173` as `leo.chen28@gmail.com` / `password123`.
+Sign in at `http://localhost:5173` as `leo.chen@example.com` / `password123`.
 
 Expected: the dashboard loads. **Before this task it showed "Verify your email" with no way through.**
 
@@ -964,33 +964,33 @@ describe('auth: password reset', () => {
   };
 
   it('issues a reset token for a known address', async () => {
-    const res = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen28@gmail.com' });
+    const res = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen@example.com' });
     expect(res.status).toBe(200);
     expect(tokenFor('user-student-1')).toBeTruthy();
   });
 
   it('does not reveal whether an address exists', async () => {
-    const known = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen28@gmail.com' });
+    const known = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen@example.com' });
     const unknown = await srv.call('POST', '/api/auth/forgot-password', { email: 'nobody@example.org' });
     expect(unknown.status).toBe(known.status);
     expect(unknown.body).toEqual(known.body);
   });
 
   it('resets the password and lets the user sign in with it', async () => {
-    await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen28@gmail.com' });
+    await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen@example.com' });
     const token = tokenFor('user-student-1');
 
     const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'brand-new-pass' });
     expect(res.status).toBe(200);
 
     const relogin = await srv.call('POST', '/api/auth/login', {
-      email: 'leo.chen28@gmail.com', password: 'brand-new-pass'
+      email: 'leo.chen@example.com', password: 'brand-new-pass'
     });
     expect(relogin.status).toBe(200);
   });
 
   it('burns the token so it cannot be replayed', async () => {
-    await srv.call('POST', '/api/auth/forgot-password', { email: 'priya.patel.nhs@outlook.com' });
+    await srv.call('POST', '/api/auth/forgot-password', { email: 'priya.patel@example.com' });
     const token = tokenFor('user-student-2');
 
     const first = await srv.call('POST', '/api/auth/reset-password', { token, password: 'first-change' });
@@ -1001,7 +1001,7 @@ describe('auth: password reset', () => {
   });
 
   it('rejects an expired token', async () => {
-    await srv.call('POST', '/api/auth/forgot-password', { email: 'emiller2027@gmail.com' });
+    await srv.call('POST', '/api/auth/forgot-password', { email: 'ethan.miller@example.com' });
     const token = tokenFor('user-student-3');
 
     const db = new DatabaseSync(process.env.WEV_DB_PATH);
@@ -1014,7 +1014,7 @@ describe('auth: password reset', () => {
   });
 
   it('rejects a password below the minimum length', async () => {
-    await srv.call('POST', '/api/auth/forgot-password', { email: 'advait.g@yahoo.com' });
+    await srv.call('POST', '/api/auth/forgot-password', { email: 'arjun.gopal@example.com' });
     const token = tokenFor('user-advait');
     const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'abc' });
     expect(res.status).toBe(400);
@@ -1137,11 +1137,11 @@ Expected: PASS, 9 tests.
 npm run dev
 ```
 
-1. At `http://localhost:5173/login`, click "Forgot password", enter `leo.chen28@gmail.com`, submit.
+1. At `http://localhost:5173/login`, click "Forgot password", enter `leo.chen@example.com`, submit.
 2. Read the reset link from the **server terminal** — with no SMTP configured, `email.js` prints the message to the console:
    ```
    =================== EMAIL SENT ===================
-   To:      leo.chen28@gmail.com
+   To:      leo.chen@example.com
    Subject: Password Reset - WeVolunteer
    ```
 3. Open the printed `http://localhost:5173/?reset=<token>` URL. `App.jsx:131` redirects to `/reset-password?token=…`.
@@ -1417,7 +1417,7 @@ describe('applications: withdrawal and re-application', () => {
 
   beforeAll(async () => {
     srv = await startTestServer();
-    studentToken = await srv.login('leo.chen28@gmail.com');
+    studentToken = await srv.login('leo.chen@example.com');
     const events = (await srv.call('GET', '/api/events')).body;
     const ev = events.find(e => e.status === 'open' && e.slots.length > 0);
     eventId = ev.id;
@@ -1454,7 +1454,7 @@ describe('applications: withdrawal and re-application', () => {
   });
 
   it('does not let a student withdraw someone elses application', async () => {
-    const other = await srv.login('priya.patel.nhs@outlook.com');
+    const other = await srv.login('priya.patel@example.com');
     const app = await myApp();
     const res = await srv.call('PATCH', `/api/applications/${app.id}`, { status: 'withdrawn' }, other);
     expect(res.status).toBe(403);
@@ -1608,7 +1608,7 @@ For each hit, confirm whether `withdrawn` belongs alongside it. Two known cases 
 npm run dev
 ```
 
-As `leo.chen28@gmail.com`: apply to an open shift, withdraw it, confirm the dashboard says **"Withdrawn"** (not "Not selected"), then apply to the same shift again.
+As `leo.chen@example.com`: apply to an open shift, withdraw it, confirm the dashboard says **"Withdrawn"** (not "Not selected"), then apply to the same shift again.
 
 Expected: re-application succeeds.
 
@@ -1829,7 +1829,7 @@ describe('check-in', () => {
 
   beforeAll(async () => {
     srv = await startTestServer();
-    orgToken = await srv.login('jkatzenback@vikings.org');
+    orgToken = await srv.login('jordan.whitfield@example.org');
     const apps = (await srv.call('GET', '/api/applications', undefined, orgToken)).body;
     application = apps.find(a => a.status === 'accepted');
     eventId = application.eventId;
@@ -1845,7 +1845,7 @@ describe('check-in', () => {
   });
 
   it('refuses a single event to a student', async () => {
-    const student = await srv.login('leo.chen28@gmail.com');
+    const student = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', `/api/events/${eventId}`, undefined, student);
     expect(res.status).toBe(403);
   });
@@ -2075,7 +2075,7 @@ Expected: PASS, 6 tests.
 npm run dev
 ```
 
-Sign in as `jkatzenback@vikings.org` / `password123`, open the Softball Tournament event, click through to check-in (`/checkin/event-softball`).
+Sign in as `jordan.whitfield@example.org` / `password123`, open the Softball Tournament event, click through to check-in (`/checkin/event-softball`).
 
 Expected: the roster renders (it previously showed "Cannot load check-in"). Tap a volunteer — the row highlights. Reload the page and confirm the mark **persisted**. Before this task, every tap silently recorded nothing.
 
@@ -2153,7 +2153,7 @@ As a brand-new account (sign up with a username), confirm each step:
 
 - [ ] **Step 5: Walk the organizer journey manually**
 
-As `jkatzenback@vikings.org`:
+As `jordan.whitfield@example.org`:
 - [ ] Create an event with two shifts
 - [ ] Review applicants and accept one
 - [ ] Open the day-of check-in screen, mark someone present, reload, confirm it persisted
@@ -2214,7 +2214,7 @@ but `openEventById` does `events.find(e => e.id === eventId)` against that objec
 
 - [ ] **Step 1: Reproduce it**
 
-`npm run dev`, sign in as `leo.chen28@gmail.com` / `password123`, go to Opportunities, click any event card. Expect the toast "That event is no longer available." and no modal.
+`npm run dev`, sign in as `leo.chen@example.com` / `password123`, go to Opportunities, click any event card. Expect the toast "That event is no longer available." and no modal.
 
 - [ ] **Step 2: Make the handler accept either shape**
 
@@ -2254,7 +2254,7 @@ Reload, click an event card on Opportunities — the event modal must open. Repe
 
 - [ ] **Step 4: Reproduce it**
 
-With the dev server running, request a reset for `leo.chen28@gmail.com`, copy the `/?reset=<token>` URL printed to the server console, and open it. Expect a spinner that never resolves.
+With the dev server running, request a reset for `leo.chen@example.com`, copy the `/?reset=<token>` URL printed to the server console, and open it. Expect a spinner that never resolves.
 
 - [ ] **Step 5: Clear the checking flag before redirecting**
 

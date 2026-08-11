@@ -11,8 +11,8 @@ describe('messaging UX polish', () => {
   let conversationId;
 
   beforeAll(async () => {
-    orgToken = await srv.login('jkatzenback@vikings.org');
-    studentToken = await srv.login('leo.chen28@gmail.com');
+    orgToken = await srv.login('jordan.whitfield@example.org');
+    studentToken = await srv.login('leo.chen@example.com');
     studentId = (await srv.call('GET', '/api/users/me', undefined, studentToken)).body.id;
     orgId = (await srv.call('GET', '/api/users/me', undefined, orgToken)).body.id;
 
@@ -77,8 +77,8 @@ describe('messages/users/search result scoping (Task 7d)', () => {
   let studentToken, orgToken, adminToken, partnerToken;
 
   beforeAll(async () => {
-    studentToken = await srv.login('leo.chen28@gmail.com'); // applied to event-softball (user-org-1)
-    orgToken = await srv.login('jkatzenback@vikings.org');  // hosts event-softball
+    studentToken = await srv.login('leo.chen@example.com'); // applied to event-softball (user-org-1)
+    orgToken = await srv.login('jordan.whitfield@example.org');  // hosts event-softball
     adminToken = await srv.login('admin@example.gov');
 
     const partnerSigned = await srv.signupConfirmed({
@@ -91,7 +91,7 @@ describe('messages/users/search result scoping (Task 7d)', () => {
   });
 
   it('lets a student find the organizer of an event they applied to', async () => {
-    const res = await srv.call('GET', '/api/messages/users/search?q=katzenback', undefined, studentToken);
+    const res = await srv.call('GET', '/api/messages/users/search?q=whitfield', undefined, studentToken);
     expect(res.status).toBe(200);
     expect(res.body.users.map(u => u.id)).toContain('user-org-1');
   });
@@ -170,8 +170,8 @@ describe('messages/conversations/resolve capability walkthrough (v1.2a messaging
   let studentId, hostedEventId, unhostedEventId;
 
   beforeAll(async () => {
-    studentToken = await srv.login('leo.chen28@gmail.com');
-    orgToken = await srv.login('jkatzenback@vikings.org');
+    studentToken = await srv.login('leo.chen@example.com');
+    orgToken = await srv.login('jordan.whitfield@example.org');
     adminToken = await srv.login('admin@example.gov');
 
     const partnerSigned = await srv.signupConfirmed({
@@ -188,7 +188,7 @@ describe('messages/conversations/resolve capability walkthrough (v1.2a messaging
     partnerToken = partnerSigned.cookie;
     superAdminToken = superAdminSigned.cookie;
 
-    studentId = db.prepare("SELECT id FROM users WHERE email = 'leo.chen28@gmail.com'").get().id;
+    studentId = db.prepare("SELECT id FROM users WHERE email = 'leo.chen@example.com'").get().id;
     const adminId = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get().id;
 
     // An event the organizer fixture actually hosts, with a real application

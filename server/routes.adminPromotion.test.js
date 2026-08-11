@@ -12,7 +12,7 @@ import { startTestServer } from './testServer.js';
  * `srv.loginAsOwner` runs the same UPDATE `bin/grant-ownership.mjs` runs,
  * against this suite's throwaway database.
  */
-const OWNER_EMAIL = 'dsanger@outlook.com';
+const OWNER_EMAIL = 'derek.sorensen@example.com';
 
 /**
  * `db` is imported inside `beforeAll`, never at the top of the file.
@@ -36,7 +36,7 @@ afterAll(async () => {
 
 describe('Administrator Promotion and Revocation', () => {
   it('prevents students from promoting', async () => {
-    const studentToken = await srv.login('leo.chen28@gmail.com');
+    const studentToken = await srv.login('leo.chen@example.com');
     const res = await fetch(srv.base + '/api/admin/users/123/promote', {
       method: 'POST',
       headers: { Cookie: `wev_session=${studentToken}`, 'Content-Type': 'application/json' },

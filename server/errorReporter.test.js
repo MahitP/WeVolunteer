@@ -40,8 +40,8 @@ const label = (n) => {
 
 describe('redactMessage — one rule, one realistic positive', () => {
   it('removes an email address', () => {
-    const out = redactMessage('Failed to mail leo.chen28@gmail.com about their shift');
-    expect(out).not.toContain('leo.chen28@gmail.com');
+    const out = redactMessage('Failed to mail leo.chen@example.com about their shift');
+    expect(out).not.toContain('leo.chen@example.com');
     expect(out).toContain(REDACTED);
   });
 
@@ -314,14 +314,14 @@ describe('fingerprint', () => {
    * address cannot be recovered from — or identified by — the stored digest.
    */
   it('is computed from the redacted message, not the raw one', () => {
-    const raw = 'mail to leo.chen28@gmail.com failed';
+    const raw = 'mail to leo.chen@example.com failed';
     const viaRecord = fingerprint({ source: 'server', kind: 'TypeError', message: redactMessage(raw), route: null });
     const viaRaw = fingerprint({ source: 'server', kind: 'TypeError', message: raw, route: null });
     expect(viaRecord).not.toBe(viaRaw);
 
     recordError(db, base({ message: raw }));
     const [g] = groups();
-    expect(g.message).not.toContain('leo.chen28@gmail.com');
+    expect(g.message).not.toContain('leo.chen@example.com');
     expect(g.fingerprint).toBe(viaRecord);
   });
 });

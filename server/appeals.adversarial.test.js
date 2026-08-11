@@ -184,7 +184,7 @@ describe('appeal and moderation records are append-only at the database', () => 
      * filing an appeal against a report the caller owns is what appends the
      * `appeal_filed` history row, so this also proves that path still writes one.
      */
-    const studentT = await srv.login('colin.carbin29@outlook.com');
+    const studentT = await srv.login('cameron.caldwell@example.com');
     const now = new Date().toISOString();
     db.prepare(`
       INSERT INTO reports (id, reporter_id, reporter_name_snapshot, target_type, target_id,

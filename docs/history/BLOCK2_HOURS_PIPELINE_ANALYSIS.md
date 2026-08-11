@@ -23,7 +23,7 @@ Established by probing a copy of the live database, not by reading code:
 | Volunteer | Credited hours |
 |---|---|
 | Priya Patel | 5 |
-| Leo Chen, Advaitkrishna G., Alexia Burnett, Colin Carbin, David Sanger, Diana Sanger, Matthew Polizzotto, Norma Carbin, Pranathi Sukumar | 2 each |
+| Leo Chen, Arjun Gopal, Alexis Brennan, Cameron Caldwell, Derek Sorensen, Dana Sorensen, Marcus Pelletier, Nora Caldwell, Priyanka Shah | 2 each |
 
 ---
 

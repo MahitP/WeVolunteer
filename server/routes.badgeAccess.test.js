@@ -73,7 +73,7 @@ describe('badge reads require a session', () => {
   });
 
   it('serves the catalogue to any signed-in caller', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', '/api/badges', undefined, token);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.badges)).toBe(true);
@@ -81,7 +81,7 @@ describe('badge reads require a session', () => {
   });
 
   it('serves a volunteer\'s achievements to a signed-in caller, matching the profile page it renders on', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', `/api/users/${STUDENT}/badges`, undefined, token);
     expect(res.status).toBe(200);
     expect(res.body.badges.length).toBeGreaterThan(0);

@@ -200,12 +200,12 @@ breakdown.
 three or four real organizations:
 
 ```
-South Brunswick | Vikings Softball | SBPL |
-SB Softball Booster | South Brunswick HS | South Brunswick High School
+Example Valley | Falcons Softball | EVPL |
+EV Softball Booster | Example Valley HS | Example Valley High School
 ```
 
-"South Brunswick", "South Brunswick HS" and "South Brunswick High School" are one school
-written three ways. "Vikings Softball" and "SB Softball Booster" are plausibly one
+"Example Valley", "Example Valley HS" and "Example Valley High School" are one school
+written three ways. "Falcons Softball" and "EV Softball Booster" are plausibly one
 organization.
 
 **A "communities served" figure computed from this field would report 6 for a reality of

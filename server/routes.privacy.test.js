@@ -19,15 +19,15 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
   let freshStudentId, freshStudentToken;
 
   beforeAll(async () => {
-    leoToken = await srv.login('leo.chen28@gmail.com');
-    hostingOrgToken = await srv.login('jkatzenback@vikings.org'); // hosts event-softball
-    unrelatedOrgToken = await srv.login('rmiller@sbpl.info'); // hosts nothing
+    leoToken = await srv.login('leo.chen@example.com');
+    hostingOrgToken = await srv.login('jordan.whitfield@example.org'); // hosts event-softball
+    unrelatedOrgToken = await srv.login('robin.ellery@example.org'); // hosts nothing
 
     /**
      * The agreement is accepted so this fixture tests what it says it tests.
      *
      * These cases are about FIELD scoping — which columns an organizer who does
-     * not host the student's event may see — and the seeded `rmiller` is a
+     * not host the student's event may see — and the seeded `rellery` is a
      * pending organizer. Since v1.3, `directory.read` is one of the capabilities
      * withheld until the Organizer Agreement is accepted (see
      * ORGANIZER_GATED_CAPABILITIES), and `GET /api/users/:id/profile` now
@@ -44,9 +44,9 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
     adminToken = await srv.login('admin@example.gov');
 
     // A fresh student who applies to a freshly created event hosted by
-    // jkatzenback, so we have a real, unambiguous "hosting organizer"
+    // jwhitfield, so we have a real, unambiguous "hosting organizer"
     // relationship to test against, independent of the pre-existing seeded
-    // Priya<->jkatzenback link. A future slot also gives us a non-vacuous
+    // Priya<->jwhitfield link. A future slot also gives us a non-vacuous
     // upcomingCount to assert on.
     const signupRes = await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       email: 'privacy.fresh.student@example.org', password: 'Password123',
@@ -66,7 +66,7 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
       title: 'Privacy Test Event',
       description: 'Created to test PII gating on the volunteer profile endpoint.',
       category: 'Other',
-      location: '99 Privacy Way, South Brunswick',
+      location: '99 Privacy Way, Example Valley',
       applicationDeadline: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
       slots: [{
         name: 'Shift', description: 'Test shift',
@@ -118,12 +118,12 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
     expect(res.body.volunteer.email).toBe('privacy.fresh.student@example.org');
   });
 
-  it('reveals grade/school/bio/email to the seeded hosting-organizer relationship (Priya <-> jkatzenback)', async () => {
+  it('reveals grade/school/bio/email to the seeded hosting-organizer relationship (Priya <-> jwhitfield)', async () => {
     const res = await srv.call('GET', '/api/users/user-student-2/profile', undefined, hostingOrgToken);
     expect(res.status).toBe(200);
     expect(res.body.volunteer.grade).toBe('11');
     expect(res.body.volunteer.school).toBeTruthy();
-    expect(res.body.volunteer.email).toBe('priya.patel.nhs@outlook.com');
+    expect(res.body.volunteer.email).toBe('priya.patel@example.com');
   });
 
   it('reveals grade/school/bio/email to an admin viewing any student', async () => {
@@ -174,7 +174,7 @@ describe('leaderboard privacy', () => {
   const SEEDED_STUDENT_IDS = ['user-student-1', 'user-student-2', 'user-student-3'];
 
   beforeAll(async () => {
-    leoToken = await srv.login('leo.chen28@gmail.com');
+    leoToken = await srv.login('leo.chen@example.com');
   });
 
   it('is empty of seeded students while everyone defaults to leaderboard_opt_in = 0', async () => {
@@ -233,7 +233,7 @@ describe('leaderboard privacy', () => {
   });
 
   it('round-trips the opt-in through PATCH /api/auth/profile (the write-path guard)', async () => {
-    const priyaToken = await srv.login('priya.patel.nhs@outlook.com');
+    const priyaToken = await srv.login('priya.patel@example.com');
 
     // Opt in.
     const optInRes = await srv.call('PATCH', '/api/auth/profile', { leaderboardOptIn: true }, priyaToken);
@@ -267,9 +267,9 @@ describe('privacy: event listing requires auth and scopes instructions', () => {
   const SOFTBALL_INSTRUCTIONS = 'Enter through the west gate and check in at the snack shack table.';
 
   beforeAll(async () => {
-    leoToken = await srv.login('leo.chen28@gmail.com');
-    priyaToken = await srv.login('priya.patel.nhs@outlook.com');
-    hostingOrgToken = await srv.login('jkatzenback@vikings.org');
+    leoToken = await srv.login('leo.chen@example.com');
+    priyaToken = await srv.login('priya.patel@example.com');
+    hostingOrgToken = await srv.login('jordan.whitfield@example.org');
     adminToken = await srv.login('admin@example.gov');
 
     const rawDb = new DatabaseSync(process.env.WEV_DB_PATH);
@@ -319,9 +319,9 @@ describe('privacy: event announcements gated to accepted volunteers and staff', 
   let leoToken, priyaToken, hostingOrgToken, adminToken;
 
   beforeAll(async () => {
-    leoToken = await srv.login('leo.chen28@gmail.com');
-    priyaToken = await srv.login('priya.patel.nhs@outlook.com');
-    hostingOrgToken = await srv.login('jkatzenback@vikings.org');
+    leoToken = await srv.login('leo.chen@example.com');
+    priyaToken = await srv.login('priya.patel@example.com');
+    hostingOrgToken = await srv.login('jordan.whitfield@example.org');
     adminToken = await srv.login('admin@example.gov');
   });
 

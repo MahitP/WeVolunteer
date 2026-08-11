@@ -59,9 +59,9 @@ beforeAll(async () => {
   authz = await import('./authz.js');
   reauth = await import('./reauth.js');
 
-  alice = sessionOf(await srv.login('leo.chen28@gmail.com', PASSWORD));
-  aliceOther = sessionOf(await srv.login('leo.chen28@gmail.com', PASSWORD));
-  bob = sessionOf(await srv.login('jkatzenback@vikings.org', PASSWORD));
+  alice = sessionOf(await srv.login('leo.chen@example.com', PASSWORD));
+  aliceOther = sessionOf(await srv.login('leo.chen@example.com', PASSWORD));
+  bob = sessionOf(await srv.login('jordan.whitfield@example.org', PASSWORD));
 
   expect(alice.jti, 'the two Alice sessions must be distinguishable').not.toBe(aliceOther.jti);
   expect(alice.userId).not.toBe(bob.userId);

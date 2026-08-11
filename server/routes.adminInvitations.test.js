@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { startTestServer } from './testServer.js';
 
-const OWNER_EMAIL = 'dsanger@outlook.com';
+const OWNER_EMAIL = 'derek.sorensen@example.com';
 const INVITEE = 'invitee@example.invalid';
 
 /**
@@ -47,7 +47,7 @@ describe('administrator invitations', () => {
     ({ db } = await import('./db.js'));
     owner = await srv.loginAsOwner(OWNER_EMAIL);
     admin = await srv.login('admin@example.gov');
-    student = await srv.login('leo.chen28@gmail.com');
+    student = await srv.login('leo.chen@example.com');
 
     /* The invited person: a real account with a VERIFIED address, which is what
        IV-6 requires before a token can be redeemed. */

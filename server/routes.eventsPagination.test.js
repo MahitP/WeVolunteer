@@ -46,7 +46,7 @@ beforeAll(async () => {
   // Only now that WEV_DB_PATH points at the throwaway database is it safe to
   // import anything that pulls in db.js.
   ({ EVENTS_MAX_LIMIT } = await import('./routes/eventRoutes.js'));
-  organizer = await srv.login('jkatzenback@vikings.org');
+  organizer = await srv.login('jordan.whitfield@example.org');
 
   // Enough events to page through, some sharing a start time so the tiebreak is
   // actually exercised rather than incidentally satisfied.

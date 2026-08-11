@@ -316,7 +316,7 @@ describe('denying a pending organizer and the photograph', () => {
     scratchFiles.push(onDisk(url));
     expect(fs.existsSync(onDisk(url)), 'fixture upload did not land').toBe(true);
 
-    const ownerToken = await srv.loginAsOwner('dsanger@outlook.com');
+    const ownerToken = await srv.loginAsOwner('derek.sorensen@example.com');
     const res = await srv.call('POST', `/api/admin/organizers/${user.id}/deny`, {}, ownerToken);
     expect(res.status).toBe(200);
 

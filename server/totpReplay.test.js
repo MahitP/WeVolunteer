@@ -199,7 +199,7 @@ describe('TOTP tolerance and single use', () => {
     expect((await submit(token, await beginLogin())).status).toBe(200);
 
     /* A different account, same shared secret, same code, same window. */
-    const owner = await srv.loginAsOwner('dsanger@outlook.com');
+    const owner = await srv.loginAsOwner('derek.sorensen@example.com');
     expect(owner).toBeTruthy();
   });
 });

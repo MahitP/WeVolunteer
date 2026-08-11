@@ -9,7 +9,7 @@ afterAll(async () => { await srv.close(); });
 
 describe('auth: email verification state', () => {
   it('returns emailVerified on the user object', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const me = await srv.call('GET', '/api/auth/me', undefined, token);
     expect(me.status).toBe(200);
     expect(me.body).toHaveProperty('emailVerified');
@@ -18,7 +18,7 @@ describe('auth: email verification state', () => {
   // Seeded demo fixtures are confirmed on purpose — their addresses are
   // invented, so no confirmation mail could ever reach them.
   it('marks a seeded demo user verified', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const me = await srv.call('GET', '/api/auth/me', undefined, token);
     expect(me.body.emailVerified).toBe(true);
   });
@@ -115,33 +115,33 @@ describe('auth: password reset', () => {
   };
 
   it('issues a reset token for a known address', async () => {
-    const res = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen28@gmail.com' });
+    const res = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen@example.com' });
     expect(res.status).toBe(200);
     expect(tokenFor('user-student-1')).toBeTruthy();
   });
 
   it('does not reveal whether an address exists', async () => {
-    const known = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen28@gmail.com' });
+    const known = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen@example.com' });
     const unknown = await srv.call('POST', '/api/auth/forgot-password', { email: 'nobody@example.org' });
     expect(unknown.status).toBe(known.status);
     expect(unknown.body).toEqual(known.body);
   });
 
   it('resets the password and lets the user sign in with it', async () => {
-    await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen28@gmail.com' });
+    await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen@example.com' });
     const token = tokenFor('user-student-1');
 
     const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'BrandNewPass1' });
     expect(res.status).toBe(200);
 
     const relogin = await srv.call('POST', '/api/auth/login', {
-      email: 'leo.chen28@gmail.com', password: 'BrandNewPass1'
+      email: 'leo.chen@example.com', password: 'BrandNewPass1'
     });
     expect(relogin.status).toBe(200);
   });
 
   it('burns the token so it cannot be replayed', async () => {
-    await srv.call('POST', '/api/auth/forgot-password', { email: 'priya.patel.nhs@outlook.com' });
+    await srv.call('POST', '/api/auth/forgot-password', { email: 'priya.patel@example.com' });
     const token = tokenFor('user-student-2');
 
     const first = await srv.call('POST', '/api/auth/reset-password', { token, password: 'FirstChange1' });
@@ -152,7 +152,7 @@ describe('auth: password reset', () => {
   });
 
   it('rejects an expired token', async () => {
-    await srv.call('POST', '/api/auth/forgot-password', { email: 'emiller2027@gmail.com' });
+    await srv.call('POST', '/api/auth/forgot-password', { email: 'ethan.miller@example.com' });
     const token = tokenFor('user-student-3');
 
     const db = new DatabaseSync(process.env.WEV_DB_PATH);
@@ -165,7 +165,7 @@ describe('auth: password reset', () => {
   });
 
   it('rejects a password below the minimum length', async () => {
-    await srv.call('POST', '/api/auth/forgot-password', { email: 'advait.g@yahoo.com' });
+    await srv.call('POST', '/api/auth/forgot-password', { email: 'arjun.gopal@example.com' });
     const token = tokenFor('user-advait');
     const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'abc' });
     expect(res.status).toBe(400);
@@ -220,12 +220,12 @@ describe('auth: volunteer profile does not leak whereabouts to other students', 
   let organizerToken, leoToken, priyaToken, adminToken, eventId, slotId;
 
   beforeAll(async () => {
-    organizerToken = await srv.login('jkatzenback@vikings.org');
+    organizerToken = await srv.login('jordan.whitfield@example.org');
     // Earlier in this file, "auth: password reset" actually resets these two
     // seeded students' passwords while exercising the reset flow — their live
     // passwords are no longer the seeded 'password123'.
-    leoToken = await srv.login('leo.chen28@gmail.com', 'BrandNewPass1');
-    priyaToken = await srv.login('priya.patel.nhs@outlook.com', 'FirstChange1');
+    leoToken = await srv.login('leo.chen@example.com', 'BrandNewPass1');
+    priyaToken = await srv.login('priya.patel@example.com', 'FirstChange1');
     adminToken = await srv.login('admin@example.gov');
 
     // Build a real confirmed future shift for Priya via the actual API, so the
@@ -236,7 +236,7 @@ describe('auth: volunteer profile does not leak whereabouts to other students', 
       title: 'Whereabouts Test Event',
       description: 'Created to prove upcoming shift data is gated correctly.',
       category: 'Other',
-      location: '12 Maple Ave, South Brunswick',
+      location: '12 Maple Ave, Example Valley',
       applicationDeadline: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
       slots: [{
         name: 'Morning', description: 'Morning shift',
@@ -274,7 +274,7 @@ describe('auth: volunteer profile does not leak whereabouts to other students', 
     expect(res.body.upcoming.length).toBeGreaterThan(0);
     const shift = res.body.upcoming.find(u => u.eventId === eventId);
     expect(shift).toBeTruthy();
-    expect(shift.location).toBe('12 Maple Ave, South Brunswick');
+    expect(shift.location).toBe('12 Maple Ave, Example Valley');
     expect(res.body.stats.upcomingCount).toBeGreaterThan(0);
   });
 
@@ -288,7 +288,7 @@ describe('auth: volunteer profile does not leak whereabouts to other students', 
   it('does not regress the organizer applicant-review workflow: email and completed history still show', async () => {
     const res = await srv.call('GET', '/api/users/user-student-2/profile', undefined, organizerToken);
     expect(res.status).toBe(200);
-    expect(res.body.volunteer.email).toBe('priya.patel.nhs@outlook.com');
+    expect(res.body.volunteer.email).toBe('priya.patel@example.com');
     expect(Array.isArray(res.body.completed)).toBe(true);
     expect(res.body.completed.length).toBeGreaterThan(0);
   });

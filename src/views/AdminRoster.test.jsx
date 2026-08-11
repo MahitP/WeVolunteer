@@ -26,7 +26,7 @@ vi.mock('../components/auth/useStepUp', () => ({
 
 const ADMIN = (over = {}) => ({
   id: 'user-admin',
-  name: 'Jacquelyn Katzenback',
+  name: 'Jordan Whitfield',
   email: 'admin@example.gov',
   role: 'admin',
   avatar: '🛡️',
@@ -55,7 +55,7 @@ beforeEach(() => {
 describe('AdminRoster', () => {
   it('lists the administrators the API returns', async () => {
     renderRoster();
-    expect(await screen.findByText('Jacquelyn Katzenback')).toBeInTheDocument();
+    expect(await screen.findByText('Jordan Whitfield')).toBeInTheDocument();
   });
 
   it('surfaces a load failure instead of rendering an empty roster', async () => {
@@ -86,7 +86,7 @@ describe('AdminRoster', () => {
    */
   it('binds targetUserId, not id, whenever it runs a step-up', async () => {
     renderRoster();
-    await screen.findByText('Jacquelyn Katzenback');
+    await screen.findByText('Jordan Whitfield');
 
     // The real path: expand the row, open the revoke modal, type the
     // administrator's name to confirm, submit.
@@ -94,7 +94,7 @@ describe('AdminRoster', () => {
     fireEvent.click(screen.getByRole('button', { name: /^revoke$/i }));
 
     const confirm = await screen.findByLabelText(/type .* to confirm/i);
-    fireEvent.change(confirm, { target: { value: 'Jacquelyn Katzenback' } });
+    fireEvent.change(confirm, { target: { value: 'Jordan Whitfield' } });
     fireEvent.click(screen.getByRole('button', { name: /revoke access/i }));
 
     await waitFor(() => expect(run).toHaveBeenCalled());

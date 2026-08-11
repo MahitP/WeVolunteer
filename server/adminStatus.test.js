@@ -62,7 +62,7 @@ describe('access control', () => {
   });
 
   it('refuses a student', async () => {
-    const student = await srv.login('leo.chen28@gmail.com');
+    const student = await srv.login('leo.chen@example.com');
     const res = await status(student);
     expect(res.status).toBe(403);
   });

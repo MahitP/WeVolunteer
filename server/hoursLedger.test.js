@@ -38,7 +38,7 @@ function seed(db) {
     INSERT INTO users (id, name, role) VALUES
       ('u1','Priya Patel','student'),
       ('u2','Leo Chen','student'),
-      ('u3','Ethan Miller','student');
+      ('u3','Ethan Ellery','student');
     INSERT INTO events (id, title) VALUES ('e1','Food Pantry'), ('e2','Snack Shack');
     INSERT INTO slots (id, event_id, name) VALUES
       ('s1','e1','Box Packer'), ('s2','e2','Grill'), ('s3','e2','Litter');

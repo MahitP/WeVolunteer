@@ -48,7 +48,7 @@ const anyEventId = () => {
 
 describe('POST /api/reports accepts the shipped client payload', () => {
   it('takes the free-text reason the report modal sends', async () => {
-    const t = await srv.login('colin.carbin29@outlook.com');
+    const t = await srv.login('cameron.caldwell@example.com');
 
     // Copied from src/components/ReportModal.jsx — `api.submitReport({ targetType,
     // targetId, reason: trimmed })`, where `trimmed` is the textarea contents.
@@ -77,7 +77,7 @@ describe('POST /api/reports accepts the shipped client payload', () => {
   it('still honours a real category when the client sends one', async () => {
     // The fallback must not swallow the taxonomy — otherwise every report
     // becomes `other` and triage has nothing to sort on.
-    const t = await srv.login('colin.carbin29@outlook.com');
+    const t = await srv.login('cameron.caldwell@example.com');
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'event',
       targetId: anyEventId(),
@@ -121,7 +121,7 @@ describe('POST /api/reports accepts the shipped client payload', () => {
  */
 describe('POST /api/reports accepts the rewritten client payload', () => {
   it('takes a category and a description from the report dialog', async () => {
-    const t = await srv.login('colin.carbin29@outlook.com');
+    const t = await srv.login('cameron.caldwell@example.com');
 
     // Copied from src/components/ReportModal.jsx — `api.submitReport({
     // targetType, targetId, reason: category, details })`.
@@ -147,7 +147,7 @@ describe('POST /api/reports accepts the rewritten client payload', () => {
     // A target of its own, for the reason the header records: with only two
     // seeded events this reporter has already reported both, and duplicate
     // suppression would answer with an earlier case's report id.
-    const t = await srv.login('colin.carbin29@outlook.com');
+    const t = await srv.login('cameron.caldwell@example.com');
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'user', targetId: 'contract_no_description', reason: 'something_feels_wrong',
     }, t);
@@ -163,7 +163,7 @@ describe('POST /api/reports accepts the rewritten client payload', () => {
     // Driven off the shared module, so a category added to the taxonomy is
     // covered here without anybody remembering to add a case.
     const { CATEGORY_VALUES } = await import('./moderation.js');
-    const t = await srv.login('colin.carbin29@outlook.com');
+    const t = await srv.login('cameron.caldwell@example.com');
 
     for (const category of CATEGORY_VALUES) {
       const res = await srv.call('POST', '/api/reports', {

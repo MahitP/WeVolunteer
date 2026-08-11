@@ -798,7 +798,7 @@ export default function Signup({ onSignupSuccess, addToast }) {
                 className="input input-lg"
                 autoCapitalize="words"
                 value={form.school}
-                placeholder={isStudent ? 'e.g. South Brunswick High School' : 'e.g. South Brunswick Public Library'}
+                placeholder={isStudent ? 'e.g. Example Valley High School' : 'e.g. Example Valley Public Library'}
                 onChange={e => set('school', e.target.value)}
               />
             </div>

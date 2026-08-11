@@ -31,7 +31,7 @@ describe('check-in', () => {
   beforeAll(async () => {
     srv = await startTestServer();
     ({ db } = await import('./db.js'));
-    orgToken = await srv.login('jkatzenback@vikings.org');
+    orgToken = await srv.login('jordan.whitfield@example.org');
     const apps = (await srv.call('GET', '/api/applications', undefined, orgToken)).body;
     application = apps.find(a => a.status === 'accepted');
     eventId = application.eventId;
@@ -48,7 +48,7 @@ describe('check-in', () => {
   });
 
   it('refuses a single event to a student', async () => {
-    const student = await srv.login('leo.chen28@gmail.com');
+    const student = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', `/api/events/${eventId}`, undefined, student);
     expect(res.status).toBe(403);
   });

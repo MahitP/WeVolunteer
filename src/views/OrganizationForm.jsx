@@ -137,7 +137,7 @@ export default function OrganizationForm({ addToast }) {
             <label htmlFor="org-name">Name</label>
             <input
               id="org-name" className="input" value={form.name}
-              placeholder="e.g. South Brunswick High School Volunteering Club"
+              placeholder="e.g. Example Valley High School Volunteering Club"
               aria-invalid={!!errors.name}
               aria-describedby={errors.name ? 'org-name-err' : undefined}
               onChange={e => set('name', e.target.value)}

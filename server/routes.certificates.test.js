@@ -39,7 +39,7 @@ describe('certificates', () => {
     srv = await startTestServer();
     ({ db } = await import('./db.js'));
     ({ backfillCertificates } = await import('./certificates.js'));
-    priyaToken = await srv.login('priya.patel.nhs@outlook.com');
+    priyaToken = await srv.login('priya.patel@example.com');
   });
   afterAll(async () => { await srv.close(); });
 
@@ -96,7 +96,7 @@ describe('certificates', () => {
       .run('event-pantry-past', 'user-student-3');
     backfillCertificates(db);
 
-    const ethanToken = await srv.login('emiller2027@gmail.com');
+    const ethanToken = await srv.login('ethan.miller@example.com');
     const ethanCerts = await srv.call('GET', '/api/certificates', undefined, ethanToken);
     const priyaCerts = await srv.call('GET', '/api/certificates', undefined, priyaToken);
 

@@ -16,8 +16,8 @@ afterAll(async () => {
 
 describe('Geocoding Proxy Route', () => {
   beforeEach(async () => {
-    organizerToken = await srv.login('jkatzenback@vikings.org', 'password123');
-    studentToken = await srv.login('leo.chen28@gmail.com', 'password123');
+    organizerToken = await srv.login('jordan.whitfield@example.org', 'password123');
+    studentToken = await srv.login('leo.chen@example.com', 'password123');
 
     global.fetch = vi.fn(async (url, init) => {
       if (typeof url === 'string' && url.includes('nominatim')) {

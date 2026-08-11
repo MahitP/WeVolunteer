@@ -40,7 +40,7 @@ let srv;
 beforeAll(async () => { srv = await startTestServer(); }, 60000);
 afterAll(async () => { await srv?.close(); });
 
-const REAL = 'leo.chen28@gmail.com';
+const REAL = 'leo.chen@example.com';
 const FAKE = 'definitely-not-a-user-99@example.org';
 
 describe('password reset does not reveal whether an account exists', () => {
@@ -137,7 +137,7 @@ describe('login: the deliberate oracle, pinned so it cannot drift unnoticed', ()
   it('throttles per account, which is what bounds bulk harvesting', async () => {
     const { __resetLoginThrottle } = await import('./routes/authRoutes.js');
     __resetLoginThrottle();
-    const target = 'priya.patel.nhs@outlook.com';
+    const target = 'priya.patel@example.com';
     let throttled = false;
     for (let i = 0; i < 14; i++) {
       const res = await srv.call('POST', '/api/auth/login', { email: target, password: `no${i}` });
