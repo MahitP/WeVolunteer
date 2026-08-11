@@ -9,11 +9,18 @@ vi.mock('../utils/api', () => ({
   api: {
     fetchCheckins: vi.fn(),
     fetchAutoSelectRuns: vi.fn(),
+    /* Every api method this tree can reach must exist here. A missing key is
+       not a no-op — it throws `undefined is not a function` from inside a
+       passive effect, which surfaces as a confusing hook-order failure rather
+       than as "you forgot to mock getWeather". */
+    getWeather: vi.fn(() => new Promise(() => {})),
   }
 }));
 
+/* Overridden per-test where a position matters; see the distance cases. */
+const locationState = { location: null };
 vi.mock('../contexts/LocationContext', () => ({
-  useLocationContext: () => ({ location: null })
+  useLocationContext: () => locationState
 }));
 
 const mockEvent = {
@@ -112,6 +119,109 @@ describe('EventModal Characterization', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Mark who actually attended. Only the volunteers you tick are credited.')).toBeInTheDocument();
+    });
+  });
+});
+
+/**
+ * Location, which this modal is the only live surface for.
+ *
+ * The rich location components existed and worked, but the only file importing
+ * them had no route and no importer of its own, so no volunteer had ever seen a
+ * map, a distance or a directions link. These pin the wiring.
+ */
+describe('EventModal location', () => {
+  const pinned = {
+    ...mockEvent,
+    location: 'Reichler Park',
+    address: '100 Reichler Park Drive, Example Valley, NJ 08824',
+    latitude: 40.386,
+    longitude: -74.556,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    locationState.location = null;
+  });
+
+  it('makes the location a directions link', () => {
+    renderWithRouter(
+      <EventModal event={pinned} currentUser={mockCurrentUser} applications={[]} onClose={vi.fn()} />
+    );
+    /* Anchored: the "Get directions" pill also names the place, and both
+       links being present is the intended design, not an ambiguity. */
+    expect(screen.getByRole('link', { name: /^Reichler Park/ })).toBeInTheDocument();
+  });
+
+  it('shows the street address when it adds something to the place name', () => {
+    renderWithRouter(
+      <EventModal event={pinned} currentUser={mockCurrentUser} applications={[]} onClose={vi.fn()} />
+    );
+    expect(screen.getByText('100 Reichler Park Drive, Example Valley, NJ 08824')).toBeInTheDocument();
+  });
+
+  it('offers directions as an action of its own', () => {
+    renderWithRouter(
+      <EventModal event={pinned} currentUser={mockCurrentUser} applications={[]} onClose={vi.fn()} />
+    );
+    expect(screen.getByRole('link', { name: /get directions/i })).toBeInTheDocument();
+  });
+
+  it('does not load map tiles until asked', () => {
+    renderWithRouter(
+      <EventModal event={pinned} currentUser={mockCurrentUser} applications={[]} onClose={vi.fn()} />
+    );
+    /* The tile provider is the only third party that sees a student's IP. */
+    expect(screen.getByRole('button', { name: /show map/i })).toBeInTheDocument();
+  });
+
+  it('shows the distance once the volunteer has shared a position', () => {
+    locationState.location = { latitude: 40.4188, longitude: -74.5931 };
+    renderWithRouter(
+      <EventModal event={pinned} currentUser={mockCurrentUser} applications={[]} onClose={vi.fn()} />
+    );
+    expect(screen.getByText(/mi away/)).toBeInTheDocument();
+  });
+
+  it('shows no distance when the volunteer has not shared one', () => {
+    renderWithRouter(
+      <EventModal event={pinned} currentUser={mockCurrentUser} applications={[]} onClose={vi.fn()} />
+    );
+    expect(screen.queryByText(/mi away/)).toBeNull();
+  });
+
+  describe('an event with no pin', () => {
+    /* The ordinary case: an organizer typed a place name and never opened the
+       picker. Everything has to degrade, and nothing may break. */
+    const unpinned = { ...mockEvent, location: 'Local Shelter', address: null, latitude: null, longitude: null };
+
+    it('still links the location, using the place name as the destination', () => {
+      renderWithRouter(
+        <EventModal event={unpinned} currentUser={mockCurrentUser} applications={[]} onClose={vi.fn()} />
+      );
+      expect(screen.getByRole('link', { name: /^Local Shelter/ })).toBeInTheDocument();
+    });
+
+    it('offers no map, because there is no point to put on one', () => {
+      renderWithRouter(
+        <EventModal event={unpinned} currentUser={mockCurrentUser} applications={[]} onClose={vi.fn()} />
+      );
+      expect(screen.queryByRole('button', { name: /show map/i })).toBeNull();
+    });
+
+    it('asks for no forecast, because there is nowhere to forecast for', () => {
+      renderWithRouter(
+        <EventModal event={unpinned} currentUser={mockCurrentUser} applications={[]} onClose={vi.fn()} />
+      );
+      expect(api.getWeather).not.toHaveBeenCalled();
+    });
+
+    it('shows no distance even when the volunteer has shared a position', () => {
+      locationState.location = { latitude: 40.4188, longitude: -74.5931 };
+      renderWithRouter(
+        <EventModal event={unpinned} currentUser={mockCurrentUser} applications={[]} onClose={vi.fn()} />
+      );
+      expect(screen.queryByText(/mi away/)).toBeNull();
     });
   });
 });

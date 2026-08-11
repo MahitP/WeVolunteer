@@ -4,12 +4,15 @@ import {
   FileText, ArrowRight, Printer, X, Ban, Trophy, MapPin, CalendarCheck, History, ShieldCheck
 } from 'lucide-react';
 import { APP_NAME, SCHOOL_NAME } from '../config';
-import { formatHours, formatDay, formatTimeRange, countdown } from '../utils/helpers';
+import { formatHours, formatDay, formatTimeRange, countdown, haversineDistance } from '../utils/helpers';
 import { api } from '../utils/api';
 import Modal from '../components/Modal';
 import { BarChart, DonutChart } from '../components/BarChart';
 import { DateChip } from '../components/Seats';
 import EmptyState from '../components/common/EmptyState';
+import { useLocationContext } from '../contexts/LocationContext';
+import LocationLink from '../components/location/LocationLink';
+import WeatherSummary from '../components/location/WeatherSummary';
 
 export default function VolunteerDashboard({
   currentUser, events = [], applications = [], addToast, setActiveTab, refreshEvents, refreshApplications, onViewDetails
@@ -57,6 +60,17 @@ export default function VolunteerDashboard({
     [mine]);
 
   const nextShift = upcoming[0];
+
+  /* How far the next shift is, computed on the device so the volunteer's exact
+     position never leaves it. Null whenever they have not opted in, or the
+     event has no pin — both ordinary, both render nothing. */
+  const { location: myLocation } = useLocationContext();
+  const nextDistance = useMemo(() => {
+    const e = nextShift?.event;
+    if (!myLocation || !e || e.latitude == null || e.longitude == null) return null;
+    return haversineDistance(myLocation.latitude, myLocation.longitude, e.latitude, e.longitude);
+  }, [myLocation, nextShift]);
+
   const totalHours = currentUser.volunteeredHours || 0;
   /* The district's Silver Award threshold, from the server. It was
      `const HOUR_GOAL = 25` here and again in VolunteerProfile.jsx — two copies
@@ -167,8 +181,24 @@ export default function VolunteerDashboard({
                 {formatDay(nextShift.slot?.startDatetime)}, {formatTimeRange(nextShift.slot?.startDatetime, nextShift.slot?.endDatetime)}
               </span>
               <span className="row" style={{ gap: 5 }}>
-                <MapPin size={13} /> {nextShift.event.location}
+                <MapPin size={13} aria-hidden="true" />
+                <LocationLink
+                  location={nextShift.event.location}
+                  address={nextShift.event.address}
+                  latitude={nextShift.event.latitude}
+                  longitude={nextShift.event.longitude}
+                />
               </span>
+              {nextDistance != null && (
+                <span className="row tnum" style={{ gap: 5 }}>{nextDistance.toFixed(1)} mi away</span>
+              )}
+              {/* Keyed to the SLOT's start, not the event's: this is a specific
+                  shift, and that hour is the one they will be standing outside in. */}
+              <WeatherSummary
+                latitude={nextShift.event.latitude}
+                longitude={nextShift.event.longitude}
+                datetime={nextShift.slot?.startDatetime}
+              />
             </div>
           </div>
           <button className="btn btn-secondary" onClick={() => onViewDetails(nextShift.event)}>

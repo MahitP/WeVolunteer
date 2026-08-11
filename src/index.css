@@ -1909,6 +1909,33 @@ time { font-variant-numeric: tabular-nums; }
   border-color: var(--brand-translucent-border-hover);
 }
 
+/* The location link and the forecast badge are built for a normal surface, and
+   this panel is the app's one inverse surface. Without these the link's dotted
+   underline is a dark grey on a dark green, its hover colour is the panel's own
+   background, and the weather chip is a light card floating on top. Same
+   reasoning, and the same place, as the `.btn-secondary` override above. */
+.nextshift .location-link {
+  color: var(--ink-inv);
+  text-decoration-color: var(--ink-inv-3);
+}
+.nextshift .location-link:hover {
+  color: var(--ink-inv);
+  text-decoration-color: var(--ink-inv);
+}
+.nextshift .location-link:focus-visible {
+  outline-color: var(--ink-inv);
+}
+.nextshift .weather-summary {
+  margin-top: 0;
+  background: var(--brand-translucent);
+  border-color: var(--brand-translucent-border);
+  color: var(--ink-inv-2);
+}
+.nextshift .weather-temp,
+.nextshift .weather-icon {
+  color: var(--ink-inv);
+}
+
 /* ==========================================================================
    Calendar
    ========================================================================== */

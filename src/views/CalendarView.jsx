@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, CalendarDays, MapPin, Clock } from 'lucide-react';
-import { formatHours, formatTimeRange, formatDay } from '../utils/helpers';
+import { formatHours, formatTimeRange, formatDay, haversineDistance } from '../utils/helpers';
+import { useLocationContext } from '../contexts/LocationContext';
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /**
@@ -53,6 +54,7 @@ export default function CalendarView({
   const [viewMode, setViewMode] = useState('month'); // 'month' or 'week'
   const [filter, setFilter] = useState('all'); // 'all', 'upcoming', 'pending', 'history'
   const isOrganizer = currentUser?.role === 'organizer';
+  const { location: myLocation } = useLocationContext();
 
   /** Everything with a date, flattened into calendar entries. */
   const entries = useMemo(() => {
@@ -132,13 +134,36 @@ export default function CalendarView({
     return out;
   }, [events, applications, currentUser, isOrganizer]);
 
+  /**
+   * Distance attached once, here, rather than computed inside `EntryRow`.
+   *
+   * `EntryRow` renders the selected day AND all three agenda lists, so a hook
+   * inside it would run once per visible row for an answer that depends only on
+   * one position and one event. Computed here it stays presentational.
+   *
+   * Null throughout when the volunteer has not shared a position, or the event
+   * has no pin — both ordinary, and both render nothing at all.
+   */
+  const entriesWithDistance = useMemo(() => {
+    if (!myLocation) return entries;
+    return entries.map(entry => {
+      const e = entry.event;
+      if (!e || e.latitude == null || e.longitude == null) return entry;
+      return {
+        ...entry,
+        distanceMiles: haversineDistance(myLocation.latitude, myLocation.longitude, e.latitude, e.longitude),
+      };
+    });
+  }, [entries, myLocation]);
+
   const filteredEntries = useMemo(() => {
-    if (filter === 'all') return entries;
-    if (filter === 'upcoming') return entries.filter(e => e.kind === 'shift' || e.kind === 'hosting');
-    if (filter === 'pending') return entries.filter(e => e.kind === 'pending' || e.kind === 'deadline');
-    if (filter === 'history') return entries.filter(e => e.kind === 'history');
-    return entries;
-  }, [entries, filter]);
+    const all = entriesWithDistance;
+    if (filter === 'all') return all;
+    if (filter === 'upcoming') return all.filter(e => e.kind === 'shift' || e.kind === 'hosting');
+    if (filter === 'pending') return all.filter(e => e.kind === 'pending' || e.kind === 'deadline');
+    if (filter === 'history') return all.filter(e => e.kind === 'history');
+    return all;
+  }, [entriesWithDistance, filter]);
 
   const byDay = useMemo(() => {
     const map = new Map();
@@ -394,8 +419,16 @@ function EntryRow({
           {entry.startDatetime && <span className="row tnum s-9d3307">
               <Clock size={11} /> {formatTimeRange(entry.startDatetime, entry.endDatetime)}
             </span>}
+          {/* Text, not a link. This row's root is a <button>, and an anchor
+              nested inside a button is invalid HTML with genuinely broken
+              keyboard behaviour. The row already opens the event, where the
+              location IS a link — so the affordance is one press away rather
+              than duplicated badly here. Distance still helps at a glance. */}
           {entry.event?.location && <span className="row truncate s-9d3307">
               <MapPin size={11} /> {entry.event.location}
+              {entry.distanceMiles != null && (
+                <span className="dim tnum"> · {entry.distanceMiles.toFixed(1)} mi</span>
+              )}
             </span>}
         </span>
       </span>
