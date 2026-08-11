@@ -142,7 +142,23 @@ describe('authenticated route table', () => {
     ]) {
       signedInAs(USER('student'));
       const view = renderAt(path);
-      const el = await screen.findByTestId(id);
+      /**
+       * Five sequential full-App mounts, each waiting on a `React.lazy` chunk.
+       *
+       * RTL's default `findBy` patience is 1000ms, which is tuned for a
+       * component that is already loaded. This case is waiting for a dynamic
+       * import to resolve, five times over, inside a worker competing with the
+       * rest of the suite — and it intermittently lost that race under full-load
+       * runs while passing every time in isolation.
+       *
+       * The wait is widened, not the assertion: `dataset.props` below is still
+       * an exact match on the full prop list, so a route that renders with the
+       * wrong props fails exactly as loudly as before. What changes is only how
+       * long we are willing to wait for a code-split chunk — the same reasoning,
+       * and the same explicitness, as the 20s timeout the CLI tooling suites set
+       * because they spawn real processes.
+       */
+      const el = await screen.findByTestId(id, {}, { timeout: 5000 });
       expect(el.dataset.props, path).toBe(props);
       view.unmount();
     }
