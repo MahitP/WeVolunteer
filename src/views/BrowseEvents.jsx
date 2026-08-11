@@ -30,7 +30,7 @@ import {
   Search, Sparkles, SlidersHorizontal, CalendarX2, Star, Filter, X, Plus,
   Building2, UserRound, MapPin, Users,
 } from 'lucide-react';
-import { formatHours } from '../utils/helpers';
+import { formatHours, haversineDistance } from '../utils/helpers';
 import { api } from '../utils/api';
 import EmptyState from '../components/common/EmptyState';
 import { useLocationContext } from '../contexts/LocationContext';
@@ -39,6 +39,14 @@ import { useDebounce } from '../hooks/useDebounce';
 import DatePicker from '../components/common/DatePicker';
 import { DistinctionTag } from '../components/profile/Distinction';
 const CATEGORIES = ['All', 'School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
+
+/**
+ * A coordinate rounded to the neighbourhood before it leaves the device.
+ *
+ * Two decimal places, about 1.1km. See the call site for why the filter can
+ * afford it and why the displayed distance is computed separately.
+ */
+const coarsen = (deg) => Math.round(deg * 100) / 100;
 
 /**
  * What the reader is looking for.
@@ -268,10 +276,23 @@ export default function BrowseEvents({
     to: toDate || undefined,
     minHours: minHours || undefined,
     closingSoon: closingSoon || undefined,
-    // Coordinates travel only when they are actually needed, so a user who has
-    // not granted location is never asked for it implicitly.
-    lat: (maxDistance || sortBy === 'distance') && location ? location.latitude : undefined,
-    lng: (maxDistance || sortBy === 'distance') && location ? location.longitude : undefined,
+    /**
+     * Coordinates travel only when they are actually needed, so a user who has
+     * not granted location is never asked for it implicitly — and when they do
+     * travel, they are coarsened to two decimal places first.
+     *
+     * Two decimal places is about 1.1km. That is accurate enough for "within
+     * five miles" (the boundary blurs by well under a mile) and far too coarse
+     * to say where somebody is. The exact position stays on the device, which
+     * is where the displayed "1.8 mi away" is computed — so the number a
+     * volunteer reads is exact while the number the server sees is a
+     * neighbourhood.
+     *
+     * These are minors' positions, and the master plan required this. It had
+     * not been implemented.
+     */
+    lat: (maxDistance || sortBy === 'distance') && location ? coarsen(location.latitude) : undefined,
+    lng: (maxDistance || sortBy === 'distance') && location ? coarsen(location.longitude) : undefined,
     maxDistance: location ? (maxDistance || undefined) : undefined,
     sort: sortBy
   }), [searchIntent, category, place, openOnly, showFavoritesOnly, fromDate, toDate, minHours, closingSoon, maxDistance, sortBy, location, selectedTags]);
@@ -392,7 +413,26 @@ export default function BrowseEvents({
 
   const advancedCount = [fromDate, toDate, minHours, place !== 'All' ? place : '', closingSoon ? 'x' : '', maxDistance].filter(Boolean).length;
 
-  const filtered = results;
+  /**
+   * The distance a volunteer READS is computed here, not on the server.
+   *
+   * The server's `distance_miles` is measured from the coarsened centre we
+   * send, so it can be off by up to about half a mile — invisible in a "within
+   * 5 miles" filter, and wrong in a number printed on a card. Recomputing from
+   * the exact position, which never left the device, keeps the card, the modal
+   * and the dashboard all saying the same thing.
+   *
+   * Falls through to the server's value when there is no shared position, so
+   * nothing regresses for a volunteer who has not opted in.
+   */
+  const filtered = useMemo(() => {
+    if (!location) return results;
+    return results.map(e => (
+      e.latitude != null && e.longitude != null
+        ? { ...e, distance: haversineDistance(location.latitude, location.longitude, e.latitude, e.longitude) }
+        : e
+    ));
+  }, [results, location]);
 
   /**
    * Row windowing for the results grid.
