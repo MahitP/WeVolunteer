@@ -219,7 +219,7 @@ export function validateProfilePatch(patch) {
   /**
    * A general area, and emphatically not an address.
    *
-   * The bound is short on purpose — 80 characters holds "South Brunswick, NJ"
+   * The bound is short on purpose — 80 characters holds "Example Valley, NJ"
    * with room to spare and does not comfortably hold a street address. That is
    * a nudge rather than a control, and the real work is done by the field's
    * placeholder and hint in ProfileEditModal, which say plainly not to use an

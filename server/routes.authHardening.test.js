@@ -50,7 +50,7 @@ const post = (path, body, headers = {}) => fetch(`${srv.base}${path}`, {
 const login = (email, password) => post('/api/auth/login', { email, password });
 
 /** The seeded student, reachable by either identifier. */
-const EMAIL = 'leo.chen28@gmail.com';
+const EMAIL = 'leo.chen@example.com';
 const PASSWORD = 'password123';
 
 async function usernameOf(email) {
@@ -96,7 +96,7 @@ describe('S1 — the login throttle is per account, not per spelling', () => {
   it('does not let one account lock out another', async () => {
     await fail(EMAIL, 11);
 
-    const other = await login('priya.patel.nhs@outlook.com', PASSWORD);
+    const other = await login('priya.patel@example.com', PASSWORD);
     expect(other.status).toBe(200);
   }, 15000);
 

@@ -34,7 +34,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 // imported statically here. See the explanation in testServer.js.
 let srv, db, encryptSecret, generateSync;
 
-const EMAIL = 'leo.chen28@gmail.com';
+const EMAIL = 'leo.chen@example.com';
 const PASSWORD = 'password123';
 
 /** A valid 32-character base32 secret; otplib rejects anything under 16 bytes. */

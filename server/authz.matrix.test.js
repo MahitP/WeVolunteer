@@ -67,8 +67,8 @@ beforeAll(async () => {
   const { startTestServer } = await import('./testServer.js');
   srv = await startTestServer();
 
-  tokens.student   = await srv.login('leo.chen28@gmail.com');
-  tokens.organizer = await srv.login('jkatzenback@vikings.org');
+  tokens.student   = await srv.login('leo.chen@example.com');
+  tokens.organizer = await srv.login('jordan.whitfield@example.org');
   tokens.admin     = await srv.login('admin@example.gov');
 
   // super_admin and partner have no seeded fixture: promote a throwaway account

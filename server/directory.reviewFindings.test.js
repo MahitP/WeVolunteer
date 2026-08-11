@@ -17,10 +17,10 @@ describe('review findings', () => {
 
   beforeAll(async () => {
     srv = await startTestServer();
-    organizer = await srv.login('jkatzenback@vikings.org');
+    organizer = await srv.login('jordan.whitfield@example.org');
     admin = await srv.login('admin@example.gov');
     ({ db } = await import('./db.js'));
-    organizerId = db.prepare('SELECT id FROM users WHERE email = ?').get('jkatzenback@vikings.org').id;
+    organizerId = db.prepare('SELECT id FROM users WHERE email = ?').get('jordan.whitfield@example.org').id;
 
     const make = async (name, username) => {
       const r = await srv.signupConfirmed({
@@ -200,7 +200,7 @@ describe('review findings', () => {
     it('refuses an organizer the student never applied to, on both', async () => {
       const other = await srv.signupConfirmed({
         name: 'Unrelated Organizer', username: 'unrelatedorg',
-        email: 'unrelatedorg@vikings.org', grade: 'Adult', role: 'organizer', password: PASSWORD,
+        email: 'unrelated.org.contact@example.net', grade: 'Adult', role: 'organizer', password: PASSWORD,
       });
       /* Organizers must accept the agreement before they hold applicant.review;
          either way this must not disclose the history. */

@@ -7,7 +7,7 @@ describe('events: ICS Export', () => {
   afterAll(async () => { await srv.close(); });
 
   it('exports a valid ICS file for a given event and slot', async () => {
-    const oToken = await srv.login('jkatzenback@vikings.org');
+    const oToken = await srv.login('jordan.whitfield@example.org');
     
     // Create an event
     const res = await srv.call('POST', '/api/events', {
@@ -76,7 +76,7 @@ describe('events: ICS Export', () => {
    * at all, which is how it went unnoticed in the first place.
    */
   it('refuses an unauthenticated ICS request', async () => {
-    const oToken = await srv.login('jkatzenback@vikings.org');
+    const oToken = await srv.login('jordan.whitfield@example.org');
     const res = await srv.call('POST', '/api/events', {
       title: 'Auth Guard', description: 'd', category: 'Other', location: 'Secret Location',
       applicationDeadline: new Date(Date.now() + 2 * 864e5).toISOString(),
@@ -100,7 +100,7 @@ describe('events: ICS Export', () => {
   });
 
   it('escapes a comma in the location so the value is not truncated', async () => {
-    const oToken = await srv.login('jkatzenback@vikings.org');
+    const oToken = await srv.login('jordan.whitfield@example.org');
     const res = await srv.call('POST', '/api/events', {
       title: 'Comma Test', description: 'desc', category: 'Other',
       location: '12 Main St, Kendall Park, NJ',

@@ -1907,7 +1907,7 @@ each changes work later in the plan.
   target? If not, the options are object storage (needs an account, possibly a
   card) or launching W8 with link-and-attestation evidence only and adding
   uploads later. *Assumption:* local persistent disk with the caps in W8.
-- **Q4 — Email provider.** Does South Brunswick have Google Workspace? If yes,
+- **Q4 — Email provider.** Does Example Valley have Google Workspace? If yes,
   the SMTP relay is strictly better (district domain, higher limits, no new
   vendor). *Assumption:* Brevo, since it needs no card and no district IT ticket.
 - **Q5 — NHS advisor onboarding.** Do advisors already have accounts, and who

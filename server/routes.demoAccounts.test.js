@@ -54,8 +54,8 @@ describe('GET /api/auth/demo-accounts', () => {
     expect(res.status).toBe(200);
 
     const emails = res.body.accounts.map(a => a.email);
-    expect(emails).toContain('leo.chen28@gmail.com');
-    expect(emails).toContain('jkatzenback@vikings.org');
+    expect(emails).toContain('leo.chen@example.com');
+    expect(emails).toContain('jordan.whitfield@example.org');
     expect(emails).toContain('admin@example.gov');
   });
 
@@ -78,7 +78,7 @@ describe('GET /api/auth/demo-accounts', () => {
        thing to advertise under any spelling. */
     expect(res.body.accounts.map(a => a.name)).not.toContain('System Admin');
     // The rest are untouched.
-    expect(emails).toContain('leo.chen28@gmail.com');
+    expect(emails).toContain('leo.chen@example.com');
   });
 
   it('never lists an internal actor', async () => {

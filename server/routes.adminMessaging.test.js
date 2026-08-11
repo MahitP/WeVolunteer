@@ -114,14 +114,14 @@ describe('using the thread', () => {
     expect(sent.status, JSON.stringify(sent.body)).toBe(201);
 
     const asStudent = await srv.call('GET', `/api/messages/conversations/${conversation.id}/messages`,
-      undefined, await srv.login('priya.patel.nhs@outlook.com'));
+      undefined, await srv.login('priya.patel@example.com'));
     expect(asStudent.status).toBe(200);
     expect(asStudent.body.messages.at(-1).body).toContain('about a report');
   });
 
   it('lets the student reply', async () => {
     const { body: { conversation } } = await openThread(STUDENT);
-    const cookie = await srv.login('priya.patel.nhs@outlook.com');
+    const cookie = await srv.login('priya.patel@example.com');
 
     const res = await srv.call('POST', `/api/messages/conversations/${conversation.id}/messages`,
       { body: 'Okay, I can come at lunch tomorrow.' }, cookie);
@@ -131,7 +131,7 @@ describe('using the thread', () => {
   it('shows up in both inboxes', async () => {
     const { body: { conversation } } = await openThread(STUDENT);
 
-    for (const cookie of [await adminToken(), await srv.login('priya.patel.nhs@outlook.com')]) {
+    for (const cookie of [await adminToken(), await srv.login('priya.patel@example.com')]) {
       const res = await srv.call('GET', '/api/messages/conversations', undefined, cookie);
       expect(res.body.conversations.map(c => c.id)).toContain(conversation.id);
     }
@@ -161,8 +161,8 @@ describe('using the thread', () => {
 describe('refusals', () => {
   it('refuses a student and an organizer, who hold message.send but not report.resolve', async () => {
     for (const cookie of [
-      await srv.login('leo.chen28@gmail.com'),
-      await srv.login('jkatzenback@vikings.org'),
+      await srv.login('leo.chen@example.com'),
+      await srv.login('jordan.whitfield@example.org'),
     ]) {
       const res = await openThread(STUDENT, cookie);
       expect(res.status, 'message.send must not let anybody pick a stranger to message')

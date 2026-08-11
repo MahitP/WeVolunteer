@@ -654,7 +654,7 @@ describe('appeal surfaces refuse everyone without appeal.review', () => {
     const adminT = await srv.login('admin@example.gov');
     const uid = makeUser();
     const { appealId } = await suspendAndAppeal(adminT, uid, 'A statement no student should read.');
-    const studentT = await srv.login('colin.carbin29@outlook.com');
+    const studentT = await srv.login('cameron.caldwell@example.com');
 
     const attempts = await Promise.all([
       jf('/api/admin/appeals', { headers: asUser(studentT) }),
@@ -692,7 +692,7 @@ describe('appeal surfaces refuse everyone without appeal.review', () => {
     await suspendAndAppeal(adminT, a, 'Appellant A private statement about events.');
     await suspendAndAppeal(adminT, b, 'Appellant B private statement about events.');
 
-    const studentT = await srv.login('colin.carbin29@outlook.com');
+    const studentT = await srv.login('cameron.caldwell@example.com');
     const mine = await (await jf('/api/appeals/mine', { headers: asUser(studentT) })).json();
     const text = JSON.stringify(mine);
     expect(text).not.toContain('Appellant A private');

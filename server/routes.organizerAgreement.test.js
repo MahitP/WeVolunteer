@@ -29,10 +29,10 @@ describe('the Organizer Agreement', () => {
   let srv;
   let ORGANIZER_GATED_CAPABILITIES;
 
-  /** rmiller — seeded as an organizer awaiting approval, with no acceptance row. */
-  const PENDING_ORGANIZER = 'rmiller@sbpl.info';
-  /** jkatzenback — seeded as approved, and seeded WITH an acceptance row. */
-  const ACCEPTED_ORGANIZER = 'jkatzenback@vikings.org';
+  /** rellery — seeded as an organizer awaiting approval, with no acceptance row. */
+  const PENDING_ORGANIZER = 'robin.ellery@example.org';
+  /** jwhitfield — seeded as approved, and seeded WITH an acceptance row. */
+  const ACCEPTED_ORGANIZER = 'jordan.whitfield@example.org';
 
   beforeAll(async () => {
     srv = await startTestServer();
@@ -41,11 +41,11 @@ describe('the Organizer Agreement', () => {
   afterAll(async () => { await srv.close(); });
 
   /**
-   * Approves rmiller and returns their token. Approval only — no acceptance.
+   * Approves rellery and returns their token. Approval only — no acceptance.
    *
    * Clears any acceptance row first, because every test in this file shares one
    * server and one database. Without the delete, the first test that accepts
-   * leaves rmiller accepted for every test after it, and the ones asserting the
+   * leaves rellery accepted for every test after it, and the ones asserting the
    * REFUSALS — which are the tests that actually prove the finding is closed —
    * start passing for the wrong reason and then stop failing when the gate breaks.
    */
@@ -224,7 +224,7 @@ describe('the Organizer Agreement', () => {
     it('refuses to record an acceptance for somebody it does not bind', async () => {
       // An acceptance row for a student is a false record, and a false record in
       // this table is worse than a missing one.
-      const student = await srv.login('colin.carbin29@outlook.com');
+      const student = await srv.login('cameron.caldwell@example.com');
       const res = await srv.call('POST', '/api/legal/organizer-agreement/accept', { acknowledged: true }, student);
       expect(res.status).toBe(400);
       expect(res.body.code).toBe('not_an_organizer');
@@ -243,7 +243,7 @@ describe('the Organizer Agreement', () => {
     });
 
     it('a student is told no agreement is required rather than refused', async () => {
-      const student = await srv.login('colin.carbin29@outlook.com');
+      const student = await srv.login('cameron.caldwell@example.com');
       const res = await srv.call('GET', '/api/legal/organizer-agreement', undefined, student);
       expect(res.status).toBe(200);
       expect(res.body.required).toBe(false);
@@ -346,7 +346,7 @@ describe('the Organizer Agreement', () => {
     });
 
     it('withholds nothing from a student', async () => {
-      const student = await srv.login('colin.carbin29@outlook.com');
+      const student = await srv.login('cameron.caldwell@example.com');
       const me = await srv.call('GET', '/api/auth/me', undefined, student);
       expect(me.body.withheld).toEqual([]);
     });
@@ -361,7 +361,7 @@ describe('the Organizer Agreement', () => {
        * Asserted against an organizer with no acceptance row, so it fails if the
        * field is ever moved into the shared formatter.
        *
-       * rmiller is returned to the unapproved state first: the queue selects on
+       * rellery is returned to the unapproved state first: the queue selects on
        * `verified = 0`, and earlier tests in this file approve them.
        */
       const { DatabaseSync } = await import('node:sqlite');

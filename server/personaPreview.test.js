@@ -37,8 +37,8 @@ let srv, db, authz, ownerToken;
  * role — an owner who is not enrolled is refused by `requireCap` before any of
  * this is reached, which is correct behaviour and a confusing way to discover it.
  */
-const OWNER = 'dsanger@outlook.com';
-const STUDENT = 'leo.chen28@gmail.com';
+const OWNER = 'derek.sorensen@example.com';
+const STUDENT = 'leo.chen@example.com';
 
 const idFor = (email) => db.prepare('SELECT id FROM users WHERE email = ?').get(email)?.id;
 

@@ -54,7 +54,7 @@ describe('PUT /api/events/:id cannot reach another event\'s shifts', () => {
   beforeAll(async () => {
     srv = await startTestServer();
     ({ db } = await import('./db.js'));
-    organizer = await srv.login('jkatzenback@vikings.org');
+    organizer = await srv.login('jordan.whitfield@example.org');
   }, 60000);
 
   afterAll(async () => { await srv?.close(); });
@@ -75,7 +75,7 @@ describe('PUT /api/events/:id cannot reach another event\'s shifts', () => {
   const fixture = () => {
     const mine = db.prepare(
       'SELECT id FROM events WHERE organizer_id = (SELECT id FROM users WHERE email = ?) LIMIT 1'
-    ).get('jkatzenback@vikings.org');
+    ).get('jordan.whitfield@example.org');
 
     const foreignSlot = db.prepare(
       'SELECT * FROM slots WHERE event_id != ? LIMIT 1'

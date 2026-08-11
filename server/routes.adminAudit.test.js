@@ -38,7 +38,7 @@ const auditRows = async (action) => {
 
 /** Files a report as a student so there is something to moderate. */
 async function fileReport() {
-  const student = await srv.login('leo.chen28@gmail.com');
+  const student = await srv.login('leo.chen@example.com');
   const events = (await srv.call('GET', '/api/events', undefined, student)).body;
   const eventId = (Array.isArray(events) ? events : events.events)[0].id;
   const res = await srv.call('POST', '/api/reports', {
@@ -95,7 +95,7 @@ describe('moderation decisions are recorded', () => {
 
   it('writes nothing when a non-admin attempts it', async () => {
     const reportId = await fileReport();
-    const student = await srv.login('leo.chen28@gmail.com');
+    const student = await srv.login('leo.chen@example.com');
     const before = (await auditRows('MODERATE_REPORT')).length;
     const res = await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'dismissed', resolution: 'no_action', resolutionNote: 'This is a long enough note to pass.' }, student);
     expect(res.status).toBe(403);

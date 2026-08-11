@@ -146,7 +146,7 @@ describe('realtime handshake authentication', () => {
 describe('realtime delivery', () => {
   it('delivers a notification to its recipient live', async () => {
     const student = await signIn('leochen');
-    const organizer = await signIn('jkatzenback');
+    const organizer = await signIn('jwhitfield');
     const socket = await openSocket(student);
 
     const events = (await call('GET', '/api/events', student)).data;
@@ -169,7 +169,7 @@ describe('realtime delivery', () => {
 
   it('delivers a message to the other participant live', async () => {
     const student = await signIn('leochen');
-    const organizer = await signIn('jkatzenback');
+    const organizer = await signIn('jwhitfield');
     const socket = await openSocket(student);
 
     const resolved = await call('POST', '/api/messages/conversations/resolve', organizer, {
@@ -189,7 +189,7 @@ describe('realtime delivery', () => {
 
   it('relays typing indicators between participants', async () => {
     const student = await signIn('leochen');
-    const organizer = await signIn('jkatzenback');
+    const organizer = await signIn('jwhitfield');
     const studentSocket = await openSocket(student);
     const organizerSocket = await openSocket(organizer);
 
@@ -212,7 +212,7 @@ describe('realtime delivery', () => {
 
   it('does not relay typing for a conversation the sender is not in', async () => {
     const outsider = await signIn('ethanmiller');
-    const organizer = await signIn('jkatzenback');
+    const organizer = await signIn('jwhitfield');
     const outsiderSocket = await openSocket(outsider);
     const organizerSocket = await openSocket(organizer);
 
@@ -231,7 +231,7 @@ describe('realtime delivery', () => {
 
   it('synchronises read receipts live', async () => {
     const student = await signIn('leochen');
-    const organizer = await signIn('jkatzenback');
+    const organizer = await signIn('jwhitfield');
     const organizerSocket = await openSocket(organizer);
 
     const resolved = await call('POST', '/api/messages/conversations/resolve', organizer, {
@@ -251,7 +251,7 @@ describe('realtime delivery', () => {
 
   it('does not leak another user\'s notification onto this socket', async () => {
     const student = await signIn('leochen');
-    const organizer = await signIn('jkatzenback');
+    const organizer = await signIn('jwhitfield');
     // Listening as the ORGANIZER; the notification below is addressed to a student.
     const organizerSocket = await openSocket(organizer);
 

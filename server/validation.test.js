@@ -196,7 +196,7 @@ describe('POST/PUT /api/events: server-side validation wiring', () => {
 
   beforeAll(async () => {
     srv = await startTestServer();
-    orgToken = await srv.login('jkatzenback@vikings.org');
+    orgToken = await srv.login('jordan.whitfield@example.org');
   });
   afterAll(async () => { await srv.close(); });
 

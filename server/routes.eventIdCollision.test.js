@@ -29,7 +29,7 @@ import { startTestServer } from './testServer.js';
 let srv, organizer;
 beforeAll(async () => {
   srv = await startTestServer();
-  organizer = await srv.login('jkatzenback@vikings.org');
+  organizer = await srv.login('jordan.whitfield@example.org');
 }, 60000);
 afterAll(async () => { await srv?.close(); });
 

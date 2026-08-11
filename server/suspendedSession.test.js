@@ -38,7 +38,7 @@ describe('a suspended session', () => {
   beforeAll(async () => {
     srv = await startTestServer();
     ({ db } = await import('./db.js'));
-    active = await srv.login('leo.chen28@gmail.com');
+    active = await srv.login('leo.chen@example.com');
     admin = await srv.login('admin@example.gov');
   }, 60000);
 
@@ -46,7 +46,7 @@ describe('a suspended session', () => {
 
   beforeEach(async () => {
     unsuspend('user-student-2');
-    suspended = await srv.login('priya.patel.nhs@outlook.com');
+    suspended = await srv.login('priya.patel@example.com');
     suspend('user-student-2');
   });
 
@@ -196,7 +196,7 @@ describe('a suspended session', () => {
        suspended, in which case the suspend below answers 409, changes nothing,
        and the assertions pass without exercising anything. */
     unsuspend('user-student-3');
-    const live = await srv.login('emiller2027@gmail.com');
+    const live = await srv.login('ethan.miller@example.com');
     expect((await srv.call('GET', '/api/auth/me', undefined, live)).status).toBe(200);
 
     await srv.call('POST', '/api/admin/users/user-student-3/suspend',
@@ -224,8 +224,8 @@ describe('a suspended session', () => {
    */
   it('applies to every open session at once, not just the active one', async () => {
     unsuspend('user-student-3');
-    const phone = await srv.login('emiller2027@gmail.com');
-    const laptop = await srv.login('emiller2027@gmail.com');
+    const phone = await srv.login('ethan.miller@example.com');
+    const laptop = await srv.login('ethan.miller@example.com');
 
     await srv.call('POST', '/api/admin/users/user-student-3/suspend',
       { reason: 'Messaging a student after being asked to stop' }, admin);
@@ -240,7 +240,7 @@ describe('a suspended session', () => {
   /** And access returns on the same session when the suspension is lifted. */
   it('restores the same session on unsuspension, with no new sign-in', async () => {
     unsuspend('user-student-3');
-    const live = await srv.login('emiller2027@gmail.com');
+    const live = await srv.login('ethan.miller@example.com');
     await srv.call('POST', '/api/admin/users/user-student-3/suspend',
       { reason: 'Messaging a student after being asked to stop' }, admin);
     expect((await srv.call('GET', '/api/events', undefined, live)).status).toBe(403);

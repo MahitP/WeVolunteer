@@ -102,7 +102,7 @@ describe('the exemption cannot reach anything else', () => {
     'admin@example.gov ',
     'admin@example.govv',
     'admin@example.com',
-    'mahitp.16@gmail.com',
+    'not.the.owner@example.com',
     'wevolunteer.platform@gmail.com',
   ])('does not exempt %s', async (email) => {
     const required = await load({ demo: true });

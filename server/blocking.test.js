@@ -61,8 +61,8 @@ describe('blocking', () => {
   const ORG = 'user-org-1';
 
   beforeAll(async () => {
-    studentToken = await srv.login('leo.chen28@gmail.com');
-    orgToken = await srv.login('jkatzenback@vikings.org');
+    studentToken = await srv.login('leo.chen@example.com');
+    orgToken = await srv.login('jordan.whitfield@example.org');
     adminToken = await srv.login('admin@example.gov');
   });
 
@@ -240,7 +240,7 @@ describe('blocking', () => {
 
     it('scopes the list to the caller', async () => {
       await srv.call('POST', `/api/blocks/${ORG}`, {}, studentToken);
-      const other = await srv.login('priya.patel.nhs@outlook.com');
+      const other = await srv.login('priya.patel@example.com');
       const list = await srv.call('GET', '/api/blocks', undefined, other);
       expect(list.body.blocked).toEqual([]);
     });

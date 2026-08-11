@@ -4,8 +4,8 @@ let srv, student, organizer, admin;
 beforeAll(async () => {
   const { startTestServer } = await import('./testServer.js');
   srv = await startTestServer();
-  student = await srv.login('leo.chen28@gmail.com');
-  organizer = await srv.login('jkatzenback@vikings.org');
+  student = await srv.login('leo.chen@example.com');
+  organizer = await srv.login('jordan.whitfield@example.org');
   admin = await srv.login('admin@example.gov');
 }, 60000);
 afterAll(async () => { await srv?.close(); });

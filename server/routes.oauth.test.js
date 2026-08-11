@@ -120,7 +120,7 @@ describe('oauth', () => {
       const { db } = await import('./db.js');
       const sub = 'sub-suspended-live';
       const id = 'user-student-2';
-      const email = 'priya.patel.nhs@outlook.com';
+      const email = 'priya.patel@example.com';
       linkProvider(db, id, sub, email);
       suspend(db, id, new Date(Date.now() + 7 * 86400_000).toISOString());
 
@@ -135,7 +135,7 @@ describe('oauth', () => {
       const { db } = await import('./db.js');
       const sub = 'sub-suspended-expired';
       const id = 'user-student-3';
-      const email = 'emiller2027@gmail.com';
+      const email = 'ethan.miller@example.com';
       linkProvider(db, id, sub, email);
       suspend(db, id, new Date(Date.now() - 1000).toISOString());
 
@@ -482,10 +482,10 @@ describe('oauth', () => {
     srv.call('POST', '/api/oauth/link', { linkToken }, cookie, challengeId ? srv.reauthHeader(challengeId) : {});
 
   it('joins a provider to an existing account once identity is re-verified', async () => {
-    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-leo-google');
+    const linkToken = await linkTokenFor('leo.chen@example.com', 'sub-leo-google');
 
     // The person signs in the ordinary way, then verifies.
-    const cookie = await srv.login('leo.chen28@gmail.com');
+    const cookie = await srv.login('leo.chen@example.com');
     const challengeId = await srv.stepUp(cookie, 'oauth.link', { params: { provider: 'google' } });
 
     const res = await link(linkToken, cookie, challengeId);
@@ -509,8 +509,8 @@ describe('oauth', () => {
   });
 
   it('refuses a link presenting no verification at all', async () => {
-    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-leo-noverify');
-    const cookie = await srv.login('leo.chen28@gmail.com');
+    const linkToken = await linkTokenFor('leo.chen@example.com', 'sub-leo-noverify');
+    const cookie = await srv.login('leo.chen@example.com');
 
     const res = await link(linkToken, cookie);
     expect(res.status).toBe(403);
@@ -521,14 +521,14 @@ describe('oauth', () => {
   it('refuses a link with no session at all', async () => {
     // It was an UNauthenticated endpoint: the token plus a password was the whole
     // proof. The session is now half of that proof, so there has to be one.
-    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-leo-nosession');
+    const linkToken = await linkTokenFor('leo.chen@example.com', 'sub-leo-nosession');
     const res = await srv.call('POST', '/api/oauth/link', { linkToken });
     expect(res.status).toBe(401);
   });
 
   it('refuses a grant obtained for a different action', async () => {
-    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-leo-crossaction');
-    const cookie = await srv.login('leo.chen28@gmail.com');
+    const linkToken = await linkTokenFor('leo.chen@example.com', 'sub-leo-crossaction');
+    const cookie = await srv.login('leo.chen@example.com');
     const forExport = await srv.stepUp(cookie, 'data.export');
 
     const res = await link(linkToken, cookie, forExport);
@@ -545,8 +545,8 @@ describe('oauth', () => {
    * against the provider actually about to be written.
    */
   it('refuses a grant bound to a different provider than the token names', async () => {
-    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-leo-boundprov');
-    const cookie = await srv.login('leo.chen28@gmail.com');
+    const linkToken = await linkTokenFor('leo.chen@example.com', 'sub-leo-boundprov');
+    const cookie = await srv.login('leo.chen@example.com');
     const forMicrosoft = await srv.stepUp(cookie, 'oauth.link', { params: { provider: 'microsoft' } });
 
     const res = await link(linkToken, cookie, forMicrosoft);
@@ -555,8 +555,8 @@ describe('oauth', () => {
   });
 
   it('spends the grant exactly once', async () => {
-    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-leo-single');
-    const cookie = await srv.login('leo.chen28@gmail.com');
+    const linkToken = await linkTokenFor('leo.chen@example.com', 'sub-leo-single');
+    const cookie = await srv.login('leo.chen@example.com');
     const challengeId = await srv.stepUp(cookie, 'oauth.link', { params: { provider: 'google' } });
 
     expect((await link(linkToken, cookie, challengeId)).status).toBe(200);
@@ -579,10 +579,10 @@ describe('oauth', () => {
    * after which "Continue with Google" signs them in as the victim.
    */
   it('refuses a link token that names a different account than the caller', async () => {
-    const linkToken = await linkTokenFor('leo.chen28@gmail.com', 'sub-attacker-google');
+    const linkToken = await linkTokenFor('leo.chen@example.com', 'sub-attacker-google');
 
     // Signed in as somebody else entirely, verified perfectly well as themselves.
-    const attacker = await srv.login('emiller2027@gmail.com');
+    const attacker = await srv.login('ethan.miller@example.com');
     const challengeId = await srv.stepUp(attacker, 'oauth.link', { params: { provider: 'google' } });
 
     const res = await link(linkToken, attacker, challengeId);

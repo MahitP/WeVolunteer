@@ -15,8 +15,8 @@ describe('messaging lifecycle enforcement', () => {
   let studentId, orgId;
 
   beforeAll(async () => {
-    studentToken = await srv.login('leo.chen28@gmail.com');
-    orgToken = await srv.login('jkatzenback@vikings.org');
+    studentToken = await srv.login('leo.chen@example.com');
+    orgToken = await srv.login('jordan.whitfield@example.org');
     studentId = 'user-student-1';
     orgId = 'user-org-1';
   });

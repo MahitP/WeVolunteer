@@ -18,10 +18,10 @@ const signup = (over = {}) => srv.call('POST', '/api/auth/signup', { ...TEST_SIG
 
 describe('authenticateToken: reads identity from the database', () => {
   it('authenticates a valid token for an existing (seeded) user', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', '/api/auth/me', undefined, token);
     expect(res.status).toBe(200);
-    expect(res.body.email).toBe('leo.chen28@gmail.com');
+    expect(res.body.email).toBe('leo.chen@example.com');
   });
 
   it('rejects a token belonging to a user who has since been deleted', async () => {

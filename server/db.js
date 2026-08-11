@@ -1076,7 +1076,7 @@ export function initDatabase() {
     /**
      * Seeded fixtures are always confirmed.
      *
-     * The seed addresses are invented (leo.chen28@gmail.com and friends) and
+     * The seed addresses are invented (leo.chen@example.com and friends) and
      * no confirmation mail can ever reach them, so leaving them unconfirmed
      * puts every demo account behind a wall with nothing behind it — the demo
      * sign-in buttons land on "check your email" forever, and the whole test
@@ -1373,25 +1373,25 @@ function seedDatabase() {
   `);
 
   // Admins & Organizers
-  insertUser.run('user-admin', 'System Admin', 'admin@example.gov', 'sysadmin', passwordHash, 'N/A', 'admin', 1, '🛠️', 'Platform administrator.', 'South Brunswick', JSON.stringify(['Moderation']), nowStr);
-  insertUser.run('user-org-1', 'Jacquelyn Katzenback', 'jkatzenback@vikings.org', 'jkatzenback', passwordHash, 'Adult', 'organizer', 1, '👩‍💼', 'Coordinator for Vikings Softball.', 'Vikings Softball', JSON.stringify(['Coordination']), nowStr);
-  insertUser.run('user-org-pending', 'Robert Miller', 'rmiller@sbpl.info', 'rmiller', passwordHash, 'Adult', 'organizer', 0, '👨‍🏫', 'Library Director. Pending admin approval.', 'SBPL', JSON.stringify(['Events']), nowStr);
+  insertUser.run('user-admin', 'System Admin', 'admin@example.gov', 'sysadmin', passwordHash, 'N/A', 'admin', 1, '🛠️', 'Platform administrator.', 'Example Valley', JSON.stringify(['Moderation']), nowStr);
+  insertUser.run('user-org-1', 'Jordan Whitfield', 'jordan.whitfield@example.org', 'jwhitfield', passwordHash, 'Adult', 'organizer', 1, '👩‍💼', 'Coordinator for Falcons Softball.', 'Falcons Softball', JSON.stringify(['Coordination']), nowStr);
+  insertUser.run('user-org-pending', 'Robin Ellery', 'robin.ellery@example.org', 'rellery', passwordHash, 'Adult', 'organizer', 0, '👨‍🏫', 'Library Director. Pending admin approval.', 'EVPL', JSON.stringify(['Events']), nowStr);
 
 
   // Softball volunteers
-  insertUser.run('user-diana', 'Diana Sanger', 'diana.sanger@gmail.com', 'dianasanger', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'SB Softball Booster', JSON.stringify(['Cooking']), nowStr);
-  insertUser.run('user-matthew', 'Matthew Polizzotto', 'mpolizzotto@outlook.com', 'mpolizzotto', passwordHash, 'Adult', 'student', 1, '👨', 'Parent volunteer.', 'SB Softball Booster', JSON.stringify(['Grilling']), nowStr);
-  insertUser.run('user-norma', 'Norma Carbin', 'ncarbin@comcast.net', 'ncarbin', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer, glad to restock and reset.', 'SB Softball Booster', JSON.stringify(['Restocking']), nowStr);
-  insertUser.run('user-colin', 'Colin Carbin', 'colin.carbin29@outlook.com', 'colincarbin', passwordHash, '11', 'student', 1, '🧑', 'High school volunteer.', 'South Brunswick HS', JSON.stringify(['Cashier']), nowStr);
-  insertUser.run('user-alexia', 'Alexia Burnett', 'aburnett@gmail.com', 'aburnett', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'SB Softball Booster', JSON.stringify(['Cooking']), nowStr);
-  insertUser.run('user-advait', 'Advaitkrishna G.', 'advait.g@yahoo.com', 'advaitg', passwordHash, '10', 'student', 1, '🧑', 'High school volunteer.', 'South Brunswick HS', JSON.stringify(['Food Prep']), nowStr);
-  insertUser.run('user-david', 'David Sanger', 'dsanger@outlook.com', 'dsanger', passwordHash, 'Adult', 'student', 1, '👨', 'Parent volunteer, usually on clean-up.', 'SB Softball Booster', JSON.stringify(['Cleanup']), nowStr);
-  insertUser.run('user-pranathi', 'Pranathi Sukumar', 'pranathi.s@gmail.com', 'pranathis', passwordHash, '11', 'student', 1, '👩', 'Interested in environmental clean-ups.', 'South Brunswick HS', JSON.stringify(['Litter cleanup']), nowStr);
+  insertUser.run('user-diana', 'Dana Sorensen', 'dana.sorensen@example.com', 'dsorensen', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'EV Softball Booster', JSON.stringify(['Cooking']), nowStr);
+  insertUser.run('user-matthew', 'Marcus Pelletier', 'marcus.pelletier@example.com', 'mpelletier', passwordHash, 'Adult', 'student', 1, '👨', 'Parent volunteer.', 'EV Softball Booster', JSON.stringify(['Grilling']), nowStr);
+  insertUser.run('user-norma', 'Nora Caldwell', 'nora.caldwell@example.com', 'ncaldwell', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer, glad to restock and reset.', 'EV Softball Booster', JSON.stringify(['Restocking']), nowStr);
+  insertUser.run('user-colin', 'Cameron Caldwell', 'cameron.caldwell@example.com', 'ccaldwell', passwordHash, '11', 'student', 1, '🧑', 'High school volunteer.', 'Example Valley HS', JSON.stringify(['Cashier']), nowStr);
+  insertUser.run('user-alexia', 'Alexis Brennan', 'alexis.brennan@example.com', 'abrennan', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'EV Softball Booster', JSON.stringify(['Cooking']), nowStr);
+  insertUser.run('user-advait', 'Arjun Gopal', 'arjun.gopal@example.com', 'agopal', passwordHash, '10', 'student', 1, '🧑', 'High school volunteer.', 'Example Valley HS', JSON.stringify(['Food Prep']), nowStr);
+  insertUser.run('user-david', 'Derek Sorensen', 'derek.sorensen@example.com', 'dsorensen2', passwordHash, 'Adult', 'student', 1, '👨', 'Parent volunteer, usually on clean-up.', 'EV Softball Booster', JSON.stringify(['Cleanup']), nowStr);
+  insertUser.run('user-pranathi', 'Priyanka Shah', 'priyanka.shah@example.com', 'pshah', passwordHash, '11', 'student', 1, '👩', 'Interested in environmental clean-ups.', 'Example Valley HS', JSON.stringify(['Litter cleanup']), nowStr);
 
   // Core simulated students
-  insertUser.run('user-student-1', 'Leo Chen', 'leo.chen28@gmail.com', 'leochen', passwordHash, '10', 'student', 1, '🧑‍💻', 'First year volunteering — keen to try everything.', 'South Brunswick HS', JSON.stringify(['Setup', 'Math']), nowStr);
-  insertUser.run('user-student-2', 'Priya Patel', 'priya.patel.nhs@outlook.com', 'priyapatel', passwordHash, '11', 'student', 1, '👩‍⚕️', 'Happy to help with anything hands-on.', 'South Brunswick HS', JSON.stringify(['First Aid']), nowStr);
-  insertUser.run('user-student-3', 'Ethan Miller', 'emiller2027@gmail.com', 'ethanmiller', passwordHash, '12', 'student', 1, '🧑‍🎨', 'Enjoys set-up and anything creative.', 'South Brunswick HS', JSON.stringify(['Art']), nowStr);
+  insertUser.run('user-student-1', 'Leo Chen', 'leo.chen@example.com', 'leochen', passwordHash, '10', 'student', 1, '🧑‍💻', 'First year volunteering — keen to try everything.', 'Example Valley HS', JSON.stringify(['Setup', 'Math']), nowStr);
+  insertUser.run('user-student-2', 'Priya Patel', 'priya.patel@example.com', 'priyapatel', passwordHash, '11', 'student', 1, '👩‍⚕️', 'Happy to help with anything hands-on.', 'Example Valley HS', JSON.stringify(['First Aid']), nowStr);
+  insertUser.run('user-student-3', 'Ethan Ellery', 'ethan.miller@example.com', 'ethanmiller', passwordHash, '12', 'student', 1, '🧑‍🎨', 'Enjoys set-up and anything creative.', 'Example Valley HS', JSON.stringify(['Art']), nowStr);
 
   /**
    * Seed dates are relative to seeding time, never absolute.
@@ -1435,7 +1435,7 @@ function seedDatabase() {
   insertEvent.run(
     'event-pantry-past',
     'Food Pantry Boxing & Distribution',
-    'Load delivery boxes and sort food cans for South Brunswick families.',
+    'Load delivery boxes and sort food cans for Example Valley families.',
     'Food Pantry',
     'SB Food Pantry Hall',
     atDay(-26, 17),

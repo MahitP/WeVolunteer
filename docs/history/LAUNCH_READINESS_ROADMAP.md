@@ -1,7 +1,7 @@
 # WeVolunteer — Launch Readiness Roadmap
 
 **Date:** 2026-07-21
-**Scope:** Full codebase audit (client + server) and a phased plan to take WeVolunteer from a working demo to a platform South Brunswick students, organizers, and school administrators can actually depend on.
+**Scope:** Full codebase audit (client + server) and a phased plan to take WeVolunteer from a working demo to a platform Example Valley students, organizers, and school administrators can actually depend on.
 **Constraint:** Preserve existing product decisions. Auto Select stays weighted-random. The application → approval → attendance → hours workflow stays. Volunteers stay individuals. Field Notes stays. Nothing is added because other apps have it.
 
 ---
@@ -201,7 +201,7 @@ Field Notes, as described. Skip link, `aria-modal` dialogs with focus containmen
 **Difficulty** — Small · **Priority** — P0
 
 ### 1.4 Verified identity for students
-**Why it matters** — Hours from this platform will be used for the Silver Award and college applications. Right now anyone anywhere can create "Leo Chen, Grade 10, South Brunswick HS" and start accruing them.
+**Why it matters** — Hours from this platform will be used for the Silver Award and college applications. Right now anyone anywhere can create "Leo Chen, Grade 10, Example Valley HS" and start accruing them.
 **Current state** — `POST /api/auth/signup` accepts any email; students are `verified = 1` on creation.
 **Recommended** — Restrict student signup to the district email domain (env-configurable allowlist) **plus** email confirmation before the account can apply to anything. Do not build SSO yet — a domain check plus a confirmation link solves the real problem at a fraction of the cost. Keep the existing admin-approval flow for organizers unchanged.
 **Difficulty** — Medium · **Priority** — P0

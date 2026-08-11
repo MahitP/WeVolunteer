@@ -46,7 +46,7 @@ describe('friend-tier visibility is peer-only', () => {
     ({ areFriends } = await import('./relationships.js'));
 
     organizerId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('jkatzenback@vikings.org').id;
+      .get('jordan.whitfield@example.org').id;
 
     const make = async (name, username) => {
       const r = await srv.signupConfirmed({
@@ -104,7 +104,7 @@ describe('friend-tier visibility is peer-only', () => {
     db.prepare("UPDATE users SET profile_visibility = 'friends' WHERE id = ?").run(aliceId);
     forceAcceptedFriendship('rel-legacy-profile', organizerId, aliceId);
 
-    const organizerToken = await srv.login('jkatzenback@vikings.org');
+    const organizerToken = await srv.login('jordan.whitfield@example.org');
     const res = await srv.call('GET', `/api/users/${aliceId}`, undefined, organizerToken);
 
     /* Whatever the endpoint chooses to return, it must not be the friends-only

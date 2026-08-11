@@ -36,7 +36,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 // imported statically here — see the long explanation in testServer.js.
 let srv, db;
 
-const EMAIL = 'leo.chen28@gmail.com';
+const EMAIL = 'leo.chen@example.com';
 const PASSWORD = 'password123';
 
 /** Starts a sign-in and returns the pre-auth cookie the second factor needs. */
@@ -445,7 +445,7 @@ describe('POST /api/auth/login-2fa with an emailed code', () => {
    * code for whoever submitted it.
    */
   it("refuses another account's code", async () => {
-    const other = 'emiller2027@gmail.com';
+    const other = 'ethan.miller@example.com';
     enrolEmailOnly(other);
     await issueKnownCode('111213', { email: other });
 

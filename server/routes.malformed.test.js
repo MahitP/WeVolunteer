@@ -40,8 +40,8 @@ const validEvent = (over = {}) => ({
 describe('malformed input returns 400, not 500', () => {
   let orgToken, studentToken;
   beforeAll(async () => {
-    orgToken = await srv.login('jkatzenback@vikings.org');
-    studentToken = await srv.login('leo.chen28@gmail.com');
+    orgToken = await srv.login('jordan.whitfield@example.org');
+    studentToken = await srv.login('leo.chen@example.com');
   });
 
   it('rejects a null entry in slots', async () => {
@@ -137,7 +137,7 @@ describe('error codes stay meaningfully distinct', () => {
 
   it('forbidden requests are 403, not 400', async () => {
     // A student may not create events — an authorization failure, not bad input.
-    const studentToken = await srv.login('priya.patel.nhs@outlook.com');
+    const studentToken = await srv.login('priya.patel@example.com');
     const res = await srv.call('POST', '/api/events', validEvent(), studentToken);
     expect(res.status).toBe(403);
   });

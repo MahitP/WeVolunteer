@@ -163,7 +163,7 @@ describe('reading preserved evidence requires a fresh verification', () => {
 
   /** A capability refusal still comes first: a student has no business here at all. */
   it('refuses a student before it asks them to verify anything', async () => {
-    const student = await srv.login('leo.chen28@gmail.com');
+    const student = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', `/api/admin/reports/${reportA}/evidence`, undefined, student);
     expect(res.status).toBe(403);
     expect(res.body.code).not.toBe('reauth_required');

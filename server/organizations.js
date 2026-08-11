@@ -1,7 +1,7 @@
 /**
  * Organizations — a club, a chapter, or a programme that runs events.
  *
- * "South Brunswick High School Volunteering Club". "NHS". The thing a student
+ * "Example Valley High School Volunteering Club". "NHS". The thing a student
  * says they volunteer *with*, which until now the platform had no way to name:
  * every event belonged to an individual organizer account, so two events run by
  * the same club by two different teachers had nothing connecting them.

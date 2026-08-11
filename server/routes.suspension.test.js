@@ -58,8 +58,8 @@ describe('POST /api/admin/users/:id/suspend', () => {
 
   beforeAll(async () => {
     adminToken = await srv.login('admin@example.gov');
-    studentToken = await srv.login('leo.chen28@gmail.com');
-    organizerToken = await srv.login('jkatzenback@vikings.org');
+    studentToken = await srv.login('leo.chen@example.com');
+    organizerToken = await srv.login('jordan.whitfield@example.org');
   });
 
   beforeEach(() => resetAccounts());
@@ -100,7 +100,7 @@ describe('POST /api/admin/users/:id/suspend', () => {
    * What must not answer 200 is anything else, and that is what is checked here.
    */
   it('CONFINES an existing session — the half that actually protects anyone', async () => {
-    const victimToken = await srv.login('priya.patel.nhs@outlook.com');
+    const victimToken = await srv.login('priya.patel@example.com');
     expect(
       (await srv.call('GET', '/api/auth/me', undefined, victimToken)).status,
       'precondition: the session works'
@@ -165,7 +165,7 @@ describe('POST /api/admin/users/:id/suspend', () => {
     // Asserted against the endpoint rather than srv.login(), which returns the
     // cookie (undefined/null on failure) instead of throwing.
     const res = await srv.call('POST', '/api/auth/login', {
-      email: 'priya.patel.nhs@outlook.com', password: 'password123'
+      email: 'priya.patel@example.com', password: 'password123'
     });
 
     expect(res.status).toBe(200);
@@ -193,7 +193,7 @@ describe('POST /api/admin/users/:id/suspend', () => {
       { reason: GOOD_REASON }, adminToken);
 
     const res = await srv.call('POST', '/api/auth/login', {
-      email: 'priya.patel.nhs@outlook.com', password: 'wrong-on-purpose'
+      email: 'priya.patel@example.com', password: 'wrong-on-purpose'
     });
 
     expect(res.status).toBe(401);
@@ -370,7 +370,7 @@ describe('POST /api/admin/users/:id/unsuspend', () => {
       { reason: GOOD_REASON }, adminToken);
     await srv.call('POST', '/api/admin/users/user-student-2/unsuspend', {}, adminToken);
 
-    const token = await srv.login('priya.patel.nhs@outlook.com');
+    const token = await srv.login('priya.patel@example.com');
     const me = await srv.call('GET', '/api/auth/me', undefined, token);
     expect(me.status).toBe(200);
   });
@@ -399,7 +399,7 @@ describe('POST /api/admin/users/:id/unsuspend', () => {
   });
 
   it('refuses a student calling it', async () => {
-    const studentToken = await srv.login('leo.chen28@gmail.com');
+    const studentToken = await srv.login('leo.chen@example.com');
     const res = await srv.call('POST', '/api/admin/users/user-student-2/unsuspend', {}, studentToken);
     expect(res.status).toBe(403);
   });
@@ -452,7 +452,7 @@ describe('timed suspension', () => {
       { reason: GOOD_REASON, until }, adminToken);
 
     const res = await srv.call('POST', '/api/auth/login',
-      { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
+      { email: 'priya.patel@example.com', password: 'password123' });
 
     // Signed in, still suspended, and told when it ends.
     expect(res.status).toBe(200);
@@ -469,7 +469,7 @@ describe('timed suspension', () => {
     expireNow('user-student-2');
 
     const res = await srv.call('POST', '/api/auth/login',
-      { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
+      { email: 'priya.patel@example.com', password: 'password123' });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
   });
 
@@ -479,7 +479,7 @@ describe('timed suspension', () => {
     expireNow('user-student-2');
 
     await srv.call('POST', '/api/auth/login',
-      { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
+      { email: 'priya.patel@example.com', password: 'password123' });
 
     const row = db.prepare(`SELECT account_status, suspension_reason, suspension_lifted_at
                               FROM users WHERE id = ?`).get('user-student-2');
@@ -494,7 +494,7 @@ describe('timed suspension', () => {
   });
 
   it('an existing session is refused while suspended and works after expiry', async () => {
-    const victim = await srv.login('emiller2027@gmail.com');
+    const victim = await srv.login('ethan.miller@example.com');
     await srv.call('POST', '/api/admin/users/user-student-3/suspend',
       { reason: GOOD_REASON, until: inDays(3) }, adminToken);
 
@@ -506,7 +506,7 @@ describe('timed suspension', () => {
 
     expireNow('user-student-3');
     const after = await srv.call('POST', '/api/auth/login',
-      { email: 'emiller2027@gmail.com', password: 'password123' });
+      { email: 'ethan.miller@example.com', password: 'password123' });
     expect(after.status).toBe(200);
   });
 
@@ -518,7 +518,7 @@ describe('timed suspension', () => {
       .get('user-student-2').suspended_until).toBe(null);
 
     const res = await srv.call('POST', '/api/auth/login',
-      { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
+      { email: 'priya.patel@example.com', password: 'password123' });
 
     /**
      * `indefinite` is reported as its own field rather than left to be inferred
@@ -560,7 +560,7 @@ describe('timed suspension', () => {
       { reason: GOOD_REASON, until }, adminToken);
 
     const res = await srv.call('POST', '/api/auth/login',
-      { email: 'priya.patel.nhs@outlook.com', password: 'wrong-on-purpose' });
+      { email: 'priya.patel@example.com', password: 'wrong-on-purpose' });
 
     expect(res.status).toBe(401);
     expect(res.body.suspension, 'the notice must not leave the building here')

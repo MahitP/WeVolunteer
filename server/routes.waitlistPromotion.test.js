@@ -30,7 +30,7 @@ let srv;
 beforeAll(async () => { srv = await startTestServer(); });
 afterAll(async () => { await srv.close(); });
 
-const ORG = 'jkatzenback@vikings.org';
+const ORG = 'jordan.whitfield@example.org';
 
 /** Creates an open event with one shift of `maxSpots`, returning ids. */
 async function makeEvent({ maxSpots, autoApprove = false, dayOffset = 60, title = 'Waitlist Test' }) {
@@ -76,14 +76,14 @@ describe('waitlist promotion on an ORGANIZER-MANAGED event (autoApprove off)', (
 
   beforeAll(async () => {
     ctx = await makeEvent({ maxSpots: 1, autoApprove: false, dayOffset: 60 });
-    cast = await applyAll(ctx.eventId, ctx.slotId, ['leo.chen28@gmail.com', 'priya.patel.nhs@outlook.com']);
-    await srv.call('PATCH', `/api/applications/${cast['leo.chen28@gmail.com'].appId}`, { status: 'accepted' }, ctx.orgToken);
-    await srv.call('PATCH', `/api/applications/${cast['priya.patel.nhs@outlook.com'].appId}`, { status: 'waitlisted' }, ctx.orgToken);
+    cast = await applyAll(ctx.eventId, ctx.slotId, ['leo.chen@example.com', 'priya.patel@example.com']);
+    await srv.call('PATCH', `/api/applications/${cast['leo.chen@example.com'].appId}`, { status: 'accepted' }, ctx.orgToken);
+    await srv.call('PATCH', `/api/applications/${cast['priya.patel@example.com'].appId}`, { status: 'waitlisted' }, ctx.orgToken);
   });
 
   it('assigns a waitlist_order when the organizer waitlists someone', async () => {
-    const apps = (await srv.call('GET', '/api/applications', undefined, cast['priya.patel.nhs@outlook.com'].token)).body;
-    const mine = apps.find(a => a.id === cast['priya.patel.nhs@outlook.com'].appId);
+    const apps = (await srv.call('GET', '/api/applications', undefined, cast['priya.patel@example.com'].token)).body;
+    const mine = apps.find(a => a.id === cast['priya.patel@example.com'].appId);
     expect(mine.status).toBe('waitlisted');
     expect(mine.waitlistOrder, 'waitlist position must be defined, not NULL').toBe(1);
   });
@@ -91,13 +91,13 @@ describe('waitlist promotion on an ORGANIZER-MANAGED event (autoApprove off)', (
   // The core regression: this is the exact scenario from the audit brief.
   it('promotes the waitlisted volunteer when the accepted one withdraws', async () => {
     const res = await srv.call(
-      'PATCH', `/api/applications/${cast['leo.chen28@gmail.com'].appId}`,
-      { status: 'withdrawn' }, cast['leo.chen28@gmail.com'].token
+      'PATCH', `/api/applications/${cast['leo.chen@example.com'].appId}`,
+      { status: 'withdrawn' }, cast['leo.chen@example.com'].token
     );
     expect(res.status).toBe(200);
     expect(res.body.released).toBe(true);
 
-    expect(await statusOf(ctx.orgToken, ctx.eventId, cast['priya.patel.nhs@outlook.com'].appId)).toBe('accepted');
+    expect(await statusOf(ctx.orgToken, ctx.eventId, cast['priya.patel@example.com'].appId)).toBe('accepted');
   });
 
   it('keeps the slot count correct after promotion', async () => {
@@ -105,13 +105,13 @@ describe('waitlist promotion on an ORGANIZER-MANAGED event (autoApprove off)', (
   });
 
   it('clears waitlist_order on the promoted application', async () => {
-    const apps = (await srv.call('GET', '/api/applications', undefined, cast['priya.patel.nhs@outlook.com'].token)).body;
-    const mine = apps.find(a => a.id === cast['priya.patel.nhs@outlook.com'].appId);
+    const apps = (await srv.call('GET', '/api/applications', undefined, cast['priya.patel@example.com'].token)).body;
+    const mine = apps.find(a => a.id === cast['priya.patel@example.com'].appId);
     expect(mine.waitlistOrder == null).toBe(true);
   });
 
   it('notifies the promoted volunteer with real copy, not a fallback', async () => {
-    const notifs = (await srv.call('GET', '/api/notifications', undefined, cast['priya.patel.nhs@outlook.com'].token)).body;
+    const notifs = (await srv.call('GET', '/api/notifications', undefined, cast['priya.patel@example.com'].token)).body;
     const list = Array.isArray(notifs) ? notifs : notifs.notifications;
     const promoted = list.find(n => /spot|promot/i.test(n.title));
     expect(promoted, `no promotion notice in ${JSON.stringify(list.map(n => n.title))}`).toBeTruthy();
@@ -125,21 +125,21 @@ describe('waitlist promotion on an AUTO SELECT event still works', () => {
 
   beforeAll(async () => {
     ctx = await makeEvent({ maxSpots: 1, autoApprove: true, dayOffset: 70, title: 'Auto Waitlist Test' });
-    cast = await applyAll(ctx.eventId, ctx.slotId, ['emiller2027@gmail.com', 'ncarbin@comcast.net']);
-    await srv.call('PATCH', `/api/applications/${cast['emiller2027@gmail.com'].appId}`, { status: 'accepted' }, ctx.orgToken);
-    await srv.call('PATCH', `/api/applications/${cast['ncarbin@comcast.net'].appId}`, { status: 'waitlisted' }, ctx.orgToken);
+    cast = await applyAll(ctx.eventId, ctx.slotId, ['ethan.miller@example.com', 'nora.caldwell@example.com']);
+    await srv.call('PATCH', `/api/applications/${cast['ethan.miller@example.com'].appId}`, { status: 'accepted' }, ctx.orgToken);
+    await srv.call('PATCH', `/api/applications/${cast['nora.caldwell@example.com'].appId}`, { status: 'waitlisted' }, ctx.orgToken);
   });
 
   it('promotes on withdrawal', async () => {
-    await srv.call('PATCH', `/api/applications/${cast['emiller2027@gmail.com'].appId}`,
-      { status: 'withdrawn' }, cast['emiller2027@gmail.com'].token);
-    expect(await statusOf(ctx.orgToken, ctx.eventId, cast['ncarbin@comcast.net'].appId)).toBe('accepted');
+    await srv.call('PATCH', `/api/applications/${cast['ethan.miller@example.com'].appId}`,
+      { status: 'withdrawn' }, cast['ethan.miller@example.com'].token);
+    expect(await statusOf(ctx.orgToken, ctx.eventId, cast['nora.caldwell@example.com'].appId)).toBe('accepted');
   });
 });
 
 describe('waitlist ordering with MULTIPLE waiting volunteers', () => {
   let ctx, cast;
-  const A = 'diana.sanger@gmail.com', B = 'mpolizzotto@outlook.com', C = 'aburnett@gmail.com', D = 'dsanger@outlook.com';
+  const A = 'dana.sorensen@example.com', B = 'marcus.pelletier@example.com', C = 'alexis.brennan@example.com', D = 'derek.sorensen@example.com';
 
   beforeAll(async () => {
     ctx = await makeEvent({ maxSpots: 1, autoApprove: false, dayOffset: 80, title: 'FIFO Waitlist Test' });
@@ -182,42 +182,42 @@ describe('waitlist ordering with MULTIPLE waiting volunteers', () => {
 describe('promotion respects capacity and is not triggered spuriously', () => {
   it('does not promote when the organizer rejects a PENDING (never accepted) applicant', async () => {
     const ctx = await makeEvent({ maxSpots: 1, autoApprove: false, dayOffset: 90, title: 'Pending Reject Test' });
-    const cast = await applyAll(ctx.eventId, ctx.slotId, ['advait.g@yahoo.com', 'pranathi.s@gmail.com']);
-    await srv.call('PATCH', `/api/applications/${cast['pranathi.s@gmail.com'].appId}`, { status: 'waitlisted' }, ctx.orgToken);
+    const cast = await applyAll(ctx.eventId, ctx.slotId, ['arjun.gopal@example.com', 'priyanka.shah@example.com']);
+    await srv.call('PATCH', `/api/applications/${cast['priyanka.shah@example.com'].appId}`, { status: 'waitlisted' }, ctx.orgToken);
     // Rejecting someone who was only pending frees nothing.
-    await srv.call('PATCH', `/api/applications/${cast['advait.g@yahoo.com'].appId}`, { status: 'rejected' }, ctx.orgToken);
-    expect(await statusOf(ctx.orgToken, ctx.eventId, cast['pranathi.s@gmail.com'].appId)).toBe('waitlisted');
+    await srv.call('PATCH', `/api/applications/${cast['arjun.gopal@example.com'].appId}`, { status: 'rejected' }, ctx.orgToken);
+    expect(await statusOf(ctx.orgToken, ctx.eventId, cast['priyanka.shah@example.com'].appId)).toBe('waitlisted');
   });
 
   it('promotes when the organizer demotes an ACCEPTED volunteer to rejected', async () => {
     const ctx = await makeEvent({ maxSpots: 1, autoApprove: false, dayOffset: 100, title: 'Demote Test' });
-    const cast = await applyAll(ctx.eventId, ctx.slotId, ['colin.carbin29@outlook.com', 'leo.chen28@gmail.com']);
-    await srv.call('PATCH', `/api/applications/${cast['colin.carbin29@outlook.com'].appId}`, { status: 'accepted' }, ctx.orgToken);
-    await srv.call('PATCH', `/api/applications/${cast['leo.chen28@gmail.com'].appId}`, { status: 'waitlisted' }, ctx.orgToken);
-    await srv.call('PATCH', `/api/applications/${cast['colin.carbin29@outlook.com'].appId}`, { status: 'rejected' }, ctx.orgToken);
-    expect(await statusOf(ctx.orgToken, ctx.eventId, cast['leo.chen28@gmail.com'].appId)).toBe('accepted');
+    const cast = await applyAll(ctx.eventId, ctx.slotId, ['cameron.caldwell@example.com', 'leo.chen@example.com']);
+    await srv.call('PATCH', `/api/applications/${cast['cameron.caldwell@example.com'].appId}`, { status: 'accepted' }, ctx.orgToken);
+    await srv.call('PATCH', `/api/applications/${cast['leo.chen@example.com'].appId}`, { status: 'waitlisted' }, ctx.orgToken);
+    await srv.call('PATCH', `/api/applications/${cast['cameron.caldwell@example.com'].appId}`, { status: 'rejected' }, ctx.orgToken);
+    expect(await statusOf(ctx.orgToken, ctx.eventId, cast['leo.chen@example.com'].appId)).toBe('accepted');
   });
 
   it('does not promote into a CANCELLED event', async () => {
     const ctx = await makeEvent({ maxSpots: 1, autoApprove: false, dayOffset: 110, title: 'Cancelled Promote Test' });
-    const cast = await applyAll(ctx.eventId, ctx.slotId, ['priya.patel.nhs@outlook.com', 'emiller2027@gmail.com']);
-    await srv.call('PATCH', `/api/applications/${cast['priya.patel.nhs@outlook.com'].appId}`, { status: 'accepted' }, ctx.orgToken);
-    await srv.call('PATCH', `/api/applications/${cast['emiller2027@gmail.com'].appId}`, { status: 'waitlisted' }, ctx.orgToken);
+    const cast = await applyAll(ctx.eventId, ctx.slotId, ['priya.patel@example.com', 'ethan.miller@example.com']);
+    await srv.call('PATCH', `/api/applications/${cast['priya.patel@example.com'].appId}`, { status: 'accepted' }, ctx.orgToken);
+    await srv.call('PATCH', `/api/applications/${cast['ethan.miller@example.com'].appId}`, { status: 'waitlisted' }, ctx.orgToken);
     await srv.call('PATCH', `/api/events/${ctx.eventId}/status`, { status: 'cancelled' }, ctx.orgToken);
-    await srv.call('PATCH', `/api/applications/${cast['priya.patel.nhs@outlook.com'].appId}`,
-      { status: 'withdrawn' }, cast['priya.patel.nhs@outlook.com'].token);
+    await srv.call('PATCH', `/api/applications/${cast['priya.patel@example.com'].appId}`,
+      { status: 'withdrawn' }, cast['priya.patel@example.com'].token);
     // Pulling someone into a called-off event would be worse than leaving them waiting.
-    expect(await statusOf(ctx.orgToken, ctx.eventId, cast['emiller2027@gmail.com'].appId)).toBe('waitlisted');
+    expect(await statusOf(ctx.orgToken, ctx.eventId, cast['ethan.miller@example.com'].appId)).toBe('waitlisted');
   });
 
   it('promotes through the BULK endpoint too', async () => {
     const ctx = await makeEvent({ maxSpots: 1, autoApprove: false, dayOffset: 120, title: 'Bulk Promote Test' });
-    const cast = await applyAll(ctx.eventId, ctx.slotId, ['ncarbin@comcast.net', 'dsanger@outlook.com']);
-    await srv.call('PATCH', `/api/applications/${cast['ncarbin@comcast.net'].appId}`, { status: 'accepted' }, ctx.orgToken);
-    await srv.call('PATCH', `/api/applications/${cast['dsanger@outlook.com'].appId}`, { status: 'waitlisted' }, ctx.orgToken);
+    const cast = await applyAll(ctx.eventId, ctx.slotId, ['nora.caldwell@example.com', 'derek.sorensen@example.com']);
+    await srv.call('PATCH', `/api/applications/${cast['nora.caldwell@example.com'].appId}`, { status: 'accepted' }, ctx.orgToken);
+    await srv.call('PATCH', `/api/applications/${cast['derek.sorensen@example.com'].appId}`, { status: 'waitlisted' }, ctx.orgToken);
     const res = await srv.call('PATCH', '/api/applications/bulk',
-      { applicationIds: [cast['ncarbin@comcast.net'].appId], status: 'rejected' }, ctx.orgToken);
+      { applicationIds: [cast['nora.caldwell@example.com'].appId], status: 'rejected' }, ctx.orgToken);
     expect(res.status).toBe(200);
-    expect(await statusOf(ctx.orgToken, ctx.eventId, cast['dsanger@outlook.com'].appId)).toBe('accepted');
+    expect(await statusOf(ctx.orgToken, ctx.eventId, cast['derek.sorensen@example.com'].appId)).toBe('accepted');
   });
 });

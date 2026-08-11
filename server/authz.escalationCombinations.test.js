@@ -5,8 +5,8 @@ import { SUPER_ONLY, CAPABILITIES, ROLE } from './authz.js';
 /* A seeded account promoted for this suite, the same idiom the invitation suite
    uses. Deliberately not `admin@example.gov` — the whole file is about what an
    ordinary administrator cannot do to an owner, so they must be two accounts. */
-const OWNER_EMAIL = 'dsanger@outlook.com';
-const STUDENT_EMAIL = 'leo.chen28@gmail.com';
+const OWNER_EMAIL = 'derek.sorensen@example.com';
+const STUDENT_EMAIL = 'leo.chen@example.com';
 
 /**
  * Capabilities that are individually safe and dangerous together.

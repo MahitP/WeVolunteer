@@ -140,8 +140,8 @@ describe('the admin Dashboard renders', () => {
     apiMock.apiFetch.mockImplementation((path) => {
       if (path.includes('/organizers/pending')) {
         return Promise.resolve([{
-          id: 'user-pending', name: 'Robert Miller', email: 'rmiller@example.invalid',
-          affiliation: 'SBPL', bio: 'Library Director.', createdAt: '2026-08-06T12:00:00.000Z',
+          id: 'user-pending', name: 'Robin Ellery', email: 'rellery@example.invalid',
+          affiliation: 'EVPL', bio: 'Library Director.', createdAt: '2026-08-06T12:00:00.000Z',
         }]);
       }
       if (path.includes('/reports')) return Promise.resolve([]);

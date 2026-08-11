@@ -48,12 +48,12 @@ describe('the member directory: what one member may learn about another', () => 
 
   beforeAll(async () => {
     srv = await startTestServer();
-    student = await srv.login('leo.chen28@gmail.com');
-    organizer = await srv.login('jkatzenback@vikings.org');
+    student = await srv.login('leo.chen@example.com');
+    organizer = await srv.login('jordan.whitfield@example.org');
     admin = await srv.login('admin@example.gov');
 
     ({ db } = await import('./db.js'));
-    studentId = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen28@gmail.com').id;
+    studentId = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com').id;
 
     /* A second student, so the "one member reading another" case is a real one
        rather than a self-read wearing a disguise. */
@@ -68,7 +68,7 @@ describe('the member directory: what one member may learn about another', () => 
       UPDATE users SET bio = ?, school = ?, location = ?,
                        hobbies = ?, skills = ?, profile_visibility = 'public'
       WHERE id = ?
-    `).run('I like helping out.', 'South Brunswick High', 'South Brunswick, NJ',
+    `).run('I like helping out.', 'Example Valley High', 'Example Valley, NJ',
       JSON.stringify(['baking']), JSON.stringify(['first aid']), otherId);
   }, 60000);
 
@@ -80,7 +80,7 @@ describe('the member directory: what one member may learn about another', () => 
       expect(res.status).toBe(200);
       expect(res.body.profile.name).toBe('Priya Raman');
       expect(res.body.profile.username).toBe('priya');
-      expect(res.body.profile.location).toBe('South Brunswick, NJ');
+      expect(res.body.profile.location).toBe('Example Valley, NJ');
       expect(res.body.profile.hobbies).toEqual(['baking']);
       expect(res.body.profile.stats).toBeTruthy();
     });
@@ -93,7 +93,7 @@ describe('the member directory: what one member may learn about another', () => 
 
     it('shows school and grade, because that is what public means', async () => {
       const res = await srv.call('GET', '/api/users/by-username/priya', undefined, student);
-      expect(res.body.profile.school).toBe('South Brunswick High');
+      expect(res.body.profile.school).toBe('Example Valley High');
       expect(res.body.profile.grade).toBe('11');
     });
 
@@ -137,7 +137,7 @@ describe('the member directory: what one member may learn about another', () => 
       const res = await srv.call('GET', '/api/users/by-username/priya', undefined, student);
       expect(res.status).toBe(200);
       expect(res.body.profile.name).toBe('Priya Raman');
-      expect(res.body.profile.location).toBe('South Brunswick, NJ');
+      expect(res.body.profile.location).toBe('Example Valley, NJ');
       expect(res.body.profile.hobbies).toEqual(['baking']);
       expect(res.body.profile.skills).toEqual(['first aid']);
       expect(res.body.profile.stats.eventsSignedUp).toBeTypeOf('number');
@@ -159,7 +159,7 @@ describe('the member directory: what one member may learn about another', () => 
 
     it('shows them to staff holding user.contact.read', async () => {
       const res = await srv.call('GET', '/api/users/by-username/priya', undefined, admin);
-      expect(res.body.profile.school).toBe('South Brunswick High');
+      expect(res.body.profile.school).toBe('Example Valley High');
       expect(res.body.profile.grade).toBe('11');
     });
 

@@ -34,7 +34,7 @@ import { REAUTH_CHALLENGE_HEADER } from '../utils/stepUp';
  */
 
 const linkData = {
-  email: 'priya.patel.nhs@outlook.com',
+  email: 'priya.patel@example.com',
   provider: 'microsoft',
   linkToken: 'link-token-abc'
 };

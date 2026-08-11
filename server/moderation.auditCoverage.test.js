@@ -32,8 +32,8 @@ describe('administrative deletions are recorded', () => {
     srv = await startTestServer();
     ({ db } = await import('./db.js'));
     admin = await srv.login('admin@example.gov');
-    organizer = await srv.login('jkatzenback@vikings.org');
-    student = await srv.login('leo.chen28@gmail.com');
+    organizer = await srv.login('jordan.whitfield@example.org');
+    student = await srv.login('leo.chen@example.com');
   }, 60000);
 
   afterAll(async () => { await srv?.close(); });
@@ -67,7 +67,7 @@ describe('administrative deletions are recorded', () => {
     /* Against the AUTHOR, not the moderator — the trail answers "what was done to
        this person", and the subject is who was affected. */
     const studentId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('leo.chen28@gmail.com').id;
+      .get('leo.chen@example.com').id;
     expect(rows[0].target_user_id).toBe(studentId);
     expect(rows[0].admin_id).toBe('user-admin');
 
@@ -102,7 +102,7 @@ describe('administrative deletions are recorded', () => {
 
   it('records an administrator deleting another organizer\'s event', async () => {
     const organizerId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('jkatzenback@vikings.org').id;
+      .get('jordan.whitfield@example.org').id;
     const id = makeEvent('event-audit-probe-1', organizerId);
     const before = auditRows('EVENT_DELETED').length;
 
@@ -117,7 +117,7 @@ describe('administrative deletions are recorded', () => {
 
   it('records nothing when an organizer deletes their own event', async () => {
     const organizerId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('jkatzenback@vikings.org').id;
+      .get('jordan.whitfield@example.org').id;
     const id = makeEvent('event-audit-probe-2', organizerId);
     const before = auditRows('EVENT_DELETED').length;
 

@@ -28,7 +28,7 @@ import { startTestServer } from './testServer.js';
  * is deliberately no code path that CREATES an owner, so the fixture has to be
  * an account the demo seed already made.
  */
-const OWNER_EMAIL = 'dsanger@outlook.com';
+const OWNER_EMAIL = 'derek.sorensen@example.com';
 
 describe('GET /api/admin/impact', () => {
   let srv;

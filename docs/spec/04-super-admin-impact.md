@@ -953,7 +953,7 @@ record. It cannot be attributed to, corrected centrally, or reported on.
 
 | # | Problem | Consequence |
 |---|---|---|
-| PO-1 | Free text | "SB Food Pantry", "SB food pantry" and "South Brunswick Food Pantry" are three organizations in every report. |
+| PO-1 | Free text | "SB Food Pantry", "SB food pantry" and "Example Valley Food Pantry" are three organizations in every report. |
 | PO-2 | No record | Impact cannot be attributed to an organization, which is the attribution a partner cares about most. |
 | PO-3 | No correction path | A typo is permanent and propagates into every derived figure. |
 | PO-4 | No relationship | An organization cannot have several organizers, which is how real organizations work. |

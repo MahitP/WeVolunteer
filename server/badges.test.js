@@ -206,7 +206,7 @@ describe('events_attended counts events, not shifts', () => {
   });
 
   it('agrees with the eventsCompleted figure the profile route derives', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', '/api/users/user-badge-shifts/profile', undefined, token);
     expect(res.status).toBe(200);
     // Two events, three shifts. The badge service and the profile route must not
@@ -333,8 +333,8 @@ describe('admin badge routes: authorization', () => {
 
   beforeAll(async () => {
     admin = await srv.login('admin@example.gov');
-    organizer = await srv.login('jkatzenback@vikings.org');
-    student = await srv.login('leo.chen28@gmail.com');
+    organizer = await srv.login('jordan.whitfield@example.org');
+    student = await srv.login('leo.chen@example.com');
     badge = makeBadge({ criteria_type: 'manual', criteria_value: 0 });
   });
 
@@ -570,7 +570,7 @@ describe('the award notification goes through notificationService', () => {
 describe('the milestone thresholds are served, not duplicated client-side', () => {
   it('carries metric and threshold on every milestone in a profile', async () => {
     const { SERVICE_HOUR_GOAL } = await import('./milestones.js');
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     /* The seeded student, by the id db.js gives them. */
     const res = await srv.call('GET', '/api/users/user-student-1/profile', undefined, token);
 
@@ -590,7 +590,7 @@ describe('the milestone thresholds are served, not duplicated client-side', () =
 
   it('sends the progress-meter goal on the session payload and the stats endpoint', async () => {
     const { SERVICE_HOUR_GOAL } = await import('./milestones.js');
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
 
     /* On the session payload, because the dashboard draws the meter on its first
        frame from `currentUser` and cannot wait for a second request to learn its

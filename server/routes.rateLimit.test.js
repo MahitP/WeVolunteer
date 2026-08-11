@@ -28,12 +28,12 @@ describe('mail endpoints are rate limited', () => {
   it('counts successful forgot-password requests and eventually returns 429', async () => {
     // Three allowed (the limit), all 200 — and, crucially, all counted.
     for (let i = 0; i < 3; i++) {
-      const res = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen28@gmail.com' });
+      const res = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen@example.com' });
       expect(res.status).toBe(200);
     }
     // The fourth is refused. Before the fix this stayed 200 for ever, because
     // successful requests were skipped by the limiter.
-    const blocked = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen28@gmail.com' });
+    const blocked = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen@example.com' });
     expect(blocked.status).toBe(429);
   });
 
@@ -82,7 +82,7 @@ describe('mail endpoints are rate limited', () => {
     const res = await fetch(`${srv.base}/api/auth/forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'leo.chen28@gmail.com' })
+      body: JSON.stringify({ email: 'leo.chen@example.com' })
     });
 
     expect(res.status).toBe(429);

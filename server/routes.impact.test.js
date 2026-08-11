@@ -13,7 +13,7 @@ import { startTestServer } from './testServer.js';
  * CREATES an owner, so the fixture has to be an account the demo seed made —
  * `loginAsOwner` runs the same UPDATE `bin/grant-ownership.mjs` runs.
  */
-const OWNER_EMAIL = 'dsanger@outlook.com';
+const OWNER_EMAIL = 'derek.sorensen@example.com';
 const PARTNER_EMAIL = 'partner@impact.test';
 
 describe('GET /api/impact', () => {
@@ -21,8 +21,8 @@ describe('GET /api/impact', () => {
 
   beforeAll(async () => {
     srv = await startTestServer();
-    student = await srv.login('leo.chen28@gmail.com');
-    organizer = await srv.login('jkatzenback@vikings.org');
+    student = await srv.login('leo.chen@example.com');
+    organizer = await srv.login('jordan.whitfield@example.org');
     admin = await srv.login('admin@example.gov');
     owner = await srv.loginAsOwner(OWNER_EMAIL);
 

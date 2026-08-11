@@ -37,7 +37,7 @@ import { startTestServer } from './testServer.js';
 
 let srv, db;
 
-const OWNER_EMAIL = 'dsanger@outlook.com';
+const OWNER_EMAIL = 'derek.sorensen@example.com';
 const LIVE_STUDENT = 'user-student-1';
 const DEAD_STUDENT = 'user-student-3';
 const LIVE_ORGANIZER = 'user-org-1';
@@ -85,25 +85,25 @@ describe('deleted accounts are not readable as profiles', () => {
   });
 
   it('404s the volunteer profile of a deleted student', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', `/api/users/${DEAD_STUDENT}/profile`, undefined, token);
     expect(res.status).toBe(404);
   });
 
   it('still serves the volunteer profile of a live student', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', `/api/users/${LIVE_STUDENT}/profile`, undefined, token);
     expect(res.status).toBe(200);
   });
 
   it('404s the organizer profile of a deleted organizer', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', `/api/organizers/${DEAD_ORGANIZER}/profile`, undefined, token);
     expect(res.status).toBe(404);
   });
 
   it('still serves the organizer profile of a live organizer', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', `/api/organizers/${LIVE_ORGANIZER}/profile`, undefined, token);
     expect(res.status).toBe(200);
   });

@@ -84,7 +84,7 @@ describe('login and signup issue a session cookie', () => {
     const res = await fetch(`${srv.base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'password123' })
+      body: JSON.stringify({ email: 'leo.chen@example.com', password: 'password123' })
     });
     expect(res.status).toBe(200);
 
@@ -97,7 +97,7 @@ describe('login and signup issue a session cookie', () => {
     const res = await fetch(`${srv.base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'password123' })
+      body: JSON.stringify({ email: 'leo.chen@example.com', password: 'password123' })
     });
     const cookie = parseCookie(res.headers.get('set-cookie'), 'wev_session');
 
@@ -113,7 +113,7 @@ describe('login and signup issue a session cookie', () => {
     const res = await fetch(`${srv.base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'password123' })
+      body: JSON.stringify({ email: 'leo.chen@example.com', password: 'password123' })
     });
     const cookie = parseCookie(res.headers.get('set-cookie'), 'wev_session');
     expect(cookie.attrs).not.toContain('secure');
@@ -123,7 +123,7 @@ describe('login and signup issue a session cookie', () => {
     const res = await fetch(`${srv.base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'wrong-password' })
+      body: JSON.stringify({ email: 'leo.chen@example.com', password: 'wrong-password' })
     });
     expect(res.status).toBe(401);
     expect(parseCookie(res.headers.get('set-cookie'), 'wev_session')).toBeNull();
@@ -150,7 +150,7 @@ describe('authenticateToken accepts the session cookie', () => {
     const loginRes = await fetch(`${srv.base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'password123' })
+      body: JSON.stringify({ email: 'leo.chen@example.com', password: 'password123' })
     });
     const setCookie = loginRes.headers.get('set-cookie');
     const cookieString = setCookie.split(';')[0]; // Extract just the name=value part
@@ -161,7 +161,7 @@ describe('authenticateToken accepts the session cookie', () => {
     
     expect(meRes.status).toBe(200);
     const body = await meRes.json();
-    expect(body.email).toBe('leo.chen28@gmail.com');
+    expect(body.email).toBe('leo.chen@example.com');
   });
 
   it('rejects a request with no cookie and no header', async () => {
@@ -182,7 +182,7 @@ describe('server-side logout', () => {
     const res = await fetch(`${srv.base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'password123' })
+      body: JSON.stringify({ email: 'leo.chen@example.com', password: 'password123' })
     });
     expect(res.status).toBe(200);
     return res.headers.get('set-cookie').split(';')[0];
@@ -262,7 +262,7 @@ describe('severed Authorization header fallback', () => {
     const loginRes = await fetch(`${srv.base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'password123' })
+      body: JSON.stringify({ email: 'leo.chen@example.com', password: 'password123' })
     });
     const setCookie = loginRes.headers.get('set-cookie');
     const token = setCookie.match(/wev_session=([^;]+)/)?.[1];
@@ -278,7 +278,7 @@ describe('severed Authorization header fallback', () => {
     const loginRes = await fetch(`${srv.base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'leo.chen28@gmail.com', password: 'password123' })
+      body: JSON.stringify({ email: 'leo.chen@example.com', password: 'password123' })
     });
     const loginBody = await loginRes.json();
     expect(loginBody.token).toBeUndefined();

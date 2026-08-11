@@ -29,7 +29,7 @@ const SUSPENSION = (over = {}) => ({
   ...over,
 });
 
-const USER = { id: 'user-student-2', email: 'priya.patel.nhs@outlook.com', name: 'Priya Patel' };
+const USER = { id: 'user-student-2', email: 'priya.patel@example.com', name: 'Priya Patel' };
 
 const renderWall = (over = {}) => render(
   <SuspendedWall

@@ -92,7 +92,7 @@ describe('POST /api/admin/users/:id/warn', () => {
       { reason: REASON }, await adminToken());
 
     const res = await srv.call('POST', '/api/auth/login',
-      { email: 'priya.patel.nhs@outlook.com', password: 'password123' });
+      { email: 'priya.patel@example.com', password: 'password123' });
     expect(res.status).toBe(200);
   });
 
@@ -160,8 +160,8 @@ describe('POST /api/admin/users/:id/warn', () => {
 
     it('refuses a student, an organizer and a stranger', async () => {
       for (const cookie of [
-        await srv.login('leo.chen28@gmail.com'),
-        await srv.login('jkatzenback@vikings.org'),
+        await srv.login('leo.chen@example.com'),
+        await srv.login('jordan.whitfield@example.org'),
         undefined,
       ]) {
         const res = await srv.call('POST', '/api/admin/users/user-student-2/warn',

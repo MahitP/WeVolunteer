@@ -13,7 +13,7 @@ import { recordAudit } from './auditLog.js';
  * `srv.loginAsOwner` runs the same UPDATE `bin/grant-ownership.mjs` runs,
  * against this suite's throwaway database.
  */
-const OWNER_EMAIL = 'dsanger@outlook.com';
+const OWNER_EMAIL = 'derek.sorensen@example.com';
 
 let srv;
 let db;
@@ -30,7 +30,7 @@ describe('GET /api/admin/roster', () => {
   });
 
   it('rejects student requests', async () => {
-    const token = await srv.login('leo.chen28@gmail.com');
+    const token = await srv.login('leo.chen@example.com');
     const res = await fetch(srv.base + '/api/admin/roster', {
       headers: { Cookie: `wev_session=${token}` }
     });
@@ -50,7 +50,7 @@ describe('GET /api/admin/roster', () => {
     const ownerToken = await srv.loginAsOwner(OWNER_EMAIL);
     
     const adminUser = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get();
-    const studentUser = db.prepare("SELECT id FROM users WHERE email = 'leo.chen28@gmail.com'").get();
+    const studentUser = db.prepare("SELECT id FROM users WHERE email = 'leo.chen@example.com'").get();
 
     // Let's create an audit log for an admin to test decision counts
     if (adminUser && studentUser) {

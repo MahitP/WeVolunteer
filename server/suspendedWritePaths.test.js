@@ -49,7 +49,7 @@ describe('a suspended session cannot write anything', () => {
 
   beforeEach(async () => {
     unsuspend('user-student-2');
-    suspended = await srv.login('priya.patel.nhs@outlook.com');
+    suspended = await srv.login('priya.patel@example.com');
     suspend('user-student-2');
   });
 
