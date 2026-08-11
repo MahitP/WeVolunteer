@@ -777,7 +777,7 @@ over acceptance coverage ("94% of active users are on ToS v1.1").
 
 ## Tests this system requires
 
-Per `CLAUDE.md`, any new endpoint, any authz change, and any migration needs tests.
+Per `docs/ENGINEERING_GUIDE.md`, any new endpoint, any authz change, and any migration needs tests.
 
 1. Migration idempotency for `006` and `007`
 2. Signup writes acceptance rows **in the same transaction** — a forced failure after the user

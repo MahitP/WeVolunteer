@@ -346,7 +346,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      * compare, and under a loaded full-suite run it could exhaust the loop
      * without the per-account window behaving as it does in isolation. A test
      * that passes alone and fails in the suite is a defect in the test —
-     * CLAUDE.md is explicit that flakiness is not a re-run.
+     * docs/ENGINEERING_GUIDE.md is explicit that flakiness is not a re-run.
      *
      * What matters is the RULE: attempts are summed across grants for one
      * account, so a fresh grant does not reset the budget. Seeding the ledger to

@@ -4,7 +4,7 @@
  * Statically importing `auditLog.js` at the top of a server test file is safe —
  * and asserting that is part of the point. `db.js` opens its database at module
  * scope, so a static import that reaches it binds the suite to the repo-local
- * database (CLAUDE.md). This module imports `node:crypto` and nothing else,
+ * database (docs/ENGINEERING_GUIDE.md). This module imports `node:crypto` and nothing else,
  * which is exactly what lets `db.js` import it during its own initialisation
  * without a cycle, and what lets this file build its own schema in memory.
  */

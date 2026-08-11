@@ -5,7 +5,7 @@
  * still worth a suite for one reason: SQLite has no `ALTER TABLE ... ADD COLUMN
  * IF NOT EXISTS`, so an unguarded second run throws "duplicate column name" and
  * takes the boot down with it. Idempotency is the property every migration in
- * this repository has to prove (CLAUDE.md), and here it is the only thing that
+ * this repository has to prove (docs/ENGINEERING_GUIDE.md), and here it is the only thing that
  * can go wrong.
  */
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';

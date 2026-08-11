@@ -37,7 +37,7 @@ vi.mock('../utils/api');
  * Testing Library's default is 1000ms, which is the same order as that timer —
  * so under a loaded full-suite run these queries could expire before React had
  * flushed, and the file passed alone and failed in the suite. The assertions are
- * unchanged and still exact; only the patience is. CLAUDE.md is explicit that a
+ * unchanged and still exact; only the patience is. docs/ENGINEERING_GUIDE.md is explicit that a
  * flaky test is a defect rather than a re-run.
  */
 const WAIT = { timeout: 5000 };

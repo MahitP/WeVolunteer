@@ -101,7 +101,7 @@ Items 1, 2 and 3 compounded: the test agreed with the bug in 1, and could not ha
 - **Description.** Lines 30 and 33 compare `u.role` against literals, failing Guard 3.
   Beyond the build failure: `super_admin` holds `'*'`, so role cascades are not mutually
   exclusive and mis-order by construction.
-- **Plan reference.** `CLAUDE.md` authorization spine; Volume II §2.2.
+- **Plan reference.** `docs/ENGINEERING_GUIDE.md` authorization spine; Volume II §2.2.
 - **Dependencies.** None.
 - **Complexity.** Low.
 - **Files.** `src/views/AdminRoster.jsx`.
@@ -110,9 +110,9 @@ Items 1, 2 and 3 compounded: the test agreed with the bug in 1, and could not ha
 ### P0-4 · Add idempotency guards and tests to migrations 020 and 021
 
 - **Description.** Both use bare `ALTER TABLE ADD COLUMN` with no guard; 021 issues two
-  statements in one `db.exec()`. `CLAUDE.md` requires every migration to assert
+  statements in one `db.exec()`. `docs/ENGINEERING_GUIDE.md` requires every migration to assert
   idempotency.
-- **Plan reference.** `CLAUDE.md` Migrations; ENGINEERING_GUIDE §8.
+- **Plan reference.** `docs/ENGINEERING_GUIDE.md` Migrations; ENGINEERING_GUIDE §8.
 - **Dependencies.** None.
 - **Complexity.** Low.
 - **Files.** `server/migrations/020_administrator_roster.js`,

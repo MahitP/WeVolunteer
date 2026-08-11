@@ -83,7 +83,7 @@ describe('the error handler, driven directly', () => {
    *
    * `testServer` has already imported `app.js` with WEV_DB_PATH bound, so this
    * dynamic import returns that same instance rather than opening a second
-   * database — the rule in CLAUDE.md is about STATIC imports at module scope.
+   * database — the rule in docs/ENGINEERING_GUIDE.md is about STATIC imports at module scope.
    *
    * Express 4 keeps middleware on `app._router.stack`; the error handler is the
    * last layer with arity 4. Reaching for an internal is the cost of testing

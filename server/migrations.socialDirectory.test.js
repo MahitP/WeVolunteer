@@ -2,7 +2,7 @@
  * Migration 031, run twice.
  *
  * Idempotency is the one property every migration in this repository is
- * required to prove (CLAUDE.md, "any migration (assert idempotency)"), and it
+ * required to prove (docs/ENGINEERING_GUIDE.md, "any migration (assert idempotency)"), and it
  * is not academic here: 031 mixes `CREATE TABLE IF NOT EXISTS` with guarded
  * `ALTER TABLE ADD COLUMN`, and the latter has no `IF NOT EXISTS` in SQLite. An
  * unguarded second run throws "duplicate column name" and takes the boot down

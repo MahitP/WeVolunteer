@@ -193,7 +193,7 @@ src/views/AdminRoster.jsx:33: "if (u.role !== 'student') {"
 ```
 
 Guard 3 of `authz.completeness.test.js` fails on both. This is the precise rule
-`CLAUDE.md` states as non-negotiable: route and view code asks for a **capability**, never
+`docs/ENGINEERING_GUIDE.md` states as non-negotiable: route and view code asks for a **capability**, never
 compares a role string. It matters beyond style — `super_admin` holds `'*'`, so a cascade
 of role comparisons is not mutually exclusive and will mis-order.
 
@@ -211,7 +211,7 @@ It is gated behind `DEMO_MODE` **and** the presence of the `user-admin` seed, an
 production boot fails closed when `DEMO_MODE` is set with `NODE_ENV=production`. So it
 should not reach production.
 
-**But it contradicts a stated invariant.** `CLAUDE.md` and the security review both record
+**But it contradicts a stated invariant.** `docs/ENGINEERING_GUIDE.md` and the security review both record
 that no code path creates a `super_admin` — "enforced by absence of mechanism, which is
 stronger than a permission check". A mechanism now exists. See `questions-for-owner.md` Q1.
 
@@ -295,7 +295,7 @@ undocumented and can be removed by anyone who does not know it is load-bearing.
 ### 6.2 Architectural risks
 
 - **Migrations 020 and 021 use bare `ALTER TABLE ADD COLUMN`** with no
-  `addColumnIfMissing` guard and no idempotency test. `CLAUDE.md` requires every migration
+  `addColumnIfMissing` guard and no idempotency test. `docs/ENGINEERING_GUIDE.md` requires every migration
   to assert idempotency. Migration 021 issues two `ALTER TABLE` statements in a single
   `db.exec()`.
 - **`issueSession` now writes to the database on every sign-in** (`last_sign_in_at`),

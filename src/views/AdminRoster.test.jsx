@@ -81,7 +81,7 @@ describe('AdminRoster', () => {
    * did not match, which is indistinguishable from an attack it is right to
    * refuse.
    *
-   * CLAUDE.md states the rule this breaks: params must be exactly the keys the
+   * docs/ENGINEERING_GUIDE.md states the rule this breaks: params must be exactly the keys the
    * registry binds, no more and no fewer.
    */
   it('binds targetUserId, not id, whenever it runs a step-up', async () => {
