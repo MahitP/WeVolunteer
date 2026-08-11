@@ -151,7 +151,11 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
         // see contact info may see it too — the array itself (event location,
         // exact times) is self-only, below.
         upcomingCount: isSelf || canSeeContact ? upcoming.length : 0,
-        pendingCount
+        /* Gated on the same terms as `upcomingCount` above. It was
+           unconditional, which left a figure the public profile does not publish
+           sitting next to one that is deliberately withheld — an asymmetry that
+           read as an oversight rather than a decision. */
+        pendingCount: isSelf || canSeeContact ? pendingCount : 0
       },
       milestones: buildMilestones(Number(totals.hours) || 0, totals.events || 0),
       byCategory: byCategory.map(c => ({ category: c.category, hours: Number(c.hours) })),
@@ -252,6 +256,12 @@ router.get('/api/organizers/:id/profile', authenticateToken, (req, res) => {
     ).get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Organizer not found' });
 
+    /* Same rule as the volunteer profile above: self, or an actor holding the
+       capability to read contact details. `hostsApplicant` has no meaning here —
+       the subject is the host — so it is not part of the test. */
+    const canSeeContact = req.params.id === req.principal.userId
+      || can(req.principal, 'user.contact.read');
+
     const totals = db.prepare(`
       SELECT COUNT(DISTINCT e.id) as events_hosted,
              COUNT(DISTINCT a.user_id) as volunteers_helped
@@ -293,7 +303,29 @@ router.get('/api/organizers/:id/profile', authenticateToken, (req, res) => {
         organization: row.school,
         verified: row.verified === 1,
         joinedAt: row.created_at,
-        email: row.email
+        /**
+         * The login address is privileged here too, on the same terms as the
+         * volunteer profile above.
+         *
+         * This was unconditional, and this route is reachable by EVERY
+         * authenticated role — including `partner`, which is deliberately kept
+         * out of the directory (authz.js) precisely so an outside organization
+         * cannot mine member records. The subject rows are
+         * `role IN ('organizer','admin')`, so what a student could collect by
+         * walking the `organizerId` values that `GET /api/events` already hands
+         * them was the address of every organizer AND every administrator — the
+         * accounts holding `user.suspend`, `report.resolve` and
+         * `capability.grant`. That is a phishing target list.
+         *
+         * `profileSerializer.js` has always listed `email` among
+         * PRIVILEGED_FIELDS and states a public profile never shows one; the
+         * sibling volunteer route implements exactly this check. This route was
+         * the one place the rule was not applied.
+         *
+         * Reaching an organizer is a real need, but the answer to it is an
+         * opt-in contact address, not the credential the account signs in with.
+         */
+        email: canSeeContact ? row.email : null
       },
       stats: {
         eventsHosted: totals.events_hosted || 0,

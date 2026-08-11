@@ -35,8 +35,12 @@ export function isConversationParticipant(conversationId, userId) {
 }
 
 export function otherParticipant(conversationId, userId) {
+  /* No `u.school`. It is one of a volunteer's PUBLIC_ONLY_FIELDS
+     (profileSerializer.js) and `profile_visibility` defaults to 'private', so a
+     student who never opened the setting has it withheld from every peer — while
+     every conversation payload published it. Nothing in the message UI read it. */
   return db.prepare(`
-    SELECT u.id, u.name, u.avatar, u.role, u.school
+    SELECT u.id, u.name, u.avatar, u.role
     FROM conversation_participants cp
     JOIN users u ON u.id = cp.user_id
     WHERE cp.conversation_id = ? AND cp.user_id != ?
@@ -499,7 +503,6 @@ export function decorateConversation(conversation, viewerId) {
       name: other.name,
       avatar: other.avatar,
       role: other.role,
-      school: other.school,
       lastReadMessageId: otherParticipantRow?.last_read_message_id || null,
       lastReadAt: otherParticipantRow?.last_read_at || null
     } : null
