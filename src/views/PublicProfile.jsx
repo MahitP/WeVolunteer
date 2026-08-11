@@ -343,8 +343,17 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
           * The privacy notice is shown to the VIEWER, not as a warning about the
           * person. It explains why a section is missing rather than leaving a
           * reader to conclude the profile is empty.
+          *
+          * Keyed on `school`, which is what the sentence is ABOUT. It used to be
+          * keyed on `bio === undefined` as a proxy for "the sensitive block was
+          * withheld" — the two were emitted together, so the proxy held. They no
+          * longer are: an institutional account carries its bio at every privacy
+          * setting, so the proxy would have silently suppressed this note for
+          * exactly the account whose school and year are still withheld. Reading
+          * the field the sentence names is both correct now and immune to the
+          * next field that moves.
           */}
-        {profile.visibility !== 'public' && !isSelf && profile.bio === undefined && (
+        {profile.visibility !== 'public' && !isSelf && profile.school === undefined && (
           <p className="muted profile-privacy-note">
             <Lock size={13} aria-hidden="true" /> This member keeps their school and year private.
           </p>
