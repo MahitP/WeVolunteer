@@ -1413,10 +1413,22 @@ function seedDatabase() {
     return d.toISOString();
   };
 
-  // Seed Events
+  /**
+   * Seed events, with coordinates.
+   *
+   * The geo columns were absent from this statement, so every seeded event had
+   * a NULL latitude — which meant the map, the distance filter, "nearest to me"
+   * and the forecast all had nothing to render on a freshly seeded database.
+   * Every one of those features looked broken when it was merely unfed.
+   *
+   * The coordinates are invented places in one invented town, in the same
+   * register as the rest of this seed. They are spread over roughly six miles
+   * so that each of the 5 / 10 / 25 / 50-mile filters returns a different
+   * number of events, which is the only way to see the filter working.
+   */
   const insertEvent = db.prepare(`
-    INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, auto_approve, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, auto_approve, created_at, address, latitude, longitude)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   insertEvent.run(
@@ -1429,9 +1441,21 @@ function seedDatabase() {
     'user-org-1',
     'open',
     0,
-    nowStr
+    nowStr,
+    '100 Reichler Park Drive, Example Valley, NJ 08824',
+    40.3860,
+    -74.5560
   );
 
+  /**
+   * Deliberately left without coordinates.
+   *
+   * An event with no pin is an ordinary thing — an organizer typed a place name
+   * and never opened the picker — and every location surface has to degrade for
+   * it: no map, no distance, no forecast, and a directions link that falls back
+   * to the text address. That path is the one most likely to regress, and a
+   * seed where every event has a pin is a seed where nobody ever sees it.
+   */
   insertEvent.run(
     'event-pantry-past',
     'Food Pantry Boxing & Distribution',
@@ -1442,7 +1466,10 @@ function seedDatabase() {
     'user-org-1',
     'completed',
     0,
-    nowStr
+    nowStr,
+    null,
+    null,
+    null
   );
 
   // Seed Slots

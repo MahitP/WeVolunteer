@@ -68,9 +68,9 @@ try {
   const newEventId = 'evt-sim-' + Date.now();
   const newSlotId = 'slot-sim-' + Date.now();
   db.prepare(`
-    INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, auto_approve, created_at, instructions, attendee_visibility)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(newEventId, 'Simulated Car Wash', 'Fundraiser.', 'Other', 'HS Parking Lot', new Date(Date.now() + 86400000).toISOString(), 'org-1', 'open', 0, new Date().toISOString(), 'Bring buckets.', 'accepted');
+    INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, auto_approve, created_at, instructions, attendee_visibility, address, latitude, longitude)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(newEventId, 'Simulated Car Wash', 'Fundraiser.', 'Other', 'HS Parking Lot', new Date(Date.now() + 86400000).toISOString(), 'org-1', 'open', 0, new Date().toISOString(), 'Bring buckets.', 'accepted', '750 Ridge Road, Example Valley, NJ 08852', 40.4188, -74.5931);
   
   db.prepare(`
     INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
