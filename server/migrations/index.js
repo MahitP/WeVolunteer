@@ -44,6 +44,7 @@ import externalHoursTrackingOnly from './032_external_hours_tracking_only.js';
 import distinguishedProfiles from './033_distinguished_profiles.js';
 import legalDocumentRevisions from './034_legal_document_revisions.js';
 import peerConversations from './035_peer_conversations.js';
+import slotWindowIndex from './036_slot_window_index.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -178,7 +179,15 @@ export const MIGRATIONS = [
    * transaction, and `conversations` still cascades to students' private
    * messages.
    */
-  peerConversations
+  peerConversations,
+  /**
+   * 036 adds one covering index on `slots`, for the aggregate `GET /api/events`
+   * runs to derive each event's earliest shift, latest end, capacity and hours.
+   * Index-only, no schema change, no data change, and safe to run on any
+   * database that has a `slots` table — which is every one, since the initial
+   * schema creates it.
+   */
+  slotWindowIndex
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
