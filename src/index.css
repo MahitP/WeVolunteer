@@ -5832,10 +5832,10 @@ input:disabled + .premium-slider {
 /* ── components/AttendeeList.jsx, components/BarChart.jsx, views/CalendarView.jsx, views/OrganizerDashboard.jsx ── */
 /* <span class="truncate muted"> */
 .s-49cdf8 { flex: 1; }
+.s-7b2db8 { flex: 1; min-width: 0px; }
 
 /* ── components/BarChart.jsx, components/EventAttendance.jsx, components/EventCard.jsx, views/OrganizerDashboard.jsx ── */
 /* <div class="stack-sm"> */
-.s-7b2db8 { flex: 1; min-width: 0px; }
 
 /* ── components/BarChart.jsx ── */
 /* <div class=""> */
@@ -5843,13 +5843,10 @@ input:disabled + .premium-slider {
 /* <div class="truncate"> */
 .s-3581ab { font-size: 0.625rem; color: var(--ink-3); }
 /* <div class="row"> */
-.s-473ea3 { gap: var(--s4); align-items: center; flex-wrap: wrap; }
 /* <p class="small dim"> */
 .s-739dac { text-align: center; padding: var(--s5) 0; }
 /* <svg class=""> */
-.s-c99770 { flex-shrink: 0; }
 /* <div class="tnum"> */
-.s-edb0fa { font-size: 0.75rem; font-weight: 600; }
 
 /* ── components/EventAttendance.jsx, components/EventEditForm.jsx, views/CreateEvent.jsx ── */
 /* <div class="alert alert-danger"> */
@@ -9553,4 +9550,42 @@ input:disabled + .premium-slider {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   color: var(--ink);
+}
+
+/* ==========================================================================
+   BarChart
+   ==========================================================================
+   The grid track count arrives as `--bars` from the component rather than as an
+   inline `grid-template-columns`. An inline declaration outranks every media
+   query, which is what caused the "dashboard is zoomed out on my phone" bug
+   recorded against .dash-split above — and here it mattered more, because a
+   zero-filled six-month series makes the tightest layout the only layout.
+
+   `minmax(0, 1fr)` rather than `1fr`: a grid track's default minimum is `auto`,
+   which refuses to shrink below its content, so at 320px the row would overflow
+   instead of compressing.
+   ========================================================================== */
+.barchart-bars,
+.barchart-labels {
+  --bars: 6;
+  display: grid;
+  grid-template-columns: repeat(var(--bars), minmax(0, 1fr));
+  gap: 6px;
+}
+
+.barchart-bars { align-items: end; }
+
+.barchart-labels {
+  margin-top: 6px;
+  border-top: 1px solid var(--rule);
+  padding-top: 6px;
+}
+
+.barchart-value { font-size: 0.75rem; font-weight: 600; }
+
+/* At the narrowest supported width six columns leave about 36px each, and a
+   three-digit total no longer fits at the default size. Reachable at all only
+   because the grid moved out of the inline style. */
+@media (max-width: 360px) {
+  .barchart-value { font-size: 0.6875rem; }
 }

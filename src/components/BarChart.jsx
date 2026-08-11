@@ -31,7 +31,8 @@ export function BarChart({
   caption = 'Hours by period',
   unit = 'Hours',
   periodLabel = 'Period',
-  emptyText = 'No hours recorded yet'
+  emptyText = 'No hours recorded yet',
+  highlightNote = 'current'
 }) {
   if (!data || data.length === 0) {
     return <p className="small dim s-739dac">{emptyText}</p>;
@@ -51,19 +52,30 @@ export function BarChart({
         </thead>
         <tbody>
           {data.map((d, i) => <tr key={i}>
-              <th scope="row">{longLabel(d[labelKey])}</th>
+              {/* The highlighted column is distinguished ONLY by colour in the
+                  visual half, and the table below is what a screen reader
+                  actually reads — so without this the distinction does not
+                  exist for that reader at all. */}
+              <th scope="row">
+                {longLabel(d[labelKey])}
+                {highlightLast && i === data.length - 1 ? ` (${highlightNote})` : ''}
+              </th>
               <td>{fmt(d[valueKey])}</td>
             </tr>)}
         </tbody>
       </table>
 
-      <div aria-hidden="true" style={{
-      display: 'grid',
-      gridTemplateColumns: `repeat(${data.length}, 1fr)`,
-      alignItems: 'end',
-      gap: 6,
-      height
-    }}>
+      {/* `--bars` rather than an inline `gridTemplateColumns`.
+
+          index.css records a real "the dashboard is zoomed out on my phone"
+          bug caused by exactly that: an inline grid declaration is more
+          specific than any media query, so the layout could not be adjusted for
+          narrow screens at all. With the series zero-filled to a fixed six
+          columns, the tightest case (about 36px per bar at 320px) is now the
+          ALWAYS case rather than an occasional one — so being able to reach the
+          value row from a media query is the difference between a readable
+          chart and an overflowing one. */}
+      <div aria-hidden="true" className="barchart-bars" style={{ '--bars': data.length, height }}>
         {data.map((d, i) => {
         const value = Number(d[valueKey]) || 0;
         const isLast = highlightLast && i === data.length - 1;
@@ -80,74 +92,12 @@ export function BarChart({
       })}
       </div>
 
-      <div aria-hidden="true" style={{
-      display: 'grid',
-      gridTemplateColumns: `repeat(${data.length}, 1fr)`,
-      gap: 6,
-      marginTop: 6,
-      borderTop: '1px solid var(--rule)',
-      paddingTop: 6
-    }}>
+      <div aria-hidden="true" className="barchart-labels" style={{ '--bars': data.length }}>
         {data.map((d, i) => <div key={i} className="s-052d03">
-            <div className="tnum s-edb0fa">{fmt(d[valueKey])}</div>
+            <div className="tnum barchart-value">{fmt(d[valueKey])}</div>
             <div className="truncate s-3581ab">
               {shortLabel(d[labelKey])}
             </div>
-          </div>)}
-      </div>
-    </div>;
-}
-export function DonutChart({
-  data = [],
-  valueKey = 'value',
-  labelKey = 'label',
-  size = 116,
-  thickness = 16
-}) {
-  const total = data.reduce((sum, d) => sum + (Number(d[valueKey]) || 0), 0);
-  if (total === 0) {
-    return <p className="small dim s-739dac">No hours recorded yet</p>;
-  }
-  const radius = (size - thickness) / 2;
-  const center = size / 2;
-  const circumference = 2 * Math.PI * radius;
-
-  // Cumulative offsets derived in one pass — no mutation during render.
-  const segments = data.reduce((acc, d, i) => {
-    const value = Number(d[valueKey]) || 0;
-    const length = value / total * circumference;
-    const prev = acc[acc.length - 1];
-    acc.push({
-      key: i,
-      length,
-      offset: prev ? prev.offset + prev.length : 0,
-      color: PALETTE[i % PALETTE.length],
-      label: d[labelKey],
-      value
-    });
-    return acc;
-  }, []);
-  return <div className="row s-473ea3">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${fmt(total)} hours total across ${data.length} categories`} className="s-c99770">
-        <circle cx={center} cy={center} r={radius} fill="none" stroke="var(--surface-3)" strokeWidth={thickness} />
-        {segments.map(seg => <circle key={seg.key} cx={center} cy={center} r={radius} fill="none" stroke={seg.color} strokeWidth={thickness} strokeDasharray={`${seg.length} ${circumference - seg.length}`} strokeDashoffset={-seg.offset} transform={`rotate(-90 ${center} ${center})`} />)}
-        <text x={center} y={center - 2} textAnchor="middle" fontSize="17" fontWeight="700" fill="var(--ink)" fontFamily="var(--font-display)">
-          {fmt(total)}
-        </text>
-        <text x={center} y={center + 13} textAnchor="middle" fontSize="9" fill="var(--ink-3)">hours</text>
-      </svg>
-
-      <div className="stack-sm s-7b2db8">
-        {segments.map(seg => <div key={seg.key} className="row small s-65ce96">
-            <span style={{
-          width: 9,
-          height: 9,
-          borderRadius: 2,
-          background: seg.color,
-          flexShrink: 0
-        }} />
-            <span className="truncate muted s-49cdf8">{seg.label}</span>
-            <span className="strong tnum">{fmt(seg.value)}</span>
           </div>)}
       </div>
     </div>;
