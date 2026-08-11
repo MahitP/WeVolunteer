@@ -148,8 +148,10 @@ async function apiFetch(endpoint, options = {}) {
   }
 
   let data = null;
+  let parsedJson = false;
   try {
     data = await response.json();
+    parsedJson = true;
   } catch {
     // Non-JSON body (e.g. rate limiter text, proxy error page) — fall through
     // to the status check, which supplies a readable message.
@@ -159,6 +161,41 @@ async function apiFetch(endpoint, options = {}) {
       status: response.status,
       data
     });
+  }
+
+  /**
+   * A 2xx whose body is not JSON is a broken response, not an empty one.
+   *
+   * ── The crash this closes ──
+   *
+   * This used to `return data` regardless, so an unparseable body resolved as
+   * `null` — a SUCCESS carrying nothing. Every caller that expects a list then
+   * ran `.filter()` on null and took its whole screen down through the error
+   * boundary. An extreme-usage run reproduced exactly that on AdminDashboard
+   * ("Cannot read properties of null (reading 'filter')"): the admin dashboard
+   * was replaced by the crash screen, recoverable only by "Try again".
+   *
+   * It needs no attacker and no bug on this server. Anything between the
+   * browser and the API that answers 200 with HTML does it: a captive portal on
+   * school or hotel wifi, a CDN or reverse-proxy error page, an ISP
+   * interception page, a stale service worker. The server itself never does —
+   * every JSON route replies through `res.json`, and the two text responses
+   * (CSV, ICS) are either handled above or never fetched through here.
+   *
+   * Throwing turns a render crash into the ordinary network-error path that
+   * every caller already handles: a toast, a reset busy state, a page the user
+   * can still use. `isNetworkError` is set because that is what it is —
+   * something on the wire, not something this application decided.
+   *
+   * 204 is exempt: no content is the one status for which an unparseable body
+   * is the correct body. Nothing returns it today; it is here so that adding it
+   * later is not a fresh outage.
+   */
+  if (!parsedJson && response.status !== 204) {
+    throw new ApiError(
+      'The server sent a response we could not read. Check your connection and try again.',
+      { isNetworkError: true, status: response.status }
+    );
   }
 
   return data;
