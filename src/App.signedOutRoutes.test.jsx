@@ -199,7 +199,7 @@ describe('isSignedOutOnlyPath', () => {
    * behaviour through the whole shell, this asserts the rule itself, so a
    * refactor of App.jsx's branches cannot quietly move them into scope.
    */
-  it.each(['/reset-password', '/oauth/callback', '/legal', '/verify/abc', '/events', '/nope'])(
+  it.each(['/reset-password', '/oauth/callback', '/legal', '/verify/abc', '/discover', '/nope'])(
     'does not claim %s', (path) => {
       expect(isSignedOutOnlyPath(path)).toBe(false);
     }

@@ -43,6 +43,7 @@ import socialDirectory from './031_social_directory.js';
 import externalHoursTrackingOnly from './032_external_hours_tracking_only.js';
 import distinguishedProfiles from './033_distinguished_profiles.js';
 import legalDocumentRevisions from './034_legal_document_revisions.js';
+import peerConversations from './035_peer_conversations.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -165,7 +166,19 @@ export const MIGRATIONS = [
    * disk and behaves exactly as it did before, so the existing text is already
    * the answer and copying it in would only create a second copy to keep in step.
    */
-  legalDocumentRevisions
+  legalDocumentRevisions,
+  /**
+   * 035 REBUILDS `conversations` a second time, to admit `kind = 'peer'` so two
+   * friends can have a thread that is about neither an event nor a moderation
+   * case. It MUST run after 018 — it copies 018's column list, including `kind`,
+   * and refuses outright if that column is absent.
+   *
+   * Same six guards and the same `ownTransaction: true` as 018, for the same
+   * reason: `PRAGMA foreign_keys = OFF` is a silent no-op inside an open
+   * transaction, and `conversations` still cascades to students' private
+   * messages.
+   */
+  peerConversations
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

@@ -55,7 +55,7 @@ describe('Find people is no longer a destination', () => {
     const route = APP_ROUTES.find(r => r.path === '/directory');
     expect(route, '/directory was deleted rather than redirected').toBeTruthy();
     expect(route.requiredCap).toBe('directory.read');
-    expect(route.element.props.to).toContain('/events');
+    expect(route.element.props.to).toContain('/discover');
   });
 
   /**

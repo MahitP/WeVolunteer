@@ -545,7 +545,7 @@ describe('authorization hygiene', () => {
       'src/components/EventModal.jsx::{mode === \'view\' && currentUser?.role === \'student\' && onToggleFavorite && (': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'favourite button shown to students only; wants can(event.apply)' },
       'src/views/BrowseEvents.jsx::const isStudent = currentUser?.role === \'student\';': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isStudent` gates favourites and apply CTAs on the browse list; wants can(event.apply)' },
       'src/views/CalendarView.jsx::const isOrganizer = currentUser?.role === \'organizer\';': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: '`isOrganizer` picks hosted-events entries over applied-shift entries; wants a can(event.create) cascade, most-privileged-first' },
-      'src/views/Messages.jsx::const studentId = currentUser.role === \'student\' ? currentUser.id : recipient.id;': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'decides which side of a conversation is the student when resolving it; wants can(event.apply), and the server re-derives it anyway' },
+      'src/views/Messages.jsx::currentUser.role === \'student\' ? currentUser.id : recipient.id': { category: CLIENT_CATEGORY.UNCONVERTED_UX, reason: 'decides which side of an EVENT conversation is the student when resolving it; wants can(event.apply), and the server re-derives it anyway. Unchanged in substance by the friend-messaging work — that took the peer branch out above it, leaving this expression inlined as the event branch\'s argument' },
     };
 
     const validCategories = new Set(Object.values(CLIENT_CATEGORY));

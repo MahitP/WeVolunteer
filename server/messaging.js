@@ -3,6 +3,10 @@ import { db } from './db.js';
 import { inTransaction } from './utils.js';
 import { can, principalFor } from './authz.js';
 import { isBlockedBetween } from './blocking.js';
+/* The ONE definition of "these two are friends". See resolvePeerConversation —
+   re-deriving it here from `user_relationships` would create a second answer
+   that could disagree with the profile tier about the same pair. */
+import { areFriends } from './relationships.js';
 
 export const MESSAGE_MAX_LENGTH = 4000;
 export const MESSAGE_PAGE_LIMIT = 50;
@@ -305,6 +309,131 @@ export function resolveAdminConversation({ actor, counterpartyId, counterpartyPr
   };
 }
 
+/**
+ * The canonical key for one unordered pair of members.
+ *
+ * `min:max`, so `peerPairKey(a, b) === peerPairKey(b, a)` by construction rather
+ * than by every caller remembering to sort. That is the whole reason the column
+ * exists — see migration 035: keyed on `created_by` instead, A→B and B→A would be
+ * two different rows and one friendship's messages would split across two threads
+ * that each party sees half of.
+ *
+ * Defined here, beside its only writer, so the ordering rule has one home. The
+ * migration's unique index is what ENFORCES it; this is what produces it.
+ */
+export function peerPairKey(a, b) {
+  return a < b ? `${a}:${b}` : `${b}:${a}`;
+}
+
+/**
+ * Finds or creates the thread between two friends.
+ *
+ * ── The authorization rule, in one line ──
+ *
+ * `areFriends(db, actor.id, friendId)`. Nothing else. Not a role comparison, not
+ * a second query against `user_relationships`, and deliberately not "can the
+ * actor SEE this person" — being able to find somebody in search or open their
+ * public profile is not consent to be messaged by them, and on a platform whose
+ * members are mostly minors that distinction is the entire feature.
+ *
+ * ── Why that one call is sufficient ──
+ *
+ * `areFriends` is already the gate for the friends-only profile tier, and it was
+ * hardened for exactly the failure mode this endpoint would otherwise reintroduce.
+ * It answers false when:
+ *
+ *   · there is no accepted row (a pending request is not a friendship);
+ *   · either party has blocked the other — so a block severs messaging here for
+ *     the same reason it severs disclosure;
+ *   · the two are not PEERS, i.e. either lacks `event.apply`. This is the check
+ *     that makes a legacy organizer↔student friendship row — accepted before
+ *     friendship became peer-only, and still sitting in databases that old —
+ *     grant nothing. Messaging permission reflects current authorization state,
+ *     not the survival of an old row;
+ *   · either account is missing or deleted (`principalFor` returns null and
+ *     `can(null, …)` is false).
+ *
+ * Restriction needs no separate check: `setUnilateral` withdraws the friendship
+ * row when it records a restrict, and `block()` does the same, so both are
+ * already visible to `areFriends` as "not friends".
+ *
+ * Calling it rather than restating it is the point. A second definition of
+ * "friend" is how the profile tier and the message gate come to disagree about
+ * the same pair, and the disagreement would be silent.
+ *
+ * ── This authorises CREATION. It is not the only gate. ──
+ *
+ * Friendship can end after the thread exists, and a conversation row is not a
+ * standing permission. `computeConversationLifecycle` re-asks this same question
+ * on every read and every send, which is what makes unfriending take effect on an
+ * open thread rather than only on the next new one.
+ */
+export function resolvePeerConversation({ actor, friendId }) {
+  if (!friendId || typeof friendId !== 'string') {
+    return { ok: false, status: 400, error: 'A person to message is required' };
+  }
+  if (friendId === actor.id) {
+    return { ok: false, status: 400, error: 'You cannot open a conversation with yourself' };
+  }
+
+  /**
+   * ── One refusal for "not a friend" and for "no such person" ──
+   *
+   * Distinguishing them would make this endpoint an existence oracle: an id that
+   * answered 404 is not a member and one that answered 403 is, so anybody could
+   * walk ids and enumerate the platform's accounts without sending a message.
+   * `eligibleRelationship` above collapses the same pair of cases for the same
+   * reason, and privacyRoutes.js did it before either.
+   *
+   * The sentence names the rule rather than the person, so it is equally true and
+   * equally uninformative in both cases — and it does not reveal a block, which
+   * would tell a blocked party who blocked them.
+   */
+  if (!areFriends(db, actor.id, friendId)) {
+    return { ok: false, status: 403, error: 'You can only message people you are friends with' };
+  }
+
+  const pairKey = peerPairKey(actor.id, friendId);
+
+  let conversation = db.prepare(
+    "SELECT * FROM conversations WHERE kind = 'peer' AND pair_key = ?"
+  ).get(pairKey);
+
+  if (!conversation) {
+    const now = new Date().toISOString();
+    const conversationId = newId('conv');
+    inTransaction(() => {
+      /**
+       * Both role columns stay NULL. Both of these people are students and
+       * neither is an organizer, so seating one of them in `organizer_id` would
+       * be a false statement in the data — and would put the row in front of
+       * every query that reads those columns to mean what they say. Membership
+       * is the participant rows, which is what `isConversationParticipant`
+       * reads anyway.
+       */
+      db.prepare(`
+        INSERT INTO conversations (id, kind, event_id, student_id, organizer_id, pair_key, created_by, created_at)
+        VALUES (?, 'peer', NULL, NULL, NULL, ?, ?, ?)
+      `).run(conversationId, pairKey, actor.id, now);
+
+      /* `role_at_creation` is a snapshot of what each party was when the thread
+         opened, exactly as it is for the other kinds. Both are students here;
+         recording it is what lets a reader a year later tell that this was a
+         peer thread and not staff contact, even if a role has changed since. */
+      db.prepare(`
+        INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
+        VALUES (?, ?, ?, ?), (?, ?, ?, ?)
+      `).run(
+        conversationId, actor.id, actor.role, now,
+        conversationId, friendId, 'student', now
+      );
+    });
+    conversation = getConversation(conversationId);
+  }
+
+  return { ok: true, conversation: decorateConversation(conversation, actor.id) };
+}
+
 export function decorateConversation(conversation, viewerId) {
   if (!conversation) return null;
   const event = db.prepare(`
@@ -436,6 +565,67 @@ export function computeConversationLifecycle(conversation, now = new Date()) {
    * something — including an appeal. This is the hazard the audit named when it
    * rejected putting an admin in the `organizer_id` slot.
    */
+  /**
+   * A peer thread is writable exactly while the two are still friends.
+   *
+   * ── Why the rule lives HERE and not only in the send handler ──
+   *
+   * This function is called on every read (`decorateConversation`) and on every
+   * send, and the send handler already refuses when `writable` is false. Putting
+   * the check here therefore does two jobs with one answer: the backend refuses
+   * the write, AND the client is told the thread is read-only so it renders the
+   * banner and disables the composer instead of offering a box whose submissions
+   * will 409. A rule enforced in the handler alone would be correct and would
+   * still show the user a working-looking composer.
+   *
+   * ── What "still friends" covers ──
+   *
+   * `areFriends` is the same single source of truth `resolvePeerConversation`
+   * opens the thread on, so permission cannot drift between creating and
+   * continuing. It goes false on unfriend, on block by either party, on restrict
+   * (which withdraws the friendship row), on either account being deleted, and on
+   * either party ceasing to be a peer. Every one of those closes the thread on
+   * the next request, with no sweep and no stored state to keep in step.
+   *
+   * ── Read-only rather than invisible ──
+   *
+   * The history stays readable to both parties, which is the same choice this
+   * codebase makes everywhere else a thread stops accepting messages — a
+   * completed event, a withdrawn application, a block on an event thread. Two
+   * reasons it is the right one here too: a student who is being harassed needs
+   * the record to still exist when they report it, and hiding a conversation the
+   * moment a friendship ends would delete a person's side of an argument from
+   * under them. Membership is unchanged; only writing stops.
+   *
+   * ── Participants, not the role columns ──
+   *
+   * A peer row's `student_id` and `organizer_id` are NULL by CHECK (migration
+   * 035), so the pair has to come from `conversation_participants`. Reading it
+   * rather than splitting `pair_key` keeps this working for a row whose key is
+   * somehow absent, and participants are the membership of record regardless.
+   */
+  if (conversation.kind === 'peer') {
+    const ids = db.prepare(
+      'SELECT user_id FROM conversation_participants WHERE conversation_id = ?'
+    ).all(conversation.id).map(r => r.user_id);
+
+    if (ids.length === 2 && areFriends(db, ids[0], ids[1])) {
+      return { state: 'active', writable: true, reason: null, banner: null };
+    }
+    return {
+      state: 'read_only',
+      writable: false,
+      reason: 'not_friends',
+      readOnlyAt: null,
+      /* Says what changed and not who did it. "They unfriended you", "they
+         blocked you" and "they deleted their account" are three different
+         disclosures about somebody else's decision, and this thread is not where
+         any of them should be announced. */
+      banner: 'This conversation is read-only because you are no longer connected. '
+        + 'Message history is still available.',
+    };
+  }
+
   if (conversation.kind && conversation.kind !== 'student_organizer') {
     return { state: 'active', writable: true, reason: null, banner: null };
   }

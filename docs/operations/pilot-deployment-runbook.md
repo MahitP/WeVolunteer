@@ -160,7 +160,8 @@ holds `currentUser`, `events`, `applications`, and `favorites`, and a
 `refreshKey` counter re-fetches everything on any mutation.
 
 Routing matters operationally because the app uses **real paths, not hashes**:
-`/login`, `/signup`, `/reset-password`, `/events`, `/events/:id/edit`,
+`/login`, `/signup`, `/reset-password`, `/discover`, `/events` (a compatibility
+redirect to `/discover`), `/events/:id/edit`,
 `/checkin/:eventId`, `/calendar`, `/notifications`, `/profile`, `/portfolio`,
 and the public `/verify/:code`. Any of these can be loaded cold by a user
 pasting a link, so the server (or proxy) **must** return `index.html` for
@@ -2797,7 +2798,7 @@ precondition for the next.
 - [ ] The organizer creates a real event: title, description, category,
       location, arrival instructions, application deadline, and one or more
       shifts with realistic times and `maxSpots`
-      → *Expected:* 201; status `open`; visible to students in `/events`
+      → *Expected:* 201; status `open`; visible to students in `/discover`
 - [ ] Check the deadline is **on or before** the first shift start
       → *Expected:* accepted (the server enforces this; a rejection means the
       dates are wrong)

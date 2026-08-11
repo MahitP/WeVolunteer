@@ -123,9 +123,9 @@ describe('authenticated route table', () => {
     }
   );
 
-  it('student: /events gets every prop it had before', async () => {
+  it('student: /discover gets every prop it had before', async () => {
     signedInAs(USER('student'));
-    renderAt('/events');
+    renderAt('/discover');
     const el = await screen.findByTestId('browse');
     expect(el.dataset.props).toBe(
       'applications,currentUser,favorites,onEventsSeen,onToggleFavorite,onViewDetails'
@@ -206,18 +206,18 @@ describe('authenticated route table', () => {
    * send, and be read by the other party. So the route leads somewhere, and
    * refusing it would withhold a working feature.
    *
-   * `/events` is kept in the same case as the control: it proves the render path
-   * works for this role, so a failure above is about the capability rather than
-   * about the harness.
+   * `/discover` is kept in the same case as the control: it proves the render
+   * path works for this role, so a failure above is about the capability rather
+   * than about the harness.
    */
-  it('admin: /messages and /events both render', async () => {
+  it('admin: /messages and /discover both render', async () => {
     signedInAs(USER('admin'));
     const a = renderAt('/messages');
     expect(await screen.findByTestId('messages')).toBeInTheDocument();
     a.unmount();
 
     signedInAs(USER('admin'));
-    renderAt('/events');
+    renderAt('/discover');
     expect(await screen.findByTestId('browse')).toBeInTheDocument();
   });
 
@@ -255,6 +255,31 @@ describe('authenticated route table', () => {
     signedInAs(USER('organizer'));
     renderAt('/events/evt-9/edit');
     expect(await screen.findByTestId('browse')).toBeInTheDocument();
+  });
+
+  /**
+   * `/events` is the Discover page's old address and still has to work.
+   *
+   * It is in browser histories and in `?event=<id>` deep links, so the redirect
+   * is the compatibility promise — and a redirect that renders the right page
+   * while dropping the query string keeps that promise only in appearance. Both
+   * halves are asserted, because only the first would fail loudly on its own.
+   */
+  it('/events redirects to /discover and keeps the query string', async () => {
+    signedInAs(USER('student'));
+    render(
+      <MemoryRouter initialEntries={['/events?event=evt-9&find=people']}>
+        <App />
+        <LocationProbe />
+      </MemoryRouter>
+    );
+    expect(await screen.findByTestId('browse')).toBeInTheDocument();
+    const where = screen.getByTestId('where');
+    expect(where.dataset.path).toBe('/discover');
+    /* The half that would fail silently. A redirect that lands on the right page
+       with an empty query string still resolves, so nothing errors — the
+       `?event=<id>` bookmark just quietly stops opening the event it names. */
+    expect(where.dataset.search).toBe('?event=evt-9&find=people');
   });
 
   it('unknown path renders 404 rather than silently becoming the dashboard', async () => {
@@ -483,7 +508,7 @@ describe('going offline', () => {
 
   it('covers the authenticated shell, nav and all, without unmounting the view', async () => {
     signedInAs(USER('student'));
-    renderAt('/events');
+    renderAt('/discover');
     const view = await screen.findByTestId('browse');
 
     act(() => setOnline(false));

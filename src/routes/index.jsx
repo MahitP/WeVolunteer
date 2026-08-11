@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate, useParams } from 'react-router-dom';
+import { Navigate, useLocation, useParams } from 'react-router-dom';
 
 /**
  * Route-level code splitting, and the route table itself.
@@ -93,7 +93,45 @@ export {
  */
 function RedirectToEvent() {
   const { id } = useParams();
-  return <Navigate to={id ? `/events?event=${encodeURIComponent(id)}` : '/events'} replace />;
+  return <Navigate to={id ? `/discover?event=${encodeURIComponent(id)}` : '/discover'} replace />;
+}
+
+/**
+ * `/events` is the Discover page's OLD address, kept working.
+ *
+ * ── Why the page moved ──
+ *
+ * The rail entry has said "Discover" since the discovery consolidation, while
+ * the URL it opened still said `/events`. That page is not a list of events any
+ * more: it searches opportunities, people AND organizations behind one box, and
+ * `/directory` was folded into it as `?find=people`. So the path named a third
+ * of what the page does, disagreed with the label on the item that opens it, and
+ * was the address a reader would see in the URL bar after clicking "Discover".
+ * `/discover` is the canonical route now.
+ *
+ * ── Why a redirect and not a deletion ──
+ *
+ * Same reason `/directory` below is one, and the reason is not sentiment: the
+ * path shipped. It is in browser histories and autocomplete, in the pilot
+ * runbook, and — the case that actually bites — in `?event=<id>` deep links,
+ * which is how OrganizationPage and `/events/:id/edit` have always opened a
+ * single event. Deleting the path would 404 those.
+ *
+ * ── The query string is carried across, and that is the whole point ──
+ *
+ * `<Navigate to="/discover">` alone would DROP it, turning every `?event=<id>`
+ * bookmark into a generic landing on the discovery page — the link would still
+ * resolve, so nothing would report an error, and it would silently stop opening
+ * the thing it named. `?find=people` and `?q=` have the same problem. Forwarding
+ * `location.search` is what makes this a redirect rather than a soft 404.
+ *
+ * `replace` so the old path leaves no history entry: a reader who lands on
+ * `/events` and presses Back must go where they came from, not bounce through
+ * the redirect again.
+ */
+function RedirectToDiscover() {
+  const { search, hash } = useLocation();
+  return <Navigate to={`/discover${search}${hash}`} replace />;
 }
 
 /**
@@ -115,7 +153,23 @@ function RedirectToEvent() {
  * catch-all remain in App.jsx.
  */
 export const APP_ROUTES = [
-  { path: '/events', element: <BrowseEvents />, requiredCap: 'event.view' },
+  { path: '/discover', element: <BrowseEvents />, requiredCap: 'event.view' },
+  /* The old address for the line above. See RedirectToDiscover — it carries the
+     query string, which is what keeps `?event=<id>` deep links opening an event
+     instead of quietly landing on the discovery page. Declared with the SAME
+     capability as its destination, so a redirect can never be a way around a
+     gate the page itself applies. */
+  { path: '/events', element: <RedirectToDiscover />, requiredCap: 'event.view' },
+  /**
+   * `/events/new` and `/events/:id/edit` are NOT renamed, and the distinction is
+   * the point of this pass rather than an omission from it.
+   *
+   * What moved to `/discover` is the discovery SURFACE — a page that searches
+   * opportunities, people and organizations. These two are about a single
+   * volunteer event: posting one, and editing one. "Event" is still the right
+   * noun for that, the same way `event.create` is still the right capability,
+   * and renaming them would be renaming the concept rather than the page.
+   */
   { path: '/events/new', element: <CreateEvent />, requiredCap: 'event.create', requiresVerified: true },
   { path: '/events/:id/edit', element: <RedirectToEvent /> },
   { path: '/checkin/:eventId', element: <CheckInView />, requiredCap: 'attendance.mark' },
@@ -153,7 +207,7 @@ export const APP_ROUTES = [
    * capability is unchanged, so somebody who could not reach the directory still
    * cannot reach what it redirects to.
    */
-  { path: '/directory', element: <Navigate to="/events?find=people" replace />, requiredCap: 'directory.read' },
+  { path: '/directory', element: <Navigate to="/discover?find=people" replace />, requiredCap: 'directory.read' },
   { path: '/users/id/:id', element: <PublicProfile />, requiredCap: 'directory.read' },
   { path: '/users/:handle', element: <PublicProfile />, requiredCap: 'directory.read' },
   /* Declared BEFORE `/organizations/:key`, so "new" is never matched as a slug. */

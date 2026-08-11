@@ -202,11 +202,11 @@ describe('the way out matches the session and the kind', () => {
   it('offers in-app links to someone signed in', () => {
     at({ kind: '404', theme: 'board' });
     expect(screen.getByRole('link', { name: /dashboard/i })).toHaveAttribute('href', '/');
-    expect(screen.getByRole('link', { name: /browse open shifts/i })).toHaveAttribute('href', '/events');
+    expect(screen.getByRole('link', { name: /browse open shifts/i })).toHaveAttribute('href', '/discover');
   });
 
   /**
-   * A signed-out visitor sent to `/events` is bounced straight back, which
+   * A signed-out visitor sent to `/discover` is bounced straight back, which
    * would make the page look broken in the moment it is trying to help.
    */
   it('offers only the start page to someone signed out', () => {

@@ -53,7 +53,7 @@ import { getTheme } from './themes/index.js';
 /**
  * @param {object}   props
  * @param {string}   props.kind      one of `KINDS`
- * @param {boolean}  props.signedIn  A signed-out visitor sent to `/events` is
+ * @param {boolean}  props.signedIn  A signed-out visitor sent to `/discover` is
  *   bounced straight back to `/welcome`, which would make this page look broken
  *   in the moment it is trying to help. They get the start page instead.
  * @param {string}   [props.theme]   Force a theme. Tests and the dev preview
@@ -173,7 +173,7 @@ export default function ErrorExperience({
                 <ArrowLeft size={15} /> Back to my dashboard
               </Link>
               {kind === '404' && (
-                <Link className="btn btn-secondary" to="/events">Browse open shifts</Link>
+                <Link className="btn btn-secondary" to="/discover">Browse open shifts</Link>
               )}
             </>
           ) : (

@@ -161,7 +161,7 @@ export default function LoggedHours({ currentUser, addToast }) {
               icon={History}
               title="No confirmed shifts yet"
               message="Hours appear here once an organizer marks you present for a shift you worked."
-              action={<Link className="btn btn-primary btn-sm" to="/events">Find an opportunity</Link>}
+              action={<Link className="btn btn-primary btn-sm" to="/discover">Find an opportunity</Link>}
             />
           ) : (
             <ul className="list loggedhours-list">

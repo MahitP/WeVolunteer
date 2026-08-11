@@ -103,9 +103,24 @@ export default function Messages() {
     try {
       setShowPicker(false);
       const currentUser = api.getCurrentCachedUser();
-      const studentId = currentUser.role === 'student' ? currentUser.id : recipient.id;
-      const res = await api.resolveConversation(recipient.eventId, studentId);
-      
+
+      /**
+       * Which endpoint opens this thread is decided by what the row IS.
+       *
+       * `kind` comes from the search response rather than being inferred from
+       * `eventId` being absent — the same reason `decorateConversation` returns a
+       * stored `kind` instead of guessing from a null event. Both endpoints
+       * re-authorise from scratch, so this choice is a routing decision and never
+       * a permission one: sending a friend id to the event endpoint, or vice
+       * versa, is refused by the server, not by this branch.
+       */
+      const res = recipient.kind === 'friend'
+        ? await api.resolvePeerConversation(recipient.id)
+        : await api.resolveConversation(
+            recipient.eventId,
+            currentUser.role === 'student' ? currentUser.id : recipient.id
+          );
+
       setConversations(prev => {
         if (!prev.find(c => c.id === res.conversation.id)) {
           return [res.conversation, ...prev];
