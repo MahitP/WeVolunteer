@@ -1,0 +1,187 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { startTestServer } from './testServer.js';
+
+/**
+ * Peer eligibility gates DISCLOSURE, not only creation.
+ *
+ * ── The gap this closes ──
+ *
+ * Friendship became peer-only: `requestFriend` and `acceptFriend` both refuse a
+ * pair where either side lacks `event.apply`. That stops any NEW organizer↔
+ * student friendship from existing.
+ *
+ * It does nothing about one that already does. A row accepted before the rule
+ * shipped carries `status = 'accepted'`, and every write-path check has already
+ * run and passed for it — so the only thing between it and that student's
+ * school, grade and bio was `areFriends`, which asked about the row and about
+ * blocking and nothing else. Gating creation while leaving disclosure open
+ * preserves exactly the exposure the rule was written to remove, silently, on
+ * any database old enough to contain such a row.
+ *
+ * These cases therefore write the legacy row DIRECTLY, bypassing the routes,
+ * because that is the only way to reproduce a database that predates the rule —
+ * and it is the state the fix has to survive.
+ */
+describe('friend-tier visibility is peer-only', () => {
+  let srv, db, areFriends;
+  let organizerId, aliceId, bobId, carolId;
+  let alice, bob;
+
+  const PASSWORD = 'Password123';
+
+  /** Writes an accepted friendship straight into the table, as a pre-rule build would. */
+  const forceAcceptedFriendship = (id, actorId, subjectId) => {
+    db.prepare('DELETE FROM user_relationships WHERE id = ?').run(id);
+    db.prepare(`
+      INSERT INTO user_relationships (id, actor_id, subject_id, kind, status, created_at)
+      VALUES (?, ?, ?, 'friend', 'accepted', datetime('now'))
+    `).run(id, actorId, subjectId);
+  };
+
+  const drop = (id) => db.prepare('DELETE FROM user_relationships WHERE id = ?').run(id);
+
+  beforeAll(async () => {
+    srv = await startTestServer();
+    ({ db } = await import('./db.js'));
+    ({ areFriends } = await import('./relationships.js'));
+
+    organizerId = db.prepare('SELECT id FROM users WHERE email = ?')
+      .get('jkatzenback@vikings.org').id;
+
+    const make = async (name, username) => {
+      const r = await srv.signupConfirmed({
+        name, username, email: `${username}@peervis.example.org`,
+        grade: '11', role: 'student', password: PASSWORD,
+      });
+      return { token: r.cookie, id: r.user.id };
+    };
+    const a = await make('Ada Peer', 'ada_peer');
+    const b = await make('Ben Peer', 'ben_peer');
+    const c = await make('Cleo Peer', 'cleo_peer');
+    alice = a.token; aliceId = a.id;
+    bob = b.token; bobId = b.id;
+    carolId = c.id;
+  }, 60000);
+
+  afterAll(async () => { await srv?.close(); });
+
+  /* ── The case the feature exists for ──────────────────────────────────── */
+
+  it('grants friend visibility between two students', () => {
+    forceAcceptedFriendship('rel-peer-ok', aliceId, bobId);
+    expect(areFriends(db, aliceId, bobId)).toBe(true);
+    expect(areFriends(db, bobId, aliceId), 'direction must not matter').toBe(true);
+    drop('rel-peer-ok');
+  });
+
+  /* ── The legacy rows ──────────────────────────────────────────────────── */
+
+  /**
+   * The whole point. This row is indistinguishable from a legitimate one at the
+   * table level — it is only the CURRENT eligibility of the two accounts that
+   * disqualifies it.
+   */
+  it('refuses a legacy accepted organizer→student friendship', () => {
+    forceAcceptedFriendship('rel-legacy-org-student', organizerId, aliceId);
+    expect(areFriends(db, organizerId, aliceId)).toBe(false);
+    expect(areFriends(db, aliceId, organizerId)).toBe(false);
+    drop('rel-legacy-org-student');
+  });
+
+  it('refuses it in the other direction too', () => {
+    forceAcceptedFriendship('rel-legacy-student-org', aliceId, organizerId);
+    expect(areFriends(db, aliceId, organizerId)).toBe(false);
+    expect(areFriends(db, organizerId, aliceId)).toBe(false);
+    drop('rel-legacy-student-org');
+  });
+
+  /**
+   * And the refusal reaches the profile, which is where the exposure would
+   * actually have landed: `profile_visibility = 'friends'` hands over school,
+   * grade and bio to anyone `areFriends` calls a friend.
+   */
+  it('withholds the friends-only tier from a legacy non-peer relationship', async () => {
+    db.prepare("UPDATE users SET profile_visibility = 'friends' WHERE id = ?").run(aliceId);
+    forceAcceptedFriendship('rel-legacy-profile', organizerId, aliceId);
+
+    const organizerToken = await srv.login('jkatzenback@vikings.org');
+    const res = await srv.call('GET', `/api/users/${aliceId}`, undefined, organizerToken);
+
+    /* Whatever the endpoint chooses to return, it must not be the friends-only
+       fields. Asserted on the payload rather than on a status code, because a
+       200 that carries `school` is the failure this exists to catch. */
+    expect(res.body?.profile?.school ?? null).toBeNull();
+    expect(res.body?.profile?.grade ?? null).toBeNull();
+
+    drop('rel-legacy-profile');
+    db.prepare("UPDATE users SET profile_visibility = 'private' WHERE id = ?").run(aliceId);
+  });
+
+  /* ── Blocking still wins ──────────────────────────────────────────────── */
+
+  it('refuses friend visibility when one side has blocked the other', () => {
+    forceAcceptedFriendship('rel-blocked', aliceId, bobId);
+    db.prepare(`
+      INSERT INTO user_blocks (id, blocker_id, blocked_id, created_at)
+      VALUES ('blk-peervis', ?, ?, datetime('now'))
+    `).run(aliceId, bobId);
+
+    expect(areFriends(db, aliceId, bobId)).toBe(false);
+    expect(areFriends(db, bobId, aliceId)).toBe(false);
+
+    db.prepare("DELETE FROM user_blocks WHERE id = 'blk-peervis'").run();
+    expect(areFriends(db, aliceId, bobId), 'unblocking restores it').toBe(true);
+    drop('rel-blocked');
+  });
+
+  /* ── Removal ──────────────────────────────────────────────────────────── */
+
+  it('grants nothing once the friendship row is gone', async () => {
+    forceAcceptedFriendship('rel-removal', aliceId, bobId);
+    expect(areFriends(db, aliceId, bobId)).toBe(true);
+
+    const res = await srv.call('DELETE', `/api/users/${bobId}/friend`, undefined, alice);
+    expect(res.status).toBe(200);
+    expect(areFriends(db, aliceId, bobId)).toBe(false);
+  });
+
+  /* ── Degenerate inputs ────────────────────────────────────────────────── */
+
+  it('grants nothing for a missing account, self, or null', () => {
+    forceAcceptedFriendship('rel-degenerate', aliceId, bobId);
+    expect(areFriends(db, aliceId, aliceId), 'self').toBe(false);
+    expect(areFriends(db, aliceId, 'no-such-user'), 'missing subject').toBe(false);
+    expect(areFriends(db, 'no-such-user', bobId), 'missing actor').toBe(false);
+    expect(areFriends(db, null, bobId), 'null').toBe(false);
+    drop('rel-degenerate');
+  });
+
+  /**
+   * A pending row was never a friendship and must not become one by being
+   * looked at. Guards the read side against the same mistake the write side
+   * already refuses.
+   */
+  it('grants nothing for a pending request between peers', () => {
+    db.prepare(`
+      INSERT INTO user_relationships (id, actor_id, subject_id, kind, status, created_at)
+      VALUES ('rel-pending', ?, ?, 'friend', 'pending', datetime('now'))
+    `).run(bobId, carolId);
+    expect(areFriends(db, bobId, carolId)).toBe(false);
+    drop('rel-pending');
+  });
+
+  /* ── The ordinary path is untouched ───────────────────────────────────── */
+
+  it('still lets two students befriend each other through the real routes', async () => {
+    const request = await srv.call('POST', `/api/users/${carolId}/friend`, undefined, bob);
+    expect([200, 201]).toContain(request.status);
+
+    /* The fixture was created with PASSWORD, not the seeded accounts' default
+       that `srv.login` assumes. */
+    const carolToken = await srv.login('cleo_peer@peervis.example.org', PASSWORD);
+    const accept = await srv.call('POST', `/api/users/${bobId}/friend/accept`, undefined, carolToken);
+    expect(accept.status).toBe(200);
+
+    expect(areFriends(db, bobId, carolId)).toBe(true);
+  });
+});
