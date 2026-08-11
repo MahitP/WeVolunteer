@@ -805,9 +805,34 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
       });
     }
 
+    /**
+     * An absent geo field means "not editing it", not "clear it".
+     *
+     * The UPDATE below wrote `address`, `latitude` and `longitude`
+     * unconditionally from the body. `OrganizerDashboard`'s quick-edit form
+     * sends title, description, location and category and nothing else — so
+     * every quick save silently nulled the coordinates an organizer had picked
+     * on the map, and with them that event's distance filtering, its directions
+     * link and its forecast. The map data disappeared through the form that
+     * never mentions maps.
+     *
+     * Same distinction the `tags` block below makes, for the same reason: a
+     * client written before a field existed must not strip that field by saving
+     * something else. Explicit `null` still clears, so a deliberate "remove the
+     * pin" is still expressible.
+     *
+     * The coordinates move as a pair — `validateEventPayload` refuses one
+     * without the other — so they are kept or replaced together and never left
+     * half-written.
+     */
+    const nextAddress = address === undefined ? event.address : (address || null);
+    const editingCoords = latitude !== undefined || longitude !== undefined;
+    const nextLatitude = editingCoords ? (latitude ?? null) : event.latitude;
+    const nextLongitude = editingCoords ? (longitude ?? null) : event.longitude;
+
     const changes = [];
     if (event.title !== title) changes.push('title');
-    if (event.location !== location || event.address !== address) changes.push('location');
+    if (event.location !== location || event.address !== nextAddress) changes.push('location');
     if (event.application_deadline !== applicationDeadline) changes.push('deadline');
     if (event.description !== description) changes.push('description');
 
@@ -929,7 +954,7 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
         SET title = ?, description = ?, category = ?, location = ?, application_deadline = ?,
             address = ?, latitude = ?, longitude = ?
         WHERE id = ?
-      `).run(title, description, category, location, applicationDeadline, address || null, latitude != null ? latitude : null, longitude != null ? longitude : null, eventId);
+      `).run(title, description, category, location, applicationDeadline, nextAddress, nextLatitude, nextLongitude, eventId);
 
       if (autoApprove !== undefined) {
         db.prepare('UPDATE events SET auto_approve = ? WHERE id = ?').run(autoApprove ? 1 : 0, eventId);
