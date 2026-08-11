@@ -4441,9 +4441,34 @@ time { font-variant-numeric: tabular-nums; }
 }
 
 /* Premium Notifications Center */
+/**
+ * Visual treatment only. Geometry belongs to `.notifications-popover`.
+ *
+ * This block used to set `width: 380px` and `max-height: 85vh`, and both were
+ * silent regressions of the responsive design — not because they are wrong
+ * numbers, but because of where they sit. `.notifications-popover` already
+ * declares `width: min(380px, calc(100vw - 2rem))` (line ~2553) and the
+ * `max-width: 700px` query re-anchors the popover to `left`/`right` insets with
+ * `width: auto` (line ~3174). All three selectors are a single class, so they
+ * have equal specificity — and a media query adds none — which means the LAST
+ * declaration in the file wins. This block is the last one.
+ *
+ * The element carries all three classes together
+ * (`popover notifications-popover premium-popover`, NotificationsBell.jsx), so
+ * the computed width was a flat 380px at every viewport. At 320px that is 380px
+ * of fixed-position panel starting at a left inset: the notification list ran
+ * roughly 76px past the right edge of the screen, with the close and
+ * mark-all-read controls in the clipped region. `max-height: 85vh` did the same
+ * to the mobile `calc(100vh - 78px)`, which matters on a viewport under ~390px
+ * tall where `top: 58px` plus 85vh exceeds the screen.
+ *
+ * Removing the two declarations rather than making them responsive: the
+ * positioning class already expresses the intent correctly at all three
+ * breakpoints, and a second source of truth for the same geometry is what
+ * produced this. `.premium-popover` keeps the radius, shadow and blur it exists
+ * for.
+ */
 .premium-popover {
-  width: 380px;
-  max-height: 85vh;
   border-radius: 16px;
   box-shadow: 0 10px 40px -10px rgba(0,0,0,0.15), 0 0 0 1px var(--border);
   background: var(--surface);
