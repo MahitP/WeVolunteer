@@ -106,12 +106,19 @@ const FORBIDDEN_VALUES = [
 let BASELINE_KEYS, SENSITIVE_KEYS, CONTACT_KEYS;
 
 /**
- * The two fields a DISTINGUISHED account carries unconditionally and an ordinary
- * account does not carry at all.
+ * The fields a DISTINGUISHED account carries unconditionally.
  *
- * They are free text under a name — the same kind of thing as `bio`, which is
- * gated — so on a student they follow the privacy setting. On an owner or a
- * partner they are the point of the page. See the note at their emission site.
+ * `headline` and `highlights` an ordinary account does not carry at all — they
+ * are free text under a name, so on a student they would be a second `bio`, and
+ * the safe version of "a student's headline is private" is a student having no
+ * headline.
+ *
+ * `bio` is deliberately NOT in this list, even though an institutional account
+ * carries it unconditionally too. It already belongs to `SENSITIVE_KEYS` —
+ * every account has a bio, and on a student it stays behind
+ * `profile_visibility` exactly as it always has — so listing it here as well
+ * would double it in the concatenations below. The institutional exemption is
+ * asserted directly instead, in both directions, in the two tests that name it.
  */
 const DISTINGUISHED_KEYS = ['headline', 'highlights'];
 
@@ -173,11 +180,30 @@ describe('what a public profile may contain', () => {
      an owner's one-line introduction must not vanish behind a privacy toggle. */
   it.each(['super_admin', 'partner'])(
     'keeps a %s account\'s headline and highlights at every privacy setting', (role) => {
-      db.prepare(`UPDATE users SET profile_visibility = 'private', role = ?`).run(role);
+      db.prepare(`UPDATE users SET profile_visibility = 'private', role = ?, bio = 'Who we are.'`)
+        .run(role);
       const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
       for (const k of DISTINGUISHED_KEYS) expect(p).toHaveProperty(k);
+      /* The exemption this test exists to pin: a partner's own description of
+         itself is visible at a private setting, because an institution is not a
+         child and the paragraph IS the page. */
+      expect(p.bio, 'an institution\'s own description is the page').toBe('Who we are.');
       expect(p.distinction).toBeTruthy();
+
+      /* The exemption is for the institutional fields ONLY. School and grade
+         stay behind the privacy setting whoever holds the account — nothing
+         here widens what is disclosed about a person. */
+      for (const k of ['school', 'grade', 'graduationYear']) expect(p).not.toHaveProperty(k);
     });
+
+  /* And the other direction: a STUDENT's bio keeps its gate exactly as it was. */
+  it('still hides an ordinary account\'s bio at a private setting', () => {
+    db.prepare(`UPDATE users SET profile_visibility = 'private', role = 'student', bio = 'Mine.'`)
+      .run();
+    const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
+    expect(p).not.toHaveProperty('bio');
+    expect(p.distinction).toBeNull();
+  });
 
   /* 'friends' behaves as 'private' to a stranger and as 'public' to an accepted
      friend. One decision, made here, so no consumer invents its own reading. */

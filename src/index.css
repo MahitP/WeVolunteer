@@ -8715,6 +8715,79 @@ input:disabled + .premium-slider {
 }
 .distinction-highlight svg { flex-shrink: 0; margin-top: 0.2em; }
 
+/**
+ * ── The blocks a distinguished profile grew ──
+ *
+ * All four sit inside `.distinction`, which is already a tinted panel with a
+ * stronger left edge, so none of them introduces a surface of its own. The
+ * hierarchy is carried by type and colour alone: the account's own words are
+ * the largest and darkest, the platform's explanation of the role is the
+ * smallest and lightest, and nothing new is boxed, bordered or shadowed.
+ *
+ * That restraint is the point. This card has to say "this account has a role
+ * here" without saying "this person matters more than the others", and every
+ * extra frame pushes it toward the second reading.
+ */
+
+/* The holder's own paragraph. One step down from the headline, still clearly
+   theirs rather than the platform's. */
+.distinction-about {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* A labelled sub-block. `--s2` between the heading and its content, `--s3`
+   above, so the group reads as one thing without a rule to separate it. */
+.distinction-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+/**
+ * The `h3` inside the card.
+ *
+ * Deliberately NOT display type: it is a label for the list beneath it, and
+ * setting it in Bricolage at heading weight would make it compete with the
+ * `h2` two lines above. Uppercase with tracking is what the rest of this
+ * product uses for a field label, so it is what a reader already knows.
+ */
+.distinction-block-head {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/**
+ * What the role means, in the platform's words.
+ *
+ * Separated by a hairline rather than by space alone, because it is the one
+ * block on this card the account holder did not write — the line is the visual
+ * form of that change in voice. Quietest thing in the card, and last, since it
+ * is reference rather than news.
+ */
+.distinction-role-note {
+  margin: 0;
+  padding-top: var(--s3);
+  border-top: 1px solid var(--brand-tint-2);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+.distinction[data-kind='partner'] .distinction-role-note {
+  border-top-color: var(--info-tint);
+}
+
 .distinction-tag {
   gap: var(--s1);
   background: var(--brand-tint-2);
