@@ -9,8 +9,13 @@ import {
 import { api } from '../utils/api';
 import {
   formatDay, formatTime, formatTimeRange, countdown,
-  selectionMethodLabel, eventPermissions, usesAutoSelect
+  selectionMethodLabel, eventPermissions, usesAutoSelect, haversineDistance
 } from '../utils/helpers';
+import { useLocationContext } from '../contexts/LocationContext';
+import LocationLink from './location/LocationLink';
+import DirectionsButton from './location/DirectionsButton';
+import MapReveal from './location/MapReveal';
+import WeatherSummary from './location/WeatherSummary';
 import EventEditForm from './EventEditForm';
 import EventAttendance from './EventAttendance';
 import EventComments from './EventComments';
@@ -62,6 +67,30 @@ export default function EventModal({
         slots: [...slots].sort((a, b) => new Date(a.startDatetime) - new Date(b.startDatetime))
       }));
   }, [event?.slots]);
+
+  /**
+   * How far this event is from wherever the volunteer is standing.
+   *
+   * Computed here rather than read from `event.distance`: the server only fills
+   * that field in when the request carried coordinates, which the browse list
+   * does and the index feeding this modal does not. So a modal opened from the
+   * calendar or the dashboard would show no distance at all.
+   *
+   * Doing it client-side also means the volunteer's exact position never leaves
+   * the device. The browse filter sends a coordinate coarsened to about a
+   * kilometre, which is fine for "within five miles" and much too coarse for a
+   * number somebody reads — this one is exact because it is computed where the
+   * exact position already is. `useLocationContext` holds it only in memory,
+   * only for the session, and only after the volunteer has opted in.
+   *
+   * Above the early return, with the `days` memo, so hook order cannot shift
+   * between a render with an event and one without.
+   */
+  const { location: myLocation } = useLocationContext();
+  const distanceMiles = useMemo(() => {
+    if (!myLocation || event?.latitude == null || event?.longitude == null) return null;
+    return haversineDistance(myLocation.latitude, myLocation.longitude, event.latitude, event.longitude);
+  }, [myLocation, event?.latitude, event?.longitude]);
 
   const permissions = eventPermissions(event);
   const isOwner = currentUser?.role === 'organizer' && currentUser.id === event?.organizerId;
@@ -406,7 +435,22 @@ export default function EventModal({
                 </div>
                 <div>
                   <div className="eyebrow">Where</div>
-                  <div className="small strong" style={{ marginTop: 2 }}>{event.location}</div>
+                  <div className="small strong" style={{ marginTop: 2 }}>
+                    <LocationLink
+                      location={event.location}
+                      address={event.address}
+                      latitude={event.latitude}
+                      longitude={event.longitude}
+                    />
+                  </div>
+                  {/* The street address only when it says something the name did
+                      not. "Reichler Park / Reichler Park" is noise. */}
+                  {event.address && event.address !== event.location && (
+                    <div className="small muted">{event.address}</div>
+                  )}
+                  {distanceMiles != null && (
+                    <div className="small muted tnum">{distanceMiles.toFixed(1)} mi away</div>
+                  )}
                 </div>
                 <div>
                   <div className="eyebrow">Applications close</div>
@@ -428,6 +472,41 @@ export default function EventModal({
                 </p>
               )}
             </div>
+
+            {/**
+              * Getting there.
+              *
+              * Above "Before you go" on purpose: arrival instructions assume you
+              * already know where you are going, so the directions and the
+              * forecast belong first.
+              *
+              * Every part of this is conditional and the block degrades to
+              * nothing. An event with no location information at all renders no
+              * empty container, no heading and no disabled button.
+              */}
+            {(event.latitude != null || event.address || event.location) && (
+              <div style={{ marginBottom: 'var(--s5)' }}>
+                <div className="row row-wrap" style={{ gap: 'var(--s3)', marginBottom: 'var(--s3)' }}>
+                  <DirectionsButton
+                    latitude={event.latitude}
+                    longitude={event.longitude}
+                    address={event.address}
+                    label={event.location}
+                  />
+                  <WeatherSummary
+                    latitude={event.latitude}
+                    longitude={event.longitude}
+                    datetime={event.startDatetime}
+                  />
+                </div>
+                <MapReveal
+                  latitude={event.latitude}
+                  longitude={event.longitude}
+                  label={event.location}
+                  height={220}
+                />
+              </div>
+            )}
 
             {/* Arrival instructions are for people actually going */}
             {event.instructions && (iAmConfirmed || isOwner || isAdmin) && (
