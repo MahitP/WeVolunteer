@@ -70,7 +70,33 @@ export default defineConfig({
           include: ['server/**/*.test.js'],
           exclude: EXCLUDE,
           environment: 'node',
-          isolate: true
+          isolate: true,
+          /**
+           * Fifteen seconds, on the SERVER project only.
+           *
+           * Vitest's default is five, which is ample for a unit test and not
+           * ample for this suite. A server test boots the real application
+           * against a throwaway SQLite file, and the authentication paths hash
+           * with bcrypt at cost 10 — enrolment alone hashes ten recovery codes
+           * before it verifies anything, and a recovery sign-in compares against
+           * the whole set. One of those takes well under a second on an idle
+           * machine and several seconds when the whole worker pool is busy.
+           *
+           * The symptom was a suite that failed differently on every run: one to
+           * three files, never the same ones, every failure `Test timed out in
+           * 5000ms`, and every one of them passing in isolation. That is a
+           * measurement artefact reported as a defect, and the cost is worse
+           * than the noise — a suite that cries wolf is one people stop reading.
+           *
+           * Raised rather than removed, and raised only here. A genuine hang
+           * still fails, fifteen seconds is still far below anything a correct
+           * test needs, and the client project keeps the default because jsdom
+           * tests do no such work and a slow one there is a real finding.
+           *
+           * This is not a licence to write slow tests. A case that needs longer
+           * than this should say so at the call site, as several already do.
+           */
+          testTimeout: 15_000
         }
       }
     ]

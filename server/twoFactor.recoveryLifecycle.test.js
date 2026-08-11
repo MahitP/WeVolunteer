@@ -240,7 +240,7 @@ describe('the recovery set over an account lifetime', () => {
       expect(status.status).toBe(200);
       expect(status.body.recoveryCodesRemaining).toBe(codeCount(user.id));
       expect(status.body.recoveryCodesRemaining).toBe(9);
-    });
+    }, 30_000);
   });
 
   /* ── Adding and removing factors ──────────────────────────────────────── */

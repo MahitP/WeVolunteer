@@ -59,6 +59,9 @@ import crypto from 'node:crypto';
    to respect — see `areFriends`. blocking.js imports nothing but node:crypto, so
    this direction cannot become a cycle. */
 import { isBlockedBetween } from './blocking.js';
+/* `authz.js` imports nothing at all — see its header — so reading the capability
+   table here cannot create a cycle. */
+import { can, principalFor } from './authz.js';
 
 export const RELATIONSHIP_KINDS = Object.freeze(['friend', 'mute', 'restrict']);
 
@@ -105,12 +108,61 @@ export function relationship(db, actorId, subjectId, kind) {
 export function areFriends(db, a, b) {
   if (!a || !b || a === b) return false;
   if (isBlockedBetween(db, a, b)) return false;
+  if (!arePeers(db, a, b)) return false;
   return Boolean(db.prepare(`
     SELECT 1 FROM user_relationships
     WHERE kind = 'friend' AND status = 'accepted'
       AND ((actor_id = ? AND subject_id = ?) OR (actor_id = ? AND subject_id = ?))
     LIMIT 1
   `).get(a, b, b, a));
+}
+
+/**
+ * Whether these two accounts may be friends at all.
+ *
+ * ── Why friendship is peer-only ──
+ *
+ * An accepted friendship opens the friends-only profile tier — school, grade,
+ * bio — and the signup notifications. Between two students that is a mutual
+ * exchange between equals. Between an organizer and a student it is not: the
+ * adult who decides whether a fourteen-year-old is placed on a shift would be
+ * asking that student for access to their school and year, and "no" is a much
+ * harder answer to give upward than sideways.
+ *
+ * ── Derived from a capability, never from a role name ──
+ *
+ * `event.apply` is the capability that means "this account volunteers here",
+ * which is exactly the population for whom friendship is a peer relationship.
+ * Reading it through `can()` rather than comparing `role` keeps this rule in
+ * step with the authorization kernel automatically: a role added later is
+ * classified by what it can DO, and `authz.completeness.test.js` forbids the
+ * role-string spelling outright.
+ *
+ * ── Why it is also enforced on the READ side ──
+ *
+ * `requestFriend` and `acceptFriend` both refuse a non-peer pair, so no new row
+ * can be created. That is not sufficient on its own. A row accepted BEFORE the
+ * rule existed is already `status = 'accepted'`, and every check on the write
+ * path has already run and passed for it — so the only thing standing between a
+ * legacy organizer↔student row and that student's school, grade and bio is this
+ * function. Gating creation without gating disclosure would have left the exact
+ * exposure the rule was written to close, silently, on any database old enough
+ * to contain one.
+ *
+ * Enforced here for the same reason the block check is: this is the single gate
+ * that unlocks the friends-only tier, so one check covers every present and
+ * future consumer.
+ *
+ * A missing or deleted account is not a peer — `principalFor` returns null for
+ * it, and `can(null, …)` is false, so a relationship pointing at a row that is
+ * gone grants nothing.
+ */
+export function arePeers(db, a, b) {
+  const rows = db.prepare(
+    'SELECT id, role FROM users WHERE id IN (?, ?)'
+  ).all(a, b);
+  if (rows.length !== 2) return false;
+  return rows.every(row => can(principalFor(row), 'event.apply'));
 }
 
 /** True when either party has restricted the other. */
