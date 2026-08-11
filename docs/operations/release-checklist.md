@@ -226,6 +226,49 @@ person remembering. Migrations run automatically and unattended at boot
 - [ ] The export directory is `0700` and on the same backed-up volume as the database.
 - [ ] The district has been told, in writing, what is stored and who can see it.
 
+### Making the repository public — a gate, not a step
+
+The working tree is clean: the demo seed and every test fixture use synthetic
+identities on reserved `example.*` domains, and a scan of the current tree finds
+zero personal addresses. **Git history is a different question, and it is not
+resolved by that.**
+
+Until 2026-08-11 the `DEMO_MODE` seed carried real volunteers of a real school —
+including students in grades 10 and 11 with full names, working addresses at
+consumer domains, a school and a year group — and because those addresses were
+the suite's login fixtures they had spread to over a hundred files. Commit
+`ae4c5d7` replaced them. Every commit BEFORE it still contains them.
+
+That data is pinned by **nine refs that are published to `origin`**, not one:
+
+- `refs/heads/main` and `refs/heads/claude/fix-ci-db-tooling-qd1gbz`
+- `refs/tags/v1.0.0`, `v1.0.0-pilot`, `v1.1.0`
+- `refs/tags/backup/pre-scrub-2026-07-31`,
+  `backup/main-pre-consolidation-2026-07-31`,
+  `backup/v1.1-pre-consolidation-2026-07-31`,
+  `archive/stabilization-backup-pre-purge-2026-07-31`
+
+All 408 commits reachable from `origin/main` carry them (earliest `ed2dea1`,
+2026-07-20). Rewriting `main` alone would remove nothing, because the four
+backup/archive tags exist precisely to pin the pre-rewrite commits — that is what
+they are for.
+
+**This does not block the launch.** The repository is private and deliberately so
+(see the Licence section of README.md: all rights reserved, no licence granted),
+and nothing in the deployment requires publishing it. Launching does not publish
+anything.
+
+- [ ] **If the repository is ever made public, this must be resolved first.** The
+      options are: rewrite history across all nine refs and force-update them
+      (destroys the shared history and every published tag, and any existing
+      clone or fork still has the data); publish a fresh repository whose first
+      commit is the current clean tree (keeps the data private, loses the public
+      development record); or keep it private. Given the subjects include minors,
+      the middle option is the one to prefer.
+- [ ] Anyone granted collaborator access to the private repository can read the
+      historical data. Grant access on that understanding, or resolve the history
+      first.
+
 ---
 
 ## 10 — Credential rotation

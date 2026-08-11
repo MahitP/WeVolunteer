@@ -67,6 +67,10 @@ export default defineConfig({
       {
         test: {
           name: 'server',
+          /* Reclaims the throwaway temp directories a dozen server suites leave
+             behind. See server/testTempCleanup.js for why this is one global hook
+             with an age threshold rather than 55 afterAll blocks. */
+          globalSetup: ['./server/testTempCleanup.js'],
           include: ['server/**/*.test.js'],
           exclude: EXCLUDE,
           environment: 'node',
