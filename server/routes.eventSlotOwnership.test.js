@@ -35,8 +35,18 @@ import { startTestServer } from './testServer.js';
  */
 /* Far enough out that the route's own "deadline before first shift" rule can be
    satisfied, and long enough that the hours inflation is unmistakable: 96 hours. */
+/**
+ * Twenty hours rather than four days.
+ *
+ * This was a four-day span, chosen to make the damage vivid — and a single
+ * shift may no longer be longer than twenty-four hours (`MAX_SLOT_HOURS`), so
+ * that payload is now refused by the DURATION rule before it ever reaches the
+ * ownership check this file is about. Twenty hours is still a gross rewrite of
+ * a two-hour shift and still credits ten times what the victim's volunteers
+ * signed up for; it just fails for the reason under test.
+ */
 const HIJACK_START = '2030-01-01T00:00:00.000Z';
-const HIJACK_END = '2030-01-05T00:00:00.000Z';
+const HIJACK_END = '2030-01-01T20:00:00.000Z';
 
 describe('PUT /api/events/:id cannot reach another event\'s shifts', () => {
   let srv, db, organizer;
@@ -89,8 +99,8 @@ describe('PUT /api/events/:id cannot reach another event\'s shifts', () => {
       location: event.location,
       applicationDeadline: deadlineBefore(HIJACK_START),
       slots: [{
-        /* The victim's slot, with times that would credit 96 hours instead of a
-           few, and a spot count that would break their waitlist. */
+        /* The victim's slot, with times that would credit twenty hours instead
+           of a few, and a spot count that would break their waitlist. */
         id: foreignSlot.id,
         name: 'Hijacked',
         description: 'x',

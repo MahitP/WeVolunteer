@@ -320,23 +320,26 @@ describe('the password step during authenticator enrolment', () => {
   });
 
   /**
-   * The Escape assertion is SYNCHRONOUS, and that is the point.
+   * ── A known flake, and an honest note about it ──
    *
-   * It was `await waitFor(() => expect(queryByRole('dialog')).toBeNull())`, and
-   * it failed roughly one full-suite run in two — never on its own (0/25), never
-   * in the client project alone (3/3), only with all 289 files in flight.
+   * This assertion was `waitFor(... toBeNull())`, failed roughly one full-suite
+   * run in two, and never failed in isolation. It was changed to a synchronous
+   * assertion on the reasoning that `fireEvent` is act-wrapped and the close is
+   * a plain `setState`, so the dialog must be gone before the next line — and
+   * that reasoning was WRONG, or at least incomplete: the synchronous form
+   * still fails under full-suite load, which means the dialog genuinely has not
+   * closed at that moment rather than merely not been observed.
    *
-   * `waitFor` spends a 1000ms WALL-CLOCK budget, and under that much parallel
-   * load its polling can be starved past the deadline. But nothing here is
-   * asynchronous: `useModal`'s keydown handler calls `onClose` directly,
-   * `settle` calls `setPrompt(null)`, and `fireEvent` is act-wrapped, so React
-   * has flushed the unmount before the next line runs. A timeout was therefore
-   * never evidence about the component — only about how busy the machine was.
+   * The suspected cause is the module-level stack in `useModal`: Escape is
+   * ignored by a dialog that is not `isTopmost()`, so a token left behind by an
+   * earlier mount would silence this one. That is a real defect if true, but it
+   * is in shared modal infrastructure and diagnosing it properly needs a
+   * reproduction this test has not yet produced.
    *
-   * Asserting synchronously removes the clock from the test and makes it
-   * STRICTER: a dialog that closes a tick late now fails immediately instead of
-   * being waited into passing. That is the opposite of raising a timeout, which
-   * would have hidden a real defect in the same place.
+   * So `waitFor` is restored — not as a fix, but because it is the honest shape
+   * for an assertion whose timing is not understood, and it fails loudly rather
+   * than silently when the dialog never closes at all. Recorded here rather than
+   * left as a mystery for whoever hits it next.
    */
   it('moves focus into the dialog and closes on Escape', async () => {
     mockServer();
@@ -349,7 +352,7 @@ describe('the password step during authenticator enrolment', () => {
     expect(document.activeElement).toBe(field);
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });
 
