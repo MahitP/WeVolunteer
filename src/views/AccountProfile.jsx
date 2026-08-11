@@ -110,15 +110,24 @@ export default function AccountProfile({ currentUser, onEditProfile }) {
           </div>
         </div>
 
-        {bio && <p className="profile-bio">{bio}</p>}
+        {/* On an institutional account the bio moves into the distinction card,
+            where it reads as the account's description of itself rather than as
+            an aside under a handle. Same field, drawn once — see the matching
+            note in PublicProfile.jsx. */}
+        {bio && !distinction && <p className="profile-bio">{bio}</p>}
       </section>
 
-      <DistinctionBanner distinction={distinction} headline={headline} highlights={highlights} />
+      <DistinctionBanner
+        distinction={distinction}
+        headline={headline}
+        highlights={highlights}
+        about={bio}
+      />
 
       {hasService && (
         <section className="card">
           <div className="card-head row-between row-wrap">
-            <h2>Volunteering</h2>
+            <h2>{distinction?.contributionLabel ?? 'Volunteering'}</h2>
             <span className="tag tag-ok">Confirmed by an organizer</span>
           </div>
           <div className="card-body stack-md">
@@ -135,7 +144,10 @@ export default function AccountProfile({ currentUser, onEditProfile }) {
 
       {(hobbies.length > 0 || skills.length > 0) && (
         <section className="card">
-          <div className="card-head"><h2>Interests</h2></div>
+          {/* "Interests" is a student word. An organization does not have
+              hobbies, so the heading comes from the distinction table — one
+              edit adds a third kind of account without a branch here. */}
+          <div className="card-head"><h2>{distinction?.interestsLabel ?? 'Interests'}</h2></div>
           <div className="card-body stack-md">
             {hobbies.length > 0 && <ChipRow title="Hobbies" items={hobbies} icon={Sparkles} />}
             {skills.length > 0 && <ChipRow title="Skills" items={skills} icon={Check} />}

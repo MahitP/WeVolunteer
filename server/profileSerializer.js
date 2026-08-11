@@ -88,16 +88,54 @@ import { volunteerStats, externalHoursSummary } from './volunteerStats.js';
  * of the member fields would hide a genuine service record behind a job title;
  * returning it alongside is what makes one page describe one person.
  */
+/**
+ * ── The copy here is platform-authored, and every line of it has to be TRUE ──
+ *
+ * These strings are written by this repository, not by the account they
+ * describe, and they appear on a page a reader will treat as the platform
+ * vouching for somebody. So they say only what this codebase can actually
+ * demonstrate from the role: what the account can do, and how it got here.
+ *
+ * They deliberately claim nothing about legal structure, incorporation,
+ * charitable status, funding, staff, endorsement or the size of any
+ * relationship, because none of that is knowledge this system holds. A partner
+ * row is a `users.role` value; it is not a signed agreement, and copy that
+ * implied one would be the platform asserting something on somebody else's
+ * behalf.
+ *
+ * `blurb` is the one-line form used in tight places. `description` is the
+ * paragraph a profile page can afford, and it exists so that "what IS a
+ * community partner?" is answered on the page rather than left to a reader who
+ * has never seen the word used this way. `contributionLabel` and
+ * `interestsLabel` name the sections beneath, because "Volunteering" and
+ * "Interests" are student words and an organization does not have hobbies.
+ */
 const DISTINCTIONS = {
   super_admin: {
     kind: 'owner',
     label: 'Platform owner',
     blurb: 'Runs WeVolunteer for the district.',
+    description:
+      'This account runs WeVolunteer — the person responsible for how the '
+      + 'platform works, what it does with your information, and the policies in '
+      + 'the Legal Center. If something here is wrong or unfair, this is the '
+      + 'account that can change it.',
+    contributionLabel: 'Volunteering',
+    interestsLabel: 'Interests',
+    highlightsLabel: 'What this account does here',
   },
   partner: {
     kind: 'partner',
     label: 'Community partner',
     blurb: 'An outside organization that works with WeVolunteer.',
+    description:
+      'A community partner is an organization outside the school that takes part '
+      + 'in WeVolunteer. Partner accounts can see what is posted across the '
+      + 'district, and deliberately cannot browse student profiles or search the '
+      + 'member directory.',
+    contributionLabel: 'On WeVolunteer',
+    interestsLabel: 'Areas of involvement',
+    highlightsLabel: 'What we do',
   },
 };
 
@@ -270,6 +308,30 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
   if (distinction || sensitiveVisible) {
     profile.headline = row.profile_headline || null;
     profile.highlights = parseHighlights(row.profile_highlights);
+  }
+
+  /**
+   * ── `bio` follows the headline onto an institutional account ──
+   *
+   * `bio` was gated by `profile_visibility` for everybody, and that column
+   * defaults to `'private'`. So a community partner's own description of itself
+   * — the paragraph explaining who they are and what they do here — was
+   * invisible to every reader until somebody found a privacy setting written
+   * for a fourteen-year-old and changed it.
+   *
+   * That is the same asymmetry the headline note above resolves, applied to the
+   * same kind of text, and it was simply not carried across: the argument is
+   * word for word the one already made there. An institution's public
+   * description disappearing behind a child-safety toggle is not privacy, it is
+   * a page that fails to say what it is for.
+   *
+   * Emitted in this branch and NOT on the public baseline, which is the
+   * distinction that matters. A student's `bio` keeps its gate exactly as it
+   * was — the block below still owns that case — and nothing here widens what
+   * is disclosed about a minor.
+   */
+  if (distinction && !sensitiveVisible) {
+    profile.bio = row.bio || '';
   }
 
   /**

@@ -326,7 +326,18 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
           </div>
         </div>
 
-        {profile.bio && <p className="profile-bio">{profile.bio}</p>}
+        {/**
+          * An institutional account's bio moves into the distinction card.
+          *
+          * It is the same field, drawn once. On a student the bio belongs in
+          * the identity block, next to their name — it is a personal note. On an
+          * owner or a partner it IS the account's description of itself, so it
+          * reads as part of "what this account is" rather than as an aside
+          * under a handle, and the distinction card is where that question is
+          * being answered. Drawing it in both places would be one paragraph
+          * twice on one screen.
+          */}
+        {profile.bio && !profile.distinction && <p className="profile-bio">{profile.bio}</p>}
 
         {/**
           * The privacy notice is shown to the VIEWER, not as a warning about the
@@ -361,6 +372,7 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
         distinction={profile.distinction}
         headline={profile.headline}
         highlights={profile.highlights}
+        about={profile.bio}
       />
 
       {/**
@@ -381,7 +393,11 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
         || stats.eventsSignedUp > 0 || stats.eventsAttended > 0
         || stats.hours > 0 || profile.lastVolunteeredAt) && (
       <section className="card">
-        <div className="card-head"><h2>Volunteering</h2></div>
+        {/* "Volunteering" is the student word for it. An institutional account
+            names the same section differently — the label comes from the
+            distinction table so a third kind of account is one edit there
+            rather than a branch here. */}
+        <div className="card-head"><h2>{profile.distinction?.contributionLabel ?? 'Volunteering'}</h2></div>
         <div className="card-body">
           <div className="stats profile-stats">
             <Stat icon={CalendarDays} label="Events signed up" value={stats.eventsSignedUp} />
@@ -429,7 +445,7 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
       {/* ── Interests ── */}
       {(profile.hobbies?.length > 0 || profile.skills?.length > 0) && (
         <section className="card">
-          <div className="card-head"><h2>Interests</h2></div>
+          <div className="card-head"><h2>{profile.distinction?.interestsLabel ?? 'Interests'}</h2></div>
           <div className="card-body stack-md">
             {profile.hobbies?.length > 0 && (
               <ChipRow title="Hobbies" items={profile.hobbies} icon={Sparkles} />
