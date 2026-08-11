@@ -184,7 +184,21 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
   const eventId = req.params.id;
   const { slotId } = req.body;
 
-  if (!slotId) {
+  /**
+   * A slot id is a string, and anything else is a malformed request.
+   *
+   * `!slotId` alone let `true`, `{a:{b:1}}` and `['slot-1']` through to the
+   * lookup below, where node:sqlite refuses to bind them — a boolean raises
+   * "Provided value cannot be bound to SQLite parameter 1", and any non-null
+   * object is read as a bag of NAMED parameters, so `{a:…}` raises "Unknown
+   * named parameter 'a'". Both landed in the catch and answered 500, which
+   * says the server is broken when the request was.
+   *
+   * Same rule and same reason as the non-string report `targetId` in
+   * reportService.js; `routes.malformed.test.js` is where that class of defect
+   * is asserted, and this one is asserted there too.
+   */
+  if (typeof slotId !== 'string' || slotId.trim() === '') {
     return res.status(400).json({ error: 'Required slotId missing' });
   }
 

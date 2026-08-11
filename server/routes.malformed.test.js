@@ -83,6 +83,40 @@ describe('malformed input returns 400, not 500', () => {
     expect(res.status).toBe(400);
   });
 
+  /**
+   * The apply route's slot id, found by an extreme-usage fuzzing pass.
+   *
+   * `!slotId` was the only guard, so three shapes reached the SQL binder and
+   * came back as 500: a boolean (node:sqlite refuses to bind it) and any
+   * non-null object or array (read as a bag of NAMED parameters, raising
+   * "Unknown named parameter 'a'"). Three of 350 malformed bodies answered
+   * "Internal server error applying to event" for what was a client mistake.
+   */
+  describe('a slot id that is not a string', () => {
+    for (const [label, slotId] of [
+      ['a boolean', true],
+      ['a nested object', { a: { b: 1 } }],
+      ['an array', ['slot-softball-1']],
+      ['a number', 12345],
+    ]) {
+      it(`rejects ${label}`, async () => {
+        const res = await srv.call('POST', '/api/events/event-softball/apply', { slotId }, studentToken);
+        expect(res.status, JSON.stringify(res.body)).toBe(400);
+      });
+    }
+
+    it('still accepts a well-formed string slot id (no over-tightening)', async () => {
+      const events = await srv.call('GET', '/api/events', undefined, studentToken);
+      const event = (events.body.events ?? events.body).find(e => e.slots?.length);
+      const res = await srv.call('POST', `/api/events/${event.id}/apply`,
+        { slotId: event.slots[0].id, overrideConflict: true }, studentToken);
+      expect([201, 400]).toContain(res.status);
+      /* 400 only ever means a product rule (deadline passed, already applied) —
+         never the shape of the request. */
+      if (res.status === 400) expect(res.body.error).not.toMatch(/Required slotId missing/);
+    });
+  });
+
   it('still accepts a well-formed event (no over-tightening)', async () => {
     const res = await srv.call('POST', '/api/events', validEvent({ title: 'Valid After Hardening' }), orgToken);
     expect(res.status).toBe(201);
