@@ -503,11 +503,33 @@ export function parseEffectiveAt(raw, { now = new Date(), previousEffectiveAt = 
 
   const today = dayOf(now);
 
-  /* Rule 2. Same-day passes — that is the ordinary case, not an edge one. */
-  if (value < today) {
+  /**
+   * Rule 2, with one day of slack, and the slack is not politeness.
+   *
+   * The server computes "today" in UTC; the browser computes the date it
+   * prefills and the `min` it puts on the picker from the OWNER's local
+   * calendar. Those are different days for part of every day. In America/New_York
+   * the UTC date rolls over at 20:00 local, so for four hours each evening — five
+   * in winter — the editor would offer a default of "today", mark the field with
+   * `min="today"`, and then be refused by a server that had already moved on.
+   * The owner would have to type tomorrow's date to publish tonight, on a field
+   * whose whole purpose is to record what the document says.
+   *
+   * Making the server read local time is not the fix: `effective_at` is a
+   * calendar date with no zone, and `legalDates.js` documents at length why
+   * treating it as an instant prints the wrong day west of Greenwich.
+   *
+   * So the floor is yesterday-in-UTC. No inhabited offset is more than fourteen
+   * hours from UTC, so one day of slack accepts every owner's genuine "today"
+   * wherever they are, while still refusing a date that is actually in the past —
+   * which is what this rule is for. Backdating a legal document by one day is
+   * not the abuse anybody was worried about; `1970-01-01` was.
+   */
+  const earliest = dayOf(new Date(new Date(today).getTime() - 86400000));
+  if (value < earliest) {
     throw new LegalValidationError(
       'A version cannot take effect before it is published. '
-      + `The earliest date you can choose is ${today}.`,
+      + `The earliest date you can choose is ${earliest}.`,
       'effectiveAt'
     );
   }
@@ -522,8 +544,22 @@ export function parseEffectiveAt(raw, { now = new Date(), previousEffectiveAt = 
     );
   }
 
-  /* Rule 3. Equality allowed — see the model note above. */
-  if (previousEffectiveAt && value < previousEffectiveAt) {
+  /**
+   * Rule 3. Equality allowed — see the model note above.
+   *
+   * ── And it never argues with rule 1 ──
+   *
+   * The two bounds are `value >= previousEffectiveAt` and `value <= latest`. If
+   * a revision published before this validation existed carries a date beyond
+   * `latest` — `9999-12-31` was accepted right up until this commit — those two
+   * have no common solution, and because `legal_document_revisions` is
+   * append-only there would be no way to correct it: the document could never
+   * be revised again, by anybody, ever.
+   *
+   * So a previous date that is itself out of range is ignored rather than
+   * enforced. The floor is only a floor while it is a reachable one.
+   */
+  if (previousEffectiveAt && previousEffectiveAt <= latest && value < previousEffectiveAt) {
     throw new LegalValidationError(
       `The version this replaces takes effect on ${previousEffectiveAt}, so this one `
       + 'cannot be dated earlier. Effective dates only move forward.',

@@ -29,6 +29,7 @@
  */
 
 import { recordHoursChange } from './hoursLedger.js';
+import { MAX_SLOT_HOURS } from './validation.js';
 
 export function createCheckinTable(db) {
   db.exec(`
@@ -57,6 +58,25 @@ export function createCheckinTable(db) {
  * they turned up.
  */
 export const MAX_CREDITABLE_HOURS = 24;
+
+/**
+ * The two constants are the same rule seen from two sides, so they are checked
+ * rather than merely described as matching.
+ *
+ * `MAX_SLOT_HOURS` bounds how long a shift may BE; `MAX_CREDITABLE_HOURS`
+ * bounds what may be credited FOR one. If they drift apart a slot becomes
+ * creatable whose own default credit the cap would refuse — a shift somebody
+ * can be rostered for and never paid for. The comment in validation.js claimed
+ * this assertion existed; it did not, which is exactly the drift it was
+ * describing. Thrown at module load, so it fails the boot and the suite rather
+ * than one finalisation months later.
+ */
+if (MAX_SLOT_HOURS !== MAX_CREDITABLE_HOURS) {
+  throw new Error(
+    `MAX_SLOT_HOURS (${MAX_SLOT_HOURS}) and MAX_CREDITABLE_HOURS (${MAX_CREDITABLE_HOURS}) `
+    + 'must agree: a shift cannot be longer than the hours it is allowed to credit.'
+  );
+}
 
 /**
  * How far past a shift's scheduled length an organizer may still credit.
@@ -103,7 +123,23 @@ export function slotDuration(slot) {
   return hours;
 }
 
-export const slotHasEnded = (slot, now) => new Date(slot.end_datetime) <= new Date(now);
+/**
+ * Whether a shift is over.
+ *
+ * `null` — not `false` — when the end time cannot be read at all. The two are
+ * different questions and were being answered the same way: `NaN <= x` is
+ * false, so a slot with a missing or unparseable `end_datetime` reported "not
+ * finished yet" and the organizer was told to come back later, for ever, about
+ * a shift that has no end. That refusal is permanent and says nothing true.
+ *
+ * Callers distinguish the two, so an unreadable slot reaches the refusal that
+ * names it instead of the one that asks for patience.
+ */
+export const slotHasEnded = (slot, now) => {
+  const endMs = Date.parse(slot?.end_datetime);
+  if (!Number.isFinite(endMs)) return null;
+  return endMs <= new Date(now).getTime();
+};
 
 /** Volunteers whose hours would be destroyed by removing these slots. */
 export function attendanceOnSlots(db, slotIds) {
@@ -139,7 +175,10 @@ export function computeEventCompletion(db, eventId, now) {
   const slots = db.prepare('SELECT id, end_datetime FROM slots WHERE event_id = ?').all(eventId);
   if (slots.length === 0) return { complete: false, reason: 'no_slots' };
 
-  const unfinished = slots.filter(s => !slotHasEnded(s, now));
+  /* `!== true` rather than `!`: a slot whose end time cannot be read is not
+     finished either, and treating `null` as "done" would let an event complete
+     — and become immutable — on a shift nobody can evaluate. */
+  const unfinished = slots.filter(s => slotHasEnded(s, now) !== true);
   if (unfinished.length > 0) {
     return { complete: false, reason: 'shifts_remaining', remaining: unfinished.length };
   }
@@ -311,7 +350,11 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
       continue;
     }
 
-    if (!slotHasEnded(app, now)) {
+    /* `false` means "not yet"; `null` means the end time cannot be read, which
+       is a different problem with a different answer. Only the first is a
+       reason to come back later — the second falls through to the unpriceable
+       check below, which names the shift so somebody can fix it. */
+    if (slotHasEnded(app, now) === false) {
       notEnded.push({ applicationId, slotName: app.slot_name, endsAt: app.end_datetime });
       continue;
     }
@@ -357,7 +400,32 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
      * what stops this refusal reaching back through history: a record already
      * written stays written.
      */
-    if (!prior && awardsHours && scheduled === null) {
+    /**
+     * ── Refused only when there is no other way to price it ──
+     *
+     * Three conditions were missing, and each one turned a guard into a trap:
+     *
+     *   `present === 1` — marking somebody ABSENT credits nothing and needs no
+     *     duration, so a broken slot was blocking the recording of absences.
+     *   `!hasOverride` — the organizer typing the hours IS the remedy. Refusing
+     *     even then left no in-product way forward at all: the message says to
+     *     correct the shift times, and `PUT /api/events/:id` refuses any event
+     *     whose application deadline has passed — which is every event anybody
+     *     is finalising attendance on. One mistyped slot would have blocked the
+     *     entire roster permanently.
+     *
+     * With an override the number comes from a human who was there, which is
+     * the opposite of the fabrication this guard exists to prevent — and it is
+     * still bounded, at `MAX_CREDITABLE_HOURS`, because a slot that cannot price
+     * itself cannot offer a tighter ceiling.
+     *
+     * The refusal is whole-request, so every one of these conditions protects
+     * every other volunteer on the event as well as this one.
+     */
+    const hasOverride = hoursMap && Object.hasOwn(hoursMap, applicationId)
+      && hoursMap[applicationId] !== null && hoursMap[applicationId] !== '';
+
+    if (!prior && present === 1 && awardsHours && scheduled === null && !hasOverride) {
       unpriceable.push({
         applicationId, name: app.user_name, slotName: app.slot_name,
         startDatetime: app.start_datetime ?? null,

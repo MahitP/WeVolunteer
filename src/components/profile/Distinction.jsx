@@ -112,7 +112,10 @@ export function DistinctionBanner({ distinction, headline, highlights = [], abou
               is small — 1.0625rem against .9375rem — and that is not a reason to
               flatten them: the heading order is what a screen reader navigates
               by, and this genuinely is a sub-block of the section. */}
-          <h3 className="distinction-block-head">{distinction.highlightsLabel}</h3>
+          {/* Defaulted like the section names in the two profile views: a third kind
+              added server-side without this field gets a sensible heading rather
+              than an empty one. */}
+          <h3 className="distinction-block-head">{distinction.highlightsLabel ?? 'Highlights'}</h3>
           <ul className="distinction-highlights">
             {highlights.map((h, i) => (
               <li key={`${i}-${h}`} className="distinction-highlight">

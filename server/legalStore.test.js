@@ -381,10 +381,39 @@ describe('parseEffectiveAt', () => {
     expect(on('2026-08-10')).toBe('2026-08-10');
   });
 
-  it('refuses a date before publication', () => {
-    expect(() => on('2026-08-09')).toThrow(LegalValidationError);
+  /**
+   * ── One day of slack, because the two clocks disagree by design ──
+   *
+   * The server reads "today" in UTC; the browser prefills the field and sets the
+   * picker's `min` from the OWNER's local calendar. In America/New_York the UTC
+   * date rolls over at 20:00 local, so without slack the editor would offer a
+   * default it was about to be refused for, for four hours every evening.
+   *
+   * `effective_at` is a calendar date with no zone, so making the server read
+   * local time is not available. One day covers every inhabited offset.
+   */
+  it('accepts the owner\'s local yesterday, so no timezone can refuse a same-day publish', () => {
+    expect(on('2026-08-09')).toBe('2026-08-09');
+  });
+
+  it('refuses a date genuinely in the past', () => {
+    expect(() => on('2026-08-08')).toThrow(LegalValidationError);
     expect(() => on('1970-01-01')).toThrow(/cannot take effect before it is published/i);
-    try { on('2026-08-09'); } catch (e) { expect(e.field).toBe('effectiveAt'); }
+    try { on('2026-08-08'); } catch (e) { expect(e.field).toBe('effectiveAt'); }
+  });
+
+  /**
+   * ── The two bounds must never argue ──
+   *
+   * `value >= previousEffectiveAt` and `value <= today + 365` have no common
+   * solution when a revision published before this validation existed carries a
+   * date beyond the bound — `9999-12-31` was accepted right up until it was
+   * added. `legal_document_revisions` is append-only, so a document in that
+   * state could never be revised again by anybody.
+   */
+  it('ignores a previous effective date that is itself out of range', () => {
+    expect(on('2026-09-01', { previousEffectiveAt: '9999-12-31' })).toBe('2026-09-01');
+    expect(on('2026-08-10', { previousEffectiveAt: '3026-01-01' })).toBe('2026-08-10');
   });
 
   /* A year is past every real notice period and every school-year alignment,
