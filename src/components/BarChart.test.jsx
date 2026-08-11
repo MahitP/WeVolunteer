@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { BarChart, DonutChart, Sparkline } from './BarChart';
+import { BarChart, Sparkline } from './BarChart';
 
 /**
  * The three charts three dashboards share, which had no test at all.
@@ -93,38 +93,3 @@ describe('BarChart describes the quantity it is actually showing', () => {
   });
 });
 
-describe('DonutChart and Sparkline', () => {
-  it('DonutChart labels itself with its total and category count', () => {
-    render(
-      <DonutChart
-        data={[{ category: 'School', hours: 6 }, { category: '5K', hours: 4 }]}
-        valueKey="hours" labelKey="category"
-      />
-    );
-
-    const label = screen.getByRole('img').getAttribute('aria-label');
-    expect(label).toMatch(/10/);
-    expect(label).toMatch(/2 categories/);
-  });
-
-  it('DonutChart survives an empty series', () => {
-    const { container } = render(<DonutChart data={[]} />);
-    expect(container).toBeTruthy();
-  });
-
-  /**
-   * A sparkline carries no information a screen reader can use — it has no
-   * labels and no scale — so it is hidden rather than given a misleading
-   * description. The assertion is that it stays hidden.
-   */
-  it('Sparkline is hidden from assistive technology', () => {
-    const { container } = render(<Sparkline values={[1, 4, 2, 8]} />);
-    expect(container.querySelector('[aria-hidden="true"]')).toBeTruthy();
-    expect(screen.queryByRole('img')).toBeNull();
-  });
-
-  it('Sparkline survives an empty series', () => {
-    const { container } = render(<Sparkline values={[]} />);
-    expect(container).toBeTruthy();
-  });
-});

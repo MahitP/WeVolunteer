@@ -7,9 +7,9 @@ import { APP_NAME, SCHOOL_NAME } from '../config';
 import { formatHours, formatDay, formatTimeRange, countdown, haversineDistance } from '../utils/helpers';
 import { api } from '../utils/api';
 import Modal from '../components/Modal';
-import { BarChart, DonutChart } from '../components/BarChart';
 import { DateChip } from '../components/Seats';
 import EmptyState from '../components/common/EmptyState';
+import ServiceInsights from '../components/ServiceInsights';
 import { useLocationContext } from '../contexts/LocationContext';
 import LocationLink from '../components/location/LocationLink';
 import WeatherSummary from '../components/location/WeatherSummary';
@@ -19,15 +19,22 @@ export default function VolunteerDashboard({
 }) {
   const [showCertificate, setShowCertificate] = useState(false);
   const [withdrawingId, setWithdrawingId] = useState(null);
-  const [stats, setStats] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
 
+  /**
+   * Leaderboard only. `ServiceInsights` fetches its own figures.
+   *
+   * This used to fetch the volunteer statistics here too, swallow every error,
+   * and re-run whenever `applications.length` changed. All three were wrong:
+   * the section that consumes the figures is the one that should own the
+   * request, a swallowed 500 was indistinguishable from "no data", and none of
+   * those figures depend on applications.
+   */
   useEffect(() => {
     let cancelled = false;
-    api.fetchVolunteerStats().then(s => !cancelled && setStats(s)).catch(() => {});
     api.fetchLeaderboard().then(l => !cancelled && setLeaderboard(l || [])).catch(() => {});
     return () => { cancelled = true; };
-  }, [currentUser.id, applications.length]);
+  }, [currentUser.id]);
 
   const myApps = useMemo(
     () => applications.filter(a => a.userId === currentUser.id),
@@ -407,26 +414,7 @@ export default function VolunteerDashboard({
             )}
           </section>
 
-          {/* ── Impact charts, only once there's something to show ── */}
-          {stats && (stats.monthlyHours?.length > 0 || stats.categoryHours?.length > 0) && (
-            <section>
-              <div className="section-head"><h2>Where your hours came from</h2></div>
-              <div className="grid grid-2">
-                {stats.monthlyHours?.length > 0 && (
-                  <div className="card card-pad">
-                    <div className="eyebrow" style={{ marginBottom: 'var(--s3)' }}>By month</div>
-                    <BarChart data={stats.monthlyHours} valueKey="hours" labelKey="month" highlightLast />
-                  </div>
-                )}
-                {stats.categoryHours?.length > 0 && (
-                  <div className="card card-pad">
-                    <div className="eyebrow" style={{ marginBottom: 'var(--s3)' }}>By type of service</div>
-                    <DonutChart data={stats.categoryHours} valueKey="hours" labelKey="category" />
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
+          <ServiceInsights userId={currentUser.id} setActiveTab={setActiveTab} />
         </div>
 
         {/* ── Right column ── */}
