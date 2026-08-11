@@ -21,6 +21,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import LegalEditor from './LegalEditor';
 import { api, ApiError } from '../../utils/api';
+import { todayIso, latestEffectiveIso, MAX_EFFECTIVE_DAYS_AHEAD } from './legalDates';
 
 vi.mock('../../utils/api', async (importOriginal) => {
   const actual = await importOriginal();
@@ -251,6 +252,36 @@ describe('LegalEditor', () => {
       expect(versionInput).toHaveAttribute('aria-errormessage', 'legal-save-error');
       expect(screen.getByRole('alert')).toHaveAttribute('id', 'legal-save-error');
       await waitFor(() => expect(versionInput).toHaveFocus());
+    });
+
+    /**
+     * ── The picker refuses the out-of-range dates before a round trip ──
+     *
+     * UX only, and deliberately so: the server owns the answer, and a browser
+     * without `type="date"` support falls back to text and meets the same
+     * refusal. What this pins is that the two bounds exist and agree with the
+     * rule — `min` is today, `max` is a year out — because a picker that offers
+     * a date the server will refuse is worse than one with no bounds at all.
+     *
+     * Save is deliberately NOT gated on these. `dirty` means the BODY changed,
+     * and a second condition would make a valid save impossible to explain when
+     * the button stayed grey.
+     */
+    it('bounds the date picker to the range the server accepts', async () => {
+      renderEditor();
+      const dateInput = await screen.findByLabelText('Takes effect');
+
+      const min = dateInput.getAttribute('min');
+      const max = dateInput.getAttribute('max');
+      expect(min, 'no earlier than today').toBe(todayIso());
+      expect(max, 'no more than a year ahead').toBe(latestEffectiveIso());
+
+      /* A year, counted in days, so the constant and the control cannot drift. */
+      const days = (Date.parse(`${max}T00:00:00Z`) - Date.parse(`${min}T00:00:00Z`)) / 86400000;
+      expect(days).toBe(MAX_EFFECTIVE_DAYS_AHEAD);
+
+      /* And the field defaults to something inside its own range. */
+      expect(dateInput.value >= min && dateInput.value <= max).toBe(true);
     });
 
     it('marks the date field when that is what was refused', async () => {

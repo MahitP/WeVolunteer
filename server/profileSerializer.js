@@ -140,7 +140,10 @@ const DISTINCTIONS = {
 };
 
 export function distinctionFor(role) {
-  return DISTINCTIONS[role] ?? null;
+  /* `hasOwn`, not a bare lookup: `DISTINCTIONS['constructor']` is truthy on a
+     plain object literal. Unreachable today — `users.role` is CHECK-constrained
+     — but the cost of not depending on that is one call. */
+  return Object.hasOwn(DISTINCTIONS, role) ? DISTINCTIONS[role] : null;
 }
 
 /**

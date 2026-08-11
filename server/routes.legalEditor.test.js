@@ -512,10 +512,13 @@ describe('the Legal Center editor', () => {
   describe('effective-date refusals', () => {
     const body = (n) => `# Youth safety guidelines\n\nRevision ${n}.\n`;
 
-    it('refuses a date before today', async () => {
-      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    /* Three days back, not one: the floor is yesterday-in-UTC on purpose, so
+       that an owner whose local calendar is a day behind the server's is not
+       refused the date their own picker offered them. See `parseEffectiveAt`. */
+    it('refuses a date genuinely in the past', async () => {
+      const wellPast = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
       const res = await publishVerified(DATED, {
-        version: '5.0.0', body: body('past'), effectiveAt: yesterday,
+        version: '5.0.0', body: body('past'), effectiveAt: wellPast,
       });
       expect(res.status).toBe(400);
       expect(res.body.field).toBe('effectiveAt');

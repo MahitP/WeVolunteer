@@ -513,15 +513,60 @@ describe('hour integrity', () => {
   });
 
   /**
-   * The bypass this closes. A slot floored to 0.1 hours accepted a 24-hour
-   * override, because the only ceiling was the absolute cap.
+   * ── An override IS the remedy for a slot that cannot price itself ──
+   *
+   * The refusal below fires only when there is no other way to work out the
+   * hours. Refusing even with an override would leave no way forward at all:
+   * the message says to correct the shift times, and `PUT /api/events/:id`
+   * rejects any event whose application deadline has passed — which is every
+   * event anybody is finalising attendance on. One mistyped slot would have
+   * blocked the whole roster permanently.
+   *
+   * With an override the number comes from a human who was there, which is the
+   * opposite of the fabrication the guard exists to prevent, and it is still
+   * bounded by the absolute cap because a broken slot cannot offer a tighter
+   * one.
    */
-  it('refuses a large override on a slot with no real duration', () => {
+  it('lets an explicit override price a slot that cannot price itself', () => {
     const db = makeDb();
     const event = scenario(db, { slotStart: PAST_END, slotEnd: PAST_END });
-    const res = finalize(db, event, { hoursMap: { a1: 24 } });
+    const res = finalize(db, event, { hoursMap: { a1: 4 } });
+    expect(res.ok).toBe(true);
+    expect(hoursOf(db, 'u1')).toBe(4);
+  });
+
+  it('still bounds that override by the absolute cap', () => {
+    const db = makeDb();
+    const event = scenario(db, { slotStart: PAST_END, slotEnd: PAST_END });
+    const res = finalize(db, event, { hoursMap: { a1: 25 } });
     expect(res.ok).toBe(false);
+    expect(res.error).toBe('invalid_hours');
     expect(hoursOf(db, 'u1')).toBe(0);
+  });
+
+  /* Marking somebody ABSENT credits nothing and needs no duration, so a broken
+     slot must not block recording an absence — and because the refusal is
+     whole-request, blocking it would block every other volunteer too. */
+  it('records an absence on an unpriceable slot', () => {
+    const db = makeDb();
+    const event = scenario(db, { slotStart: PAST_END, slotEnd: PAST_END });
+    const res = finalize(db, event, { attendanceMap: { a1: false } });
+    expect(res.ok).toBe(true);
+    expect(hoursOf(db, 'u1')).toBe(0);
+  });
+
+  /**
+   * A shift with an unreadable END used to report "not finished yet", for ever.
+   * `NaN <= now` is false, so the organizer was told to come back later about a
+   * shift that has no end — a permanent refusal that says nothing true.
+   */
+  it('names a shift whose end time cannot be read, instead of asking for patience', () => {
+    const db = makeDb();
+    const event = scenario(db);
+    db.prepare('UPDATE slots SET end_datetime = ? WHERE id = ?').run('not a date', 's1');
+    const res = finalize(db, event);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('slot_unpriceable');
   });
 
   /**
