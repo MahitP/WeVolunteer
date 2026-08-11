@@ -1094,8 +1094,15 @@ export const api = {
    * The whole feature was dead: `api.geocodeSearch` was never defined, so typing in
    * the search box threw on the first keystroke that triggered a lookup.
    */
-  geocodeSearch: async (query, signal) =>
-    apiFetch(`/api/geocode?q=${encodeURIComponent(query)}`, { signal }),
+  geocodeSearch: async (query, signal, near) => {
+    /* `near` biases the search to a ~35 mile box around a coarse position. The
+       server has supported it since it was written; nothing ever sent it, so
+       the bias was unreachable. See LocationPicker for why 1dp is enough. */
+    const bias = near?.lat != null && near?.lon != null
+      ? `&lat=${encodeURIComponent(near.lat)}&lon=${encodeURIComponent(near.lon)}`
+      : '';
+    return apiFetch(`/api/geocode?q=${encodeURIComponent(query)}${bias}`, { signal });
+  },
 
   /**
    * Forecast for an event's coordinates and start time (`WeatherSummary.jsx`).

@@ -12,6 +12,7 @@ import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
 import useOnline from './hooks/useOnline';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
 import PersonaPreviewBanner from './components/admin/PersonaPreviewBanner';
+import LocationPrompt from './components/location/LocationPrompt';
 import AccountProfile from './views/AccountProfile';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
@@ -1448,6 +1449,11 @@ function AppShell({ toasts, addToast, removeToast }) {
               narrows capabilities — so the surfaces that would otherwise host the
               way out are the first ones it removes. See the component header. */}
           <PersonaPreviewBanner preview={currentUser.preview} onEnded={refreshAll} />
+          {/* Inside the signed-in shell, not in main.jsx with the provider: a
+              banner asking to use your location has no business on the sign-in
+              screen, and the browser would refuse the permission there anyway
+              because nobody has pressed anything yet. */}
+          <LocationPrompt />
           {/* Inside the shell boundary above, so a chunk that fails to load is
               caught alongside a view that throws while rendering — and covering
               both arms of the ternary below, since the profile views are lazy

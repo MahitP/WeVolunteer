@@ -39,6 +39,9 @@ export default function LocationPicker({ value, onChange, datetime, error }) {
     }
   }, [value, selected]);
 
+  /* Used to bias address search toward the organizer's own area; see doSearch. */
+  const { location: myLocation } = useLocationContext() ?? {};
+
   const doSearch = useCallback(async (searchQuery) => {
     if (!searchQuery?.trim() || searchQuery.trim().length < 2) {
       setResults([]);
@@ -51,7 +54,23 @@ export default function LocationPicker({ value, onChange, datetime, error }) {
     setShowResults(true);
     
     try {
-      const data = await api.geocodeSearch(searchQuery);
+      /**
+       * Bias the search toward wherever the organizer is.
+       *
+       * The server has applied a ~35 mile viewbox around a supplied position
+       * since it was written, and the client has never sent one — so the bias
+       * was unreachable code and "Reichler Park" could return the one three
+       * states away. This is the wire.
+       *
+       * One decimal place, about 11km. The viewbox is half a degree wide, so a
+       * finer figure changes nothing about the results while making every
+       * organizer's cache key unique — and a shared key is what keeps the
+       * upstream request count down.
+       */
+      const near = myLocation
+        ? { lat: Math.round(myLocation.latitude * 10) / 10, lon: Math.round(myLocation.longitude * 10) / 10 }
+        : undefined;
+      const data = await api.geocodeSearch(searchQuery, undefined, near);
       setResults(data.results || []);
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -60,7 +79,7 @@ export default function LocationPicker({ value, onChange, datetime, error }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [myLocation]);
 
   const debouncedSearch = useDebounce(doSearch, 400);
 
