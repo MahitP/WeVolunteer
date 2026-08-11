@@ -16,6 +16,7 @@ import { can } from '../authz.js';
    duplicated byte-for-byte in utils.js where nothing imported it. See
    server/milestones.js for the badge/milestone boundary this sits on. */
 import { buildMilestones } from '../milestones.js';
+import { milestoneInputs } from '../volunteerInsights.js';
 import { db, initDatabase } from '../db.js';
 import { distinctionFor } from '../profileSerializer.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
@@ -85,12 +86,16 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
     `).get(req.params.id, req.principal.userId);
     const canSeeContact = isSelf || can(req.principal, 'user.contact.read') || hostsApplicant;
 
-    const totals = db.prepare(`
-      SELECT COALESCE(SUM(hours_awarded), 0) as hours,
-             COUNT(DISTINCT event_id) as events,
-             COUNT(*) as shifts
-      FROM attendance WHERE user_id = ? AND present = 1
-    `).get(req.params.id);
+    /**
+     * Shared with the dashboard rather than restated here.
+     *
+     * This query and the dashboard's are the inputs to the same
+     * `buildMilestones` call, so if they ever drift the two surfaces disagree
+     * about whether a student has earned a tier — on the same afternoon, for
+     * the same student. `milestoneInputs` is the single derivation, and
+     * `volunteerInsights.test.js` asserts the agreement.
+     */
+    const totals = milestoneInputs(db, req.params.id);
 
     // Completed service, newest first
     const completed = db.prepare(`
