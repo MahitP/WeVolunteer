@@ -31,6 +31,20 @@
 import { recordHoursChange } from './hoursLedger.js';
 import { MAX_SLOT_HOURS } from './validation.js';
 
+/**
+ * The check-in table, as a database created from scratch gets it.
+ *
+ * `method` is declared here AND added by migration 037, so that a fresh
+ * database and a migrated one arrive at the same schema. This function runs
+ * before `runMigrations`, so on a new database the column already exists when
+ * 037 looks and its existence check skips the ALTER; on an existing database
+ * the ALTER is what adds it. Neither path can produce a table the other would
+ * not recognise.
+ *
+ * No CHECK constraint on `method`: SQLite cannot add one by ALTER TABLE, so
+ * declaring one here would make the two paths genuinely differ. `recordCheckins`
+ * enforces the enum instead.
+ */
 export function createCheckinTable(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS attendance_checkin (
@@ -40,6 +54,7 @@ export function createCheckinTable(db) {
       present    INTEGER CHECK(present IN (0,1)) NOT NULL,
       marked_by  TEXT,
       marked_at  TEXT NOT NULL,
+      method     TEXT NOT NULL DEFAULT 'manual',
       PRIMARY KEY(slot_id, user_id)
     )
   `);
@@ -139,6 +154,44 @@ export const slotHasEnded = (slot, now) => {
   const endMs = Date.parse(slot?.end_datetime);
   if (!Number.isFinite(endMs)) return null;
   return endMs <= new Date(now).getTime();
+};
+
+/**
+ * Whether a shift has begun.
+ *
+ * Tri-state for exactly the reason `slotHasEnded` above is: `NaN <= x` is
+ * false, so a slot whose `start_datetime` cannot be read would report "not
+ * started yet" for ever, and a volunteer would be told to wait, permanently,
+ * for a shift that has no beginning. Callers must test `!== true` and route
+ * `null` to a refusal that names the broken slot.
+ *
+ * ── This is NOT used by manual check-in, and must not be ──
+ *
+ * `checkinWindowState` opens two hours EARLY and is per EVENT. This opens at
+ * the start and is per SLOT, and it gates only one thing: whether a volunteer
+ * may mint a QR code.
+ *
+ * The two differ because the instruments differ. A manual mark is an
+ * organizer's judgement, attributed to them by name in `marked_by`, and setting
+ * up ninety minutes early is the job. A QR code is a bearer credential, and a
+ * bearer credential that is valid before the thing it attests to has begun is
+ * one you can spend at home the night before.
+ *
+ * It is per slot rather than per event because check-in IS per slot —
+ * `attendance_checkin`'s primary key is `(slot_id, user_id)`. On a two-day
+ * festival, a per-event rule would let a Sunday volunteer's code work on
+ * Saturday morning.
+ *
+ * Redemption deliberately does NOT re-check this. A code cannot exist before
+ * its slot starts, so checking again at scan time would add a second time bound
+ * without adding a guarantee — and check-in has an opening time and no closing
+ * time on purpose (see `checkinWindowState`), so a volunteer arriving two hours
+ * late is an ordinary case that must keep working.
+ */
+export const slotHasStarted = (slot, now) => {
+  const startMs = Date.parse(slot?.start_datetime);
+  if (!Number.isFinite(startMs)) return null;
+  return startMs <= new Date(now).getTime();
 };
 
 /** Volunteers whose hours would be destroyed by removing these slots. */
@@ -257,12 +310,26 @@ export function checkinWindowState(db, event, now) {
  * Records check-in marks. Never touches `attendance`, never credits anything,
  * never writes to the ledger — nothing here changes anyone's hours.
  */
-export function recordCheckins(db, { event, checkinMap, actor, now }) {
+export function recordCheckins(db, { event, checkinMap, actor, now, method = 'manual' }) {
+  /**
+   * `method` records HOW the mark was taken, and defaults to 'manual' so the
+   * existing route needs no change at all.
+   *
+   * SQLite cannot add a CHECK constraint to an existing table without
+   * rebuilding it, and rebuilding `attendance_checkin` is out of scope, so the
+   * enum is enforced here instead. A typo would otherwise write a value nothing
+   * can interpret into a column an organizer is shown.
+   */
+  if (method !== 'manual' && method !== 'qr') {
+    throw new Error(`recordCheckins: unknown method '${method}'`);
+  }
+
   const upsert = db.prepare(`
-    INSERT INTO attendance_checkin (event_id, slot_id, user_id, present, marked_by, marked_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO attendance_checkin (event_id, slot_id, user_id, present, marked_by, marked_at, method)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(slot_id, user_id) DO UPDATE SET
-      present = excluded.present, marked_by = excluded.marked_by, marked_at = excluded.marked_at
+      present = excluded.present, marked_by = excluded.marked_by,
+      marked_at = excluded.marked_at, method = excluded.method
   `);
 
   let marked = 0;
@@ -278,7 +345,7 @@ export function recordCheckins(db, { event, checkinMap, actor, now }) {
       continue;
     }
 
-    upsert.run(event.id, app.slot_id, app.user_id, present ? 1 : 0, actor.id, now);
+    upsert.run(event.id, app.slot_id, app.user_id, present ? 1 : 0, actor.id, now, method);
     marked++;
   }
 

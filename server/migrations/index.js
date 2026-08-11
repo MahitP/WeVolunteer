@@ -45,6 +45,7 @@ import distinguishedProfiles from './033_distinguished_profiles.js';
 import legalDocumentRevisions from './034_legal_document_revisions.js';
 import peerConversations from './035_peer_conversations.js';
 import slotWindowIndex from './036_slot_window_index.js';
+import checkinTokens from './037_checkin_tokens.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -187,7 +188,17 @@ export const MIGRATIONS = [
    * database that has a `slots` table — which is every one, since the initial
    * schema creates it.
    */
-  slotWindowIndex
+  slotWindowIndex,
+
+  /**
+   * 037 — per-volunteer check-in codes, and how a check-in mark was taken.
+   *
+   * Additive and order-independent: a new table, plus a defaulted column on
+   * `attendance_checkin`. Nothing existing reads either, so it can be applied to
+   * a database at any prior version without touching a row that is already
+   * there. See the file for why the codes are stored rather than signed.
+   */
+  checkinTokens
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
