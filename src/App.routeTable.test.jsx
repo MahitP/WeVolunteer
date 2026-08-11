@@ -204,7 +204,9 @@ describe('authenticated route table', () => {
     signedInAs(USER('organizer'));
     renderAt('/checkin/evt-1');
     const el = await screen.findByTestId('checkin');
-    expect(el.dataset.props).toBe('currentUser');
+    /* `addToast` joined the props when this screen stopped using window.alert
+       for its two failure paths — it was the only view in the app doing so. */
+    expect(el.dataset.props).toBe('addToast,currentUser');
   });
 
   /**

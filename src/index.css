@@ -9589,3 +9589,142 @@ input:disabled + .premium-slider {
 @media (max-width: 360px) {
   .barchart-value { font-size: 0.6875rem; }
 }
+
+/* ==========================================================================
+   Check-in code (volunteer) and scanner (organizer)
+   ========================================================================== */
+
+.checkin-code {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s4);
+  text-align: center;
+}
+
+.checkin-code-name { font-size: 1.125rem; }
+
+/* White, not a token, and deliberately.
+
+   A QR code needs a light quiet zone to be readable, and in dark mode every
+   surface token in this file is dark. This is the same exception
+   TwoFactorSetup makes for the same reason: the colour is a property of the
+   thing, not of the theme. */
+.checkin-code-qr {
+  background: white;
+  padding: var(--s3);
+  border-radius: var(--r-md);
+  width: 240px;
+  height: 240px;
+  max-width: 100%;
+}
+
+.checkin-code-meta {
+  display: flex;
+  gap: var(--s6);
+  margin: 0;
+  justify-content: center;
+}
+
+.checkin-code-meta dt {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.checkin-code-meta dd {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.checkin-code-hint { max-width: 32ch; }
+
+.checkin-code-expired {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s6) var(--s4);
+}
+
+.checkin-code-status { padding: var(--s8) 0; }
+
+/* ── Scanner ─────────────────────────────────────────────────────────────
+   Renders through Modal, so its overlay already sits above the bottom
+   navigation (z-index 100). Nothing here sets a z-index: a bespoke value is
+   how correct layering regresses.
+   ------------------------------------------------------------------------ */
+
+.scanner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.scanner-viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  /* dvh, never vh. Mobile browser chrome collapses and expands, and 100vh on
+     iOS Safari is taller than the visible viewport — which pushes the controls
+     below off the bottom of the screen, on the device this is mostly used on. */
+  max-height: 50dvh;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+}
+
+.scanner-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.scanner-result {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r-sm);
+  border: 1px solid;
+  font-size: 0.875rem;
+}
+
+/* `--ok` has no `-border`/`-ink` pair the way `warn` and `danger` do, so this
+   uses the tokens that exist rather than inventing two that only one rule would
+   ever reference. */
+.scanner-result.is-ok {
+  background: var(--ok-tint);
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.scanner-result.is-bad {
+  background: var(--warn-tint);
+  border-color: var(--warn-border);
+  color: var(--warn-ink);
+}
+
+.scanner-unavailable { align-items: flex-start; }
+
+.scanner-foot {
+  display: flex;
+  justify-content: center;
+  /* A fixed overlay does not inherit .page's reservation for the bottom
+     navigation and the home indicator, so it clears the safe area itself. */
+  padding-bottom: max(var(--s4), env(safe-area-inset-bottom));
+}
+
+/* At the narrowest supported width the dialog is a single column with nothing
+   set in fixed pixels, so every control stays reachable without sideways
+   scrolling. */
+@media (max-width: 390px) {
+  .checkin-code-qr { width: 200px; height: 200px; }
+  .checkin-code-meta { gap: var(--s4); }
+  .scanner-foot .btn { width: 100%; }
+}
