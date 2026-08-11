@@ -226,11 +226,28 @@ router.get('/api/events/:id/attendees', authenticateToken, (req, res) => {
       ORDER BY u.name
     `).all(req.params.id);
 
+    /**
+     * A co-attendee sees who else is coming. They do not see school and grade.
+     *
+     * The access gate above is right — a non-staff caller needs an accepted
+     * application and the organizer must have left the roster visible — but it
+     * decided only WHETHER to answer, not WHAT to include, and the row carried
+     * both of a volunteer's `PUBLIC_ONLY_FIELDS` (profileSerializer.js).
+     * `users.profile_visibility` defaults to 'private', so for a student who
+     * never opened the setting those two columns are withheld from every peer,
+     * friends included: `GET /api/users/:id/public-profile` refuses them and
+     * `directory.privacy.test.js` pins that refusal. This roster answered them
+     * to anyone who had applied to the same shift, which made it the effective
+     * policy and the directory's refusal cosmetic.
+     *
+     * Staff keep both, because reviewing applicants is what those fields are
+     * for and that path is gated on hosting the event.
+     */
     res.json({
       visible: true,
-      attendees: rows.map(r => ({
-        id: r.id, name: r.name, avatar: r.avatar, grade: r.grade, school: r.school
-      }))
+      attendees: rows.map(r => (isStaff
+        ? { id: r.id, name: r.name, avatar: r.avatar, grade: r.grade, school: r.school }
+        : { id: r.id, name: r.name, avatar: r.avatar }))
     });
   } catch (err) {
     console.error('Attendees error:', err);

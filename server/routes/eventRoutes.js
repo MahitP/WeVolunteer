@@ -421,6 +421,36 @@ router.get('/api/events', authenticateToken, (req, res) => {
 });
 
 /**
+ * GET /api/events/tags — the tag vocabulary, for reuse rather than reinvention.
+ *
+ * ── Why a route of its own ──
+ *
+ * The list endpoint already returns this alongside its results, which is right for
+ * the browse screen's filter bar. The event FORM needs it too and has no reason to
+ * fetch a page of events to get it — so this is the same data without the payload
+ * the caller would throw away.
+ *
+ * ── Why it is authenticated but ungated ──
+ *
+ * The vocabulary is the words organizers have used on events that are already
+ * visible to every signed-in account, so it discloses nothing a reader cannot see
+ * by browsing. It is behind `authenticateToken` because there is no reason for it
+ * to be the one event endpoint answering anonymously, and it carries no capability
+ * because every signed-in role can already read the tags on an event.
+ *
+ * Declared ABOVE `/api/events/:id`: Express matches in order, so registering it
+ * after would make `tags` be read as an event id and answer 404.
+ */
+router.get('/api/events/tags', authenticateToken, (req, res) => {
+  try {
+    res.json({ tags: tagVocabulary(db, { limit: req.query.limit }) });
+  } catch (err) {
+    console.error('Failed to load the tag vocabulary:', err);
+    res.status(500).json({ error: 'Could not load tags.' });
+  }
+});
+
+/**
  * One event with its applications, for the organizer's own screens.
  *
  * Staff-only: it carries the applicant roster, which is not something a
@@ -503,35 +533,6 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
   }
 });
 
-/**
- * GET /api/events/tags — the tag vocabulary, for reuse rather than reinvention.
- *
- * ── Why a route of its own ──
- *
- * The list endpoint already returns this alongside its results, which is right for
- * the browse screen's filter bar. The event FORM needs it too and has no reason to
- * fetch a page of events to get it — so this is the same data without the payload
- * the caller would throw away.
- *
- * ── Why it is authenticated but ungated ──
- *
- * The vocabulary is the words organizers have used on events that are already
- * visible to every signed-in account, so it discloses nothing a reader cannot see
- * by browsing. It is behind `authenticateToken` because there is no reason for it
- * to be the one event endpoint answering anonymously, and it carries no capability
- * because every signed-in role can already read the tags on an event.
- *
- * Declared ABOVE `/api/events/:id`: Express matches in order, so registering it
- * after would make `tags` be read as an event id and answer 404.
- */
-router.get('/api/events/tags', authenticateToken, (req, res) => {
-  try {
-    res.json({ tags: tagVocabulary(db, { limit: req.query.limit }) });
-  } catch (err) {
-    console.error('Failed to load the tag vocabulary:', err);
-    res.status(500).json({ error: 'Could not load tags.' });
-  }
-});
 
 router.post('/api/events', authenticateToken, requireCap('event.create'), (req, res) => {
   // Check if organizer is verified by Admin

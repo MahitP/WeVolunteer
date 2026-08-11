@@ -813,7 +813,14 @@ describe('authorization hygiene', () => {
       'POST /api/auth/accept-invitation': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'redeems an invitation token; the caller holds no capability yet by definition, and authority comes from the token plus a VERIFIED address match rather than from a role' },
       'GET /api/events': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'public browse listing; every role\'s CAPABILITIES entry includes event.view, so no role is ever denied' },
       'GET /api/events/tags': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'the tag vocabulary in use, for the event form\'s suggestions and the browse filter bar. Discloses only words organizers put on events that GET /api/events already shows every signed-in role, so a capability would gate a strictly smaller disclosure than the listing beside it. Authenticated rather than public purely so no event endpoint answers anonymously' },
-      'GET /api/organizers/:id/profile': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'an organizer\'s public-facing hosting record (events hosted, volunteers helped, hours awarded) — no PII beyond what the profile already publishes, and no role has ever been denied it; previously carried requireCap(\'event.view\'), a capability all five roles hold, which read as a gate while discriminating against nobody' },
+      /* The reason previously read "no PII beyond what the profile already
+         publishes", and that was wrong: the handler emitted `row.email`
+         unconditionally, which profileSerializer.js lists among
+         PRIVILEGED_FIELDS and never publishes. The stale justification is what
+         let it survive review. The route stays open to every authenticated role
+         — the hosting record genuinely is public-facing — but the address is now
+         gated field-by-field the way the sibling volunteer profile gates it. */
+      'GET /api/organizers/:id/profile': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'an organizer\'s public-facing hosting record (events hosted, volunteers helped, hours awarded); every role holds event.view so a capability gate would discriminate against nobody. The one privileged field, the login address, is gated inside the handler on self-or-user.contact.read rather than by the route' },
       'GET /api/events/:eventId/slots/:slotId/ics': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may download; title/description/location are no more sensitive than GET /api/events already returns to everyone' },
       'GET /api/events/:id/comments': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may read any event\'s comments; no ownership/capability distinction by design' },
       'POST /api/events/:id/comments': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may post a comment on any event; no ownership/capability distinction by design' },
