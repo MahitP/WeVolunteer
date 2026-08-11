@@ -128,7 +128,20 @@ function loadDotEnv() {
 export function openPrivilegedDb(command) {
   const dbPath = anchorRelative(loadDotEnv());
 
+  /**
+   * Which file the configuration resolved to, said the same way on every exit
+   * path rather than only the successful one.
+   *
+   * A refusal is where the operator most needs the answer — "no database at X"
+   * names the path in prose, but the question being asked is whether X is the
+   * file they meant, and that is a question about resolution, not about the
+   * refusal. The successful path announces after opening instead, so the
+   * migration count can be part of the same line.
+   */
+  const announcePath = () => console.log(`Database: ${dbPath}`);
+
   if (!fs.existsSync(dbPath)) {
+    announcePath();
     console.error(`Refused: no database at ${dbPath}`);
     console.error('');
     console.error('This script will not create one. A privileged command that');
@@ -153,6 +166,7 @@ export function openPrivilegedDb(command) {
   ).get().n;
 
   if (!hasUsers) {
+    announcePath();
     console.error(`Refused: ${dbPath} is not an initialised WeVolunteer database.`);
     console.error('It has no `users` table. Start the server against it once so');
     console.error('the migrations run, or point WEV_DB_PATH at the right file.');
