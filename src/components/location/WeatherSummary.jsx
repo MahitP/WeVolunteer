@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   Loader2, Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning
 } from 'lucide-react';
+import { getForecast, isForecastable, weatherKey } from '../../utils/weatherCache';
+import './LocationDisplay.css';
 
 /**
  * The weather icons this component can actually show, keyed by the name the
@@ -24,67 +26,102 @@ import {
 const WEATHER_ICONS = {
   Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning
 };
-import { api } from '../../utils/api';
-import './LocationDisplay.css';
 
+/**
+ * How long a fetch must run before a spinner is worth showing.
+ *
+ * The forecast is usually a cache hit and resolves in the same tick. Rendering
+ * a spinner for it produces a flash of "Forecast…" that reads as jank, not as
+ * progress — so the loading state waits until there is genuinely something to
+ * wait for.
+ */
+const SPINNER_DELAY_MS = 300;
+
+/**
+ * A one-line forecast for an event, or nothing at all.
+ *
+ * ── Everything that goes wrong renders nothing ──
+ *
+ * No coordinates, an event outside the forecast window, a refused request, an
+ * outage, a timeout, a browser offline: all render `null`. Weather is an
+ * enhancement to a page whose real job is telling somebody where to be and
+ * when, and "Weather unavailable" is a line of apology occupying space that the
+ * absence of a badge occupies better.
+ *
+ * The window is checked here rather than left to the server, so an event three
+ * weeks out never issues a request that could only have been refused. The
+ * dashboard and the calendar are full of events three weeks out.
+ */
 export default function WeatherSummary({ latitude, longitude, datetime }) {
   const [weather, setWeather] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [showSpinner, setShowSpinner] = useState(false);
+
+  /* The identity of the question, so the effect re-runs when the ANSWER would
+     differ rather than whenever a parent re-renders with a new object. */
+  const key = latitude != null && longitude != null && datetime
+    ? weatherKey(latitude, longitude, datetime)
+    : null;
+  const forecastable = key != null && isForecastable(datetime);
 
   useEffect(() => {
-    if (latitude == null || longitude == null || !datetime) {
-      setLoading(false);
-      return;
+    if (!forecastable) {
+      setWeather(null);
+      setShowSpinner(false);
+      return undefined;
     }
 
-    const controller = new AbortController();
+    /**
+     * A plain flag, not an AbortController.
+     *
+     * The request is shared through the module cache, so aborting it on unmount
+     * would cancel it for every other component waiting on the same answer.
+     * Ignoring a late result is the version that composes; see weatherCache.js.
+     */
+    let cancelled = false;
+    setWeather(null);
 
-    async function fetchWeather() {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await api.getWeather(latitude, longitude, datetime, controller.signal);
-        setWeather(data.result);
-      } catch (err) {
-        if (err.name !== 'AbortError') {
-          setError(err.message);
-        }
-      } finally {
-        setLoading(false);
-      }
-    }
+    const spinnerTimer = setTimeout(() => {
+      if (!cancelled) setShowSpinner(true);
+    }, SPINNER_DELAY_MS);
 
-    fetchWeather();
+    getForecast(latitude, longitude, datetime).then((result) => {
+      if (cancelled) return;
+      clearTimeout(spinnerTimer);
+      setShowSpinner(false);
+      setWeather(result);
+    });
 
-    return () => controller.abort();
-  }, [latitude, longitude, datetime]);
+    return () => {
+      cancelled = true;
+      clearTimeout(spinnerTimer);
+    };
+  }, [key, forecastable, latitude, longitude, datetime]);
 
-  if (loading) {
+  if (!forecastable) return null;
+
+  if (showSpinner && !weather) {
     return (
-      <div className="weather-summary loading" aria-busy="true">
-        <Loader2 className="spinner" size={14} />
-        <span className="weather-desc">Forecast...</span>
+      <div className="weather-summary loading" role="status" aria-busy="true">
+        <Loader2 className="spinner" size={14} aria-hidden="true" />
+        <span className="weather-desc">Checking the forecast</span>
       </div>
     );
   }
 
-  if (error || !weather) {
-    // Hide gracefully if unavailable
-    return null;
-  }
+  if (!weather) return null;
 
   const IconComponent = WEATHER_ICONS[weather.icon] || Cloud;
 
   return (
-    <div 
-      className="weather-summary" 
-      aria-label={`${weather.condition}, ${weather.temperature} degrees Fahrenheit`}
+    <div
+      className="weather-summary"
+      role="img"
+      aria-label={`Forecast: ${weather.condition}, ${weather.temperature} degrees Fahrenheit, feels like ${weather.feelsLike}`}
       title={`Feels like ${weather.feelsLike}°F`}
     >
-      <IconComponent size={14} className="weather-icon" />
-      <span className="weather-temp">{weather.temperature}°F</span>
-      <span className="weather-desc">{weather.condition}</span>
+      <IconComponent size={14} className="weather-icon" aria-hidden="true" />
+      <span className="weather-temp" aria-hidden="true">{weather.temperature}°F</span>
+      <span className="weather-desc" aria-hidden="true">{weather.condition}</span>
     </div>
   );
 }
