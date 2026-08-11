@@ -8,6 +8,7 @@ import { SERVICE_HOUR_GOAL } from './milestones.js';
 import { grantsFor } from './userCapabilities.js';
 import { withheldCapabilitiesFor } from './organizerAgreement.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
+import { sweepCheckinTokens } from './checkinTokens.js';
 import { sweepErrors } from './errorReporter.js';
 import { sendErrorAlerts } from './alerting.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
@@ -983,6 +984,13 @@ export function runNotificationSweep() {
      */
     const tfa = sweepTwoFactorRemnants(db, now);
     if (tfa > 0) console.log(`[2FA] Purged ${tfa} expired code and attempt row(s).`);
+
+    /* Check-in codes expire after five minutes; these are swept a day later, so
+       "did Leo's code work this morning?" is still answerable in the afternoon.
+       After that it is credential material with no remaining purpose, which is
+       the same reason the 2FA codes above are swept. */
+    const codes = sweepCheckinTokens(db, now);
+    if (codes > 0) console.log(`[Check-in] Purged ${codes} expired check-in code(s).`);
 
     /**
      * Error records: aged evidence, closed groups, and the single-occurrence
