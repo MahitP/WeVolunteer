@@ -42,6 +42,59 @@ const geocodeLimiter = rateLimit({
 });
 
 /**
+ * The application-wide throttle in front of Nominatim (TD-19).
+ *
+ * ── Why the per-IP limiter above is not this ──
+ *
+ * `geocodeLimiter` bounds how much ONE CLIENT may ask for. The Nominatim usage
+ * policy bounds how much THIS APPLICATION may ask for: an absolute maximum of
+ * one request per second, in total, across every user. Those are different
+ * jobs, so this is a second control rather than a change to the first — a
+ * handful of organizers on different networks each stayed inside thirty a
+ * minute while the application as a whole went well past one a second.
+ *
+ * ── Why a reservation and not a promise chain ──
+ *
+ * Chaining each request onto the last serialises correctly but queues without
+ * bound: the two-hundredth caller waits two hundred seconds, for a client that
+ * closed the tab three minutes ago. Reserving a timestamp lets the handler ask
+ * "how long would I wait?" BEFORE it waits, and refuse with the 429 this route
+ * already returns — a shape the client already understands.
+ *
+ * Process-local state is genuinely application-wide state here: `instanceLock`
+ * refuses to boot a second production instance against one database, and that
+ * file names multiplied rate limits as the reason it exists.
+ *
+ * The constants are not operator tunables. One request per second is somebody
+ * else's published policy, not a knob, so it is not read from the environment.
+ *
+ * @see https://operations.osmfoundation.org/policies/nominatim/
+ */
+const NOMINATIM_MIN_INTERVAL_MS = 1000;
+const NOMINATIM_MAX_WAIT_MS = 3000;
+let nextUpstreamSlotAt = 0;
+
+/**
+ * Claims the next upstream slot.
+ *
+ * @returns {number|null} milliseconds to wait before calling, or `null` when
+ *   the queue is already deeper than a caller should be asked to sit through.
+ *   A `null` return reserves nothing, so refusing does not push the queue out
+ *   further for everyone behind it.
+ */
+function reserveUpstreamSlot(now = Date.now()) {
+  const at = Math.max(now, nextUpstreamSlotAt);
+  if (at - now > NOMINATIM_MAX_WAIT_MS) return null;
+  nextUpstreamSlotAt = at + NOMINATIM_MIN_INTERVAL_MS;
+  return at - now;
+}
+
+/** Test seam: the bucket is module state and suites must not inherit each other's. */
+export function __resetUpstreamThrottle() {
+  nextUpstreamSlotAt = 0;
+}
+
+/**
  * Formats a Nominatim address object into a single-line string.
  * Picks the most useful fields and joins them.
  */
@@ -67,28 +120,23 @@ function formatAddress(addr) {
  * Server-side proxy for Nominatim geocoding, gated on `geocode.use`, with
  * caching and response normalisation.
  *
- * ── ⚠️ The rate limiting is NOT central, despite what this said (TD-19) ──
+ * ── Two limits, doing two different jobs (TD-19, resolved) ──
  *
- * `geocodeLimiter` above passes no `keyGenerator`, so `express-rate-limit`
- * defaults to **per client IP**: thirty requests a minute *each*. The
- * [Nominatim usage policy](https://operations.osmfoundation.org/policies/nominatim/)
- * is an absolute maximum of **one request per second for the whole
- * application**. A handful of organizers on different networks exceeds that.
+ * `geocodeLimiter` is per client IP — thirty a minute each — and bounds how
+ * much one client may ask for. `reserveUpstreamSlot` is application-wide and
+ * bounds how much WeVolunteer may ask Nominatim for, which its usage policy
+ * caps at one request per second in total.
  *
- * This comment used to claim "central rate limiting", which is the reason the
- * gap survived a read: someone checking whether the policy was honoured would
- * have found a sentence saying yes.
+ * Only the first of those existed, and this comment used to claim "central rate
+ * limiting" — which is why the gap survived a read. Anyone checking whether the
+ * policy was honoured found a sentence saying yes.
  *
- * The cache below is the only thing currently holding upstream volume down, and
- * it works — repeat lookups of the same address never leave the process. What is
- * missing is a **server-wide** throttle in front of the `fetch`, placed after the
- * cache check so a cached hit never waits. Whether that queues briefly or
- * fail-fasts with the 429 this handler already returns is a UX decision; see
- * ENGINEERING_GUIDE TD-19 and v1.4 Task 12.
+ * The cache is still the first line and does most of the work: a repeat lookup
+ * of the same address never leaves the process, and never reaches the throttle.
  *
- * The consequence of leaving it is not a 500 — it is OSM blocking this
+ * The consequence of getting this wrong is not a 500 — it is OSM blocking this
  * application's User-Agent, which removes address lookup for every school at
- * once.
+ * once, and is slow to reverse.
  */
 router.get('/api/geocode', geocodeLimiter, authenticateToken, requireCap('geocode.use'), async (req, res) => {
   const raw = req.query.q;
@@ -131,6 +179,22 @@ router.get('/api/geocode', geocodeLimiter, authenticateToken, requireCap('geocod
       const bottom = lat - 0.5;
       params.append('viewbox', `${left},${top},${right},${bottom}`);
       params.append('bounded', '1');
+    }
+
+    /* After the cache check, so a hit never waits, and before the fetch, so
+       nothing reaches Nominatim faster than its policy allows. */
+    const waitMs = reserveUpstreamSlot();
+    if (waitMs === null) {
+      return res.status(429).json({
+        error: 'Address lookup is busy right now. Try again in a moment.',
+        code: 'rate_limited'
+      });
+    }
+    if (waitMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      /* The caller may have given up during the wait. The slot is already spent
+         either way — releasing it would let the next caller jump the interval. */
+      if (req.destroyed) return;
     }
 
     const controller = new AbortController();
