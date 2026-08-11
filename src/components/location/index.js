@@ -4,3 +4,6 @@ export { default as LocationThumbnail } from './LocationThumbnail';
 export { default as MapPreview } from './MapPreview';
 export { default as DirectionsButton } from './DirectionsButton';
 export { default as LocationCard } from './LocationCard';
+export { default as LocationLink } from './LocationLink';
+export { default as MapReveal } from './MapReveal';
+export { default as WeatherSummary } from './WeatherSummary';

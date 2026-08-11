@@ -105,11 +105,24 @@
   border-radius: 50%;
 }
 
-/* Hide leaflet controls on small previews to reduce clutter */
-.location-inline-map .leaflet-control-container,
-.map-preview-thumb .leaflet-control-container,
-.map-preview .leaflet-control-container {
+/* Hide the zoom buttons on small previews to reduce clutter.
+
+   This used to hide `.leaflet-control-container`, which is the parent of BOTH
+   the zoom buttons and the attribution — so it removed the OpenStreetMap and
+   CARTO credit from every map in the app. That credit is a licence condition of
+   both providers, not decoration, and the privacy notice asserts it is shown.
+   Only the zoom control is clutter; the attribution stays. */
+.location-inline-map .leaflet-control-zoom,
+.map-preview-thumb .leaflet-control-zoom,
+.map-preview .leaflet-control-zoom {
   display: none;
+}
+
+.location-inline-map .leaflet-control-attribution,
+.map-preview-thumb .leaflet-control-attribution,
+.map-preview .leaflet-control-attribution {
+  font-size: 0.625rem;
+  padding: 0 4px;
 }
 
 .map-dark-mode .leaflet-layer,
@@ -216,4 +229,67 @@
   .directions-btn {
     width: 100%;
   }
+}
+
+/* --------------------------------------------------------------------------
+   Location link — the inline "this address is clickable" affordance
+   --------------------------------------------------------------------------
+   Quiet at rest, brand on interaction. Green in this app means "the platform,
+   and any action you can take" (index.css header), so a location IS eligible
+   for it — but painting every address on the dashboard, the calendar and the
+   modal green would drown the actual calls to action on those screens. The
+   dotted underline plus the external-link glyph is what carries "clickable"
+   at rest; the colour arrives on hover and focus, when the reader is asking.
+   -------------------------------------------------------------------------- */
+.location-link {
+  color: inherit;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--ink-3);
+  text-underline-offset: 3px;
+  transition: color var(--t-fast), text-decoration-color var(--t-fast);
+}
+
+.location-link:hover {
+  color: var(--brand);
+  text-decoration-color: var(--brand);
+}
+
+.location-link:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.location-link-glyph {
+  opacity: 0.6;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+/* --------------------------------------------------------------------------
+   Map reveal — tiles load only when asked for
+   --------------------------------------------------------------------------
+   Map tiles are fetched by the student's own browser, which makes the tile
+   provider the one third party that sees a student's IP address. Loading them
+   because a page happened to render is a disclosure nobody asked for; loading
+   them because somebody pressed "Show map" is one they did.
+   -------------------------------------------------------------------------- */
+.map-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  align-items: flex-start;
+}
+
+.map-reveal-note {
+  font-size: 0.75rem;
+  color: var(--ink-3);
+}
+
+.map-reveal.is-shown {
+  align-items: stretch;
 }
