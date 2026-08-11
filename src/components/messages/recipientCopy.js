@@ -100,22 +100,42 @@ const ENTRIES = [
       body: 'Confirm the details, answer questions, and let them know what to bring.',
     },
   },
+  /**
+   * ── A member reaches TWO groups, and this used to name one ──
+   *
+   * Every sentence here said "organizer" and only "organizer", which was
+   * accurate while the schema had no shape for a student↔student thread. It
+   * does now (migration 035), so the copy described a narrower product than the
+   * one behind it: a student who wanted to message a friend was told, in the
+   * dialog for doing exactly that, that they could message organizers.
+   *
+   * Both audiences are named in the same breath rather than in two sentences.
+   * "Friends" is first because it is the one that changed and the one a member
+   * is more likely to be looking for; the organizer half is unchanged in
+   * substance so that nobody reads the new wording as a replacement.
+   *
+   * The friendship condition is stated ("you are friends with", "once you are
+   * friends") rather than left implied, because the alternative reading —
+   * message anyone you can find — is both wrong and the one a search box invites.
+   */
   {
     cap: 'application.withdraw',
-    description: 'You can message the organizer of an event you have applied to.',
-    placeholder: 'Search organizers of events you applied to…',
-    empty: 'Nobody matched. You can message an organizer once you have applied to one '
-      + 'of their events.',
-    listEmpty: 'No conversations yet. One appears here when you message the organizer of '
-      + 'an event you have applied to, or when they message you.',
+    description: 'You can message your friends, and the organizer of an event you have '
+      + 'applied to.',
+    placeholder: 'Search friends and organizers…',
+    empty: 'Nobody matched. You can message someone once you are friends, or once you '
+      + 'have applied to one of their events.',
+    listEmpty: 'No conversations yet. One appears here when you message a friend or the '
+      + 'organizer of an event you have applied to, or when they message you.',
     noneSelected: {
       title: 'Select a conversation',
-      body: 'Choose an organizer on the left to ask about a shift you applied for.',
+      body: 'Choose someone on the left — a friend, or an organizer you can ask about a '
+        + 'shift you applied for.',
     },
     threadEmpty: {
       title: 'Start the conversation',
-      body: 'Ask about the shift, the place, or what to bring. An adult at the '
-        + 'organization will see what you write.',
+      body: 'Say hello, or ask about the shift, the place, or what to bring. Messages to '
+        + 'an organizer are read by an adult at the organization.',
     },
   },
 ];

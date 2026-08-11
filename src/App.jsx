@@ -214,7 +214,7 @@ const SELF_PROFILE_CAPS = SELF_PROFILE.filter(p => p.view !== 'denied').map(p =>
  * So priority is now DECLARED. Everything is primary unless it says otherwise,
  * and exactly two entries say otherwise:
  *
- *   PRIMARY    Dashboard · Opportunities · Calendar · Messages · Admin
+ *   PRIMARY    Dashboard · Discover · Calendar · Messages · Admin
  *   SECONDARY  Notifications · My profile
  *
  * Both surfaces read the same flag. The desktop rail draws primary then secondary
@@ -256,7 +256,11 @@ const NAV = [
    * "Opportunities" because the supporting copy alone could not fix a label that
    * collides with a control on its own page.
    */
-  { id: 'browse', path: '/events', label: 'Discover', icon: Compass, requiredCap: 'event.view' },
+  /* The path matches the label now. It said `/events` while the label said
+     "Discover", so the rail promised one thing and the URL bar showed another the
+     moment anybody clicked it. `/events` still resolves — see RedirectToDiscover
+     in routes/index.jsx — but nothing in the product points there any more. */
+  { id: 'browse', path: '/discover', label: 'Discover', icon: Compass, requiredCap: 'event.view' },
   { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, requiredCapAny: ['event.apply', 'event.create'] },
   { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, requiredCap: 'message.send' },
   /* "New event" is deliberately NOT a nav entry.
@@ -264,7 +268,7 @@ const NAV = [
      It was one, which put the single most common organizer action behind reading
      a twelve-item rail of mostly administrative pages — and on a phone, where the
      rail collapses to a bar plus a "More" sheet, frequently behind a tap as well.
-     It now lives as a primary button on Opportunities, which is where an
+     It now lives as a primary button on Discover, which is where an
      organizer already is when they think "I want to post a shift".
 
      `tabForPath` still maps `/events/new` to `create`, and PAGE_META still has a
@@ -312,7 +316,7 @@ const NAV = [
    * organization, or the person who runs it? A student searching does not know,
    * and should not have to.
    *
-   * Discovery is now one search on Opportunities, across opportunities, people
+   * Discovery is now one search on Discover, across opportunities, people
    * and organizations at once — see the `scope` control in BrowseEvents.jsx.
    * `/directory` redirects there, so the shipped URL still works; `tabForPath`
    * still maps `/users` and `/organizations` (to `browse`, now) because a path
@@ -381,6 +385,13 @@ for (const entry of NAV) {
  */
 export function tabForPath(pathname) {
   if (pathname.startsWith('/events/new')) return 'create';
+  /* `/discover` is the canonical Discover page and `/events` is its compatibility
+     redirect. Both map to `browse`: the redirect renders for one frame before
+     React Router replaces the URL, and a frame titled "Discover" is better
+     than a frame titled by the `*` fallback. Kept after `/events/new` for the
+     prefix reason the header gives — `/events` is a prefix of `/events/new`, and
+     `/discover` is a prefix of nothing. */
+  if (pathname.startsWith('/discover')) return 'browse';
   if (pathname.startsWith('/events')) return 'browse';
   if (pathname.startsWith('/errors')) return 'errors';
   if (pathname.startsWith('/calendar')) return 'calendar';
@@ -388,8 +399,8 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/profile')) return 'profile';
   /* The discovery destinations keep tab ids of their OWN, because this function
      answers two questions at once and they have different answers here: what to
-     TITLE the page (a member's profile is not "Opportunities") and which rail
-     item to light (Opportunities, because that is where discovery lives and a
+     TITLE the page (a member's profile is not "Discover") and which rail
+     item to light (Discover, because that is where discovery lives and a
      rail that goes dark when you follow a search result reads as having left the
      app). `RAIL_TAB` below is the second answer; PAGE_META is the first.
 
@@ -427,7 +438,7 @@ export function tabForPath(pathname) {
  * almost every path the rail entry has the same name. The discovery
  * destinations are the exception: a member's profile and an organization page
  * are their own pages with their own titles, and they are reached from
- * Opportunities, which is where finding a person now lives. Without this the
+ * Discover, which is where finding a person now lives. Without this the
  * rail would go dark on every search result, which reads as having navigated
  * out of the application.
  *
@@ -519,30 +530,30 @@ export const PAGE_META = {
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
     /**
-     * ── The label stays "Opportunities"; the SUBTITLE is what had to change ──
+     * ── "Discover", matching the rail entry and the route ──
      *
-     * The page holds three kinds of thing now — shifts, people, organizations —
-     * and the rail label named one of them. The tempting fix is to rename the
-     * entry to something that covers all three ("Discover", "Explore"), and it
-     * is the wrong one: a rail label should say what somebody GOES there for,
-     * and a student goes there for a shift. "Discover" is a category of action
-     * rather than a destination, it tells a fourteen-year-old nothing about what
-     * they will find, and it would leave the rail disagreeing with the page
-     * titles the other personas already read ("Recruit", "All events").
+     * This block used to argue the opposite — that the label should stay
+     * "Opportunities" — and it was left standing after the rename went the other
+     * way, so the comment contradicted the line beneath it and the NAV entry it
+     * describes. The reasoning that won is recorded once, at the NAV entry: the
+     * page holds shifts, people and organizations, and "Opportunities" was
+     * simultaneously the name of the whole destination and of one of the four
+     * scope tabs inside it.
      *
-     * What was genuinely wrong is this line, which described only the grid on a
-     * page that had grown two more sections above it. The scope tabs and the
-     * search placeholder both say all three; the one sentence under the heading
-     * did not.
+     * The subtitle is what carries the specificity the old label was doing:
+     * naming all three, so the heading does not describe only the grid.
      */
     browse: { title: 'Discover', sub: 'Find a shift, a club, or someone you volunteer with' },
     calendar: { title: 'Calendar', sub: 'Your shifts and the deadlines that matter' },
-    messages: { title: 'Messages', sub: 'Coordinate directly with organizers regarding your shifts' },
+    /* Named both audiences once messaging stopped being organizers-only. The
+       old line was the page-header twin of the recipient picker's sentence, and
+       it went stale for the same reason — see recipientCopy.js. */
+    messages: { title: 'Messages', sub: 'Talk to your friends and the organizers of shifts you applied for' },
     notifications: { title: 'Notifications', sub: 'Replies, reminders, and event updates' },
     profile: { title: 'Profile', sub: 'Your service record, milestones, and certificates' },
     loggedHours: { title: 'Logged hours', sub: 'Everything you have volunteered, confirmed and self-reported' },
     externalHours: { title: 'Log external hours', sub: 'Volunteering you did somewhere WeVolunteer does not run' },
-    /* Reached from the search on Opportunities, and titled for what is on the
+    /* Reached from the search on Discover, and titled for what is on the
        page rather than for where the reader came from. */
     directory: { title: 'Member profile', sub: 'Someone you volunteer alongside' },
     organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
@@ -576,7 +587,14 @@ export const PAGE_META = {
        title nobody will ever see. */
     legalEditor: { title: 'Legal Center editor', sub: 'Publish new versions of the documents people agree to' },
     dashboard: { title: 'Dashboard', sub: 'Reports waiting, organizers to approve, and how the programme is doing' },
-    browse: { title: 'All events', sub: 'Everything posted across the district' },
+    /* "All events" was the pre-consolidation title, and it survived the rename
+       into two personas. It disagreed with the rail item that opens the page
+       ("Discover") and it named a third of what the page holds — the same
+       two faults the volunteer entry above was already corrected for. The
+       organizer's "Recruit" is left alone: it is a deliberate persona title
+       naming what an organizer comes here to DO, and its subtitle already says
+       all three. */
+    browse: { title: 'Discover', sub: 'Every opportunity, member, and club across the district' },
     notifications: { title: 'Notifications', sub: 'Platform activity' },
     errors: { title: 'Errors', sub: 'Crashes and faults reported by browsers, the server, and background jobs' },
     appeals: { title: 'Appeals', sub: 'Review and decide user suspension appeals' },
@@ -604,7 +622,14 @@ export const PAGE_META = {
        so any signed-in role can open it, partner included. */
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
-    browse: { title: 'All events', sub: 'Everything posted across the district' },
+    /* "All events" was the pre-consolidation title, and it survived the rename
+       into two personas. It disagreed with the rail item that opens the page
+       ("Discover") and it named a third of what the page holds — the same
+       two faults the volunteer entry above was already corrected for. The
+       organizer's "Recruit" is left alone: it is a deliberate persona title
+       naming what an organizer comes here to DO, and its subtitle already says
+       all three. */
+    browse: { title: 'Discover', sub: 'Every opportunity, member, and club across the district' },
     /**
      * `profile` was missing, and partner is the role the distinguished profile
      * was BUILT for — so the one page it exists to serve fell through to the
@@ -778,7 +803,10 @@ function AppShell({ toasts, addToast, removeToast }) {
   const setActiveTab = (tab) => {
     const map = {
       dashboard: '/',
-      browse: '/events',
+      /* The canonical path, not the redirect. Navigating programmatically to
+         `/events` would work, but it would put the old URL in the address bar and
+         then replace it — a visible flicker on a path nothing should still use. */
+      browse: '/discover',
       create: '/events/new',
       calendar: '/calendar',
       notifications: '/notifications',
@@ -1206,7 +1234,7 @@ function AppShell({ toasts, addToast, removeToast }) {
 
   /** What each routed view in APP_ROUTES needs from the shell. */
   const appRouteProps = {
-    '/events': {
+    '/discover': {
       currentUser,
       applications,
       onViewDetails: openEventById,
@@ -1217,6 +1245,9 @@ function AppShell({ toasts, addToast, removeToast }) {
          modal can resolve an event the index does not hold. */
       onEventsSeen: rememberEvents
     },
+    /* Redirect elements, so they take nothing — declared `{}` rather than
+       omitted, because `withProps` treats an omission as a forgotten entry. */
+    '/events': {},
     '/events/new': { onSubmitEvent: handleCreateEvent, addToast, setActiveTab },
     '/events/:id/edit': {},
     '/checkin/:eventId': { currentUser },

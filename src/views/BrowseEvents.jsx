@@ -121,7 +121,7 @@ export default function BrowseEvents({
   /**
    * The scope lives in the URL.
    *
-   * `/directory` was a shipped path and redirects to `/events?find=people`, so
+   * `/directory` was a shipped path and redirects to `/discover?find=people`, so
    * a bookmark or a link in a group chat still lands on the people results
    * rather than on an unexplained grid of events. It is also what makes a
    * search shareable at all.

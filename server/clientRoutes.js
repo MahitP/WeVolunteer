@@ -69,6 +69,13 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/reset-password',
 
   // src/routes/index.jsx — APP_ROUTES
+  '/discover',
+  /* The Discover page's old address, still declared BECAUSE it still resolves —
+     it is a query-preserving redirect to `/discover`, not a deleted path. A
+     crash during that redirect, or on a `/events?event=<id>` deep link somebody
+     still has bookmarked, has to be reportable as `/events` rather than as
+     `unknown`; the pattern is a literal, so nothing the query string carried
+     survives matching. Remove this entry only when the redirect itself goes. */
   '/events',
   '/events/new',
   '/events/:id/edit',

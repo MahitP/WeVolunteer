@@ -122,10 +122,14 @@ describe('every nav entry knows which page it is', () => {
     expect(tabForPath('/')).toBe('dashboard');
   });
 
-  /* Prefix order is load-bearing: `/events` is a prefix of `/events/new`. */
+  /* Prefix order is load-bearing: `/events` is a prefix of `/events/new`. The
+     canonical Discover path is `/discover`; `/events` still maps to `browse`
+     because its compatibility redirect renders for a frame before the URL is
+     replaced, and that frame must not be titled by the `*` fallback. */
   it('does not let a shorter path swallow a longer one', () => {
     expect(tabForPath('/events/new')).toBe('create');
     expect(tabForPath('/events')).toBe('browse');
+    expect(tabForPath('/discover')).toBe('browse');
   });
 });
 

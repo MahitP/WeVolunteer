@@ -356,9 +356,29 @@ export default function ConversationPane({ conversation, onBack, onUpdateConvers
       </div>
       
       {/* ── Composer ────────────────────────────────────────────────── */}
-      {conversation.lifecycle?.readOnly ? (
+      {/**
+        * ── `writable`, not `readOnly` — the latter is a field that does not exist ──
+        *
+        * `computeConversationLifecycle` returns `{ state, writable, reason,
+        * readOnlyAt, banner }`. There is no `readOnly` key and there never has
+        * been, so this test read `undefined` on every conversation and the
+        * composer rendered unconditionally. A read-only thread — a completed
+        * event, a withdrawn application, a block — showed a working message box
+        * that answered 409 on submit, and the server's carefully written
+        * `banner` explaining WHY was never displayed to anybody.
+        *
+        * Checked as `=== false` rather than `!writable` so that a conversation
+        * whose lifecycle failed to load does not silently lock the composer:
+        * absent means unknown, and the server is the authority either way.
+        *
+        * The banner is preferred over the generic sentence because it is the one
+        * that says which rule closed the thread. That matters most for the peer
+        * kind, where "read-only" with no reason reads as a fault rather than as
+        * the consequence of a friendship ending.
+        */}
+      {conversation.lifecycle?.writable === false ? (
         <div className="composer-readonly">
-          This conversation is read-only.
+          {conversation.lifecycle.banner || 'This conversation is read-only.'}
         </div>
       ) : (
         <div className="composer-area">

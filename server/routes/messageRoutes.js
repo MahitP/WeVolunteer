@@ -6,8 +6,10 @@ import { can, requireCap, principalFor } from '../authz.js';
 import { grantsFor } from '../userCapabilities.js';
 import { isBlockedBetween, block, unblock } from '../blocking.js';
 /* Blocking withdraws the friendship, exactly as restricting does — see the note
-   in the block handler below. */
-import { removeFriend } from '../relationships.js';
+   in the block handler below. `areFriends` is the same single source of truth
+   `resolvePeerConversation` authorises on; the recipient search filters through
+   it so the picker cannot offer a row that would answer 403 when tapped. */
+import { areFriends, removeFriend } from '../relationships.js';
 import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
@@ -26,7 +28,8 @@ import {
   newId,
   otherParticipant,
   resolveAdminConversation,
-  resolveConversation
+  resolveConversation,
+  resolvePeerConversation
 } from '../messaging.js';
 
 const router = express.Router();
@@ -93,6 +96,51 @@ router.post('/api/messages/conversations/resolve', authenticateToken, (req, res)
     res.status(500).json({ error: 'Failed to open conversation' });
   }
 });
+
+/**
+ * Opens (or reopens) the thread between the caller and one of their friends.
+ *
+ * ── Why this is a separate endpoint from `/resolve` ──
+ *
+ * Same reason the admin one below is: `/resolve` derives a (student, organizer,
+ * event) triple from an event id and checks the caller's relationship to that
+ * event. A peer thread has no event and names the counterparty directly, so
+ * every branch of that handler would have had to ask which mode it was in.
+ *
+ * ── Gated on `message.send`, and then on friendship ──
+ *
+ * `message.send` is the capability that means "this account participates in
+ * conversations", which is the right coarse gate — a partner holds neither it nor
+ * `event.apply` and is refused here before any relationship is read.
+ *
+ * It is deliberately NOT sufficient on its own, and that is the whole design: an
+ * organizer holds `message.send` too. What narrows this to friends is
+ * `areFriends` inside `resolvePeerConversation`, which requires BOTH parties to
+ * hold `event.apply` — so an organizer calling this endpoint directly is refused
+ * by the peer rule rather than by a role comparison here. There is no role string
+ * in this handler, and `authz.completeness.test.js` would fail the build if there
+ * were.
+ *
+ * ── No audit row, unlike the admin endpoint below ──
+ *
+ * That one records `ADMIN_CONVERSATION_OPENED` because an administrator opening a
+ * line to a member is a use of power a person might later ask about. Two friends
+ * choosing to talk is not, and writing a row every time one of them opens a chat
+ * would put ordinary teenage conversation into a moderation log with a broader
+ * audience than the conversation has.
+ */
+router.post('/api/messages/conversations/peer/resolve', authenticateToken,
+  requireCap('message.send'), (req, res) => {
+    try {
+      const { userId } = req.body || {};
+      const result = resolvePeerConversation({ actor: req.user, friendId: userId });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      res.status(200).json({ conversation: result.conversation });
+    } catch (err) {
+      console.error('Resolve peer conversation error:', err);
+      res.status(500).json({ error: 'Failed to open conversation' });
+    }
+  });
 
 /**
  * Opens (or reopens) an administrator's own thread with one person.
@@ -303,9 +351,20 @@ router.post('/api/messages/conversations/:id/messages', authenticateToken, (req,
          * one case where the recipient most needs to know who is contacting them
          * and why.
          */
-        const context = decorated.kind === 'student_organizer'
-          ? (decorated.event?.title || 'Volunteer conversation')
-          : 'Message from a WeVolunteer administrator';
+        /**
+         * A peer thread is neither, and the two-branch version got it badly
+         * wrong: anything that was not `student_organizer` fell to the
+         * administrator line, so a message from a school friend would have
+         * arrived labelled as contact from platform staff. That is alarming in
+         * the exact way a notification must not be, and it misidentifies who is
+         * getting in touch — the one thing the context line exists to say.
+         */
+        const CONTEXT_BY_KIND = {
+          student_organizer: decorated.event?.title || 'Volunteer conversation',
+          peer: 'Message from a friend',
+        };
+        const context = CONTEXT_BY_KIND[decorated.kind]
+          ?? 'Message from a WeVolunteer administrator';
 
         notificationService.dispatch('DIRECT_MESSAGE', {
           title: `New message from ${sender?.name || 'Someone'}`,
@@ -397,12 +456,25 @@ router.get('/api/messages/search', authenticateToken, (req, res) => {
     const q = String(req.query.q || '').trim();
     if (q.length < 2) return res.json({ results: [] });
     const like = `%${q}%`;
+    /**
+     * `events` is LEFT joined, because not every conversation has one.
+     *
+     * It was an inner join, which silently dropped every thread whose `event_id`
+     * is NULL from search results — a filter nobody wrote and no error reported.
+     * That already excluded the admin threads migration 018 introduced, and it
+     * would have excluded peer threads entirely: a member could search their
+     * messages, match nothing from a friend, and reasonably conclude the search
+     * was broken rather than that it had never looked.
+     *
+     * `event_title` is therefore NULL for those rows, which is what it should be
+     * — the client already renders a thread with no event.
+     */
     const rows = db.prepare(`
       SELECT m.*, c.event_id, e.title AS event_title, u.name AS sender_name
       FROM messages m
       JOIN conversations c ON c.id = m.conversation_id
       JOIN conversation_participants cp ON cp.conversation_id = c.id AND cp.user_id = ?
-      JOIN events e ON e.id = c.event_id
+      LEFT JOIN events e ON e.id = c.event_id
       JOIN users u ON u.id = m.sender_id
       WHERE m.body LIKE ?
       ORDER BY m.created_at DESC
@@ -503,7 +575,8 @@ router.get('/api/messages/users/search', authenticateToken, (req, res) => {
     // unscoped `else` that would search every user on the platform.
     if (can(req.principal, 'applicant.review') || can(req.principal, 'event.moderate')) {
       rows = db.prepare(`
-        SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role, e.id AS eventId, e.title AS eventTitle
+        SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role,
+               'applicant' AS kind, e.id AS eventId, e.title AS eventTitle
         FROM users u
         JOIN applications a ON a.user_id = u.id
         JOIN events e ON a.event_id = e.id
@@ -513,7 +586,8 @@ router.get('/api/messages/users/search', authenticateToken, (req, res) => {
       `).all(req.principal.userId, like, like);
     } else if (can(req.principal, 'application.withdraw')) {
       rows = db.prepare(`
-        SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role, e.id AS eventId, e.title AS eventTitle
+        SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role,
+               'organizer' AS kind, e.id AS eventId, e.title AS eventTitle
         FROM users u
         JOIN events e ON e.organizer_id = u.id
         JOIN applications a ON a.event_id = e.id
@@ -521,6 +595,50 @@ router.get('/api/messages/users/search', authenticateToken, (req, res) => {
           AND (u.name LIKE ? OR u.username LIKE ?)
         LIMIT 20
       `).all(req.principal.userId, like, like);
+
+      /**
+       * ...and the caller's friends, which is the other half of who a member may
+       * message.
+       *
+       * ── Why this is a second query and not a UNION ──
+       *
+       * The organizer query is keyed on an application and carries the event it
+       * came from; a friend has no event and the columns would be NULL. Keeping
+       * them apart lets each say what it means, and lets the friendship rule be
+       * expressed as a filter through `areFriends` rather than as SQL that would
+       * be a second definition of "friend".
+       *
+       * ── The candidate set is deliberately narrow ──
+       *
+       * Only accounts with an accepted friendship row in either direction, and
+       * every one of them is then re-asked through `areFriends`. The row alone is
+       * NOT the answer: it does not know about blocking, and it does not know
+       * that friendship became peer-only, so a legacy organizer↔student row would
+       * otherwise surface somebody this member cannot actually message. Filtering
+       * with the same function the resolve endpoint authorises on is what keeps
+       * the picker from offering a row that answers 403 when tapped.
+       *
+       * `kind` tells the client which endpoint to call. Without it the picker
+       * would have to infer it from `eventId` being absent, which is the same
+       * shape of guess `decorateConversation` refuses to make about `event`.
+       */
+      const friendCandidates = db.prepare(`
+        SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role
+        FROM users u
+        JOIN user_relationships r
+          ON r.kind = 'friend' AND r.status = 'accepted'
+         AND ((r.actor_id = ? AND r.subject_id = u.id)
+           OR (r.subject_id = ? AND r.actor_id = u.id))
+        WHERE u.account_status = 'active'
+          AND (u.name LIKE ? OR u.username LIKE ?)
+        LIMIT 20
+      `).all(req.principal.userId, req.principal.userId, like, like);
+
+      rows = rows.concat(
+        friendCandidates
+          .filter(u => areFriends(db, req.principal.userId, u.id))
+          .map(u => ({ ...u, kind: 'friend', eventId: null, eventTitle: null }))
+      );
     }
 
     res.json({ users: rows });

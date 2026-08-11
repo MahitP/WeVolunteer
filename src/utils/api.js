@@ -789,6 +789,13 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ eventId, studentId })
   }),
+  /* Opening a thread with a friend. A separate endpoint from the one above
+     because a peer thread has no event to derive a triple from — and separately
+     authorised, on friendship rather than on an application. */
+  resolvePeerConversation: async (userId) => apiFetch('/api/messages/conversations/peer/resolve', {
+    method: 'POST',
+    body: JSON.stringify({ userId })
+  }),
   fetchMessages: async (conversationId) => apiFetch(`/api/messages/conversations/${conversationId}/messages`),
   sendMessage: async (conversationId, body) => apiFetch(`/api/messages/conversations/${conversationId}/messages`, {
     method: 'POST',

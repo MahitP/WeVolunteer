@@ -87,8 +87,14 @@ export default function RecipientPicker({ onSelect, onClose, user }) {
       <div className="modal-body">
         <div className="recipient-search">
           <Search size={18} className="recipient-search-icon" aria-hidden="true" />
+          {/* Mirrors `copy.placeholder` rather than restating a fixed list of
+              roles. It said "a volunteer or organizer", which was wrong for a
+              member searching for a friend and wrong for an administrator, and
+              it could drift from the visible placeholder beside it — so a
+              screen-reader user and a sighted user were told different things
+              about the same box. */}
           <label className="sr-only" htmlFor="recipient-search">
-            Search for a volunteer or organizer
+            {copy.placeholder.replace(/…$/, '')}
           </label>
           <input
             id="recipient-search"
@@ -114,14 +120,22 @@ export default function RecipientPicker({ onSelect, onClose, user }) {
             </p>
           )}
 
+          {/* A friend has no event, so the row's second line and its accessible
+              name both have to come from what the result IS rather than from a
+              column that is now sometimes null. "Message Ada about undefined"
+              is what the unconditional template produced. */}
           {!loading && !error && results.map((u) => (
             <button
-              key={`${u.id}-${u.eventId}`}
+              /* `u.eventId` is null for a friend, so two friends would key as
+                 `x-null` and `y-null` — distinct, but only by accident of the
+                 id. Falling back to `kind` says what the row is instead. */
+              key={`${u.id}-${u.eventId || u.kind}`}
               type="button"
               data-recipient={u.id}
+              data-recipient-kind={u.kind}
               className="recipient-row"
               onClick={() => onSelect(u)}
-              aria-label={`Message ${u.name} about ${u.eventTitle}`}
+              aria-label={u.eventTitle ? `Message ${u.name} about ${u.eventTitle}` : `Message ${u.name}`}
             >
               <span className="recipient-avatar" aria-hidden="true">
                 {u.avatar ? u.avatar : <User size={20} />}
@@ -130,7 +144,9 @@ export default function RecipientPicker({ onSelect, onClose, user }) {
                 <span className="recipient-name">
                   {u.name} <span className="recipient-username">@{u.username}</span>
                 </span>
-                <span className="small dim">{u.eventTitle}</span>
+                {/* Named for what it is. A row with a blank second line reads as
+                    missing data rather than as a friend. */}
+                <span className="small dim">{u.eventTitle || 'Friend'}</span>
               </span>
             </button>
           ))}
