@@ -278,12 +278,16 @@ describe('migration 038', () => {
         .toThrow(/FOREIGN KEY/i);
     });
 
-    it('is inert while enforcement is off, which is the state today', () => {
+    it('can be turned off, which is what a table rebuild needs', () => {
       /**
-       * Recorded rather than asserted as desirable. `PRAGMA foreign_keys`
-       * defaults to OFF and db.js never sets it, so every cascade in this
-       * schema — including the ones `attendance` has always declared — is
-       * currently documentation. Enabling it is a separate change.
+       * Not a description of production. `node:sqlite` enables foreign keys by
+       * default and `db.js` passes no options, so enforcement is ON in the
+       * running application — see TD-21.
+       *
+       * This pins the other half: a migration that rebuilds a table has to be
+       * able to disable enforcement around the DROP, or a parent's cascade
+       * takes the children with it. `db.js` documents exactly that hazard for
+       * `application_conflicts`.
        */
       migration.up(db);
       db.exec('PRAGMA foreign_keys = OFF');

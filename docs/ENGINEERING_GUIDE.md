@@ -1890,43 +1890,41 @@ when they are done, not when they become uncomfortable to look at.
   change to a security control.
 - **Effort:** small. **Opened and resolved:** 2026-08-08.
 
-#### TD-21 — every foreign key in the schema is documentation
+#### TD-21 — foreign-key enforcement rests on a library default, not a pragma
 
-- **Detail:** `PRAGMA foreign_keys` defaults to **OFF** in SQLite and must be set
-  per connection. `server/db.js` sets `journal_mode` and `busy_timeout` and does
-  not set this one. **Forty-four tables declare `REFERENCES`** — including
-  `attendance`, whose three `ON DELETE CASCADE` clauses have been in the schema
-  since it was created, and `user_badges`, which cascades on both parents. None
-  of them has ever been enforced. Every one is a comment that reads like a
-  constraint.
-- **Why this is debt and not a bug today:** the application layer does the work
-  instead, and does it better in the places that matter. `PUT /api/events/:id`
-  refuses to remove a slot with attendance against it and *names the volunteers
-  who would lose credited hours* — a cascade would have silently deleted them.
-  Accounts are tombstoned (`account_status = 'deleted'`, the row stays) rather
-  than deleted, so the user cascades describe a path the product does not take.
-- **Evidence the data is nonetheless clean:** `PRAGMA foreign_key_check` over the
-  production database returns **nothing**, whole-database, with enforcement
-  enabled. Every declared relationship is already satisfied. Verified 2026-08-12
-  on a copy, read-only against the original.
-- **Risk of leaving it:** moderate and growing. A future author reads
-  `ON DELETE CASCADE` and reasonably assumes cleanup is automatic, so a new
-  delete path ships without the application-layer guard its neighbours have. The
-  declaration actively misleads.
-- **Risk of fixing it:** the reason it has not been flipped. Enabling enforcement
-  changes what **every** `DELETE` in the product does, all at once, and activates
-  cascades that have never fired. The one that needs the most thought is
-  `attendance` → `slots`: today a slot deletion that slipped past the
-  application guard raises an error somewhere downstream, and with enforcement on
-  it would instead succeed and take credited hours with it. That is a strictly
-  worse failure, and it is why the switch deserves its own change with its own
-  pass over every delete path — not a line appended to a migration.
-- **What has been done:** the two tables that declared nothing now declare
-  correctly (migration 038, `attendance_checkin` and `checkin_tokens`), so the
-  schema is at least self-consistent and the remaining decision is a single
-  global one rather than a per-table audit.
-- **Effort:** medium — the migration is one line; the review is every delete
-  path. **Opened:** 2026-08-12.
+- **Detail:** `node:sqlite` sets `enableForeignKeyConstraints: true` by default,
+  and `server/db.js:109` constructs `new DatabaseSync(dbPath)` with no options.
+  So every declared foreign key in this schema **is** enforced — all forty-four
+  tables, including `attendance`'s three `ON DELETE CASCADE` clauses and
+  `user_badges`' two. Verified against the production database:
+  `PRAGMA foreign_keys` reads 1 on a fresh connection, and 0 only when
+  `enableForeignKeyConstraints: false` is passed explicitly.
+- **Why it is still debt:** the guarantee is *implicit*. The two lines below that
+  constructor set `journal_mode` and `busy_timeout` explicitly, with a paragraph
+  each explaining why — and the far more consequential setting is the one nobody
+  wrote down. If a future Node release flips the default, or somebody adds an
+  options object for an unrelated reason and omits this key, forty-four tables
+  lose referential integrity **silently**. No test fails, no error is raised;
+  cascades simply stop firing and orphans start accumulating.
+- **The fix is one line** — pass `enableForeignKeyConstraints: true` explicitly,
+  beside the two pragmas, with a comment — plus a test asserting
+  `PRAGMA foreign_keys` reads 1 on the application's own connection. It is
+  written up rather than done here because it belongs with the person who can
+  run the delete-path review it deserves, and because the behaviour is correct
+  today: it is the *durability of the guarantee* that is thin, not the guarantee.
+- **What was corrected:** an earlier draft of this entry claimed the opposite —
+  that enforcement was off and every declared key was decoration. That was
+  wrong, and `server/db.js:339` already said so in a comment about
+  `application_conflicts` cascading during a table rebuild. Recorded here
+  because a false claim in the guide is worse than no claim: it would have sent
+  somebody to "enable" a thing that was already on, and to reason about delete
+  paths as if cascades were inert.
+- **Related, and genuinely resolved:** `attendance_checkin` and `checkin_tokens`
+  declared no foreign keys at all and now do (migration 038). Because
+  enforcement is live, those cascades took effect immediately rather than
+  waiting on a future switch. `PRAGMA foreign_key_check` over the production
+  database returns nothing, before and after.
+- **Effort:** small. **Opened:** 2026-08-12.
 
 #### TD-17 — every gated action costs two requests
 
