@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { db } from '../db.js';
 import { notificationService } from './notificationService.js';
+import { reliabilityOf } from '../reliability.js';
 
 /**
  * Badges: recognition that is CONFERRED, as opposed to milestones, which are
@@ -67,12 +68,13 @@ export function isKnownCriteriaType(type) {
 }
 
 /**
- * The minimum number of sign-ups before an attendance RATE means anything.
+ * The minimum-evidence rule now lives in `server/reliability.js`.
  *
- * One shift attended is a 100% attendance rate, and saying so would make the
- * "Reliable Volunteer" badge a reward for turning up once.
+ * It was `ATTENDANCE_RATE_MIN_SIGNUPS = 5` here, `completedCommitments < 3` in
+ * ApplicantReview, and `PRIOR_WEIGHT = 5` in weighting.js — three numbers
+ * answering one question, in three files, disagreeing. `MIN_EVIDENCE` is the
+ * one that remains, and every surface reads it.
  */
-const ATTENDANCE_RATE_MIN_SIGNUPS = 5;
 
 /**
  * Every figure the criteria below are decided against, read once per evaluation.
@@ -115,12 +117,19 @@ function collectStats(userId) {
     WHERE organizer_id = ? AND status != 'cancelled'
   `).get(userId);
 
-  const reliability = db.prepare(`
-    SELECT COUNT(*) AS signups,
-           COALESCE(SUM(CASE WHEN present = 1 THEN 1 ELSE 0 END), 0) AS present
-    FROM attendance
-    WHERE user_id = ?
-  `).get(userId);
+  /**
+   * Reliability comes from the canonical model, not from a query here.
+   *
+   * This used to be `COUNT(*)` and `SUM(present = 1)` over `attendance` — per
+   * SHIFT, and including cancelled events. `attendanceRecordsFor`, which Auto
+   * Select uses, counted distinct EVENTS with `MAX(present)` and excluded
+   * cancelled ones. Two denominators for one question, so the badge and the
+   * draw could disagree about the same volunteer on the same afternoon.
+   *
+   * `reliabilityOf` is now the only derivation, and it adds what neither had:
+   * when the misses happened.
+   */
+  const reliability = reliabilityOf(db, userId);
 
   /**
    * How early this account is, as a 1-based rank over registration order.
@@ -150,8 +159,14 @@ function collectStats(userId) {
     eventsAttended: Number(service?.events_attended ?? 0),
     shiftsAttended: Number(service?.shifts_attended ?? 0),
     eventsCreated: Number(organizing?.events_created ?? 0),
-    signups: Number(reliability?.signups ?? 0),
-    present: Number(reliability?.present ?? 0),
+    /* The canonical summary, carried whole rather than flattened into two
+       numbers. Anything reading `signups`/`present` was reading the shift-grain
+       figures that disagreed with Auto Select. */
+    reliability,
+    /* Kept as the count of CONFIRMED commitments, which is what the evidence
+       floor is about. Named for what it is, so nobody mistakes it for the old
+       per-shift signup count. */
+    completedCommitments: reliability.recorded,
     joinRank: Number(tenure?.rank ?? 0),
   };
 }
@@ -176,9 +191,18 @@ function meetsCriteria(badge, stats) {
       return stats.eventsAttended >= threshold;
     case 'events_created':
       return stats.eventsCreated >= threshold;
+    /**
+     * `criteria_value` is a whole-number percentage (90), compared against the
+     * canonical recency-weighted, smoothed score rather than a raw ratio.
+     *
+     * Strictly greater than, because the badge says "over 90%". And gated on
+     * `hasEnoughEvidence` first: a perfect record of three commitments is not
+     * evidence of a habit, and awarding on it is how a badge stops meaning
+     * anything.
+     */
     case 'attendance_rate':
-      if (stats.signups < ATTENDANCE_RATE_MIN_SIGNUPS) return false;
-      return (stats.present / stats.signups) * 100 >= threshold;
+      if (!stats.reliability?.hasEnoughEvidence) return false;
+      return stats.reliability.score * 100 > threshold;
     /**
      * Previously an empty branch with a comment saying the logic "could" check
      * the join date. It never did, so the seeded "Early Supporter" badge was

@@ -75,9 +75,16 @@ function makeAccount(suffix, role = 'student', createdAt = new Date().toISOStrin
 const makeVolunteer = (suffix, createdAt) => makeAccount(suffix, 'student', createdAt);
 
 /** An event with `slots` shifts on it, hosted by the seeded organizer. */
-function makeEvent(suffix, slots = 1, status = 'open', organizerId = ORGANIZER) {
+/**
+ * @param {string} [endsAt] when the shifts finished, ISO. Defaults to now.
+ *   Reliability is recency-weighted, so a fixture that stamps every slot with
+ *   the same instant cannot express "recently" at all — which is why the
+ *   attendance-rate tests below pass one.
+ */
+function makeEvent(suffix, slots = 1, status = 'open', organizerId = ORGANIZER, endsAt = null) {
   const eventId = `event-badge-${suffix}`;
   const now = new Date().toISOString();
+  const when = endsAt ?? now;
   db.prepare(`
     INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, created_at)
     VALUES (?, ?, 'Fixture', 'Other', 'Somewhere', ?, ?, ?, ?)
@@ -89,14 +96,28 @@ function makeEvent(suffix, slots = 1, status = 'open', organizerId = ORGANIZER) 
     db.prepare(`
       INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
       VALUES (?, ?, ?, 'Fixture', ?, ?, 10)
-    `).run(slotId, eventId, `Shift ${i + 1}`, now, now);
+    `).run(slotId, eventId, `Shift ${i + 1}`, when, when);
     slotIds.push(slotId);
   }
   return { eventId, slotIds };
 }
 
-/** Writes the attendance row that IS the credit — hours are derived from it. */
+/**
+ * Writes the attendance row that IS the credit — hours are derived from it.
+ *
+ * Also writes the accepted application behind it. In production an attendance
+ * row cannot exist without one: `finalizeAttendance` and `recordCheckins` are
+ * both keyed by application id. A fixture with attendance and no application
+ * described a state the product cannot reach, and it hid the fact that
+ * reliability is a question about COMMITMENTS — which is what an accepted
+ * application is — rather than about attendance rows.
+ */
 function credit(userId, eventId, slotId, hours, present = 1) {
+  db.prepare(`
+    INSERT OR IGNORE INTO applications (id, user_id, event_id, slot_id, status, applied_at)
+    VALUES (?, ?, ?, ?, 'accepted', ?)
+  `).run(`app-${slotId}-${userId}`, userId, eventId, slotId, new Date(0).toISOString());
+
   db.prepare(`
     INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
     VALUES (?, ?, ?, ?, ?)
@@ -245,22 +266,114 @@ describe('early_adopter is earnable', () => {
 // ── attendance_rate and events_created ─────────────────────────────────────
 
 describe('the remaining automatic criteria', () => {
-  it('needs a floor of sign-ups before an attendance rate means anything', () => {
+  it('needs a floor of completed commitments before an attendance rate means anything', () => {
+    /**
+     * Counted in EVENTS, not shifts.
+     *
+     * This fixture used to credit five slots of ONE day-long event and expect
+     * the badge, which measured reliability in shifts. That is the denominator
+     * Auto Select never used: turning up once to an event with five slots is a
+     * single demonstration that somebody turns up, and counting it as five is
+     * how a volunteer earns a reliability badge from one afternoon. The
+     * canonical model collapses an event with `MAX(present)`, so the fixture
+     * now spans separate events — which is what "five sign-ups" has to mean
+     * for the badge to say anything.
+     */
     const user = makeVolunteer('rate');
     const badge = makeBadge({ criteria_type: 'attendance_rate', criteria_value: 90 });
-    const { eventId, slotIds } = makeEvent('rate', 6);
+    const events = Array.from({ length: 5 }, (_, i) => makeEvent(`rate-${i}`, 1));
 
-    // Perfect record, but only two sign-ups: 100% of nothing much.
-    credit(user, eventId, slotIds[0], 1);
-    credit(user, eventId, slotIds[1], 1);
+    // Perfect record, but only two commitments: 100% of nothing much.
+    credit(user, events[0].eventId, events[0].slotIds[0], 1);
+    credit(user, events[1].eventId, events[1].slotIds[0], 1);
     badgeService.evaluateBadges(user);
     expect(holds(user, badge)).toBe(false);
 
-    credit(user, eventId, slotIds[2], 1);
-    credit(user, eventId, slotIds[3], 1);
-    credit(user, eventId, slotIds[4], 1);
+    credit(user, events[2].eventId, events[2].slotIds[0], 1);
+    credit(user, events[3].eventId, events[3].slotIds[0], 1);
+    credit(user, events[4].eventId, events[4].slotIds[0], 1);
     badgeService.evaluateBadges(user);
     expect(holds(user, badge)).toBe(true);
+  });
+
+  /**
+   * The two cases that separate the canonical model from a raw ratio.
+   *
+   * Both are histories where the plain percentage and the recency-weighted
+   * score point in OPPOSITE directions, so a badge computed either way gives a
+   * different answer. They are the reason the model exists.
+   */
+  describe('recency, not just a ratio', () => {
+    /** `n` completed commitments for `user`, oldest first, `misses` at the END (most recent). */
+    const buildHistory = (user, prefix, { attended, recentMisses }) => {
+      const total = attended + recentMisses;
+      for (let i = 0; i < total; i += 1) {
+        /* Oldest first: index 0 is furthest back. */
+        const daysAgo = (total - i) * 7;
+        const endsAt = new Date(Date.now() - daysAgo * 86400000).toISOString();
+        const { eventId, slotIds } = makeEvent(`${prefix}-${i}`, 1, 'open', ORGANIZER, endsAt);
+        const present = i < attended ? 1 : 0;
+        credit(user, eventId, slotIds[0], 1, present);
+      }
+    };
+
+    it('refuses a volunteer whose raw ratio clears 90% but whose recent record does not', () => {
+      /**
+       * 40 attended, then 4 straight misses. Raw: 40/44 = 90.9%, which a plain
+       * percentage awards. But the last four commitments were all missed, and
+       * an organizer choosing who to give a place to this week is not helped by
+       * a badge earned two years ago.
+       */
+      const user = makeVolunteer('recent-decline');
+      const badge = makeBadge({ criteria_type: 'attendance_rate', criteria_value: 90 });
+      buildHistory(user, 'decline', { attended: 40, recentMisses: 4 });
+
+      const stats = badgeService.collectStats(user);
+      expect(stats.reliability.attended / stats.reliability.recorded,
+        'the fixture must clear 90% on a raw ratio, or this proves nothing')
+        .toBeGreaterThan(0.9);
+
+      badgeService.evaluateBadges(user);
+      expect(holds(user, badge), `score=${stats.reliability.score}`).toBe(false);
+    });
+
+    it('awards a volunteer who recovered, whose raw ratio is well under 90%', () => {
+      /**
+       * 6 misses, then 20 consecutive attendances. Raw: 20/26 = 76.9%, which a
+       * plain percentage refuses for ever — there is no number of good months
+       * that lifts it quickly. Recovery has to be something a volunteer can do.
+       */
+      const user = makeVolunteer('recovered');
+      const badge = makeBadge({ criteria_type: 'attendance_rate', criteria_value: 90 });
+
+      for (let i = 0; i < 26; i += 1) {
+        const daysAgo = (26 - i) * 7;
+        const endsAt = new Date(Date.now() - daysAgo * 86400000).toISOString();
+        const { eventId, slotIds } = makeEvent(`recover-${i}`, 1, 'open', ORGANIZER, endsAt);
+        credit(user, eventId, slotIds[0], 1, i < 6 ? 0 : 1);
+      }
+
+      const stats = badgeService.collectStats(user);
+      expect(stats.reliability.attended / stats.reliability.recorded,
+        'the fixture must FAIL a raw ratio, or this proves nothing')
+        .toBeLessThan(0.9);
+
+      badgeService.evaluateBadges(user);
+      expect(holds(user, badge), `score=${stats.reliability.score}`).toBe(true);
+    });
+  });
+
+  it('does not award a reliability badge for one event with many shifts', () => {
+    /* The other half of the grain rule, asserted directly: five slots of one
+       event is one commitment, and one commitment is not evidence of a habit. */
+    const user = makeVolunteer('one-event-many-shifts');
+    const badge = makeBadge({ criteria_type: 'attendance_rate', criteria_value: 90 });
+    const { eventId, slotIds } = makeEvent('one-event-many-shifts', 6);
+
+    for (const slotId of slotIds) credit(user, eventId, slotId, 1);
+    badgeService.evaluateBadges(user);
+
+    expect(holds(user, badge)).toBe(false);
   });
 
   it('counts a live event towards events_created, not only a completed one', () => {
