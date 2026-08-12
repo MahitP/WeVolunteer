@@ -8,20 +8,23 @@
  * did not were `attendance_checkin` and `checkin_tokens`, the second because it
  * was written to match its neighbour and inherited the omission.
  *
- * ── The larger finding, which this migration does NOT act on ──
+ * ── Enforcement is ON, which is why this matters immediately ──
  *
- * None of those declarations have ever been enforced. `PRAGMA foreign_keys`
- * defaults to OFF in SQLite and `db.js` sets only `journal_mode` and
- * `busy_timeout`, so every `ON DELETE CASCADE` in this schema is currently
- * documentation. Turning enforcement on is a separate decision with a much
- * wider blast radius — it changes what every DELETE in the product does — and
- * it belongs in its own change, with its own pass over the delete paths.
+ * `node:sqlite` sets `enableForeignKeyConstraints: true` by default and
+ * `db.js` constructs its connection with no options, so every declared key in
+ * this schema is live. These two tables were therefore not "missing a
+ * declaration nobody reads" — they were the only members of the attendance
+ * family with no referential integrity at all, while their neighbours had it.
  *
- * What can be said now, from evidence rather than hope: `PRAGMA
- * foreign_key_check` over the production database returns nothing. Every
- * declared relationship is already satisfied by the data, so enabling
- * enforcement would not orphan or reject anything that exists today. That is
- * the prerequisite, and it holds.
+ * The cascades added below take effect the moment this runs. `PRAGMA
+ * foreign_key_check` over the production database returns nothing, before and
+ * after, so nothing existing is orphaned or rejected by it.
+ *
+ * (An earlier draft of this comment asserted the reverse — that the pragma was
+ * off and every declaration was decoration. It was wrong. `db.js` already said
+ * so, in the note about `application_conflicts` cascading during a table
+ * rebuild. TD-21 records the correction and the real remaining fragility: the
+ * guarantee rests on a library default rather than an explicit pragma.)
  *
  * ── Cascade policy, chosen rather than defaulted ──
  *

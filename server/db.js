@@ -106,7 +106,22 @@ if (process.env.NODE_ENV === 'production' && !isSqliteLocator(dbPath) && !fs.exi
 
 console.log(`[db] using ${dbPath}`);
 
-const db = new DatabaseSync(dbPath);
+/**
+ * `enableForeignKeyConstraints` is stated rather than inherited.
+ *
+ * `node:sqlite` already defaults it to true, so this changes no behaviour
+ * today — every declared key in this schema is enforced either way, and
+ * `rebuildApplicationsForWithdrawn` below depends on that being true.
+ *
+ * It is written down because the guarantee was resting on a library default
+ * that nobody had recorded, one line above two pragmas that each got a
+ * paragraph. If a future Node release flips it, or somebody adds an options
+ * object for an unrelated reason and omits this key, forty-four tables lose
+ * referential integrity **silently** — no error, no failing test, cascades
+ * simply stop firing and orphans accumulate. A setting whose absence is
+ * undetectable is worth one line to make explicit.
+ */
+const db = new DatabaseSync(dbPath, { enableForeignKeyConstraints: true });
 
 // Connection durability/concurrency settings, applied before any statement runs.
 //
