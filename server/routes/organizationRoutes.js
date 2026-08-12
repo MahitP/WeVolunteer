@@ -204,6 +204,9 @@ router.patch('/api/organizations/:key', authenticateToken, requireCap('organizat
   }
   if (check.value.description !== undefined) { updates.push('description = ?'); values.push(check.value.description); }
   if (check.value.tags !== undefined) { updates.push('tags = ?'); values.push(JSON.stringify(check.value.tags)); }
+  /* The emoji mark. `null` clears it, which is why the check is on `undefined`
+     and not on truthiness — an organization may go back to having none. */
+  if (check.value.avatar !== undefined) { updates.push('avatar = ?'); values.push(check.value.avatar); }
   if (req.body?.status !== undefined) {
     if (!['active', 'archived'].includes(req.body.status)) {
       return res.status(400).json({ error: 'Status must be active or archived.', field: 'status' });
@@ -381,5 +384,235 @@ function countMembers(organizationId) {
   return db.prepare('SELECT COUNT(*) AS n FROM organization_members WHERE organization_id = ?')
     .get(organizationId).n;
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Announcements
+   ────────────────────────────────────────────────────────────────────────── */
+
+/** The longest a single announcement or reply may be. */
+const ANNOUNCEMENT_MAX = 4000;
+const REPLY_MAX = 1000;
+
+/** Shapes one announcement for the client, replies included. */
+function formatAnnouncement(row, replies = []) {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    body: row.body,
+    repliesEnabled: row.replies_enabled === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || null,
+    author: {
+      id: row.author_id,
+      name: row.author_name || 'Former member',
+      avatar: row.author_avatar || null,
+    },
+    replies,
+  };
+}
+
+const ANNOUNCEMENT_SELECT = `
+  SELECT a.*, u.name AS author_name, u.avatar AS author_avatar
+  FROM organization_announcements a
+  LEFT JOIN users u ON u.id = a.author_id
+`;
+
+/**
+ * An organization's announcements, newest first, with their replies.
+ *
+ * `directory.read` to match the organization page itself: an announcement is
+ * part of what an organization publishes about itself, and gating it more
+ * tightly than the page it appears on would be a lock on an open door.
+ *
+ * Two queries regardless of how many announcements there are — the replies are
+ * fetched for the whole page in one `IN (…)` and grouped in memory. One query
+ * per announcement is how a club with forty posts becomes forty-one round
+ * trips.
+ */
+router.get('/api/organizations/:key/announcements', authenticateToken, requireCap('directory.read'), (req, res) => {
+  const row = loadOrganization(req, res);
+  if (!row) return undefined;
+
+  const announcements = db.prepare(`${ANNOUNCEMENT_SELECT} WHERE a.organization_id = ? ORDER BY a.created_at DESC LIMIT 100`)
+    .all(row.id);
+  if (announcements.length === 0) return res.json({ announcements: [] });
+
+  const placeholders = announcements.map(() => '?').join(',');
+  const replyRows = db.prepare(`
+    SELECT r.*, u.name AS author_name, u.avatar AS author_avatar
+    FROM organization_announcement_replies r
+    LEFT JOIN users u ON u.id = r.author_id
+    WHERE r.announcement_id IN (${placeholders})
+    ORDER BY r.created_at
+  `).all(...announcements.map(a => a.id));
+
+  const byAnnouncement = new Map();
+  for (const r of replyRows) {
+    if (!byAnnouncement.has(r.announcement_id)) byAnnouncement.set(r.announcement_id, []);
+    byAnnouncement.get(r.announcement_id).push({
+      id: r.id,
+      body: r.body,
+      createdAt: r.created_at,
+      author: { id: r.author_id, name: r.author_name || 'Former member', avatar: r.author_avatar || null },
+    });
+  }
+
+  return res.json({
+    announcements: announcements.map(a => formatAnnouncement(a, byAnnouncement.get(a.id) ?? [])),
+  });
+});
+
+/**
+ * Posting as the organization.
+ *
+ * Managers only — `organization.manage.own` plus `canManage`, the same two-layer
+ * check every other write in this file uses. The capability says "this account
+ * is the kind that manages organizations"; the membership row says which one.
+ * Without the second half any organizer could post as any club, which is
+ * impersonation with a byline.
+ */
+router.post('/api/organizations/:key/announcements', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
+  const row = loadOrganization(req, res);
+  if (!row) return undefined;
+  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    return res.status(403).json({ error: 'Only a manager of this organization can post announcements.', code: 'not_manager' });
+  }
+
+  const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+  if (!body) return res.status(400).json({ error: 'Write something to announce.', code: 'body_required' });
+  if (body.length > ANNOUNCEMENT_MAX) {
+    return res.status(400).json({ error: `An announcement must be ${ANNOUNCEMENT_MAX} characters or fewer.`, code: 'body_too_long' });
+  }
+
+  /* Replies on unless the manager says otherwise: an announcement people cannot
+     answer is a broadcast, and a volunteer noticing "that clashes with the
+     game" is most of why an organization posts at all. */
+  const repliesEnabled = req.body?.repliesEnabled === false ? 0 : 1;
+
+  const id = `organn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  db.prepare(`
+    INSERT INTO organization_announcements (id, organization_id, author_id, body, replies_enabled, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, row.id, req.principal.userId, body, repliesEnabled, new Date().toISOString());
+
+  const created = db.prepare(`${ANNOUNCEMENT_SELECT} WHERE a.id = ?`).get(id);
+  return res.status(201).json({ announcement: formatAnnouncement(created) });
+});
+
+/**
+ * Editing an announcement, including turning replies off.
+ *
+ * Turning replies off KEEPS the replies that are already there and stops new
+ * ones. Deleting them would be destroying other people's words as a side effect
+ * of a settings change, and hiding them would be worse still — the authors
+ * would carry on believing they had been heard. A closed thread is what this
+ * means everywhere else, so nobody has to be taught it.
+ */
+router.patch('/api/organizations/:key/announcements/:announcementId', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
+  const row = loadOrganization(req, res);
+  if (!row) return undefined;
+  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    return res.status(403).json({ error: 'Only a manager of this organization can edit announcements.', code: 'not_manager' });
+  }
+
+  const existing = db.prepare('SELECT * FROM organization_announcements WHERE id = ? AND organization_id = ?')
+    .get(req.params.announcementId, row.id);
+  if (!existing) return res.status(404).json({ error: 'No such announcement.', code: 'not_found' });
+
+  const updates = [];
+  const values = [];
+  if (req.body?.body !== undefined) {
+    const body = typeof req.body.body === 'string' ? req.body.body.trim() : '';
+    if (!body) return res.status(400).json({ error: 'Write something to announce.', code: 'body_required' });
+    if (body.length > ANNOUNCEMENT_MAX) {
+      return res.status(400).json({ error: `An announcement must be ${ANNOUNCEMENT_MAX} characters or fewer.`, code: 'body_too_long' });
+    }
+    updates.push('body = ?'); values.push(body);
+  }
+  if (req.body?.repliesEnabled !== undefined) {
+    updates.push('replies_enabled = ?'); values.push(req.body.repliesEnabled === false ? 0 : 1);
+  }
+  if (updates.length === 0) return res.status(400).json({ error: 'No fields to update.' });
+
+  updates.push('updated_at = ?'); values.push(new Date().toISOString());
+  values.push(existing.id);
+  db.prepare(`UPDATE organization_announcements SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+
+  const updated = db.prepare(`${ANNOUNCEMENT_SELECT} WHERE a.id = ?`).get(existing.id);
+  return res.json({ announcement: formatAnnouncement(updated) });
+});
+
+/** Removing an announcement. Its replies cascade with it. */
+router.delete('/api/organizations/:key/announcements/:announcementId', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
+  const row = loadOrganization(req, res);
+  if (!row) return undefined;
+  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    return res.status(403).json({ error: 'Only a manager of this organization can delete announcements.', code: 'not_manager' });
+  }
+
+  const result = db.prepare('DELETE FROM organization_announcements WHERE id = ? AND organization_id = ?')
+    .run(req.params.announcementId, row.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'No such announcement.', code: 'not_found' });
+
+  return res.json({ ok: true });
+});
+
+/**
+ * Replying.
+ *
+ * `organization.join` rather than a management capability: replying is what an
+ * ordinary member does, and it is the capability every role that can belong to
+ * an organization already holds. Membership itself is checked below — an
+ * announcement is addressed to the people in the club, and a stranger answering
+ * it is a stranger in the room.
+ */
+router.post('/api/organizations/:key/announcements/:announcementId/replies', authenticateToken, requireCap('organization.join'), (req, res) => {
+  const row = loadOrganization(req, res);
+  if (!row) return undefined;
+
+  const announcement = db.prepare('SELECT * FROM organization_announcements WHERE id = ? AND organization_id = ?')
+    .get(req.params.announcementId, row.id);
+  if (!announcement) return res.status(404).json({ error: 'No such announcement.', code: 'not_found' });
+
+  /* The flag is enforced here and only here. Existing replies are untouched by
+     it — see the migration for why that is the deliberate choice. */
+  if (announcement.replies_enabled !== 1) {
+    return res.status(409).json({ error: 'Replies are turned off for this announcement.', code: 'replies_disabled' });
+  }
+
+  const isMember = db.prepare('SELECT 1 FROM organization_members WHERE organization_id = ? AND user_id = ?')
+    .get(row.id, req.principal.userId);
+  if (!isMember && !can(req.principal, 'organization.moderate')) {
+    return res.status(403).json({ error: 'Join the organization to reply.', code: 'not_member' });
+  }
+
+  const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+  if (!body) return res.status(400).json({ error: 'Write a reply first.', code: 'body_required' });
+  if (body.length > REPLY_MAX) {
+    return res.status(400).json({ error: `A reply must be ${REPLY_MAX} characters or fewer.`, code: 'body_too_long' });
+  }
+
+  const id = `orgrep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  db.prepare(`
+    INSERT INTO organization_announcement_replies (id, announcement_id, author_id, body, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(id, announcement.id, req.principal.userId, body, new Date().toISOString());
+
+  const created = db.prepare(`
+    SELECT r.*, u.name AS author_name, u.avatar AS author_avatar
+    FROM organization_announcement_replies r
+    LEFT JOIN users u ON u.id = r.author_id
+    WHERE r.id = ?
+  `).get(id);
+
+  return res.status(201).json({
+    reply: {
+      id: created.id,
+      body: created.body,
+      createdAt: created.created_at,
+      author: { id: created.author_id, name: created.author_name || 'Former member', avatar: created.author_avatar || null },
+    },
+  });
+});
 
 export default router;

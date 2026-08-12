@@ -92,6 +92,25 @@ export function validateOrganization(payload, { partial = false } = {}) {
     out.tags = tags.value;
   }
 
+  /**
+   * The emoji mark, under exactly the rule `users.avatar` uses.
+   *
+   * Eight characters, because a single emoji can be several code units once
+   * skin tone and zero-width joiners are involved, and anything past that is
+   * either a mistake or an attempt to smuggle a payload into a field that gets
+   * rendered on every card. Copied in spirit rather than imported because
+   * `accountValidation` is about a person's account and this module
+   * deliberately depends on nothing.
+   *
+   * `null` clears it — an organization is allowed to go back to having no mark.
+   */
+  if (payload.avatar !== undefined) {
+    if (payload.avatar !== null && (typeof payload.avatar !== 'string' || payload.avatar.length > 8)) {
+      return { ok: false, field: 'avatar', error: 'Pick one of the available icons.' };
+    }
+    out.avatar = payload.avatar === null ? null : payload.avatar.trim() || null;
+  }
+
   return { ok: true, value: out };
 }
 
@@ -249,6 +268,11 @@ export function formatOrganization(row) {
     createdBy: row.created_by
       ? { id: row.created_by, name: row.created_by_name_snapshot || 'Organizer' }
       : { id: null, name: row.created_by_name_snapshot || 'Former member' },
+    /* Both, so the renderer can prefer the upload and fall back to the emoji —
+       the same contract `users` publishes, so one avatar component serves
+       people and organizations without learning which it was handed. */
+    avatar: row.avatar || null,
+    imageUrl: row.image_url || null,
     memberCount: row.memberCount ?? 0,
     eventCount: row.eventCount ?? 0,
     status: row.status,

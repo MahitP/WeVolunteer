@@ -48,6 +48,8 @@ import slotWindowIndex from './036_slot_window_index.js';
 import checkinTokens from './037_checkin_tokens.js';
 import attendanceForeignKeys from './038_attendance_foreign_keys.js';
 import legalChangeNotices from './039_legal_change_notices.js';
+import organizationIdentity from './040_organization_identity.js';
+import organizationAnnouncements from './041_organization_announcements.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -218,7 +220,23 @@ export const MIGRATIONS = [
    * Order-independent: a new table with one foreign key to `users`, no data
    * migration and no dependency on any earlier schema beyond that.
    */
-  legalChangeNotices
+  legalChangeNotices,
+
+  /**
+   * 040 — an emoji or an uploaded image for an organization.
+   *
+   * Three ALTER TABLE ADD COLUMNs, each guarded on `PRAGMA table_info`, so a
+   * half-applied earlier run recovers rather than failing forever.
+   */
+  organizationIdentity,
+
+  /**
+   * 041 — organization announcements and their replies.
+   *
+   * Order-dependent only on `organizations` and `users` existing, both of which
+   * long predate it. Idempotent: `CREATE TABLE IF NOT EXISTS` throughout.
+   */
+  organizationAnnouncements
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
