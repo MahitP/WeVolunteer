@@ -105,7 +105,17 @@ export default function ApplicantReview({
       <div className="list">
         {sorted.map(app => {
         const v = app.volunteer || {};
-        const isNew = (v.completedEvents || 0) === 0;
+        /**
+         * Too little history to say anything, rather than nothing at all.
+         *
+         * This was `completedEvents === 0`, so a volunteer with exactly one
+         * completed commitment showed "0 of 1 attended" — which reads as a
+         * damning fact and is one shift's worth of evidence. Below three, the
+         * honest thing to show an organizer is that there is no record yet, not
+         * a ratio they cannot help reading as a verdict.
+         */
+        const completedCommitments = v.eventsSignedUp ?? v.completedEvents ?? 0;
+        const isNew = completedCommitments < 3;
         const isSelected = selectedIds.has(app.id);
         return <div key={app.id} className={`list-row ${isSelected ? 'selected' : ''}`} style={isSelected ? {
           backgroundColor: 'var(--brand-tint)'
@@ -141,7 +151,7 @@ export default function ApplicantReview({
               
               <div className="s-0c206e">
                 {isNew ? <span className="tag tag-brand">
-                    <Sparkles size={10} /> First event
+                    <Sparkles size={10} /> {completedCommitments === 0 ? 'First event' : 'New volunteer'}
                   </span> : <>
                     {/**
                       * Signed up versus attended — the follow-through question.
@@ -163,6 +173,22 @@ export default function ApplicantReview({
                     <div className="small tnum">
                       {v.eventsAttended ?? v.completedEvents} of {v.eventsSignedUp ?? v.completedEvents} attended
                     </div>
+                    {/**
+                      * Why the gap is what it is.
+                      *
+                      * "7 of 9" invites one reading — that somebody missed two
+                      * — and that reading is wrong whenever an organizer simply
+                      * never confirmed attendance. The volunteer has no way to
+                      * make it happen and no way to see it being held against
+                      * them. Naming the unconfirmed shifts is the difference
+                      * between evidence and an accusation, so it is shown
+                      * whenever there are any.
+                      */}
+                    {v.eventsAwaitingRecord > 0 && (
+                      <div className="small dim tnum">
+                        {v.eventsAwaitingRecord} not confirmed by an organizer
+                      </div>
+                    )}
                     <div className="small dim tnum">
                       last {formatDay(v.lastVolunteeredDate)}
                     </div>
