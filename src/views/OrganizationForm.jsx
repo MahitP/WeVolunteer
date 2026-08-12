@@ -19,6 +19,16 @@ import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import TagInput from '../components/common/TagInput';
+import { normaliseTag } from '../eventTags.js';
+
+/**
+ * A stored tag label, as the chip `TagInput` expects.
+ *
+ * Uses the same normaliser the editor and the event routes use, so a stored
+ * label that predates a rule change is either rendered or dropped — never
+ * turned into a chip whose key disagrees with everything else's.
+ */
+const toChip = (label) => (typeof label === 'string' ? normaliseTag(label) : label) || null;
 
 export default function OrganizationForm({ addToast }) {
   const { key } = useParams();
@@ -44,7 +54,10 @@ export default function OrganizationForm({ addToast }) {
         setForm({
           name: res.organization.name,
           description: res.organization.description,
-          tags: res.organization.tags ?? [],
+          /* Stored as plain labels; `TagInput` renders `{tag, label}` chips.
+             Mapping in here and back out on submit keeps the shared editor
+             usable without teaching it a second storage format. */
+          tags: (res.organization.tags ?? []).map(toChip).filter(Boolean),
         });
       })
       .catch(err => { if (!cancelled) setLoadError(err.status === 404 ? 'not_found' : err.message); })
@@ -75,7 +88,18 @@ export default function OrganizationForm({ addToast }) {
     }
     setSubmitting(true);
     try {
-      const body = { name: form.name.trim(), description: form.description, tags: form.tags };
+      /**
+       * `TagInput` is shared with the event editor and emits `{tag, label}`
+       * objects; organizations store plain labels. Sending the objects through
+       * unmapped is what made tags unusable — the server refused every one of
+       * them with a message about a 40-character limit none of them came near.
+       *
+       * The label rather than the key, so the capitalisation somebody typed
+       * survives. The server accepts both shapes now, but agreeing here is what
+       * stops the round trip from depending on that tolerance.
+       */
+      const tags = form.tags.map(t => (typeof t === 'string' ? t : t.label));
+      const body = { name: form.name.trim(), description: form.description, tags };
       const res = editing
         ? await api.updateOrganization(key, body)
         : await api.createOrganization(body);
