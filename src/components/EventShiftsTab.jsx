@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Info, CalendarClock, MapPin, Users, Check, Clock, Edit2 } from 'lucide-react';
+import { Info, CalendarClock, MapPin, Users, Check, Clock, Edit2, CalendarPlus, QrCode } from 'lucide-react';
 import { formatDay, formatTime, formatHours, usesAutoSelect } from '../utils/helpers';
 import { Seats } from './Seats';
 import EmptyState from './common/EmptyState';
@@ -205,13 +205,42 @@ export default function EventShiftsTab({
                                 rejected: 'Not accepted'
                               }[mine.status]}
                             </span>
+                            {/**
+                              * The two utilities are icons; the destructive one
+                              * keeps its word.
+                              *
+                              * This row carried four full-width controls — a
+                              * status pill, "Add to Calendar", "Check in with
+                              * QR" and "Release" — and on a phone
+                              * `.sheet-action .btn { width: 100% }` stacked all
+                              * four into a column taller than the shift it
+                              * belonged to. Multiply by a three-shift event and
+                              * the page is nothing but buttons.
+                              *
+                              * Calendar and QR are recognisable as glyphs, are
+                              * safe to press by accident, and are the two a
+                              * volunteer reaches for repeatedly — they compress
+                              * well. Release does not: it gives up a place
+                              * somebody else wanted, it is pressed once, and an
+                              * unlabelled icon for a destructive action is how
+                              * people lose their shift by mis-tapping. It stays
+                              * a word.
+                              *
+                              * Both icons carry `title` AND `aria-label`, the
+                              * house pattern (there is no Tooltip component —
+                              * `title` is the browser's own and is read out).
+                              * The labels name the shift, so a screen reader on
+                              * a three-shift event hears which one.
+                              */}
                             {mine.status === 'accepted' && (
-                              <a 
-                                href={`/api/events/${event.id}/slots/${slot.id}/ics?remind=${CALENDAR_REMINDER_MINUTES}`} 
-                                className="btn btn-secondary btn-sm" 
+                              <a
+                                href={`/api/events/${event.id}/slots/${slot.id}/ics?remind=${CALENDAR_REMINDER_MINUTES}`}
+                                className="btn btn-secondary btn-sm btn-icon shift-util"
                                 download
+                                title="Add to calendar"
+                                aria-label={`Add ${slot.name} to your calendar`}
                               >
-                                Add to Calendar
+                                <CalendarPlus size={16} aria-hidden="true" />
                               </a>
                             )}
                             {/* Per slot, because check-in is per slot: on a
@@ -221,11 +250,13 @@ export default function EventShiftsTab({
                                 exist yet and says so in the dialog. */}
                             {mine.status === 'accepted' && (
                               <button
-                                className="btn btn-secondary btn-sm"
+                                className="btn btn-secondary btn-sm btn-icon shift-util"
                                 type="button"
                                 onClick={() => setQrFor({ application: mine, slot })}
+                                title="Check in with QR"
+                                aria-label={`Show your check-in code for ${slot.name}`}
                               >
-                                Check in with QR
+                                <QrCode size={16} aria-hidden="true" />
                               </button>
                             )}
                             {(mine.status === 'accepted' || mine.status === 'pending' || mine.status === 'waitlisted') && (

@@ -3085,7 +3085,23 @@ time { font-variant-numeric: tabular-nums; }
   padding: var(--s12);
   border: 1px solid var(--cert-border);
 }
-.certificate-rule { border-top: 2px solid var(--brand); width: 44px; margin: var(--s5) auto; }
+/* `--cert-accent`, not `--brand`: `--brand` is redefined under
+   `[data-theme='dark']`, so this 44px rule was the one part of a fixed-palette
+   document that changed colour with the app's theme. Exactly the drift that
+   `--cert-accent` was introduced to stop, and the contrast test does not cover
+   it because it checks inks, not rules. */
+/**
+ * The workspace a certificate sits on, on screen.
+ *
+ * This was an inline `style={{ background: 'var(--surface-2)' }}`, and an
+ * inline style beats every stylesheet rule that is not `!important` — so in
+ * dark mode the printed page carried a near-black slab around the cream
+ * certificate, because the print block's `.modal-body { background:
+ * transparent }` could not reach it. As a class it can be, and is.
+ */
+.certificate-canvas { background: var(--surface-2); }
+
+.certificate-rule { border-top: 2px solid var(--cert-accent); width: 44px; margin: var(--s5) auto; }
 .certificate h1 {
   font-family: var(--font-doc);
   font-weight: 400;
@@ -3367,6 +3383,23 @@ time { font-variant-numeric: tabular-nums; }
   .sheet-action .btn { width: 100%; }
 
   /**
+   * …except the icon utilities, which stay square.
+   *
+   * `.sheet-action .btn { width: 100% }` is right for the controls that carry
+   * words — a full-width "Release" is easy to hit and easy to read. It is wrong
+   * for a calendar or QR glyph: stretched to the full column, a 16px icon sits
+   * marooned in the middle of a 300px slab, and the row reads as three
+   * identical bars whose meaning is a guess.
+   *
+   * Kept to the 44px floor the coarse-pointer block sets, so they remain a
+   * legitimate touch target, and pushed onto the same line by `width: auto`.
+   */
+  .sheet-action .btn.shift-util {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  /**
    * `stretch`, not `flex-start` — this is what made the Dashboard scroll
    * sideways on a phone.
    *
@@ -3511,9 +3544,52 @@ time { font-variant-numeric: tabular-nums; }
 }
 
 @media print {
-  body { background: #fff; }
+  /**
+   * The page itself, reset before anything on it.
+   *
+   * Three separate leaks used to survive into a printed transcript, and all
+   * three are worst in dark mode:
+   *
+   *   1. `body { color: var(--ink) }` is near-white under `[data-theme=dark]`.
+   *      The documents set their own ink, so they survived — but anything that
+   *      inherits printed white on white. Ink is forced back to black here.
+   *
+   *   2. `body` and `.app` carry `min-height: 100vh`. A viewport height means
+   *      nothing on paper: it reserves a full screen's worth of box and hands
+   *      the printer a trailing blank sheet. `.transcript-page` was already
+   *      reset for this, but it never had the height — these two do.
+   *
+   *   3. `.page` keeps its 2rem app padding and its `--content-max` clamp, so
+   *      the document was inset inside the `@page` margin and narrower than the
+   *      paper. That is the web app's layout, not the document's.
+   *
+   * `background: transparent` rather than white on the containers: white would
+   * paint over the documents' own cream stock wherever they overlap, and the
+   * mismatch between a `print-color-adjust: exact` document and a plain-white
+   * surround is exactly the artifact this is fixing.
+   */
+  html,
+  body {
+    background: #fff;
+    color: #000;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+  }
+  .app,
+  .content,
+  .page,
+  .modal-body {
+    background: transparent;
+    min-height: 0;
+    max-width: none;
+    padding: 0;
+    margin: 0;
+  }
   .sidebar,
   .mobilenav,
+  .mobile-more-sheet,
+  .mobile-more-backdrop,
   .topbar,
   .demobar,
   .toasts,

@@ -45,7 +45,7 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
           <button className="modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
 
-        <div className="modal-body" style={{ background: 'var(--surface-2)' }}>
+        <div className="modal-body certificate-canvas">
           <div className="certificate" id="printable-certificate">
             <div style={{ textAlign: 'center' }}>
               <div className="certificate-org">
@@ -55,7 +55,17 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
               <h1>Certificate of Community Service</h1>
 
               <p style={{ marginTop: 'var(--s5)', color: 'var(--certificate-ink-2)' }}>This certifies that</p>
-              <div className="certificate-name">{volunteer?.name}</div>
+              {/**
+                * A name, or a visible admission that we do not have one.
+                *
+                * `{volunteer?.name}` alone renders an empty element when the
+                * prop is missing or the profile fetch failed, so the finished
+                * certificate has a blank where the subject belongs — printed,
+                * signed and handed to a college with nobody's name on it. A
+                * document that is silently wrong is worse than one that says it
+                * is incomplete.
+                */}
+              <div className="certificate-name">{volunteer?.name || 'Name unavailable'}</div>
               {volunteer?.grade && (
                 <p className="certificate-sub">{gradeLabel(volunteer.grade)}</p>
               )}
@@ -77,7 +87,10 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
             <div className="certificate-foot">
               <div>
                 <div className="certificate-sign">
-                  {certificate.organizerName}
+                  {/* Same reasoning as the volunteer name above: an empty
+                      signature line is indistinguishable from an unsigned
+                      certificate. */}
+                  {certificate.organizerName || 'Organizer unavailable'}
                   {certificate.organizerVerified && ' · Verified organizer'}
                 </div>
                 <div className="certificate-sign-label">Confirmed by</div>
