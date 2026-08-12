@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { db } from '../db.js';
 import { notificationService } from './notificationService.js';
 import { reliabilityOf } from '../reliability.js';
+import { buildStreak, attendanceMonths } from '../volunteerInsights.js';
 
 /**
  * Badges: recognition that is CONFERRED, as opposed to milestones, which are
@@ -58,6 +59,7 @@ export const BADGE_CRITERIA_TYPES = Object.freeze([
   'events_attended',
   'events_created',
   'attendance_rate',
+  'streak_months',
   'early_adopter',
   'manual',
 ]);
@@ -147,6 +149,17 @@ function collectStats(userId) {
    * every account with the same `created_at`, so ordering on the timestamp
    * alone is not a total order and the rank would depend on row order.
    */
+  /**
+   * The streak, from `buildStreak` rather than a second implementation.
+   *
+   * There is exactly one definition of a month of service in this codebase and
+   * it is deliberately non-punitive — the current month is live, a cancelled
+   * event cannot break a run. A badge computing its own would be a second
+   * definition that drifts, and the first thing to drift would be whether
+   * somebody's streak had ended.
+   */
+  const streak = buildStreak(attendanceMonths(db, userId), new Date());
+
   const tenure = db.prepare(`
     SELECT COUNT(*) AS rank
     FROM users
@@ -167,6 +180,11 @@ function collectStats(userId) {
        floor is about. Named for what it is, so nobody mistakes it for the old
        per-shift signup count. */
     completedCommitments: reliability.recorded,
+    /* The longest run ever held, not the current one. A badge is a record of
+       something achieved; taking it away because somebody had a quiet December
+       would make it a status indicator, and this product already has one of
+       those. `reliability` is where "currently dependable" lives. */
+    streakMonths: streak.longest,
     joinRank: Number(tenure?.rank ?? 0),
   };
 }
@@ -213,6 +231,16 @@ function meetsCriteria(badge, stats) {
      * this reads as "nobody", so an un-reconciled database fails CLOSED rather
      * than awarding the badge to every account that ever evaluates.
      */
+    /**
+     * Awarded on the LONGEST run, so it is never revoked.
+     *
+     * The current streak is the right input for a status indicator and the
+     * wrong one for a credential: a volunteer who did nine months running and
+     * then had exams would watch a badge disappear for it. Consistency that
+     * happened is consistency that happened.
+     */
+    case 'streak_months':
+      return stats.streakMonths >= threshold;
     case 'early_adopter':
       return threshold > 0 && stats.joinRank > 0 && stats.joinRank <= threshold;
     case 'manual':
