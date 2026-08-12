@@ -8,6 +8,7 @@ import { api } from '../utils/api';
 import { formatHours, formatDay, formatTimeRange, gradeLabel, countdown } from '../utils/helpers';
 import { DateChip } from '../components/Seats';
 import CertificateModal from '../components/CertificateModal';
+import PreviewList from '../components/common/PreviewList';
 import BadgesList from '../components/BadgesList';
 import { Link } from 'react-router-dom';
 
@@ -235,9 +236,18 @@ export default function VolunteerProfile({
                 style={{ padding: 'var(--s8) var(--s4)' }} 
               />
             ) : (
-              <div className="list">
-                {/* Same reason as the upcoming list above. */}
-                {completed.map((c, i) => (
+              /* Five, not all of them. This list was uncapped on both the
+                 client and the server, so a volunteer with two hundred
+                 confirmed shifts rendered two hundred rows on their own
+                 profile — and on anybody else's view of it. */
+              <PreviewList
+                items={completed}
+                cap={5}
+                className="list"
+                label="completed shifts"
+                moreHref="/hours"
+                moreLabel={`Show all ${completed.length} shifts`}
+                renderItem={(c, i) => (
                   <div key={`${c.eventId}-${c.startDatetime}-${i}`} className="list-row">
                     <DateChip iso={c.startDatetime} />
                     <div className="truncate" style={{ flex: 1 }}>
@@ -251,8 +261,8 @@ export default function VolunteerProfile({
                     </div>
                     <span className="hourspill">+{formatHours(c.hours)}</span>
                   </div>
-                ))}
-              </div>
+                )}
+              />
             )}
           </section>
         </div>

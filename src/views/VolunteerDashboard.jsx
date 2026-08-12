@@ -10,6 +10,7 @@ import Modal from '../components/Modal';
 import { DateChip } from '../components/Seats';
 import EmptyState from '../components/common/EmptyState';
 import ServiceInsights from '../components/ServiceInsights';
+import PreviewList from '../components/common/PreviewList';
 import { useLocationContext } from '../contexts/LocationContext';
 import LocationLink from '../components/location/LocationLink';
 import WeatherSummary from '../components/location/WeatherSummary';
@@ -459,11 +460,19 @@ export default function VolunteerDashboard({
                   icon={History}
                   title="No completed shifts yet"
                   message="Hours appear here once an organizer confirms you attended."
-                  compact={true}
                 />
               ) : (
-                <div className="timeline">
-                  {completed.map(({ app, event, slot }) => (
+                /* Three, not all of them. A timeline item is four lines tall,
+                   so a volunteer with a real history turned this card into the
+                   longest thing on the dashboard. The full record has its own
+                   page. */
+                <PreviewList
+                  items={completed}
+                  cap={3}
+                  className="timeline"
+                  label="completed shifts"
+                  moreHref="/hours"
+                  renderItem={({ app, event, slot }) => (
                     <div key={app.id} className="timeline-item">
                       <div className="timeline-date">{formatDay(slot?.startDatetime)}</div>
                       <div className="timeline-title">{event.title}</div>
@@ -472,8 +481,8 @@ export default function VolunteerDashboard({
                         +{formatHours(app.attendance?.hoursAwarded)} <span>credited</span>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  )}
+                />
               )}
             </div>
           </section>
