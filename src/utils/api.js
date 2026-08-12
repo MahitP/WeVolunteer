@@ -796,6 +796,36 @@ export const api = {
   leaveOrganization: async (key) =>
     apiFetch(`/api/organizations/${encodeURIComponent(key)}/membership`, { method: 'DELETE' }),
 
+  /**
+   * Removing a member.
+   *
+   * The route has existed and been tested since organizations shipped, and
+   * nothing on the client ever called it — so a manager could promote, demote
+   * and leave, but the one action the server was ready for was unreachable.
+   */
+  removeOrganizationMember: async (key, userId) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`,
+      { method: 'DELETE' }),
+
+  // ── Organization announcements ─────────────────
+  fetchOrganizationAnnouncements: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/announcements`),
+  postOrganizationAnnouncement: async (key, body) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/announcements`, {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  updateOrganizationAnnouncement: async (key, id, body) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/announcements/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: JSON.stringify(body),
+    }),
+  deleteOrganizationAnnouncement: async (key, id) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/announcements/${encodeURIComponent(id)}`,
+      { method: 'DELETE' }),
+  replyToOrganizationAnnouncement: async (key, id, body) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/announcements/${encodeURIComponent(id)}/replies`, {
+      method: 'POST', body: JSON.stringify({ body }),
+    }),
+
   // ── Legal change notices ───────────────────────
   /** Legal documents this account has not been shown the change to. */
   fetchLegalUpdates: async () => apiFetch('/api/legal/updates'),

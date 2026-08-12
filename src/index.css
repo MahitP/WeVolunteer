@@ -7531,6 +7531,41 @@ input:disabled + .premium-slider {
   color: var(--brand);
 }
 
+/* The organization icon picker. `is-selected` marks the chosen radio; the
+   outline is on top of the button's own focus ring rather than replacing it,
+   so a keyboard user can still see where they are while moving through them. */
+.org-icon-picker { gap: var(--s2); }
+.org-icon-picker .is-selected {
+  border-color: var(--brand);
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
+.org-avatar .avatar-img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+
+/* Organization announcements */
+.org-announcement {
+  padding: var(--s4);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.org-announcement-head { margin-bottom: var(--s2); gap: var(--s3); }
+.org-announcement-body { margin: 0; white-space: pre-wrap; }
+.org-replies {
+  margin: var(--s3) 0 0;
+  padding: 0 0 0 var(--s4);
+  border-left: 2px solid var(--rule);
+  list-style: none;
+}
+.org-reply p { margin: 0; }
+.org-reply-form { gap: var(--s2); margin-top: var(--s3); align-items: flex-end; }
+.org-replies-closed {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: var(--s3) 0 0;
+}
+.org-announcements { list-style: none; padding: 0; margin: 0; }
+
 /* ==========================================================================
    Legal pages — the page container the public routes never had
 
