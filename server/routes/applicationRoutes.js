@@ -161,9 +161,25 @@ router.get('/api/applications', authenticateToken, (req, res) => {
           /* Counts, never a rate — see `participationCountsFor`. `signedUp`
              counts commitments whose shift has ENDED, so an upcoming shift is
              not held against somebody who has not had the chance to attend it
-             yet. */
+             yet.
+
+             `eventsAbsent` was computed and then dropped here, which left the
+             organizer unable to tell "8 of 9, one missed" from "8 of 9, one the
+             organizer never got round to confirming". Those are a fact about
+             the volunteer and a fact about the paperwork, and reading the
+             second as the first is the specific unfairness this whole set of
+             definitions exists to prevent. `eventsAwaitingRecord` is the
+             remainder, published alongside so the gap is legible rather than
+             assumed. */
           eventsSignedUp: participation.get(r.user_id)?.signedUp ?? 0,
           eventsAttended: participation.get(r.user_id)?.attended ?? 0,
+          eventsAbsent: participation.get(r.user_id)?.absent ?? 0,
+          eventsAwaitingRecord: Math.max(
+            0,
+            (participation.get(r.user_id)?.signedUp ?? 0)
+            - (participation.get(r.user_id)?.attended ?? 0)
+            - (participation.get(r.user_id)?.absent ?? 0),
+          ),
           bio: r.bio,
           skills: r.skills ? JSON.parse(r.skills) : []
         },
