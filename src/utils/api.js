@@ -1134,6 +1134,24 @@ export const api = {
     ),
 
   /**
+   * Roughly how long the drive to a shift takes.
+   *
+   * POST, and that is a privacy decision rather than a REST one: a GET would put
+   * a student's coordinates in a query string, where the browser's history, any
+   * proxy and every access log along the way keep a copy of them. It creates
+   * nothing and is safe to repeat.
+   *
+   * No `signal`. Callers guard with a `cancelled` flag instead — two of these
+   * can share a page, and an AbortController belonging to one component
+   * cancels the other's request when it unmounts.
+   */
+  getTravelTime: async (fromLat, fromLon, toLat, toLon) =>
+    apiFetch('/api/travel-time', {
+      method: 'POST',
+      body: JSON.stringify({ fromLat, fromLon, toLat, toLon }),
+    }),
+
+  /**
    * The appeal form a suspended student reaches from their emailed link.
    *
    * `Appeal.jsx` called `api.fetch(...)`, which has never existed — so the one

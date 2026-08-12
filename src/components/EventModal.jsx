@@ -16,6 +16,7 @@ import LocationLink from './location/LocationLink';
 import DirectionsButton from './location/DirectionsButton';
 import MapReveal from './location/MapReveal';
 import WeatherSummary from './location/WeatherSummary';
+import TravelTime from './location/TravelTime';
 import EventEditForm from './EventEditForm';
 import EventAttendance from './EventAttendance';
 import EventComments from './EventComments';
@@ -498,6 +499,11 @@ export default function EventModal({
                     longitude={event.longitude}
                     datetime={event.startDatetime}
                   />
+                  {/* A rough driving time, on the same row as the directions
+                      link that produces the real, traffic-aware one. Renders
+                      nothing without location, without coordinates, or without a
+                      routing provider configured. */}
+                  <TravelTime latitude={event.latitude} longitude={event.longitude} />
                 </div>
                 <MapReveal
                   latitude={event.latitude}

@@ -7,3 +7,4 @@ export { default as LocationCard } from './LocationCard';
 export { default as LocationLink } from './LocationLink';
 export { default as MapReveal } from './MapReveal';
 export { default as WeatherSummary } from './WeatherSummary';
+export { default as TravelTime } from './TravelTime';

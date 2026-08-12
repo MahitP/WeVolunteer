@@ -261,6 +261,20 @@ if (OAUTH_ALLOW_MOCK && IS_PRODUCTION) {
   );
 }
 
+/**
+ * The routing provider's API key, for travel times. Optional.
+ *
+ * Absent is a supported, silent state rather than an error: `/api/travel-time`
+ * answers 503 `routing_unconfigured` and the client renders nothing, leaving the
+ * directions link — which needs no provider — exactly as it was. A pilot that
+ * has not signed up for OpenRouteService loses a rough number and nothing else.
+ *
+ * It lives here and never reaches the browser. A key shipped to a browser is a
+ * published key, and that is the entire reason `/api/travel-time` is a server
+ * route instead of a fetch from the page.
+ */
+export const ROUTING_API_KEY = process.env.ROUTING_API_KEY || '';
+
 export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 export const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || '';
