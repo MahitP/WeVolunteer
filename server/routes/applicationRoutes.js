@@ -111,6 +111,49 @@ router.get('/api/applications', authenticateToken, (req, res) => {
       conflictsByAppId.add(c.application_id);
     }
 
+    /**
+     * Conferred badges, for the handful the organizer view actually shows.
+     *
+     * One query for the page, in keeping with the two above — a per-row read
+     * would be twenty round trips to render three chips. `UNIQUE(user_id,
+     * badge_id)` makes this a covering index search on `user_id`, so no index
+     * was added for it; `EXPLAIN QUERY PLAN` confirms `SEARCH ub USING COVERING
+     * INDEX ... (user_id=?)`.
+     *
+     * Everything sent here is already public on the volunteer's profile. The
+     * client decides WHICH of them to show — `organizerBadges` in
+     * `src/utils/badgeOrder.js` keeps it to the status badge and the top of each
+     * progression, because a row of nine hour tiers buries the two badges an
+     * organizer is actually reading for.
+     *
+     * `active = 1` only. A retired definition stays in `user_badges` on purpose
+     * (nobody's record is edited when the catalogue changes) but it should not
+     * be presented as current standing.
+     */
+    const badgesByUser = new Map();
+    if (rows.length > 0) {
+      const userIds = [...new Set(rows.map(r => r.user_id))];
+      const placeholders = userIds.map(() => '?').join(',');
+      const badgeRows = db.prepare(`
+        SELECT ub.user_id, b.name, b.icon, b.category, b.criteria_type, b.criteria_value, ub.earned_at
+        FROM user_badges ub
+        JOIN badges b ON b.id = ub.badge_id
+        WHERE ub.user_id IN (${placeholders}) AND b.active = 1
+      `).all(...userIds);
+
+      for (const b of badgeRows) {
+        if (!badgesByUser.has(b.user_id)) badgesByUser.set(b.user_id, []);
+        badgesByUser.get(b.user_id).push({
+          name: b.name,
+          icon: b.icon,
+          category: b.category,
+          criteria_type: b.criteria_type,
+          criteria_value: b.criteria_value,
+          earnedAt: b.earned_at,
+        });
+      }
+    }
+
     const formattedApps = rows.map(r => {
       const history = historyByUser.get(r.user_id);
       const totalHours = history ? Number(history.total_hours) : 0.0;
@@ -181,6 +224,7 @@ router.get('/api/applications', authenticateToken, (req, res) => {
             - (participation.get(r.user_id)?.attended ?? 0)
             - (participation.get(r.user_id)?.absent ?? 0),
           ),
+          badges: badgesByUser.get(r.user_id) ?? [],
           bio: r.bio,
           skills: r.skills ? JSON.parse(r.skills) : []
         },

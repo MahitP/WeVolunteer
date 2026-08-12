@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Check, Clock4, Ban, ArrowUpDown, Sparkles, AlertCircle } from 'lucide-react';
 import { formatHours, formatDay, gradeLabel } from '../utils/helpers';
+import { organizerBadges } from '../utils/badgeOrder';
 
 /**
  * The screen where an organizer decides who gets a spot.
@@ -116,6 +117,10 @@ export default function ApplicantReview({
          */
         const completedCommitments = v.eventsSignedUp ?? v.completedEvents ?? 0;
         const isNew = completedCommitments < 3;
+        /* A first-timer's row is a status line, so it carries no badges — an
+           Early Supporter chip beside "First event" would read as experience
+           they do not have. */
+        const shown = isNew ? [] : organizerBadges(v.badges);
         const isSelected = selectedIds.has(app.id);
         return <div key={app.id} className={`list-row ${isSelected ? 'selected' : ''}`} style={isSelected ? {
           backgroundColor: 'var(--brand-tint)'
@@ -136,6 +141,25 @@ export default function ApplicantReview({
                   {app.hasConflict && (
                     <span className="tag tag-danger" style={{ marginTop: 2, display: 'inline-flex', padding: '1px 4px', fontSize: 10 }}>
                       <AlertCircle size={10} style={{ marginRight: 2 }} /> Conflict
+                    </span>
+                  )}
+                  {/**
+                    * At most three badges, chosen by `organizerBadges`.
+                    *
+                    * Not the volunteer's whole cabinet. An organizer with twenty
+                    * places is asking "have they done this before, and do they
+                    * turn up" — a row of nine hour tiers answers neither and
+                    * buries the reliability badge that answers the second. The
+                    * icon is decorative; the name carries the meaning, so both
+                    * are rendered rather than the glyph alone.
+                    */}
+                  {shown.length > 0 && (
+                    <span style={{ marginTop: 2, display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                      {shown.map(b => (
+                        <span key={b.name} className="tag" style={{ padding: '1px 4px', fontSize: 10 }}>
+                          <span aria-hidden="true">{b.icon}</span> {b.name}
+                        </span>
+                      ))}
                     </span>
                   )}
                 </span>
@@ -189,8 +213,27 @@ export default function ApplicantReview({
                         {v.eventsAwaitingRecord} not confirmed by an organizer
                       </div>
                     )}
+                    {/**
+                      * When they last served, or a neutral sentence when never.
+                      *
+                      * This was `last {formatDay(v.lastVolunteeredDate)}`
+                      * unconditionally, and `formatDay` returns an em dash for a
+                      * missing date — so a volunteer with three commitments and
+                      * no confirmed attendance read "last —". That is not
+                      * neutral, it is a blank an organizer fills in themselves,
+                      * and the likeliest guess is the unkindest one. Both cases
+                      * are said in words instead.
+                      *
+                      * Neither line is framed as a lapse. A gap since March is a
+                      * fact about a calendar, not a character reference — a
+                      * student sits exams, breaks an ankle, moves house. The
+                      * date is given; the reading is left to the person who
+                      * knows the context.
+                      */}
                     <div className="small dim tnum">
-                      last {formatDay(v.lastVolunteeredDate)}
+                      {v.lastVolunteeredDate
+                        ? `last ${formatDay(v.lastVolunteeredDate)}`
+                        : 'no confirmed shifts yet'}
                     </div>
                   </>}
               </div>
