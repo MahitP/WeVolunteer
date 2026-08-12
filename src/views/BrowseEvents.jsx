@@ -530,8 +530,14 @@ export default function BrowseEvents({
             {recommended.map(event => <button key={event.id} className="card card-link card-pad" onClick={() => onViewDetails(event)}>
                 <div className="eyebrow">{event.category}</div>
                 <div className="strong s-57eca1">{event.title}</div>
+                {/* Same defect as the shifts tab: an event with no shifts has
+                    neither total, and this rendered " of  spots open" with two
+                    blanks where the numbers should be. */}
                 <div className="small muted s-956c6f">
-                  {event.spotsRemaining} of {event.maxSpots} spots open · {event.applicantCount} applied ·{' '}
+                  {Number.isFinite(event.spotsRemaining) && Number.isFinite(event.maxSpots) && (
+                    <>{event.spotsRemaining} of {event.maxSpots} spots open · </>
+                  )}
+                  {event.applicantCount} applied ·{' '}
                   up to {formatHours(event.hoursAwarded)}
                 </div>
               </button>)}
