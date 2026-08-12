@@ -2452,15 +2452,37 @@ time { font-variant-numeric: tabular-nums; }
   flex-shrink: 0;
 }
 
+/* The dismiss control every dialog in the application uses.
+
+   It was 30x37px — below the 44px minimum this stylesheet already enforces for
+   touch targets elsewhere (see the `hover: none` block), on the one control a
+   person reaches for when they want OUT of a modal. A close button that needs a
+   second attempt is the worst one to make small.
+
+   Sized rather than padded, so the hit area is exactly 44x44 regardless of the
+   icon a caller renders inside it — several pass an 18px X, one passes a 20px.
+   The icon keeps its own size; only the target grows. */
 .modal-close {
   margin-left: auto;
-  padding: 0.375rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
   border-radius: var(--r-sm);
   color: var(--ink-3);
   flex-shrink: 0;
   transition: background var(--t-fast), color var(--t-fast);
 }
 .modal-close:hover { background: var(--surface-3); color: var(--ink); }
+/* The dialog's own focus ring, rather than the page default, because this
+   control sits on a raised surface where the default ring's outer halo is
+   invisible against the header's background. */
+.modal-close:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
 
 /* ==========================================================================
    Popover / dropdown
