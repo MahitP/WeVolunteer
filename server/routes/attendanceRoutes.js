@@ -175,6 +175,24 @@ router.post('/api/events/:id/attendance', authenticateToken, requireCap('attenda
       }
     }
     for (const r of outcome.revoked) {
+      /**
+       * Re-evaluated BEFORE the `wasCredited` guard, and deliberately.
+       *
+       * This loop used to notify and move on, so the single action that can
+       * take a badge away was the one path that never recomputed one. A
+       * volunteer marked absent kept an hour tier they no longer reached, and
+       * kept a reliability badge their record no longer supported —
+       * `evaluateBadges` has always known how to withdraw an automatic award,
+       * it was simply never asked on the way down.
+       *
+       * Above the guard because that guard is about NOTIFYING. Somebody who was
+       * never credited has had nothing taken from them and should not be told
+       * their hours changed — but being marked absent still changes the
+       * denominator their reliability is computed from, so their badges still
+       * need recomputing.
+       */
+      badgeService.evaluateBadges(r.userId);
+
       if (!r.wasCredited) continue; // never credited, so nothing was taken away
       notificationService.dispatch(
         'HOURS_ADJUSTED',
