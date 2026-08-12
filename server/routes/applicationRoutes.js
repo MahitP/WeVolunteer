@@ -11,6 +11,7 @@ import { friendsToNotify } from '../relationships.js';
    figures — see the header on `participationCountsFor`. */
 import { participationCountsFor } from '../volunteerStats.js';
 import { db } from '../db.js';
+import { slotHasStarted } from '../attendance.js';
 
 const router = express.Router();
 
@@ -430,6 +431,9 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
 
     const promotions = [];
     const freedSlots = new Set();
+    /* One clock for the whole batch, so a long transaction cannot let two
+       applications on the same slot disagree about whether it had started. */
+    const removalClock = new Date();
     inTransaction(() => {
       const update = db.prepare('UPDATE applications SET status = ? WHERE id = ?');
       for (const app of apps) {
@@ -447,6 +451,26 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
         }
 
         const wasAccepted = app.status === 'accepted';
+
+        /**
+         * Removing somebody from a shift that has already started is refused
+         * here too, and skipped rather than failing the batch.
+         *
+         * Setting an accepted volunteer to `rejected` IS removal: it frees
+         * their place and promotes from the waitlist. Doing that after the
+         * shift has run is not roster management, it is editing the past —
+         * somebody turned up and worked. Skipping matches how this route
+         * already handles a full slot: the rest of the batch is honest work
+         * and should not be lost to one application that cannot move.
+         */
+        if (wasAccepted && status !== 'accepted') {
+          const slot = db.prepare('SELECT start_datetime FROM slots WHERE id = ?').get(app.slot_id);
+          if (slotHasStarted(slot, removalClock) !== false) {
+            skipped.push({ id: app.id, reason: 'shift_started' });
+            continue;
+          }
+        }
+
         update.run(status, app.id);
         applied.push({ id: app.id, status, userId: app.user_id, eventId: app.event_id, eventTitle: app.event_title });
 
@@ -561,6 +585,51 @@ router.patch('/api/applications/:id', authenticateToken,
       }
 
       const wasAccepted = app.status === 'accepted';
+
+      /**
+       * An organizer may remove somebody from a shift, but only before it
+       * starts.
+       *
+       * ── What this closes ──
+       *
+       * Setting an accepted volunteer to `rejected` IS removal — it frees their
+       * place and promotes from the waitlist. Nothing stopped an organizer
+       * doing it after the shift had run, which meant somebody who turned up
+       * and worked could be taken off the roster afterwards. That is not
+       * managing a roster; it is editing the past.
+       *
+       * The bound is per SLOT, not per event, and matches check-in: on a
+       * two-day festival a volunteer holding Sunday's shift can still be
+       * removed on Saturday, because their own commitment has not begun.
+       *
+       * Declining a PENDING application is untouched. That is not removing a
+       * participant — nobody held a place — and organizers reconcile
+       * applications after the fact all the time.
+       *
+       * Hours are unreachable from here by construction: this route writes
+       * `applications.status` and nothing else. Attendance and credited hours
+       * live in their own tables and are not read, written, or cascaded to.
+       * A removed volunteer keeps every hour they earned.
+       */
+      if (wasAccepted && status !== 'accepted') {
+        const slot = db.prepare('SELECT id, name, start_datetime FROM slots WHERE id = ?').get(app.slot_id);
+        const started = slotHasStarted(slot, new Date());
+
+        if (started === null) {
+          return res.status(409).json({
+            error: "This shift's start time cannot be read, so it is not clear whether it has begun.",
+            code: 'slot_unreadable',
+          });
+        }
+        if (started === true) {
+          return res.status(409).json({
+            error: 'This shift has already started, so volunteers can no longer be removed from it. '
+              + 'Attendance is recorded on the check-in screen.',
+            code: 'shift_started',
+            startedAt: slot.start_datetime,
+          });
+        }
+      }
 
       // The status change and any resulting promotion must land together: a spot
       // freed but not refilled, or refilled twice, are both worse than neither.
