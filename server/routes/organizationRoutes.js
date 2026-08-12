@@ -269,6 +269,69 @@ router.delete('/api/organizations/:key/membership', authenticateToken, requireCa
   res.json({ isMember: false, memberCount: countMembers(row.id) });
 });
 
+/**
+ * Remove somebody else from the organization. Managers only.
+ *
+ * ── What this does NOT touch ──
+ *
+ * Membership, and nothing else. Not the account, not attendance, not credited
+ * hours, not certificates, not the transcript, not the events they worked. A
+ * volunteer who served forty hours under this organization's banner still
+ * served them, and a manager tidying a member list has no business editing
+ * somebody's service record — the two are unrelated facts that happen to share
+ * a page.
+ *
+ * That is not a promise a comment can keep, so the route writes exactly one
+ * DELETE against `organization_members` and the tests assert every other table
+ * is untouched.
+ *
+ * ── The last manager ──
+ *
+ * Guarded here for the third time, deliberately. `DELETE …/membership` (leave)
+ * and `PATCH …/members/:userId` (demote) both refuse to strip the final
+ * manager, and without this a manager could simply remove their co-manager and
+ * then themselves — defeating the invariant in two requests rather than one.
+ * An organization nobody can manage is recoverable only by an administrator,
+ * and only if somebody notices.
+ *
+ * ── Removing yourself ──
+ *
+ * Allowed, and routed to the same guard. Refusing would mean a manager who
+ * clicks their own row gets an error telling them to use a different button for
+ * the same thing, and `DELETE …/membership` already exists for exactly this.
+ */
+router.delete('/api/organizations/:key/members/:userId', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
+  const row = loadOrganization(req, res);
+  if (!row) return;
+  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    return res.status(403).json({ error: 'You do not manage this organization.', code: 'not_manager' });
+  }
+
+  const target = db.prepare(
+    'SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?'
+  ).get(row.id, req.params.userId);
+  if (!target) {
+    return res.status(404).json({ error: 'That person is not a member.', code: 'not_member' });
+  }
+
+  if (target.member_role === 'manager') {
+    const managers = db.prepare(
+      `SELECT COUNT(*) AS n FROM organization_members WHERE organization_id = ? AND member_role = 'manager'`
+    ).get(row.id).n;
+    if (managers <= 1) {
+      return res.status(409).json({
+        error: 'This is the only manager. Make somebody else a manager first.',
+        code: 'last_manager',
+      });
+    }
+  }
+
+  db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+    .run(row.id, req.params.userId);
+
+  res.json({ userId: req.params.userId, isMember: false, memberCount: countMembers(row.id) });
+});
+
 /** Promote or demote a member. Managers only. */
 router.patch('/api/organizations/:key/members/:userId', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
   const row = loadOrganization(req, res);
