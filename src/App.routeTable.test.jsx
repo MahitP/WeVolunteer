@@ -104,6 +104,19 @@ beforeEach(() => {
    * assertions and trade the unhandled error for an act() warning.
    */
   api.fetchLegalDocument.mockReturnValue(new Promise(() => {}));
+
+  /**
+   * Same reason as `fetchLegalDocument` above: the signed-in shell mounts
+   * `LegalUpdateModal`, whose effect calls `api.fetchLegalUpdates().then(…)`.
+   * Under the automock that is `undefined.then` — an exception thrown inside a
+   * passive effect, outside any test's control, which Vitest reports as an
+   * unhandled error while the suite still prints green.
+   *
+   * A promise that never settles is again the honest stand-in: these tests
+   * assert on routing and shell composition, never on legal notices, so "still
+   * loading" is exactly the state they mean.
+   */
+  api.fetchLegalUpdates.mockReturnValue(new Promise(() => {}));
 });
 
 describe('authenticated route table', () => {

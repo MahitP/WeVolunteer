@@ -7502,6 +7502,35 @@ input:disabled + .premium-slider {
    is tuned for a note that opens a section. */
 .signup-guardian { margin-top: var(--s4); margin-bottom: var(--s4); }
 
+/**
+ * A quoted sentence from a legal document, in a change notice.
+ *
+ * Styled as a quotation and not as a code block: it is the document's own prose,
+ * and monospace or a diff gutter would make a sentence somebody should read look
+ * like output somebody should skim.
+ */
+.legal-excerpt {
+  display: flex;
+  gap: var(--s3);
+  margin: 0;
+  padding: var(--s4);
+  border-left: 3px solid var(--brand);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--surface-2);
+}
+.legal-excerpt p {
+  margin: 0;
+  font-family: var(--font-doc);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink);
+}
+.legal-excerpt-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--brand);
+}
+
 /* ==========================================================================
    Legal pages — the page container the public routes never had
 

@@ -5,6 +5,8 @@ import { documentBySlug } from '../legalDocuments.js';
 import { PolicyContentError } from '../legalContent.js';
 import { db } from '../db.js';
 import { effectiveDocuments, resolveDocument } from '../legalStore.js';
+import { authenticateToken } from '../utils.js';
+import { pendingNoticesFor, acknowledgeNotice } from '../legalNotices.js';
 
 /**
  * Publishes the legal documents the product asks people to rely on.
@@ -148,6 +150,59 @@ router.get('/api/legal/documents/:slug', (req, res) => {
   }
 
   res.json({ ...publicMeta(resolved), markdown: resolved.body });
+});
+
+/**
+ * Legal documents this account has not been shown the change to.
+ *
+ * ── Why this is authenticated when the rest of this file is not ──
+ *
+ * The documents themselves are public because a fourteen-year-old has to read
+ * the Terms before they have an account. "Which changes has THIS person not
+ * seen" is the opposite: it is a fact about one account and is answerable only
+ * for the caller.
+ *
+ * ── Why no capability gate ──
+ *
+ * There is no capability that means "read your own legal notices", and the two
+ * that every role happens to hold are `event.view` and `persona.preview.exit`
+ * — gating on either would be a lie about what is being checked, and the next
+ * person to read it would have to work out that it meant nothing. The route is
+ * scoped to `req.user.id` and is declared SELF_ONLY in the completeness
+ * registry, which is the mechanism this codebase provides for exactly this.
+ */
+router.get('/api/legal/updates', authenticateToken, (req, res) => {
+  try {
+    res.json({ updates: pendingNoticesFor(db, req.user.id) });
+  } catch (err) {
+    console.error('Legal updates error:', err.message);
+    /* An empty list rather than a 500. A failure to compute the excerpt must
+       not be able to block the application shell, which fetches this on load. */
+    res.json({ updates: [] });
+  }
+});
+
+/**
+ * Records that this account has read a change notice.
+ *
+ * Acknowledgement is NOT consent and is deliberately stored in a different
+ * table from `legal_acceptances` — see the migration. Dismissing a modal must
+ * never become evidence that somebody agreed to anything.
+ *
+ * Idempotent: the upsert keeps the first acknowledgement, so a double-click, a
+ * retry and a second tab all converge on one row.
+ */
+router.post('/api/legal/updates/acknowledge', authenticateToken, (req, res) => {
+  const { slug, version } = req.body ?? {};
+  if (typeof slug !== 'string' || typeof version !== 'string' || !slug || !version) {
+    return res.status(400).json({ error: 'slug and version are required.', code: 'slug_required' });
+  }
+  if (!documentBySlug(slug)) {
+    return res.status(404).json({ error: 'No such legal document.' });
+  }
+
+  acknowledgeNotice(db, req.user.id, slug, version);
+  res.json({ ok: true });
 });
 
 export default router;

@@ -696,6 +696,8 @@ describe('authorization hygiene', () => {
       'GET /api/user/preferences': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
       'POST /api/user/preferences': { category: CATEGORY.SELF_ONLY, reason: 'insert/update scoped to caller\'s own id' },
       'GET /api/certificates': { category: CATEGORY.SELF_ONLY, reason: 'WHERE at.user_id = caller' },
+      'GET /api/legal/updates': { category: CATEGORY.SELF_ONLY, reason: 'lists legal-document changes THIS account has not acknowledged; every query is WHERE user_id = caller. No capability gate because none of them means "read your own legal notices" — the only two every role holds are event.view and persona.preview.exit, and gating on either would misdescribe the check' },
+      'POST /api/legal/updates/acknowledge': { category: CATEGORY.SELF_ONLY, reason: 'upserts one row keyed (caller, slug, version) recording that the caller dismissed a change notice. Acknowledgement is not consent and is stored apart from legal_acceptances, so this cannot manufacture agreement' },
       'GET /api/notifications': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
       'PATCH /api/notifications': { category: CATEGORY.SELF_ONLY, reason: 'update scoped to caller\'s own id' },
       'GET /api/favorites': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },

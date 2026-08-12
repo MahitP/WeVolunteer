@@ -796,6 +796,16 @@ export const api = {
   leaveOrganization: async (key) =>
     apiFetch(`/api/organizations/${encodeURIComponent(key)}/membership`, { method: 'DELETE' }),
 
+  // ── Legal change notices ───────────────────────
+  /** Legal documents this account has not been shown the change to. */
+  fetchLegalUpdates: async () => apiFetch('/api/legal/updates'),
+  /** Records that the account has read one. Idempotent server-side. */
+  acknowledgeLegalUpdate: async (slug, version) =>
+    apiFetch('/api/legal/updates/acknowledge', {
+      method: 'POST',
+      body: JSON.stringify({ slug, version }),
+    }),
+
   // ── External hours ─────────────────────────────
   fetchExternalHours: async () => apiFetch('/api/external-hours'),
   createExternalHours: async (body) => apiFetch('/api/external-hours', { method: 'POST', body: JSON.stringify(body) }),
