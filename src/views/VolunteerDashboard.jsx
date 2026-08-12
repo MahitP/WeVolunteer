@@ -398,7 +398,21 @@ export default function VolunteerDashboard({
                         {slot?.name} · {formatTimeRange(slot?.startDatetime, slot?.endDatetime)} · {formatHours(slot?.hours)}
                       </div>
                     </div>
-                    <span className="status status-ok">Confirmed</span>
+                    {/**
+                      * No "Confirmed" pill here.
+                      *
+                      * It sat between the shift and two `btn-ghost` buttons at
+                      * the same weight and height as both, so it read as a
+                      * third control — and the only thing it could plausibly
+                      * mean when clicked is "confirm", which the volunteer has
+                      * already done. A status that looks like an unfinished
+                      * task is worse than no status at all.
+                      *
+                      * The fact is not lost: this list renders under a
+                      * "Confirmed shifts" heading and only accepted
+                      * applications reach it. The row can now spend its width
+                      * on the two things that really are actions.
+                      */}
                     <button className="btn btn-ghost btn-sm" onClick={() => onViewDetails(event)}>View</button>
                     <button
                       className="btn btn-ghost btn-sm"
@@ -535,6 +549,25 @@ function buildBoard(leaderboard, myId) {
 function CertificateModal({ user, shifts, onClose }) {
   const total = shifts.reduce((sum, s) => sum + Number(s.app.attendance?.hoursAwarded || 0), 0);
 
+  /**
+   * Who stands behind this document.
+   *
+   * Unlike the per-event certificate, this one summarises service across many
+   * events and therefore often across many organizers. Naming one of them would
+   * be a claim they did not make — they confirmed their own event, not the
+   * total. So: one organizer gets named, several are counted, and when the
+   * shifts carry no organizer at all the programme itself is named, which is
+   * true of every row on the page.
+   */
+  const organizers = [...new Set(
+    shifts.map(s => s.event?.organizerName).filter(Boolean)
+  )];
+  const authorisedBy = organizers.length === 1
+    ? organizers[0]
+    : organizers.length > 1
+      ? `${SCHOOL_NAME} · ${organizers.length} organizers`
+      : SCHOOL_NAME;
+
   return (
     <Modal onClose={onClose} label="Hours certificate" size="lg">
       <div className="modal-head no-print">
@@ -545,7 +578,7 @@ function CertificateModal({ user, shifts, onClose }) {
         <button className="modal-close" onClick={onClose} aria-label="Close dialog"><X size={18} /></button>
       </div>
 
-        <div className="modal-body" style={{ background: 'var(--surface-2)' }}>
+        <div className="modal-body certificate-canvas">
           <div className="certificate" id="printable-certificate">
             <div style={{ textAlign: 'center' }}>
               <div className="certificate-org">{SCHOOL_NAME}</div>
@@ -583,12 +616,29 @@ function CertificateModal({ user, shifts, onClose }) {
               </tbody>
             </table>
 
+            {/**
+              * Names on the name lines, labels on the label lines.
+              *
+              * This block printed the strings "Volunteer signature" and
+              * "Program coordinator" inside `.certificate-sign` — which is the
+              * NAME slot: bold, dark, with the signature rule above it. The
+              * label slot, `.certificate-sign-label`, was not used at all. So
+              * the finished document had a caption where each name belonged and
+              * nothing anywhere that said who it was about or who stood behind
+              * it. Printed, it reads as two blank signature lines.
+              *
+              * `CertificateModal.jsx` has had the right shape all along — name
+              * in `.certificate-sign`, caption in `.certificate-sign-label` —
+              * and this is now the same.
+              */}
             <div className="row" style={{ marginTop: 'var(--s12)', gap: 'var(--s8)' }}>
               <div style={{ flex: 1 }}>
-                <div className="certificate-sign">Volunteer signature</div>
+                <div className="certificate-sign">{user?.name || '—'}</div>
+                <div className="certificate-sign-label">Volunteer</div>
               </div>
               <div style={{ flex: 1 }}>
-                <div className="certificate-sign">Program coordinator</div>
+                <div className="certificate-sign">{authorisedBy}</div>
+                <div className="certificate-sign-label">Authorised by</div>
               </div>
             </div>
           </div>

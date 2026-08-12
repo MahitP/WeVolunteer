@@ -252,4 +252,69 @@ describe('removing a participant', () => {
       expect(res.status, JSON.stringify(res.body)).toBe(200);
     });
   });
+
+  describe('the bulk route enforces the same rule', () => {
+    /**
+     * The single route 409s; the bulk route SKIPS, so the rest of a batch is
+     * not lost to one application that cannot move. Both behaviours are
+     * deliberate and only the first was covered — the skip branch had no test
+     * at all, which meant the batch path could have started removing people
+     * from shifts that had already run without anything failing.
+     */
+    const bulk = (ids, status, session = organizer) =>
+      srv.call('PATCH', '/api/applications/bulk', { applicationIds: ids, status }, session);
+
+    it('skips an accepted volunteer whose shift has started, and says why', async () => {
+      setSlotWindow(-30, 90);
+
+      const res = await bulk([application.id], 'rejected');
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.skipped).toContainEqual({ id: application.id, reason: 'shift_started' });
+      expect(res.body.applied).toEqual([]);
+      expect(statusOf(), 'the volunteer must still hold their place').toBe('accepted');
+    });
+
+    it('removes normally when the shift has not started', async () => {
+      setSlotWindow(60 * 24, 60 * 25);
+
+      const res = await bulk([application.id], 'rejected');
+
+      expect(res.status).toBe(200);
+      expect(res.body.skipped ?? []).toEqual([]);
+      expect(statusOf()).toBe('rejected');
+    });
+
+    it('does not lose the rest of the batch to one started shift', async () => {
+      /**
+       * The whole reason this route skips instead of failing. An organizer
+       * clearing a backlog should not have twenty good decisions discarded
+       * because the twenty-first is out of time.
+       */
+      const others = db.prepare(
+        "SELECT id FROM applications WHERE status = 'pending' AND id != ? LIMIT 1"
+      ).all(application.id);
+      if (others.length === 0) return; // seed has none spare; the skip case above still holds
+
+      setSlotWindow(-30, 90);
+      const res = await bulk([application.id, others[0].id], 'rejected');
+
+      expect(res.status).toBe(200);
+      expect(res.body.skipped).toContainEqual({ id: application.id, reason: 'shift_started' });
+      expect(res.body.applied.map(a => a.id)).toContain(others[0].id);
+    });
+
+    it('never touches attendance or credited hours when it skips', async () => {
+      const before = db.prepare(
+        'SELECT COUNT(*) AS rows, COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ?'
+      ).get(application.userId);
+
+      setSlotWindow(-60 * 24, -60 * 23);
+      await bulk([application.id], 'rejected');
+
+      expect(db.prepare(
+        'SELECT COUNT(*) AS rows, COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ?'
+      ).get(application.userId)).toEqual(before);
+    });
+  });
 });
