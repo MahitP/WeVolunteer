@@ -10074,3 +10074,12 @@ input:disabled + .premium-slider {
      mistake. */
   .transcript-issued { text-align: left; }
 }
+
+/* The link out of a capped preview. Sits under the list it summarises, so it
+   reads as the end of that list rather than as a separate action. */
+.preview-more {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
