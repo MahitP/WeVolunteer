@@ -14,6 +14,12 @@ vi.mock('../utils/api', () => ({
        passive effect, which surfaces as a confusing hook-order failure rather
        than as "you forgot to mock getWeather". */
     getWeather: vi.fn(() => new Promise(() => {})),
+    /* Added when TravelTime joined the "Getting there" row, and it failed
+       exactly as the note above predicts: `api.getTravelTime is not a function`
+       thrown from a passive effect, in a distance test that has nothing to do
+       with travel times. Both resolve to a promise that never settles, so
+       neither renders and neither races the assertions. */
+    getTravelTime: vi.fn(() => new Promise(() => {})),
   }
 }));
 
