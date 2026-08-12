@@ -236,3 +236,96 @@ assumes one excludes exactly the students least able to argue about it.
   `wevolunteer-qr-qa` entry in `.claude/launch.json` pointed at a scratch file.
 - **Set `WEV_REAL_DB` when running the full suite.** `dataIntegrity.test.js`
   opens `pilot.db` read-write for schema assertions; without it the WAL grows.
+
+---
+
+# Pre-launch quality pass — checklist and state
+
+**Branch `feat/prelaunch-quality`, started 2026-08-12.** This section is the
+live checklist for the finalisation pass. Items are marked from the code, not
+from intent.
+
+## Done
+
+- [x] **Organization tags** — every tag was refused as too long whatever its
+      length. `TagInput` is shared with the event editor and emits
+      `{tag, label}` objects; the server's guard was one `.some()` doing three
+      jobs and reported the first clause's failure against the third's message.
+      Empty arrays passed, which hid it. Fixed both sides; `normaliseOrgTags`
+      now does per-tag length, blank rejection, case-insensitive de-duplication,
+      the count limit applied after de-duplication, and an error that names the
+      offending tag. 14 tests; reverting the old guard fails 5.
+- [x] **Modal close touch target** — `.modal-close` was ~30×37px on eight
+      dialogs, below the 44px floor this stylesheet already enforces elsewhere.
+      Fixed in the shared class, sized rather than padded, focus ring added.
+      Guard parses the declared rule (jsdom has no layout engine, so a measured
+      assertion would be vacuous); real geometry checked in browser QA.
+- [x] **Transcript event aggregation** — one row per event, shift *count* kept,
+      shift *names* dropped, total preserved exactly and computed from the rows
+      being printed. `aggregateServiceByEvent` is a projection of
+      `attendance WHERE present = 1`, not a second definition of service.
+- [x] **Transcript print behaviour** — `.app`'s sidebar grid track survived
+      `display:none` and put an empty 244px gutter on every printed page;
+      `min-height:100vh` produced a trailing blank sheet; backgrounds were
+      dropped so the document printed as bare text. Added `@page` margins,
+      `print-color-adjust` on the two artefacts that *are* the printout,
+      repeating table headers, break-inside guards.
+- [x] **Certificate dark-mode contrast (pre-existing)** — `.certificate-name`
+      used `--brand-ink`, which is redefined for dark mode while `--cert-bg` is
+      deliberately not: the volunteer's name rendered at **1.54:1** on a
+      certificate viewed in dark mode. Now 8.96:1 via `--cert-accent`, a token
+      in the block that is never themed.
+
+## Not started
+
+These are specified in the owner's brief and remain open. Nothing about them
+has been half-built — no partial schema, no dead code, no dependency added.
+
+- [ ] **Numeric ETA with a routing provider** (Part 1A). Approved by the owner
+      including its privacy implications. Requires: provider choice,
+      server-side proxy so no key reaches the browser, transient-origin
+      handling with no persistence and no logging, CSP amendment, cache design
+      that cannot become a location trail, legal/privacy disclosure. OS handoff
+      (`GEO`/`VALARM`/directions) already ships and must be kept.
+- [ ] **QR fallback decoder review** (Part 2) — whether `jsqr` should be
+      replaced. It is dynamically imported and used only where
+      `BarcodeDetector` is absent. The brief explicitly allows "document that
+      the current choice is the safest practical one" as an outcome.
+- [ ] **`attendance_checkin` foreign keys** (Part 4) — needs orphan detection
+      before any rebuild, and a deliberate cascade policy. Historical
+      attendance must survive user-lifecycle operations.
+- [ ] **Service-record previews + "Show more"** on dashboard and profile
+      (Parts 6, 7). Both currently render the full history uncapped.
+- [ ] **Badge / achievement separation** (Parts 8–17), including progressive
+      hour and streak badges, alternating ordering, Early Supporter review,
+      first-time and no-recent-service badges.
+- [ ] **Reliable Volunteer as a recency-weighted badge** (Part 13). Note the
+      existing state: it is *already* a badge, not an achievement — but
+      `badgeService.collectStats` computes its `attendance_rate` from a raw
+      `present/signups` count with an ad-hoc five-signup floor, while
+      `weighting.js` has a smoothed Bayesian rate that Auto Select uses. Those
+      two must not contradict each other, and the smoothed one subsumes the
+      floor. `attendanceRecordsFor`/`participationCountsFor` carry **no dates**,
+      so recency weighting needs a new per-commitment query.
+- [ ] **Reliability simulation suite** (Parts 21–22).
+- [ ] **Organizer removes participant before start** (Part 19).
+- [ ] **Organization member removal** (Part 20).
+
+## Constraints discovered that the remaining work must respect
+
+- `server/badges.test.js` asserts the conferred catalogue contains **no**
+  `hours` or `events_attended` badge, because milestones own thresholds derived
+  from the service record and badges own what cannot be derived. Progressive
+  hour badges deliberately re-open that boundary; the test and the three module
+  headers stating the split have to be revised together, not worked around.
+- `profileSerializer.js` is an allowlist and `profileSerializer.leakage.test.js`
+  asserts against the constants. A `badges` key on the public profile needs an
+  allowlist entry.
+- A **rate** is emitted nowhere on a public profile, stated in four independent
+  places. A "Reliable Volunteer" badge is fine — it already ships. A percentage
+  is not.
+- "No recent service" is a *negative* signal derived from `lastVolunteeredAt`.
+  Turning a raw date into a verdict is the same transformation the
+  "counts, never a rate" rule prohibits, applied to a different field — so
+  whether it is organizer-only or profile-visible is a product decision, not an
+  implementation detail.
