@@ -329,3 +329,44 @@ has been half-built — no partial schema, no dead code, no dependency added.
   "counts, never a rate" rule prohibits, applied to a different field — so
   whether it is organizer-only or profile-visible is a product decision, not an
   implementation detail.
+
+---
+
+# Overnight pass — continuation state
+
+**Branch `feat/prelaunch-quality`. Updated 2026-08-12 morning.**
+
+## DONE (this pass)
+- Organization tag bug — shape mismatch, both sides fixed, 14 tests
+- `.modal-close` 44px touch target + guard
+- Transcript: event aggregation, print fixes, `--cert-accent` contrast bug
+- **`server/reliability.js` — the canonical model.** Recency weighted in
+  COMMITMENTS not days; smoothed via the existing `smoothedShowUpRate`; one
+  `MIN_EVIDENCE` replacing three floors (5/5/3). 45 simulation cases.
+- **`badgeService` wired to it.** Naive `present/signups` rate deleted; grain
+  moved from shifts to events; `credit()` fixture now writes the application
+  behind the attendance, and `makeEvent` takes an end time so recency is
+  testable.
+- Service record previews on dashboard (3) and profile (5) via `PreviewList`.
+
+## NEXT, in order
+1. Progressive hour + streak badges, alternating order, capped display.
+   Requires revising `badges.test.js:620` and the four prose headers together.
+2. Organizer participant removal (pre-start only, never revokes hours).
+3. Organization manager member removal (last-manager protection).
+4. Attendance foreign keys migration (orphan detection first).
+5. Numeric ETA behind a server-side routing proxy.
+6. QR decoder review (jsqr vs maintained alternatives).
+
+## TEST STATUS
+`npm test` 329 files / 5305 passed / 13 skipped / 0 failed. Lint, build, audit clean.
+
+## KNOWN ISSUES
+- `evaluateBadges` fires ONLY at `attendanceRoutes.js:165` (hours confirmation).
+  Nothing decays or recovers without a new trigger — a reliability badge that
+  can be lost needs re-evaluation somewhere, most likely the notification sweep.
+- No index on `user_badges(user_id)`; matters once badges appear on an
+  applicant list.
+
+## LAST COMMIT
+`d92d886` service record previews.
