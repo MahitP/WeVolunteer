@@ -334,39 +334,59 @@ has been half-built — no partial schema, no dead code, no dependency added.
 
 # Overnight pass — continuation state
 
-**Branch `feat/prelaunch-quality`. Updated 2026-08-12 morning.**
+**Branch `feat/prelaunch-quality`. Updated 2026-08-12, midday.**
 
-## DONE (this pass)
-- Organization tag bug — shape mismatch, both sides fixed, 14 tests
+## DONE
+- Organization tag bug (shape mismatch, both sides, 14 tests)
 - `.modal-close` 44px touch target + guard
 - Transcript: event aggregation, print fixes, `--cert-accent` contrast bug
-- **`server/reliability.js` — the canonical model.** Recency weighted in
-  COMMITMENTS not days; smoothed via the existing `smoothedShowUpRate`; one
-  `MIN_EVIDENCE` replacing three floors (5/5/3). 45 simulation cases.
-- **`badgeService` wired to it.** Naive `present/signups` rate deleted; grain
-  moved from shifts to events; `credit()` fixture now writes the application
-  behind the attendance, and `makeEvent` takes an end time so recency is
-  testable.
-- Service record previews on dashboard (3) and profile (5) via `PreviewList`.
+- **`server/reliability.js`** — the canonical model. Recency weighted in
+  COMMITMENTS not days; reuses `smoothedShowUpRate`; one `MIN_EVIDENCE`
+  replacing three floors (5/5/3). 45 simulation cases.
+- **`badgeService` reads it.** Naive `present/signups` deleted; grain moved
+  from shifts to events; `credit()` fixture writes the application behind the
+  attendance; `makeEvent` takes an end time so recency is testable.
+- Service record previews — dashboard 3, profile 5, via `PreviewList`.
+- **Progressive hour (5→500) and streak (2→24) badges**, generated from
+  published tier lists. `badges.test.js` boundary test REPLACED, not worked
+  around: the rule is now "neither restates a number", and the
+  `events_attended` half survives.
+- **Badge ordering** — `src/utils/badgeOrder.js`. Alternating highest-first;
+  `organizerBadges` caps the applicant row at three and never grows.
+- **Participant removal guarded** — both PATCH routes; pre-start only; bulk
+  skips rather than failing the batch; hours unreachable.
 
-## NEXT, in order
-1. Progressive hour + streak badges, alternating order, capped display.
-   Requires revising `badges.test.js:620` and the four prose headers together.
-2. Organizer participant removal (pre-start only, never revokes hours).
-3. Organization manager member removal (last-manager protection).
-4. Attendance foreign keys migration (orphan detection first).
-5. Numeric ETA behind a server-side routing proxy.
-6. QR decoder review (jsqr vs maintained alternatives).
+## NEXT, in priority order
+1. **Organization manager member removal** — capability, last-manager
+   protection, history untouched. Nothing started.
+2. **Attendance foreign keys** — orphan detection FIRST, then a rebuild
+   migration. Nothing started.
+3. **Numeric ETA** behind a server-side routing proxy. Owner has approved the
+   privacy trade explicitly. Nothing started — deliberately not begun rather
+   than left half-integrated.
+4. **First-Time Volunteer badge** and neutral organizer "last volunteered"
+   context. `reliability.summarise()` already returns `recorded` and
+   `lastAttendedAt`, so both are presentation on data that now exists.
+5. **QR decoder review** (jsqr vs maintained alternatives).
+6. Browser QA of the badge surfaces; final multi-domain audit.
 
 ## TEST STATUS
-`npm test` 329 files / 5305 passed / 13 skipped / 0 failed. Lint, build, audit clean.
+`npm test` 331 files / 5338 passed / 13 skipped / 0 failed.
+Lint clean, build clean, `npm audit` 0 vulnerabilities.
 
-## KNOWN ISSUES
-- `evaluateBadges` fires ONLY at `attendanceRoutes.js:165` (hours confirmation).
-  Nothing decays or recovers without a new trigger — a reliability badge that
-  can be lost needs re-evaluation somewhere, most likely the notification sweep.
-- No index on `user_badges(user_id)`; matters once badges appear on an
-  applicant list.
+## KNOWN ISSUES — read before continuing
+- **`evaluateBadges` fires ONLY at `attendanceRoutes.js:165`** (hours
+  confirmation). Nothing decays or recovers without a new trigger. This now
+  matters more than it did: the reliability badge is designed to be lost and
+  regained, and today it is only ever recomputed when somebody is credited
+  hours. The notification sweep is the obvious host.
+- **No index on `user_badges(user_id)`.** Fine today; matters the moment badges
+  render on a 40-row applicant list.
+- **Badges are not yet on any organizer surface.** `organizerBadges()` exists
+  and is tested; nothing calls it. Wiring it needs the applicants endpoint to
+  carry badges, which needs the `user_badges` index above.
+- Demoting the only accepted volunteer to the waitlist re-promotes them
+  immediately (two correct rules composing into a no-op). Pre-existing.
 
 ## LAST COMMIT
-`d92d886` service record previews.
+`80d33c6` participant removal guard.
