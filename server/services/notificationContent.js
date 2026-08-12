@@ -37,6 +37,15 @@ export const SUPPORT_EMAIL = 'wevolunteer.platform@gmail.com';
 export const MANDATORY_NOTICE_EVENTS = new Set([
   'ACCOUNT_SUSPENDED',
   /**
+   * A legal document changing is a mandatory notice because the product has
+   * published a promise to give one: "If a change matters, we will tell you in
+   * the app at least 30 days before it takes effect… We will not change them
+   * quietly" (Terms of Service). A notification preference is a choice about
+   * how much the product talks to you; it cannot be a way to opt out of being
+   * told that the agreement you are held to has been rewritten.
+   */
+  'LEGAL_DOCUMENT_UPDATED',
+  /**
    * A formal warning is a mandatory notice for the same reason a suspension is:
    * it is an enforcement action recorded against the person, it is the step that
    * precedes suspension, and it is worthless — worse than worthless — if they do
@@ -185,6 +194,15 @@ export const EVENT_CATEGORIES = {
    * System is one they have to already know to look for.
    */
   ACCOUNT_SUSPENDED: 'ACCOUNT',
+  /**
+   * A legal document you accepted has changed.
+   *
+   * ACCOUNT rather than SYSTEM: it is a fact about this person's relationship
+   * with the platform — the terms they agreed to are not the terms in force —
+   * and it belongs beside suspensions and appeals in the Account filter, not
+   * beside maintenance notices.
+   */
+  LEGAL_DOCUMENT_UPDATED: 'ACCOUNT',
   ACCOUNT_WARNED: 'ACCOUNT',
   ACCOUNT_REINSTATED: 'ACCOUNT',
   APPEAL_DECISION_STANDS: 'ACCOUNT',
@@ -442,6 +460,38 @@ export function getInAppContent(event, payload) {
      * an indefinite suspension is still a real option and must not be described
      * as having an end.
      */
+    case 'LEGAL_DOCUMENT_UPDATED': {
+      /**
+       * The excerpt is a SAMPLE, and the copy says so.
+       *
+       * `buildExcerpt` quotes one sentence that is new. It cannot know which
+       * change matters most, so presenting it as "what changed" would overstate
+       * it — "among other changes" is the honest frame when there is more than
+       * one, and the link is what actually discharges the obligation.
+       */
+      const quoted = payload.excerpt
+        ? `\n\n\u201c${payload.excerpt}\u201d`
+        : '';
+      const others = payload.changeCount > 1
+        ? `\n\nThat is one of ${payload.changeCount} changes.`
+        : '';
+
+      return {
+        kind,
+        /* IMPORTANT, not NORMAL: the retention sweep is allowed to delete
+           NORMAL notices, and a mandatory notice that can be swept is a notice
+           the product only pretended to give. */
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: `${payload.title} has been updated`,
+        body:
+          `We have made changes to the ${payload.title}.${quoted}${others}\n\n`
+          + 'Please read the full document. If you do not agree with the changes, '
+          + 'you can close your account at any time.',
+        link: `/legal/${payload.slug}`,
+        ctaText: `Read the ${payload.title}`,
+      };
+    }
+
     case 'ACCOUNT_SUSPENDED': {
       const endsAt = payload.suspendedUntil ? new Date(payload.suspendedUntil) : null;
       const endsOn = endsAt && !Number.isNaN(endsAt.getTime())

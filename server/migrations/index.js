@@ -47,6 +47,7 @@ import peerConversations from './035_peer_conversations.js';
 import slotWindowIndex from './036_slot_window_index.js';
 import checkinTokens from './037_checkin_tokens.js';
 import attendanceForeignKeys from './038_attendance_foreign_keys.js';
+import legalChangeNotices from './039_legal_change_notices.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -209,7 +210,15 @@ export const MIGRATIONS = [
    * rebuild carries both through. Guarded by `PRAGMA foreign_key_list`, so a
    * second run is a no-op.
    */
-  attendanceForeignKeys
+  attendanceForeignKeys,
+
+  /**
+   * 039 — who has been told a legal document changed, and who has read it.
+   *
+   * Order-independent: a new table with one foreign key to `users`, no data
+   * migration and no dependency on any earlier schema beyond that.
+   */
+  legalChangeNotices
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

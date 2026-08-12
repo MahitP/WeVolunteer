@@ -13,6 +13,7 @@ import useOnline from './hooks/useOnline';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
 import PersonaPreviewBanner from './components/admin/PersonaPreviewBanner';
 import LocationPrompt from './components/location/LocationPrompt';
+import LegalUpdateModal from './components/LegalUpdateModal';
 import AccountProfile from './views/AccountProfile';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
@@ -1454,6 +1455,12 @@ function AppShell({ toasts, addToast, removeToast }) {
               screen, and the browser would refuse the permission there anyway
               because nobody has pressed anything yet. */}
           <LocationPrompt />
+          {/* Inside the signed-in shell for the same reason as the banner
+              above: "which documents has THIS account not been shown" is only
+              answerable once there is an account, and the Terms promise notice
+              in the app rather than at the sign-in screen. Renders nothing when
+              there is nothing to say, which is almost always. */}
+          <LegalUpdateModal />
           {/* Inside the shell boundary above, so a chunk that fails to load is
               caught alongside a view that throws while rendering — and covering
               both arms of the ternary below, since the profile views are lazy
