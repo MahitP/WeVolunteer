@@ -46,6 +46,7 @@ import legalDocumentRevisions from './034_legal_document_revisions.js';
 import peerConversations from './035_peer_conversations.js';
 import slotWindowIndex from './036_slot_window_index.js';
 import checkinTokens from './037_checkin_tokens.js';
+import attendanceForeignKeys from './038_attendance_foreign_keys.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -198,7 +199,17 @@ export const MIGRATIONS = [
    * a database at any prior version without touching a row that is already
    * there. See the file for why the codes are stored rather than signed.
    */
-  checkinTokens
+  checkinTokens,
+
+  /**
+   * 038 — foreign keys for the two attendance tables that never declared any.
+   *
+   * A table rebuild, so it is NOT order-independent: it must run after 037,
+   * which adds `attendance_checkin.method` and creates `checkin_tokens`. The
+   * rebuild carries both through. Guarded by `PRAGMA foreign_key_list`, so a
+   * second run is a no-op.
+   */
+  attendanceForeignKeys
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
