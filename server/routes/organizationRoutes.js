@@ -23,6 +23,9 @@ import {
   validateOrganization, createOrganization, canManage, formatOrganization, uniqueSlug,
 } from '../organizations.js';
 import { profileSummary } from '../profileSerializer.js';
+import path from 'node:path';
+import sharp from 'sharp';
+import { receiveAvatar, deleteUploadedFile, AVATAR_UPLOADS_DIR } from './profilePictureRoutes.js';
 
 const router = express.Router();
 
@@ -613,6 +616,100 @@ router.post('/api/organizations/:key/announcements/:announcementId/replies', aut
       author: { id: created.author_id, name: created.author_name || 'Former member', avatar: created.author_avatar || null },
     },
   });
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Organization image
+   ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Uploading a logo.
+ *
+ * ── Everything here is borrowed on purpose ──
+ *
+ * `receiveAvatar` (the multer config, the 5 MB limit, the mimetype pre-filter
+ * and the three refusal shapes), `AVATAR_UPLOADS_DIR` and `deleteUploadedFile`
+ * all come from `profilePictureRoutes.js`. A second upload pipeline would be a
+ * second size limit to keep in step, a second set of error codes for the client
+ * to learn, and — the one that matters — a second path-containment check on a
+ * delete. The comment on `deleteUploadedFile` records what the hand-written
+ * version of that check got wrong.
+ *
+ * ── The two things that are NOT borrowed ──
+ *
+ * Authorization: a profile picture is gated on being yourself, and there is no
+ * "yourself" for an organization. It is `organization.manage.own` plus
+ * `canManage`, the same two layers as every other write in this file.
+ *
+ * `fit: 'contain'` rather than `cover`, on a white ground. A person's avatar is
+ * a face and cropping to a square is right; a club's logo is frequently wide,
+ * and entropy-cropping a wordmark cuts the middle out of the name. Letterboxing
+ * a logo is ugly in the worst case; cropping one is illegible.
+ */
+router.post('/api/organizations/:key/image', authenticateToken, requireCap('organization.manage.own'), receiveAvatar, async (req, res) => {
+  const row = loadOrganization(req, res);
+  if (!row) return undefined;
+  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    return res.status(403).json({ error: 'Only a manager of this organization can change its image.', code: 'not_manager' });
+  }
+  if (!req.file) return res.status(400).json({ error: 'No image provided.', code: 'no_file' });
+
+  /* Decoded before anything is written, and a bad image answered as a 400 —
+     the same two-pass reasoning the profile picture handler gives: "these bytes
+     are not an image" is the caller's mistake and "the disk is full" is ours,
+     and telling them apart by inspecting an error message is the fragile thing
+     being avoided. */
+  let decoded;
+  try {
+    decoded = await sharp(req.file.buffer).metadata();
+  } catch {
+    decoded = null;
+  }
+  if (!decoded?.format) {
+    return res.status(400).json({
+      error: 'That file could not be read as an image. Choose a JPEG, PNG, WebP or GIF.',
+      code: 'unsupported_media_type',
+    });
+  }
+
+  try {
+    const previous = db.prepare('SELECT image_url FROM organizations WHERE id = ?').get(row.id)?.image_url;
+
+    const filename = `org-${row.id}-${Date.now()}.webp`;
+    await sharp(req.file.buffer)
+      .resize(400, 400, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } })
+      .webp({ quality: 82 })
+      .toFile(path.join(AVATAR_UPLOADS_DIR, filename));
+
+    const relativeUrl = `/uploads/avatars/${filename}`;
+    db.prepare('UPDATE organizations SET image_url = ?, image_uploaded_at = ?, updated_at = ? WHERE id = ?')
+      .run(relativeUrl, new Date().toISOString(), new Date().toISOString(), row.id);
+
+    /* Written before the old one is removed, so a failed unlink leaves an
+       orphaned file rather than an organization pointing at nothing. */
+    if (previous && previous !== relativeUrl) deleteUploadedFile(previous);
+
+    return res.json({ organization: formatOrganization(db.prepare(`${ORG_SELECT} WHERE o.id = ?`).get(row.id)) });
+  } catch (err) {
+    console.error('Organization image upload error:', err.message);
+    return res.status(500).json({ error: 'That image could not be saved.', code: 'upload_failed' });
+  }
+});
+
+/** Removing it, falling the page back to the emoji and then the glyph. */
+router.delete('/api/organizations/:key/image', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
+  const row = loadOrganization(req, res);
+  if (!row) return undefined;
+  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    return res.status(403).json({ error: 'Only a manager of this organization can change its image.', code: 'not_manager' });
+  }
+
+  const previous = db.prepare('SELECT image_url FROM organizations WHERE id = ?').get(row.id)?.image_url;
+  db.prepare('UPDATE organizations SET image_url = NULL, image_uploaded_at = NULL, updated_at = ? WHERE id = ?')
+    .run(new Date().toISOString(), row.id);
+  if (previous) deleteUploadedFile(previous);
+
+  return res.json({ organization: formatOrganization(db.prepare(`${ORG_SELECT} WHERE o.id = ?`).get(row.id)) });
 });
 
 export default router;

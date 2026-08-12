@@ -30,7 +30,7 @@ const ORG_ICONS = [
   '🏥', '🤝', '🌍', '🎵', '🔬', '🏃', '🍲', '⭐',
 ];
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { AlertCircle, Building2, Archive } from 'lucide-react';
+import { AlertCircle, Building2, Archive, ImagePlus } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
@@ -53,6 +53,7 @@ export default function OrganizationForm({ addToast }) {
   const editing = Boolean(key);
 
   const [form, setForm] = useState({ name: '', description: '', tags: [], avatar: null });
+  const [imageUrl, setImageUrl] = useState(null);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(editing);
   const [loadError, setLoadError] = useState('');
@@ -68,6 +69,7 @@ export default function OrganizationForm({ addToast }) {
         /* The server says whether this caller may manage it. Trusting that
            rather than re-deriving it here means one answer to the question. */
         if (!res.viewer.canManage) { setLoadError('forbidden'); return; }
+        setImageUrl(res.organization.imageUrl ?? null);
         setForm({
           name: res.organization.name,
           description: res.organization.description,
@@ -202,6 +204,61 @@ export default function OrganizationForm({ addToast }) {
                 several, which is what a radio group means, and it gives arrow-key
                 navigation for free. `None` is a real option — an organization is
                 allowed to have no mark and fall back to the building glyph. */}
+            {/**
+              * Upload first, then the emoji row.
+              *
+              * Only when editing: an upload needs an organization to attach to,
+              * and the create form has not made one yet. Offering it there
+              * would mean holding a file in memory across a request that might
+              * fail — an emoji at creation and a logo afterwards is the simpler
+              * and more honest order.
+              */}
+            {editing && (
+              <div className="row row-wrap" style={{ gap: 'var(--s3)', marginBottom: 'var(--s3)' }}>
+                <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+                  <ImagePlus size={14} aria-hidden="true" /> Upload a logo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const res = await api.uploadOrganizationImage(key, file);
+                        setImageUrl(res.organization.imageUrl);
+                        addToast?.('Logo updated.', 'success');
+                      } catch (err) {
+                        addToast?.(err.message, 'error');
+                      } finally {
+                        /* Cleared so choosing the same file twice still fires a
+                           change event — otherwise a failed upload cannot be
+                           retried without picking a different file. */
+                        e.target.value = '';
+                      }
+                    }}
+                  />
+                </label>
+                {imageUrl && (
+                  <>
+                    <img src={imageUrl} alt="" className="org-logo-preview" />
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={async () => {
+                        try {
+                          await api.deleteOrganizationImage(key);
+                          setImageUrl(null);
+                        } catch (err) { addToast?.(err.message, 'error'); }
+                      }}
+                    >
+                      Remove logo
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
             <div className="row row-wrap org-icon-picker" role="radiogroup" aria-labelledby="org-icon-label">
               <button
                 type="button"
