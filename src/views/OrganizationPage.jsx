@@ -14,11 +14,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
-  Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock,
+  Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock, UserMinus,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
+import OrganizationAnnouncements from '../components/OrganizationAnnouncements';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 
 export default function OrganizationPage({ addToast }) {
@@ -41,6 +42,25 @@ export default function OrganizationPage({ addToast }) {
   }, [key]);
 
   useEffect(() => load(), [load]);
+
+  const [removing, setRemoving] = useState(null);
+
+  const removeMember = async (member) => {
+    setBusy(true);
+    try {
+      await api.removeOrganizationMember(key, member.id);
+      addToast(`${member.name} was removed from ${data.organization.name}.`, 'info');
+      setRemoving(null);
+      load();
+    } catch (err) {
+      /* Surfaced rather than swallowed: the most likely refusal is the
+         last-manager guard, and a manager who does not learn why will simply
+         press it again. */
+      addToast(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const membership = async (join) => {
     setBusy(true);
@@ -88,7 +108,15 @@ export default function OrganizationPage({ addToast }) {
       <section className="card card-pad">
         <div className="row-between org-header-top">
           <div className="row org-identity">
-            <span className="avatar avatar-lg" aria-hidden="true"><Building2 size={22} /></span>
+            {/* Upload, then emoji, then the building glyph — the same order
+                `users` resolves an avatar in, so the two never disagree about
+                which picture wins. `alt=""` because the name is right beside
+                it: announcing the logo would be reading the name twice. */}
+            <span className="avatar avatar-lg org-avatar">
+              {org.imageUrl
+                ? <img src={org.imageUrl} alt="" className="avatar-img" />
+                : (org.avatar || <Building2 size={22} aria-hidden="true" />)}
+            </span>
             <div className="stack-xs">
               <h1>{org.name}</h1>
               <p className="muted org-meta">
@@ -154,6 +182,13 @@ export default function OrganizationPage({ addToast }) {
         </div>
       </section>
 
+      <OrganizationAnnouncements
+        orgKey={key}
+        canManage={viewer?.canManage === true}
+        isMember={viewer?.isMember === true}
+        addToast={addToast}
+      />
+
       <section className="card">
         <div className="card-head"><h2>Members</h2></div>
         <div className="card-body">
@@ -178,12 +213,55 @@ export default function OrganizationPage({ addToast }) {
                     </span>
                     {m.memberRole === 'manager' && <span className="tag tag-brand">Manager</span>}
                   </Link>
+                  {/**
+                    * Removal, for managers.
+                    *
+                    * The route has been implemented and tested since
+                    * organizations shipped and nothing ever called it, so a
+                    * manager could promote, demote and leave but not remove.
+                    *
+                    * Outside the `<Link>`, never inside it: a button nested in
+                    * an anchor is invalid, and a mis-tap would navigate instead
+                    * of removing — or worse, remove instead of navigating. The
+                    * server refuses the last manager, so no guard is duplicated
+                    * here; it reports what the server says.
+                    */}
+                  {viewer.canManage && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm btn-icon"
+                      disabled={busy}
+                      onClick={() => setRemoving(m)}
+                      title={`Remove ${m.name}`}
+                      aria-label={`Remove ${m.name} from ${org.name}`}
+                    >
+                      <UserMinus size={15} aria-hidden="true" />
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
           )}
         </div>
       </section>
+
+      {removing && (
+        <ConfirmDialog
+          title={`Remove ${removing.name}?`}
+          confirmLabel="Remove"
+          destructive
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => removeMember(removing)}
+        >
+          {/* Says what removal does NOT do, because that is the thing a
+              manager is actually worried about. Hours are service history and
+              a membership change never touches them. */}
+          <p>
+            They will no longer be a member of {org.name}. The hours they have
+            already served stay on their record.
+          </p>
+        </ConfirmDialog>
+      )}
 
       {leaving && (
         <ConfirmDialog

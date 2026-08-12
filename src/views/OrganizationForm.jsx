@@ -12,6 +12,23 @@
  * express. If the server refuses, the refusal is what the user sees.
  */
 import { useState, useEffect } from 'react';
+
+/**
+ * Marks an organization can wear.
+ *
+ * Deliberately not the palette in `ProfileEditModal`: that one is faces,
+ * because it is for a person, and 👩‍⚕️ is a poor mark for a food bank. These are
+ * the things clubs actually are — a sport, a cause, a subject.
+ *
+ * A short list rather than a full emoji keyboard. Every one of these renders
+ * legibly at avatar size on every platform, which an arbitrary emoji does not,
+ * and choosing from sixteen takes a second where choosing from three thousand
+ * takes a minute.
+ */
+const ORG_ICONS = [
+  '🏫', '🌱', '🍎', '📚', '⚽', '🎭', '🎨', '🐾',
+  '🏥', '🤝', '🌍', '🎵', '🔬', '🏃', '🍲', '⭐',
+];
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { AlertCircle, Building2, Archive } from 'lucide-react';
 import { api } from '../utils/api';
@@ -35,7 +52,7 @@ export default function OrganizationForm({ addToast }) {
   const navigate = useNavigate();
   const editing = Boolean(key);
 
-  const [form, setForm] = useState({ name: '', description: '', tags: [] });
+  const [form, setForm] = useState({ name: '', description: '', tags: [], avatar: null });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(editing);
   const [loadError, setLoadError] = useState('');
@@ -54,6 +71,7 @@ export default function OrganizationForm({ addToast }) {
         setForm({
           name: res.organization.name,
           description: res.organization.description,
+          avatar: res.organization.avatar ?? null,
           /* Stored as plain labels; `TagInput` renders `{tag, label}` chips.
              Mapping in here and back out on submit keeps the shared editor
              usable without teaching it a second storage format. */
@@ -99,7 +117,7 @@ export default function OrganizationForm({ addToast }) {
        * stops the round trip from depending on that tolerance.
        */
       const tags = form.tags.map(t => (typeof t === 'string' ? t : t.label));
-      const body = { name: form.name.trim(), description: form.description, tags };
+      const body = { name: form.name.trim(), description: form.description, tags, avatar: form.avatar };
       const res = editing
         ? await api.updateOrganization(key, body)
         : await api.createOrganization(body);
@@ -176,6 +194,38 @@ export default function OrganizationForm({ addToast }) {
                 Renaming changes the organization&rsquo;s link. Old links will stop working.
               </span>
             )}
+          </div>
+
+          <div className="field">
+            <span id="org-icon-label">Icon</span>
+            {/* A radiogroup, not a row of buttons: these are one choice among
+                several, which is what a radio group means, and it gives arrow-key
+                navigation for free. `None` is a real option — an organization is
+                allowed to have no mark and fall back to the building glyph. */}
+            <div className="row row-wrap org-icon-picker" role="radiogroup" aria-labelledby="org-icon-label">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={!form.avatar}
+                className={`btn btn-secondary btn-sm ${!form.avatar ? 'is-selected' : ''}`}
+                onClick={() => set('avatar', null)}
+              >
+                None
+              </button>
+              {ORG_ICONS.map(icon => (
+                <button
+                  key={icon}
+                  type="button"
+                  role="radio"
+                  aria-checked={form.avatar === icon}
+                  aria-label={`Use ${icon} as the organization icon`}
+                  className={`btn btn-secondary btn-sm btn-icon ${form.avatar === icon ? 'is-selected' : ''}`}
+                  onClick={() => set('avatar', icon)}
+                >
+                  <span aria-hidden="true">{icon}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="field">
