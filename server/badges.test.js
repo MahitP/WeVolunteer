@@ -669,140 +669,70 @@ describe('the award notification goes through notificationService', () => {
 // ── The architecture boundary ──────────────────────────────────────────────
 
 /**
- * The threshold reaches the client, so the client does not keep its own copy.
+ * Milestones and badges may describe the same fact, for different readers.
  *
- * `VolunteerDashboard.jsx` and `VolunteerProfile.jsx` each held
- * `const HOUR_GOAL = 25` — a third and fourth copy of the district's Silver
- * Award threshold, in a different language from the server that decides whether
- * the milestone is earned. Nothing could compare them, so the progress meter
- * could read "8 hours to go" beside a milestone already rendered as achieved.
+ * ── The boundary this replaces, and why it moved ──
  *
- * Both numbers now come from `server/milestones.js` over two transports, and
- * these are the assertions that keep them arriving.
+ * The rule used to be that milestones own every threshold derivable from the
+ * service record and badges own what a milestone cannot express, so the shipped
+ * catalogue defined NO hour badge and this test asserted the empty list.
+ *
+ * That rule conflated two things a volunteer experiences differently:
+ *
+ *   · a MILESTONE is a rung on the ladder on their OWN dashboard — derived on
+ *     read, undated, and it silently un-earns if hours are corrected downward;
+ *   · a BADGE is a dated, conferred credential that appears where OTHER PEOPLE
+ *     look, and survives in `user_badges` as a record of when it happened.
+ *
+ * A school report and a certificate can both mention one exam. What must never
+ * happen is the two DISAGREEING, so the replacement rule is not "no overlap" —
+ * it is that neither restates a number. Both derive from
+ * `SUM(hours_awarded) WHERE present = 1`, and every hour badge threshold comes
+ * from the published tier list rather than being written out beside it.
  */
-describe('the milestone thresholds are served, not duplicated client-side', () => {
-  it('carries metric and threshold on every milestone in a profile', async () => {
-    const { SERVICE_HOUR_GOAL } = await import('./milestones.js');
-    const token = await srv.login('leo.chen@example.com');
-    /* The seeded student, by the id db.js gives them. */
-    const res = await srv.call('GET', '/api/users/user-student-1/profile', undefined, token);
+describe('milestones and badges never restate a number', () => {
+  it('generates every hour badge from the published tier list', async () => {
+    const { CONFERRED_CATALOGUE, HOUR_BADGE_TIERS } = await import('./scripts/seed_badges.js');
+    const thresholds = CONFERRED_CATALOGUE
+      .filter(b => b.criteria_type === 'hours')
+      .map(b => b.criteria_value);
 
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body.milestones)).toBe(true);
-    for (const m of res.body.milestones) {
-      expect(['hours', 'events'], `${m.id} has metric ${m.metric}`).toContain(m.metric);
-      expect(typeof m.threshold, `${m.id} carries no threshold`).toBe('number');
-      expect(typeof m.earned).toBe('boolean');
-    }
-
-    /* The Silver tier is the one the meter is drawn against, so its threshold is
-       the number the client must not be inventing. */
-    const silver = res.body.milestones.find(m => m.id === 'silver');
-    expect(silver.threshold).toBe(SERVICE_HOUR_GOAL);
+    /* Equality both ways: a tier missing from the catalogue is a badge nobody
+       can earn, and a catalogue entry missing from the tiers is a threshold
+       somebody typed by hand. */
+    expect(thresholds).toEqual([...HOUR_BADGE_TIERS]);
   });
 
-  it('sends the progress-meter goal on the session payload and the stats endpoint', async () => {
-    const { SERVICE_HOUR_GOAL } = await import('./milestones.js');
-    const token = await srv.login('leo.chen@example.com');
+  it('generates every streak badge from the published tier list', async () => {
+    const { CONFERRED_CATALOGUE, STREAK_BADGE_TIERS } = await import('./scripts/seed_badges.js');
+    const thresholds = CONFERRED_CATALOGUE
+      .filter(b => b.criteria_type === 'streak_months')
+      .map(b => b.criteria_value);
 
-    /* On the session payload, because the dashboard draws the meter on its first
-       frame from `currentUser` and cannot wait for a second request to learn its
-       own maximum. */
-    const me = await srv.call('GET', '/api/auth/me', undefined, token);
-    expect(me.status).toBe(200);
-    expect(me.body.serviceHourGoal).toBe(SERVICE_HOUR_GOAL);
-
-    const stats = await srv.call('GET', '/api/stats/volunteer', undefined, token);
-    expect(stats.status).toBe(200);
-    expect(stats.body.serviceHourGoal).toBe(SERVICE_HOUR_GOAL);
+    expect(thresholds).toEqual([...STREAK_BADGE_TIERS]);
   });
-});
 
-describe('milestones and badges do not describe the same achievement twice', () => {
-  it('the shipped catalogue defines no hours or events_attended threshold', async () => {
-    // Milestones own every threshold derivable from the service ledger; badges
-    // own what is conferred. Two systems claiming the same 25 hours under two
-    // different names ("Silver Award" and "Community Champion") on one page is
-    // the defect this boundary exists to prevent. An administrator may still
-    // define such a badge deliberately — the fixtures above do — but the
-    // product ships none.
+  it('starts streak badges above one month', async () => {
+    /* A one-month streak is one month with a flame next to it, and the streak
+       definition itself is documented as non-punitive. */
+    const { STREAK_BADGE_TIERS } = await import('./scripts/seed_badges.js');
+    expect(Math.min(...STREAK_BADGE_TIERS)).toBeGreaterThan(1);
+  });
+
+  it('still defines no events_attended badge, which milestones own alone', async () => {
+    /* The half of the old rule that survives. "5 events" is a milestone and
+       nothing else; there is no reader for whom a dated version of it says
+       something the milestone does not. */
     const { CONFERRED_CATALOGUE } = await import('./scripts/seed_badges.js');
-    const overlapping = CONFERRED_CATALOGUE
-      .filter(b => b.criteria_type === 'hours' || b.criteria_type === 'events_attended')
-      .map(b => b.name);
-    expect(overlapping).toEqual([]);
+    expect(CONFERRED_CATALOGUE.filter(b => b.criteria_type === 'events_attended')).toEqual([]);
   });
 
-  /**
-   * The reconciliation has ALREADY happened by the time anything reads the
-   * database.
-   *
-   * This is the assertion that makes the boundary real rather than available.
-   * The reconciliation used to be a hand-run CLI wired into no npm script, so
-   * migration 024's four duplicate hour badges sat in every database that nobody
-   * remembered to run it against — which was all of them, including the database
-   * this test boots. `initDatabase` calls it now, beside `syncLegalDocuments` and
-   * for the same reason.
-   *
-   * Asserted as "a fresh run changes nothing", which is the same statement as
-   * "boot already did it" and additionally proves idempotency. The previous
-   * version of this case asserted the opposite — that the FIRST run in the test
-   * changed something — and that expectation is exactly what a correction moving
-   * to init has to break.
-   */
-  it('has already reconciled the catalogue at boot, and never deletes an earned award', async () => {
-    const { reconcileBadgeCatalogue } = await import('./scripts/seed_badges.js');
-
-    const atBoot = reconcileBadgeCatalogue(db);
-    expect(atBoot.created, 'boot should have created the catalogue').toBe(0);
-    expect(atBoot.updated, 'boot should have brought definitions into line').toBe(0);
-    expect(atBoot.retired, 'boot should have retired the duplicate hour badges').toBe(0);
-
-    /**
-     * The collision itself, checked by name rather than inferred from a counter.
-     *
-     * Scoped to the SHIPPED names, not to every `hours` badge in the table: the
-     * fixtures earlier in this file deliberately define hour-threshold badges to
-     * exercise the evaluator, because an administrator is still allowed to
-     * create one. What the product must not SHIP is one that restates a
-     * milestone, and these four are the ones migration 024 seeded.
-     *
-     * Retired, not deleted. A definition somebody earned under has to keep
-     * existing for their award to mean anything, so `active = 0` is the whole
-     * mechanism — and asserting the row is still there is asserting that.
-     */
-    const { RETIRED_NAMES } = await import('./scripts/seed_badges.js');
-    const seededBy024 = ['First Step', 'Helping Hand', 'Community Champion', 'Volunteer Legend'];
-    for (const name of seededBy024) {
-      const row = db.prepare('SELECT name, active FROM badges WHERE name = ?').get(name);
-      expect(row, `${name} was deleted rather than retired`).toBeTruthy();
-      expect(row.active, `${name} still competes with a milestone`).toBe(0);
-    }
-    for (const name of RETIRED_NAMES) {
-      const row = db.prepare('SELECT active FROM badges WHERE name = ?').get(name);
-      if (row) expect(row.active, `${name} should be deactivated`).toBe(0);
-    }
-
-    const user = makeVolunteer('reconcile');
-    const held = db.prepare("SELECT id FROM badges WHERE active = 0 LIMIT 1").get();
-    db.prepare('INSERT INTO user_badges (id, user_id, badge_id, earned_at) VALUES (?, ?, ?, ?)')
-      .run('ub-reconcile', user, held.id, new Date().toISOString());
-
-    const second = reconcileBadgeCatalogue(db);
-    expect(second.created).toBe(0);
-    expect(second.updated).toBe(0);
-    expect(second.retired).toBe(0);
-
-    // Retiring a definition must never destroy the record of an award made
-    // under it — that record is somebody's history.
-    expect(holds(user, held.id)).toBe(true);
-
-    for (const b of (await import('./scripts/seed_badges.js')).CONFERRED_CATALOGUE) {
-      const row = db.prepare('SELECT * FROM badges WHERE name = ?').get(b.name);
-      expect(row, `${b.name} is missing from the catalogue after reconciliation`).toBeTruthy();
-      expect(row.active).toBe(1);
-      expect(row.criteria_type).toBe(b.criteria_type);
-      expect(row.criteria_value).toBe(b.criteria_value);
+  it('keeps every catalogue threshold a whole number', async () => {
+    /* `criteria_value` is an INTEGER column. A fractional threshold would be
+       silently truncated on the way in and compared against the truncation. */
+    const { CONFERRED_CATALOGUE } = await import('./scripts/seed_badges.js');
+    for (const b of CONFERRED_CATALOGUE) {
+      expect(Number.isInteger(b.criteria_value), `${b.name} has a non-integer threshold`).toBe(true);
     }
   });
 });

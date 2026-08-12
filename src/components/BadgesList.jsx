@@ -26,6 +26,16 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import LoadingSkeleton from './common/LoadingSkeleton';
+import { orderBadges } from '../utils/badgeOrder';
+
+/**
+ * How many badges a profile shows before it stops.
+ *
+ * Twelve is two full rows at every width the badge grid uses, so the cap never
+ * leaves a ragged half-row — and it is comfortably more than anybody has until
+ * they have earned several tiers of both progressions.
+ */
+const VISIBLE_BADGES = 12;
 
 export default function BadgesList({ userId }) {
   const [badges, setBadges] = useState([]);
@@ -51,23 +61,38 @@ export default function BadgesList({ userId }) {
     return () => { cancelled = true; };
   }, [userId]);
 
+  /**
+   * Ordered, and capped.
+   *
+   * A volunteer with 250 hours and a year's run has earned fourteen tiers. All
+   * of them inline is the wall of medals this product is not supposed to
+   * become, so the profile shows the most informative twelve and says how many
+   * there are.
+   */
+  const ordered = orderBadges(badges);
+  const visible = ordered.slice(0, VISIBLE_BADGES);
+  const hidden = ordered.length - visible.length;
+
   if (loading) return <LoadingSkeleton heights={[120]} />;
 
   return (
     <section className="card card-pad stack-sm" aria-labelledby="badges-heading">
-      <h3 id="badges-heading">Achievements</h3>
+      <h3 id="badges-heading">Badges</h3>
 
       {error && <p className="small dim" role="status">{error}</p>}
 
       {!error && badges.length === 0 && (
         <p className="small dim">
-          No achievements yet. They are awarded automatically as confirmed hours add up.
+          No badges yet. They arrive as an organizer confirms the hours you have served.
         </p>
       )}
 
       {badges.length > 0 && (
         <ul className="badge-list">
-          {badges.map(b => (
+          {/* Ordered here rather than by the server, because the arrangement is
+              a presentation decision and the organizer's view of the same
+              badges wants a different one. See utils/badgeOrder.js. */}
+          {visible.map(b => (
             <li key={b.id} className="badge-award">
               <span className="badge-award-icon" aria-hidden="true">{b.icon}</span>
               <span className="badge-award-name">{b.name}</span>
@@ -81,6 +106,15 @@ export default function BadgesList({ userId }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {hidden > 0 && (
+        /* A count rather than a control. There is no fuller page to send
+           somebody to yet, and an inline expander would recreate the wall this
+           cap exists to prevent — so it states the fact and stops. */
+        <p className="small dim">
+          and {hidden} more {hidden === 1 ? 'badge' : 'badges'}.
+        </p>
       )}
     </section>
   );
