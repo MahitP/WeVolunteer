@@ -1809,7 +1809,7 @@ when they are done, not when they become uncomfortable to look at.
   the missing capability when the favourites work is next touched.
 - **Effort:** small. **Opened:** 2026-08-01.
 
-#### TD-19 — geocoding is rate-limited per IP, but Nominatim's policy is per application
+#### TD-19 — geocoding was rate-limited per IP, but Nominatim's policy is per application — **resolved**
 
 - **Detail:** `geocodeLimiter` in `server/routes/geocodeRoutes.js` is
   `rateLimit({ windowMs: 60_000, limit: 30 })` with **no `keyGenerator`**, so
@@ -1829,14 +1829,25 @@ when they are done, not when they become uncomfortable to look at.
   User-Agent, which takes address lookup out for every school at once and is
   awkward to get reversed. Bounded in practice by the cache and by how rarely
   organizers create events, which is why this is Medium and not Critical.
-- **Action:** a **server-wide** throttle in front of the upstream call, not a
-  second per-IP limiter — a small queue that serialises to ≤1/s, or a
-  fail-fast 429 when a token bucket is empty. Which of those depends on what the
-  UI should do while waiting, so it is a design decision, not a one-liner. The
-  cache is already the first line and should stay. Planned as v1.4 Task 12; this
-  entry exists because the breach is live in shipped code and the plan is not
-  where anyone would look for that.
-- **Effort:** small. **Opened:** 2026-08-03.
+- **Resolution:** `reserveUpstreamSlot` in `server/routes/geocodeRoutes.js` — an
+  application-wide reservation bucket placed **after** the cache check and
+  immediately before the `fetch`, so a cached lookup never waits. A caller
+  reserves the next 1-second slot and is told how long it would wait *before*
+  waiting; beyond `NOMINATIM_MAX_WAIT_MS` (3s) it fail-fasts with the 429 this
+  route already returned, which the client already understands.
+  - A reservation rather than a promise chain: chaining serialises correctly but
+    queues without bound, parking the two-hundredth caller for two hundred
+    seconds on a request abandoned three minutes ago.
+  - The per-IP limiter **stays**. It bounds how much one client may ask for,
+    which is a different job from bounding what the application asks upstream.
+  - The interval is hardcoded, not an env var. One request per second is
+    somebody else's published policy, not an operator tunable.
+  - Process-local state is application-wide state here, for the reason
+    `instanceLock.js` already gives.
+  - Covered by `server/routes.geocode.test.js`: two distinct uncached lookups
+    are ≥1000ms apart at the outbound call, a cached lookup never waits, and a
+    queue deeper than the limit returns 429 without spending a slot.
+- **Effort:** small. **Opened:** 2026-08-03. **Resolved:** 2026-08-11.
 
 #### TD-20 — the authz guards' reviewed-exception registries were line-keyed — **resolved**
 

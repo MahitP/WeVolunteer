@@ -63,9 +63,18 @@ export const MILESTONE_METRICS = Object.freeze(['hours', 'events']);
  *
  * ── These mark service ALREADY COMPLETED ──
  *
- * They are not targets to chase, there are no points, and there is no streak.
- * Each one is either earned or it is not. The ordering exists so a reader can
- * see where they are, not to imply an obligation to reach the end of it.
+ * They are not targets to chase and there are no points. Each one is either
+ * earned or it is not. The ordering exists so a reader can see where they are,
+ * not to imply an obligation to reach the end of it.
+ *
+ * This used to say "and there is no streak", which is no longer true — see
+ * `buildStreak` in volunteerInsights.js. The distinction it was drawing still
+ * holds, though, and is worth restating: a milestone is a threshold crossed by
+ * service already completed, and nothing about it can be lost. A streak is a
+ * separate, non-punitive continuity signal, counted in whole months so that an
+ * exam week, a holiday or an illness cannot break it, and hidden entirely below
+ * two months so it never reads as a scoreboard opening in front of somebody who
+ * has volunteered once.
  *
  * `hours` is credited hours — `SUM(hours_awarded) WHERE present = 1`, the same
  * derivation as everywhere else (INV-001). `events` is DISTINCT events, not
