@@ -69,7 +69,11 @@ export default function EventShiftsTab({
                 </div>
               </div>
             ) : (
-              `Choose the shifts you want and send an application. ${event.organizerName} decides who gets each spot, and you'll be notified either way.`
+              /* Named when we know the name. An event whose organizer has been
+                 tombstoned has no `organizerName`, and interpolating it
+                 unguarded put the literal word "undefined" in a sentence about
+                 who decides whether a student gets a place. */
+              `Choose the shifts you want and send an application. ${event.organizerName || 'The organizer'} decides who gets each spot, and you'll be notified either way.`
             )}
           </span>
         </div>
@@ -94,9 +98,24 @@ export default function EventShiftsTab({
 
       <div className="section-head">
         <h3>Shifts</h3>
-        <span className="section-action small dim tnum">
-          {event.maxSpots - event.spotsRemaining} of {event.maxSpots} spots filled
-        </span>
+        {/**
+          * The count only when there is something to count.
+          *
+          * An event with no shifts yet has no `maxSpots` and no
+          * `spotsRemaining`, so this read `undefined - undefined` and rendered
+          * the literal string "NaN of  spots filled" — directly above an empty
+          * state that says, correctly, "No shifts yet". Found in the browser on
+          * a seeded event, not by a test.
+          *
+          * Guarded on the numbers rather than on `days.length`, because a
+          * malformed event with shifts but no spot totals produces exactly the
+          * same nonsense and would slip past a length check.
+          */}
+        {Number.isFinite(event.maxSpots) && Number.isFinite(event.spotsRemaining) && (
+          <span className="section-action small dim tnum">
+            {event.maxSpots - event.spotsRemaining} of {event.maxSpots} spots filled
+          </span>
+        )}
       </div>
 
       {days.length === 0 ? (

@@ -56,7 +56,12 @@ export default function LocationPrompt() {
         </button>
         <button
           type="button"
-          className="btn btn-ghost btn-sm"
+          /* `btn-icon` is what carries the 44px WIDTH floor on a phone. Without
+             it this was 37×44 at 320px — a 44-tall sliver, which is the exact
+             failure the rule's own comment in index.css describes. Measured in
+             a browser at 320px; the static touch-target guard cannot see it,
+             because the class that fixes it was simply absent. */
+          className="btn btn-ghost btn-sm btn-icon"
           onClick={dismissPrompt}
           aria-label="Not now — hide this for the rest of this session"
         >
