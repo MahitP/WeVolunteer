@@ -3,6 +3,7 @@ import {
   CalendarCheck, MapPin, Mail, Award, ArrowLeft, History, Medal, Sparkles, FileText, Lock, Pencil
 } from 'lucide-react';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
+import { DistinctionTag } from '../components/profile/Distinction';
 import EmptyState from '../components/common/EmptyState';
 import { api } from '../utils/api';
 import { formatHours, formatDay, formatTimeRange, gradeLabel, countdown } from '../utils/helpers';
@@ -98,6 +99,21 @@ export default function VolunteerProfile({
 
           <div style={{ flex: 1, minWidth: 200 }}>
             <h1 style={{ fontSize: '1.375rem' }}>{volunteer.name}</h1>
+            {/**
+              * The owner or partner pill, if this account carries one.
+              *
+              * An account can be the platform owner AND a volunteer — the owner
+              * of this platform deliberately is both — and this page is now
+              * where such an account lands, because privilege should not decide
+              * whether somebody gets to see their own service record. The pill
+              * keeps the distinction visible without turning the page into a
+              * different page: everything below it is the ordinary student
+              * presentation, which is the whole point.
+              *
+              * `distinctionFor` is a pure function of role on the server and is
+              * presentation only — no capability is derived from it.
+              */}
+            <DistinctionTag distinction={currentUser?.id === userId ? currentUser?.distinction : volunteer.distinction} />
             <p className="lead" style={{ marginTop: 2 }}>
               {[gradeLabel(volunteer.grade), 'Volunteer'].filter(Boolean).join(' · ')}
             </p>

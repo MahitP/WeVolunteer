@@ -7541,6 +7541,36 @@ input:disabled + .premium-slider {
 }
 .org-avatar .avatar-img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 
+/**
+ * A button that keeps its word on a desktop and drops to its glyph on a phone.
+ *
+ * The label is hidden, never removed, so the accessible name is identical at
+ * every width — a control that renames itself at 700px is a control a screen
+ * reader user cannot be told about consistently.
+ *
+ * The 44px floor comes from the coarse-pointer block via `btn-icon`'s rule; this
+ * only has to stop the label taking up room and stop the button stretching.
+ */
+.btn-icon-responsive { gap: var(--s2); }
+
+@media (max-width: 700px) {
+  .btn-icon-responsive {
+    min-width: 44px;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .btn-icon-responsive .btn-label-wide {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
 /* Organization announcements */
 .org-announcement {
   padding: var(--s4);

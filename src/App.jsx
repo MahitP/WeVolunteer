@@ -183,7 +183,33 @@ const SELF_PROFILE = [
   { cap: 'event.view', view: 'account' }         // partner, and any later role
 ];
 
-const selfProfileFor = (user) => SELF_PROFILE.find(p => can(user, p.cap))?.view ?? 'denied';
+/**
+ * Which of the three profile pages this account gets.
+ *
+ * The list above is a most-privileged-first cascade, which is right for an
+ * account that only administers: an administrator's profile is about their
+ * account, not about shifts they never worked.
+ *
+ * It is wrong for an account that administers AND volunteers. The platform
+ * owner is deliberately both — they run the district's programme and they turn
+ * up to events — and the cascade sent them to `AccountProfile`, which shows a
+ * total and nothing else: no badges, no milestones, no service record, no
+ * certificates. Their own record was the one record the product would not show
+ * them.
+ *
+ * So privilege picks the page only when there is nothing else to go on. An
+ * account that can hold a portfolio AND has actually served gets the volunteer
+ * page, whatever else it can do. The rule names no person and no role — it
+ * reads a capability and a number — and `AccountProfile` already draws its
+ * volunteering block from the same fact for the same reason.
+ *
+ * The owner distinction is not lost by this: `VolunteerProfile` renders the
+ * banner, so the page says "Platform owner" and then shows their service.
+ */
+export const selfProfileFor = (user) => {
+  if (can(user, 'portfolio.write') && Number(user?.volunteeredHours) > 0) return 'volunteer';
+  return SELF_PROFILE.find(p => can(user, p.cap))?.view ?? 'denied';
+};
 
 /** Derived, not repeated, so the nav entry and the route can never disagree. */
 const SELF_PROFILE_CAPS = SELF_PROFILE.filter(p => p.view !== 'denied').map(p => p.cap);
