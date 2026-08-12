@@ -87,19 +87,98 @@ export function validateOrganization(payload, { partial = false } = {}) {
   }
 
   if (payload.tags !== undefined) {
-    if (!Array.isArray(payload.tags)) {
-      return { ok: false, field: 'tags', error: 'Tags must be a list.' };
-    }
-    if (payload.tags.length > MAX_ORG_TAGS) {
-      return { ok: false, field: 'tags', error: `Please use ${MAX_ORG_TAGS} tags or fewer.` };
-    }
-    if (payload.tags.some(t => typeof t !== 'string' || !t.trim() || t.length > 40)) {
-      return { ok: false, field: 'tags', error: 'Each tag must be text of 40 characters or fewer.' };
-    }
-    out.tags = payload.tags.map(t => t.trim());
+    const tags = normaliseOrgTags(payload.tags);
+    if (!tags.ok) return tags;
+    out.tags = tags.value;
   }
 
   return { ok: true, value: out };
+}
+
+/**
+ * The longest a single organization tag may be.
+ *
+ * Per tag, never across the collection — see `normaliseOrgTags`.
+ */
+export const MAX_ORG_TAG_LENGTH = 40;
+
+/**
+ * Turns whatever the editor sent into a clean list of tag labels.
+ *
+ * ── The bug this exists to make impossible ──
+ *
+ * The check used to be one `.some()` doing three jobs:
+ *
+ *     payload.tags.some(t => typeof t !== 'string' || !t.trim() || t.length > 40)
+ *
+ * with a single message about the 40-character limit. `TagInput` is shared with
+ * the event editor and emits `{tag, label}` OBJECTS, so every real submission
+ * failed on the FIRST clause and was reported against the THIRD — an organizer
+ * was told their perfectly short tags were too long. Submitting no tags worked,
+ * because `.some()` over an empty array is false, which is precisely what hid
+ * the fault: the feature looked merely broken rather than mistyped.
+ *
+ * So this accepts both shapes. The client sends strings now, but a validator
+ * that only understands one shape is a validator that breaks again the next
+ * time a shared control is reused, and the object form carries strictly more
+ * information than it needs rather than less.
+ *
+ * ── What it guarantees ──
+ *
+ *   · every tag is a trimmed, non-empty string
+ *   · every tag is at most `MAX_ORG_TAG_LENGTH`, measured per tag
+ *   · duplicates are dropped, matched case-insensitively, first spelling wins
+ *   · the count limit is applied AFTER de-duplication, so "Food Drive" twice
+ *     does not consume two of somebody's eight slots
+ *   · a refusal names the offending tag, because an organizer with eight tags
+ *     and one mistake should not have to bisect their own input
+ *
+ * Duplicates are dropped rather than refused: two spellings of one thing is a
+ * typo, and stopping the whole submission for it teaches people to avoid the
+ * control.
+ */
+export function normaliseOrgTags(raw) {
+  if (!Array.isArray(raw)) {
+    return { ok: false, field: 'tags', error: 'Tags must be a list.' };
+  }
+
+  const seen = new Set();
+  const value = [];
+
+  for (const entry of raw) {
+    /* `{tag, label}` from the shared editor, or a plain string. Anything else
+       is a shape nobody meant to send. */
+    const text = typeof entry === 'string'
+      ? entry
+      : (entry && typeof entry === 'object' && typeof entry.label === 'string' ? entry.label : null);
+
+    if (text === null) {
+      return { ok: false, field: 'tags', error: 'Each tag must be text.' };
+    }
+
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return { ok: false, field: 'tags', error: 'A tag cannot be blank.' };
+    }
+    if (trimmed.length > MAX_ORG_TAG_LENGTH) {
+      return {
+        ok: false,
+        field: 'tags',
+        error: `"${trimmed}" is too long — each tag must be ${MAX_ORG_TAG_LENGTH} characters or fewer.`,
+      };
+    }
+
+    const key = trimmed.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    value.push(trimmed);
+  }
+
+  if (value.length > MAX_ORG_TAGS) {
+    return { ok: false, field: 'tags', error: `Please use ${MAX_ORG_TAGS} tags or fewer.` };
+  }
+
+  return { ok: true, value };
 }
 
 /**
