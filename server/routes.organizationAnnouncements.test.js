@@ -328,4 +328,75 @@ describe('organization announcements', () => {
       expect((await srv.call('GET', `/api/organizations/${orgKey}/announcements`)).status).toBe(401);
     });
   });
+
+  
+  /**
+   * The organization logo.
+   *
+   * Kept in this file rather than a new one because it exercises the same two
+   * authorization layers over the same organization fixture, and a third
+   * `startTestServer` for four assertions is a slow way to say the same thing.
+   */
+  describe('organization image', () => {
+    /* Reuses the file's single server and organization. `startTestServer` refuses
+       a second call in one file — deliberately, because two servers in one file
+       means two database handles and the anti-leak guard cannot tell which one a
+       stray write went to. */
+  
+    it('publishes both an emoji and an image slot', async () => {
+      /* The renderer prefers the upload and falls back to the emoji, which only
+         works if both are on the payload. */
+      const res = await srv.call('GET', `/api/organizations/${orgKey}`, undefined, manager);
+      expect(res.body.organization).toHaveProperty('avatar');
+      expect(res.body.organization).toHaveProperty('imageUrl');
+    });
+  
+    it('accepts an emoji through the ordinary edit route', async () => {
+      const res = await srv.call('PATCH', `/api/organizations/${orgKey}`, { avatar: '🍎' }, manager);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.organization.avatar).toBe('🍎');
+    });
+  
+    it('lets an organization go back to having no mark', async () => {
+      await srv.call('PATCH', `/api/organizations/${orgKey}`, { avatar: '🍎' }, manager);
+      const res = await srv.call('PATCH', `/api/organizations/${orgKey}`, { avatar: null }, manager);
+      expect(res.body.organization.avatar).toBeNull();
+    });
+  
+    it('refuses something too long to be one emoji', async () => {
+      /* Eight characters, the rule `users.avatar` uses — long enough for skin
+         tone and joiners, short enough that a payload cannot ride in a field that
+         renders on every card. */
+      const res = await srv.call('PATCH', `/api/organizations/${orgKey}`, { avatar: 'x'.repeat(40) }, manager);
+      expect(res.status).toBe(400);
+      expect(res.body.field).toBe('avatar');
+    });
+  
+    it('refuses an image upload from somebody who does not manage the organization', async () => {
+      db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+        .run(orgId, managerId);
+  
+      const res = await srv.call('DELETE', `/api/organizations/${orgKey}/image`, undefined, manager);
+  
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('not_manager');
+  
+      join(managerId, 'manager');
+    });
+  
+    it('refuses an unauthenticated caller', async () => {
+      expect((await srv.call('DELETE', `/api/organizations/${orgKey}/image`)).status).toBe(401);
+    });
+  
+    it('clearing the image leaves the emoji standing', async () => {
+      /* The fallback order is upload, then emoji, then the building glyph.
+         Removing the top of that chain must not take the rest with it. */
+      await srv.call('PATCH', `/api/organizations/${orgKey}`, { avatar: '🌱' }, manager);
+      const res = await srv.call('DELETE', `/api/organizations/${orgKey}/image`, undefined, manager);
+  
+      expect(res.status).toBe(200);
+      expect(res.body.organization.imageUrl).toBeNull();
+      expect(res.body.organization.avatar).toBe('🌱');
+    });
+  });
 });

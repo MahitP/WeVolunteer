@@ -808,6 +808,34 @@ export const api = {
       { method: 'DELETE' }),
 
   // ── Organization announcements ─────────────────
+  /**
+   * The organization logo.
+   *
+   * Same shape as `uploadProfilePicture`: a bare `fetch` rather than `apiFetch`,
+   * because the Content-Type header must be left unset so the browser can write
+   * its own multipart boundary. The field is still called `avatar` — that is the
+   * name the shared multer config listens for, and renaming it here would mean
+   * a second `upload.single()` on the server.
+   */
+  uploadOrganizationImage: async (key, file) => {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    return fetch(`/api/organizations/${encodeURIComponent(key)}/image`, {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    }).then(async res => {
+      if (!res.ok) {
+        let err;
+        try { err = await res.json(); } catch { /* non-JSON body */ }
+        throw new ApiError(err?.error || 'Upload failed', { status: res.status });
+      }
+      return res.json();
+    });
+  },
+  deleteOrganizationImage: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/image`, { method: 'DELETE' }),
+
   fetchOrganizationAnnouncements: async (key) =>
     apiFetch(`/api/organizations/${encodeURIComponent(key)}/announcements`),
   postOrganizationAnnouncement: async (key, body) =>
