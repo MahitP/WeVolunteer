@@ -29,6 +29,37 @@ import { api } from '../utils/api';
  * iPhones. The import is dynamic so nothing is downloaded until somebody
  * actually opens the scanner.
  *
+ * ── jsQR is unmaintained, and is still the right choice. Reviewed 2026-08-12 ──
+ *
+ * Its last release was 1.4.0 in **April 2021**. That is five years, and it is a
+ * real mark against it, so it was reviewed properly rather than left to drift.
+ *
+ * The alternatives are all WASM: `zxing-wasm` (3.1.2, actively released) and the
+ * `barcode-detector` polyfill, which wraps it. Both would need
+ * `'wasm-unsafe-eval'` added to `script-src`, and this application's CSP is
+ * enforcing and currently `["'self'"]` — nothing else in the product needs that
+ * relaxation, and widening the script policy of the whole application to modules
+ * that run on the phone of every organizer is a poor trade for a decoder swap.
+ * `@zxing/library` avoids the CSP question but is several times the size for the
+ * one format we read.
+ *
+ * The argument that settles it is the failure mode. jsQR is a pure function from
+ * a pixel buffer to a string: no network, no DOM, no eval, no parser for
+ * anything but the QR itself, and JavaScript is memory-safe. A hostile QR
+ * pointed at an unmaintained *JS* decoder gets an exception or a wrong string —
+ * and a wrong string is refused by the prefix check below, then by the length
+ * bound, then by the server, which re-validates everything and looks the hash up
+ * in a table. The same bug class in a WASM decoder is a memory-safety bug in a
+ * sandbox we would then be trusting. Unmaintained matters much less when the
+ * blast radius is "returns nonsense to a caller that assumes nonsense".
+ *
+ * `npm audit` reports nothing against it, and the 130KB chunk is downloaded only
+ * by the browsers that need it, only when the scanner is opened.
+ *
+ * What would change the answer: a published vulnerability, a QR format we cannot
+ * read, or Safari shipping `BarcodeDetector` — the last of which deletes the
+ * dependency rather than replacing it.
+ *
  * The loop is throttled and refuses to submit the same decoded string twice in
  * a row. That is the real defence against a runaway scanner; the server's rate
  * limit is the backstop for when this is bypassed.
@@ -39,6 +70,20 @@ const SCAN_INTERVAL_MS = 100;
 
 /** How long a result stays on screen before scanning resumes. */
 const RESULT_HOLD_MS = 2000;
+
+/**
+ * The wire prefix every code carries. Mirrors `PREFIX` in
+ * `server/checkinTokens.js`, which is the authority — this copy is a local
+ * filter, and the server re-checks it on every scan.
+ */
+const CODE_PREFIX = 'wev1:';
+
+/**
+ * Matches the server's bound in the scan route, so an over-long string is
+ * dropped here rather than posted to be rejected there. A QR can carry a few
+ * kilobytes; a code is 48 characters.
+ */
+const MAX_CODE_LENGTH = 200;
 
 export default function CheckInScanner({ eventId, onClose, onCheckedIn }) {
   const videoRef = useRef(null);
@@ -176,6 +221,30 @@ export default function CheckInScanner({ eventId, onClose, onCheckedIn }) {
 
       if (!token || token === lastTokenRef.current) return;
       lastTokenRef.current = token;
+
+      /**
+       * Anything that is not one of our codes is refused here, on the device.
+       *
+       * This is what the `wev1:` prefix was minted for, and until now nothing
+       * used it: every string the camera resolved went straight to the server.
+       * A venue is full of QR codes — a wifi card taped to the wall, a poster,
+       * the sticker on the back of somebody's laptop — and each one was a round
+       * trip and a rate-limit unit spent to be told 422. Pointed at a noticeboard
+       * a scanner could work through its whole burst allowance without a single
+       * volunteer being checked in.
+       *
+       * It is NOT a security check and is not relied on as one: the server
+       * re-validates the prefix, the length and the hash regardless. This is
+       * about not wasting the organizer's budget, and about telling them why
+       * nothing happened — "that isn't a check-in code" is actionable at a noisy
+       * park in a way that a generic failure is not.
+       */
+      if (!token.startsWith(CODE_PREFIX) || token.length > MAX_CODE_LENGTH) {
+        setResult({ ok: false, message: "That isn't a WeVolunteer check-in code." });
+        setTimeout(() => { lastTokenRef.current = null; setResult(null); }, RESULT_HOLD_MS);
+        return;
+      }
+
       submit(token);
     }
 
