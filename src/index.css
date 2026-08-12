@@ -3468,6 +3468,31 @@ time { font-variant-numeric: tabular-nums; }
     min-width: 24px;
     min-height: 24px;
   }
+
+  /**
+   * List rows wrap on a phone instead of being cut off.
+   *
+   * `.list-row` is `display: flex` with the default `nowrap`, and `.list` is
+   * `overflow: hidden`. Measured on the applicant review at 320px: the row's
+   * content is 630px inside a 268px box, so 362px — the hours pill, the
+   * "N of M attended" counts, the "not confirmed by an organizer" line, the
+   * First event tag and the applied date — was clipped off the right edge with
+   * no way to scroll to it. An organizer on a phone saw a name and nothing they
+   * could decide on.
+   *
+   * Hidden rather than scrollable, so it did not even read as truncation. The
+   * clipping stops around 768px, which is to say it affected every phone and no
+   * desktop, and desktop is where it was looked at.
+   *
+   * `.person` claims the first line so the name and its badges stay together,
+   * and the remaining cells flow underneath rather than off the side.
+   */
+  .list-row {
+    flex-wrap: wrap;
+  }
+  .list-row .person {
+    flex: 1 1 100%;
+  }
 }
 
 /* ==========================================================================
