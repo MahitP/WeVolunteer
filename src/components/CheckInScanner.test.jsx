@@ -162,6 +162,112 @@ describe('CheckInScanner', () => {
     });
   });
 
+  describe('what the camera resolves, before anything is sent', () => {
+    /**
+     * A venue is full of QR codes that are not check-in codes — a wifi card
+     * taped to the wall, a poster, the sticker on a laptop lid. Every one of
+     * them used to be a round trip and a rate-limit unit spent to be told 422,
+     * because the `wev1:` prefix existed and nothing read it. Pointed at a
+     * noticeboard, a scanner could burn its whole burst allowance without a
+     * single volunteer being checked in.
+     *
+     * Driven through `BarcodeDetector` because that is the path a real Android
+     * scanner takes and it is the one that can be stubbed honestly — the jsQR
+     * branch decodes pixels jsdom cannot produce.
+     */
+    function decodes(rawValue) {
+      window.BarcodeDetector = class {
+        // eslint-disable-next-line class-methods-use-this
+        async detect() { return rawValue === null ? [] : [{ rawValue }]; }
+      };
+      /* jsdom reports readyState 0 forever; the loop skips anything below 4. */
+      Object.defineProperty(window.HTMLMediaElement.prototype, 'readyState', {
+        configurable: true,
+        get: () => 4,
+      });
+    }
+
+    afterEach(() => { delete window.BarcodeDetector; });
+
+    it('sends a code that carries the prefix', async () => {
+      const { api } = await import('../utils/api');
+      api.scanCheckinCode.mockResolvedValue({ volunteer: { name: 'Leo Chen' }, slot: { name: 'Setup' } });
+      grantCamera();
+      decodes('wev1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+
+      render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
+
+      await waitFor(() => expect(api.scanCheckinCode).toHaveBeenCalledWith(
+        'e1', 'wev1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      ));
+    });
+
+    it('never posts a wifi QR', async () => {
+      const { api } = await import('../utils/api');
+      grantCamera();
+      decodes('WIFI:S=SouthBrunswickGuest;T=WPA;P=hunter2;;');
+
+      render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
+
+      /* Rendered twice by design — the visible card and the sr-only live
+         region — so this asserts presence, not uniqueness. */
+      await screen.findAllByText(/isn't a WeVolunteer check-in code/);
+      expect(api.scanCheckinCode).not.toHaveBeenCalled();
+    });
+
+    it('never posts a plain URL from a poster', async () => {
+      const { api } = await import('../utils/api');
+      grantCamera();
+      decodes('https://example.org/some-poster');
+
+      render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
+
+      /* Rendered twice by design — the visible card and the sr-only live
+         region — so this asserts presence, not uniqueness. */
+      await screen.findAllByText(/isn't a WeVolunteer check-in code/);
+      expect(api.scanCheckinCode).not.toHaveBeenCalled();
+    });
+
+    it('never posts a code longer than the server would accept', async () => {
+      /* A QR can carry kilobytes. A code is 48 characters. Dropping it here
+         means the oversized string is never put on the wire at all. */
+      const { api } = await import('../utils/api');
+      grantCamera();
+      decodes(`wev1:${'a'.repeat(500)}`);
+
+      render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
+
+      /* Rendered twice by design — the visible card and the sr-only live
+         region — so this asserts presence, not uniqueness. */
+      await screen.findAllByText(/isn't a WeVolunteer check-in code/);
+      expect(api.scanCheckinCode).not.toHaveBeenCalled();
+    });
+
+    it('tells the organizer why nothing happened, rather than failing silently', async () => {
+      /* At a noisy park, "nothing happened" and "the camera is broken" look
+         identical. The message is the difference between the organizer
+         re-aiming and the organizer giving up on the scanner. */
+      grantCamera();
+      decodes('not-a-code');
+
+      const { container } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
+
+      await screen.findAllByText(/isn't a WeVolunteer check-in code/);
+      expect(container.querySelector('.scanner-result.is-bad')).toBeTruthy();
+    });
+
+    it('announces the refusal through the live region', async () => {
+      grantCamera();
+      decodes('not-a-code');
+
+      const { container } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
+
+      await waitFor(() => expect(
+        container.querySelector('[role="status"][aria-live="polite"]').textContent,
+      ).toMatch(/isn't a WeVolunteer check-in code/));
+    });
+  });
+
   it('carries a live region for scan results on the dialog itself', () => {
     /* On the dialog rather than inside the result card, because the card
        unmounts as the next scan begins — a region that disappears while it is
