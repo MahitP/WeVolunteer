@@ -34,7 +34,23 @@
 /** Markdown decoration that should not survive into a plain-text excerpt. */
 function stripMarkdown(text) {
   return text
-    .replace(/^#{1,6}\s+/gm, '')
+    /**
+     * Headings are DROPPED, not un-marked.
+     *
+     * Stripping only the `#` leaves the heading text as a fragment that then
+     * joins the sentence following it, so a section beginning
+     *
+     *     ## What we collect
+     *     We only collect what a school needs.
+     *
+     * is quoted as "What we collect We only collect what a school needs." —
+     * a sentence the document does not contain. Found in a browser: a revision
+     * whose body opened with a heading produced exactly that.
+     *
+     * A heading is a label for prose, never prose itself, so there is nothing
+     * lost by removing it and a false quotation avoided by doing so.
+     */
+    .replace(/^#{1,6}\s+.*$/gm, '')
     .replace(/\*\*(.+?)\*\*/g, '$1')
     .replace(/\*(.+?)\*/g, '$1')
     .replace(/`(.+?)`/g, '$1')

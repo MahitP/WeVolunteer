@@ -43,6 +43,17 @@ describe('sentences', () => {
     expect(sentences('Contact the U.S. office for help.')).toHaveLength(1);
   });
 
+  it('drops heading lines rather than folding them into the next sentence', () => {
+    /**
+     * Found in a browser. Stripping only the `#` leaves the heading text as a
+     * fragment that joins the sentence after it, so this was quoted as
+     * "What we collect We only collect what a school needs." — a sentence the
+     * document does not contain. A heading labels prose; it is not prose.
+     */
+    const out = sentences('## What we collect\n\nWe only collect what a school needs.');
+    expect(out).toEqual(['We only collect what a school needs.']);
+  });
+
   it('strips markdown decoration', () => {
     const out = sentences('## Heading\n\nWe **never** sell your [data](https://x.test).');
     expect(out.join(' ')).not.toMatch(/[#*[\]()]|https/);

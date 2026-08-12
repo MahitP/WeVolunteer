@@ -7595,7 +7595,25 @@ input:disabled + .premium-slider {
   list-style: none;
 }
 .org-reply p { margin: 0; }
-.org-reply-form { gap: var(--s2); margin-top: var(--s3); align-items: flex-end; }
+.org-reply-form { gap: var(--s2); margin-top: var(--s3); align-items: flex-end; flex-wrap: wrap; }
+/**
+ * The reply box needs a usable width before the Reply button gets a line.
+ *
+ * Measured at 320px: the button took the row and the input collapsed to 24px —
+ * a text field narrower than one character, which is not a small control, it is
+ * a broken one. `flex-wrap` plus a floor means the two share a line where there
+ * is room and stack where there is not.
+ */
+.org-reply-form .field { flex: 1 1 12rem; min-width: 0; }
+
+/**
+ * A member row is a link, and a link people tap on a phone.
+ *
+ * It rendered 30px tall, below the 44px floor the rest of the application
+ * keeps. The avatar and two lines of text already occupy most of that, so this
+ * is a floor rather than padding — nothing moves on a desktop.
+ */
+.org-members .org-member { min-height: 44px; }
 .org-replies-closed {
   display: flex;
   align-items: center;
