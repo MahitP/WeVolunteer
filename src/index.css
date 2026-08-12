@@ -307,6 +307,19 @@
   --cert-bg: #fffdf8;
   --cert-text: #1c1917;
   --cert-border: #e7e2d6;
+  /* The one accent used on document paper — the volunteer's own name.
+
+     It exists because `.certificate-name` used `--brand-ink`, which IS
+     redefined for dark mode (to `--green-dark-300`, a pale mint tuned for dark
+     surfaces) while `--cert-bg` deliberately is not. So on a certificate viewed
+     in dark mode the volunteer's name rendered pale green on cream at 1.54:1 —
+     against a 4.5:1 requirement, on the single most important word in the
+     document, on the artefact somebody hands to a college.
+
+     Being a `--cert-*` token is the point: this block is never overridden
+     below, so the value cannot drift back out of the document's own palette
+     the way a general token did. */
+  --cert-accent: #14532d;
 
   /* — Space (4px base) ——————————————————————————— */
   --s1: 0.25rem;
@@ -3084,7 +3097,10 @@ time { font-variant-numeric: tabular-nums; }
   font-family: var(--font-doc);
   font-size: 1.75rem;
   font-weight: 600;
-  color: var(--brand-ink);
+  /* Not --brand-ink: that token is redefined for dark mode and this paper is
+     not, which left the volunteer's name at 1.54:1 on a certificate viewed in
+     dark mode. See --cert-accent. */
+  color: var(--cert-accent);
   margin: var(--s4) 0;
 }
 .certificate-hours {
@@ -3490,6 +3506,74 @@ time { font-variant-numeric: tabular-nums; }
   }
   .modal-body { overflow: visible; padding: 0; }
   .certificate { border: none; padding: 0; }
+
+  /* ── Documents must actually print as documents ──────────────────────────
+
+     Three things were wrong, and all three showed up on paper rather than on
+     screen, which is why they survived.
+
+     1. `.app` is a two-column grid whose first track is the sidebar. Hiding
+        `.sidebar` with `display: none` does NOT remove its 244px track, so
+        every printed page carried an empty left gutter and the document was
+        squeezed into what remained.
+
+     2. Backgrounds and ink are dropped by browsers unless a page asks for
+        them. The certificate's warm paper and the transcript's rules were
+        being discarded, so the "designed" document printed as bare text on
+        white with no visible structure.
+
+     3. `min-height: 100vh` on a print surface is a full viewport of nothing
+        after the content ends — reliably a trailing blank sheet.
+     ---------------------------------------------------------------------- */
+
+  .app {
+    display: block;
+  }
+
+  @page {
+    /* A real margin, so text is not printed into the unprintable edge, and a
+       consistent one so page two lines up with page one. */
+    margin: 18mm 16mm;
+  }
+
+  .certificate,
+  .transcript {
+    /* The one place `print-color-adjust` is warranted: these two ARE the
+       artefact being printed, and their rules and totals are structural
+       rather than decorative. Nothing else in the stylesheet asks for it. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    max-width: none;
+    margin: 0;
+    box-shadow: none;
+  }
+
+  .transcript-page {
+    padding: 0;
+    background: none;
+    min-height: 0;
+  }
+
+  .transcript {
+    border: none;
+    padding: 0;
+  }
+
+  /* Headers repeat on every sheet of a multi-page history, so a second page is
+     not an unlabelled list of numbers. */
+  .transcript-table thead { display: table-header-group; }
+  .transcript-table tfoot { display: table-footer-group; }
+
+  .transcript-head,
+  .transcript-subject,
+  .transcript-totals,
+  .transcript-foot {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* A signature block alone on a final page reads as a missing page. */
+  .transcript-foot { break-before: avoid; page-break-before: avoid; }
 }
 /* ==========================================================================
    Messages UI — Premium redesign
@@ -9749,4 +9833,244 @@ input:disabled + .premium-slider {
   .checkin-code-qr { width: 200px; height: 200px; }
   .checkin-code-meta { gap: var(--s4); }
   .scanner-foot .btn { width: 100%; }
+}
+
+/* ==========================================================================
+   Transcript — the printable record of verified service
+   ==========================================================================
+   Styled on the certificate's document tokens rather than the app's theme
+   tokens, and for the same reason those tokens are deliberately not overridden
+   in dark mode: a printed record is a light-paper artefact whatever theme the
+   person viewing it happens to be using.
+
+   The previous version drew on `--paper` and `--print-*` for an on-screen
+   wrapper, which is why it broke in both themes at once — in dark mode the
+   document sat on a dark slab, and in print the background was dropped and the
+   intended white never actually printed.
+
+   Classes rather than inline styles, so the print rules below can reach them.
+   ========================================================================== */
+
+.transcript-page {
+  padding: var(--s6) var(--s4) var(--s10);
+  background: var(--bg-primary);
+}
+
+.transcript-toolbar {
+  max-width: 800px;
+  margin: 0 auto var(--s5);
+}
+
+.transcript {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: var(--s10) var(--s8);
+  background: var(--cert-bg);
+  color: var(--cert-text);
+  border: 1px solid var(--cert-border);
+  border-radius: var(--r-sm);
+  font-family: var(--font-doc);
+}
+
+.transcript-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--s6);
+  padding-bottom: var(--s4);
+  border-bottom: 2px solid var(--cert-text);
+  flex-wrap: wrap;
+}
+
+.transcript-org {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--certificate-ink-3);
+  margin: 0;
+}
+
+.transcript-title {
+  font-family: var(--font-doc);
+  font-size: 1.75rem;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  color: var(--cert-text);
+  margin: var(--s1) 0 0;
+}
+
+.transcript-issued {
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  color: var(--certificate-ink-2);
+  text-align: right;
+}
+
+.transcript-subject { margin-top: var(--s6); }
+
+.transcript-label {
+  font-family: var(--font-body);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--certificate-ink-3);
+  margin: 0;
+}
+
+.transcript-name {
+  font-family: var(--font-doc);
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--cert-accent);
+  margin: 2px 0 0;
+}
+
+.transcript-sub {
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  color: var(--certificate-ink-2);
+  margin: 2px 0 0;
+}
+
+.transcript-totals {
+  display: flex;
+  gap: var(--s10);
+  margin-top: var(--s6);
+  padding: var(--s4) 0;
+  border-top: 1px solid var(--cert-border);
+  border-bottom: 1px solid var(--cert-border);
+  flex-wrap: wrap;
+}
+
+.transcript-figure {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--cert-text);
+  margin: 2px 0 0;
+}
+
+.transcript-history { margin-top: var(--s8); }
+
+.transcript-section-title {
+  font-family: var(--font-body);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--certificate-ink-3);
+  margin: 0 0 var(--s3);
+}
+
+.transcript-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.transcript-table th {
+  font-family: var(--font-body);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--certificate-ink-3);
+  text-align: left;
+  padding: 0 0 var(--s2);
+  border-bottom: 1px solid var(--cert-text);
+}
+
+.transcript-table td {
+  padding: var(--s3) 0;
+  border-bottom: 1px solid var(--cert-border);
+  vertical-align: top;
+  /* A row is one commitment; splitting one across a page break makes a date
+     and its hours land on different sheets. */
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.transcript-table td:first-child { width: 8.5rem; padding-right: var(--s4); }
+
+.transcript-hours-col { text-align: right; width: 6rem; font-weight: 600; }
+
+.transcript-event {
+  display: block;
+  font-weight: 600;
+  color: var(--cert-text);
+  /* Long event names wrap rather than forcing the table wider than the page. */
+  overflow-wrap: anywhere;
+}
+
+.transcript-meta {
+  display: block;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  color: var(--certificate-ink-2);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.transcript-table tfoot td {
+  border-bottom: none;
+  border-top: 2px solid var(--cert-text);
+  padding-top: var(--s3);
+  font-weight: 700;
+}
+
+.transcript-total-label {
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--certificate-ink-2);
+}
+
+.transcript-empty {
+  font-family: var(--font-body);
+  color: var(--certificate-ink-2);
+}
+
+.transcript-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--s8);
+  margin-top: var(--s10);
+  padding-top: var(--s5);
+  border-top: 1px solid var(--cert-border);
+  flex-wrap: wrap;
+}
+
+.transcript-note {
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  color: var(--certificate-ink-2);
+  max-width: 46ch;
+  margin: 0;
+}
+
+.transcript-sign { width: 15rem; text-align: center; }
+
+.transcript-sign-rule {
+  border-bottom: 1px solid var(--certificate-ink-2);
+  height: 2.25rem;
+  margin-bottom: var(--s2);
+}
+
+@media (max-width: 640px) {
+  .transcript { padding: var(--s6) var(--s4); }
+  .transcript-totals { gap: var(--s6); }
+  .transcript-figure { font-size: 1.5rem; }
+  .transcript-table td:first-child { width: 6rem; }
+  .transcript-sign { width: 100%; }
+  .transcript-title { font-size: 1.375rem; }
+  /* Once the header wraps, the issue line sits UNDER the title rather than
+     beside it, and right-aligned text under a left-aligned heading reads as a
+     mistake. */
+  .transcript-issued { text-align: left; }
 }
