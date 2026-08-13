@@ -217,6 +217,8 @@ export const EVENT_CATEGORIES = {
   /* Membership of a club is a relationship with the platform, not an event. */
   ORGANIZATION_MEMBERSHIP_REMOVED: 'ACCOUNT',
   ORGANIZATION_BANNED: 'ACCOUNT',
+  ORGANIZATION_BAN_APPEAL_STANDS: 'ACCOUNT',
+  ORGANIZATION_BAN_APPEAL_REVERSED: 'ACCOUNT',
   ACCOUNT_WARNED: 'ACCOUNT',
   ACCOUNT_REINSTATED: 'ACCOUNT',
   APPEAL_DECISION_STANDS: 'ACCOUNT',
@@ -555,6 +557,44 @@ export function getInAppContent(event, payload) {
           ? `/appeals/new?subject=organization_ban&organization=${encodeURIComponent(payload.organizationId)}`
           : '/appeals/new?subject=organization_ban',
         ctaText: 'Make an appeal',
+      };
+    }
+
+    case 'ORGANIZATION_BAN_APPEAL_STANDS': {
+      /**
+       * Written for a BAN, not borrowed from the suspension wording.
+       *
+       * `APPEAL_DECISION_STANDS` says "we are keeping the suspension in place"
+       * and offers a link to the suspension appeal page. Sent to somebody
+       * appealing a club ban, that names a punishment they are not under and
+       * points at a page about it. Two decisions, two vocabularies.
+       */
+      const org = payload.organizationName || 'the organization';
+      const why = payload.reasoning ? `\n\nWhat they said: ${payload.reasoning}` : '';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: `Your appeal to ${org} was not upheld`,
+        body:
+          `A manager of ${org} has looked at your appeal, and the ban stays in place.${why}`
+          + '\n\nThis does not affect your account, your hours, or any other organization.',
+        /* No CTA. There is nothing useful to press: the decision is made, and a
+           link back to the organization they cannot rejoin would be a taunt. */
+      };
+    }
+
+    case 'ORGANIZATION_BAN_APPEAL_REVERSED': {
+      const org = payload.organizationName || 'the organization';
+      const why = payload.reasoning ? `\n\nWhat they said: ${payload.reasoning}` : '';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: `Your appeal to ${org} was upheld`,
+        body:
+          `A manager of ${org} has looked at your appeal and lifted the ban. `
+          + 'You can join again whenever you like.' + why,
+        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : undefined,
+        ctaText: payload.organizationSlug ? `Go to ${org}` : undefined,
       };
     }
 

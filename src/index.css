@@ -7946,6 +7946,30 @@ input:disabled + .premium-slider {
 .org-home-list .btn { flex-shrink: 0; }
 
 /* Organization announcements */
+/**
+ * The organization's appeal inbox, at the foot of the management area.
+ *
+ * Deliberately plain: this is somebody contesting a decision about them, and a
+ * card styled to draw the eye would make a rare, serious thing look like a
+ * promotion. The statement is set apart because it is the only text on the page
+ * written by the person being decided about.
+ */
+.appeal-inbox-item {
+  padding: var(--s4) 0;
+  border-top: 1px solid var(--rule);
+}
+
+.appeal-inbox-item:first-child { border-top: 0; padding-top: 0; }
+
+.appeal-inbox-statement {
+  margin: 0;
+  padding-left: var(--s4);
+  border-left: 2px solid var(--rule);
+  color: var(--ink-2);
+  /* An unbroken run — a pasted link, a long word — must not widen the card. */
+  overflow-wrap: anywhere;
+}
+
 .org-announcement {
   padding: var(--s4);
   border: 1px solid var(--rule);

@@ -833,6 +833,17 @@ export const api = {
    * or an omitted field must get the reversible action, and the permanent one
    * has to be asked for by name.
    */
+  /* The organization's own appeal inbox. Scoped server-side to the org in the
+     path, so a manager of one club cannot read another's. */
+  fetchOrganizationAppeals: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/appeals`),
+
+  decideOrganizationAppeal: async (key, appealId, { decision, reasoning }) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/appeals/${encodeURIComponent(appealId)}/decision`, {
+      method: 'POST',
+      body: JSON.stringify({ decision, reasoning }),
+    }),
+
   removeOrganizationMember: async (key, userId, { mode = 'kick', reason = '' } = {}) =>
     apiFetch(`/api/organizations/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`,
       { method: 'DELETE', body: JSON.stringify({ mode, reason }) }),

@@ -24,6 +24,7 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import { avatarColorValue } from '../utils/avatarColors';
 import OrgAvatar from '../components/common/OrgAvatar';
 import RemoveMemberDialog from '../components/organizations/RemoveMemberDialog';
+import AppealInbox from '../components/organizations/AppealInbox';
 import { formatHours, formatDay } from '../utils/helpers';
 
 export default function OrganizationPage({ addToast }) {
@@ -281,6 +282,11 @@ export default function OrganizationPage({ addToast }) {
           )}
         </div>
       </section>
+
+      {/* The bottom of the management area, below the roster — the rarest thing
+          a manager does, and the one with the most text. It renders nothing at
+          all when there is nothing to review. */}
+      {viewer?.canManage && <AppealInbox orgKey={key} addToast={addToast} />}
 
       {removing && (
         <RemoveMemberDialog
