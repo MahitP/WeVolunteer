@@ -215,6 +215,28 @@ export const VALID_GRADES = ['9', '10', '11', '12', 'Adult', 'N/A'];
 export const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 
 export const APP_NAME = process.env.APP_NAME || 'WeVolunteer';
+
+/**
+ * Which account the public About page names as running the platform.
+ *
+ * ── Why this is configuration and not a query ──
+ *
+ * `super_admin` is the ROLE that confers owner status, and nothing about that
+ * changes here: the endpoint still requires the named account to hold it, so
+ * this can only ever choose BETWEEN owners, never create one. But a deployment
+ * can legitimately hold several — this one holds two, a person and a service
+ * account, both created in the same seeding run with identical timestamps — and
+ * "earliest created" then decays into an arbitrary tiebreak on the id. Featuring
+ * whichever account sorted first is not a decision anybody made.
+ *
+ * So the deployment says who it is, in the same spirit as
+ * `DOCUMENT_SIGNATORY`: which human is publicly answerable for this instance is
+ * an editorial fact about the deployment, not something the schema knows.
+ *
+ * Unset falls back to the earliest active owner, so an install that never sets
+ * it still names somebody rather than nobody.
+ */
+export const PLATFORM_OWNER_USERNAME = process.env.PLATFORM_OWNER_USERNAME || '';
 export const MAX_AUTO_SELECT_DRAWS = Number(process.env.MAX_AUTO_SELECT_DRAWS) || 5;
 
 /**

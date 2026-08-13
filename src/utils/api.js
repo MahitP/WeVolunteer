@@ -1365,6 +1365,11 @@ export const api = {
 
   fetchLegalDocuments: async () => apiFetch('/api/legal/documents'),
 
+  /* Who runs this deployment, resolved server-side by ROLE. Public, because the
+     people most likely to ask — a parent, a student who wants to complain to
+     somebody real — do not have an account yet. */
+  fetchPlatformOwner: async () => apiFetch('/api/platform/owner'),
+
   /** One document and its Markdown source, verified against its pinned hash. */
   fetchLegalDocument: async (slug) =>
     apiFetch(`/api/legal/documents/${encodeURIComponent(slug)}`),
