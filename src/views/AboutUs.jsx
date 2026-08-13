@@ -481,11 +481,18 @@ function OwnerSection() {
     api.fetchPlatformOwner()
       .then(res => { if (!cancelled) setOwner(res?.owner ?? null); })
       .catch(() => { if (!cancelled) setOwner(null); });
-    /* Whether to offer the profile link. `document.cookie` cannot see the
-       httpOnly session cookie, so this asks the one endpoint that answers for
-       everybody and treats any refusal as "signed out". */
+    /**
+     * Whether to offer the profile link. `document.cookie` cannot see the
+     * httpOnly session cookie, so this asks the endpoint that answers for
+     * everybody.
+     *
+     * The RESOLVED VALUE decides it, not whether the promise rejected: `getMe`
+     * swallows 401 and 403 and resolves `null`, so a `.then` that assumed
+     * rejection ran on the signed-out path too — which showed a members-only
+     * link to exactly the readers this page exists for.
+     */
     api.getMe()
-      .then(() => { if (!cancelled) setSignedIn(true); })
+      .then(user => { if (!cancelled) setSignedIn(Boolean(user)); })
       .catch(() => { if (!cancelled) setSignedIn(false); });
     return () => { cancelled = true; };
   }, []);
