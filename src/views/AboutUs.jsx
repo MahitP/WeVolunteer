@@ -474,26 +474,29 @@ export default function AboutUs() {
  */
 function OwnerSection() {
   const [owner, setOwner] = useState(null);
-  const [signedIn, setSignedIn] = useState(false);
+
+  /**
+   * Whether to offer the profile link, decided WITHOUT a request.
+   *
+   * This used to call `api.getMe()`. That is authoritative, and on this page it
+   * is the wrong trade: `/about` is public and is read mostly by people who have
+   * no account — a parent, somebody sent a link — so the call was a guaranteed
+   * 401 on almost every view, from anonymous visitors, purely to decide whether
+   * to render one anchor.
+   *
+   * The cached user is enough for that decision and costs nothing. Being wrong
+   * is cheap in both directions: a stale cache offers a link to somebody signed
+   * out, who meets the sign-in screen the link was always gated by, or withholds
+   * it from somebody signed in, who still has the whole navigation. Neither is
+   * worth an auth probe on a public page.
+   */
+  const signedIn = Boolean(api.getCurrentCachedUser?.());
 
   useEffect(() => {
     let cancelled = false;
     api.fetchPlatformOwner()
       .then(res => { if (!cancelled) setOwner(res?.owner ?? null); })
       .catch(() => { if (!cancelled) setOwner(null); });
-    /**
-     * Whether to offer the profile link. `document.cookie` cannot see the
-     * httpOnly session cookie, so this asks the endpoint that answers for
-     * everybody.
-     *
-     * The RESOLVED VALUE decides it, not whether the promise rejected: `getMe`
-     * swallows 401 and 403 and resolves `null`, so a `.then` that assumed
-     * rejection ran on the signed-out path too — which showed a members-only
-     * link to exactly the readers this page exists for.
-     */
-    api.getMe()
-      .then(user => { if (!cancelled) setSignedIn(Boolean(user)); })
-      .catch(() => { if (!cancelled) setSignedIn(false); });
     return () => { cancelled = true; };
   }, []);
 

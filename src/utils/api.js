@@ -485,9 +485,32 @@ export const api = {
     }
   },
 
+  /**
+   * The cached user, or null — never a throw.
+   *
+   * `JSON.parse` on a bare string was one corrupt localStorage entry away from
+   * taking down every caller, and there are several, including one that runs
+   * during render on the public About page. A half-written value (storage quota
+   * hit mid-write, a browser extension, a hand-edit in devtools) is not a
+   * reason for a page to fail to appear.
+   *
+   * A cache that cannot be read is treated exactly as a cache that is not there,
+   * which is the state every caller already handles.
+   */
   getCurrentCachedUser: () => {
-    const user = localStorage.getItem(STORAGE_KEYS.USER);
-    return user ? JSON.parse(user) : null;
+    try {
+      const user = localStorage.getItem(STORAGE_KEYS.USER);
+      const parsed = user ? JSON.parse(user) : null;
+      /* `JSON.parse('"hello"')` and `JSON.parse('7')` succeed and return a
+         primitive. A caller reading `.id` off that gets undefined rather than a
+         throw, which is worse than nothing because it looks like a user.
+         Arrays are excluded for the same reason and are easy to miss:
+         `typeof [] === 'object'`, so a stored array passes a naive check. */
+      const usable = parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+      return usable ? parsed : null;
+    } catch {
+      return null;
+    }
   },
 
   // ── Events ──────────────────────────────────────
