@@ -803,9 +803,16 @@ export const api = {
    * nothing on the client ever called it — so a manager could promote, demote
    * and leave, but the one action the server was ready for was unreachable.
    */
-  removeOrganizationMember: async (key, userId) =>
+  /**
+   * Removing somebody, or banning them.
+   *
+   * `mode` defaults to `kick` on the server too, deliberately: an older client
+   * or an omitted field must get the reversible action, and the permanent one
+   * has to be asked for by name.
+   */
+  removeOrganizationMember: async (key, userId, { mode = 'kick', reason = '' } = {}) =>
     apiFetch(`/api/organizations/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`,
-      { method: 'DELETE' }),
+      { method: 'DELETE', body: JSON.stringify({ mode, reason }) }),
 
   // ── Organization announcements ─────────────────
   /**
@@ -1283,10 +1290,13 @@ export const api = {
 
   listMyAppeals: async () => apiFetch('/api/appeals/mine'),
 
-  submitAppeal: async ({ subject, statement }) =>
+  /* `organizationId` is only meaningful for an `organization_ban` appeal; the
+     server ignores it for every other subject and re-checks that the ban named
+     is actually against this caller. */
+  submitAppeal: async ({ subject, statement, organizationId }) =>
     apiFetch('/api/appeals', {
       method: 'POST',
-      body: JSON.stringify({ subject, statement }),
+      body: JSON.stringify({ subject, statement, organizationId }),
     }),
 
   /* ── The moderator-facing appeals queue (`AdminAppeals.jsx`) ─────────────────── */

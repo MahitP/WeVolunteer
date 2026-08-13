@@ -26,6 +26,7 @@ import { profileSummary } from '../profileSerializer.js';
 import path from 'node:path';
 import sharp from 'sharp';
 import { receiveAvatar, deleteUploadedFile, AVATAR_UPLOADS_DIR } from './profilePictureRoutes.js';
+import { notificationService } from '../services/notificationService.js';
 
 const router = express.Router();
 
@@ -242,6 +243,27 @@ router.post('/api/organizations/:key/membership', authenticateToken, requireCap(
   if (row.status !== 'active') {
     return res.status(409).json({ error: 'That organization is no longer accepting members.', code: 'archived' });
   }
+
+  /**
+   * A ban is enforced HERE, on the ordinary join path.
+   *
+   * This is the whole of what a ban means — the client hiding a Join button is
+   * a courtesy, and a banned person posting straight to this endpoint is
+   * exactly the case the record exists for. `lifted_at IS NULL` is what makes a
+   * lifted ban stop applying without deleting the fact that it happened.
+   */
+  const ban = db.prepare(`
+    SELECT reason FROM organization_bans
+    WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
+  `).get(row.id, req.principal.userId);
+  if (ban) {
+    return res.status(403).json({
+      error: 'You cannot rejoin this organization while this ban is active.',
+      code: 'banned',
+      reason: ban.reason,
+    });
+  }
+
   db.prepare(`
     INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
     VALUES (?, ?, 'member', ?)
@@ -342,10 +364,83 @@ router.delete('/api/organizations/:key/members/:userId', authenticateToken, requ
     }
   }
 
-  db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
-    .run(row.id, req.params.userId);
+  /**
+   * Kick or ban, and the difference is not cosmetic.
+   *
+   * A kick ends a membership; they can join again. A ban is a standing decision
+   * that they may not, and it needs a reason — enforced here AND by the column,
+   * because a person told they are banned and not told why has nothing to
+   * appeal against.
+   *
+   * Defaulting to `kick` matters: a client that omits the field, or an older one
+   * that has never heard of banning, must get the reversible action. The
+   * permanent one has to be asked for by name.
+   */
+  const mode = req.body?.mode === 'ban' ? 'ban' : 'kick';
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
 
-  res.json({ userId: req.params.userId, isMember: false, memberCount: countMembers(row.id) });
+  if (mode === 'ban') {
+    if (!reason) {
+      return res.status(400).json({
+        error: 'Give a reason for the ban. The person is told what it is, and it is what any appeal is heard against.',
+        code: 'reason_required',
+      });
+    }
+    if (reason.length > 1000) {
+      return res.status(400).json({ error: 'Keep the reason to 1000 characters or fewer.', code: 'reason_too_long' });
+    }
+    if (req.params.userId === req.principal.userId) {
+      /* Banning yourself would lock you out of an organization you manage and
+         leave nobody able to lift it. Leaving is a different route. */
+      return res.status(409).json({ error: 'You cannot ban yourself.', code: 'cannot_ban_self' });
+    }
+  } else if (reason.length > 1000) {
+    return res.status(400).json({ error: 'Keep the reason to 1000 characters or fewer.', code: 'reason_too_long' });
+  }
+
+  const now = new Date().toISOString();
+
+  inTransaction(() => {
+    db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+      .run(row.id, req.params.userId);
+
+    if (mode === 'ban') {
+      /* `INSERT OR IGNORE` against the partial unique index: banning somebody
+         already banned is the state the caller wanted, not an error. */
+      db.prepare(`
+        INSERT OR IGNORE INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(`orgban-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        row.id, req.params.userId, req.principal.userId, reason, now);
+    }
+  });
+
+  /**
+   * Told, and told why.
+   *
+   * Dispatched outside the transaction: a notification that fails must not roll
+   * back a removal the manager has already been shown as done.
+   */
+  const actor = db.prepare('SELECT name FROM users WHERE id = ?').get(req.principal.userId);
+  notificationService.dispatch(
+    mode === 'ban' ? 'ORGANIZATION_BANNED' : 'ORGANIZATION_MEMBERSHIP_REMOVED',
+    {
+      organizationName: row.name,
+      organizationSlug: row.slug,
+      organizationId: row.id,
+      actorName: actor?.name || 'A manager',
+      reason: reason || null,
+    },
+    req.params.userId,
+    `org-${mode}:${row.id}:${now}`,
+  );
+
+  res.json({
+    userId: req.params.userId,
+    isMember: false,
+    banned: mode === 'ban',
+    memberCount: countMembers(row.id),
+  });
 });
 
 /** Promote or demote a member. Managers only. */

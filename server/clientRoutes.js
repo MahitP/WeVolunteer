@@ -136,6 +136,7 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
      parameter, read by people who do not have an account yet. */
   '/about',
   '/appeal/:token',
+  '/appeals/new',
 
   /* ── v1.3, the member directory ──────────────────────────────────────────
    *

@@ -23,6 +23,7 @@ import OrganizationAnnouncements from '../components/OrganizationAnnouncements';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import { avatarColorValue } from '../utils/avatarColors';
 import OrgAvatar from '../components/common/OrgAvatar';
+import RemoveMemberDialog from '../components/organizations/RemoveMemberDialog';
 
 export default function OrganizationPage({ addToast }) {
   const { key } = useParams();
@@ -47,11 +48,16 @@ export default function OrganizationPage({ addToast }) {
 
   const [removing, setRemoving] = useState(null);
 
-  const removeMember = async (member) => {
+  const removeMember = async (member, { mode = 'kick', reason = '' } = {}) => {
     setBusy(true);
     try {
-      await api.removeOrganizationMember(key, member.id);
-      addToast(`${member.name} was removed from ${data.organization.name}.`, 'info');
+      await api.removeOrganizationMember(key, member.id, { mode, reason });
+      addToast(
+        mode === 'ban'
+          ? `${member.name} was banned from ${data.organization.name}.`
+          : `${member.name} was removed from ${data.organization.name}.`,
+        'info',
+      );
       setRemoving(null);
       load();
     } catch (err) {
@@ -248,21 +254,13 @@ export default function OrganizationPage({ addToast }) {
       </section>
 
       {removing && (
-        <ConfirmDialog
-          title={`Remove ${removing.name}?`}
-          confirmLabel="Remove"
-          destructive
+        <RemoveMemberDialog
+          member={removing}
+          organizationName={org.name}
+          busy={busy}
           onCancel={() => setRemoving(null)}
-          onConfirm={() => removeMember(removing)}
-        >
-          {/* Says what removal does NOT do, because that is the thing a
-              manager is actually worried about. Hours are service history and
-              a membership change never touches them. */}
-          <p>
-            They will no longer be a member of {org.name}. The hours they have
-            already served stay on their record.
-          </p>
-        </ConfirmDialog>
+          onConfirm={opts => removeMember(removing, opts)}
+        />
       )}
 
       {leaving && (

@@ -258,27 +258,59 @@ router.post('/api/appeals', authenticateToken, (req, res) => {
    * context for their own case. The rule is the narrow one: you may appeal a
    * report only if you are the person it is about.
    */
-  const subjectRef = typeof req.body?.reportId === 'string' ? req.body.reportId : null;
+  /**
+   * The same rule, applied to an organization ban: you may appeal one only if
+   * it is against you and still active.
+   *
+   * Without the check, `organizationId` is attacker-chosen in exactly the way
+   * `reportId` was — a student could open an appeal naming a club they have
+   * never been near, and a reviewer would read that club's name as the context
+   * for a case that has nothing to do with it. The lifted-ban case refuses too:
+   * there is no longer a decision to appeal against, and the honest answer is
+   * to say we cannot find it rather than to queue a case a reviewer can only
+   * close.
+   */
+  let subjectRef = null;
   let reportId = null;
 
-  if (subjectRef) {
-    const report = db.prepare(
-      'SELECT id, target_author_id, target_type, target_id FROM reports WHERE id = ?'
-    ).get(subjectRef);
+  if (subject === 'organization_ban') {
+    subjectRef = typeof req.body?.organizationId === 'string' ? req.body.organizationId : null;
+    const ban = subjectRef && db.prepare(`
+      SELECT id FROM organization_bans
+       WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
+    `).get(subjectRef, req.user.id);
 
-    const isAboutCaller = report && (
-      report.target_author_id === req.user.id
-      || (report.target_type === 'user' && report.target_id === req.user.id)
-    );
-
-    // Identical refusal for "no such report" and "not yours", so this cannot be
-    // walked to discover which report ids exist.
-    if (!isAboutCaller) {
+    // Identical refusal for "no such ban" and "not yours", so this cannot be
+    // walked to discover which organizations have banned whom. A LIFTED ban
+    // refuses too: there is no longer a decision to appeal against, and saying
+    // so is better than queueing a case a reviewer can only close.
+    if (!ban) {
       return res.status(404).json({
         error: 'We could not find what you are appealing.', code: 'subject_not_found',
       });
     }
-    reportId = report.id;
+  } else {
+    subjectRef = typeof req.body?.reportId === 'string' ? req.body.reportId : null;
+
+    if (subjectRef) {
+      const report = db.prepare(
+        'SELECT id, target_author_id, target_type, target_id FROM reports WHERE id = ?'
+      ).get(subjectRef);
+
+      const isAboutCaller = report && (
+        report.target_author_id === req.user.id
+        || (report.target_type === 'user' && report.target_id === req.user.id)
+      );
+
+      // Identical refusal for "no such report" and "not yours", so this cannot be
+      // walked to discover which report ids exist.
+      if (!isAboutCaller) {
+        return res.status(404).json({
+          error: 'We could not find what you are appealing.', code: 'subject_not_found',
+        });
+      }
+      reportId = report.id;
+    }
   }
 
   /** One live appeal per person per subject. A duplicate is not new information. */

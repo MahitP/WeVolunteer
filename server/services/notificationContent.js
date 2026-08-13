@@ -46,6 +46,17 @@ export const MANDATORY_NOTICE_EVENTS = new Set([
    */
   'LEGAL_DOCUMENT_UPDATED',
   /**
+   * Being banned from an organization is a mandatory notice for the same reason
+   * a suspension is: it is an enforcement decision recorded against the person,
+   * it is what an appeal is heard against, and it is worthless if they do not
+   * receive it. A notification preference is a choice about how much the
+   * product talks to you; it cannot be a way to not be told you were banned.
+   *
+   * An ordinary removal is NOT mandatory. Leaving a club is routine, and a
+   * volunteer who has muted membership chatter has made a reasonable choice.
+   */
+  'ORGANIZATION_BANNED',
+  /**
    * A formal warning is a mandatory notice for the same reason a suspension is:
    * it is an enforcement action recorded against the person, it is the step that
    * precedes suspension, and it is worthless — worse than worthless — if they do
@@ -203,6 +214,9 @@ export const EVENT_CATEGORIES = {
    * beside maintenance notices.
    */
   LEGAL_DOCUMENT_UPDATED: 'ACCOUNT',
+  /* Membership of a club is a relationship with the platform, not an event. */
+  ORGANIZATION_MEMBERSHIP_REMOVED: 'ACCOUNT',
+  ORGANIZATION_BANNED: 'ACCOUNT',
   ACCOUNT_WARNED: 'ACCOUNT',
   ACCOUNT_REINSTATED: 'ACCOUNT',
   APPEAL_DECISION_STANDS: 'ACCOUNT',
@@ -489,6 +503,58 @@ export function getInAppContent(event, payload) {
           + 'you can close your account at any time.',
         link: `/legal/${payload.slug}`,
         ctaText: `Read the ${payload.title}`,
+      };
+    }
+
+    case 'ORGANIZATION_MEMBERSHIP_REMOVED': {
+      const org = payload.organizationName || 'an organization';
+      const actor = payload.actorName || 'A manager';
+      const why = payload.reason ? `\n\nReason: ${payload.reason}` : '';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `You were removed from ${org}`,
+        body:
+          `${actor} removed you from ${org}.${why}`
+          + '\n\nYou can still join this organization again.',
+        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : '/organizations',
+        ctaText: `View ${org}`,
+      };
+    }
+
+    case 'ORGANIZATION_BANNED': {
+      /* Named defensively. This is delivered over the recipient's opt-out, so
+         "You were banned from undefined" is not a cosmetic slip — it is the
+         one message they cannot choose not to receive. */
+      const org = payload.organizationName || 'an organization';
+      const actor = payload.actorName || 'A manager';
+      /**
+       * The reason is not decoration here — it is what the appeal is heard
+       * against, and a person told they are banned without being told why has
+       * nothing to answer. The route refuses a ban with no reason, so this
+       * fallback should be unreachable; it exists because a notification that
+       * renders "Reason: undefined" to somebody being excluded is worse than
+       * one that admits the record is incomplete.
+       */
+      const why = payload.reason
+        ? `\n\nReason: ${payload.reason}`
+        : '\n\nNo reason was recorded.';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: `You were banned from ${org}`,
+        body:
+          `${actor} banned you from ${org}.${why}`
+          + '\n\nYou cannot rejoin this organization while this ban is active. '
+          + 'If you think this is wrong, you can make an appeal.',
+        /* The organization travels in the link so the form knows what is being
+           appealed without asking somebody to identify it themselves — and the
+           server re-checks that this ban is theirs regardless of what the query
+           string says. */
+        link: payload.organizationId
+          ? `/appeals/new?subject=organization_ban&organization=${encodeURIComponent(payload.organizationId)}`
+          : '/appeals/new?subject=organization_ban',
+        ctaText: 'Make an appeal',
       };
     }
 

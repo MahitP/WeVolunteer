@@ -52,6 +52,7 @@ import organizationIdentity from './040_organization_identity.js';
 import organizationAnnouncements from './041_organization_announcements.js';
 import organizationAllowReplies from './042_organization_allow_replies.js';
 import avatarColour from './043_avatar_colour.js';
+import organizationBans from './044_organization_bans.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -252,7 +253,13 @@ export const MIGRATIONS = [
    * 043 — a background colour behind an emoji avatar, for people and for
    * organizations. Two guarded ALTER TABLE ADD COLUMNs; order-independent.
    */
-  avatarColour
+  avatarColour,
+
+  /**
+   * 044 — organization bans. A new table plus two indexes; order-independent
+   * beyond `organizations` and `users`, both of which long predate it.
+   */
+  organizationBans
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

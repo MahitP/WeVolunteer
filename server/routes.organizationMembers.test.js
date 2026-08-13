@@ -256,4 +256,285 @@ describe('removing an organization member', () => {
       expect(stillThere).toBe(1);
     });
   });
+
+  describe('kicking versus banning', () => {
+    /**
+     * Two different acts. A kick ends a membership and they can come back; a
+     * ban is a standing decision that they cannot. The tests that matter are
+     * the ones that hold that difference apart — a kick that silently banned,
+     * or a ban a client could bypass by posting to the join route, would each
+     * be worse than the feature not existing.
+     */
+    const removeWith = (userId, body, session = manager) =>
+      srv.call('DELETE', `/api/organizations/${orgKey}/members/${userId}`, body, session);
+
+    const activeBan = (userId) => db.prepare(
+      'SELECT reason, banned_by FROM organization_bans WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL'
+    ).get(orgId, userId);
+
+    beforeEach(() => {
+      db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
+    });
+
+    it('kicks by default when no mode is given', async () => {
+      /* An older client, or an omitted field, must get the REVERSIBLE action.
+         The permanent one has to be asked for by name. */
+      const res = await removeWith(studentId, undefined);
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.banned).toBe(false);
+      expect(activeBan(studentId)).toBeUndefined();
+    });
+
+    it('lets a kicked member join again', async () => {
+      await removeWith(studentId, { mode: 'kick' });
+
+      const rejoin = await srv.call('POST', `/api/organizations/${orgKey}/membership`, undefined, student);
+      expect(rejoin.status, JSON.stringify(rejoin.body)).toBe(200);
+      expect(isMember(studentId)).toBe(true);
+    });
+
+    it('accepts a kick with no reason', async () => {
+      /* Demanding a justification for routine roster work trains people to type
+         "n/a", which is worse than an honest blank. */
+      const res = await removeWith(studentId, { mode: 'kick', reason: '' });
+      expect(res.status).toBe(200);
+    });
+
+    it('records a ban with its reason and who made it', async () => {
+      const res = await removeWith(studentId, { mode: 'ban', reason: 'Repeatedly no-showed shifts.' });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.banned).toBe(true);
+      expect(activeBan(studentId)).toMatchObject({
+        reason: 'Repeatedly no-showed shifts.',
+        banned_by: managerId,
+      });
+    });
+
+    it('REFUSES a ban with no reason', async () => {
+      /**
+       * Enforced here as well as in the UI and the column. A person told they
+       * are banned and not told why has nothing to appeal against, and the
+       * reason is what an administrator hearing that appeal reads.
+       */
+      const res = await removeWith(studentId, { mode: 'ban', reason: '   ' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('reason_required');
+      expect(isMember(studentId), 'a refused ban must not remove them either').toBe(true);
+      expect(activeBan(studentId)).toBeUndefined();
+    });
+
+    it('stops a banned person rejoining through the ordinary join route', async () => {
+      /**
+       * The whole of what a ban means. The client hiding a Join button is a
+       * courtesy; a banned person posting straight to this endpoint is exactly
+       * the case the record exists for.
+       */
+      await removeWith(studentId, { mode: 'ban', reason: 'Repeated no-shows.' });
+
+      const rejoin = await srv.call('POST', `/api/organizations/${orgKey}/membership`, undefined, student);
+
+      expect(rejoin.status).toBe(403);
+      expect(rejoin.body.code).toBe('banned');
+      expect(isMember(studentId)).toBe(false);
+    });
+
+    it('tells the banned person why, in the refusal', async () => {
+      await removeWith(studentId, { mode: 'ban', reason: 'Repeated no-shows.' });
+      const rejoin = await srv.call('POST', `/api/organizations/${orgKey}/membership`, undefined, student);
+      expect(rejoin.body.reason).toBe('Repeated no-shows.');
+    });
+
+    it('lets them back in once the ban is lifted', async () => {
+      /* Lifting sets `lifted_at` rather than deleting the row — the fact that
+         somebody was banned and then unbanned is what an appeal produces. */
+      await removeWith(studentId, { mode: 'ban', reason: 'Repeated no-shows.' });
+      db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
+        .run(new Date().toISOString(), orgId, studentId);
+
+      const rejoin = await srv.call('POST', `/api/organizations/${orgKey}/membership`, undefined, student);
+      expect(rejoin.status).toBe(200);
+    });
+
+    it('keeps the lifted ban on the record', async () => {
+      await removeWith(studentId, { mode: 'ban', reason: 'Repeated no-shows.' });
+      db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
+        .run(new Date().toISOString(), orgId, studentId);
+
+      const rows = db.prepare(
+        'SELECT COUNT(*) AS c FROM organization_bans WHERE organization_id = ? AND user_id = ?'
+      ).get(orgId, studentId).c;
+      expect(rows, 'lifting must not erase the decision').toBe(1);
+    });
+
+    it('refuses a ban from somebody who does not manage this organization', async () => {
+      /* The caller HOLDS the capability and has had its membership removed, so
+         only `canManage` can be doing the refusing. */
+      db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+        .run(orgId, managerId);
+
+      const res = await removeWith(studentId, { mode: 'ban', reason: 'Not mine to ban.' });
+
+      expect(res.status).toBe(403);
+      expect(activeBan(studentId)).toBeUndefined();
+      join(managerId, 'manager');
+    });
+
+    it('refuses a ban from a plain member', async () => {
+      const res = await removeWith(managerId, { mode: 'ban', reason: 'Trying it on.' }, student);
+      expect([403, 404]).toContain(res.status);
+      expect(activeBan(managerId)).toBeUndefined();
+    });
+
+    it('will not let a manager ban themselves', async () => {
+      /* It would lock them out of an organization they manage and leave nobody
+         able to lift it. Leaving is a different route.
+
+         A co-manager first, so the last-manager rule — which fires earlier and
+         would refuse this for an entirely different reason — is not what the
+         assertion is measuring. */
+      join(otherId, 'manager');
+
+      const res = await removeWith(managerId, { mode: 'ban', reason: 'Oops.' });
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('cannot_ban_self');
+    });
+
+    it('notifies the person, saying which it was', async () => {
+      await removeWith(studentId, { mode: 'ban', reason: 'Repeated no-shows.' });
+
+      const note = db.prepare(
+        'SELECT title, body FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
+      ).get(studentId);
+
+      expect(note?.title).toMatch(/banned/i);
+      expect(note.body).toContain('Repeated no-shows.');
+      expect(note.body).toMatch(/cannot rejoin/i);
+    });
+
+    it('tells a kicked person they can come back', async () => {
+      await removeWith(studentId, { mode: 'kick' });
+
+      const note = db.prepare(
+        'SELECT title, body FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
+      ).get(studentId);
+
+      expect(note?.title).toMatch(/removed/i);
+      expect(note.body).toMatch(/can still join/i);
+    });
+
+    it('never revokes an hour, whichever it was', async () => {
+      /* The property every removal path in this product shares. */
+      const before = db.prepare(
+        'SELECT COUNT(*) AS rows, COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ?'
+      ).get(studentId);
+
+      await removeWith(studentId, { mode: 'ban', reason: 'Repeated no-shows.' });
+
+      expect(db.prepare(
+        'SELECT COUNT(*) AS rows, COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ?'
+      ).get(studentId)).toEqual(before);
+    });
+  });
+
+  describe('appealing a ban', () => {
+    /**
+     * The notification a banned person receives carries a "Make an appeal"
+     * button. These are the tests that the button leads somewhere real, and
+     * that the query string behind it cannot be edited into an appeal about
+     * somebody else's ban.
+     */
+    const STATEMENT = 'I was told I missed three shifts but two of them were cancelled by the organizer.';
+
+    const appeal = (body, session = student) => srv.call('POST', '/api/appeals', body, session);
+
+    /* Live appeals only. Resolved rows from earlier tests stay on the record —
+       nothing deletes an appeal — so a bare COUNT would keep counting them. */
+    const openAppeals = (userId) => db.prepare(
+      "SELECT COUNT(*) AS c FROM appeals WHERE user_id = ? AND status IN ('open', 'reviewing')"
+    ).get(userId).c;
+
+    beforeEach(() => {
+      db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
+      /* Closed, not deleted. A trigger refuses the delete outright — "an appeal
+         is never deleted: it is the record of a person contesting an enforcement
+         action" — and that rule is right, so the fixture works with it. Only
+         `open` and `reviewing` appeals block a new one, so resolving them leaves
+         each test a clean slate without erasing anything. */
+      db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ?").run(studentId);
+      db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ?").run(otherId);
+    });
+
+    it('accepts an appeal from the person actually banned', async () => {
+      await srv.call('DELETE', `/api/organizations/${orgKey}/members/${studentId}`,
+        { mode: 'ban', reason: 'Missed three shifts.' }, manager);
+
+      const res = await appeal({ subject: 'organization_ban', organizationId: orgId, statement: STATEMENT });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      const row = db.prepare('SELECT subject, subject_ref, status FROM appeals WHERE id = ?').get(res.body.appealId);
+      expect(row).toMatchObject({ subject: 'organization_ban', subject_ref: orgId, status: 'open' });
+    });
+
+    it('REFUSES an appeal about an organization that never banned them', async () => {
+      /**
+       * `organizationId` arrives from a query string the appellant can edit.
+       * Without the check, anyone could open an appeal naming a club they have
+       * never been near, and a reviewer would read that club's name as the
+       * context for a case that has nothing to do with it.
+       */
+      const res = await appeal({ subject: 'organization_ban', organizationId: orgId, statement: STATEMENT });
+
+      expect(res.status).toBe(404);
+      expect(res.body.code).toBe('subject_not_found');
+      expect(openAppeals(studentId)).toBe(0);
+    });
+
+    it('refuses an appeal about somebody ELSE\'s ban', async () => {
+      await srv.call('DELETE', `/api/organizations/${orgKey}/members/${studentId}`,
+        { mode: 'ban', reason: 'Missed three shifts.' }, manager);
+
+      /* `other` was never banned; the ban that exists belongs to `student`. */
+      const res = await appeal({ subject: 'organization_ban', organizationId: orgId, statement: STATEMENT }, other);
+
+      expect(res.status).toBe(404);
+    });
+
+    it('refuses once the ban has been lifted', async () => {
+      /* There is no longer a decision to appeal against. Saying so beats
+         queueing a case a reviewer can only close. */
+      await srv.call('DELETE', `/api/organizations/${orgKey}/members/${studentId}`,
+        { mode: 'ban', reason: 'Missed three shifts.' }, manager);
+      db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
+        .run(new Date().toISOString(), orgId, studentId);
+
+      const res = await appeal({ subject: 'organization_ban', organizationId: orgId, statement: STATEMENT });
+      expect(res.status).toBe(404);
+    });
+
+    it('refuses an appeal naming no organization at all', async () => {
+      await srv.call('DELETE', `/api/organizations/${orgKey}/members/${studentId}`,
+        { mode: 'ban', reason: 'Missed three shifts.' }, manager);
+
+      const res = await appeal({ subject: 'organization_ban', statement: STATEMENT });
+      expect(res.status).toBe(404);
+    });
+
+    it('does not open a second appeal for the same ban', async () => {
+      await srv.call('DELETE', `/api/organizations/${orgKey}/members/${studentId}`,
+        { mode: 'ban', reason: 'Missed three shifts.' }, manager);
+
+      const first = await appeal({ subject: 'organization_ban', organizationId: orgId, statement: STATEMENT });
+      const second = await appeal({ subject: 'organization_ban', organizationId: orgId, statement: STATEMENT });
+
+      /* Tapping the notification twice is not an error, and telling them it
+         failed would make them write the whole thing again. */
+      expect(second.status).toBe(200);
+      expect(second.body.duplicate).toBe(true);
+      expect(second.body.appealId).toBe(first.body.appealId);
+      expect(openAppeals(studentId)).toBe(1);
+    });
+  });
 });
