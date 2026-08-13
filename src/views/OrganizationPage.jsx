@@ -22,6 +22,7 @@ import EmptyState from '../components/common/EmptyState';
 import OrganizationAnnouncements from '../components/OrganizationAnnouncements';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import { avatarColorValue } from '../utils/avatarColors';
+import OrgAvatar from '../components/common/OrgAvatar';
 
 export default function OrganizationPage({ addToast }) {
   const { key } = useParams();
@@ -113,14 +114,10 @@ export default function OrganizationPage({ addToast }) {
                 `users` resolves an avatar in, so the two never disagree about
                 which picture wins. `alt=""` because the name is right beside
                 it: announcing the logo would be reading the name twice. */}
-            <span
-              className="avatar avatar-lg org-avatar"
-              style={avatarColorValue(org.avatarColor) ? { '--avatar-bg': avatarColorValue(org.avatarColor) } : undefined}
-            >
-              {org.imageUrl
-                ? <img src={org.imageUrl} alt="" className="avatar-img" />
-                : (org.avatar || <Building2 size={22} aria-hidden="true" />)}
-            </span>
+            {/* The same component every other surface uses. This page used to
+                carry the only correct copy of the fallback chain, which is how
+                the others drifted. */}
+            <OrgAvatar organization={org} size={22} className="avatar-lg org-avatar" />
             <div className="stack-xs">
               <h1>{org.name}</h1>
               <p className="muted org-meta">

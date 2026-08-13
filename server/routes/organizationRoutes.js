@@ -61,7 +61,11 @@ router.get('/api/organizations', authenticateToken, requireCap('directory.read')
   const mineOnly = req.query.mine === 'true';
 
   const rows = mineOnly
-    ? db.prepare(`${ORG_SELECT}
+    /* `mm.member_role` is selected so the caller can tell the clubs they RUN
+       from the ones they merely belong to. Without it every organization on the
+       "mine" list looks the same and the page cannot offer Manage on the right
+       ones — which is the whole point of that page. */
+    ? db.prepare(`${ORG_SELECT.replace('SELECT o.*', 'SELECT o.*, mm.member_role AS viewer_role')}
         JOIN organization_members mm ON mm.organization_id = o.id AND mm.user_id = ?
         WHERE o.status = 'active' ORDER BY o.name COLLATE NOCASE LIMIT ? OFFSET ?`)
       .all(req.principal.userId, limit + 1, offset)

@@ -38,6 +38,7 @@ import { useWindowedRows } from '../hooks/useWindowedRows';
 import { useDebounce } from '../hooks/useDebounce';
 import DatePicker from '../components/common/DatePicker';
 import { DistinctionTag } from '../components/profile/Distinction';
+import OrgAvatar from '../components/common/OrgAvatar';
 const CATEGORIES = ['All', 'School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 
 /**
@@ -450,7 +451,16 @@ export default function BrowseEvents({
   const canCreate = can(currentUser, 'event.create') && Boolean(currentUser?.verified);
   /* Same shape, same reasoning: `/organizations/new` enforces both conditions
      itself, and so does every server route behind it. */
-  const canCreateOrganization = can(currentUser, 'organization.create') && Boolean(currentUser?.verified);
+  /**
+   * Who sees the Organizations entry.
+   *
+   * `organization.join`, not `organization.create`. The destination is now a
+   * page listing the organizations you run OR belong to, and a student who has
+   * joined a club has organizations — gating the way in on the ability to
+   * CREATE one would hide their own clubs from them. Creating is a control on
+   * that page, gated separately and re-checked by the server.
+   */
+  const canSeeOrganizations = can(currentUser, 'organization.join');
 
   const hasFilters = query || category !== 'All' || !openOnly || showFavoritesOnly || selectedTags.length > 0 || advancedCount > 0;
   const clearFilters = () => {
@@ -496,7 +506,7 @@ export default function BrowseEvents({
       {/* `row-between row-wrap` is the same pair the student summary above uses —
           no new class, because this needs no layout the shell does not already
           have, and an undefined class fails `noDanglingClasses.test.js`. */}
-      {(canCreate || canCreateOrganization) && <div className="row-between row-wrap">
+      {(canCreate || canSeeOrganizations) && <div className="row-between row-wrap">
           <p className="lead">
             {total} opportunit{total === 1 ? 'y' : 'ies'} posted
           </p>
@@ -505,9 +515,9 @@ export default function BrowseEvents({
                 It was the header action on the Find people page, and deleting
                 that page without it would have left creating a club reachable
                 from nowhere at all. */}
-            {canCreateOrganization && (
-              <Link to="/organizations/new" className="btn btn-secondary">
-                <Building2 size={16} aria-hidden="true" /> New organization
+            {canSeeOrganizations && (
+              <Link to="/organizations" className="btn btn-secondary">
+                <Building2 size={16} aria-hidden="true" /> Organizations
               </Link>
             )}
             {canCreate && (
@@ -665,7 +675,7 @@ export default function BrowseEvents({
               {directory.organizations.map(org => (
                 <li key={org.id} className="list-row">
                   <Link to={`/organizations/${org.slug}`} className="card card-pad card-link directory-row">
-                    <span className="avatar directory-avatar" aria-hidden="true"><Building2 size={18} /></span>
+                    <OrgAvatar organization={org} className="directory-avatar" />
                     <span className="directory-body">
                       <span className="directory-name">{org.name}</span>
                       <span className="muted directory-meta">
@@ -695,7 +705,7 @@ export default function BrowseEvents({
               {browsedOrgs.map(org => (
                 <li key={org.id} className="list-row">
                   <Link to={`/organizations/${org.slug}`} className="card card-pad card-link directory-row">
-                    <span className="avatar directory-avatar" aria-hidden="true"><Building2 size={18} /></span>
+                    <OrgAvatar organization={org} className="directory-avatar" />
                     <span className="directory-body">
                       <span className="directory-name">{org.name}</span>
                       <span className="muted directory-meta">

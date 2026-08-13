@@ -32,6 +32,7 @@ const CreateEvent = React.lazy(() => import('../views/CreateEvent'));
 const PublicProfile = React.lazy(() => import('../views/PublicProfile'));
 const OrganizationPage = React.lazy(() => import('../views/OrganizationPage'));
 const OrganizationForm = React.lazy(() => import('../views/OrganizationForm'));
+const OrganizationsHome = React.lazy(() => import('../views/OrganizationsHome'));
 const LogExternalHours = React.lazy(() => import('../views/LogExternalHours'));
 const LoggedHours = React.lazy(() => import('../views/LoggedHours'));
 const VolunteerDashboard = React.lazy(() => import('../views/VolunteerDashboard'));
@@ -211,6 +212,17 @@ export const APP_ROUTES = [
   { path: '/users/id/:id', element: <PublicProfile />, requiredCap: 'directory.read' },
   { path: '/users/:handle', element: <PublicProfile />, requiredCap: 'directory.read' },
   /* Declared BEFORE `/organizations/:key`, so "new" is never matched as a slug. */
+  /**
+   * The organizations you run or belong to.
+   *
+   * `organization.join` rather than `organization.create`: a student who has
+   * joined a club has organizations, and this is where they are. Creating is a
+   * control ON this page, gated separately.
+   *
+   * Declared before `/organizations/:key` for the same reason `new` is — a
+   * bare `/organizations` must not be read as a slug.
+   */
+  { path: '/organizations', element: <OrganizationsHome />, requiredCap: 'organization.join' },
   { path: '/organizations/new', element: <OrganizationForm />, requiredCap: 'organization.create', requiresVerified: true },
   { path: '/organizations/:key/edit', element: <OrganizationForm />, requiredCap: 'organization.manage.own' },
   { path: '/organizations/:key', element: <OrganizationPage />, requiredCap: 'directory.read' },
