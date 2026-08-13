@@ -3503,7 +3503,13 @@ time { font-variant-numeric: tabular-nums; }
   .btn-sm,
   .btn-lg,
   .input,
-  .select {
+  .select,
+  /* The conversation search is a bare `<input>` inside `.search-bar`, with no
+     `.input` class, so every touch rule in this file passed straight over it and
+     it stayed 38px on a phone. Named explicitly rather than reclassed: giving it
+     `.input` would also give it that class's border, radius and background, and
+     `.search-bar` deliberately styles its own field. */
+  .search-bar input {
     min-height: 44px;
   }
   /* Square icon buttons need width too, or they stay a thin 44px-tall sliver. */
@@ -5603,6 +5609,73 @@ input:disabled + .premium-slider {
 }
 
 .auth-providers { display: flex; flex-direction: column; gap: var(--s3); }
+
+/**
+ * Keeping a provider button's contents inside the provider button.
+ *
+ * ── The bug ──
+ *
+ * At 320px the Microsoft logo rendered SIX PIXELS OUTSIDE the button's left
+ * edge, and its label ran past the right edge. Measured: the button is 256px,
+ * the content 263px.
+ *
+ * It looked Microsoft-specific and was not. All three buttons are the same flex
+ * row, centred, with `overflow: visible` and nothing telling either child how to
+ * behave when the row does not fit. `ProviderButtons` composes the label —
+ * `${p.label} — not set up on this site` — so the misconfigured state is around
+ * fifteen characters longer than "Continue with Google". Microsoft is simply the
+ * provider that is unconfigured on this deployment; Apple in the same state
+ * would overflow identically, and so would any provider whose name is long
+ * enough. Centred content that overflows spills out of BOTH ends, which is why
+ * the icon moved left while the text ran right.
+ *
+ * ── Why the fix lives here and not in the components ──
+ *
+ * Those three components set `display`, `gap` and `padding` inline, and an
+ * inline declaration cannot be overridden by a rule or a media query — the
+ * failure mode this stylesheet already records elsewhere. But they set nothing
+ * on their CHILDREN, so the containment rules land cleanly without an
+ * `!important` fight.
+ *
+ * The label wraps rather than truncating: "Microsoft — not set up on this s…"
+ * loses exactly the part that tells an operator their own deployment is
+ * misconfigured, which is the whole reason that wording exists.
+ */
+.btn-google > svg,
+.btn-microsoft > svg,
+.btn-apple > svg {
+  /* A brand mark is a fixed size. Squeezing it is not an option, so it is the
+     label that gives way. */
+  flex-shrink: 0;
+}
+
+.btn-google > span,
+.btn-microsoft > span,
+.btn-apple > span {
+  /* `min-width: 0` because a flex item's automatic minimum size is its content,
+     which is what let the text push the row wider than the button in the first
+     place. */
+  min-width: 0;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.25;
+}
+
+/**
+ * A focus ring, because these buttons had none.
+ *
+ * Hover is driven by `onMouseOver`/`onMouseOut` handlers that assign
+ * `style.backgroundColor` directly. A keyboard user never fires either, so the
+ * three sign-in buttons — the first controls on the first screen — gave no
+ * indication of where focus was. `:focus-visible` only paints for keyboard
+ * focus, so it costs the pointer path nothing.
+ */
+.btn-google:focus-visible,
+.btn-microsoft:focus-visible,
+.btn-apple:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
 
 /* Reason the submit button is disabled. Never left to the user to guess. */
 .auth-hint {

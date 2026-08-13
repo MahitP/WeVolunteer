@@ -131,7 +131,22 @@ gha-creds-*.json
 # The directory itself is not tracked either. `profilePictureRoutes.js` creates
 # it on demand (`mkdirSync` with `recursive: true`), so nothing depends on it
 # existing in a fresh clone.
+#
+# BOTH paths, because the rule named only the first one and pictures do not land
+# there. `UPLOADS_ROOT` resolves to `<repo>/public/uploads` — the path
+# `profilePicture.serving.test.js` asserts — while this rule guarded
+# `server/public/uploads/`, which nothing writes to. So the protection this
+# comment describes was not in force: a real student's photograph was still one
+# broad `git add` away from the repository.
+#
+# It is the same confusion that hid the picture bug in `vite.config.js`, and
+# `server/app.js` names it outright: `path.join(process.cwd(), 'public',
+# 'uploads')` means `server/public/uploads` under the npm workspace scripts and
+# `public/uploads` under vitest. Both are ignored rather than one being chosen,
+# because the cost of ignoring a directory nothing writes to is nil, and the cost
+# of guessing wrong again is a minor's photograph in every clone.
 server/public/uploads/
+public/uploads/
 
 # AI/editor assistant working directories.
 #
