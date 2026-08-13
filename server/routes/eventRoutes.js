@@ -40,6 +40,24 @@ const router = express.Router();
  * two queries for each of sixty cards, and a list is the surface where that
  * cost is actually paid.
  */
+/**
+ * The organizations this reader belongs to, as a Set of ids.
+ *
+ * One query for the whole page rather than one per card, for the same reason
+ * `viewerBansFor` is batched: a browse list is up to sixty events, and a
+ * membership lookup per card is sixty round trips to answer one question.
+ *
+ * Used only to decide what a members-only event SAYS. It is not the
+ * enforcement — `eventApplicationEligibility` re-reads the membership row when
+ * an application is actually made, and would refuse regardless of what this
+ * told the browser.
+ */
+function viewerMembershipsFor(userId) {
+  if (!userId) return new Set();
+  return new Set(db.prepare('SELECT organization_id FROM organization_members WHERE user_id = ?')
+    .all(userId).map(r => r.organization_id));
+}
+
 function viewerBansFor(userId) {
   if (!userId) return new Map();
 
@@ -378,6 +396,7 @@ router.get('/api/events', authenticateToken, (req, res) => {
 
     /* One lookup for the page rather than two per card — see viewerBansFor. */
     const viewerBans = viewerBansFor(req.user?.id);
+    const viewerOrgs = viewerMembershipsFor(req.user?.id);
 
     const formattedEvents = events.map(event => {
       const slots = slotsByEvent.get(event.id) || [];
@@ -441,6 +460,21 @@ router.get('/api/events', authenticateToken, (req, res) => {
         /* Who may apply. The client labels members-only events and explains
            ineligibility rather than showing a button that will be refused. */
         audience: event.audience || 'everyone',
+        /**
+         * Whether THIS reader is on the inside of that restriction.
+         *
+         * A members-only event is still listed to everybody and still says
+         * whose it is — hiding it would mean somebody who would happily join
+         * the club never learns the club exists. What changes is what the card
+         * says: "members only, and you are not one" instead of a button that
+         * 403s.
+         *
+         * Presentation only. The server re-reads the membership row on the
+         * application itself and refuses there.
+         */
+        viewerIsMember: event.organization_id
+          ? viewerOrgs.has(event.organization_id)
+          : null,
         /* The reader's own ban from the organization running this event, if
            any — see `viewerBansFor`. Only ever theirs; there is no parameter
            that could point it at somebody else. */
@@ -589,6 +623,7 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
       event.organizer_id === req.principal.userId;
     if (!isStaff) return res.status(403).json({ error: 'Access denied: You do not host this event' });
 
+    const viewerOrgs = viewerMembershipsFor(req.user?.id);
     const slots = db.prepare('SELECT * FROM slots WHERE event_id = ?').all(event.id);
     const acceptedBySlot = new Map();
     for (const r of db.prepare(`
@@ -637,6 +672,21 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
         /* Who may apply. The client labels members-only events and explains
            ineligibility rather than showing a button that will be refused. */
         audience: event.audience || 'everyone',
+        /**
+         * Whether THIS reader is on the inside of that restriction.
+         *
+         * A members-only event is still listed to everybody and still says
+         * whose it is — hiding it would mean somebody who would happily join
+         * the club never learns the club exists. What changes is what the card
+         * says: "members only, and you are not one" instead of a button that
+         * 403s.
+         *
+         * Presentation only. The server re-reads the membership row on the
+         * application itself and refuses there.
+         */
+        viewerIsMember: event.organization_id
+          ? viewerOrgs.has(event.organization_id)
+          : null,
         organizationName: event.organization_name || null,
         organizationSlug: event.organization_slug || null,
         /**

@@ -17,24 +17,44 @@ describe('route table', () => {
     expect(new Set(paths).size).toBe(paths.length);
   });
 
+  /* Both forms of the gate, so a route declared with `requiredCapAny` is not
+     quietly exempt from the typo check by not matching the filter. */
+  const capsOf = (r) => [r.requiredCap, ...(r.requiredCapAny || [])].filter(Boolean);
+
   it('names only real capabilities', () => {
-    for (const r of ROUTES.filter(r => r.requiredCap)) {
-      // can() denies unknown capabilities, so a super_admin being denied proves a typo.
-      expect(can({ id: 'x', role: 'super_admin' }, r.requiredCap), `bad cap on ${r.path}`).toBe(true);
+    for (const r of ROUTES) {
+      for (const cap of capsOf(r)) {
+        // can() denies unknown capabilities, so a super_admin being denied proves a typo.
+        expect(can({ id: 'x', role: 'super_admin' }, cap), `bad cap ${cap} on ${r.path}`).toBe(true);
+      }
     }
   });
 
   it('lets a super_admin reach every gated route', () => {
-    for (const r of ROUTES.filter(r => r.requiredCap)) {
-      expect(can({ id: 'x', role: 'super_admin' }, r.requiredCap)).toBe(true);
+    for (const r of ROUTES.filter(r => capsOf(r).length)) {
+      expect(capsOf(r).some(c => can({ id: 'x', role: 'super_admin' }, c)), r.path).toBe(true);
     }
   });
 
   it('gates organizer-only routes against students', () => {
     const create = ROUTES.find(r => r.path === '/events/new');
-    expect(create?.requiredCap).toBeTruthy();
-    expect(can({ id: 'x', role: 'student' }, create.requiredCap)).toBe(false);
-    expect(can({ id: 'x', role: 'organizer' }, create.requiredCap)).toBe(true);
+    const caps = capsOf(create);
+    expect(caps.length).toBeGreaterThan(0);
+    expect(caps.some(c => can({ id: 'x', role: 'student' }, c))).toBe(false);
+    expect(caps.some(c => can({ id: 'x', role: 'organizer' }, c))).toBe(true);
+  });
+
+  it('opens /events/new to a Student Organizer, and to nobody else who is a student', () => {
+    /**
+     * The rank is a per-person GRANT, not a role capability — so this is the
+     * one place the client's `can()` has to read `grants` for the page to be
+     * reachable at all. A student with no grant is refused by the same table.
+     */
+    const create = ROUTES.find(r => r.path === '/events/new');
+    const caps = capsOf(create);
+    const helper = { id: 'x', role: 'student', grants: ['organization.event.create'] };
+    expect(caps.some(c => can(helper, c))).toBe(true);
+    expect(caps.some(c => can({ id: 'x', role: 'student', grants: [] }, c))).toBe(false);
   });
 });
 

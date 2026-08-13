@@ -7959,6 +7959,12 @@ input:disabled + .premium-slider {
    thing they prevent. */
 .event-ban-notice { margin-bottom: var(--s4); }
 
+/* ── components/EventModal.jsx ──
+   The members-only notice. Same spacing as the ban notice above it — they
+   occupy the same position and only one is ever shown, so a different gap
+   would make the panel jump between two readers of the same event. */
+.event-members-only { margin-bottom: var(--s4); }
+
 .appeal-inbox-item {
   padding: var(--s4) 0;
   border-top: 1px solid var(--rule);

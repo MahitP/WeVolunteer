@@ -172,7 +172,23 @@ export const APP_ROUTES = [
    * noun for that, the same way `event.create` is still the right capability,
    * and renaming them would be renaming the concept rather than the page.
    */
-  { path: '/events/new', element: <CreateEvent />, requiredCap: 'event.create', requiresVerified: true },
+  /**
+   * Two capabilities reach this form, and neither implies the other.
+   *
+   * `event.create` is the organizer's: put a shift up anywhere, under your own
+   * name. `organization.event.create` is the Student Organizer's: put one up for
+   * the club you help run. A student holds the second only while they hold the
+   * rank, and the form itself refuses to submit without an organization for
+   * them — the same refusal the server gives.
+   *
+   * Declared as `requiredCapAny` rather than by dropping the gate, so a plain
+   * student still never reaches the page.
+   */
+  {
+    path: '/events/new', element: <CreateEvent />,
+    requiredCapAny: ['event.create', 'organization.event.create'],
+    requiresVerified: true,
+  },
   { path: '/events/:id/edit', element: <RedirectToEvent /> },
   { path: '/checkin/:eventId', element: <CheckInView />, requiredCap: 'attendance.mark' },
   { path: '/calendar', element: <CalendarView />, requiredCap: 'event.view' },

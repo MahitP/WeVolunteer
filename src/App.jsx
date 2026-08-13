@@ -811,11 +811,13 @@ function shellServes(pathname) {
  *
  * The two conditions below MIRROR the route table's own element ternary exactly
  * — `requiresVerified` first, then `requiredCap` — and deliberately nothing
- * more. This function decides whether the shell is built at all, so any
- * condition here that the table does not also apply would refuse a route the
- * table would have rendered, with no way for the reader to reach it. The NAV
- * table in this file additionally supports `requiredCapAny`; APP_ROUTES does
- * not use it, and this must not start honouring it before the table does.
+ * more, plus `requiredCapAny` — which both now honour. This function decides
+ * whether the shell is built at all, so any condition here that the table does
+ * not also apply would refuse a route the table would have rendered, with no way
+ * for the reader to reach it; and any condition the table applies that this does
+ * not would build a shell around a page the reader is then refused, which is the
+ * same drift the other way round. The two lists below must stay identical to the
+ * element ternary further down.
  */
 function deniedRoute(pathname, user) {
   const matched = matchRoutes(APP_ROUTES.map(r => ({ path: r.path, route: r })), pathname);
@@ -824,6 +826,7 @@ function deniedRoute(pathname, user) {
 
   if (route.requiresVerified && !user.verified) return route;
   if (route.requiredCap && !can(user, route.requiredCap)) return route;
+  if (route.requiredCapAny?.length && !route.requiredCapAny.some(c => can(user, c))) return route;
   return null;
 }
 
@@ -1319,7 +1322,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     /* Redirect elements, so they take nothing — declared `{}` rather than
        omitted, because `withProps` treats an omission as a forgotten entry. */
     '/events': {},
-    '/events/new': { onSubmitEvent: handleCreateEvent, addToast, setActiveTab },
+    '/events/new': { onSubmitEvent: handleCreateEvent, addToast, setActiveTab, currentUser },
     '/events/:id/edit': {},
     '/checkin/:eventId': { currentUser, addToast },
     '/calendar': { currentUser, events, applications, onViewEvent: openEventById },
@@ -1614,9 +1617,14 @@ function AppShell({ toasts, addToast, removeToast }) {
                   element={
                     route.requiresVerified && !currentUser.verified
                       ? deniedFallback(route)
-                      : route.requiredCap
+                      : (route.requiredCap || route.requiredCapAny?.length)
                         ? (
-                          <Can user={currentUser} cap={route.requiredCap} fallback={deniedFallback(route)}>
+                          <Can
+                            user={currentUser}
+                            cap={route.requiredCap}
+                            capAny={route.requiredCapAny}
+                            fallback={deniedFallback(route)}
+                          >
                             {withProps(route, appRouteProps)}
                           </Can>
                         )
