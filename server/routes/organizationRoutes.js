@@ -210,6 +210,9 @@ router.patch('/api/organizations/:key', authenticateToken, requireCap('organizat
   /* The emoji mark. `null` clears it, which is why the check is on `undefined`
      and not on truthiness — an organization may go back to having none. */
   if (check.value.avatar !== undefined) { updates.push('avatar = ?'); values.push(check.value.avatar); }
+  if (check.value.avatarColor !== undefined) {
+    updates.push('avatar_color = ?'); values.push(check.value.avatarColor);
+  }
   if (check.value.allowReplies !== undefined) {
     updates.push('allow_replies = ?'); values.push(check.value.allowReplies ? 1 : 0);
   }

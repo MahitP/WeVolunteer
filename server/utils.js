@@ -661,6 +661,7 @@ export function formatUserResponse(row) {
     ],
     tfaRequired: secondFactorRequiredFor(row.role, row) && !row.tfa_enabled && !row.tfa_email_enabled,
     avatar: row.avatar,
+    avatarColor: row.avatar_color || null,
     profile_picture_url: row.profile_picture_url,
     volunteeredHours: totalHours,
     /**

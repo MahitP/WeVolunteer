@@ -832,7 +832,13 @@ time { font-variant-numeric: tabular-nums; }
   width: 30px;
   height: 30px;
   border-radius: var(--r-full);
-  background: var(--brand-tint);
+  /**
+   * `--avatar-bg` when the person or organization chose one, otherwise the
+   * shared tint. Driven by a custom property rather than a class so the
+   * twenty-one places that already render `.avatar` keep working untouched and
+   * can pass a colour whenever they are ready to.
+   */
+  background: var(--avatar-bg, var(--brand-tint));
   display: grid;
   place-items: center;
   font-size: 0.9375rem;
@@ -7621,6 +7627,98 @@ input:disabled + .premium-slider {
     white-space: nowrap;
   }
 }
+
+/**
+ * The avatar palette.
+ *
+ * Declared here rather than as hex literals in JavaScript for two reasons: the
+ * stylesheet is where this project keeps colour, and a token can be retuned for
+ * dark mode without rewriting anybody's stored row — the column holds a KEY like
+ * `sage`, never a value.
+ *
+ * Chosen to stay distinguishable at 24px (the smallest avatar drawn anywhere)
+ * and to leave emoji legible on top.
+ */
+:root {
+  --avatar-sage: #cfe3d4;
+  --avatar-sky: #cfe0f2;
+  --avatar-lavender: #ded6f2;
+  --avatar-blossom: #f5d6e0;
+  --avatar-clay: #f2ded0;
+  --avatar-sand: #efe6cf;
+  --avatar-mint: #d2eee6;
+  --avatar-slate: #dcdfe4;
+
+  /* Set per element by whatever is drawing an avatar or a swatch. Declared so
+     the token guard can see them; the fallback is what actually applies when
+     nobody has chosen a colour. */
+  --avatar-bg: var(--brand-tint);
+  --swatch: var(--brand-tint);
+}
+
+/* ── Emoji avatar picker ─────────────────────────────────────────────────── */
+
+.emoji-picker { display: block; }
+.emoji-grid-wrap {
+  max-height: 15rem;
+  overflow-y: auto;
+  padding-right: var(--s2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  padding: var(--s3);
+}
+.emoji-group + .emoji-group { margin-top: var(--s4); }
+.emoji-group-name {
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: var(--s2);
+}
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(2.5rem, 1fr));
+  gap: var(--s2);
+}
+/* 40px on a desktop, lifted to the 44px floor by the coarse-pointer block. */
+.emoji-option {
+  aspect-ratio: 1;
+  min-height: 2.5rem;
+  display: grid;
+  place-items: center;
+  font-size: 1.25rem;
+  line-height: 1;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.emoji-option:hover { background: var(--surface-3); }
+.emoji-option.is-selected {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+}
+.emoji-colours { gap: var(--s2); margin-top: var(--s2); }
+.emoji-colour {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-full);
+  border: 2px solid transparent;
+  background: var(--swatch);
+  cursor: pointer;
+}
+.emoji-colour.is-selected { border-color: var(--ink); }
+/* The search field's magnifier sits inside the input rather than beside it. */
+.input-with-icon { position: relative; display: block; }
+.input-with-icon > svg {
+  position: absolute;
+  left: var(--s3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-3);
+  pointer-events: none;
+}
+.input-with-icon .input { padding-left: 2rem; }
 
 /* Organization announcements */
 .org-announcement {

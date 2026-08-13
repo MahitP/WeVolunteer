@@ -13,22 +13,6 @@
  */
 import { useState, useEffect } from 'react';
 
-/**
- * Marks an organization can wear.
- *
- * Deliberately not the palette in `ProfileEditModal`: that one is faces,
- * because it is for a person, and 👩‍⚕️ is a poor mark for a food bank. These are
- * the things clubs actually are — a sport, a cause, a subject.
- *
- * A short list rather than a full emoji keyboard. Every one of these renders
- * legibly at avatar size on every platform, which an arbitrary emoji does not,
- * and choosing from sixteen takes a second where choosing from three thousand
- * takes a minute.
- */
-const ORG_ICONS = [
-  '🏫', '🌱', '🍎', '📚', '⚽', '🎭', '🎨', '🐾',
-  '🏥', '🤝', '🌍', '🎵', '🔬', '🏃', '🍲', '⭐',
-];
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { AlertCircle, Building2, Archive, ImagePlus } from 'lucide-react';
 import { api } from '../utils/api';
@@ -37,6 +21,7 @@ import EmptyState from '../components/common/EmptyState';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import TagInput from '../components/common/TagInput';
 import { normaliseTag } from '../eventTags.js';
+import EmojiAvatarPicker from '../components/common/EmojiAvatarPicker';
 
 /**
  * A stored tag label, as the chip `TagInput` expects.
@@ -52,7 +37,7 @@ export default function OrganizationForm({ addToast }) {
   const navigate = useNavigate();
   const editing = Boolean(key);
 
-  const [form, setForm] = useState({ name: '', description: '', tags: [], avatar: null, allowReplies: true });
+  const [form, setForm] = useState({ name: '', description: '', tags: [], avatar: null, avatarColor: null, allowReplies: true });
   const [imageUrl, setImageUrl] = useState(null);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(editing);
@@ -74,6 +59,7 @@ export default function OrganizationForm({ addToast }) {
           name: res.organization.name,
           description: res.organization.description,
           avatar: res.organization.avatar ?? null,
+          avatarColor: res.organization.avatarColor ?? null,
           allowReplies: res.organization.allowReplies !== false,
           /* Stored as plain labels; `TagInput` renders `{tag, label}` chips.
              Mapping in here and back out on submit keeps the shared editor
@@ -122,7 +108,7 @@ export default function OrganizationForm({ addToast }) {
       const tags = form.tags.map(t => (typeof t === 'string' ? t : t.label));
       const body = {
         name: form.name.trim(), description: form.description, tags,
-        avatar: form.avatar, allowReplies: form.allowReplies,
+        avatar: form.avatar, avatarColor: form.avatarColor, allowReplies: form.allowReplies,
       };
       const res = editing
         ? await api.updateOrganization(key, body)
@@ -263,30 +249,16 @@ export default function OrganizationForm({ addToast }) {
               </div>
             )}
 
-            <div className="row row-wrap org-icon-picker" role="radiogroup" aria-labelledby="org-icon-label">
-              <button
-                type="button"
-                role="radio"
-                aria-checked={!form.avatar}
-                className={`btn btn-secondary btn-sm ${!form.avatar ? 'is-selected' : ''}`}
-                onClick={() => set('avatar', null)}
-              >
-                None
-              </button>
-              {ORG_ICONS.map(icon => (
-                <button
-                  key={icon}
-                  type="button"
-                  role="radio"
-                  aria-checked={form.avatar === icon}
-                  aria-label={`Use ${icon} as the organization icon`}
-                  className={`btn btn-secondary btn-sm btn-icon ${form.avatar === icon ? 'is-selected' : ''}`}
-                  onClick={() => set('avatar', icon)}
-                >
-                  <span aria-hidden="true">{icon}</span>
-                </button>
-              ))}
-            </div>
+            <EmojiAvatarPicker
+              emoji={form.avatar}
+              color={form.avatarColor}
+              idPrefix="org"
+              onChange={patch => setForm(f => ({
+                ...f,
+                ...('emoji' in patch ? { avatar: patch.emoji } : {}),
+                ...('color' in patch ? { avatarColor: patch.color } : {}),
+              }))}
+            />
           </div>
 
           <div className="field">
