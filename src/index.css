@@ -4512,6 +4512,10 @@ time { font-variant-numeric: tabular-nums; }
   margin-bottom: var(--s4);
 }
 
+/* Both levels: the heading here is `h2` when the empty state is the only thing
+   under the page's `h1`, and `h3` when it sits inside a titled section. The look
+   is the same either way — the level is about the document outline, not size. */
+.empty-state-content h2,
 .empty-state-content h3 {
   font-family: var(--font-display);
   font-size: 1.125rem;
