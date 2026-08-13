@@ -77,7 +77,11 @@ export default function BadgesList({ userId }) {
 
   return (
     <section className="card card-pad stack-sm" aria-labelledby="badges-heading">
-      <h3 id="badges-heading">Badges</h3>
+      {/* `h2`, matching every sibling section on the profile — "Coming up",
+          "Service record", "Milestones", "Certificates". As an `h3` under the
+          page's `h1` it both skipped a level and sat a level below its own
+          peers. One caller, so there is no other context to keep in step. */}
+      <h2 id="badges-heading">Badges</h2>
 
       {error && <p className="small dim" role="status">{error}</p>}
 
