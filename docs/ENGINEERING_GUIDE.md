@@ -2069,6 +2069,15 @@ Kept rather than deleted, because the reasoning is the part worth having.
 - **Fix.** Replaced the clock-dependent inputs (`datetime('now')` and `isoFromNow`) with hardcoded, explicit same-day strings (`2026-07-31T16:00:00.000Z` vs `2026-07-31 20:00:00`) for the lexicographic demonstration. This makes the test deterministic regardless of the wall clock time.
 - **Opened and closed:** 2026-07-31.
 
+#### TD-22 — historical PII in published git refs — **accepted, deferred by the owner**
+
+- **Symptom.** Nine git refs pin commits whose contents include real pilot participants' data — minors' names and service records — as they stood before the demo/QA seeding conventions were introduced. The data is reachable to anybody who can read those refs.
+- **Why it is not a launch blocker.** The repository is **private**. The population that can reach those refs is exactly the population already trusted with the live database, so removing them changes who can see the data by approximately nobody. The exposure is real but its blast radius is the same set of people either way.
+- **Owner decision (2026-08-13).** Accepted and deferred. Explicitly **not** a launch blocker, and history is **not** to be rewritten: a rebase or filter across published refs would invalidate every existing clone and checkout for a benefit that, on a private repository, is close to nil.
+- **What would change this.** Making the repository public, granting read access to anybody outside the group already trusted with production data, or a regulatory request that reaches historical copies. Any of those reopens this at the top of the queue, and the remedy at that point is history rewriting with every collaborator warned in advance — not a quiet fix.
+- **Deliberately not done.** No `filter-repo`, no force-push, no ref deletion. Recording the decision is the deliverable.
+- **Opened:** 2026-08-13. **Status:** accepted debt, reviewed at each release.
+
 ### Register maintenance
 
 Review at every release. When closing an item, note the commit that closed it.

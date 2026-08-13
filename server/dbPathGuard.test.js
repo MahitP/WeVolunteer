@@ -4,6 +4,7 @@ import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -56,7 +57,17 @@ function boot({ dbPath, nodeEnv, cwd = ROOT }) {
       // character is rejected for having no entropy, which is correct of it and
       // was the first thing this harness got wrong.
       JWT_SECRET: 'Xk7fQ2mZp9RtLw4vBn6yHs3JdCa8EgUo1TiVr5MzOxNbKlPq',
-      TFA_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64')
+      /**
+       * A REAL key, for the same reason the secret above is a real one.
+       *
+       * This was `Buffer.alloc(32, 7)` — the right length, and every byte
+       * identical. `TFA_ENCRYPTION_KEY` used to check only base64 validity and
+       * length, so it passed; now that the entropy floor exists it is refused,
+       * and these three tests failed on a fatal boot guard that has nothing to
+       * do with database paths. Generated per-run rather than hard-coded so this
+       * harness cannot drift back into supplying a value production would reject.
+       */
+      TFA_ENCRYPTION_KEY: randomBytes(32).toString('base64')
     }
   });
 

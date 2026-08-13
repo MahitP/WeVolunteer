@@ -164,6 +164,48 @@ function resolveTfaKey() {
       + 'AES-256 takes a 256-bit key.'
     );
   }
+
+  /**
+   * A key of the right SHAPE can still be no key at all.
+   *
+   * `JWT_SECRET` a hundred lines above refuses placeholders and low-entropy
+   * values; this function only ever checked base64 validity and length. The
+   * development key is valid base64 and decodes to exactly 32 bytes — every one
+   * of them ZERO — so an operator who copied it from this file, or from a
+   * tutorial, into `/etc/wevolunteer/wevolunteer.env` would have booted
+   * production with AES-256 keyed on a published constant of all zeros, and
+   * nothing would have said a word.
+   *
+   * Every stored two-factor secret is encrypted with this. A guessable key means
+   * anybody who reads the database can mint valid codes for an administrator,
+   * which is the entire thing the second factor exists to prevent.
+   *
+   * The distinct-byte floor rather than an equality check on the dev key alone:
+   * a hand-typed "key" of repeated characters is the same defect wearing a
+   * different value, and a real 32-byte random key has around thirty distinct
+   * bytes. Eight is the same floor `describeWeakSecret` applies to JWT_SECRET.
+   */
+  const distinctBytes = new Set(bytes).size;
+  const weakness = configured.trim() === DEV_TFA_KEY
+    ? 'it is the development key published in this source file'
+    : distinctBytes < 8
+      ? `it has only ${distinctBytes} distinct byte values, so it carries no real entropy`
+      : null;
+
+  if (weakness) {
+    const message =
+      `TFA_ENCRYPTION_KEY is not usable as an encryption key: ${weakness}.\n`
+      + 'Stored two-factor secrets are encrypted with it, so a guessable key lets\n'
+      + 'anyone who reads the database mint valid codes for any account.\n'
+      + "Generate one with:  node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"";
+    /* Fatal in production, loud in development — the same split JWT_SECRET
+       uses, and for the same reason: refusing to boot locally over the
+       documented dev key would push somebody to paste a real production key
+       into their .env to get past it. */
+    if (IS_PRODUCTION) throw new Error(`FATAL: ${message}`);
+    console.warn(`[config] WARNING: ${message}`);
+  }
+
   return configured;
 }
 
