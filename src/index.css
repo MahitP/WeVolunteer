@@ -3519,6 +3519,24 @@ time { font-variant-numeric: tabular-nums; }
     min-height: 44px;
   }
   /**
+   * Two controls on the signup screen that no touch rule reached.
+   *
+   * `.dp-toggle` — the calendar button beside the date of birth field — was
+   * 28×28, and `.choice` — the ten avatar buttons — were 40×40. Neither carries
+   * `.btn` or `.btn-icon`, so every block in this file passed over them, and
+   * signup is the one screen every student uses exactly once, on a phone,
+   * usually while somebody is telling them to hurry up.
+   *
+   * The consent checkbox next to them is deliberately NOT here: it is 22px but
+   * has a `label[for]` wrapping the full sentence, so the thing you tap is
+   * already large. Growing the box would only misalign it against its text.
+   */
+  .dp-toggle,
+  .choice {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  /**
    * Tabs, which were ~40px and in none of the three touch-target blocks.
    *
    * That mattered more after v1.3.1: the discovery scope tabs (Everything /
