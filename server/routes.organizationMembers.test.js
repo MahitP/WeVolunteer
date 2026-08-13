@@ -425,6 +425,27 @@ describe('removing an organization member', () => {
       expect(note.body).toMatch(/can still join/i);
     });
 
+    it('cannot be undone by promoting the banned person instead', async () => {
+      /**
+       * The obvious way round a ban that is enforced only on the join route: a
+       * manager (or a compromised one) sets the banned person's role directly
+       * and hopes the row comes back.
+       *
+       * It cannot, because that route is an UPDATE and a removed member has no
+       * row to update. Asserted rather than assumed, since a future edit to
+       * `INSERT OR REPLACE` there would quietly reinstate anybody.
+       */
+      await removeWith(studentId, { mode: 'ban', reason: 'Repeated no-shows.' });
+
+      const promote = await srv.call(
+        'PATCH', `/api/organizations/${orgKey}/members/${studentId}`,
+        { memberRole: 'manager' }, manager,
+      );
+
+      expect(promote.status, 'a banned person must not be reinstated by a role change').toBe(404);
+      expect(isMember(studentId)).toBe(false);
+    });
+
     it('never revokes an hour, whichever it was', async () => {
       /* The property every removal path in this product shares. */
       const before = db.prepare(

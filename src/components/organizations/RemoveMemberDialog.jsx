@@ -30,8 +30,11 @@ export default function RemoveMemberDialog({ member, organizationName, busy, onC
   const banning = mode === 'ban';
   const canConfirm = !busy && (!banning || reason.trim().length > 0);
 
+  /* No `size` prop below: `Modal` only emits a class for `lg`, so passing "sm"
+     was a no-op that read as a deliberate choice. The default width suits this
+     anyway — on a phone the modal is a full-height sheet either way. */
   return (
-    <Modal onClose={onCancel} label={`Remove ${member.name} from ${organizationName}`} size="sm">
+    <Modal onClose={onCancel} label={`Remove ${member.name} from ${organizationName}`}>
       <ModalHead
         title={banning ? `Ban ${member.name}?` : `Remove ${member.name}?`}
         description={banning
