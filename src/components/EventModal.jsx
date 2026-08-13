@@ -12,6 +12,7 @@ import {
   selectionMethodLabel, eventPermissions, usesAutoSelect, haversineDistance
 } from '../utils/helpers';
 import { useLocationContext } from '../contexts/LocationContext';
+import TagChips from './common/TagChips';
 import LocationLink from './location/LocationLink';
 import DirectionsButton from './location/DirectionsButton';
 import MapReveal from './location/MapReveal';
@@ -426,6 +427,30 @@ export default function EventModal({
           />
         ) : (
           <div className="modal-body">
+            {/**
+              * ── Every tag, which is what this surface is for ──
+              *
+              * The card shows four and counts the rest; this is where the rest
+              * are. Until now they were nowhere: the only full list in the
+              * codebase was in `EventDetailsExperience.jsx`, which has no
+              * importers, so a `+9` on a card pointed at a page that did not
+              * exist. `limit={Infinity}` rather than a large number, because
+              * "all of them" is the rule and a number would be a second cap to
+              * keep in step with `MAX_TAGS_PER_EVENT`.
+              *
+              * Interactive when the caller can filter, inert otherwise —
+              * `onSelect` is `TagChips`'s own test for that, and the modal
+              * opens over a filterable list on Discover but also over places
+              * that have no filter to drive.
+              */}
+            {event.tags?.length > 0 && (
+              <TagChips
+                tags={event.tags}
+                limit={Infinity}
+                className="event-modal-tags"
+              />
+            )}
+
             {/* ── Facts ── */}
             <div className="inset" style={{ marginBottom: 'var(--s5)' }}>
               <div className="grid grid-3" style={{ gap: 'var(--s4)' }}>

@@ -244,6 +244,22 @@ export function tagsForEvents(db, eventIds) {
  * suggestion list is a vocabulary, not a result count, and joining to `events` to
  * exclude cancelled ones would make the list flicker as events close.
  */
+/**
+ * How many tags the browse filter bar offers.
+ *
+ * Fifteen, because the bar is a row of chips above a list of events and fifty
+ * of them wrapped into a wall a reader had to scroll past to reach what they
+ * came for. The cut is by USAGE — `tagVocabulary` counts rows in `event_tags`
+ * and breaks ties on the key — so the ones that survive are the ones organizers
+ * actually use, and the same fifteen come back every time rather than a
+ * different fifteen per request.
+ *
+ * It is a DISPLAY cap and not a filtering one: `GET /api/events/tags?limit=`
+ * still serves the wider vocabulary, and a tag chosen from a link keeps working
+ * whether or not it made the fifteen.
+ */
+export const BROWSE_TAG_LIMIT = 15;
+
 export function tagVocabulary(db, { limit = 50 } = {}) {
   return db
     .prepare(

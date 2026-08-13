@@ -26,17 +26,38 @@ import React, { useState } from 'react';
  * "AnimalShelter" rather than "hash AnimalShelter" eight times. It is not stored:
  * the normaliser strips it precisely so `#NHS` and `NHS` are one concept.
  */
+/**
+ * ── `expandable`, and why a card does not get it ──
+ *
+ * Expanding in place is right where the chips ARE the surface — the tag row on
+ * a details page has room to grow. On a card in a scannable list it is the
+ * behaviour the preview limit exists to prevent: twelve tags become three lines
+ * and push the title, the date and the seat count out of view, which is exactly
+ * what a reader scanning twenty cards does not want.
+ *
+ * So a card renders the overflow as a COUNT rather than a control. That is not
+ * the "+3 that does nothing" this file's header warns about: the card is itself
+ * a link to the event, the full list is on the other side of it, and the count
+ * is marked up as text rather than dressed as a button somebody could press in
+ * vain.
+ *
+ * Default `true`, so every existing caller behaves exactly as before.
+ */
 export default function TagChips({
   tags = [],
-  limit = 3,
+  limit = 4,
   onSelect = null,
   className = '',
+  expandable = true,
 }) {
   const [expanded, setExpanded] = useState(false);
 
   if (!tags.length) return null;
 
-  const shown = expanded ? tags : tags.slice(0, limit);
+  /* `limit` is a maximum, never a minimum: a negative or non-numeric value
+     would otherwise make `slice` count from the end and show the LAST tags. */
+  const cap = Number.isFinite(limit) && limit >= 0 ? limit : tags.length;
+  const shown = expanded && expandable ? tags : tags.slice(0, cap);
   const hidden = tags.length - shown.length;
 
   /**
@@ -72,20 +93,31 @@ export default function TagChips({
 
       {hidden > 0 && (
         <li>
-          <button
-            type="button"
-            className="tag-chip tag-chip-more"
-            onClick={() => setExpanded(true)}
-            aria-expanded={false}
-            /* Names the count, because "+3" alone is not a sentence. */
-            aria-label={`Show ${hidden} more ${hidden === 1 ? 'tag' : 'tags'}`}
-          >
-            +{hidden}
-          </button>
+          {expandable ? (
+            <button
+              type="button"
+              className="tag-chip tag-chip-more"
+              onClick={() => setExpanded(true)}
+              aria-expanded={false}
+              /* Names the count, because "+3" alone is not a sentence. */
+              aria-label={`Show ${hidden} more ${hidden === 1 ? 'tag' : 'tags'}`}
+            >
+              +{hidden}
+            </button>
+          ) : (
+            /* A count, not a control — see the note on `expandable`. The label
+               says where the rest are, so the number is not a dead end. */
+            <span
+              className="tag-chip tag-chip-more"
+              aria-label={`and ${hidden} more ${hidden === 1 ? 'tag' : 'tags'}, shown when you open this event`}
+            >
+              +{hidden}
+            </span>
+          )}
         </li>
       )}
 
-      {expanded && tags.length > limit && (
+      {expandable && expanded && tags.length > cap && (
         <li>
           <button
             type="button"
