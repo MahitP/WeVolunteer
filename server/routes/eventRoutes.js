@@ -12,7 +12,7 @@ import { can, requireCap, requireCapAny } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
-import { validateTags, replaceEventTags, tagsForEvent, tagsForEvents, tagVocabulary } from '../eventTags.js';
+import { validateTags, replaceEventTags, tagsForEvent, tagsForEvents, tagVocabulary, BROWSE_TAG_LIMIT } from '../eventTags.js';
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
 import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
@@ -416,7 +416,10 @@ router.get('/api/events', authenticateToken, (req, res) => {
      * browse screen renders its filter bar from the response it already makes,
      * instead of a second round trip on first paint.
      */
-    const tags = tagVocabulary(db);
+    /* The fifteen most used, not the fifty this defaults to — see
+       BROWSE_TAG_LIMIT. Ordered by usage with a deterministic tie-break, so the
+       bar does not reshuffle between requests. */
+    const tags = tagVocabulary(db, { limit: BROWSE_TAG_LIMIT });
 
     res.json({
       events: formattedEvents,

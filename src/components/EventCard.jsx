@@ -72,7 +72,7 @@ export default function EventCard({
               chips wrap to three lines and push the date and spots out of view.
               Inert here — there is no filter on a card to drive, and a chip that
               looks clickable and is not is worse than plain metadata. */}
-          <TagChips tags={event.tags} limit={3} />
+          <TagChips tags={event.tags} limit={4} expandable={false} />
         </div>
         {currentUser?.role === 'student' && onToggleFavorite && <button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={e => {
         e.stopPropagation();

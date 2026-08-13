@@ -84,6 +84,38 @@ export function discoveryAnnouncement(directory) {
   if (orgs > 0) parts.push(`${orgs} ${orgs === 1 ? 'organization' : 'organizations'}`);
   return `${parts.join(' and ')} found`;
 }
+/**
+ * The filter bar's chips: the popular fifteen, plus anything already ticked.
+ *
+ * ── Why a selected tag is forced back in ──
+ *
+ * The server sends the fifteen most-USED tags (`BROWSE_TAG_LIMIT`), recomputed
+ * on every request. A tag can therefore be selected and then fall out of that
+ * fifteen — usage shifts, an organizer retags an event, a filter change brings
+ * back a different slice. When that happens the list is still filtered by the
+ * tag while its chip has gone: the reader sees a shortened list, no indication
+ * why, and no control to switch it off.
+ *
+ * So a selected tag is always shown. Its label comes from the events on screen,
+ * where the organizer's real spelling lives, and falls back to the normalised
+ * key — ugly, but true, and better than a chip with no words on it.
+ *
+ * Pure and exported because the alternative is testing it by rendering the
+ * whole browse screen, and the case worth testing is precisely the one that is
+ * awkward to reach through the UI.
+ */
+export function tagChipsToShow(tagOptions = [], selectedTags = [], events = []) {
+  const shown = new Map((tagOptions || []).map(t => [t.tag, t]));
+  for (const tag of selectedTags || []) {
+    if (shown.has(tag)) continue;
+    const fromEvents = (events || [])
+      .flatMap(e => e?.tags || [])
+      .find(t => t?.tag === tag);
+    shown.set(tag, { tag, label: fromEvents?.label || tag });
+  }
+  return [...shown.values()];
+}
+
 export default function BrowseEvents({
   currentUser,
   applications = [],
@@ -254,6 +286,11 @@ export default function BrowseEvents({
 
   const PAGE_SIZE = 60;
 
+
+  const visibleTagOptions = useMemo(
+    () => tagChipsToShow(tagOptions, selectedTags, results),
+    [tagOptions, selectedTags, results],
+  );
 
   /** Exactly what the server needs; `undefined` values are dropped by the api layer. */
   const serverFilters = useMemo(() => ({
@@ -787,10 +824,10 @@ export default function BrowseEvents({
           * of controls beside the category chips, and each chip already reports
           * its own pressed state.
           */}
-        {tagOptions.length > 0 && (
+        {visibleTagOptions.length > 0 && (
           <div className="row row-wrap s-775d10" role="group" aria-label="Filter by tag">
             <div className="chips">
-              {tagOptions.map(({ tag, label }) => {
+              {visibleTagOptions.map(({ tag, label }) => {
                 const on = selectedTags.includes(tag);
                 return (
                   <button

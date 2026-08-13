@@ -1276,6 +1276,22 @@ time { font-variant-numeric: tabular-nums; }
 .datechip {
   width: 46px;
   flex-shrink: 0;
+  /**
+   * A tear-off is its own size, whatever stands beside it.
+   *
+   * Every parent that renders one is a flex row that never set `align-items`,
+   * so the default `stretch` applied and this fixed-WIDTH box grew to whatever
+   * HEIGHT its sibling column happened to be. On Discover that made one card's
+   * chip 72px against another's 45px — and the difference had nothing to do
+   * with the date: the taller card carried a row of tag chips, and the shorter
+   * one did not.
+   *
+   * Fixed here rather than on the parents because there are several of them
+   * (the event card, the organizer dashboard, the organizer profile) and they
+   * would have to agree forever. A calendar chip has no reason to stretch in
+   * any of them.
+   */
+  align-self: flex-start;
   border: 1px solid var(--rule);
   border-radius: var(--r-sm);
   overflow: hidden;
@@ -8906,6 +8922,10 @@ input:disabled + .premium-slider {
 
    Every colour is a token, so both themes come from the same rules — there is no
    dark-mode block here because there is nothing hardcoded to override. */
+/* The full tag list on the event details modal, above the facts inset. The
+   card's row is dense by design; this one has room to breathe. */
+.event-modal-tags { margin-bottom: var(--s4); }
+
 .tag-chips {
   display: flex;
   flex-wrap: wrap;
