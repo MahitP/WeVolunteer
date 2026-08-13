@@ -1,6 +1,6 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { DEMO_MODE } from '../config.js';
+import { DEMO_MODE, PLATFORM_OWNER_USERNAME } from '../config.js';
 import { documentBySlug } from '../legalDocuments.js';
 import { PolicyContentError } from '../legalContent.js';
 import { db } from '../db.js';
@@ -115,6 +115,65 @@ function publicMeta(doc) {
  */
 router.get('/api/legal/documents', (req, res) => {
   res.json({ documents: effectiveDocuments(db).map(publicMeta) });
+});
+
+/**
+ * Who runs this platform.
+ *
+ * ── Why it is public, and why it is here ──
+ *
+ * Every legal document on this surface says things like "we", "the platform"
+ * and "the account that can change it", and until now nothing anywhere named
+ * that account. A parent deciding whether their child should sign up, or a
+ * student who wants to complain to somebody real, had no way to find out who
+ * that is without already having an account — which is precisely backwards.
+ * It sits beside the documents because it answers the same question they raise.
+ *
+ * ── Resolved by ROLE, never by name ──
+ *
+ * `super_admin` is the definition. Nothing here matches a username, an email or
+ * a display name, so an account that changes hands, or a second owner, needs no
+ * edit anywhere — the same rule `distinctionFor` follows in the profile
+ * serializer, for the same reason.
+ *
+ * Earliest-created wins when there is more than one, because a deployment can
+ * legitimately hold several: it is stable across restarts, needs no new column,
+ * and picks the founding account rather than whoever was promoted most recently.
+ *
+ * ── What is disclosed ──
+ *
+ * A name, a handle and an avatar: exactly what any signed-in member already sees
+ * on the profile, and less than the transcript footer, which prints the
+ * founder's full name on every document the platform issues. No email, no
+ * hours, no history, no id — this answers "who is responsible", not "tell me
+ * about this person". An empty answer is a normal 200, because a deployment
+ * with no owner yet is a state the page renders around rather than an error.
+ */
+router.get('/api/platform/owner', (req, res) => {
+  /**
+   * The role is the authority; the configured username only chooses between
+   * accounts that already hold it. A `PLATFORM_OWNER_USERNAME` naming a student
+   * therefore resolves to nothing and falls through — configuration cannot mint
+   * an owner, only point at one.
+   */
+  const byRole = `FROM users WHERE role = 'super_admin' AND account_status = 'active'`;
+  const columns = 'SELECT name, username, avatar, avatar_color, profile_picture_url';
+
+  const owner = (PLATFORM_OWNER_USERNAME
+    && db.prepare(`${columns} ${byRole} AND LOWER(username) = LOWER(?)`).get(PLATFORM_OWNER_USERNAME))
+    /* Unset, or set to an account that is not an owner: name the earliest one
+       rather than nobody. */
+    || db.prepare(`${columns} ${byRole} ORDER BY created_at ASC, id ASC LIMIT 1`).get();
+
+  res.json({
+    owner: owner ? {
+      name: owner.name,
+      username: owner.username,
+      avatar: owner.avatar,
+      avatarColor: owner.avatar_color,
+      profilePictureUrl: owner.profile_picture_url,
+    } : null,
+  });
 });
 
 /**
