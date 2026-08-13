@@ -27,12 +27,32 @@ import { normaliseTag, MAX_TAGS_PER_EVENT, MAX_TAG_LENGTH } from '../../eventTag
  * so the rules cannot drift. This is a courtesy — it tells the organizer
  * immediately rather than after a round trip — and it is NOT the enforcement. The
  * route validates every tag again; see the note there.
+ *
+ * ── Why the rules are props, with event defaults ──
+ *
+ * This control is shared with the organization form, whose route permits 40
+ * characters and any punctuation — real bodies are called "Food & Water" and
+ * "501(c)(3)". Hard-coding the event rules here meant that form enforced limits
+ * its own API did not have: punctuated names could not be typed, and a stored
+ * tag that failed the event regex was dropped from the chip list and then
+ * written away by the next save.
+ *
+ * So the caller supplies the rules it is actually validated against. The
+ * defaults are the event ones, so the event editor passes nothing and is
+ * unchanged. `subject` exists because the copy named events out loud — "An
+ * event can have at most 8 tags" and `aria-label="Tags on this event"` both
+ * rendered on the organization form.
  */
 export default function TagInput({
   value = [],
   onChange,
   suggestions = [],
   disabled = false,
+  normalise = normaliseTag,
+  maxTags = MAX_TAGS_PER_EVENT,
+  maxLength = MAX_TAG_LENGTH,
+  subject = 'event',
+  invalidHint = `Use letters, numbers, spaces or hyphens, up to ${MAX_TAG_LENGTH} characters.`,
 }) {
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
@@ -40,7 +60,7 @@ export default function TagInput({
   const listId = useId();
   const inputRef = useRef(null);
 
-  const atLimit = value.length >= MAX_TAGS_PER_EVENT;
+  const atLimit = value.length >= maxTags;
 
   /**
    * Suggestions minus what is already on the event, capped.
@@ -51,21 +71,17 @@ export default function TagInput({
    */
   const available = useMemo(() => {
     const held = new Set(value.map(t => t.tag));
-    const typed = normaliseTag(draft)?.tag ?? '';
+    const typed = normalise(draft)?.tag ?? '';
     return suggestions
       .filter(s => !held.has(s.tag))
       .filter(s => !typed || s.tag.includes(typed))
       .slice(0, 8);
-  }, [suggestions, value, draft]);
+  }, [suggestions, value, draft, normalise]);
 
   const add = (raw) => {
-    const normalised = normaliseTag(raw);
+    const normalised = normalise(raw);
     if (!normalised) {
-      setError(
-        raw.trim()
-          ? `Use letters, numbers, spaces or hyphens, up to ${MAX_TAG_LENGTH} characters.`
-          : ''
-      );
+      setError(raw.trim() ? invalidHint : '');
       return;
     }
     if (value.some(t => t.tag === normalised.tag)) {
@@ -76,7 +92,7 @@ export default function TagInput({
       return;
     }
     if (atLimit) {
-      setError(`An event can have at most ${MAX_TAGS_PER_EVENT} tags.`);
+      setError(`An ${subject} can have at most ${maxTags} tags.`);
       return;
     }
     onChange([...value, normalised]);
@@ -113,11 +129,11 @@ export default function TagInput({
       <label className="label" htmlFor={inputId}>Tags</label>
       <p className="small dim" id={`${inputId}-hint`}>
         Optional. Words that help somebody find this — a cause, a group, a subject.
-        Up to {MAX_TAGS_PER_EVENT}.
+        Up to {maxTags}.
       </p>
 
       {value.length > 0 && (
-        <ul className="tag-chips tag-chips-editable" aria-label="Tags on this event">
+        <ul className="tag-chips tag-chips-editable" aria-label={`Tags on this ${subject}`}>
           {value.map(({ tag, label }) => (
             <li key={tag}>
               <span className="tag-chip tag-chip-editable">
@@ -147,8 +163,8 @@ export default function TagInput({
         value={draft}
         list={listId}
         disabled={disabled || atLimit}
-        maxLength={MAX_TAG_LENGTH * 2}
-        placeholder={atLimit ? `${MAX_TAGS_PER_EVENT} tags is the maximum` : 'Type a tag and press Enter…'}
+        maxLength={maxLength * 2}
+        placeholder={atLimit ? `${maxTags} tags is the maximum` : 'Type a tag and press Enter…'}
         aria-describedby={`${inputId}-hint${error ? ` ${inputId}-error` : ''}`}
         aria-invalid={error ? true : undefined}
         onChange={(e) => { setDraft(e.target.value); setError(''); }}
