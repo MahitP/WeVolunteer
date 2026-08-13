@@ -1061,6 +1061,26 @@ time { font-variant-numeric: tabular-nums; }
   border-radius: 0 0 var(--r-lg) var(--r-lg);
 }
 
+/**
+ * A card footer holding two groups of buttons wraps rather than overflowing.
+ *
+ * `.row-between` is a flex row with no wrap, and the action group beside it sets
+ * `flex-shrink: 0` because a squeezed button is worse than a wrapped one. Put
+ * those together with a long label and there is nothing left to give: the new
+ * organization form's footer — Cancel on the left, "Create organization" on the
+ * right — ran 35px past a 390px viewport and took the whole document with it,
+ * which is why the mobile navigation and the toast rail appeared to overflow
+ * too. They were downstream of a document that was already 425px wide.
+ *
+ * Scoped to `.card-foot` rather than to `.row-between`, which is used across the
+ * product in places where wrapping would be wrong. Wrapping costs nothing at
+ * widths where the row already fits.
+ */
+.card-foot.row-between {
+  flex-wrap: wrap;
+  row-gap: var(--s3);
+}
+
 /* Interactive card — lifts a hair, never scales */
 .card-link {
   display: block;
