@@ -22,6 +22,85 @@ import { canManage, memberIds } from '../organizations.js';
 const router = express.Router();
 
 /**
+ * The caller's own active ban from an organization, with any appeal they filed.
+ *
+ * Returns `null` for "nothing to say" — no organization on the event, no
+ * session, or no active ban — so a client can render on truthiness alone.
+ *
+ * The appeal is looked up by the same `(subject, subject_ref, user_id)` triple
+ * `POST /api/appeals` writes, which is what keeps the button on the event and
+ * the row in the organization's inbox describing one thing.
+ */
+/**
+ * Every organization this reader is currently banned from, with the reason and
+ * their latest appeal — as a Map keyed by organization id.
+ *
+ * Built once per list response. The per-event form below would otherwise run
+ * two queries for each of sixty cards, and a list is the surface where that
+ * cost is actually paid.
+ */
+function viewerBansFor(userId) {
+  if (!userId) return new Map();
+
+  const bans = db.prepare(`
+    SELECT organization_id, reason FROM organization_bans
+     WHERE user_id = ? AND lifted_at IS NULL
+  `).all(userId);
+  if (bans.length === 0) return new Map();
+
+  const appeals = db.prepare(`
+    SELECT subject_ref, id, status, decision FROM appeals
+     WHERE subject = 'organization_ban' AND user_id = ?
+     ORDER BY created_at ASC
+  `).all(userId);
+  /* Last write wins, and the rows arrive oldest-first, so this keeps the most
+     recent appeal per organization — the one belonging to the ban they are
+     under now rather than one from a ban already lifted. */
+  const latest = new Map(appeals.map(a => [a.subject_ref, a]));
+
+  return new Map(bans.map(b => [b.organization_id, {
+    banned: true,
+    reason: b.reason,
+    appeal: latest.has(b.organization_id)
+      ? {
+        id: latest.get(b.organization_id).id,
+        status: latest.get(b.organization_id).status,
+        decision: latest.get(b.organization_id).decision,
+      }
+      : null,
+  }]));
+}
+
+function viewerBanFor(organizationId, userId) {
+  if (!organizationId || !userId) return null;
+
+  const ban = db.prepare(`
+    SELECT reason FROM organization_bans
+     WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
+  `).get(organizationId, userId);
+  if (!ban) return null;
+
+  /* The most recent, so a reader who appealed, was refused, and was banned
+     again sees the appeal that belongs to the ban they are under. */
+  const appeal = db.prepare(`
+    SELECT id, status, decision FROM appeals
+     WHERE subject = 'organization_ban' AND subject_ref = ? AND user_id = ?
+     ORDER BY created_at DESC LIMIT 1
+  `).get(organizationId, userId);
+
+  return {
+    banned: true,
+    /* Their own ban reason. They were sent it when it happened; withholding it
+       here would mean the one place they act on it is the one place it is not
+       stated. */
+    reason: ban.reason,
+    appeal: appeal
+      ? { id: appeal.id, status: appeal.status, decision: appeal.decision }
+      : null,
+  };
+}
+
+/**
  * One slot as the client consumes it. Shared by the list and single-event
  * routes so the two can never disagree about what a slot looks like.
  *
@@ -296,6 +375,9 @@ router.get('/api/events', authenticateToken, (req, res) => {
        browse screen calls on every keystroke. */
     const tagsByEvent = tagsForEvents(db, pageIds);
 
+    /* One lookup for the page rather than two per card — see viewerBansFor. */
+    const viewerBans = viewerBansFor(req.user?.id);
+
     const formattedEvents = events.map(event => {
       const slots = slotsByEvent.get(event.id) || [];
 
@@ -355,6 +437,10 @@ router.get('/api/events', authenticateToken, (req, res) => {
          */
         creditsHours: event.credits_hours !== 0,
         organizationId: event.organization_id || null,
+        /* The reader's own ban from the organization running this event, if
+           any — see `viewerBansFor`. Only ever theirs; there is no parameter
+           that could point it at somebody else. */
+        viewerBan: viewerBans.get(event.organization_id) || null,
         organizationName: event.organization_name || null,
         organizationSlug: event.organization_slug || null,
         selectionSummary: event.selection_summary ? JSON.parse(event.selection_summary) : null,
@@ -546,6 +632,30 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
         organizationId: event.organization_id || null,
         organizationName: event.organization_name || null,
         organizationSlug: event.organization_slug || null,
+        /**
+         * Whether THIS reader is banned from the organization running this
+         * event, and what became of any appeal they have already filed.
+         *
+         * ── Why it lives on the event ──
+         *
+         * Being told you are banned only through a notification means being
+         * told once, in a list that fills up. Somebody who comes back to the
+         * event a week later and finds they cannot join deserves to learn why
+         * where they are standing, and to be able to do something about it
+         * without hunting through their notifications.
+         *
+         * ── Whose ban ──
+         *
+         * Only the caller's. It is keyed on `req.user.id` and there is no
+         * parameter to change that, so this cannot be turned into a way to ask
+         * whether somebody else is banned. Managers read bans through the
+         * organization's own surfaces, which are separately authorized.
+         *
+         * `null` when there is no organization, no ban, or no session — the
+         * absence of a ban and the absence of an organization look the same to
+         * a reader, and neither needs explaining.
+         */
+        viewerBan: viewerBanFor(event.organization_id, req.user?.id),
         /* Same shape as the list response, so a client that renders chips from
            one can render them from the other without a second code path. */
         tags: tagsForEvent(db, event.id),

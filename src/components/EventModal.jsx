@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useModal } from '../utils/useModal';
 import {
   X, CalendarClock, Users, Zap, ShieldCheck,
-  Pencil, ClipboardCheck, AlertCircle, Megaphone, MessageSquare, ListChecks, Info, Star, Flag
+  Pencil, ClipboardCheck, AlertCircle, Megaphone, MessageSquare, ListChecks, Info, Star, Flag, Scale
 } from 'lucide-react';
 import { api } from '../utils/api';
 import {
@@ -13,6 +13,7 @@ import {
 } from '../utils/helpers';
 import { useLocationContext } from '../contexts/LocationContext';
 import TagChips from './common/TagChips';
+import { DECISION_LABELS, isFinal } from '../appeals';
 import LocationLink from './location/LocationLink';
 import DirectionsButton from './location/DirectionsButton';
 import MapReveal from './location/MapReveal';
@@ -647,6 +648,57 @@ export default function EventModal({
               aria-labelledby={`tab-${tab}`}
               tabIndex={0}
             >
+              {/**
+                * ── Banned from the club running this, and what to do about it ──
+                *
+                * Beside the participation controls rather than in a
+                * notification, because a notification is read once and then
+                * buried. Somebody who comes back to the event a fortnight later
+                * and finds they cannot take part learns why where they are
+                * standing, and can act on it without going hunting.
+                *
+                * Only ever the reader's OWN ban: `viewerBan` is keyed on the
+                * session server-side and has no parameter to point elsewhere.
+                *
+                * Three states, because they need different things said. No
+                * appeal yet — offer one. One waiting — say so, and do not offer
+                * a second, which would just make two rows for one grievance.
+                * One already decided — say what was decided, and stop.
+                */}
+              {tab === 'shifts' && event.viewerBan?.banned && (
+                <div className="alert alert-danger event-ban-notice" role="status">
+                  <div>
+                    <span className="alert-title">
+                      You cannot take part in {event.organizationName || 'this organization'}&rsquo;s events
+                    </span>
+                    {event.viewerBan.reason && <p>{event.viewerBan.reason}</p>}
+
+                    {!event.viewerBan.appeal ? (
+                      <p>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => navigate(
+                            `/appeals/new?subject=organization_ban&organization=${encodeURIComponent(event.organizationId)}`
+                          )}
+                        >
+                          <Scale size={14} aria-hidden="true" /> Appeal this
+                        </button>
+                      </p>
+                    ) : isFinal(event.viewerBan.appeal.status) ? (
+                      <p className="small">
+                        You appealed, and a manager decided:{' '}
+                        {DECISION_LABELS[event.viewerBan.appeal.decision] || 'the decision was recorded'}.
+                      </p>
+                    ) : (
+                      <p className="small">
+                        Your appeal is with the organization&rsquo;s managers. You do not need to send another.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {tab === 'shifts' && (
                 <EventShiftsTab
                   event={event}
