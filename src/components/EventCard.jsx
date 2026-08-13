@@ -61,7 +61,11 @@ export default function EventCard({
         {/* min-width:0 (not .truncate) so the title can clamp to two lines
             instead of inheriting nowrap from a truncating parent. */}
         <div className="s-7b2db8">
-          <h3 className="eventcard-title" title={event.title}>{event.title}</h3>
+          {/* `h2`, not `h3`: these cards sit directly under the page's `h1` on
+              Discover — the only surface that renders them — so `h3` skipped a
+              level for anybody navigating by heading. The class carries the
+              styling, so nothing about the card looks different. */}
+          <h2 className="eventcard-title" title={event.title}>{event.title}</h2>
           <p className="eventcard-meta truncate">
             <span className="tag">{event.category}</span>
             <span className="truncate">{event.organizerName}</span>
