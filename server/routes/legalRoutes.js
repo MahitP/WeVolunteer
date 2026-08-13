@@ -153,17 +153,41 @@ router.get('/api/platform/owner', (req, res) => {
   /**
    * The role is the authority; the configured username only chooses between
    * accounts that already hold it. A `PLATFORM_OWNER_USERNAME` naming a student
-   * therefore resolves to nothing and falls through — configuration cannot mint
-   * an owner, only point at one.
+   * resolves to nothing — configuration cannot mint an owner, only point at one.
+   *
+   * ── Why a configured name does NOT fall back ──
+   *
+   * The fallback used to run whenever the lookup missed, including when the
+   * variable was set and simply did not match. That is the wrong direction on
+   * the one deployment that matters: this installation holds two owner
+   * accounts, a person and an internal service account, created in the same
+   * seeding run with identical timestamps. A typo in the variable would
+   * therefore have been answered by naming whichever id happened to sort first
+   * — quite possibly the service account — on a public page, with nothing
+   * anywhere reporting a problem.
+   *
+   * So the two cases are separated. Configured means configured: if it does not
+   * resolve, the answer is nobody, and the page renders without an owner rather
+   * than with the wrong one. The fallback survives only for a deployment that
+   * has not set the variable at all, where naming the earliest owner beats
+   * naming none.
    */
   const byRole = `FROM users WHERE role = 'super_admin' AND account_status = 'active'`;
   const columns = 'SELECT name, username, avatar, avatar_color, profile_picture_url';
 
-  const owner = (PLATFORM_OWNER_USERNAME
-    && db.prepare(`${columns} ${byRole} AND LOWER(username) = LOWER(?)`).get(PLATFORM_OWNER_USERNAME))
-    /* Unset, or set to an account that is not an owner: name the earliest one
-       rather than nobody. */
-    || db.prepare(`${columns} ${byRole} ORDER BY created_at ASC, id ASC LIMIT 1`).get();
+  const owner = PLATFORM_OWNER_USERNAME
+    ? db.prepare(`${columns} ${byRole} AND LOWER(username) = LOWER(?)`).get(PLATFORM_OWNER_USERNAME)
+    : db.prepare(`${columns} ${byRole} ORDER BY created_at ASC, id ASC LIMIT 1`).get();
+
+  if (PLATFORM_OWNER_USERNAME && !owner) {
+    /* Loud, because the symptom is silence: a public page that simply stops
+       naming anybody. The username is operator-supplied configuration, not user
+       input, so echoing it is what makes the message actionable. */
+    console.warn(
+      `[platform] PLATFORM_OWNER_USERNAME="${PLATFORM_OWNER_USERNAME}" matches no active `
+      + 'super_admin account. The public About page will not name an owner.'
+    );
+  }
 
   res.json({
     owner: owner ? {
