@@ -296,6 +296,19 @@ export const APP_ROUTES = [
    * handler name, so the rail, the route and the server agree on one word.
    */
   { path: '/admin/impact', element: <AdminImpact />, requiredCap: 'analytics.platform' },
+  /**
+   * Filing an appeal.
+   *
+   * An APP route, not a public one. `POST /api/appeals` requires a session and
+   * decides ownership from it — a signed-out visitor reaching this form would
+   * write out their case and be refused on submit, which is the worst possible
+   * moment to discover you had to sign in first.
+   *
+   * No `requiredCap`: appealing is not a privilege. Every signed-in account can
+   * contest a decision taken about them, and the server checks that the thing
+   * being appealed is actually theirs.
+   */
+  { path: '/appeals/new', element: <NewAppeal /> },
 ];
 
 /**
@@ -431,7 +444,6 @@ export const PUBLIC_ROUTES = [
    */
   { path: '/about', element: <AboutUs /> },
   { path: '/appeal/:token', element: <Appeal /> },
-  { path: '/appeals/new', element: <NewAppeal /> },
 ];
 
 /**
