@@ -9273,6 +9273,84 @@ input:disabled + .premium-slider {
 
 .org-member-handle { font-size: 0.8125rem; }
 
+/* Hours on a roster row, for managers. `margin-left: auto` rather than a
+   justify change on the row, so it sits at the end without disturbing the
+   name/handle block beside it. */
+.org-member-hours {
+  margin-left: auto;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+/**
+ * A member's own service with one organization.
+ *
+ * ── The figures ──
+ *
+ * `flex-wrap` with a basis rather than two fixed columns: at 320px the two
+ * figures sit one above the other instead of squeezing the labels, and the
+ * labels are the part that stops a bare number being ambiguous.
+ */
+.org-service-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s6);
+  margin-bottom: var(--s5);
+}
+
+.org-service-figure {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 650;
+  line-height: 1.1;
+}
+
+/**
+ * The events behind the figure.
+ *
+ * A grid rather than a flex row: the hours column stays aligned down the list
+ * whatever the titles do, and `minmax(0, 1fr)` on the title is what lets a long
+ * event name wrap instead of pushing the hours off the right edge at 320px —
+ * a grid item's automatic minimum is its content, exactly like a flex item's.
+ */
+.org-service-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.org-service-history li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 var(--s3);
+  padding: var(--s3) 0;
+  border-top: 1px solid var(--rule);
+}
+
+.org-service-history li:first-child { border-top: 0; }
+
+.org-service-event {
+  font-weight: 550;
+  /* An unbroken title cannot widen the column past the card. */
+  overflow-wrap: anywhere;
+}
+
+/* The date sits under the title, in the first column, not beside the hours. */
+.org-service-history li .small { grid-column: 1; }
+
+.org-service-row-hours {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.org-service-total {
+  margin-top: var(--s5);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--rule);
+}
+
 /* ── External hours ───────────────────────────────────────────────────────── */
 
 .ext-list {

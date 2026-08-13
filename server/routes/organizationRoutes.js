@@ -23,6 +23,12 @@ import {
   validateOrganization, createOrganization, canManage, formatOrganization, uniqueSlug,
 } from '../organizations.js';
 import { profileSummary } from '../profileSerializer.js';
+import {
+  organizationHoursForUser,
+  organizationHoursByUser,
+  organizationHoursTotal,
+  organizationHistoryForUser,
+} from '../organizationHours.js';
 import path from 'node:path';
 import sharp from 'sharp';
 import { receiveAvatar, deleteUploadedFile, AVATAR_UPLOADS_DIR } from './profilePictureRoutes.js';
@@ -145,9 +151,42 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
     'SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?'
   ).get(row.id, req.principal.userId);
 
+  /**
+   * Hours, scoped to this organization.
+   *
+   * ── Who sees whose ──
+   *
+   * The viewer always gets their OWN figure and their own event-by-event
+   * history. That is their record; showing somebody their own service discloses
+   * nothing.
+   *
+   * Per-member figures and the organization's totals go to managers only. The
+   * justification is narrow and worth stating, because the members here are
+   * children: these are hours earned at THIS organization's own events, and a
+   * manager is precisely the person whose organization ran them and who
+   * confirmed the attendance that created them. It is an aggregation of what
+   * they already approved, not a new disclosure.
+   *
+   * What a manager still does not get is the platform-wide total. A student's
+   * service for other organizations is none of this club's business, and the
+   * derivation is scoped by `organization_id` so there is no query here that
+   * could return it.
+   *
+   * Ordinary members are given no per-member numbers at all. A roster that
+   * ranked classmates by hours is a leaderboard nobody asked for, and on a page
+   * about a school club it would read as one.
+   */
+  const viewerHours = organizationHoursForUser(db, row.id, req.principal.userId);
+  const memberHours = mayManage ? organizationHoursByUser(db, row.id) : null;
+
   res.json({
     organization: formatOrganization(row),
-    members: members.map(m => ({ ...profileSummary(m), memberRole: m.memberRole, joinedAt: m.joinedAt })),
+    members: members.map(m => ({
+      ...profileSummary(m),
+      memberRole: m.memberRole,
+      joinedAt: m.joinedAt,
+      ...(memberHours ? { hours: memberHours.get(m.id)?.hours ?? 0 } : {}),
+    })),
     events: events.map(e => ({ ...e, creditsHours: e.creditsHours !== 0 })),
     viewer: {
       isMember: Boolean(membership),
@@ -155,7 +194,11 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
       /* Computed once, above, where the archived-organization gate also needs
          it — the two must agree, and two calls is two chances for them not to. */
       canManage: mayManage,
+      hours: viewerHours.hours,
+      events: viewerHours.events,
+      history: organizationHistoryForUser(db, row.id, req.principal.userId),
     },
+    totals: mayManage ? organizationHoursTotal(db, row.id) : null,
   });
 });
 

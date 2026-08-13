@@ -24,6 +24,7 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import { avatarColorValue } from '../utils/avatarColors';
 import OrgAvatar from '../components/common/OrgAvatar';
 import RemoveMemberDialog from '../components/organizations/RemoveMemberDialog';
+import { formatHours, formatDay } from '../utils/helpers';
 
 export default function OrganizationPage({ addToast }) {
   const { key } = useParams();
@@ -107,7 +108,7 @@ export default function OrganizationPage({ addToast }) {
     );
   }
 
-  const { organization: org, members, events, viewer } = data;
+  const { organization: org, members, events, viewer, totals } = data;
   const upcoming = events.filter(e => e.startsAt && new Date(e.startsAt) >= new Date());
   const past = events.filter(e => !e.startsAt || new Date(e.startsAt) < new Date());
 
@@ -171,6 +172,19 @@ export default function OrganizationPage({ addToast }) {
         )}
       </section>
 
+      {/**
+        * Hours, scoped to this organization.
+        *
+        * It sits directly under the identity card because it is the thing a
+        * member came to this page to find out — "how much have I done for NHS"
+        * — and above Opportunities because a record of what you have done is
+        * the context for deciding what to do next.
+        *
+        * No new navigation entry anywhere. The organization already had a page;
+        * the number belongs on it.
+        */}
+      <OrganizationService org={org} viewer={viewer} totals={totals} />
+
       <section className="card">
         <div className="card-head"><h2>Opportunities</h2></div>
         <div className="card-body">
@@ -220,6 +234,21 @@ export default function OrganizationPage({ addToast }) {
                       {m.username && <span className="muted org-member-handle">@{m.username}</span>}
                     </span>
                     {m.memberRole === 'manager' && <span className="tag tag-brand">Manager</span>}
+                    {/**
+                      * Hours, for managers only — the server omits the field
+                      * entirely for anybody else, so this cannot render for a
+                      * member however the roster is reached.
+                      *
+                      * Hours WITH THIS ORGANIZATION, never the platform-wide
+                      * total: what a student does for another club is not this
+                      * one's business, and the query is scoped so there is no
+                      * figure here that could be it.
+                      */}
+                    {typeof m.hours === 'number' && (
+                      <span className="tnum muted org-member-hours">
+                        {formatHours(m.hours)}
+                      </span>
+                    )}
                   </Link>
                   {/**
                     * Removal, for managers.
@@ -277,6 +306,98 @@ export default function OrganizationPage({ addToast }) {
         </ConfirmDialog>
       )}
     </div>
+  );
+}
+
+/**
+ * What the viewer has done for this organization.
+ *
+ * ── Their own record, not a scoreboard ──
+ *
+ * The headline figure is the viewer's own. Per-member numbers arrive only for
+ * managers, and are rendered on the roster rather than here, so this card reads
+ * the same for everybody: it is about you.
+ *
+ * ── Why it is not a dashboard ──
+ *
+ * One number, one supporting count, and the events behind them. A club page for
+ * fifteen-year-olds does not need a chart, and the hours here are already
+ * summarised platform-wide on the profile — this is the same arithmetic scoped
+ * to one organization, not a second accounting system.
+ *
+ * The history collapses past five. A member with thirty events should not push
+ * the opportunities they could sign up for off the bottom of the page.
+ */
+function OrganizationService({ org, viewer, totals }) {
+  const [expanded, setExpanded] = useState(false);
+  const history = viewer?.history ?? [];
+  const SHOWN = 5;
+  const visible = expanded ? history : history.slice(0, SHOWN);
+
+  return (
+    <section className="card" aria-labelledby="org-service-heading">
+      <div className="card-head">
+        <h2 id="org-service-heading">Your service with {org.name}</h2>
+      </div>
+      <div className="card-body">
+        {history.length === 0 ? (
+          <EmptyState
+            icon={Clock}
+            title="No hours yet"
+            message={`Hours you volunteer at ${org.name}'s events will be counted here once an organizer confirms you were there.`}
+          />
+        ) : (
+          <>
+            <div className="org-service-figures">
+              <div>
+                <p className="org-service-figure tnum">{formatHours(viewer.hours)}</p>
+                <p className="muted small">confirmed with this organization</p>
+              </div>
+              <div>
+                <p className="org-service-figure tnum">{viewer.events}</p>
+                <p className="muted small">{viewer.events === 1 ? 'event' : 'events'}</p>
+              </div>
+            </div>
+
+            <ul className="org-service-history">
+              {visible.map(row => (
+                <li key={row.eventId}>
+                  <span className="org-service-event">{row.title}</span>
+                  <span className="muted small">
+                    {row.startsAt ? formatDay(row.startsAt) : 'Date unavailable'}
+                    {row.shifts > 1 && <> · {row.shifts} shifts</>}
+                  </span>
+                  <span className="tnum org-service-row-hours">
+                    {row.creditsHours ? formatHours(row.hours) : 'Participation'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            {history.length > SHOWN && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setExpanded(v => !v)}
+                aria-expanded={expanded}
+              >
+                {expanded ? 'Show fewer' : `Show all ${history.length} events`}
+              </button>
+            )}
+          </>
+        )}
+
+        {/* Managers get the collective figure. Members do not: with a small
+            roster a total plus your own number is somebody else's number. */}
+        {totals && (
+          <p className="muted small org-service-total">
+            Altogether, {totals.volunteers} {totals.volunteers === 1 ? 'person has' : 'people have'}{' '}
+            volunteered {formatHours(totals.hours)} across {totals.events}{' '}
+            {totals.events === 1 ? 'event' : 'events'} for {org.name}.
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 
