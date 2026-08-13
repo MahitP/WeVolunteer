@@ -13,6 +13,7 @@ import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 import { validateTags, replaceEventTags, tagsForEvent, tagsForEvents, tagVocabulary, BROWSE_TAG_LIMIT } from '../eventTags.js';
+import { EVENT_AUDIENCES, DEFAULT_AUDIENCE } from '../eventEligibility.js';
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
 import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
@@ -437,6 +438,9 @@ router.get('/api/events', authenticateToken, (req, res) => {
          */
         creditsHours: event.credits_hours !== 0,
         organizationId: event.organization_id || null,
+        /* Who may apply. The client labels members-only events and explains
+           ineligibility rather than showing a button that will be refused. */
+        audience: event.audience || 'everyone',
         /* The reader's own ban from the organization running this event, if
            any — see `viewerBansFor`. Only ever theirs; there is no parameter
            that could point it at somebody else. */
@@ -630,6 +634,9 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
         autoApprove: event.auto_approve === 1,
         creditsHours: event.credits_hours !== 0,
         organizationId: event.organization_id || null,
+        /* Who may apply. The client labels members-only events and explains
+           ineligibility rather than showing a button that will be refused. */
+        audience: event.audience || 'everyone',
         organizationName: event.organization_name || null,
         organizationSlug: event.organization_slug || null,
         /**
@@ -712,6 +719,22 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
    * that check is `canManage`, the same one organizationRoutes uses — so there
    * is one answer to "may you act for this organization" rather than two.
    */
+  /**
+   * Who the event is for.
+   *
+   * `organization` is only meaningful with an organization behind it — a shift
+   * "for members" of nothing is a shift nobody can join, and silently treating
+   * it as open would be a different event from the one the organizer described.
+   * So it is refused rather than corrected.
+   */
+  const audience = EVENT_AUDIENCES.includes(req.body?.audience) ? req.body.audience : DEFAULT_AUDIENCE;
+  if (audience === 'organization' && (organizationId == null || organizationId === '')) {
+    return res.status(400).json({
+      error: 'Choose the organization whose members can apply.',
+      field: 'organizationId', code: 'organization_required',
+    });
+  }
+
   let organization = null;
   if (organizationId != null && organizationId !== '') {
     organization = db.prepare('SELECT * FROM organizations WHERE id = ?').get(organizationId);
@@ -762,8 +785,8 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
       db.prepare(`
         INSERT INTO events (id, title, description, category, location, application_deadline,
                             organizer_id, status, created_at, auto_approve, instructions, attendee_visibility,
-                            address, latitude, longitude, organization_id, credits_hours)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            address, latitude, longitude, organization_id, credits_hours, audience)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         eventId,
         title,
@@ -780,7 +803,11 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
         latitude != null ? latitude : null,
         longitude != null ? longitude : null,
         organization ? organization.id : null,
-        awardsHours ? 1 : 0
+        awardsHours ? 1 : 0,
+        /* An event with no organization is always open, whatever was asked for
+           — the validation above refuses the combination, so this is belt and
+           braces against a future caller skipping it. */
+        organization ? audience : DEFAULT_AUDIENCE
       );
 
       // B. Insert slots
@@ -884,7 +911,7 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
   const eventId = req.params.id;
   const {
     title, description, category, location, applicationDeadline, slots,
-    autoApprove, instructions, attendeeVisibility,
+    autoApprove, instructions, attendeeVisibility, audience,
     address, latitude, longitude, tags
   } = req.body;
 
@@ -1081,6 +1108,45 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
       }
 
       /**
+       * Changing who the event is for.
+       *
+       * ── Only when the field is sent ──
+       *
+       * Omitting `audience` leaves it alone, the same rule `tags` follows below.
+       * A client that predates this field must not silently reopen a
+       * members-only shift by saving an unrelated edit.
+       *
+       * ── The organization is not editable here, so narrowing is safe ──
+       *
+       * `PUT` never accepted `organizationId` and still does not, so an event
+       * cannot be pointed at a different club. Narrowing to `organization`
+       * therefore restricts the event to the members of the club it already
+       * belonged to, which is the only club it was ever announced under.
+       *
+       * ── Existing applications are NOT invalidated ──
+       *
+       * Somebody who applied while the event was open keeps their place when it
+       * narrows. They applied to something that was genuinely open at the time,
+       * and revoking it silently would take a place away with no notice and no
+       * record. The audience governs who may apply from now on; an organizer who
+       * wants a specific person off the shift has a control for that.
+       *
+       * ── An event with no organization cannot be narrowed ──
+       *
+       * "Members only" of nothing is a shift nobody can join. Refused rather
+       * than corrected, so the organizer finds out now.
+       */
+      if (audience !== undefined) {
+        if (!EVENT_AUDIENCES.includes(audience)) {
+          throw Object.assign(new Error('bad audience'), { httpStatus: 400, field: 'audience' });
+        }
+        if (audience === 'organization' && !event.organization_id) {
+          throw Object.assign(new Error('no organization'), { httpStatus: 400, field: 'audience', code: 'organization_required' });
+        }
+        db.prepare('UPDATE events SET audience = ? WHERE id = ?').run(audience, eventId);
+      }
+
+      /**
        * Tags, only when the caller actually sent the field.
        *
        * `tags: []` means "remove them all" and is honoured; OMITTING `tags` means
@@ -1136,6 +1202,19 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
 
     res.json({ success: true, notified });
   } catch (error) {
+    /* A validation failure raised from inside the transaction carries its own
+       status. Without this it would roll back correctly and then be reported as
+       a server fault, telling an organizer their edit broke the site when they
+       had simply asked for something the event cannot be. */
+    if (error?.httpStatus) {
+      return res.status(error.httpStatus).json({
+        error: error.field === 'audience' && error.code === 'organization_required'
+          ? 'Only an event that belongs to an organization can be limited to its members.'
+          : 'That is not a valid audience for an event.',
+        field: error.field,
+        ...(error.code ? { code: error.code } : {}),
+      });
+    }
     console.error('Update event details error:', error);
     res.status(500).json({ error: 'Internal server error editing event details' });
   }
