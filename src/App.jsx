@@ -1312,6 +1312,7 @@ function AppShell({ toasts, addToast, removeToast }) {
       key: `profile-${profileRefreshKey}`,
       currentUser, addToast, onEditProfile: () => setEditingProfile(true),
     },
+    '/organizations': { currentUser },
     '/organizations/new': { addToast },
     '/organizations/:key/edit': { addToast },
     '/organizations/:key': { addToast },

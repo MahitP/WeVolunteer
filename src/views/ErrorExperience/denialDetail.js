@@ -49,6 +49,7 @@ const FEATURE_NAMES = Object.freeze({
      refused at /users/@someone nothing at all. */
   'directory.read': 'member profiles and search',
   'organization.create': 'creating an organization',
+  'organization.join': 'joining organizations',
   'organization.manage.own': 'managing an organization',
   'error.read': 'the error dashboard',
   'appeal.review': 'the appeals queue',

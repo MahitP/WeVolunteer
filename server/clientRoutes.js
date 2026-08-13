@@ -165,6 +165,7 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/hours',
   '/users/id/:id',
   '/users/:handle',
+  '/organizations',
   '/organizations/new',
   '/organizations/:key/edit',
   '/organizations/:key',

@@ -3574,6 +3574,53 @@ time { font-variant-numeric: tabular-nums; }
 
 @media print {
   /**
+   * ── Only the document prints ────────────────────────────────────────────
+   *
+   * The bug this replaces: printing a certificate printed the whole
+   * application. The block below hid the navigation chrome by name —
+   * `.sidebar`, `.mobilenav`, `.topbar`, `.demobar`, `.toasts`, `.no-print` —
+   * and that list can never be complete, because the certificate opens as a
+   * MODAL ON TOP OF A ROUTE. The dashboard behind it was never in the list, so
+   * the dashboard printed, and then the certificate printed after it.
+   *
+   * Enumerating what to hide is the wrong shape of solution: every page added
+   * to the product is another thing that might end up behind a document, and
+   * nobody adding one will remember this file exists.
+   *
+   * So the rule is inverted. Everything is hidden, then the document and its
+   * descendants are shown. `visibility` rather than `display` because it
+   * inherits — one declaration hides an arbitrarily deep tree, and a second
+   * un-hides the branch that matters, without either needing to know what the
+   * other contains.
+   *
+   * `position: absolute` is the other half and is not optional. A hidden
+   * element still occupies its box, so without lifting the document out of
+   * flow the printer is handed a dashboard's worth of blank paper and only
+   * then the certificate. Pulling it to the top-left of the page box collapses
+   * all of that.
+   *
+   * `!important` on both, deliberately: these have to beat component styles and
+   * inline styles alike, and the whole point is that they apply without knowing
+   * what they are overriding.
+   */
+  body * {
+    visibility: hidden !important;
+  }
+  .certificate,
+  .certificate *,
+  .transcript,
+  .transcript * {
+    visibility: visible !important;
+  }
+  .certificate,
+  .transcript {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+
+  /**
    * The page itself, reset before anything on it.
    *
    * Three separate leaks used to survive into a printed transcript, and all
@@ -7732,6 +7779,11 @@ input:disabled + .premium-slider {
 }
 .input-with-icon .input { padding-left: 2rem; }
 
+/* The Organizations home list. The row already comes from `.list-row`; this
+   only stops the Manage control being crushed against the name on a phone,
+   where `.list-row` wraps. */
+.org-home-list .btn { flex-shrink: 0; }
+
 /* Organization announcements */
 .org-announcement {
   padding: var(--s4);
@@ -10430,6 +10482,26 @@ input:disabled + .premium-slider {
 
 .transcript-sign { width: 15rem; text-align: center; }
 
+/**
+ * The signature block: name, rule, capacity.
+ *
+ * The name sits ON the rule the way a signature does, with the role beneath it —
+ * matching the certificates rather than inventing a second convention for the
+ * same idea. `--cert-*` tokens throughout, because a transcript is a
+ * light-paper artefact whatever theme the app is in.
+ */
+.transcript-signatory {
+  margin: 0 0 var(--s2);
+  font-family: var(--font-doc);
+  font-size: 1.0625rem;
+  color: var(--cert-text);
+}
+.transcript-signatory-title {
+  margin: 2px 0 0;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  color: var(--certificate-ink-3);
+}
 .transcript-sign-rule {
   border-bottom: 1px solid var(--certificate-ink-2);
   height: 2.25rem;

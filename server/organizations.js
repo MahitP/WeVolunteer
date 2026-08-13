@@ -301,6 +301,10 @@ export function formatOrganization(row) {
     imageUrl: row.image_url || null,
     allowReplies: row.allow_replies !== 0,
     avatarColor: row.avatar_color || null,
+    /* Present only on the "mine" listing, which joins membership. Undefined
+       elsewhere rather than null, so a caller can tell "not asked" from "not a
+       manager". */
+    viewerRole: row.viewer_role ?? undefined,
     memberCount: row.memberCount ?? 0,
     eventCount: row.eventCount ?? 0,
     status: row.status,

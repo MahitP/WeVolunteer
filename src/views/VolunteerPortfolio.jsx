@@ -6,7 +6,7 @@ import { aggregateServiceByEvent, totalServiceHours } from '../utils/serviceReco
 import { Printer, ArrowLeft, FileWarning } from 'lucide-react';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
-import { APP_NAME, SCHOOL_NAME } from '../config';
+import { APP_NAME, SCHOOL_NAME, DOCUMENT_SIGNATORY, DOCUMENT_SIGNATORY_TITLE } from '../config';
 
 /**
  * The printable record of verified service — the document a volunteer hands to
@@ -176,9 +176,20 @@ export default function VolunteerPortfolio({ currentUser }) {
             Every hour listed was confirmed by the organizer who ran the event on {APP_NAME}.
             Self-reported service recorded elsewhere is not included.
           </p>
+          {/**
+            * Name above the rule, capacity below it — the way a signed document
+            * is laid out, and the same shape the certificates use.
+            *
+            * The signatory is deployment configuration, not profile data: a
+            * transcript is issued by the platform, so joining this to a user row
+            * would mean an ordinary profile edit changed the meaning of every
+            * transcript already issued.
+            */}
           <div className="transcript-sign">
+            <p className="transcript-signatory">{DOCUMENT_SIGNATORY}</p>
             <div className="transcript-sign-rule" />
             <p className="transcript-label">Authorized signature</p>
+            <p className="transcript-signatory-title">{DOCUMENT_SIGNATORY_TITLE}</p>
           </div>
         </footer>
       </article>

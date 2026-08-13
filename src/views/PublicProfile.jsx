@@ -36,6 +36,7 @@ import EmptyState from '../components/common/EmptyState';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import ReportModal from '../components/ReportModal';
 import { DistinctionBanner, DistinctionTag } from '../components/profile/Distinction';
+import OrgAvatar from '../components/common/OrgAvatar';
 
 /** "March 2025" — a joined date needs no day, and a day is more than is asked. */
 const monthYear = (iso) => (iso
@@ -475,7 +476,7 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
               {profile.organizations.map(org => (
                 <li key={org.id} className="list-row">
                   <Link to={`/organizations/${org.slug}`} className="card-link row">
-                    <Users size={15} aria-hidden="true" />
+                    <OrgAvatar organization={org} size={15} className="sm" />
                     <span>{org.name}</span>
                     {org.memberRole === 'manager' && <span className="tag tag-brand">Manager</span>}
                   </Link>

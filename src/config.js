@@ -18,6 +18,28 @@ export const SCHOOL_NAME = import.meta.env.VITE_SCHOOL_NAME || 'WeVolunteer Comm
 export const ENABLE_LEADERBOARD = import.meta.env.VITE_ENABLE_LEADERBOARD !== 'false';
 
 /**
+ * Who signs a service transcript, and in what capacity.
+ *
+ * ── Why this is configuration and not profile data ──
+ *
+ * A transcript is a document the PLATFORM issues about somebody's service. The
+ * signature is the platform's authorised issuer, which is a property of the
+ * deployment — not of the student whose record it is, and not of whichever
+ * organizer happened to confirm the last shift.
+ *
+ * Deliberately NOT read from a user row. Joining the signature to an account
+ * would mean the document silently changes when that account is renamed or
+ * deleted, and it would make an ordinary profile edit a change to the meaning of
+ * every transcript already issued.
+ *
+ * Overridable per deployment, because a district running its own instance signs
+ * its own transcripts.
+ */
+export const DOCUMENT_SIGNATORY = import.meta.env.VITE_DOCUMENT_SIGNATORY || 'Mahit Pulavarthi';
+export const DOCUMENT_SIGNATORY_TITLE =
+  import.meta.env.VITE_DOCUMENT_SIGNATORY_TITLE || `Founder of ${APP_NAME}`;
+
+/**
  * Where the district's privacy notice lives.
  *
  * This platform holds identifying information about minors — names, grades,
