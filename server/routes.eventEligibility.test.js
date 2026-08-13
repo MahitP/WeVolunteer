@@ -292,4 +292,184 @@ describe('applying to an organization event', () => {
       expect(res.body.code).toBeUndefined();
     });
   });
+
+  describe('setting and changing the audience', () => {
+    /* A real event through the real route, so validation, storage and the
+       response shape are all exercised rather than a hand-written row. */
+    const createEvent = (body, session) => srv.call('POST', '/api/events', {
+      title: 'Audience fixture',
+      description: 'An event used by the audience tests.',
+      category: 'Other',
+      location: 'Somewhere',
+      applicationDeadline: new Date(Date.now() + 5 * 86400000).toISOString(),
+      slots: [{
+        name: 'Shift',
+        startDatetime: new Date(Date.now() + 6 * 86400000).toISOString(),
+        endDatetime: new Date(Date.now() + 6 * 86400000 + 3600000).toISOString(),
+        description: '',
+        maxSpots: 5, hoursAwarded: 2,
+      }],
+      ...body,
+    }, session);
+
+    it('defaults to everyone when nothing is said', async () => {
+      const res = await createEvent({}, organizer);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(res.body.id).audience)
+        .toBe('everyone');
+    });
+
+    it('stores a members-only event against its organization', async () => {
+      const res = await createEvent({ organizationId: orgId, audience: 'organization' }, organizer);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      const row = db.prepare('SELECT audience, organization_id FROM events WHERE id = ?').get(res.body.id);
+      expect(row).toMatchObject({ audience: 'organization', organization_id: orgId });
+    });
+
+    it('REFUSES members-only with no organization', async () => {
+      /* "Members only" of nothing is a shift nobody can join. Refused rather
+         than quietly corrected to open, which would publish a different event
+         from the one the organizer described. */
+      const res = await createEvent({ audience: 'organization' }, organizer);
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('organization_required');
+    });
+
+    it('refuses an organization the caller does not manage', async () => {
+      /**
+       * The tampering case at creation. `outsider` is a student here, but the
+       * check that matters is `canManage` — publishing under a club's name and
+       * restricting a shift to its members is a membership question, not a
+       * capability one.
+       */
+      const res = await createEvent({ organizationId: orgId, audience: 'organization' }, outsider);
+      expect([400, 403]).toContain(res.status);
+      expect(res.status).not.toBe(201);
+    });
+
+    it('ignores an unrecognised audience rather than storing it', async () => {
+      /* Anything that is not the literal `organization` reads as open, so an
+         unknown value must not be persisted and later interpreted by somebody
+         else's code. */
+      const res = await createEvent({ organizationId: orgId, audience: 'friends-only' }, organizer);
+      expect(res.status).toBe(201);
+      expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(res.body.id).audience)
+        .toBe('everyone');
+    });
+
+  /**
+   * An edit that keeps the existing shift.
+   *
+   * `PUT` retains only slots that arrive WITH an id it already knows
+   * (`slots.filter(sl => sl.id && existingIds.includes(sl.id))`); anything else
+   * is a replacement, and dropping a slot cascade-deletes the applications on
+   * it. So an edit that omits the id destroys applications for reasons that have
+   * nothing to do with the audience — which is what the first draft of the
+   * test below did, and it looked exactly like the bug it was checking for.
+   */
+    const editEvent = (id, body, session) => {
+      const slot = db.prepare('SELECT * FROM slots WHERE event_id = ? LIMIT 1').get(id);
+      return srv.call('PUT', `/api/events/${id}`, {
+        title: 'Audience fixture', description: 'Edited.', category: 'Other', location: 'Somewhere',
+        applicationDeadline: new Date(Date.now() + 5 * 86400000).toISOString(),
+        slots: [{
+          id: slot?.id,
+          name: slot?.name ?? 'Shift',
+          startDatetime: slot?.start_datetime ?? new Date(Date.now() + 6 * 86400000).toISOString(),
+          endDatetime: slot?.end_datetime ?? new Date(Date.now() + 6 * 86400000 + 3600000).toISOString(),
+          description: slot?.description ?? '',
+          maxSpots: slot?.max_spots ?? 5,
+          hoursAwarded: slot?.hours_awarded ?? 2,
+        }],
+        ...body,
+      }, session);
+    };
+
+    it('narrows an open event to members only', async () => {
+      const created = await createEvent({ organizationId: orgId }, organizer);
+      const res = await editEvent(created.body.id, { audience: 'organization' }, organizer);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(created.body.id).audience)
+        .toBe('organization');
+    });
+
+    it('does NOT invalidate an application made while it was open', async () => {
+      /**
+       * The rule this pass chose and records. Somebody who applied to something
+       * genuinely open keeps their place when it narrows; taking it away
+       * silently would remove a place with no notice and no record. The
+       * audience governs who may apply from now on.
+       */
+      const created = await createEvent({ organizationId: orgId }, organizer);
+      const eventId = created.body.id;
+      const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId).id;
+
+      const applied = await srv.call('POST', `/api/events/${eventId}/apply`, { slotId }, outsider);
+      expect(applied.status, JSON.stringify(applied.body)).toBe(201);
+
+      await editEvent(eventId, { audience: 'organization' }, organizer);
+
+      const row = db.prepare('SELECT status FROM applications WHERE id = ?').get(applied.body.application.id);
+      expect(row, 'the application was deleted by the narrowing').toBeTruthy();
+      expect(row.status).not.toBe('withdrawn');
+    });
+
+    it('stops NEW applications from non-members once narrowed', async () => {
+      const created = await createEvent({ organizationId: orgId }, organizer);
+      const eventId = created.body.id;
+      const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId).id;
+      await editEvent(eventId, { audience: 'organization' }, organizer);
+
+      const res = await srv.call('POST', `/api/events/${eventId}/apply`, { slotId }, outsider);
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('organization_members_only');
+    });
+
+    it('widens a members-only event back to everyone', async () => {
+      /* Every event this block creates runs at the same hour, so an application
+         left by an earlier test collides here as a schedule conflict rather
+         than as the audience decision being measured. */
+      db.prepare('DELETE FROM applications WHERE user_id = ?').run(outsiderId);
+      const created = await createEvent({ organizationId: orgId, audience: 'organization' }, organizer);
+      const eventId = created.body.id;
+      await editEvent(eventId, { audience: 'everyone' }, organizer);
+
+      const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId).id;
+      const res = await srv.call('POST', `/api/events/${eventId}/apply`, { slotId }, outsider);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+    });
+
+    it('leaves the audience alone when the field is omitted', async () => {
+      /* A client that predates this field must not reopen a members-only shift
+         by saving an unrelated edit. */
+      const created = await createEvent({ organizationId: orgId, audience: 'organization' }, organizer);
+      await editEvent(created.body.id, { location: 'Moved' }, organizer);
+      expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(created.body.id).audience)
+        .toBe('organization');
+    });
+
+    it('REFUSES narrowing an event that belongs to no organization', async () => {
+      const created = await createEvent({}, organizer);
+      const res = await editEvent(created.body.id, { audience: 'organization' }, organizer);
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('organization_required');
+    });
+
+    it('refuses an edit from somebody who does not host the event', async () => {
+      const created = await createEvent({ organizationId: orgId }, organizer);
+      const res = await editEvent(created.body.id, { audience: 'organization' }, outsider);
+      expect([403, 404]).toContain(res.status);
+      expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(created.body.id).audience)
+        .toBe('everyone');
+    });
+
+    it('tells the client which audience an event has', async () => {
+      /* The list labels members-only events rather than showing an apply
+         button that will be refused. */
+      const created = await createEvent({ organizationId: orgId, audience: 'organization' }, organizer);
+      const list = await srv.call('GET', '/api/events?scope=listable&limit=60&offset=0', undefined, member);
+      const found = (list.body.events || []).find(e => e.id === created.body.id);
+      expect(found?.audience).toBe('organization');
+    });
+  });
 });
