@@ -922,12 +922,20 @@ router.get('/api/organizations/:key/appeals', authenticateToken, requireCap('org
            banner.name AS banned_by_name
       FROM appeals a
       JOIN users u ON u.id = a.user_id
+      /* The ACTIVE ban only. Migration 044's uniqueness is partial — unique on
+         (organization, user) only WHERE lifted_at IS NULL — so lifted bans
+         accumulate freely. Without this the join multiplied: one appeal became
+         one row per historical ban, each copy carrying a different reason, and
+         the reviewer could be shown a reason belonging to a ban that was lifted
+         months ago. */
       LEFT JOIN organization_bans b
         ON b.organization_id = a.subject_ref AND b.user_id = a.user_id
+       AND b.lifted_at IS NULL
       LEFT JOIN users banner ON banner.id = b.banned_by
      WHERE a.subject = 'organization_ban' AND a.subject_ref = ?
      ORDER BY CASE a.status WHEN 'open' THEN 0 WHEN 'reviewing' THEN 1 ELSE 2 END,
               a.created_at DESC
+     LIMIT 200
   `).all(row.id);
 
   res.json({
@@ -955,9 +963,20 @@ router.get('/api/organizations/:key/appeals', authenticateToken, requireCap('org
       },
       /* Surfaced, not enforced. A one-manager club has nobody to hand it to,
          and refusing would leave the appellant with no route at all. */
-      youIssuedThisBan: a.banned_by_name != null
-        && db.prepare('SELECT banned_by FROM organization_bans WHERE organization_id = ? AND user_id = ?')
-             .get(row.id, a.user_id)?.banned_by === req.principal.userId,
+      /**
+       * The ACTIVE ban's issuer.
+       *
+       * This read every ban for the pair and took whichever came first, which
+       * is the OLDEST. Where an earlier ban had been lifted and a different
+       * manager issued the current one, the flag inverted: the manager actually
+       * being complained about was told they were uninvolved, and an uninvolved
+       * one was told they were the issuer. Since this route surfaces the
+       * conflict rather than enforcing it, that flag is the whole safeguard.
+       */
+      youIssuedThisBan: db.prepare(`
+        SELECT banned_by FROM organization_bans
+         WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
+      `).get(row.id, a.user_id)?.banned_by === req.principal.userId,
     })),
   });
 });
@@ -1000,6 +1019,27 @@ router.post('/api/organizations/:key/appeals/:appealId/decision', authenticateTo
     return res.status(404).json({ error: 'No such appeal for this organization.', code: 'appeal_not_found' });
   }
 
+  /**
+   * Nobody decides their own appeal.
+   *
+   * `appeals.js` declares `self` NEVER_OVERRIDABLE, and its header records the
+   * audit that found somebody deciding an appeal they were party to. This route
+   * had no such check, and the path was reachable: `organization.moderate` is
+   * held by admin and super_admin, `canManage` returns true for those without
+   * consulting membership at all, and nothing stops an admin who is a club
+   * member from being banned. They could file the appeal and then grant it.
+   *
+   * Refused outright rather than surfaced, unlike the issuer conflict below it:
+   * a club with one manager has nobody else to hand an appeal to, which is why
+   * that one is a warning — but "somebody else" always exists here, because the
+   * appellant is by definition not the only person who could decide.
+   */
+  if (appeal.user_id === req.principal.userId) {
+    return res.status(403).json({
+      error: 'You cannot decide your own appeal.', code: 'self_review',
+    });
+  }
+
   /* Already final. Answered 409 rather than silently re-deciding, so two
      managers pressing at once cannot overwrite each other's reasoning. */
   if (appeal.status === 'resolved') {
@@ -1025,11 +1065,23 @@ router.post('/api/organizations/:key/appeals/:appealId/decision', authenticateTo
       if (decision === 'reversed') {
         /* Lifted, not deleted — and only if still active, so a second reversal
            cannot rewrite who lifted it or when. */
+        /**
+         * Only a ban that PREDATES the appeal.
+         *
+         * `subject_ref` records the organization, not the individual ban, so an
+         * appeal does not name what it contests. Without the date bound, this
+         * sequence lifted the wrong thing: banned, appealed, ban lifted by
+         * hand, rejoined, banned again by somebody else for something else —
+         * and then a manager deciding the old, still-open appeal lifted the NEW
+         * ban, which nobody had appealed and nobody had reviewed. The reviewer's
+         * screen showed them a statement about the first one.
+         */
         db.prepare(`
           UPDATE organization_bans
              SET lifted_at = ?, lifted_by = ?
            WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
-        `).run(now, req.principal.userId, row.id, appeal.user_id);
+             AND created_at <= (SELECT created_at FROM appeals WHERE id = ?)
+        `).run(now, req.principal.userId, row.id, appeal.user_id, appeal.id);
       }
 
       recordAppealEvent(db, {
