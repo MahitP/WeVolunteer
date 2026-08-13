@@ -371,6 +371,9 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
     for (const [column, value] of [
       ['name', check.value.name],
       ['avatar', check.value.avatar],
+      /* The colour behind the emoji. A palette KEY, validated in
+         `accountValidation`, never a colour from the client. */
+      ['avatar_color', check.value.avatarColor],
       ['bio', check.value.bio],
       ['school', check.value.school]
     ]) {

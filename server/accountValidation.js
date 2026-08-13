@@ -22,6 +22,7 @@
 
 import bcrypt from 'bcryptjs';
 import { VALID_GRADES } from './config.js';
+import { isAvatarColor } from './avatarColors.js';
 
 /** Roles a person may give themselves. Admin is seeded or promoted, never self-assigned. */
 export const SELF_ASSIGNABLE_ROLES = ['student', 'organizer'];
@@ -554,7 +555,7 @@ export function validateGraduationYear(raw, { grade, now = new Date() } = {}) {
   return { ok: true, value: year, grade: derivedGrade };
 }
 
-export function validateAccountFields({ name, username, email, role, grade, bio, school, skills, avatar, dateOfBirth, graduationYear }) {
+export function validateAccountFields({ name, username, email, role, grade, bio, school, skills, avatar, avatarColor, dateOfBirth, graduationYear }) {
   if (typeof name !== 'string' || !name.trim()) {
     return { ok: false, field: 'name', error: 'Enter your full name.' };
   }
@@ -591,6 +592,10 @@ export function validateAccountFields({ name, username, email, role, grade, bio,
   if (school != null && (typeof school !== 'string' || school.length > SCHOOL_MAX)) {
     return { ok: false, field: 'school', error: `That must be ${SCHOOL_MAX} characters or fewer.` };
   }
+  if (avatarColor !== undefined && !isAvatarColor(avatarColor)) {
+    /* A key from the fixed palette, never a colour — see server/avatarColors.js. */
+    return { ok: false, field: 'avatarColor', error: 'Pick one of the available colours.' };
+  }
   if (avatar != null && (typeof avatar !== 'string' || avatar.length > 8)) {
     // Avatars are single emoji from a fixed palette. Anything longer is either
     // a mistake or an attempt to smuggle a payload into a rendered field.
@@ -613,6 +618,7 @@ export function validateAccountFields({ name, username, email, role, grade, bio,
 
   return {
     ok: true,
+    avatarColor: avatarColor === undefined ? undefined : avatarColor,
     value: {
       name: name.trim(),
       email: emailResult.value,

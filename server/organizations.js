@@ -21,6 +21,7 @@
  */
 
 import crypto from 'node:crypto';
+import { isAvatarColor } from './avatarColors.js';
 
 export const ORG_NAME_MAX = 120;
 export const ORG_DESCRIPTION_MAX = 2000;
@@ -124,6 +125,16 @@ export function validateOrganization(payload, { partial = false } = {}) {
       return { ok: false, field: 'avatar', error: 'Pick one of the available icons.' };
     }
     out.avatar = payload.avatar === null ? null : payload.avatar.trim() || null;
+  }
+
+  /* A key from the fixed palette, never a colour. A hex from a client would be
+     arbitrary text rendered into a style attribute on every surface that draws
+     this organization. */
+  if (payload.avatarColor !== undefined) {
+    if (!isAvatarColor(payload.avatarColor)) {
+      return { ok: false, field: 'avatarColor', error: 'Pick one of the available colours.' };
+    }
+    out.avatarColor = payload.avatarColor;
   }
 
   return { ok: true, value: out };
@@ -289,6 +300,7 @@ export function formatOrganization(row) {
     avatar: row.avatar || null,
     imageUrl: row.image_url || null,
     allowReplies: row.allow_replies !== 0,
+    avatarColor: row.avatar_color || null,
     memberCount: row.memberCount ?? 0,
     eventCount: row.eventCount ?? 0,
     status: row.status,

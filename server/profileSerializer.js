@@ -173,7 +173,7 @@ export function parseHighlights(raw) {
  * asserts against it rather than against a hand-copied list.
  */
 export const PUBLIC_BASELINE_FIELDS = Object.freeze([
-  'id', 'username', 'name', 'avatar', 'profilePictureUrl', 'role',
+  'id', 'username', 'name', 'avatar', 'avatarColor', 'profilePictureUrl', 'role',
   'location', 'hobbies', 'skills', 'joinedAt', 'lastVolunteeredAt',
   'stats', 'organizations', 'visibility', 'isSelf',
   /* `distinction` is `role` restated in words, so it discloses nothing the
@@ -251,6 +251,7 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
     username: row.username || null,
     name: row.name,
     avatar: row.avatar || null,
+    avatarColor: row.avatar_color || null,
     profilePictureUrl: row.profile_picture_url || null,
     role: row.role,
     location: row.location || null,
@@ -399,6 +400,7 @@ export function profileSummary(row) {
     username: row.username || null,
     name: row.name,
     avatar: row.avatar || null,
+    avatarColor: row.avatar_color || null,
     profilePictureUrl: row.profile_picture_url || null,
     role: row.role,
     location: row.location || null,

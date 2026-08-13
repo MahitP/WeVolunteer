@@ -2,8 +2,9 @@ import React, { useState, useRef } from 'react';
 import { useModal } from '../utils/useModal';
 import { X, LogOut } from 'lucide-react';
 import { api } from '../utils/api';
+import EmojiAvatarPicker from './common/EmojiAvatarPicker';
+import { avatarColorValue } from '../utils/avatarColors';
 
-const AVATARS = ['👤', '🧑‍💻', '👩‍⚕️', '🧑‍🎨', '👩‍🎓', '👩‍💼', '🦁', '🦉', '🦊', '🎨', '🧑‍🔬', '🧑‍🍳', '👨‍🚒', '👩‍🏫', '🧑‍🎓', '🌟'];
 
 export default function ProfileEditModal({ user, onClose, onSave, addToast, onSignOut }) {
   const dialogRef = useModal(onClose);
@@ -12,6 +13,7 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
   const [form, setForm] = useState({
     name: user?.name || '',
     avatar: user?.avatar || '👤',
+    avatarColor: user?.avatarColor || null,
     bio: user?.bio || '',
     school: user?.school || '',
     grade: user?.grade || '10',
@@ -103,6 +105,7 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
       const res = await api.updateProfile({
         name: form.name.trim(),
         avatar: form.avatar,
+        avatarColor: form.avatarColor,
         bio: form.bio,
         school: form.school,
         grade: form.grade,
@@ -174,7 +177,13 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
           <div className="field">
             <span className="label">Profile Picture</span>
             <div className="row" style={{ alignItems: 'center', gap: '1rem' }}>
-              <div className="avatar lg" style={{ width: 64, height: 64, position: 'relative', overflow: 'hidden' }}>
+              <div
+                className="avatar lg"
+                style={{
+                  width: 64, height: 64, position: 'relative', overflow: 'hidden',
+                  ...(avatarColorValue(form.avatarColor) ? { '--avatar-bg': avatarColorValue(form.avatarColor) } : {}),
+                }}
+              >
                 {profilePreview && !removePicture ? (
                   <img src={profilePreview} alt="Profile preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
@@ -199,18 +208,26 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
           </div>
 
           <div className="field" style={{ marginTop: '1rem' }}>
-            <span className="label">Emoji Avatar (Fallback)</span>
-            <div className="choicegrid">
-              {AVATARS.map(av => (
-                <button
-                  key={av} type="button" className="choice"
-                  aria-pressed={form.avatar === av} aria-label={`Avatar ${av}`}
-                  onClick={() => set('avatar', av)}
-                >
-                  {av}
-                </button>
-              ))}
-            </div>
+            <span className="label">Emoji avatar</span>
+            {/**
+              * Sixteen faces became a searchable set with a background colour.
+              *
+              * An emoji on the same tinted circle as everybody else's is a
+              * placeholder that happens to differ; the colour is what makes a
+              * pick feel chosen. Shown under the uploaded picture rather than
+              * beside it because it is the fallback — the upload wins wherever
+              * both exist.
+              */}
+            <EmojiAvatarPicker
+              emoji={form.avatar}
+              color={form.avatarColor}
+              idPrefix="profile"
+              onChange={patch => setForm(f => ({
+                ...f,
+                ...('emoji' in patch ? { avatar: patch.emoji } : {}),
+                ...('color' in patch ? { avatarColor: patch.color } : {}),
+              }))}
+            />
           </div>
 
           <div className="field">

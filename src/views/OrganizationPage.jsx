@@ -21,6 +21,7 @@ import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import OrganizationAnnouncements from '../components/OrganizationAnnouncements';
 import ConfirmDialog from '../components/common/ConfirmDialog';
+import { avatarColorValue } from '../utils/avatarColors';
 
 export default function OrganizationPage({ addToast }) {
   const { key } = useParams();
@@ -112,7 +113,10 @@ export default function OrganizationPage({ addToast }) {
                 `users` resolves an avatar in, so the two never disagree about
                 which picture wins. `alt=""` because the name is right beside
                 it: announcing the logo would be reading the name twice. */}
-            <span className="avatar avatar-lg org-avatar">
+            <span
+              className="avatar avatar-lg org-avatar"
+              style={avatarColorValue(org.avatarColor) ? { '--avatar-bg': avatarColorValue(org.avatarColor) } : undefined}
+            >
               {org.imageUrl
                 ? <img src={org.imageUrl} alt="" className="avatar-img" />
                 : (org.avatar || <Building2 size={22} aria-hidden="true" />)}

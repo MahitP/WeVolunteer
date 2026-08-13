@@ -51,6 +51,7 @@ import legalChangeNotices from './039_legal_change_notices.js';
 import organizationIdentity from './040_organization_identity.js';
 import organizationAnnouncements from './041_organization_announcements.js';
 import organizationAllowReplies from './042_organization_allow_replies.js';
+import avatarColour from './043_avatar_colour.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -245,7 +246,13 @@ export const MIGRATIONS = [
    * One guarded ALTER TABLE ADD COLUMN. Depends on 041 only in meaning, not in
    * schema: it touches `organizations`, which long predates it.
    */
-  organizationAllowReplies
+  organizationAllowReplies,
+
+  /**
+   * 043 — a background colour behind an emoji avatar, for people and for
+   * organizations. Two guarded ALTER TABLE ADD COLUMNs; order-independent.
+   */
+  avatarColour
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
