@@ -53,6 +53,7 @@ import organizationAnnouncements from './041_organization_announcements.js';
 import organizationAllowReplies from './042_organization_allow_replies.js';
 import avatarColour from './043_avatar_colour.js';
 import organizationBans from './044_organization_bans.js';
+import eventAudience from './045_event_audience.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -259,7 +260,14 @@ export const MIGRATIONS = [
    * 044 — organization bans. A new table plus two indexes; order-independent
    * beyond `organizations` and `users`, both of which long predate it.
    */
-  organizationBans
+  organizationBans,
+
+  /**
+   * 045 — who an event is for. One column on `events` plus an index; depends
+   * only on `events`, and on migration 031 having added `organization_id`,
+   * which the column is meaningless without.
+   */
+  eventAudience
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

@@ -10,6 +10,7 @@ import { friendsToNotify } from '../relationships.js';
 /* Signed-up / attended, batched, and defined identically to the profile's own
    figures — see the header on `participationCountsFor`. */
 import { participationCountsFor } from '../volunteerStats.js';
+import { eventApplicationEligibility } from '../eventEligibility.js';
 import { db } from '../db.js';
 import { slotHasStarted } from '../attendance.js';
 
@@ -267,6 +268,37 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (event.status !== 'open') return res.status(400).json({ error: 'Event registrations are closed' });
+
+    /**
+     * May this person take part at all — banned, not a member, or it is their
+     * own event.
+     *
+     * ── Why it is here, before everything else ──
+     *
+     * This is the only production path that creates an application, and both
+     * branches below run through it: the INSERT for a first application and the
+     * UPDATE that revives a withdrawn one. So one check covers both, and every
+     * downstream state — waitlisted, promoted, accepted by a draw — is covered
+     * too, because none of them can happen to somebody who never got a row.
+     *
+     * Placed above the deadline and conflict checks deliberately. Eligibility
+     * precedes them: telling a banned person that they have a schedule clash,
+     * or that the deadline passed, answers a question they were never allowed to
+     * ask and tells them something about the event's state they should not
+     * learn from a refusal.
+     *
+     * Nothing here is taken from the request. The organization comes from the
+     * event row, so a client cannot nominate the organization it would like to
+     * be measured against.
+     */
+    const eligibility = eventApplicationEligibility(event, req.user.id);
+    if (!eligibility.ok) {
+      return res.status(eligibility.status).json({
+        error: eligibility.error,
+        code: eligibility.code,
+        ...(eligibility.reason ? { reason: eligibility.reason } : {}),
+      });
+    }
 
     // Verify slot belongs to event
     const slot = db.prepare('SELECT * FROM slots WHERE id = ? AND event_id = ?').get(slotId, eventId);
