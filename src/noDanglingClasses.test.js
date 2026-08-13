@@ -118,11 +118,17 @@ describe('class names referenced in JSX that look like utilities exist in CSS', 
   /**
    * Marker classes that intentionally have no rule.
    *
-   * The three provider buttons carry their brand styling inline, because a
+   * The three provider buttons carry their brand COLOURS inline, because a
    * provider's palette has to be exact — Google's #ffffff/#8c8c8c, Apple's
    * #000000 — and `noHardcodedColors.test.js` exempts `components/auth/` for
-   * precisely that reason. These class names are identification hooks, not style
-   * carriers, so they are not the "lost rule" defect this file guards against.
+   * precisely that reason.
+   *
+   * They are no longer style-free hooks, though: they now carry containment and
+   * focus rules in `index.css`, because their contents used to escape the button
+   * at 320px and they had no focus ring at all. So they are kept as markers here
+   * — a missing rule on one of them is still not the defect this file hunts —
+   * but they are deliberately NOT in `KNOWN_DEAD` any more, and the staleness
+   * check below is what noticed the difference and required this note.
    */
   const INTENTIONAL_MARKERS = new Set(['btn-google', 'btn-microsoft', 'btn-apple']);
 
@@ -234,8 +240,6 @@ describe('no hand-written class dangles either', () => {
     'text-brand', 'text-ok', 'text-warn',
     // Badge variants with no rules.
     'badge-brand', 'badge-subtle',
-    // Provider buttons — they render on `.btn` alone today.
-    'btn-apple', 'btn-google', 'btn-microsoft',
     // Component-local names whose rules were never added.
     'action-panel-apply', 'back-btn', 'data-export-modal', 'empty-state',
     'event-detail-hero-main', 'location-card-distance', 'notif-trigger',
