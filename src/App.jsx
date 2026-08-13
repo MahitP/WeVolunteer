@@ -449,6 +449,11 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/checkin')) return 'checkin';
   if (pathname.startsWith('/organizer-agreement')) return 'organizerAgreement';
   if (pathname.startsWith('/messages')) return 'messages';
+  /* Before `/admin/appeals`? No — different prefixes, no conflict. But it must
+     exist at all: without a branch, filing an appeal was titled "Dashboard /
+     Your shifts, hours, and history", which is the /checkin and /errors bug
+     recorded above, for the third time. */
+  if (pathname.startsWith('/appeals')) return 'appealForm';
   if (pathname.startsWith('/admin/appeals')) return 'appeals';
   if (pathname.startsWith('/admin/moderation')) return 'moderation';
   if (pathname.startsWith('/admin/impact')) return 'adminImpact';
@@ -488,6 +493,7 @@ export const RAIL_TAB = {
   loggedHours: 'dashboard',
   externalHours: 'dashboard',
   organizerAgreement: 'dashboard',
+  appealForm: 'dashboard',
 };
 
 /** Every nav entry the user may see, `/` first, in the order the shell renders. */
@@ -553,6 +559,7 @@ export function navSectionsFor(user) {
    one destination means two people cannot describe it to each other. */
 export const PAGE_META = {
   volunteer: {
+    appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
@@ -587,6 +594,7 @@ export const PAGE_META = {
     organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
   },
   host: {
+    appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
@@ -601,6 +609,7 @@ export const PAGE_META = {
     organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
   },
   staff: {
+    appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
@@ -644,6 +653,7 @@ export const PAGE_META = {
     externalHours: { title: 'Log external hours', sub: 'Volunteering done outside WeVolunteer' }
   },
   partner: {
+    appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     /* `/organizer-agreement` is the one route declared with NO capability, on
        purpose — it is how an organizer accepts the terms that grant the rest —
