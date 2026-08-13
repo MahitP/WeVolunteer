@@ -52,7 +52,7 @@ export default function OrganizationForm({ addToast }) {
   const navigate = useNavigate();
   const editing = Boolean(key);
 
-  const [form, setForm] = useState({ name: '', description: '', tags: [], avatar: null });
+  const [form, setForm] = useState({ name: '', description: '', tags: [], avatar: null, allowReplies: true });
   const [imageUrl, setImageUrl] = useState(null);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(editing);
@@ -74,6 +74,7 @@ export default function OrganizationForm({ addToast }) {
           name: res.organization.name,
           description: res.organization.description,
           avatar: res.organization.avatar ?? null,
+          allowReplies: res.organization.allowReplies !== false,
           /* Stored as plain labels; `TagInput` renders `{tag, label}` chips.
              Mapping in here and back out on submit keeps the shared editor
              usable without teaching it a second storage format. */
@@ -119,7 +120,10 @@ export default function OrganizationForm({ addToast }) {
        * stops the round trip from depending on that tolerance.
        */
       const tags = form.tags.map(t => (typeof t === 'string' ? t : t.label));
-      const body = { name: form.name.trim(), description: form.description, tags, avatar: form.avatar };
+      const body = {
+        name: form.name.trim(), description: form.description, tags,
+        avatar: form.avatar, allowReplies: form.allowReplies,
+      };
       const res = editing
         ? await api.updateOrganization(key, body)
         : await api.createOrganization(body);
@@ -283,6 +287,30 @@ export default function OrganizationForm({ addToast }) {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="field">
+            {/**
+              * One setting for the whole organization, not one per post.
+              *
+              * A manager deciding "we do not take replies" is describing how
+              * their club communicates, not annotating an individual notice.
+              *
+              * The hint says what turning it off does NOT do, because that is
+              * the thing a manager hesitates over: nobody's words are deleted.
+              */}
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={form.allowReplies}
+                onChange={e => set('allowReplies', e.target.checked)}
+              />
+              <span>Allow replies to announcements</span>
+            </label>
+            <span className="field-hint">
+              Members can reply to anything this organization posts. Turning it off
+              stops new replies; the ones already written stay visible.
+            </span>
           </div>
 
           <div className="field">

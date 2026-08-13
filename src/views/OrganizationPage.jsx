@@ -186,6 +186,7 @@ export default function OrganizationPage({ addToast }) {
         orgKey={key}
         canManage={viewer?.canManage === true}
         isMember={viewer?.isMember === true}
+        repliesEnabled={org.allowReplies !== false}
         addToast={addToast}
       />
 

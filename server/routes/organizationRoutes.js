@@ -210,6 +210,9 @@ router.patch('/api/organizations/:key', authenticateToken, requireCap('organizat
   /* The emoji mark. `null` clears it, which is why the check is on `undefined`
      and not on truthiness — an organization may go back to having none. */
   if (check.value.avatar !== undefined) { updates.push('avatar = ?'); values.push(check.value.avatar); }
+  if (check.value.allowReplies !== undefined) {
+    updates.push('allow_replies = ?'); values.push(check.value.allowReplies ? 1 : 0);
+  }
   if (req.body?.status !== undefined) {
     if (!['active', 'archived'].includes(req.body.status)) {
       return res.status(400).json({ error: 'Status must be active or archived.', field: 'status' });
@@ -402,7 +405,9 @@ function formatAnnouncement(row, replies = []) {
     id: row.id,
     organizationId: row.organization_id,
     body: row.body,
-    repliesEnabled: row.replies_enabled === 1,
+    /* Resolved from the organization and stamped on every announcement, so the
+       client renders one consistent answer without having to join them up. */
+    repliesEnabled: row.org_allow_replies === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at || null,
     author: {
@@ -415,9 +420,11 @@ function formatAnnouncement(row, replies = []) {
 }
 
 const ANNOUNCEMENT_SELECT = `
-  SELECT a.*, u.name AS author_name, u.avatar AS author_avatar
+  SELECT a.*, u.name AS author_name, u.avatar AS author_avatar,
+         o.allow_replies AS org_allow_replies
   FROM organization_announcements a
   LEFT JOIN users u ON u.id = a.author_id
+  JOIN organizations o ON o.id = a.organization_id
 `;
 
 /**
@@ -487,16 +494,14 @@ router.post('/api/organizations/:key/announcements', authenticateToken, requireC
     return res.status(400).json({ error: `An announcement must be ${ANNOUNCEMENT_MAX} characters or fewer.`, code: 'body_too_long' });
   }
 
-  /* Replies on unless the manager says otherwise: an announcement people cannot
-     answer is a broadcast, and a volunteer noticing "that clashes with the
-     game" is most of why an organization posts at all. */
-  const repliesEnabled = req.body?.repliesEnabled === false ? 0 : 1;
-
+  /* No per-post reply flag. Whether replies are open is a property of the
+     organization — one setting in Manage Organization, no individual override.
+     The column 041 created is left in place but is no longer consulted. */
   const id = `organn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   db.prepare(`
-    INSERT INTO organization_announcements (id, organization_id, author_id, body, replies_enabled, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, row.id, req.principal.userId, body, repliesEnabled, new Date().toISOString());
+    INSERT INTO organization_announcements (id, organization_id, author_id, body, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(id, row.id, req.principal.userId, body, new Date().toISOString());
 
   const created = db.prepare(`${ANNOUNCEMENT_SELECT} WHERE a.id = ?`).get(id);
   return res.status(201).json({ announcement: formatAnnouncement(created) });
@@ -532,9 +537,7 @@ router.patch('/api/organizations/:key/announcements/:announcementId', authentica
     }
     updates.push('body = ?'); values.push(body);
   }
-  if (req.body?.repliesEnabled !== undefined) {
-    updates.push('replies_enabled = ?'); values.push(req.body.repliesEnabled === false ? 0 : 1);
-  }
+
   if (updates.length === 0) return res.status(400).json({ error: 'No fields to update.' });
 
   updates.push('updated_at = ?'); values.push(new Date().toISOString());
@@ -577,10 +580,15 @@ router.post('/api/organizations/:key/announcements/:announcementId/replies', aut
     .get(req.params.announcementId, row.id);
   if (!announcement) return res.status(404).json({ error: 'No such announcement.', code: 'not_found' });
 
-  /* The flag is enforced here and only here. Existing replies are untouched by
-     it — see the migration for why that is the deliberate choice. */
-  if (announcement.replies_enabled !== 1) {
-    return res.status(409).json({ error: 'Replies are turned off for this announcement.', code: 'replies_disabled' });
+  /**
+   * The ORGANIZATION's setting, not the announcement's.
+   *
+   * Enforced here and only here: existing replies are untouched by it, because
+   * a settings toggle is not a moderation decision and the people who wrote
+   * them were heard. See migration 042.
+   */
+  if (row.allow_replies !== 1) {
+    return res.status(409).json({ error: 'This organization has turned off replies.', code: 'replies_disabled' });
   }
 
   const isMember = db.prepare('SELECT 1 FROM organization_members WHERE organization_id = ? AND user_id = ?')

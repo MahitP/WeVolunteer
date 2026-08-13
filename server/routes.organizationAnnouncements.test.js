@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { startTestServer } from './testServer.js';
 
 /**
@@ -42,6 +42,10 @@ describe('organization announcements', () => {
     srv.call('DELETE', `/api/organizations/${orgKey}/announcements/${id}`, undefined, session);
   const reply = (id, body, session = student) =>
     srv.call('POST', `/api/organizations/${orgKey}/announcements/${id}/replies`, { body }, session);
+
+  /** The organization-level setting, which now governs every announcement. */
+  const setAllowReplies = (allow) =>
+    srv.call('PATCH', `/api/organizations/${orgKey}`, { allowReplies: allow }, manager);
 
   const join = (userId, role = 'member') => {
     db.prepare(`
@@ -98,9 +102,14 @@ describe('organization announcements', () => {
       expect(res.body.announcement.repliesEnabled).toBe(true);
     });
 
-    it('honours replies being turned off at creation', async () => {
-      const res = await post({ body: 'Final notice, no discussion.', repliesEnabled: false });
-      expect(res.body.announcement.repliesEnabled).toBe(false);
+    it('reports the ORGANIZATION\'s reply setting, not a per-post one', async () => {
+      /* A per-post flag in the body must be ignored — there is one answer for
+         the whole organization and no individual override. */
+      await setAllowReplies(false);
+      const res = await post({ body: 'Final notice.', repliesEnabled: true });
+
+      expect(res.body.announcement.repliesEnabled, 'the body flag must not win').toBe(false);
+      await setAllowReplies(true);
     });
 
     it('refuses an empty announcement', async () => {
@@ -188,20 +197,33 @@ describe('organization announcements', () => {
     });
   });
 
-  describe('turning replies off', () => {
+  describe('turning replies off, for the whole organization', () => {
     let announcementId;
 
     beforeEach(async () => {
+      await setAllowReplies(true);
       announcementId = (await post({ body: 'Bring gloves on Saturday.' })).body.announcement.id;
       await reply(announcementId, 'Already said this before it was locked.');
     });
 
+    afterEach(async () => { await setAllowReplies(true); });
+
     it('stops new replies', async () => {
-      await patch(announcementId, { repliesEnabled: false });
+      await setAllowReplies(false);
 
       const res = await reply(announcementId, 'Trying anyway.');
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('replies_disabled');
+    });
+
+    it('applies to EVERY announcement, not just one', async () => {
+      /* The point of moving this to the organization: one setting, no post
+         left behind with its own answer. */
+      const second = (await post({ body: 'A second announcement.' })).body.announcement.id;
+      await setAllowReplies(false);
+
+      expect((await reply(announcementId, 'One.')).status).toBe(409);
+      expect((await reply(second, 'Two.')).status).toBe(409);
     });
 
     it('KEEPS the replies already written', async () => {
@@ -213,7 +235,7 @@ describe('organization announcements', () => {
        * words without a moderation decision; hiding it would be worse, because
        * the author would carry on believing they had been heard.
        */
-      await patch(announcementId, { repliesEnabled: false });
+      await setAllowReplies(false);
 
       const found = (await list()).body.announcements.find(a => a.id === announcementId);
       expect(found.repliesEnabled).toBe(false);
@@ -222,8 +244,8 @@ describe('organization announcements', () => {
     });
 
     it('can be turned back on, and the thread resumes', async () => {
-      await patch(announcementId, { repliesEnabled: false });
-      await patch(announcementId, { repliesEnabled: true });
+      await setAllowReplies(false);
+      await setAllowReplies(true);
 
       const res = await reply(announcementId, 'Back open.');
       expect(res.status).toBe(201);
@@ -235,7 +257,8 @@ describe('organization announcements', () => {
     it('cannot be toggled by somebody who does not manage the organization', async () => {
       db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
         .run(orgId, managerId);
-      const res = await patch(announcementId, { repliesEnabled: false });
+
+      const res = await setAllowReplies(false);
       expect(res.status).toBe(403);
       join(managerId, 'manager');
 
