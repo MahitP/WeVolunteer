@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Clock, Sprout, Flame, Sparkles } from 'lucide-react';
 import { api } from '../utils/api';
+import { can } from '../authz';
 import { formatHours } from '../utils/helpers';
 import { reportClientError } from '../utils/errorReporting';
 import { BarChart } from './BarChart';
@@ -42,7 +43,37 @@ export default function ServiceInsights({ userId, setActiveTab }) {
   const [failed, setFailed] = useState(false);
   const [reload, setReload] = useState(0);
 
+  /**
+   * Only ask for a service record the viewer could actually have.
+   *
+   * `/api/stats/volunteer` requires `portfolio.write`, which an organizer does
+   * not hold — so on an organizer's dashboard this fired and was refused 403,
+   * four times per load, silently. Nothing was visibly broken because the
+   * failure path renders nothing, which is exactly why it went unnoticed.
+   *
+   * Read from the cached user rather than threaded through props: this
+   * component already owns its own fetch, and adding a prop would mean every
+   * caller had to know a rule that belongs here.
+   */
+  /**
+   * Skipped only when we positively KNOW the viewer cannot have one.
+   *
+   * An absent cache is not evidence of anything — it is a first paint before the
+   * user has been written, or a test that never wrote one. Treating that as "no
+   * capability" would hide a real student's service record behind a race, which
+   * is a worse bug than the one being fixed. So the guard fires on a cached user
+   * who demonstrably lacks the capability, and stays out of the way otherwise.
+   */
+  /* Optionally called: tests mock `api` with the handful of methods they use,
+     and a missing key throws during render — the trap `hookOrder.test.jsx`
+     exists to catch. An absent method reads as an absent cache, which the rule
+     above already treats as "do not interfere". */
+  const cachedUser = api.getCurrentCachedUser?.();
+  const mayHaveServiceRecord = !cachedUser || can(cachedUser, 'portfolio.write');
+
   useEffect(() => {
+    if (!mayHaveServiceRecord) return undefined;
+
     let cancelled = false;
     setFailed(false);
 
@@ -66,7 +97,12 @@ export default function ServiceInsights({ userId, setActiveTab }) {
        the attendance ledger, which no student action changes: withdrawing is
        refused once a shift has started, so it can only ever remove a future
        commitment, which this section does not count. */
-  }, [userId, reload]);
+  }, [userId, reload, mayHaveServiceRecord]);
+
+  /* Nothing to show, and nothing was asked for. An empty service-record card on
+     an organizer's dashboard would read as "you have volunteered nothing"
+     rather than as "this is not your kind of account". */
+  if (!mayHaveServiceRecord) return null;
 
   const loading = !insights && !failed;
 
