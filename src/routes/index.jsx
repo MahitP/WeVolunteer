@@ -57,6 +57,7 @@ const AboutUs = React.lazy(() => import('../views/AboutUs'));
 const LegalEditor = React.lazy(() => import('../views/legal/LegalEditor'));
 const OrganizerAgreement = React.lazy(() => import('../views/legal/OrganizerAgreement'));
 const Appeal = React.lazy(() => import('../views/Appeal'));
+const NewAppeal = React.lazy(() => import('../views/NewAppeal'));
 const AdminAppeals = React.lazy(() => import('../views/AdminAppeals'));
 const AdminAuditExplorer = React.lazy(() => import('../views/AdminAuditExplorer'));
 const ImpactDashboard = React.lazy(() => import('../views/ImpactDashboard.jsx'));
@@ -430,6 +431,7 @@ export const PUBLIC_ROUTES = [
    */
   { path: '/about', element: <AboutUs /> },
   { path: '/appeal/:token', element: <Appeal /> },
+  { path: '/appeals/new', element: <NewAppeal /> },
 ];
 
 /**
