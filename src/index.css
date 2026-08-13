@@ -3213,6 +3213,36 @@ time { font-variant-numeric: tabular-nums; }
   margin-top: var(--s12);
   flex-wrap: wrap;
 }
+
+/**
+ * One of the two signature columns.
+ *
+ * `flex: 1 1 12rem` rather than a width: the two rules should be the same
+ * length as each other whatever the names on them are, and at 320px — where two
+ * 12rem columns plus the gap no longer fit — the basis is what lets them wrap to
+ * one per line instead of squeezing to a stub. `min-width: 0` because a flex
+ * item's automatic minimum is its content, and a long unbroken organizer name
+ * would otherwise push the column wider than the paper.
+ */
+.certificate-sign-block {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+/**
+ * The verification code, on its own line under both signatures.
+ *
+ * `inline-block` so the rule above it is only as wide as the code — as a block
+ * it would draw a full-width line across the foot of the document and read as a
+ * third signature rule.
+ */
+.certificate-verify {
+  margin-top: var(--s8);
+  text-align: center;
+}
+.certificate-verify .certificate-code {
+  display: inline-block;
+}
 .certificate-code {
   font-family: var(--font-mono);
   font-size: 0.9375rem;

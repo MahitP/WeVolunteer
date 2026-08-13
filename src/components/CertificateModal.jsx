@@ -84,23 +84,56 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
               <p className="certificate-sub">of verified community service</p>
             </div>
 
+            {/**
+              * Two parties, two rules.
+              *
+              * A certificate of service is a claim about a volunteer that an
+              * organizer attests to, and until now only the organizer appeared
+              * at the foot of it. The document named its subject in the body and
+              * then presented a single signature, which reads as an organizer
+              * signing something about themselves.
+              *
+              * Both names sit ABOVE their rule with the capacity below it, the
+              * way a signed document is laid out and the same shape the
+              * transcript already uses. `.certificate-sign`'s `min-height` is
+              * what keeps the two rules on one line when one name wraps and the
+              * other does not — it was written for this pairing before there was
+              * anything to pair.
+              */}
             <div className="certificate-foot">
-              <div>
+              <div className="certificate-sign-block">
+                {/* Same reasoning as the volunteer name in the body: an empty
+                    signature line is indistinguishable from an unsigned
+                    certificate. */}
                 <div className="certificate-sign">
-                  {/* Same reasoning as the volunteer name above: an empty
-                      signature line is indistinguishable from an unsigned
-                      certificate. */}
+                  {volunteer?.name || 'Name unavailable'}
+                </div>
+                <div className="certificate-sign-label">Volunteer</div>
+              </div>
+
+              <div className="certificate-sign-block">
+                <div className="certificate-sign">
                   {certificate.organizerName || 'Organizer unavailable'}
                   {certificate.organizerVerified && ' · Verified organizer'}
                 </div>
                 <div className="certificate-sign-label">Program Coordinator</div>
               </div>
+            </div>
 
-              <div style={{ textAlign: 'right' }}>
-                <div className="certificate-code">{certificate.code}</div>
-                <div className="certificate-sign-label">
-                  Verify at {verifyHost}{verifyPath}
-                </div>
+            {/**
+              * The verification code, displaced by the second signature and
+              * given its own line rather than dropped.
+              *
+              * It is the only thing on the certificate a school office can act
+              * on, so it keeps its own rule and its own caption. Centred beneath
+              * both signatures it reads as belonging to the document rather than
+              * to either party — which is accurate: the platform issues it, not
+              * the organizer.
+              */}
+            <div className="certificate-verify">
+              <div className="certificate-code">{certificate.code}</div>
+              <div className="certificate-sign-label">
+                Verify at {verifyHost}{verifyPath}
               </div>
             </div>
           </div>
