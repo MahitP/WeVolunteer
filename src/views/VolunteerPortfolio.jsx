@@ -186,8 +186,13 @@ export default function VolunteerPortfolio({ currentUser }) {
             * transcript already issued.
             */}
           <div className="transcript-sign">
+            {/* The name CARRIES the rule rather than sitting above a separate
+                one. `.transcript-sign-rule` was its own 2.25rem-tall box with
+                the border along its bottom edge, so the name floated about
+                44px clear of the line it was supposed to be signed on. The
+                certificate has always done it the other way — see
+                `.certificate-sign` — and this now matches it. */}
             <p className="transcript-signatory">{DOCUMENT_SIGNATORY}</p>
-            <div className="transcript-sign-rule" />
             <p className="transcript-label">Authorized signature</p>
             <p className="transcript-signatory-title">{DOCUMENT_SIGNATORY_TITLE}</p>
           </div>

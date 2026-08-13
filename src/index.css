@@ -10612,6 +10612,18 @@ input:disabled + .premium-slider {
   margin: 0;
 }
 
+/**
+ * Below the rule, not tucked against it.
+ *
+ * The gap used to come from the removed rule element's `margin-bottom`. Scoped
+ * to the signature block so the other `.transcript-label`s — which caption
+ * figures, not signatures — keep their `margin: 0`. Same wording and reasoning
+ * as `.certificate-sign-label`.
+ */
+.transcript-sign .transcript-label {
+  margin-top: var(--s2);
+}
+
 .transcript-name {
   font-family: var(--font-doc);
   font-size: 1.5rem;
@@ -10757,7 +10769,29 @@ input:disabled + .premium-slider {
  * light-paper artefact whatever theme the app is in.
  */
 .transcript-signatory {
-  margin: 0 0 var(--s2);
+  /**
+   * The name sits ON the rule, which is the whole point of a signature line.
+   *
+   * It used to sit above a separate `.transcript-sign-rule` element that was
+   * `height: 2.25rem` with its border along the BOTTOM edge — so 36px of empty
+   * box, plus this element's own 8px bottom margin, stood between the name and
+   * the line. On paper it read as a name floating above an unrelated rule.
+   *
+   * This is `.certificate-sign`'s geometry, deliberately: border on the box that
+   * holds the name, `min-height` to reserve room for a real signature without
+   * pushing the name upward, and `flex-end` so the text rests on the border
+   * however tall the box is. Same convention for both documents rather than two
+   * conventions for one idea.
+   */
+  margin: 0;
+  min-height: 2.4em;
+  display: flex;
+  align-items: flex-end;
+  /* `.transcript-sign` centres its text; a flex container does not inherit
+     that, so the name would go hard left without this. */
+  justify-content: center;
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--certificate-ink-2);
   font-family: var(--font-doc);
   font-size: 1.0625rem;
   color: var(--cert-text);
@@ -10768,12 +10802,6 @@ input:disabled + .premium-slider {
   font-size: 0.75rem;
   color: var(--certificate-ink-3);
 }
-.transcript-sign-rule {
-  border-bottom: 1px solid var(--certificate-ink-2);
-  height: 2.25rem;
-  margin-bottom: var(--s2);
-}
-
 @media (max-width: 640px) {
   .transcript { padding: var(--s6) var(--s4); }
   .transcript-totals { gap: var(--s6); }
