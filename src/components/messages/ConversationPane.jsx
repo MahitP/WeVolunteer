@@ -63,9 +63,24 @@ export default function ConversationPane({ conversation, onBack, onUpdateConvers
     setLoading(true);
     api.fetchMessages(conversation.id)
       .then(res => {
-        setMessages([...(res.messages || [])].reverse());
+        /**
+         * No reverse. The server already returns oldest-first.
+         *
+         * `messageRoutes.js` selects `ORDER BY created_at DESC LIMIT ?` to take
+         * the newest N and then calls `rows.reverse()`, so the response is
+         * ascending — `messaging.friends.test.js` asserts exactly that. This
+         * line reversed it a second time and rendered the thread newest-first.
+         *
+         * Every other write path in this component appends (`[...prev, msg]`
+         * for both socket delivery and your own send), so history ran one way
+         * and new messages the other. That disagreement is the tell.
+         */
+        setMessages(res.messages || []);
         setHasMore(res.hasMore);
-        scrollToBottom();
+        /* Jump, not glide: opening a thread should START at the newest message.
+           Smooth-scrolling there means the first thing somebody sees is the top
+           of a conversation they have already read, sliding away. */
+        scrollToBottom({ smooth: false });
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -146,10 +161,42 @@ export default function ConversationPane({ conversation, onBack, onUpdateConvers
     };
   }, [conversation?.id, other?.id]);
 
-  const scrollToBottom = () => {
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
+  /**
+   * How close to the bottom still counts as "reading the newest".
+   *
+   * Roughly one short message plus its padding. Tighter and an ordinary
+   * resting position registers as scrolled-away; looser and somebody a
+   * paragraph up still gets yanked.
+   */
+  const NEAR_BOTTOM_PX = 120;
+
+  const isNearBottom = () => {
+    const list = messagesEndRef.current?.parentElement;
+    if (!list) return true;
+    return list.scrollHeight - list.scrollTop - list.clientHeight <= NEAR_BOTTOM_PX;
+  };
+
+  /**
+   * Scrolls to the newest message.
+   *
+   * `force` is for your OWN send — you always want to see what you just wrote.
+   * Everything else respects where the reader is: a message arriving while
+   * somebody is deliberately reading back through a thread must not drag them
+   * away from it, which is the difference between a chat that follows the
+   * conversation and one that fights the person using it.
+   *
+   * `requestAnimationFrame` rather than `setTimeout(…, 100)`: the old version
+   * was a race against React's commit that happened to usually win, and on a
+   * slow render it scrolled before the new message existed.
+   */
+  const scrollToBottom = ({ smooth = true, force = false } = {}) => {
+    if (!force && !isNearBottom()) return;
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: smooth ? 'smooth' : 'auto',
+        block: 'end',
+      });
+    });
   };
 
   const handleInputChange = (e) => {
@@ -191,7 +238,9 @@ export default function ConversationPane({ conversation, onBack, onUpdateConvers
          if (prev.find(m => m.id === res.message.id)) return prev;
          return [...prev, res.message];
       });
-      scrollToBottom();
+      /* Forced: you always want to see the message you just sent, wherever you
+         had scrolled to before sending it. */
+      scrollToBottom({ force: true });
     } catch (err) {
       if (err.status === 429) {
         setRateLimitError("You're sending messages too quickly. Please wait a moment.");
