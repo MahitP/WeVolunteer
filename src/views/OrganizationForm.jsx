@@ -20,17 +20,30 @@ import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import TagInput from '../components/common/TagInput';
-import { normaliseTag } from '../eventTags.js';
+import { normaliseOrgTag, MAX_ORG_TAGS, MAX_ORG_TAG_LENGTH } from '../organizationTags.js';
 import EmojiAvatarPicker from '../components/common/EmojiAvatarPicker';
 
 /**
  * A stored tag label, as the chip `TagInput` expects.
  *
- * Uses the same normaliser the editor and the event routes use, so a stored
- * label that predates a rule change is either rendered or dropped — never
- * turned into a chip whose key disagrees with everything else's.
+ * ── Nothing is ever dropped here ──
+ *
+ * This used to normalise with the EVENT rules and `.filter(Boolean)` away
+ * whatever failed them. Since the submit path sends the surviving chips and the
+ * route replaces the whole column, opening an organization whose tags contained
+ * an ampersand or a full stop — both of which the API accepts — and saving a
+ * change to the description silently and permanently deleted them. The editor
+ * showed no tags, so there was nothing to notice.
+ *
+ * It normalises with the ORGANIZATION rules now, under which every stored tag
+ * round-trips. A tag that still cannot be normalised is kept verbatim rather
+ * than discarded: the worst case then is the route refusing the save and NAMING
+ * the tag, which is recoverable, instead of the form quietly destroying data.
  */
-const toChip = (label) => (typeof label === 'string' ? normaliseTag(label) : label) || null;
+const toChip = (label) => {
+  if (typeof label !== 'string') return label || null;
+  return normaliseOrgTag(label) || { tag: label.toLocaleLowerCase(), label };
+};
 
 export default function OrganizationForm({ addToast }) {
   const { key } = useParams();
@@ -82,7 +95,7 @@ export default function OrganizationForm({ addToast }) {
     if (!form.name.trim()) next.name = 'Give the organization a name.';
     else if (form.name.length > 120) next.name = 'Keep the name to 120 characters or fewer.';
     if (form.description.length > 2000) next.description = 'Keep the description to 2000 characters or fewer.';
-    if (form.tags.length > 8) next.tags = 'Use eight tags or fewer.';
+    if (form.tags.length > MAX_ORG_TAGS) next.tags = `Use ${MAX_ORG_TAGS} tags or fewer.`;
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -300,7 +313,17 @@ export default function OrganizationForm({ addToast }) {
 
           <div className="field">
             <span className="label" id="org-tags-label">Tags <span className="muted">(optional)</span></span>
-            <TagInput value={form.tags} onChange={tags => set('tags', tags)} />
+            {/* The organization rules, not the event ones — see
+                `src/organizationTags.js` for what the difference cost. */}
+            <TagInput
+              value={form.tags}
+              onChange={tags => set('tags', tags)}
+              normalise={normaliseOrgTag}
+              maxTags={MAX_ORG_TAGS}
+              maxLength={MAX_ORG_TAG_LENGTH}
+              subject="organization"
+              invalidHint={`Keep each tag to ${MAX_ORG_TAG_LENGTH} characters or fewer.`}
+            />
             {errors.tags && (
               <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.tags}</span>
             )}
