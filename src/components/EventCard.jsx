@@ -68,6 +68,15 @@ export default function EventCard({
           <h2 className="eventcard-title" title={event.title}>{event.title}</h2>
           <p className="eventcard-meta truncate">
             <span className="tag">{event.category}</span>
+            {/* A members-only event stays in the list and stays labelled.
+                Hiding it would mean somebody who would happily join the club
+                never learns the club exists; saying so on the card is how they
+                find out there is one to join. */}
+            {event.audience === 'organization' && (
+              <span className="tag">
+                {event.viewerIsMember ? 'Members only' : `${event.organizationName || 'Members'} only`}
+              </span>
+            )}
             <span className="truncate">{event.organizerName}</span>
             {event.organizerVerified && <ShieldCheck size={13} aria-label="Verified organizer" className="s-733461" />}
           </p>

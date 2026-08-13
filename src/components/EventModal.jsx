@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useModal } from '../utils/useModal';
 import {
   X, CalendarClock, Users, Zap, ShieldCheck,
@@ -665,6 +665,39 @@ export default function EventModal({
                 * a second, which would just make two rows for one grievance.
                 * One already decided — say what was decided, and stop.
                 */}
+              {/**
+                * ── For the club's own members, and you are not one ──
+                *
+                * Said here rather than by removing the apply button, because a
+                * disabled control with no explanation is the thing people press
+                * twice and then give up on. It names the club and points at it:
+                * the answer to "why can't I" is usually "join, then you can".
+                *
+                * Suppressed when they are banned — that notice is the more
+                * specific one, and stacking two refusals reads as two problems.
+                */}
+              {tab === 'shifts' && !event.viewerBan?.banned
+                && event.audience === 'organization' && event.viewerIsMember === false && (
+                <div className="alert event-members-only" role="status">
+                  <div>
+                    <span className="alert-title">
+                      This one is for {event.organizationName || 'the organization'}&rsquo;s members
+                    </span>
+                    <p className="small">
+                      Anybody can see it. Only members can take a place on a shift.
+                      {event.organizationSlug && (
+                        <>
+                          {' '}
+                          <Link to={`/organizations/${event.organizationSlug}`}>
+                            See {event.organizationName || 'the organization'}
+                          </Link>
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {tab === 'shifts' && event.viewerBan?.banned && (
                 <div className="alert alert-danger event-ban-notice" role="status">
                   <div>

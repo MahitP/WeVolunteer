@@ -472,4 +472,58 @@ describe('applying to an organization event', () => {
       expect(found?.audience).toBe('organization');
     });
   });
+
+  describe('what the event tells the reader about the restriction', () => {
+    /**
+     * A members-only event stays discoverable. Hiding it would mean somebody
+     * who would happily join the club never learns the club exists — so it is
+     * listed, labelled, and refused at the point of applying, with a reason.
+     */
+    const listed = async (session) => {
+      const res = await srv.call('GET', '/api/events?scope=listable&limit=60&offset=0', undefined, session);
+      return (res.body.events || []).find(e => e.id === orgEventId);
+    };
+
+    beforeEach(() => {
+      db.prepare("UPDATE events SET audience = 'organization' WHERE id = ?").run(orgEventId);
+    });
+
+    it('is still listed to somebody who cannot apply to it', async () => {
+      const card = await listed(outsider);
+      expect(card, 'the members-only event vanished from the list').toBeTruthy();
+      expect(card.audience).toBe('organization');
+    });
+
+    it('still says whose it is, so they know what to join', async () => {
+      const card = await listed(outsider);
+      expect(card.organizationId).toBe(orgId);
+      expect(card.organizationName).toBeTruthy();
+    });
+
+    it('tells an outsider they are not a member', async () => {
+      expect((await listed(outsider)).viewerIsMember).toBe(false);
+    });
+
+    it('tells a member they are one', async () => {
+      db.prepare(`INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
+                  VALUES (?, ?, 'member', ?)`).run(orgId, memberId, new Date().toISOString());
+      expect((await listed(member)).viewerIsMember).toBe(true);
+    });
+
+    it('says nothing either way for an event with no organization', async () => {
+      const res = await srv.call('GET', '/api/events?scope=listable&limit=60&offset=0', undefined, outsider);
+      const card = (res.body.events || []).find(e => e.id === publicEventId);
+      expect(card.viewerIsMember).toBeNull();
+    });
+
+    it('does not leak anybody ELSE\u2019s membership', async () => {
+      /* The field answers "am I a member", and takes no parameter that could
+         point it at somebody else — the same rule `viewerBan` follows. */
+      db.prepare(`INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
+                  VALUES (?, ?, 'member', ?)`).run(orgId, memberId, new Date().toISOString());
+      const card = await listed(outsider);
+      expect(card.viewerIsMember).toBe(false);
+      expect(Object.keys(card).filter(k => /member/i.test(k))).toEqual(['viewerIsMember']);
+    });
+  });
 });

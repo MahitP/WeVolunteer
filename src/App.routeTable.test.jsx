@@ -203,7 +203,7 @@ describe('authenticated route table', () => {
     signedInAs(USER('organizer'));
     renderAt('/events/new');
     const el = await screen.findByTestId('create');
-    expect(el.dataset.props).toBe('addToast,onSubmitEvent,setActiveTab');
+    expect(el.dataset.props).toBe('addToast,currentUser,onSubmitEvent,setActiveTab');
   });
 
   it('unverified organizer: /events/new is still refused', async () => {
