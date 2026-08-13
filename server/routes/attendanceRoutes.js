@@ -16,7 +16,7 @@ import { db } from '../db.js';
 
 const router = express.Router();
 
-router.post('/api/events/:id/checkin', authenticateToken, requireCap('attendance.mark'), (req, res) => {
+router.post('/api/events/:id/checkin', authenticateToken, requireCapAny(['attendance.mark', 'organization.event.manage.own']), (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
@@ -67,7 +67,7 @@ router.post('/api/events/:id/checkin', authenticateToken, requireCap('attendance
   }
 });
 
-router.get('/api/events/:id/checkin', authenticateToken, requireCap('attendance.view'), (req, res) => {
+router.get('/api/events/:id/checkin', authenticateToken, requireCapAny(['attendance.view', 'organization.event.manage.own']), (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
@@ -89,7 +89,7 @@ router.get('/api/events/:id/checkin', authenticateToken, requireCap('attendance.
 // records named in the request — never the rest — so a partial or stale submission
 // can no longer mark anyone absent, and a credit can only be removed by an
 // explicit instruction that carries a reason.
-router.post('/api/events/:id/attendance', authenticateToken, requireCap('attendance.mark'), (req, res) => {
+router.post('/api/events/:id/attendance', authenticateToken, requireCapAny(['attendance.mark', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
   const { attendanceMap, hoursMap, reason } = req.body;
 
@@ -230,7 +230,7 @@ class AttendanceRefused extends Error {
 
 // 10. Edit Event Details and Slots (Organizer only)
 
-router.get('/api/events/:id/roster.csv', authenticateToken, requireCap('attendance.view'), (req, res) => {
+router.get('/api/events/:id/roster.csv', authenticateToken, requireCapAny(['attendance.view', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
 
   try {
@@ -521,7 +521,7 @@ router.post(
 router.post(
   '/api/events/:id/checkin/scan',
   authenticateToken,
-  requireCapAny(['attendance.scan', 'attendance.mark']),
+  requireCapAny(['attendance.scan', 'attendance.mark', 'organization.event.manage.own']),
   checkinScanLimiter,
   (req, res) => {
     try {

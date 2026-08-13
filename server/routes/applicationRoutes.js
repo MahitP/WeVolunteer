@@ -446,7 +446,7 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
 // capacity rules — so the two cannot diverge. All writes happen in one
 // transaction; notifications and waitlist promotion run only after it commits,
 // because createNotification performs its own writes.
-router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applicant.review', 'event.moderate']), (req, res) => {
+router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applicant.review', 'event.moderate', 'organization.event.manage.own']), (req, res) => {
   const { applicationIds, status } = req.body;
 
   if (!Array.isArray(applicationIds) || applicationIds.length === 0) {
@@ -607,7 +607,7 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
 // stack is what puts this route in front of Guard 2's scanner instead of
 // leaving it to a hand-written ROUTE_REGISTRY entry.
 router.patch('/api/applications/:id', authenticateToken,
-  requireCapAny(['applicant.review', 'event.moderate', 'application.withdraw']), (req, res) => {
+  requireCapAny(['applicant.review', 'event.moderate', 'organization.event.manage.own', 'application.withdraw']), (req, res) => {
   const appId = req.params.id;
   const { status } = req.body; // 'accepted', 'waitlisted', 'rejected'
 
@@ -617,7 +617,25 @@ router.patch('/api/applications/:id', authenticateToken,
   // so a wildcard principal (super_admin) resolves to the broader branch
   // rather than being caught by the narrower one and failing its ownership
   // check below. The cascade ends in an explicit 403, never a bare else.
-  if (can(req.principal, 'applicant.review') || can(req.principal, 'event.moderate')) {
+  /**
+   * A Student Organizer reaches the review branch only for THEIR OWN event.
+   *
+   * `organization.event.manage.own` cannot be tested on its own here the way the
+   * other two are. The person holding it is a student, and a student also has
+   * applications of their own to withdraw — so an unconditional branch on the
+   * capability would send them into the organizer path for every application
+   * they touch, including their own, and refuse it with "you do not host this
+   * event". Asking whether they host THIS one is what keeps both doors open,
+   * and it is the same ownership question the branch itself asks two lines
+   * below, moved up so the cascade can use its answer.
+   */
+  const hostsThisEvent = can(req.principal, 'organization.event.manage.own')
+    && Boolean(db.prepare(`
+      SELECT 1 FROM applications a JOIN events e ON e.id = a.event_id
+       WHERE a.id = ? AND e.organizer_id = ?
+    `).get(appId, req.principal.userId));
+
+  if (can(req.principal, 'applicant.review') || can(req.principal, 'event.moderate') || hostsThisEvent) {
     if (!['accepted', 'waitlisted', 'rejected'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status update. Must be accepted, waitlisted, or rejected.' });
     }
