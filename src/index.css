@@ -3147,21 +3147,44 @@ time { font-variant-numeric: tabular-nums; }
   font-weight: 700;
 }
 .certificate td { padding: var(--s2) 0; border-bottom: 1px solid var(--cert-border); }
+/**
+ * A signature block: the name, then the rule, then the role.
+ *
+ * The rule was `border-top`, which drew the line ABOVE the name and produced
+ *
+ *     ————————————
+ *     Mahit Pulavarthi
+ *     VOLUNTEER
+ *
+ * — a signature line with nothing on it and the name floating underneath, which
+ * is not how any certificate anybody has ever been handed is laid out. A
+ * signature rule is the thing a name sits ON. Moved to `border-bottom` so the
+ * block reads name, rule, role, top to bottom.
+ *
+ * `min-height` keeps the two columns' rules aligned when one name wraps to two
+ * lines and the other does not — otherwise a long organizer name pushes its own
+ * rule down and the certificate looks broken rather than full.
+ */
 .certificate-sign {
-  border-top: 1px solid #a8a29e;
-  padding-top: var(--s2);
+  border-bottom: 1px solid #a8a29e;
+  padding-bottom: var(--s2);
+  min-height: 2.4em;
+  display: flex;
+  align-items: flex-end;
   font-family: var(--font-body);
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   color: #1c1917;
 }
 .certificate-sign-label {
   font-family: var(--font-body);
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #78716c;
-  margin-top: 2px;
+  /* Below the rule, not tucked against it — this is the caption for the name
+     above, and it needs to read as a separate line rather than as a descender. */
+  margin-top: var(--s2);
 }
 .certificate-sub {
   font-family: var(--font-body);
@@ -3655,9 +3678,24 @@ time { font-variant-numeric: tabular-nums; }
     min-height: 0;
   }
 
+  /**
+   * The transcript keeps its paper.
+   *
+   * This was `padding: 0`, which left the cream `--cert-bg` sitting tight
+   * behind the glyphs and nothing else — on a white sheet that reads as no
+   * document stock at all, which is exactly the "white background" complaint.
+   * The certificate does not have that problem because it is dense and
+   * centred, so its paper is visible between its own elements.
+   *
+   * Keeping the padding gives the transcript a real cream panel inside the
+   * `@page` margin, the same artefact the certificate produces. `border: none`
+   * stays — a 1px rule around a printed page is a screen affordance, and the
+   * paper's edge is the edge.
+   */
   .transcript {
     border: none;
-    padding: 0;
+    padding: 14mm 12mm;
+    background: var(--cert-bg);
   }
 
   /* Headers repeat on every sheet of a multi-page history, so a second page is
@@ -3684,7 +3722,12 @@ time { font-variant-numeric: tabular-nums; }
 
 .messages-layout {
   display: flex;
-  height: calc(100vh - 150px);
+  /* `dvh`, not `vh`. `100vh` is the TALLEST the viewport ever gets, so with
+     mobile browser chrome visible this overflowed by about the toolbar height
+     and pushed the composer and the newest messages underneath it. This
+     stylesheet already makes that argument in three other places; the Messages
+     block was the one that was missed. */
+  height: calc(100dvh - 150px);
   min-height: 400px;
   max-height: 850px;
   background: var(--surface);
@@ -4427,7 +4470,7 @@ time { font-variant-numeric: tabular-nums; }
 
 @media (max-width: 768px) {
   .messages-layout {
-    height: calc(100vh - 140px);
+    height: calc(100dvh - 140px);
     max-height: none;
     border: none;
     border-radius: 0;

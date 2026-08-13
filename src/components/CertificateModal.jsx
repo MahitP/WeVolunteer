@@ -93,7 +93,7 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
                   {certificate.organizerName || 'Organizer unavailable'}
                   {certificate.organizerVerified && ' · Verified organizer'}
                 </div>
-                <div className="certificate-sign-label">Confirmed by</div>
+                <div className="certificate-sign-label">Program Coordinator</div>
               </div>
 
               <div style={{ textAlign: 'right' }}>

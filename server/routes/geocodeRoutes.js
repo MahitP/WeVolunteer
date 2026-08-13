@@ -82,7 +82,16 @@ let nextUpstreamSlotAt = 0;
  *   A `null` return reserves nothing, so refusing does not push the queue out
  *   further for everyone behind it.
  */
-function reserveUpstreamSlot(now = Date.now()) {
+/**
+ * Exported as a test seam.
+ *
+ * The `now` parameter has always been injectable; the function simply was not
+ * reachable, so the only way to test the throttle was to measure elapsed wall
+ * time — a real `setTimeout(1000)` asserted with `>= 1000`, which a coarsened
+ * or slightly early clock reports as 999 under load. That was the flake, and it
+ * was the slowest test in the suite for a property that is pure arithmetic.
+ */
+export function reserveUpstreamSlot(now = Date.now()) {
   const at = Math.max(now, nextUpstreamSlotAt);
   if (at - now > NOMINATIM_MAX_WAIT_MS) return null;
   nextUpstreamSlotAt = at + NOMINATIM_MIN_INTERVAL_MS;

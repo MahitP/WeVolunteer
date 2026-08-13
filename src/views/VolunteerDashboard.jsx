@@ -638,7 +638,7 @@ function CertificateModal({ user, shifts, onClose }) {
               </div>
               <div style={{ flex: 1 }}>
                 <div className="certificate-sign">{authorisedBy}</div>
-                <div className="certificate-sign-label">Authorised by</div>
+                <div className="certificate-sign-label">Program Coordinator</div>
               </div>
             </div>
           </div>
