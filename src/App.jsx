@@ -211,6 +211,39 @@ export const selfProfileFor = (user) => {
   return SELF_PROFILE.find(p => can(user, p.cap))?.view ?? 'denied';
 };
 
+/**
+ * The chrome for a page: its heading and subtitle.
+ *
+ * ── Why this is a function and not a lookup at the call site ──
+ *
+ * `PAGE_META` is keyed by persona, and for every page but one that is right.
+ * `/profile` is the exception: its BODY comes from `selfProfileFor` and its
+ * chrome came from `personaFor`, and those two deliberately disagree for an
+ * account that holds administrative capability AND has volunteered.
+ *
+ * The person who runs this platform is a student who volunteers, so
+ * `selfProfileFor` sends them to `VolunteerProfile` — while the heading, drawn
+ * from the `staff` block, called that page "Your account on this platform". A
+ * service record, milestones and a Silver Award meter, captioned as an admin
+ * account.
+ *
+ * Only the disagreement is corrected. `account` is deliberately unmapped,
+ * because there the persona lookup is already right: a staff persona rendering
+ * `AccountProfile` should read the staff wording, and a partner the partner's.
+ *
+ * Exported because its test would otherwise have to re-implement the rule, and
+ * a test that owns a second copy can pass while the shell is wrong.
+ */
+const PROFILE_META_PERSONA = { volunteer: 'volunteer', host: 'host' };
+
+export function pageMetaFor(user, activeTab) {
+  const persona = personaFor(user);
+  const key = activeTab === 'profile'
+    ? (PROFILE_META_PERSONA[selfProfileFor(user)] ?? persona)
+    : persona;
+  return PAGE_META[key]?.[activeTab] || { title: APP_NAME, sub: '' };
+}
+
 /** Derived, not repeated, so the nav entry and the route can never disagree. */
 const SELF_PROFILE_CAPS = SELF_PROFILE.filter(p => p.view !== 'denied').map(p => p.cap);
 
@@ -1259,7 +1292,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     </button>
   );
 
-  const meta = PAGE_META[persona]?.[activeTab] || { title: APP_NAME, sub: '' };
+  const meta = pageMetaFor(currentUser, activeTab);
 
   /* Reviewing applicants is what makes this count meaningful, and the filter
      below already scopes it to events this user actually hosts — so a wildcard
