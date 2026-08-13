@@ -14,7 +14,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
-  Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock, UserMinus,
+  Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock, UserMinus, UserCog,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
@@ -67,6 +67,35 @@ export default function OrganizationPage({ addToast }) {
          last-manager guard, and a manager who does not learn why will simply
          press it again. */
       addToast(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Handing out, or taking back, the Student Organizer rank.
+   *
+   * Offered only on rows that can actually take it — an ordinary member or
+   * somebody who already holds it. A manager's row has no toggle: they can
+   * already do everything the rank confers, so "make them a student organizer"
+   * would be a demotion wearing the word promote, and demoting a manager is a
+   * different decision that belongs with a different control.
+   */
+  const setMemberRole = async (member, memberRole) => {
+    setBusy(true);
+    try {
+      await api.setOrganizationMemberRole(key, member.id, memberRole);
+      addToast?.(
+        memberRole === 'student_organizer'
+          ? `${member.name} can now post and create events for ${data.organization.name}.`
+          : `${member.name} is an ordinary member again.`,
+        'success',
+      );
+      load();
+    } catch (err) {
+      /* Reported, not swallowed — the likely refusal is the last-manager guard,
+         and a manager who does not learn why will simply press it again. */
+      addToast?.(err.message, 'error');
     } finally {
       setBusy(false);
     }
@@ -204,9 +233,13 @@ export default function OrganizationPage({ addToast }) {
         </div>
       </section>
 
+      {/* `canPost`, not `canManage` — a Student Organizer posts and a manager
+          posts, and the server is the one that decides which is which. Passing
+          `canManage` here would show the composer to exactly the people who no
+          longer need to be the only ones with it. */}
       <OrganizationAnnouncements
         orgKey={key}
-        canManage={viewer?.canManage === true}
+        canManage={viewer?.canPost === true}
         isMember={viewer?.isMember === true}
         repliesEnabled={org.allowReplies !== false}
         addToast={addToast}
@@ -234,7 +267,13 @@ export default function OrganizationPage({ addToast }) {
                       <span>{m.name}</span>
                       {m.username && <span className="muted org-member-handle">@{m.username}</span>}
                     </span>
+                    {/* Which of the three ranks, said plainly. An ordinary
+                        member gets no tag: "Member" on every row but two is
+                        noise, and the absence already says it. */}
                     {m.memberRole === 'manager' && <span className="tag tag-brand">Manager</span>}
+                    {m.memberRole === 'student_organizer' && (
+                      <span className="tag">Student organizer</span>
+                    )}
                     {/**
                       * Hours, for managers only — the server omits the field
                       * entirely for anybody else, so this cannot render for a
@@ -264,6 +303,26 @@ export default function OrganizationPage({ addToast }) {
                     * server refuses the last manager, so no guard is duplicated
                     * here; it reports what the server says.
                     */}
+                  {viewer.canManage && m.memberRole !== 'manager' && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm btn-icon"
+                      disabled={busy}
+                      aria-pressed={m.memberRole === 'student_organizer'}
+                      onClick={() => setMemberRole(
+                        m,
+                        m.memberRole === 'student_organizer' ? 'member' : 'student_organizer',
+                      )}
+                      title={m.memberRole === 'student_organizer'
+                        ? `Remove ${m.name} as a student organizer`
+                        : `Make ${m.name} a student organizer`}
+                      aria-label={m.memberRole === 'student_organizer'
+                        ? `Remove ${m.name} as a student organizer of ${org.name}`
+                        : `Make ${m.name} a student organizer of ${org.name}`}
+                    >
+                      <UserCog size={15} aria-hidden="true" />
+                    </button>
+                  )}
                   {viewer.canManage && (
                     <button
                       type="button"

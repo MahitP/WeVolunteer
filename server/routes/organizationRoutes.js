@@ -197,6 +197,19 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
       /* Computed once, above, where the archived-organization gate also needs
          it — the two must agree, and two calls is two chances for them not to. */
       canManage: mayManage,
+      /**
+       * "May you post and put events up", which is a WIDER set than `canManage`
+       * — it includes the Student Organizers, who can do those two things and
+       * none of the manager ones.
+       *
+       * A separate field rather than something the client derives from
+       * `memberRole`, because the client would then be holding its own copy of
+       * the rule and would drift from `canHelpRun` the first time either
+       * changed. The page renders what the server says it may do.
+       */
+      canPost: canHelpRun(db, row.id, req.principal.userId, {
+        hasModerate: can(req.principal, 'organization.moderate'),
+      }),
       hours: viewerHours.hours,
       events: viewerHours.events,
       history: organizationHistoryForUser(db, row.id, req.principal.userId),

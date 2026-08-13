@@ -848,6 +848,17 @@ export const api = {
     apiFetch(`/api/organizations/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`,
       { method: 'DELETE', body: JSON.stringify({ mode, reason }) }),
 
+  /**
+   * Promote or demote a member: `member`, `student_organizer` or `manager`.
+   *
+   * The route has existed since organizations shipped and nothing ever called
+   * it — a manager could remove somebody but not change their rank. It is
+   * reached from the roster now that there is a rank worth handing out.
+   */
+  setOrganizationMemberRole: async (key, userId, memberRole) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`,
+      { method: 'PATCH', body: JSON.stringify({ memberRole }) }),
+
   // ── Organization announcements ─────────────────
   /**
    * The organization logo.
