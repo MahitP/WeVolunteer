@@ -308,4 +308,126 @@ describe('the organization appeal inbox', () => {
     expect((await inbox(orgKey)).status).toBe(401);
     expect((await decide(orgKey, id, { decision: 'reversed', reasoning: 'Anonymous decision attempt.' })).status).toBe(401);
   });
+
+  describe('defects found by an adversarial review', () => {
+    /**
+     * Four of these share one root cause: `appeals.subject_ref` records the
+     * ORGANIZATION, not the individual ban, so an appeal does not name what it
+     * contests. Every query therefore has to be explicit about which ban it
+     * means, and each of these is a place that was not.
+     */
+
+    /** A second, older, already-lifted ban for the same pair. */
+    const addLiftedBan = (bannedBy, reason = 'An older ban, since lifted.') => {
+      db.prepare(`INSERT OR REPLACE INTO organization_bans
+                    (id, organization_id, user_id, banned_by, reason, created_at, lifted_at, lifted_by)
+                  VALUES ('old-ban', ?, ?, ?, ?, '2020-01-01T00:00:00.000Z', '2020-02-01T00:00:00.000Z', ?)`)
+        .run(orgId, studentId, bannedBy, reason, bannedBy);
+    };
+
+    it('lists an appeal once, even when the pair has lifted bans in its history', async () => {
+      /**
+       * Migration 044's uniqueness is PARTIAL — unique on (organization, user)
+       * only where `lifted_at IS NULL` — so lifted bans accumulate. The inbox
+       * join did not exclude them, so one appeal became one row per historical
+       * ban.
+       */
+      const id = await banAndAppeal();
+      addLiftedBan(managerId);
+
+      const rows = (await inbox(orgKey, manager)).body.appeals.filter(a => a.id === id);
+      expect(rows, 'the appeal was duplicated by a historical ban').toHaveLength(1);
+    });
+
+    it('shows the reason of the ban actually in force, not an old one', async () => {
+      const id = await banAndAppeal();
+      addLiftedBan(managerId, 'A totally different, older accusation.');
+
+      const a = (await inbox(orgKey, manager)).body.appeals.find(x => x.id === id);
+      expect(a.ban.reason).toMatch(/Missed three shifts/);
+      expect(a.ban.reason).not.toMatch(/older accusation/);
+    });
+
+    it('names the manager who issued the LIVE ban as the conflicted one', async () => {
+      /**
+       * The flag read whichever ban row came first, which is the oldest. With an
+       * older ban by somebody else it inverted: the manager actually being
+       * complained about was told they were uninvolved. Since this route
+       * surfaces the conflict rather than enforcing it, the flag is the entire
+       * safeguard.
+       */
+      /**
+       * The older ban is inserted FIRST, deliberately.
+       *
+       * `.get()` returns the first matching row in rowid order, so a historical
+       * ban written after the live one still sorts second and the flag comes out
+       * right by accident. This test passed against the broken code until the
+       * insert order was reversed — the bug needs the stale row to come first,
+       * which is exactly what happens in reality, where the old ban is older.
+       */
+      join(orgId, secondId, 'manager');
+      addLiftedBan(secondId);                    // older, lifted, issued by `second`
+      const id = await banAndAppeal();           // current ban issued by `manager`
+
+      const forIssuer = (await inbox(orgKey, manager)).body.appeals.find(x => x.id === id);
+      const forOther = (await inbox(orgKey, second)).body.appeals.find(x => x.id === id);
+      expect(forIssuer.youIssuedThisBan, 'the live issuer was told they were uninvolved').toBe(true);
+      expect(forOther.youIssuedThisBan, 'an uninvolved manager was named as the issuer').toBe(false);
+    });
+
+    it('REFUSES to let anybody decide their own appeal', async () => {
+      /**
+       * `appeals.js` declares `self` NEVER_OVERRIDABLE and its header records
+       * the audit that found somebody deciding an appeal they were party to.
+       * This route had no such check, and the path was reachable: a manager who
+       * is themselves banned can file an appeal and, holding the capability,
+       * grant it.
+       */
+      db.prepare(`INSERT OR REPLACE INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('self-ban', ?, ?, ?, 'Banned by a co-manager.', ?)`)
+        .run(orgId, secondId, managerId, new Date().toISOString());
+      join(orgId, secondId, 'manager');
+
+      const filed = await srv.call('POST', '/api/appeals', {
+        subject: 'organization_ban', organizationId: orgId,
+        statement: 'I do not think this ban was warranted at all.',
+      }, second);
+      expect(filed.status, JSON.stringify(filed.body)).toBe(201);
+
+      const res = await decide(orgKey, filed.body.appealId,
+        { decision: 'reversed', reasoning: 'Granting my own appeal, which should be refused.' }, second);
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('self_review');
+      const ban = db.prepare('SELECT lifted_at FROM organization_bans WHERE id = ?').get('self-ban');
+      expect(ban.lifted_at, 'they lifted their own ban').toBeNull();
+
+      db.prepare("DELETE FROM organization_bans WHERE id = 'self-ban'").run();
+    });
+
+    it('does not let a stale appeal lift a ban issued after it', async () => {
+      /**
+       * The sequence: banned, appealed, lifted by hand, rejoined, banned again
+       * by somebody else for something else. Deciding the old appeal used to
+       * lift the NEW ban — one nobody had appealed and nobody had reviewed,
+       * while the reviewer's screen showed a statement about the first.
+       */
+      const id = await banAndAppeal();
+
+      db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL')
+        .run('2020-03-01T00:00:00.000Z', orgId, studentId);
+      /* A NEWER ban, created after the appeal was filed. */
+      db.prepare(`INSERT OR REPLACE INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('newer-ban', ?, ?, ?, 'A different matter entirely.', ?)`)
+        .run(orgId, studentId, managerId, new Date(Date.now() + 60000).toISOString());
+
+      const res = await decide(orgKey, id, { decision: 'reversed', reasoning: 'Upholding the original appeal.' }, manager);
+      expect(res.status).toBe(200);
+
+      const newer = db.prepare("SELECT lifted_at FROM organization_bans WHERE id = 'newer-ban'").get();
+      expect(newer.lifted_at, 'an unreviewed later ban was lifted by an older appeal').toBeNull();
+
+      db.prepare("DELETE FROM organization_bans WHERE id = 'newer-ban'").run();
+    });
+  });
 });
