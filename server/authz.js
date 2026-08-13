@@ -155,6 +155,26 @@ export const CAPABILITIES = {
     /** Joining and leaving an organization. */
     'organization.join',
     /**
+     * ── The organization-helper capabilities ──
+     *
+     * `organization.post.create`, `organization.post.manage`,
+     * `organization.event.create` and `organization.event.manage.own` are NOT in
+     * this list, and the omission is the design.
+     *
+     * A Student Organizer is a rank inside one club, held by an account whose
+     * platform role is still `student`. Putting the four here would hand them to
+     * every student on the platform and leave the whole of the protection to the
+     * membership lookup inside each handler — one forgotten second layer and any
+     * student could post as any club. So they are granted per person, by
+     * `syncOrganizerCapabilities` (server/organizationRoles.js), when somebody is
+     * promoted, and revoked when they are demoted, removed or banned.
+     *
+     * Holding one therefore means "you help run SOME organization"; which one is
+     * still decided by `canHelpRun` at the handler. Two layers, and the first no
+     * longer says yes to everybody.
+     */
+
+    /**
      * `analytics.impact` is deliberately NOT here — it became an administrative
      * capability, and this is the role it was taken from.
      *
@@ -206,6 +226,11 @@ export const CAPABILITIES = {
      * otherwise is how a scoped permission becomes a global one.
      */
     'organization.create', 'organization.manage.own',
+    /* A manager can do everything a Student Organizer can — the helper
+       capabilities are additive, never a replacement, so a route that accepts a
+       helper never locks out the manager above them. */
+    'organization.post.create', 'organization.post.manage',
+    'organization.event.create', 'organization.event.manage.own',
   ],
   admin: [
     'event.view', 'event.moderate', 'organizer.approve', 'user.suspend',
@@ -383,6 +408,14 @@ export const CAPABILITIES = {
      * capability somebody can be seen to hold.
      */
     'organization.create', 'organization.manage.own', 'organization.moderate',
+    /* The POST pair only. An administrator holds `organization.manage.own`
+       and so already runs organizations, but has never held `event.create` or
+       `event.edit.own` — oversight is `event.moderate`, which acts on other
+       people's events rather than creating any. Adding the two
+       `organization.event.*` capabilities here would quietly make every
+       administrator an event organizer, which `authz.matrix.test.js` records
+       today as a deliberate 403. */
+    'organization.post.create', 'organization.post.manage',
   ],
   /* Holds everything, including `persona.preview.exit` — which is the role a
      preview is always started FROM, so it is the one that must never lose it. */

@@ -20,8 +20,10 @@ import { authenticateToken, inTransaction } from '../utils.js';
 import { can, requireCap } from '../authz.js';
 import { db } from '../db.js';
 import {
-  validateOrganization, createOrganization, canManage, formatOrganization, uniqueSlug,
+  validateOrganization, createOrganization, canManage, canHelpRun, MEMBER_ROLES,
+  formatOrganization, uniqueSlug,
 } from '../organizations.js';
+import { syncOrganizerCapabilities } from '../organizationRoles.js';
 import { profileSummary } from '../profileSerializer.js';
 import {
   organizationHoursForUser,
@@ -129,7 +131,7 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
     FROM organization_members m
     JOIN users u ON u.id = m.user_id
     WHERE m.organization_id = ? AND u.account_status = 'active'
-    ORDER BY CASE m.member_role WHEN 'manager' THEN 0 ELSE 1 END, u.name COLLATE NOCASE
+    ORDER BY CASE m.member_role WHEN 'manager' THEN 0 WHEN 'student_organizer' THEN 1 ELSE 2 END, u.name COLLATE NOCASE
     LIMIT 100
   `).all(row.id);
 
@@ -348,6 +350,8 @@ router.delete('/api/organizations/:key/membership', authenticateToken, requireCa
 
   db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
     .run(row.id, req.principal.userId);
+  /* Walking out of the club you helped run takes the rank with you. */
+  syncOrganizerCapabilities(db, req.principal.userId, req.principal.userId);
   res.json({ isMember: false, memberCount: countMembers(row.id) });
 });
 
@@ -447,6 +451,9 @@ router.delete('/api/organizations/:key/members/:userId', authenticateToken, requ
   inTransaction(() => {
     db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
       .run(row.id, req.params.userId);
+    /* Inside the transaction with the removal, so a rollback cannot leave the
+       capability behind on somebody the club believes it has just removed. */
+    syncOrganizerCapabilities(db, req.params.userId, req.principal.userId);
 
     if (mode === 'ban') {
       /* `INSERT OR IGNORE` against the partial unique index: banning somebody
@@ -495,8 +502,11 @@ router.patch('/api/organizations/:key/members/:userId', authenticateToken, requi
     return res.status(403).json({ error: 'You do not manage this organization.', code: 'not_manager' });
   }
   const memberRole = req.body?.memberRole;
-  if (!['member', 'manager'].includes(memberRole)) {
-    return res.status(400).json({ error: 'Role must be member or manager.', field: 'memberRole' });
+  if (!MEMBER_ROLES.includes(memberRole)) {
+    return res.status(400).json({
+      error: `Role must be one of: ${MEMBER_ROLES.join(', ')}.`,
+      field: 'memberRole',
+    });
   }
   /**
    * Demoting the last manager is the same defect as letting them leave, and the
@@ -507,8 +517,15 @@ router.patch('/api/organizations/:key/members/:userId', authenticateToken, requi
    * `member_role = 'member'` — so the invariant is defeated in two requests
    * rather than one. Same check, same reason: an organization nobody can manage
    * is recoverable only by an administrator, and only if somebody notices.
+   *
+   * The condition is "the new role is not manager", NOT "the new role is
+   * member". When `student_organizer` arrived, a check written as
+   * `memberRole === 'member'` would have let the sole manager step down to it
+   * and leave the club with nobody who can ban, archive or promote — the exact
+   * hole this guard exists to close, reopened by a third value being added
+   * somewhere else.
    */
-  if (memberRole === 'member') {
+  if (memberRole !== 'manager') {
     const current = db.prepare(
       'SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?'
     ).get(row.id, req.params.userId);
@@ -529,6 +546,15 @@ router.patch('/api/organizations/:key/members/:userId', authenticateToken, requi
     'UPDATE organization_members SET member_role = ? WHERE organization_id = ? AND user_id = ?'
   ).run(memberRole, row.id, req.params.userId);
   if (!changes) return res.status(404).json({ error: 'That person is not a member.', code: 'not_member' });
+
+  /**
+   * The capabilities are recomputed from the membership table, not derived from
+   * `memberRole` here — somebody demoted in this club may still be a Student
+   * Organizer in another, and reading the new value alone would strip a rank
+   * they still hold somewhere else.
+   */
+  syncOrganizerCapabilities(db, req.params.userId, req.principal.userId);
+
   res.json({ userId: req.params.userId, memberRole });
 });
 
@@ -627,11 +653,11 @@ router.get('/api/organizations/:key/announcements', authenticateToken, requireCa
  * Without the second half any organizer could post as any club, which is
  * impersonation with a byline.
  */
-router.post('/api/organizations/:key/announcements', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
+router.post('/api/organizations/:key/announcements', authenticateToken, requireCap('organization.post.create'), (req, res) => {
   const row = loadOrganization(req, res);
   if (!row) return undefined;
-  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
-    return res.status(403).json({ error: 'Only a manager of this organization can post announcements.', code: 'not_manager' });
+  if (!canHelpRun(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    return res.status(403).json({ error: 'Only somebody who helps run this organization can post announcements.', code: 'not_manager' });
   }
 
   const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
@@ -662,11 +688,11 @@ router.post('/api/organizations/:key/announcements', authenticateToken, requireC
  * would carry on believing they had been heard. A closed thread is what this
  * means everywhere else, so nobody has to be taught it.
  */
-router.patch('/api/organizations/:key/announcements/:announcementId', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
+router.patch('/api/organizations/:key/announcements/:announcementId', authenticateToken, requireCap('organization.post.manage'), (req, res) => {
   const row = loadOrganization(req, res);
   if (!row) return undefined;
-  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
-    return res.status(403).json({ error: 'Only a manager of this organization can edit announcements.', code: 'not_manager' });
+  if (!canHelpRun(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    return res.status(403).json({ error: 'Only somebody who helps run this organization can edit announcements.', code: 'not_manager' });
   }
 
   const existing = db.prepare('SELECT * FROM organization_announcements WHERE id = ? AND organization_id = ?')
@@ -695,11 +721,11 @@ router.patch('/api/organizations/:key/announcements/:announcementId', authentica
 });
 
 /** Removing an announcement. Its replies cascade with it. */
-router.delete('/api/organizations/:key/announcements/:announcementId', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
+router.delete('/api/organizations/:key/announcements/:announcementId', authenticateToken, requireCap('organization.post.manage'), (req, res) => {
   const row = loadOrganization(req, res);
   if (!row) return undefined;
-  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
-    return res.status(403).json({ error: 'Only a manager of this organization can delete announcements.', code: 'not_manager' });
+  if (!canHelpRun(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    return res.status(403).json({ error: 'Only somebody who helps run this organization can delete announcements.', code: 'not_manager' });
   }
 
   const result = db.prepare('DELETE FROM organization_announcements WHERE id = ? AND organization_id = ?')

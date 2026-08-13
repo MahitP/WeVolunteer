@@ -18,7 +18,7 @@ import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
 import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
 import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
-import { canManage, memberIds } from '../organizations.js';
+import { canManage, canHelpRun, memberIds } from '../organizations.js';
 
 const router = express.Router();
 
@@ -677,7 +677,19 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
 });
 
 
-router.post('/api/events', authenticateToken, requireCap('event.create'), (req, res) => {
+/**
+ * Creating an event.
+ *
+ * ── Why the gate accepts two capabilities ──
+ *
+ * `event.create` is the account-level power: this person may put a shift up
+ * anywhere, under their own name. `organization.event.create` is the smaller
+ * one: this person may put a shift up FOR A CLUB THEY HELP RUN, and nothing
+ * else. Students hold the second so that a Student Organizer can reach this
+ * handler at all; the block below is what stops a student who helps run nothing
+ * from getting any further than the door.
+ */
+router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'organization.event.create']), (req, res) => {
   // Check if organizer is verified by Admin
   const organizer = db.prepare('SELECT verified FROM users WHERE id = ?').get(req.user.id);
   if (!organizer || organizer.verified !== 1) {
@@ -735,15 +747,36 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
     });
   }
 
+  /**
+   * An account with no `event.create` may ONLY create for an organization.
+   *
+   * This is the whole of what keeps `organization.event.create` from being a
+   * quiet promotion. A Student Organizer reached this handler because they help
+   * run one club; without this line the same request with `organizationId`
+   * omitted would produce a personal event under their own name, which is the
+   * `organizer` role, granted by a club president who was only choosing who
+   * posts the bake-sale shift.
+   */
+  const orgScopedOnly = !can(req.principal, 'event.create');
+  if (orgScopedOnly && (organizationId == null || organizationId === '')) {
+    return res.status(403).json({
+      error: 'You can only create events for an organization you help run.',
+      field: 'organizationId', code: 'organization_required',
+    });
+  }
+
   let organization = null;
   if (organizationId != null && organizationId !== '') {
     organization = db.prepare('SELECT * FROM organizations WHERE id = ?').get(organizationId);
     if (!organization || organization.status !== 'active') {
       return res.status(400).json({ error: 'That organization does not exist.', field: 'organizationId' });
     }
-    if (!canManage(db, organization.id, req.user.id, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    /* `canHelpRun`, not `canManage` — a Student Organizer posting their club's
+       shift is the point of the rank. Managers and moderators are included by
+       that function, so nobody loses anything they had. */
+    if (!canHelpRun(db, organization.id, req.user.id, { hasModerate: can(req.principal, 'organization.moderate') })) {
       return res.status(403).json({
-        error: 'You are not a manager of that organization.',
+        error: 'You do not help run that organization.',
         field: 'organizationId', code: 'not_manager',
       });
     }
@@ -907,7 +940,7 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
 
 // 6. Fetch All Applications (Enriched with Student profile, Slot, and Event details)
 
-router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), async (req, res) => {
+router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own', 'organization.event.manage.own']), async (req, res) => {
   const eventId = req.params.id;
   const {
     title, description, category, location, applicationDeadline, slots,
@@ -1221,7 +1254,7 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
 });
 
 // 11. Run Equalizer Hour Sorting (Organizer only)
-router.post('/api/events/:id/auto-approve', authenticateToken, requireCap('event.edit.own'), (req, res) => {
+router.post('/api/events/:id/auto-approve', authenticateToken, requireCapAny(['event.edit.own', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
 
   try {
@@ -1277,7 +1310,7 @@ router.post('/api/events/:id/auto-approve', authenticateToken, requireCap('event
 });
 
 // 12. Update Event Settings (Organizer only)
-router.patch('/api/events/:id', authenticateToken, requireCap('event.edit.own'), (req, res) => {
+router.patch('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
   const { autoApprove, attendeeVisibility } = req.body;
 
@@ -1318,7 +1351,7 @@ router.patch('/api/events/:id', authenticateToken, requireCap('event.edit.own'),
 
 // A1. Fetch Pending Organizer accounts
 
-router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own']), (req, res) => {
+router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
 
   try {
@@ -1420,7 +1453,7 @@ router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.modera
 });
 
 // A5. Toggle Event Status (Organizer only)
-router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own']), async (req, res) => {
+router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own', 'organization.event.manage.own']), async (req, res) => {
   const eventId = req.params.id;
   const { status } = req.body;
 
@@ -1459,7 +1492,7 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
 
 // A6. Export Accepted Roster as CSV (Organizer only)
 
-router.post('/api/events/:id/duplicate', authenticateToken, requireCap('event.create'), (req, res) => {
+router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['event.create', 'organization.event.manage.own']), (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
@@ -1511,7 +1544,7 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCap('event.cr
 
 // 25. Quick stats (admin) — used to enrich the admin panel
 
-router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
+router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
   try {
     const event = db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(eventId);
@@ -1545,7 +1578,7 @@ router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(
 });
 
 // A27. Execute Draft Auto Select Draw (Organizer only)
-router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
+router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
 
   try {
@@ -1626,7 +1659,7 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(
 });
 
 // A28. Confirm and Lock Auto Select Results (Organizer only)
-router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
+router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
 
   try {
@@ -1674,7 +1707,7 @@ router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCap
 });
 
 // Broadcast email to confirmed roster
-router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['event.moderate', 'announcement.post']), async (req, res) => {
+router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['event.moderate', 'announcement.post', 'organization.event.manage.own']), async (req, res) => {
   const { id: eventId } = req.params;
   const { subject, message } = req.body;
 

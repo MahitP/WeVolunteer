@@ -54,6 +54,7 @@ import organizationAllowReplies from './042_organization_allow_replies.js';
 import avatarColour from './043_avatar_colour.js';
 import organizationBans from './044_organization_bans.js';
 import eventAudience from './045_event_audience.js';
+import studentOrganizerRole from './046_student_organizer_role.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -267,7 +268,14 @@ export const MIGRATIONS = [
    * only on `events`, and on migration 031 having added `organization_id`,
    * which the column is meaningless without.
    */
-  eventAudience
+  eventAudience,
+
+  /**
+   * 046 — the Student Organizer rank. Rebuilds `organization_members` to widen
+   * its CHECK, so it must run after 031 created the table and after anything
+   * that adds a column to it (nothing does).
+   */
+  studentOrganizerRole
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

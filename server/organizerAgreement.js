@@ -92,6 +92,26 @@ export const ORGANIZER_GATED_CAPABILITIES = Object.freeze([
   'organization.create',
   'organization.manage.own',
   'organization.join',
+  /**
+   * The organization-helper capabilities, for the same reason as the five above.
+   *
+   * Posting as a club notifies its members; creating its events is what produces
+   * applicants; managing those events is reading their names and marking their
+   * attendance. Every one of them reaches a student, so an organizer who has not
+   * accepted the agreement does not hold them.
+   *
+   * They do NOT withhold anything from a Student Organizer, and the asymmetry is
+   * deliberate rather than an oversight: `withheldCapabilitiesFor` returns `[]`
+   * for anybody whose role is not `organizer`, and a Student Organizer is a
+   * student. Whether that student should sign an undertaking of their own before
+   * handling classmates' contact details is a real question, and a different one
+   * — it is a document that does not exist yet, not a capability that is missing.
+   * Recorded rather than answered here.
+   */
+  'organization.post.create',
+  'organization.post.manage',
+  'organization.event.create',
+  'organization.event.manage.own',
 ]);
 
 /**

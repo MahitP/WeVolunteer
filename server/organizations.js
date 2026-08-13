@@ -175,6 +175,55 @@ export function canManage(db, organizationId, userId, { hasModerate = false } = 
   return row?.member_role === 'manager';
 }
 
+/**
+ * The ranks a membership row may hold, weakest first.
+ *
+ * `member` belongs to the club. `student_organizer` helps run it — posts and
+ * events, and nothing else. `manager` is the organization itself: who else runs
+ * it, who is banned, whether it continues to exist.
+ *
+ * Migration 046 carries the same three values as a CHECK constraint. This array
+ * is the readable copy the routes validate against; the constraint is what stops
+ * a fourth value reaching the column by some path nobody wrote a test for.
+ */
+export const MEMBER_ROLES = Object.freeze(['member', 'student_organizer', 'manager']);
+
+/** This person's rank in this organization, or `null` if they are not in it. */
+export function memberRoleOf(db, organizationId, userId) {
+  if (!organizationId || !userId) return null;
+  const row = db.prepare(`
+    SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?
+  `).get(organizationId, userId);
+  return row?.member_role ?? null;
+}
+
+/** True only for the intermediate rank — a manager is NOT a student organizer. */
+export function isStudentOrganizerOf(db, organizationId, userId) {
+  return memberRoleOf(db, organizationId, userId) === 'student_organizer';
+}
+
+/**
+ * True when this principal may act as the organization for the day-to-day work:
+ * posting announcements and putting events up.
+ *
+ * ── Why this is a second function and not a flag on `canManage` ──
+ *
+ * `canManage` is asked by archive, member removal, role changes, bans and the
+ * appeal inbox. Widening it — even behind an option — would make the safe answer
+ * the one you have to remember to ask for, and a route added next year that
+ * simply calls `canManage(db, id, user)` would silently hand a sixteen-year-old
+ * the power to delete the club. Two functions means the dangerous question keeps
+ * its own name and its own answer, and a new route has to say which it means.
+ *
+ * Managers are included: every power a student organizer has, a manager has.
+ * Nobody should have to promote themselves downward to post a notice.
+ */
+export function canHelpRun(db, organizationId, userId, { hasModerate = false } = {}) {
+  if (hasModerate) return true;
+  const role = memberRoleOf(db, organizationId, userId);
+  return role === 'manager' || role === 'student_organizer';
+}
+
 export function createOrganization(db, { name, description = '', tags = [], creator, now = new Date().toISOString() }) {
   const orgId = `org-${crypto.randomUUID()}`;
   db.prepare(`
