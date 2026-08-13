@@ -33,6 +33,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { receiveAvatar, deleteUploadedFile, AVATAR_UPLOADS_DIR } from './profilePictureRoutes.js';
 import { notificationService } from '../services/notificationService.js';
+import { recordAppealEvent, APPEAL_DECISIONS, validateReasoning } from '../appeals.js';
 
 const router = express.Router();
 
@@ -863,6 +864,207 @@ router.delete('/api/organizations/:key/image', authenticateToken, requireCap('or
   if (previous) deleteUploadedFile(previous);
 
   return res.json({ organization: formatOrganization(db.prepare(`${ORG_SELECT} WHERE o.id = ?`).get(row.id)) });
+});
+
+/**
+ * ══ The organization's appeal inbox ══════════════════════════════════════════
+ *
+ * ── Why the ORGANIZATION owns this, not the manager who banned somebody ──
+ *
+ * A ban is issued by one person and is a decision of the club. Routing the
+ * appeal back to whoever pressed the button asks the person being complained
+ * about to judge the complaint, and it breaks outright the moment that manager
+ * leaves, goes on holiday, or is the reason for the appeal. So every manager of
+ * the organization sees it, the same set that could have issued the ban.
+ *
+ * A single-manager club still works: that manager sees it, because they are one
+ * of "every manager" rather than a special case. Conflict of interest is
+ * surfaced rather than enforced here — with one manager there is nobody else to
+ * hand it to, and refusing would leave the appellant with no route at all.
+ *
+ * ── Why there is no new table ──
+ *
+ * These are ordinary `appeals` rows with `subject = 'organization_ban'` and
+ * `subject_ref` holding the organization id, filed through `POST /api/appeals`
+ * like every other appeal. They keep the appeals table's write-once triggers,
+ * its append-only `appeal_events` history, and the vocabulary in `appeals.js`.
+ * A parallel org-appeal system would have been a second thing to keep correct.
+ */
+
+/** The organization behind a request, or a refusal. Shared by the two routes below. */
+function loadManagedOrganization(req, res) {
+  const row = loadOrganization(req, res);
+  if (!row) return null;
+  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    res.status(403).json({ error: 'You do not manage this organization.', code: 'not_manager' });
+    return null;
+  }
+  return row;
+}
+
+/**
+ * GET the appeals against this organization's bans.
+ *
+ * Scoped by `subject_ref` to THIS organization, so a manager of one club cannot
+ * read another's — the capability says "may manage an organization", and
+ * `canManage` says which one.
+ */
+router.get('/api/organizations/:key/appeals', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
+  const row = loadManagedOrganization(req, res);
+  if (!row) return;
+
+  const appeals = db.prepare(`
+    SELECT a.id, a.user_id, a.statement, a.status, a.decision, a.reasoning,
+           a.created_at, a.updated_at, a.decided_at,
+           a.reviewer_id, a.reviewer_name_snapshot,
+           u.name AS appellant_name, u.username AS appellant_username,
+           b.reason AS ban_reason, b.created_at AS banned_at, b.lifted_at,
+           banner.name AS banned_by_name
+      FROM appeals a
+      JOIN users u ON u.id = a.user_id
+      LEFT JOIN organization_bans b
+        ON b.organization_id = a.subject_ref AND b.user_id = a.user_id
+      LEFT JOIN users banner ON banner.id = b.banned_by
+     WHERE a.subject = 'organization_ban' AND a.subject_ref = ?
+     ORDER BY CASE a.status WHEN 'open' THEN 0 WHEN 'reviewing' THEN 1 ELSE 2 END,
+              a.created_at DESC
+  `).all(row.id);
+
+  res.json({
+    appeals: appeals.map(a => ({
+      id: a.id,
+      status: a.status,
+      decision: a.decision,
+      reasoning: a.reasoning,
+      statement: a.statement,
+      createdAt: a.created_at,
+      decidedAt: a.decided_at,
+      decidedBy: a.reviewer_name_snapshot,
+      /* The person appealing, named — a manager cannot weigh an appeal about
+         somebody they cannot identify. Nothing beyond name and handle: this is
+         not a profile view. */
+      appellant: { name: a.appellant_name, username: a.appellant_username },
+      /* The ban being appealed. The reason is disclosed to managers because it
+         is the thing under review and they could read it on the member list
+         anyway; it is never sent to anybody else. */
+      ban: {
+        reason: a.ban_reason,
+        bannedAt: a.banned_at,
+        bannedBy: a.banned_by_name,
+        active: a.ban_reason != null && a.lifted_at == null,
+      },
+      /* Surfaced, not enforced. A one-manager club has nobody to hand it to,
+         and refusing would leave the appellant with no route at all. */
+      youIssuedThisBan: a.banned_by_name != null
+        && db.prepare('SELECT banned_by FROM organization_bans WHERE organization_id = ? AND user_id = ?')
+             .get(row.id, a.user_id)?.banned_by === req.principal.userId,
+    })),
+  });
+});
+
+/**
+ * Decide one.
+ *
+ * `reversed` lifts the ban; `stands` leaves it exactly as it was. Both are
+ * recorded, and neither deletes anything: the ban row keeps its history and
+ * gains `lifted_at`/`lifted_by` rather than disappearing, because "banned, then
+ * unbanned" is what an appeal produces and erasing it loses the outcome.
+ */
+router.post('/api/organizations/:key/appeals/:appealId/decision', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
+  const row = loadManagedOrganization(req, res);
+  if (!row) return;
+
+  const { decision } = req.body || {};
+  if (!APPEAL_DECISIONS.includes(decision)) {
+    return res.status(400).json({
+      error: 'Unknown decision.', code: 'decision_invalid', allowed: APPEAL_DECISIONS,
+    });
+  }
+
+  /* The same floor the platform queue applies. An appellant told only "denied"
+     has been given an outcome without a reason, which is the complaint the
+     appeal was about. */
+  const reasoning = validateReasoning(req.body?.reasoning);
+  if (!reasoning.ok) {
+    return res.status(400).json({ error: reasoning.error, code: 'reasoning_invalid' });
+  }
+
+  /* Scoped in the WHERE clause, not checked afterwards: an appeal id from
+     another organization simply does not match, so it cannot be decided by
+     guessing an id. */
+  const appeal = db.prepare(`
+    SELECT id, user_id, status FROM appeals
+     WHERE id = ? AND subject = 'organization_ban' AND subject_ref = ?
+  `).get(req.params.appealId, row.id);
+  if (!appeal) {
+    return res.status(404).json({ error: 'No such appeal for this organization.', code: 'appeal_not_found' });
+  }
+
+  /* Already final. Answered 409 rather than silently re-deciding, so two
+     managers pressing at once cannot overwrite each other's reasoning. */
+  if (appeal.status === 'resolved') {
+    return res.status(409).json({ error: 'That appeal has already been decided.', code: 'already_decided' });
+  }
+
+  const now = new Date().toISOString();
+  const actor = db.prepare('SELECT name FROM users WHERE id = ?').get(req.principal.userId);
+
+  try {
+    inTransaction(() => {
+      /* Guarded on the status we read, so a concurrent decision loses rather
+         than both appearing to win. */
+      const { changes } = db.prepare(`
+        UPDATE appeals
+           SET status = 'resolved', decision = ?, reasoning = ?, reviewer_id = ?,
+               reviewer_name_snapshot = COALESCE(reviewer_name_snapshot, ?),
+               decided_at = ?, updated_at = ?
+         WHERE id = ? AND status IN ('open', 'reviewing')
+      `).run(decision, reasoning.value, req.principal.userId, actor?.name ?? null, now, now, appeal.id);
+      if (changes === 0) throw Object.assign(new Error('raced'), { code: 'already_decided' });
+
+      if (decision === 'reversed') {
+        /* Lifted, not deleted — and only if still active, so a second reversal
+           cannot rewrite who lifted it or when. */
+        db.prepare(`
+          UPDATE organization_bans
+             SET lifted_at = ?, lifted_by = ?
+           WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
+        `).run(now, req.principal.userId, row.id, appeal.user_id);
+      }
+
+      recordAppealEvent(db, {
+        appealId: appeal.id,
+        actorId: req.principal.userId,
+        actorRole: 'organization_manager',
+        action: 'decided',
+        fromStatus: appeal.status,
+        toStatus: 'resolved',
+        note: `${decision}: ${reasoning.value}`,
+      });
+    });
+  } catch (err) {
+    if (err.code === 'already_decided') {
+      return res.status(409).json({ error: 'That appeal has already been decided.', code: 'already_decided' });
+    }
+    console.error('Failed to decide organization appeal:', err);
+    return res.status(500).json({ error: 'We could not record that decision. Please try again.' });
+  }
+
+  /* Outside the transaction: a notification that fails must not roll back a
+     decision the manager has already been shown as made. */
+  notificationService.dispatch(
+    decision === 'reversed' ? 'ORGANIZATION_BAN_APPEAL_REVERSED' : 'ORGANIZATION_BAN_APPEAL_STANDS',
+    {
+      organizationName: row.name,
+      organizationSlug: row.slug,
+      reasoning: reasoning.value,
+      reviewerName: actor?.name || 'A manager',
+    },
+    appeal.user_id,
+    `org-appeal:${appeal.id}`,
+  );
+
+  res.json({ id: appeal.id, status: 'resolved', decision });
 });
 
 export default router;
