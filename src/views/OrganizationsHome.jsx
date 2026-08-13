@@ -71,6 +71,9 @@ export default function OrganizationsHome({ currentUser }) {
       ) : mine.length === 0 ? (
         <EmptyState
           icon={Building2}
+          /* The only thing under this page's h1, so the default h3 would skip a
+             level for anybody navigating by heading. */
+          headingLevel={2}
           title="You are not in any organizations yet"
           message={canCreate
             ? 'Create one for your club or programme, or join one from Discover.'

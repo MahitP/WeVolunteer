@@ -215,7 +215,11 @@ export default function Messages() {
             <div className="messages-empty-state">
               <div className="empty-state-content">
                 <MessageSquare size={48} className="empty-state-icon" />
-                <h3>{copy.noneSelected.title}</h3>
+                {/* `h2`, not `h3`: with no conversation open this is the only
+                    heading under the page's `h1`, so `h3` skipped a level for
+                    anybody navigating by heading — which is how a screen reader
+                    user skims. The styling is unchanged; only the level moved. */}
+                <h2>{copy.noneSelected.title}</h2>
                 <p>{copy.noneSelected.body}</p>
               </div>
             </div>
