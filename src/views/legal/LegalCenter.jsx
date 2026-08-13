@@ -126,6 +126,48 @@ export default function LegalCenter() {
         </p>
       </div>
 
+      {/**
+        * Keeping up to date, stated narrowly and paired with our own obligation.
+        *
+        * ── Why the wording is what it is ──
+        *
+        * The instinct with a clause like this is a waiver: "it is your
+        * responsibility to check for changes; continued use is acceptance". That
+        * would contradict what this product has already published — the Terms
+        * say "we will tell you in the app before it takes effect… We will not
+        * change them quietly", and the Privacy Policy and Cookie Notice say the
+        * same. A clause shifting the whole burden onto a fifteen-year-old would
+        * be both a reversal of a commitment already made and unenforceable
+        * against a minor in most readings.
+        *
+        * So it says the true and narrow thing: we tell you, and reading it is
+        * yours. Notice first, responsibility second, in that order and in one
+        * sentence, so neither half can be quoted without the other.
+        *
+        * It also states plainly that dismissing the notification is not
+        * agreement — because the product now shows a modal, and a modal with a
+        * button on it is exactly the shape somebody would later mistake for
+        * consent. `legal_change_notices` is deliberately a different table from
+        * `legal_acceptances` for the same reason.
+        *
+        * Informational copy in the product, deliberately NOT new language in the
+        * documents themselves: amending a published policy is the owner's
+        * decision, not an engineering one.
+        */}
+      <section className="legal-notice-callout stack-sm" aria-labelledby="legal-staying-current">
+        <h2 id="legal-staying-current">Keeping up to date</h2>
+        <p>
+          When one of these documents changes, we tell you — in the app the next
+          time you open it, and by email. Please read the update when you get it:
+          the current version on this page is the one that applies to your account.
+        </p>
+        <p className="small dim">
+          Dismissing that notification only records that you have seen it. It is
+          not acceptance, and it is kept separately from your consent record.
+          Every version is archived here with the date it took effect.
+        </p>
+      </section>
+
       {error && <p className="alert alert-warn" role="status">{error}</p>}
 
       {documents && (

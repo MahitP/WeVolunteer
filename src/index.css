@@ -7656,6 +7656,18 @@ input:disabled + .premium-slider {
   --swatch: var(--brand-tint);
 }
 
+/* The "keeping up to date" callout in the Legal Center. Bordered rather than
+   filled: it is guidance, not a warning, and an alert-coloured panel on a page
+   of policies reads as something being wrong. */
+.legal-notice-callout {
+  padding: var(--s5);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--brand);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.legal-notice-callout p { margin: 0; }
+
 /* ── Emoji avatar picker ─────────────────────────────────────────────────── */
 
 .emoji-picker { display: block; }
