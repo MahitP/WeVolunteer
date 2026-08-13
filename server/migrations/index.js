@@ -50,6 +50,7 @@ import attendanceForeignKeys from './038_attendance_foreign_keys.js';
 import legalChangeNotices from './039_legal_change_notices.js';
 import organizationIdentity from './040_organization_identity.js';
 import organizationAnnouncements from './041_organization_announcements.js';
+import organizationAllowReplies from './042_organization_allow_replies.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -236,7 +237,15 @@ export const MIGRATIONS = [
    * Order-dependent only on `organizations` and `users` existing, both of which
    * long predate it. Idempotent: `CREATE TABLE IF NOT EXISTS` throughout.
    */
-  organizationAnnouncements
+  organizationAnnouncements,
+
+  /**
+   * 042 — replies become an organization setting rather than a per-post one.
+   *
+   * One guarded ALTER TABLE ADD COLUMN. Depends on 041 only in meaning, not in
+   * schema: it touches `organizations`, which long predates it.
+   */
+  organizationAllowReplies
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

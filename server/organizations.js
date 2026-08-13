@@ -104,6 +104,21 @@ export function validateOrganization(payload, { partial = false } = {}) {
    *
    * `null` clears it — an organization is allowed to go back to having no mark.
    */
+  /**
+   * Whether members may reply to this organization's announcements.
+   *
+   * An organization-level setting with no per-post override: a manager deciding
+   * "we do not take replies" is describing how their club communicates, not
+   * annotating one notice. Turning it off keeps the replies already written and
+   * stops new ones — see migration 042.
+   */
+  if (payload.allowReplies !== undefined) {
+    if (typeof payload.allowReplies !== 'boolean') {
+      return { ok: false, field: 'allowReplies', error: 'That setting must be on or off.' };
+    }
+    out.allowReplies = payload.allowReplies;
+  }
+
   if (payload.avatar !== undefined) {
     if (payload.avatar !== null && (typeof payload.avatar !== 'string' || payload.avatar.length > 8)) {
       return { ok: false, field: 'avatar', error: 'Pick one of the available icons.' };
@@ -273,6 +288,7 @@ export function formatOrganization(row) {
        people and organizations without learning which it was handed. */
     avatar: row.avatar || null,
     imageUrl: row.image_url || null,
+    allowReplies: row.allow_replies !== 0,
     memberCount: row.memberCount ?? 0,
     eventCount: row.eventCount ?? 0,
     status: row.status,

@@ -1,23 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { Megaphone, MessageSquare, Trash2, Lock, Unlock } from 'lucide-react';
+import { Megaphone, MessageSquare, Trash2, Lock } from 'lucide-react';
 import { api } from '../utils/api';
 import EmptyState from './common/EmptyState';
 
 /**
  * What an organization tells its members, and what they say back.
  *
- * ── Replies, and the toggle ──
+ * ── Replies ──
  *
- * Replies are on unless a manager turns them off, because an announcement
- * nobody can answer is a broadcast — and a volunteer noticing "that clashes
- * with the game" is most of the reason a club posts anything.
+ * Whether members may reply is an ORGANIZATION setting, edited in Manage
+ * Organization, and it governs every announcement the organization publishes.
+ * There is no per-post override: a manager deciding "we do not take replies" is
+ * describing how their club communicates, not annotating one notice.
  *
- * When a manager turns them off, the replies already written STAY VISIBLE and
- * new ones stop. The control says "Replies open"/"Replies closed" rather than
- * "Allow replies", because the second reads like a permission being granted
- * when what is actually happening is a thread being locked — and a locked
- * thread is a thing everybody already understands, including that what was said
- * in it is still there.
+ * Turning it off keeps the replies already written and stops new ones. Somebody
+ * wrote those and other people read them; a settings toggle is not a moderation
+ * decision, and hiding them would be worse still, because the authors would
+ * carry on believing they had been heard.
  *
  * ── Who sees what ──
  *
@@ -26,11 +25,10 @@ import EmptyState from './common/EmptyState';
  * server on every request — this component hiding a button is a convenience,
  * never the check.
  */
-export default function OrganizationAnnouncements({ orgKey, canManage, isMember, addToast }) {
+export default function OrganizationAnnouncements({ orgKey, canManage, isMember, repliesEnabled, addToast }) {
   const [announcements, setAnnouncements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
-  const [allowReplies, setAllowReplies] = useState(true);
   const [busy, setBusy] = useState(false);
   const [replyDrafts, setReplyDrafts] = useState({});
 
@@ -49,29 +47,10 @@ export default function OrganizationAnnouncements({ orgKey, canManage, isMember,
     if (!draft.trim()) return;
     setBusy(true);
     try {
-      const res = await api.postOrganizationAnnouncement(orgKey, {
-        body: draft.trim(),
-        repliesEnabled: allowReplies,
-      });
+      const res = await api.postOrganizationAnnouncement(orgKey, { body: draft.trim() });
       setAnnouncements(list => [res.announcement, ...list]);
       setDraft('');
       addToast?.('Announcement posted.', 'success');
-    } catch (err) {
-      addToast?.(err.message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const toggleReplies = async (a) => {
-    setBusy(true);
-    try {
-      const res = await api.updateOrganizationAnnouncement(orgKey, a.id, { repliesEnabled: !a.repliesEnabled });
-      /* The replies already on screen are carried across deliberately: the
-         server keeps them and the PATCH response does not resend them. */
-      setAnnouncements(list => list.map(x => (
-        x.id === a.id ? { ...res.announcement, replies: x.replies } : x
-      )));
     } catch (err) {
       addToast?.(err.message, 'error');
     } finally {
@@ -128,14 +107,15 @@ export default function OrganizationAnnouncements({ orgKey, canManage, isMember,
               />
             </label>
             <div className="row-between">
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={allowReplies}
-                  onChange={e => setAllowReplies(e.target.checked)}
-                />
-                <span>Allow replies</span>
-              </label>
+              {/* Whether members can reply is an ORGANIZATION setting, in
+                  Manage Organization — one answer for every announcement, no
+                  per-post override. Said here so a manager is not left looking
+                  for a control that used to be in this row. */}
+              <span className="small dim">
+                {repliesEnabled
+                  ? 'Members can reply to announcements.'
+                  : 'Replies are turned off for this organization.'}
+              </span>
               <button className="btn btn-primary btn-sm" type="submit" disabled={busy || !draft.trim()}>
                 <Megaphone size={14} aria-hidden="true" /> Post
               </button>
@@ -166,22 +146,6 @@ export default function OrganizationAnnouncements({ orgKey, canManage, isMember,
                   </span>
                   {canManage && (
                     <span className="row" style={{ gap: 'var(--s2)' }}>
-                      {/* Says what the state IS, not what pressing it grants:
-                          "Replies closed" is a thread that is locked, which
-                          everybody already understands — including that what
-                          was said in it is still there. */}
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm btn-icon"
-                        disabled={busy}
-                        onClick={() => toggleReplies(a)}
-                        title={a.repliesEnabled ? 'Replies open — close them' : 'Replies closed — open them'}
-                        aria-label={a.repliesEnabled ? 'Close replies on this announcement' : 'Open replies on this announcement'}
-                      >
-                        {a.repliesEnabled
-                          ? <Unlock size={14} aria-hidden="true" />
-                          : <Lock size={14} aria-hidden="true" />}
-                      </button>
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm btn-icon"
@@ -213,7 +177,7 @@ export default function OrganizationAnnouncements({ orgKey, canManage, isMember,
                   </ul>
                 )}
 
-                {a.repliesEnabled ? (
+                {repliesEnabled ? (
                   isMember && (
                     <form className="row org-reply-form" onSubmit={e => sendReply(a, e)}>
                       <label className="field" style={{ flex: 1 }}>
@@ -235,7 +199,7 @@ export default function OrganizationAnnouncements({ orgKey, canManage, isMember,
                   /* Said plainly, next to the replies that are still there, so
                      nobody wonders whether theirs was removed. */
                   <p className="small dim org-replies-closed">
-                    <Lock size={12} aria-hidden="true" /> Replies are closed on this announcement.
+                    <Lock size={12} aria-hidden="true" /> This organization has turned off replies.
                   </p>
                 )}
               </li>
