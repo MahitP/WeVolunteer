@@ -7954,6 +7954,11 @@ input:disabled + .premium-slider {
  * promotion. The statement is set apart because it is the only text on the page
  * written by the person being decided about.
  */
+/* The ban notice above an event's shifts. Sits where the participation
+   controls would be, so the reason and the appeal are in the same place as the
+   thing they prevent. */
+.event-ban-notice { margin-bottom: var(--s4); }
+
 .appeal-inbox-item {
   padding: var(--s4) 0;
   border-top: 1px solid var(--rule);
