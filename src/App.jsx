@@ -1324,6 +1324,10 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/admin/appeals': {
       userRole: currentUser.role,
     },
+    /* Deliberately empty. The form reads the session from the server and the
+       case it is contesting from the URL, so there is nothing the shell knows
+       that it needs. */
+    '/appeals/new': {},
     '/impact': {},
     '/admin/audit-logs': {},
     '/admin/roster': {},
