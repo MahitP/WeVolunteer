@@ -116,6 +116,71 @@ describe('the Student Organizer Agreement', () => {
       expect((await post(helper)).status).toBe(403);
     });
 
+    it('withholds the READ routes too, not only the writes', async () => {
+      /**
+       * The gap that let a defect survive a review of this very file. Every
+       * other assertion here goes through the announcement route — the one path
+       * with capability middleware — while three READ routes had none at all
+       * and stood on `canRunEvent`, which reads the membership table and knows
+       * nothing about agreements.
+       *
+       * They are the routes carrying the applicant list: names, grades and
+       * schools, which is the data the whole document is about.
+       */
+      const created = await srv.call('POST', '/api/events', {
+        title: 'Withheld reads', description: 'x', category: 'Other', location: 'x',
+        applicationDeadline: new Date(Date.now() + 5 * 86400000).toISOString(),
+        organizationId: orgId,
+        slots: [{
+          name: 'Shift', description: '',
+          startDatetime: new Date(Date.now() + 6 * 86400000).toISOString(),
+          endDatetime: new Date(Date.now() + 6 * 86400000 + 3600000).toISOString(),
+          maxSpots: 3, hoursAwarded: 1,
+        }],
+      }, owner);
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const eventId = created.body.id;
+
+      /* A student MANAGER: their role gives them nothing, so the whole of their
+         access to this event rests on the agreement. */
+      await setRole(helperId, 'manager');
+
+      /* Staff-only, with nothing to fall back to — the route is refused. */
+      const detail = await srv.call('GET', `/api/events/${eventId}`, undefined, helper);
+      expect(detail.status, 'the applicant list was readable with no agreement').toBe(403);
+
+      /**
+       * These two have a legitimate non-staff branch — a co-attendee may see who
+       * else is coming — so 200 is the right status and the invariant is what
+       * comes back in it. The STAFF payload is the one carrying `grade` and
+       * `school`, which `contentRoutes.js` itself argues a peer must not see.
+       */
+      for (const path of [
+        `/api/events/${eventId}/attendees`,
+        `/api/events/${eventId}/announcements`,
+      ]) {
+        const res = await srv.call('GET', path, undefined, helper);
+        expect(JSON.stringify(res.body), `${path} served the staff payload`)
+          .not.toMatch(/"school"|"grade"/);
+      }
+
+      await accept(helper);
+      const after = await srv.call('GET', `/api/events/${eventId}`, undefined, helper);
+      expect(after.status, JSON.stringify(after.body)).toBe(200);
+    });
+
+    it('withholds the applicant LIST as well', async () => {
+      /* `GET /api/applications` scopes its rows by capability. A promoted
+         student who has not accepted must fall to "your own applications", not
+         to the club's. */
+      await setRole(helperId, 'manager');
+      const res = await srv.call('GET', '/api/applications', undefined, helper);
+      expect(res.status).toBe(200);
+      const rows = res.body.applications || res.body || [];
+      const foreign = (Array.isArray(rows) ? rows : []).filter(a => a.userId && a.userId !== helperId);
+      expect(foreign, 'the club’s applications were listed with no agreement').toEqual([]);
+    });
+
     it('releases every one of the four, not just the one that was tried', async () => {
       await accept(helper);
       const me = await srv.call('GET', '/api/auth/me', undefined, helper);
@@ -168,6 +233,46 @@ describe('the Student Organizer Agreement', () => {
 
       await accept(helper);
       expect((await post(helper)).status).toBe(201);
+    });
+
+    it('never withholds from an ADMINISTRATOR or the platform OWNER', async () => {
+      /**
+       * The lockout this closes, which a review found and no test would have.
+       *
+       * The gate used to subtract `CAPABILITIES[role]` from the four. A
+       * `super_admin` holds `'*'` — a wildcard, not the four literals — so the
+       * subtraction removed nothing and all four were withheld from the owner.
+       * `can()` tests `withheld` BEFORE the wildcard, deliberately, so the
+       * owner created an organization, was seated as its manager, and was
+       * refused posting to their own club and invited to accept an agreement
+       * that opens "you are a student who has been asked to help run a club".
+       *
+       * Every account is bound by exactly one instrument. These two have the
+       * Admin Responsibilities Policy.
+       */
+      for (const role of ['admin', 'super_admin']) {
+        const tag = `${role}${Math.random().toString(36).slice(2, 7)}`;
+        const signed = await srv.signupConfirmed({
+          name: `Elevated ${role}`,
+          username: `soa_${tag}`,
+          email: `${tag}@test.local`,
+          password: 'Password123',
+          grade: 'Adult',
+          role: 'student',
+        });
+        /* Promoted after the fact, the way the authorization matrix builds its
+           elevated fixtures — identity is re-derived from the row per request,
+           so no re-sign-in is needed. */
+        db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, signed.user.id);
+        seat(signed.user.id, 'manager');
+
+        const me = await srv.call('GET', '/api/auth/me', undefined, signed.cookie);
+        expect(me.body.withheld, `${role} was withheld the helper capabilities`)
+          .not.toEqual(expect.arrayContaining(['organization.post.create']));
+
+        const st = await status(signed.cookie);
+        expect(st.body.required, `${role} was asked to sign a student's agreement`).toBe(false);
+      }
     });
 
     it('does not withhold anything from an ADULT organizer who is also seated', async () => {

@@ -298,9 +298,15 @@ export function sweepTwoFactorRemnants(dbHandle = db, now = new Date()) {
  * buy nothing and a lazy getter that `can()` forgets to trigger would fail open —
  * the one direction an authorization mechanism must never fail.
  *
- * It costs one indexed query per authenticated request, and only for organizers:
- * `withheldCapabilitiesFor` returns `[]` without touching the database for every
- * other role. See `server/organizerAgreement.js` for why the list exists.
+ * It costs one or two indexed queries per authenticated request. It used to be
+ * organizers only, and is not since the Student Organizer Agreement: that gate
+ * withholds against a RANK rather than a role, so "do you help run a club" is
+ * asked of every account (`organization_members`, covered by
+ * `idx_org_members_user`). Organizers and administrators are answered from their
+ * role and never reach it; everybody else pays the one lookup, and only somebody
+ * who does hold a rank pays the second (`legal_acceptances`, covered by
+ * `idx_acceptances_user`). See `server/organizerAgreement.js` and
+ * `server/studentOrganizerAgreement.js` for why the lists exist.
  *
  * `computeWithheld` is injectable for the same reason `fetchGrants` is: so this
  * function's own contract — the shape of the principal, and the laziness of

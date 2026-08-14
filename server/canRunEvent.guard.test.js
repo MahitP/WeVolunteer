@@ -110,9 +110,25 @@ function carriesOrganizationId(text) {
   return false;
 }
 
-const files = fs.readdirSync(ROUTES_DIR)
-  .filter(f => f.endsWith('.js') && !f.includes('.test.'))
-  .map(f => ({ name: `routes/${f}`, source: fs.readFileSync(path.join(ROUTES_DIR, f), 'utf8') }))
+/**
+ * `server/routes/` AND `server/` itself.
+ *
+ * `canRunEvent` is exported, and the messaging module calls it — a scan of the
+ * routes directory alone could not see that site, so a starved query there would
+ * have been invisible to this file. The definition lives in `organizations.js`
+ * and is skipped by name.
+ */
+const SOURCES = [
+  ...fs.readdirSync(ROUTES_DIR)
+    .filter(f => f.endsWith('.js') && !f.includes('.test.'))
+    .map(f => ({ name: `routes/${f}`, full: path.join(ROUTES_DIR, f) })),
+  ...fs.readdirSync(HERE)
+    .filter(f => f.endsWith('.js') && !f.includes('.test.') && f !== 'organizations.js')
+    .map(f => ({ name: f, full: path.join(HERE, f) })),
+];
+
+const files = SOURCES
+  .map(f => ({ name: f.name, source: fs.readFileSync(f.full, 'utf8') }))
   .filter(f => f.source.includes('canRunEvent('));
 
 describe('every canRunEvent caller loads a whole event row', () => {
@@ -125,7 +141,7 @@ describe('every canRunEvent caller loads a whole event row', () => {
        vacuity the file exists to prevent. Raise it when sites are added; a drop
        means a call was missed, renamed or removed. */
     expect(total, 'canRunEvent call sites moved — recount and update this floor')
-      .toBeGreaterThanOrEqual(15);
+      .toBeGreaterThanOrEqual(19);
   });
 
   for (const file of files) {

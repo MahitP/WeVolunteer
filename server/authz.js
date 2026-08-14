@@ -616,9 +616,15 @@ export function can(principal, capability) {
    * Ordering is the whole correctness argument, and it is the same argument as
    * the cascade rule in this file's header. `super_admin` holds '*', so a
    * withheld check placed after it would be unreachable for exactly the
-   * principal with the most reach. Nothing withholds from super_admin today —
-   * `buildPrincipal` computes the list from the organizer agreement only — but
-   * "it happens not to matter yet" is not a property worth depending on.
+   * principal with the most reach.
+   *
+   * That ordering is load-bearing, and it has already bitten in the other
+   * direction. A first draft of the Student Organizer gate subtracted the
+   * ROLE's capability list — and `super_admin` holds `'*'` rather than the four
+   * literals, so nothing was subtracted, all four were withheld, and the
+   * platform owner was refused posting to a club they had just created. The fix
+   * was to withhold only from the roles that document binds. This ordering is
+   * what made the mistake visible on the first request rather than never.
    *
    * ── Why it is passed in rather than computed here ──
    *

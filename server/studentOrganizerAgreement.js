@@ -1,4 +1,4 @@
-import { CAPABILITIES } from './authz.js';
+import { CAPABILITIES, ROLE } from './authz.js';
 import { STUDENT_ORGANIZER_DOCUMENTS } from './legalDocuments.js';
 import { recordAcceptances } from './consent.js';
 import { resolveDocument } from './legalStore.js';
@@ -40,6 +40,15 @@ import { STUDENT_ORGANIZER_CAPABILITIES, helpsRunAnywhere } from './organization
  * Grant on the rank, release on the undertaking, and the acceptance record stays
  * the single source of truth for whether the undertaking was made.
  */
+
+/**
+ * Roles bound by a different instrument, and therefore never by this one.
+ *
+ * Named as a set rather than tested inline, because `authz.completeness.test.js`
+ * fails the build on an authorization decision written as a comparison against a
+ * quoted role literal — and this is one.
+ */
+const ROLES_BOUND_ELSEWHERE = new Set([ROLE.ORGANIZER, ROLE.ADMIN, ROLE.SUPER_ADMIN]);
 
 /**
  * Whether this user has accepted every current Student Organizer document.
@@ -86,9 +95,41 @@ export function hasAcceptedStudentOrganizerAgreement(db, userId) {
  */
 export function studentOrganizerWithholdingsFor(db, userRow) {
   if (!userRow) return [];
+
+  /**
+   * Only the roles this document actually binds.
+   *
+   * ── The lockout this closes ──
+   *
+   * The first version subtracted `CAPABILITIES[role]` and withheld the rest,
+   * which read sensibly and was wrong at both ends. `super_admin` holds `'*'`
+   * — a wildcard, not the four literals — so the subtraction removed nothing
+   * and all four were withheld from the platform owner. `can()` tests
+   * `withheld` BEFORE the wildcard, deliberately, so the owner created an
+   * organization, was seated as its manager, and was immediately refused
+   * posting to their own club and told to accept an agreement that opens "you
+   * are a student who has been asked to help run a club". An administrator
+   * seated in a club got the same in part.
+   *
+   * ── The rule instead ──
+   *
+   * Every account is bound by exactly one instrument. Organizers have the
+   * Organizer Agreement, which withholds these same four already. Administrators
+   * and the owner have the Admin Responsibilities Policy. This document is for
+   * everybody else — which is the students it was written for, and a `partner`
+   * account that somehow held the rank.
+   *
+   * A student MANAGER is still bound, and that is the point: their role gives
+   * them nothing, so they hold all four by grant exactly as a helper does.
+   */
+  if (ROLES_BOUND_ELSEWHERE.has(userRow.role)) return [];
+
   if (!helpsRunAnywhere(db, userRow.id)) return [];
   if (hasAcceptedStudentOrganizerAgreement(db, userRow.id)) return [];
 
+  /* Whatever the role does NOT already give them — belt and braces under the
+     role test above, so a future role list that gains one of the four cannot
+     have it withheld against a document that does not bind its holder. */
   const fromRole = new Set(CAPABILITIES[userRow.role] || []);
   return STUDENT_ORGANIZER_CAPABILITIES.filter(c => !fromRole.has(c));
 }
@@ -140,7 +181,11 @@ export function acceptStudentOrganizerAgreement(db, { userId, req = null, now = 
  */
 export function studentOrganizerAgreementStatus(db, userRow) {
   return {
-    required: helpsRunAnywhere(db, userRow.id),
+    /* "Are you asked to accept this", which is not the same as "do you help run
+       a club": an organizer or an administrator who does is bound by their own
+       instrument instead, and telling them otherwise is what produced a screen
+       inviting the platform owner to sign a student's agreement. */
+    required: !ROLES_BOUND_ELSEWHERE.has(userRow.role) && helpsRunAnywhere(db, userRow.id),
     accepted: hasAcceptedStudentOrganizerAgreement(db, userRow.id),
     documents: STUDENT_ORGANIZER_DOCUMENTS.map((registered) => {
       const d = resolveDocument(db, registered) ?? registered;

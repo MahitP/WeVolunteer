@@ -218,11 +218,6 @@ export function memberRoleOf(db, organizationId, userId) {
   return row?.member_role ?? null;
 }
 
-/** True only for the intermediate rank — a manager is NOT a student organizer. */
-export function isStudentOrganizerOf(db, organizationId, userId) {
-  return memberRoleOf(db, organizationId, userId) === 'student_organizer';
-}
-
 /**
  * True when this principal may act as the organization for the day-to-day work:
  * posting announcements and putting events up.
@@ -244,6 +239,32 @@ export function canHelpRun(db, organizationId, userId, { hasModerate = false } =
   const role = memberRoleOf(db, organizationId, userId);
   return role === 'manager' || role === 'student_organizer';
 }
+
+/**
+ * The capabilities that make somebody staff on an event.
+ *
+ * ── Why a list rather than a middleware ──
+ *
+ * `canRunEvent` reads the membership table and knows nothing about agreements.
+ * That is right for what it answers — "is this your event" — and it is why the
+ * WRITE routes pair it with `requireCapAny`: the middleware is where a withheld
+ * capability is refused, because `can()` is the only thing that consults
+ * `principal.withheld`.
+ *
+ * Three READ routes had no middleware at all and stood on `canRunEvent` alone,
+ * so a student who had been promoted but had not yet accepted the Student
+ * Organizer Agreement could still open the applicant list with everybody's
+ * grade and school on it — the exact data the agreement is about. They cannot
+ * take the whole route behind a gate, because two of them also serve ordinary
+ * attendees, so they ask this list where they compute "is the reader staff".
+ */
+export const EVENT_STAFF_CAPABILITIES = Object.freeze([
+  'event.moderate',
+  'event.edit.own',
+  'applicant.review',
+  'attendance.view',
+  'organization.event.manage.own',
+]);
 
 /**
  * May this principal run this event — edit it, review its applicants, take its

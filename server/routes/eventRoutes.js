@@ -18,7 +18,9 @@ import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
 import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
 import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
-import { canManage, canHelpRun, canRunEvent, memberIds } from '../organizations.js';
+import {
+  canManage, canHelpRun, canRunEvent, EVENT_STAFF_CAPABILITIES, memberIds,
+} from '../organizations.js';
 
 const router = express.Router();
 
@@ -640,9 +642,14 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
 
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const isStaff = canRunEvent(db, event, req.principal.userId, {
-      hasModerate: can(req.principal, 'event.moderate'),
-    });
+    /* BOTH halves. `canRunEvent` says the event is yours; the capability list is
+       what consults `principal.withheld`, so a promoted student who has not
+       accepted the Student Organizer Agreement is refused here as they are on
+       every write route. Membership alone left this one open. */
+    const isStaff = EVENT_STAFF_CAPABILITIES.some(c => can(req.principal, c))
+      && canRunEvent(db, event, req.principal.userId, {
+        hasModerate: can(req.principal, 'event.moderate'),
+      });
     if (!isStaff) return res.status(403).json({ error: 'Access denied: You do not host this event' });
 
     /* This route is staff-only (the `isStaff` gate above), so the reader always

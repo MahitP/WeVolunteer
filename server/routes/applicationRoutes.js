@@ -38,9 +38,30 @@ router.get('/api/applications', authenticateToken, (req, res) => {
      * this list is what feeds the screen those writes are made from. Scoped in
      * SQL rather than filtered afterwards, so a club with four hundred
      * applications does not load them all to discard most.
+     *
+     * ── Why hosting is not enough on its own ──
+     *
+     * It mirrors `stillWelcomeIn` in `canRunEvent`, and it has to. Without it
+     * this list reopened exactly what that function closed: an organizer removed
+     * or banned from a club was refused `GET /api/events/:id` and
+     * `roster.csv` — and kept listing every application to the club's events
+     * here, names, schools, grades, bios and all. The reads have to agree with
+     * the writes or the tighter one is decoration.
      */
     const ORGANIZATION_SCOPE = `
-      WHERE e.organizer_id = ?
+      WHERE (
+              e.organizer_id = ?
+              AND (
+                e.organization_id IS NULL
+                OR (
+                  EXISTS (SELECT 1 FROM organization_members m
+                           WHERE m.organization_id = e.organization_id AND m.user_id = ?)
+                  AND NOT EXISTS (SELECT 1 FROM organization_bans b
+                                   WHERE b.organization_id = e.organization_id
+                                     AND b.user_id = ? AND b.lifted_at IS NULL)
+                )
+              )
+            )
          OR e.organization_id IN (
               SELECT organization_id FROM organization_members
                WHERE user_id = ? AND member_role = 'manager'
@@ -72,7 +93,7 @@ router.get('/api/applications', authenticateToken, (req, res) => {
     } else if (can(req.principal, 'applicant.review')) {
       // organizer: applications to the events they host.
       rows = db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE}`)
-        .all(req.principal.userId, req.principal.userId);
+        .all(req.principal.userId, req.principal.userId, req.principal.userId, req.principal.userId);
     } else if (can(req.principal, 'organization.event.manage.own')) {
       /**
        * A Student Organizer, or a student who manages a club.
@@ -87,7 +108,7 @@ router.get('/api/applications', authenticateToken, (req, res) => {
        * events belonging to a club they manage.
        */
       rows = db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE}`)
-        .all(req.principal.userId, req.principal.userId);
+        .all(req.principal.userId, req.principal.userId, req.principal.userId, req.principal.userId);
     } else if (can(req.principal, 'application.withdraw')) {
       // student: their own applications only.
       rows = db.prepare(`${BASE_QUERY} WHERE a.user_id = ?`).all(req.principal.userId);
