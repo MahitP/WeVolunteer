@@ -41,6 +41,10 @@ const AdminDashboard = React.lazy(() => import('../views/AdminDashboard'));
 const Notifications = React.lazy(() => import('../views/Notifications'));
 const CalendarView = React.lazy(() => import('../views/CalendarView'));
 const VolunteerProfile = React.lazy(() => import('../views/VolunteerProfile'));
+const BadgesPage = React.lazy(() => import('../views/BadgesPage'));
+const CertificatesPage = React.lazy(() => import('../views/CertificatesPage'));
+const PublicCertificates = React.lazy(() => import('../views/PublicCertificates'));
+const PublicServiceHistory = React.lazy(() => import('../views/PublicServiceHistory'));
 const OrganizerProfile = React.lazy(() => import('../views/OrganizerProfile'));
 const ResetPassword = React.lazy(() => import('../views/ResetPassword'));
 const OAuthCallback = React.lazy(() => import('../views/OAuthCallback'));
@@ -258,6 +262,36 @@ export const APP_ROUTES = [
    * own history is not a thing anybody needs approval for.
    */
   { path: '/hours', element: <LoggedHours />, requiredCap: 'portfolio.write' },
+  /**
+   * The destinations the profile's capped lists point at.
+   *
+   * `BadgesList` showed twelve and then said "and 4 more badges." as plain text,
+   * because — in its own words — "there is no fuller page to send somebody to
+   * yet". A count with nowhere to go tells a volunteer about achievements the
+   * product then refuses to show them.
+   *
+   * Two paths, one component: whose badges these are is the only difference, and
+   * splitting it would let a student's own achievements drift into being
+   * presented differently from how everybody else sees them.
+   *
+   * `directory.read` on the handle route, matching `/users/:handle` itself —
+   * reading somebody's badges is reading their profile.
+   */
+  /* `portfolio.write` — the same capability `/hours` and `/certificates` use
+     for "your own service record". Inventing a fourth name for that idea
+     would mean four things to keep in step. */
+  { path: '/profile/badges', element: <BadgesPage />, requiredCap: 'portfolio.write' },
+  { path: '/users/:handle/badges', element: <BadgesPage />, requiredCap: 'directory.read' },
+  /* The same convention the badges page established: your own record lives
+     under /profile and /certificates, somebody else's under their handle. Both
+     are `directory.read`, matching `/users/:handle` itself — reading somebody's
+     public record is reading their profile. What each ACTUALLY discloses is
+     decided by the subject's own setting, at the server. */
+  { path: '/users/:handle/certificates', element: <PublicCertificates />, requiredCap: 'directory.read' },
+  { path: '/users/:handle/hours', element: <PublicServiceHistory />, requiredCap: 'directory.read' },
+  /* Own certificates only: one carries a full name, an organization, dates and
+     a verification code. */
+  { path: '/certificates', element: <CertificatesPage />, requiredCap: 'portfolio.write' },
   { path: '/settings', element: <Settings /> },
   /**
    * Declared with NO `requiredCap`, deliberately.
