@@ -481,6 +481,7 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/portfolio')) return 'portfolio';
   if (pathname.startsWith('/checkin')) return 'checkin';
   if (pathname.startsWith('/organizer-agreement')) return 'organizerAgreement';
+  if (pathname.startsWith('/student-organizer-agreement')) return 'studentOrganizerAgreement';
   if (pathname.startsWith('/messages')) return 'messages';
   /* Before `/admin/appeals`? No — different prefixes, no conflict. But it must
      exist at all: without a branch, filing an appeal was titled "Dashboard /
@@ -526,6 +527,7 @@ export const RAIL_TAB = {
   loggedHours: 'dashboard',
   externalHours: 'dashboard',
   organizerAgreement: 'dashboard',
+  studentOrganizerAgreement: 'dashboard',
   appealForm: 'dashboard',
 };
 
@@ -596,6 +598,7 @@ export const PAGE_META = {
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
     /**
      * ── "Discover", matching the rail entry and the route ──
@@ -630,6 +633,7 @@ export const PAGE_META = {
     appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
     dashboard: { title: 'Dashboard', sub: 'Track your volunteers, hours, and pending reviews' },
@@ -646,6 +650,7 @@ export const PAGE_META = {
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
     calendar: { title: 'Calendar', sub: 'Events across the district and when they close' },
@@ -692,6 +697,7 @@ export const PAGE_META = {
        purpose — it is how an organizer accepts the terms that grant the rest —
        so any signed-in role can open it, partner included. */
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
     /* "All events" was the pre-consolidation title, and it survived the rename
        into two personas. It disagreed with the rail item that opens the page
@@ -1366,6 +1372,9 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/hours': { currentUser, addToast },
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
     '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
+    /* Same three. `refreshAll` is what makes the released capabilities visible
+       to the navigation without a sign-out. */
+    '/student-organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
     '/errors': { addToast },
     '/admin/appeals': {
       userRole: currentUser.role,

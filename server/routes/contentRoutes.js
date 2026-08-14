@@ -307,10 +307,19 @@ router.post('/api/events/:id/announcements', authenticateToken, (req, res) => {
 
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    // `announcement.post` is the kind-of-actor check (organizer, and
-    // super_admin via the wildcard); `event.moderate` is admin's bypass of the
-    // ownership comparison, same pattern as eventRoutes.js's broadcast route.
-    if (!can(req.principal, 'announcement.post') && !can(req.principal, 'event.moderate')) {
+    /**
+     * `announcement.post` is the kind-of-actor check (organizer, and super_admin
+     * via the wildcard); `event.moderate` is admin's bypass of the ownership
+     * comparison, same pattern as eventRoutes.js's broadcast route.
+     *
+     * `organization.event.manage.own` is here because the host of a club's event
+     * holds it and neither of the other two. Without it a Student Organizer was
+     * refused the in-app announcement on their own event while
+     * `POST /api/events/:id/broadcast` — which emails the same roster — accepted
+     * them, and the composer rendered for them and 403'd on save.
+     */
+    if (!can(req.principal, 'announcement.post') && !can(req.principal, 'event.moderate')
+        && !can(req.principal, 'organization.event.manage.own')) {
       return res.status(403).json({ error: 'Only the event organizer can post announcements' });
     }
     if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {

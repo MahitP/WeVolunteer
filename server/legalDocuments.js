@@ -254,6 +254,18 @@ export const LEGAL_DOCUMENTS = [
     bundledWith: null,
   },
   {
+    slug: 'student-organizer-agreement',
+    version: '1.0',
+    title: 'Student Organizer Agreement',
+    consentType: 'agree',
+    scope: 'student-organizer-onboarding',
+    summary: 'What a student promoted to help run a club takes on: use what you can see to run the events, share it with nobody, credit hours honestly.',
+    effectiveAt: '2026-08-13',
+    file: '11-student-organizer-agreement.md',
+    contentHash: '1e7d904c8096482437aaa3f8a66890b0844e751127d8f4766bfcdc9834026764',
+    bundledWith: null,
+  },
+  {
     slug: 'youth-safety-guidelines',
     version: '1.0',
     title: 'Youth Safety Guidelines',
@@ -360,6 +372,33 @@ export const SIGNUP_DOCUMENTS = LEGAL_DOCUMENTS.filter(d => d.scope === 'signup'
  * document is collected rather than who the reader is.
  */
 export const ORGANIZER_DOCUMENTS = LEGAL_DOCUMENTS.filter(d => d.scope === 'organizer-onboarding');
+
+/**
+ * What a student accepts before the Student Organizer rank does anything.
+ *
+ * ── Why a separate scope, and not a second document under the organizer one ──
+ *
+ * `ORGANIZER_DOCUMENTS` is read by `withheldCapabilitiesFor`, which withholds
+ * from accounts whose role is `organizer`. Adding this document there would
+ * start demanding it from every adult organizer — people it does not bind and
+ * whose acceptance of it would be a false record — and would silently make the
+ * adult agreement a precondition for a student rank.
+ *
+ * ── Why the two documents are separate at all ──
+ *
+ * The Organizer Agreement asks its reader to confirm things a student cannot
+ * truthfully confirm: that they understand most students here are minors
+ * (addressed to somebody who is not one), that New Jersey mandated-reporter law
+ * binds them personally, and that at least two adults will be present at their
+ * events. A record of undertakings the signer cannot perform is weaker evidence
+ * than no record.
+ *
+ * The `-onboarding` suffix is deliberate, for the reason given above:
+ * `'student-organizer'` alone reads as a role name, and this codebase fails the
+ * build on authorization decisions made by comparing role strings.
+ */
+export const STUDENT_ORGANIZER_DOCUMENTS =
+  LEGAL_DOCUMENTS.filter(d => d.scope === 'student-organizer-onboarding');
 
 /**
  * The distinct consent controls a signup form must show.

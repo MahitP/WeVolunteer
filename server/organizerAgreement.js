@@ -2,6 +2,7 @@ import { ROLE } from './authz.js';
 import { ORGANIZER_DOCUMENTS } from './legalDocuments.js';
 import { recordAcceptances } from './consent.js';
 import { resolveDocument } from './legalStore.js';
+import { studentOrganizerWithholdingsFor } from './studentOrganizerAgreement.js';
 
 /**
  * The Organizer Agreement, and what an organizer cannot do until they accept it.
@@ -100,13 +101,12 @@ export const ORGANIZER_GATED_CAPABILITIES = Object.freeze([
    * attendance. Every one of them reaches a student, so an organizer who has not
    * accepted the agreement does not hold them.
    *
-   * They do NOT withhold anything from a Student Organizer, and the asymmetry is
-   * deliberate rather than an oversight: `withheldCapabilitiesFor` returns `[]`
-   * for anybody whose role is not `organizer`, and a Student Organizer is a
-   * student. Whether that student should sign an undertaking of their own before
-   * handling classmates' contact details is a real question, and a different one
-   * — it is a document that does not exist yet, not a capability that is missing.
-   * Recorded rather than answered here.
+   * A Student Organizer holds the same four, by grant rather than by role, and
+   * is withheld them against a DIFFERENT document — see
+   * `server/studentOrganizerAgreement.js`. Two gates over one set of
+   * capabilities, because the undertakings that make sense to ask an adult are
+   * not the ones that make sense to ask a fifteen-year-old, and a record of
+   * undertakings the signer cannot perform is weaker than no record.
    */
   'organization.post.create',
   'organization.post.manage',
@@ -174,6 +174,40 @@ export function hasAcceptedOrganizerAgreement(db, userId) {
  * question is about the person acting, which is `actualRole`.
  */
 export function withheldCapabilitiesFor(db, userRow) {
+  /**
+   * The UNION of every agreement gate, because there is now more than one.
+   *
+   * `buildPrincipal` calls this once and hands the result to `can()`, so this is
+   * the single answer to "what is withheld from this person". A second list
+   * computed somewhere else and unioned at the call site would be a second place
+   * to forget, and the thing forgotten would be a capability that should have
+   * been withheld.
+   */
+  return [
+    ...organizerAgreementWithholdings(db, userRow),
+    ...studentOrganizerWithholdingsFor(db, userRow),
+  ];
+}
+
+/**
+ * The organizer half: everything student-facing, until the agreement is signed.
+ *
+ * Returns `[]` for everyone who is not an organizer:
+ *
+ *   - Students never held these from their role, so withholding would be a no-op
+ *     costing a query per request. What a STUDENT ORGANIZER holds by grant is
+ *     withheld by `studentOrganizerWithholdingsFor` instead, against a document
+ *     written for them.
+ *   - Admins and super_admins are covered by the Admin Responsibilities Policy
+ *     rather than the Organizer Agreement, and withholding from the operator
+ *     would be a way to lock the platform owner out of their own instance.
+ *
+ * `actualRole`, not `effectiveRole`: an admin impersonating an organizer must
+ * not acquire that organizer's ungated capabilities, and must not be gated by
+ * that organizer's missing acceptance either. The question is about the person
+ * acting.
+ */
+function organizerAgreementWithholdings(db, userRow) {
   if (!userRow || userRow.role !== ROLE.ORGANIZER) return [];
   if (hasAcceptedOrganizerAgreement(db, userRow.id)) return [];
   return [...ORGANIZER_GATED_CAPABILITIES];

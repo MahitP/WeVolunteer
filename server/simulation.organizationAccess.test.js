@@ -120,12 +120,30 @@ describe('one club, five people', () => {
       { memberRole: 'student_organizer' }, s.A);
     expect(byA.status, JSON.stringify(byA.body)).toBe(200);
 
+    /* Granted by the promotion, and WITHHELD until B accepts the Student
+       Organizer Agreement — so the row exists now and does nothing yet. Step 2b
+       is where it starts working. */
     const caps = db.prepare('SELECT capability FROM user_capabilities WHERE user_id = ?')
       .all(id.B).map(r => r.capability).sort();
     expect(caps).toEqual([
       'organization.event.create', 'organization.event.manage.own',
       'organization.post.create', 'organization.post.manage',
     ]);
+  });
+
+  it('2b. the rank does nothing until B accepts the agreement', async () => {
+    /**
+     * The grant is on the membership row; the release is on the undertaking.
+     * Somebody handed access to classmates' names and to their service records
+     * reads what that means first.
+     */
+    const before = await srv.call('POST', `/api/organizations/${orgKey}/announcements`,
+      { body: 'Posting before I have agreed to anything.' }, s.B);
+    expect(before.status, 'the rank worked with no agreement on record').toBe(403);
+
+    const accepted = await srv.call('POST', '/api/legal/student-organizer-agreement/accept',
+      { acknowledged: true }, s.B);
+    expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
   });
 
   it('3. B posts the notice; C, D and E cannot post as the club', async () => {

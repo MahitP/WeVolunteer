@@ -19,6 +19,7 @@ import express from 'express';
 import { authenticateToken, inTransaction } from '../utils.js';
 import { can, requireCap } from '../authz.js';
 import { db } from '../db.js';
+import { recordAudit } from '../auditLog.js';
 import {
   validateOrganization, createOrganization, canManage, canHelpRun, MEMBER_ROLES,
   formatOrganization, uniqueSlug,
@@ -579,6 +580,22 @@ router.patch('/api/organizations/:key/members/:userId', authenticateToken, requi
     syncOrganizerCapabilities(db, req.params.userId, req.principal.userId);
   });
   if (!changes) return res.status(404).json({ error: 'That person is not a member.', code: 'not_member' });
+
+  /**
+   * Recorded, because of what the rank gives.
+   *
+   * A manager handing somebody `student_organizer` hands them the roster of
+   * every applicant to the club's events — names, and on the CSV export, email
+   * addresses — plus the ability to write credited hours. Both people are
+   * usually students. "Who gave this person access, and when" had no answer
+   * anywhere before this line.
+   */
+  recordAudit(db, {
+    adminId: req.principal.userId,
+    action: 'ORGANIZATION_RANK_CHANGED',
+    targetUserId: req.params.userId,
+    details: `Set rank to ${memberRole} in ${row.name} (${row.id})`,
+  });
 
   res.json({ userId: req.params.userId, memberRole });
 });

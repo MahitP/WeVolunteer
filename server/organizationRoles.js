@@ -52,7 +52,43 @@ export const STUDENT_ORGANIZER_CAPABILITIES = Object.freeze([
   'organization.event.manage.own',
 ]);
 
-/** Does this person hold the Student Organizer rank in any organization? */
+/**
+ * Does this person hold a rank that helps run SOME organization?
+ *
+ * ── Why managers are included, and why that is a fix rather than a widening ──
+ *
+ * This used to ask only for `student_organizer`, and the omission cost the club
+ * the thing the rank exists to give it. A manager holds these four capabilities
+ * from their ROLE when they are an organizer — but a STUDENT manager holds no
+ * role capability at all, so the club whose only manager is a student had
+ * nobody who could take attendance on its own events. `POST
+ * /api/events/:id/attendance` is the only path that writes credited hours, and
+ * it refuses at the middleware, before any ownership check runs.
+ *
+ * Worse, promotion was a demotion: a Student Organizer made a manager of the one
+ * club they helped run was recomputed as "student_organizer nowhere", lost all
+ * four, and could no longer manage the events they had created themselves.
+ *
+ * Granting on either rank costs an organizer nothing — they already hold these
+ * from their role, and `grantCapability` is an upsert — and it makes the rule
+ * one sentence: if you help run a club, you hold the capabilities that let you
+ * run its events.
+ */
+export function helpsRunAnywhere(db, userId) {
+  if (!userId) return false;
+  return Boolean(db.prepare(`
+    SELECT 1 FROM organization_members
+     WHERE user_id = ? AND member_role IN ('manager', 'student_organizer') LIMIT 1
+  `).get(userId));
+}
+
+/**
+ * Does this person hold the Student Organizer rank specifically?
+ *
+ * Narrower than `helpsRunAnywhere` and kept separate because the two answer
+ * different questions: this one is "is this person a helper", used where the
+ * distinction from a manager matters.
+ */
 export function isStudentOrganizerAnywhere(db, userId) {
   if (!userId) return false;
   return Boolean(db.prepare(`
@@ -80,7 +116,7 @@ export function isStudentOrganizerAnywhere(db, userId) {
  */
 export function syncOrganizerCapabilities(db, userId, grantedBy = null) {
   if (!userId) return 'revoked';
-  const holds = isStudentOrganizerAnywhere(db, userId);
+  const holds = helpsRunAnywhere(db, userId);
 
   for (const capability of STUDENT_ORGANIZER_CAPABILITIES) {
     if (holds) grantCapability({ db, userId, capability, grantedBy });

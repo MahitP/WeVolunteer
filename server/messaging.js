@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { db } from './db.js';
+import { canRunEvent } from './organizations.js';
 import { inTransaction } from './utils.js';
 import { can, principalFor } from './authz.js';
 import { isBlockedBetween } from './blocking.js';
@@ -91,7 +92,10 @@ export function eligibleRelationship({ eventId, actor, studentId = null, princip
     }
   } else if (can(p, 'applicant.review')) {
     // organizer: only for the event they host.
-    if (event.organizer_id !== actor.id) {
+    /* `canRunEvent`: a club's manager can now edit, cancel, broadcast to and
+       credit hours on an event a helper posted, so refusing them a conversation
+       about a volunteer on it was the one power that did not follow. */
+    if (!canRunEvent(db, event, actor.id, { hasModerate: can(p, 'event.moderate') })) {
       return { ok: false, status: 403, error: 'Access denied: You do not host this event' };
     }
     if (!resolvedStudentId) {

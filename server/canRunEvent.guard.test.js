@@ -36,16 +36,30 @@ import { fileURLToPath } from 'node:url';
  * route nobody thought to write a test for.
  */
 
-const ROUTES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'routes');
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROUTES_DIR = path.join(HERE, 'routes');
 
-/** Every `<name>` in `canRunEvent(db, <name>, ...)`, with its line number. */
+/**
+ * Helpers that take the event row as an argument, each with a block below
+ * checking every one of their callers. A helper NOT named here fails, rather
+ * than passing on nothing.
+ */
+const CHECKED_HELPERS = new Set(['hostRefusal']);
+
+/**
+ * Every `<name>` in `canRunEvent(db, <name>, …)`, with its line number.
+ *
+ * Matched over the whole source rather than line by line. A line-wise regex
+ * silently missed a call whose arguments wrapped across lines — and a missed
+ * call emits no assertion at all, so the starved query behind it would pass.
+ */
 function callsIn(source) {
   const out = [];
-  source.split('\n').forEach((line, i) => {
-    if (line.includes('export function canRunEvent')) return;
-    const m = line.match(/canRunEvent\(\s*db,\s*(\w+)/);
-    if (m) out.push({ variable: m[1], line: i + 1 });
-  });
+  const re = /canRunEvent\(\s*db\s*,\s*(\w+)/g;
+  let m;
+  while ((m = re.exec(source)) !== null) {
+    out.push({ variable: m[1], line: source.slice(0, m.index).split('\n').length });
+  }
   return out;
 }
 
@@ -67,12 +81,33 @@ function sourceOf(lines, variable, callLine) {
   return null;
 }
 
-/** Does this statement load the whole events row, or name the column? */
+/** Comments are prose, not a SELECT list. */
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
+}
+
+/**
+ * Does this statement load the whole events row, or SELECT the column?
+ *
+ * ── Three ways this used to answer yes when the query said no ──
+ *
+ * The loose form matched `organization_id` anywhere in the ten-line window, and
+ * this codebase writes a paragraph above almost every one of these calls — a
+ * comment that merely mentioned the column satisfied the guard.
+ *
+ * `ON org.id = e.organization_id` is a join condition, not a selected column,
+ * and that idiom already appears in `eventRoutes.js`. So the search is bounded
+ * to the text between `SELECT` and `FROM`, which is the only place a column can
+ * actually be selected.
+ */
 function carriesOrganizationId(text) {
-  return /SELECT \* FROM events/.test(text)
-    || /SELECT e\.\*/.test(text)
-    || /\be\.organization_id\b/.test(text)
-    || /\borganization_id\b/.test(text);
+  const code = stripComments(text);
+  if (/SELECT\s+\*\s+FROM\s+events/i.test(code)) return true;
+  if (/SELECT\s+e\.\*/i.test(code)) return true;
+  for (const m of code.matchAll(/\bSELECT\b([\s\S]*?)\bFROM\b/gi)) {
+    if (/\borganization_id\b/.test(m[1])) return true;
+  }
+  return false;
 }
 
 const files = fs.readdirSync(ROUTES_DIR)
@@ -85,7 +120,12 @@ describe('every canRunEvent caller loads a whole event row', () => {
     /* If this drops to zero the scan below passes vacuously — which is exactly
        how a guard stops guarding. */
     const total = files.reduce((n, f) => n + callsIn(f.source).length, 0);
-    expect(total, 'no canRunEvent calls found — has it been renamed?').toBeGreaterThan(5);
+    /* Pinned near the real count rather than loosely above zero: at `> 5`, a
+       dozen call sites could disappear and this would still pass — the same
+       vacuity the file exists to prevent. Raise it when sites are added; a drop
+       means a call was missed, renamed or removed. */
+    expect(total, 'canRunEvent call sites moved — recount and update this floor')
+      .toBeGreaterThanOrEqual(15);
   });
 
   for (const file of files) {
@@ -97,11 +137,20 @@ describe('every canRunEvent caller loads a whole event row', () => {
         expect(src, `could not find where \`${call.variable}\` comes from`).toBeTruthy();
 
         if (src.kind === 'parameter') {
-          /* The row arrives from elsewhere, so the obligation moves to whoever
-             calls this helper. `hostRefusal` is the one case today. */
-          const helper = lines[call.line - 1];
-          expect(helper, 'a helper taking the row as a parameter must be checked at its callers')
-            .toBeTruthy();
+          /**
+           * The row arrives from elsewhere, so the obligation moves to whoever
+           * calls this helper — and it must be a helper this file actually
+           * checks. This used to assert `lines[call.line - 1]` is truthy: that
+           * is the line containing the call, always a non-empty string, always
+           * true. A second helper in any file would have passed on nothing.
+           */
+          const name = src.text.match(/function\s+(\w+)/)?.[1];
+          expect(
+            Boolean(name && CHECKED_HELPERS.has(name)),
+            `\`${name}\` takes the event row as a parameter, so this scan cannot see the `
+            + 'query behind it. Add a describe block checking its callers, then add its '
+            + 'name to CHECKED_HELPERS.'
+          ).toBe(true);
           return;
         }
 

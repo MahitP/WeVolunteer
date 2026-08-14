@@ -31,9 +31,26 @@ export default function VolunteerDashboard({
    * request, a swallowed 500 was indistinguishable from "no data", and none of
    * those figures depend on applications.
    */
+  /**
+   * Whether this student has been trusted to help run a club and has not yet
+   * accepted the Student Organizer Agreement.
+   *
+   * The four capabilities the rank confers are WITHHELD until they do, so
+   * without this banner the promotion is invisible: a manager tells them they
+   * are a Student Organizer, they sign in, and nothing about the app has
+   * changed. This is the only place that says why.
+   */
+  const [helperAgreementOutstanding, setHelperAgreementOutstanding] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     api.fetchLeaderboard().then(l => !cancelled && setLeaderboard(l || [])).catch(() => {});
+    api.fetchStudentOrganizerAgreement?.()
+      .then(st => !cancelled && setHelperAgreementOutstanding(Boolean(st?.required) && !st?.accepted))
+      /* A failed status check must not invent an obligation. Silence is the safe
+         direction: the server enforces the gate regardless, so the worst case is
+         a missing explanation rather than a false accusation. */
+      .catch(() => !cancelled && setHelperAgreementOutstanding(false));
     return () => { cancelled = true; };
   }, [currentUser.id]);
 
@@ -169,6 +186,21 @@ export default function VolunteerDashboard({
 
   return (
     <div className="stack-lg">
+      {/* Above everything, because it explains why the rest of the app looks
+          unchanged after a promotion. `null` while the status loads, so it never
+          flashes at somebody who has already accepted. */}
+      {helperAgreementOutstanding && (
+        <a className="alert alert-warn oa-banner" href="/student-organizer-agreement">
+          <ShieldCheck size={18} aria-hidden="true" />
+          <span className="stack-xs">
+            <strong>You have been asked to help run an organization</strong>
+            <span className="small">
+              Before you can post as it, create its events or take attendance, there is a
+              short agreement to read. It takes a minute.
+            </span>
+          </span>
+        </a>
+      )}
       <div className="dashboard-greeting" style={{ marginBottom: '-var(--s4)' }}>
         <h1 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
           {greetingMessage}

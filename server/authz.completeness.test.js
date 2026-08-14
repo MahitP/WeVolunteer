@@ -736,6 +736,17 @@ describe('authorization hygiene', () => {
        */
       'GET /api/legal/organizer-agreement': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'reads only the caller\'s own acceptance state (organizerAgreementStatus scoped to req.user.id); every role may ask, and a non-organizer gets required:false rather than a refusal' },
       'POST /api/legal/organizer-agreement/accept': { category: CATEGORY.SELF_ONLY, reason: 'writes acceptance rows for req.user.id only; refuses a non-organizer with 400 rather than recording a false acceptance, and must stay reachable while the organizer\'s student-facing capabilities are withheld (accountRoutes.js)' },
+      /**
+       * ── The Student Organizer Agreement, the same shape as the pair above ──
+       *
+       * Ungated for the same reasons, and one more: the four capabilities the
+       * rank confers are WITHHELD until this is accepted, so a capability gate
+       * on the acceptance route would be a gate on the only action that lifts
+       * it. The rank is a membership row rather than a role, so there is no
+       * capability that means "is a student organizer" to gate on either.
+       */
+      'GET /api/legal/student-organizer-agreement': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'reads only the caller\'s own acceptance state (studentOrganizerAgreementStatus scoped to req.user.id); every role may ask, and somebody who holds the rank nowhere gets required:false rather than a refusal' },
+      'POST /api/legal/student-organizer-agreement/accept': { category: CATEGORY.SELF_ONLY, reason: 'writes acceptance rows for req.user.id only; refuses somebody who holds the rank nowhere with 400 rather than recording a false acceptance, and must stay reachable while the four helper capabilities are withheld (accountRoutes.js)' },
       'GET /api/privacy/export/download/:id': { category: CATEGORY.SELF_ONLY, reason: 'job.user_id !== caller -> 404 (always the caller\'s own export job); behind requireAAL2(\'data.download\') with the jobId bound — this is where the archive actually leaves, and gating only the request left a completed one behind a bare session for seven days (v1.2b audit F-1)' },
 
       /**

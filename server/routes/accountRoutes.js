@@ -18,7 +18,11 @@ import { db } from '../db.js';
 import {
   acceptOrganizerAgreement, organizerAgreementStatus
 } from '../organizerAgreement.js';
-import { ORGANIZER_DOCUMENTS } from '../legalDocuments.js';
+import { ORGANIZER_DOCUMENTS, STUDENT_ORGANIZER_DOCUMENTS } from '../legalDocuments.js';
+import {
+  acceptStudentOrganizerAgreement, studentOrganizerAgreementStatus,
+} from '../studentOrganizerAgreement.js';
+import { helpsRunAnywhere } from '../organizationRoles.js';
 import {
   validateAccountFields, validatePassword, validateUsername, validateEmail,
   validateProfilePatch, isCurrentPassword
@@ -947,6 +951,88 @@ router.post('/api/legal/organizer-agreement/accept', authenticateToken, (req, re
     res.json({ accepted: true, alreadyAccepted: result.already, recorded: result.recorded });
   } catch (error) {
     console.error('Organizer agreement acceptance error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * ── The Student Organizer Agreement, same shape and a different document ──
+ *
+ * Separate routes rather than a parameter on the pair above. The two agreements
+ * bind different people to different undertakings and are withheld against
+ * different capability sets; a `?which=` parameter would put the choice of
+ * which contract somebody is accepting into a query string.
+ */
+
+/**
+ * What the caller must accept, and whether they have.
+ *
+ * Readable by any authenticated user. An ordinary member gets
+ * `required: false` rather than a 403, for the reason the organizer route
+ * gives: the client asks on load, and an error would make "nothing to accept"
+ * indistinguishable from "the request failed".
+ */
+router.get('/api/legal/student-organizer-agreement', authenticateToken, (req, res) => {
+  try {
+    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'Account not found' });
+    res.json(studentOrganizerAgreementStatus(db, user));
+  } catch (error) {
+    console.error('Student organizer agreement status error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Accept it.
+ *
+ * Refused for somebody who does not hold the rank anywhere, rather than
+ * recorded: an acceptance row for a person the agreement does not bind is a
+ * false record, and a false record in this table is worse than a missing one.
+ * It is checked against the membership table and not against a role, because
+ * the rank IS a membership row.
+ *
+ * `=== true` and not a truthy test, for the reason `assertConsent` gives: the
+ * string "false" is truthy.
+ *
+ * No step-up re-authentication, matching the organizer route — this adds an
+ * obligation to somebody already signed in rather than changing who can reach
+ * the account, and gating it would lock a student out of the only action that
+ * releases their capabilities.
+ */
+router.post('/api/legal/student-organizer-agreement/accept', authenticateToken, (req, res) => {
+  try {
+    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'Account not found' });
+
+    if (!helpsRunAnywhere(db, user.id)) {
+      return res.status(400).json({
+        error: 'The Student Organizer Agreement applies to student organizers.',
+        code: 'not_a_student_organizer',
+      });
+    }
+
+    if (req.body?.acknowledged !== true) {
+      return res.status(400).json({
+        error: 'Every undertaking must be acknowledged before the agreement can be accepted.',
+        code: 'acknowledgement_required',
+      });
+    }
+
+    const result = acceptStudentOrganizerAgreement(db, { userId: user.id, req });
+
+    recordAudit(db, {
+      adminId: user.id,
+      action: 'ACCEPT_STUDENT_ORGANIZER_AGREEMENT',
+      targetUserId: user.id,
+      details: result.already
+        ? 'Re-submitted an agreement already accepted at the current version; no new record written'
+        : `Accepted ${STUDENT_ORGANIZER_DOCUMENTS.map(d => `${d.slug}@${d.version}`).join(', ')}`,
+    });
+
+    res.json({ accepted: true, alreadyAccepted: result.already, recorded: result.recorded });
+  } catch (error) {
+    console.error('Student organizer agreement acceptance error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
