@@ -15,7 +15,7 @@ import { api } from '../utils/api';
 import { useTheme } from '../hooks/useTheme';
 import { APP_NAME, SCHOOL_NAME, SUPPORT_EMAIL, STUDENT_GUIDE_URL, ORGANIZER_GUIDE_URL } from '../config';
 import { can } from '../authz';
-import { Sun, Moon, SunMoon, ExternalLink, Mail, Scale, Info, FileSignature } from 'lucide-react';
+import { Sun, Moon, SunMoon, ExternalLink, Mail, Scale, Info, FileSignature, LifeBuoy } from 'lucide-react';
 
 export default function Settings({ currentUser, addToast, onProfileChange }) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -444,11 +444,29 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
         const links = [
           STUDENT_GUIDE_URL && { label: 'Student guide', href: STUDENT_GUIDE_URL, external: true },
           ORGANIZER_GUIDE_URL && { label: 'Organizer guide', href: ORGANIZER_GUIDE_URL, external: true },
-          SUPPORT_EMAIL && {
+          /**
+           * An in-app page, not a `mailto:`.
+           *
+           * This was `mailto:support@…`. The markup was correct and nothing
+           * intercepted it — but a `mailto:` does something only if the reader's
+           * device has a mail client registered for the scheme, and on a school
+           * Chromebook or a browser where webmail was never made the handler,
+           * clicking it does nothing whatsoever. No error, no window, nothing.
+           *
+           * On the screen somebody reaches when they are already stuck, a
+           * control that silently does nothing is the worst outcome available —
+           * which is the same reasoning the comment above gives for removing the
+           * four dead `href="#"` links this list used to contain.
+           *
+           * Unconditional, unlike the guide links: the destination is served by
+           * this application, so it is always real.
+           */
+          {
             label: 'Report a problem',
-            href: `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${APP_NAME} problem report`)}`,
-            external: false,
-            Icon: Mail
+            description: 'Something broken, confusing, wrong, or unsafe',
+            href: '/report-issue',
+            internal: true,
+            Icon: LifeBuoy
           },
           /**
            * Unconditional, unlike the three above.
