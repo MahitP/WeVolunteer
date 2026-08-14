@@ -2,12 +2,14 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import jwt from 'jsonwebtoken';
 import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
+import { installMailbox } from './testMailbox.js';
 
 // One server for the whole file — a second startTestServer() call would reuse
 // the same module-cached db.js and not actually start a second instance.
 let srv;
-beforeAll(async () => { srv = await startTestServer(); });
-afterAll(async () => { await srv.close(); });
+let mailbox;
+beforeAll(async () => { srv = await startTestServer(); mailbox = installMailbox(); });
+afterAll(async () => { mailbox.restore(); await srv.close(); });
 
 const signup = (over = {}) => srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
   email: `session-${Math.random().toString(36).slice(2, 9)}@example.org`,
@@ -132,19 +134,16 @@ describe('authenticateToken: reads identity from the database', () => {
 });
 
 describe('authenticateToken: token_version invalidates sessions on password reset', () => {
-  const tokenFor = (userId) => {
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const row = db.prepare(
-      'SELECT token FROM password_reset_tokens WHERE user_id = ? ORDER BY expires_at DESC LIMIT 1'
-    ).get(userId);
-    db.close();
-    return row?.token;
-  };
+  /**
+   * The reset token, read from the mail that was actually sent. The stored
+   * column is a SHA-256 digest since migration 048, so nothing — a test
+   * included — can recover a usable token from the table.
+   */
+  const tokenFor = (email) => mailbox.waitForToken(email, 'reset');
 
   it('rejects a token minted before a password reset, but a fresh login after the reset works', async () => {
     const signupRes = await signup({ password: 'OrigPassword1' });
     expect(signupRes.status).toBe(201);
-    const userId = signupRes.body.user.id;
     const email = signupRes.body.user.email;
     const oldToken = signupRes.cookie;
 
@@ -153,9 +152,10 @@ describe('authenticateToken: token_version invalidates sessions on password rese
     expect(before.status).toBe(200);
 
     // Request and apply a password reset.
+    mailbox.clear();
     const forgot = await srv.call('POST', '/api/auth/forgot-password', { email });
     expect(forgot.status).toBe(200);
-    const resetToken = tokenFor(userId);
+    const resetToken = await tokenFor(email);
     expect(resetToken).toBeTruthy();
 
     const reset = await srv.call('POST', '/api/auth/reset-password', { token: resetToken, password: 'NewPassword1' });

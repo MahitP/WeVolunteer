@@ -803,7 +803,10 @@ export function initDatabase() {
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS email_verification_tokens (
-      token TEXT PRIMARY KEY,
+      /* The SHA-256 digest, never the token itself — see migration 048 and
+         server/tokenDigest.js. The link in somebody's inbox works; a copy of
+         this table does not. */
+      token_hash TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -841,7 +844,10 @@ export function initDatabase() {
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS password_reset_tokens (
-      token TEXT PRIMARY KEY,
+      /* The SHA-256 digest, never the token itself — see migration 048 and
+         server/tokenDigest.js. The link in somebody's inbox works; a copy of
+         this table does not. */
+      token_hash TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -860,7 +866,10 @@ export function initDatabase() {
    */
   db.exec(`
     CREATE TABLE IF NOT EXISTS email_change_tokens (
-      token TEXT PRIMARY KEY,
+      /* The SHA-256 digest, never the token itself — see migration 048 and
+         server/tokenDigest.js. The link in somebody's inbox works; a copy of
+         this table does not. */
+      token_hash TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       new_email TEXT NOT NULL,
       expires_at TEXT NOT NULL,

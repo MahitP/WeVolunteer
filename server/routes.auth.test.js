@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
+import { installMailbox } from './testMailbox.js';
+import { hashToken } from './tokenDigest.js';
 
 // One server for the whole file. See the note above.
 let srv;
-beforeAll(async () => { srv = await startTestServer(); });
-afterAll(async () => { await srv.close(); });
+let mailbox;
+beforeAll(async () => { srv = await startTestServer(); mailbox = installMailbox(); });
+afterAll(async () => { mailbox.restore(); await srv.close(); });
 
 describe('auth: email verification state', () => {
   it('returns emailVerified on the user object', async () => {
@@ -58,6 +61,7 @@ describe('auth: email verification state', () => {
   });
 
   it('confines an unconfirmed account to the allowlist, and frees it on confirmation', async () => {
+    mailbox.clear();
     const res = await srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
       email: 'gated.signup@example.org', password: 'Password123',
       name: 'Gated Signup', role: 'student', grade: '10', username: 'gated_signup'
@@ -72,13 +76,13 @@ describe('auth: email verification state', () => {
     // ...but the routes needed to finish verifying are not.
     expect((await srv.call('GET', '/api/auth/me', undefined, res.cookie)).status).toBe(200);
 
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const row = db.prepare('SELECT token FROM email_verification_tokens WHERE user_id = ?')
-      .get(res.body.user.id);
-    db.close();
-    expect(row?.token).toBeTruthy();
+    // The confirmation link is taken from the message that was actually sent —
+    // the stored column is a SHA-256 digest since migration 048, so the token
+    // is no longer recoverable from the table by anyone, tests included.
+    const token = await mailbox.waitForToken('gated.signup@example.org', 'verify');
+    expect(token).toBeTruthy();
 
-    expect((await srv.call('POST', '/api/auth/verify-email', { token: row.token })).status).toBe(200);
+    expect((await srv.call('POST', '/api/auth/verify-email', { token })).status).toBe(200);
     expect((await srv.call('GET', '/api/applications', undefined, res.cookie)).status).toBe(200);
   });
 
@@ -105,19 +109,23 @@ describe('auth: email verification state', () => {
 });
 
 describe('auth: password reset', () => {
-  const tokenFor = (userId) => {
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const row = db.prepare(
-      'SELECT token FROM password_reset_tokens WHERE user_id = ? ORDER BY expires_at DESC LIMIT 1'
-    ).get(userId);
-    db.close();
-    return row?.token;
+  /**
+   * The reset token, read from the mail that was actually sent rather than from
+   * the table — migration 048 stores only a SHA-256 digest there, so a usable
+   * token cannot be recovered from the database by anything, including a test.
+   */
+  const tokenFor = (email) => mailbox.waitForToken(email, 'reset');
+
+  /** Clears first, so a reset link from an earlier case cannot be read instead. */
+  const forgot = (email) => {
+    mailbox.clear();
+    return srv.call('POST', '/api/auth/forgot-password', { email });
   };
 
   it('issues a reset token for a known address', async () => {
-    const res = await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen@example.com' });
+    const res = await forgot('leo.chen@example.com');
     expect(res.status).toBe(200);
-    expect(tokenFor('user-student-1')).toBeTruthy();
+    expect(await tokenFor('leo.chen@example.com')).toBeTruthy();
   });
 
   it('does not reveal whether an address exists', async () => {
@@ -128,8 +136,8 @@ describe('auth: password reset', () => {
   });
 
   it('resets the password and lets the user sign in with it', async () => {
-    await srv.call('POST', '/api/auth/forgot-password', { email: 'leo.chen@example.com' });
-    const token = tokenFor('user-student-1');
+    await forgot('leo.chen@example.com');
+    const token = await tokenFor('leo.chen@example.com');
 
     const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'BrandNewPass1' });
     expect(res.status).toBe(200);
@@ -141,8 +149,8 @@ describe('auth: password reset', () => {
   });
 
   it('burns the token so it cannot be replayed', async () => {
-    await srv.call('POST', '/api/auth/forgot-password', { email: 'priya.patel@example.com' });
-    const token = tokenFor('user-student-2');
+    await forgot('priya.patel@example.com');
+    const token = await tokenFor('priya.patel@example.com');
 
     const first = await srv.call('POST', '/api/auth/reset-password', { token, password: 'FirstChange1' });
     expect(first.status).toBe(200);
@@ -152,12 +160,14 @@ describe('auth: password reset', () => {
   });
 
   it('rejects an expired token', async () => {
-    await srv.call('POST', '/api/auth/forgot-password', { email: 'ethan.miller@example.com' });
-    const token = tokenFor('user-student-3');
+    await forgot('ethan.miller@example.com');
+    const token = await tokenFor('ethan.miller@example.com');
 
+    // The row is addressed by the digest of the token, because that is all the
+    // table holds now — the same lookup the route itself performs.
     const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    db.prepare('UPDATE password_reset_tokens SET expires_at = ? WHERE token = ?')
-      .run('2020-01-01T00:00:00.000Z', token);
+    db.prepare('UPDATE password_reset_tokens SET expires_at = ? WHERE token_hash = ?')
+      .run('2020-01-01T00:00:00.000Z', hashToken(token));
     db.close();
 
     const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'TooLatePass1' });
@@ -165,8 +175,8 @@ describe('auth: password reset', () => {
   });
 
   it('rejects a password below the minimum length', async () => {
-    await srv.call('POST', '/api/auth/forgot-password', { email: 'arjun.gopal@example.com' });
-    const token = tokenFor('user-advait');
+    await forgot('arjun.gopal@example.com');
+    const token = await tokenFor('arjun.gopal@example.com');
     const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'abc' });
     expect(res.status).toBe(400);
   });

@@ -6,8 +6,8 @@
  * has to confirm it exactly like a form sign-up does.
  */
 
-import crypto from 'crypto';
 import { db } from '../db.js';
+import { issueToken } from '../tokenDigest.js';
 import { sendVerificationEmail } from '../email.js';
 
 /** How long a confirmation link stays good. */
@@ -22,11 +22,14 @@ export const VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
  * reached the wrong inbox.
  */
 export function issueVerificationToken(userId) {
-  const token = crypto.randomBytes(32).toString('hex');
+  /* Only the digest is filed. The plaintext is returned to this caller, goes
+     into the email, and is never written down — so the table holds nothing
+     anybody could sign in with. */
+  const { token, tokenHash } = issueToken();
   const expiresAt = new Date(Date.now() + VERIFICATION_TTL_MS).toISOString();
   db.prepare('DELETE FROM email_verification_tokens WHERE user_id = ?').run(userId);
-  db.prepare('INSERT INTO email_verification_tokens (token, user_id, expires_at) VALUES (?, ?, ?)')
-    .run(token, userId, expiresAt);
+  db.prepare('INSERT INTO email_verification_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
+    .run(tokenHash, userId, expiresAt);
   return token;
 }
 
