@@ -81,10 +81,26 @@ describe('organization roster ranks', () => {
     expect(screen.queryByRole('button', { name: /student organizer/i })).toBeNull();
   });
 
+
+/**
+ * Opens a member's manage menu and returns the item matching `name`.
+ *
+ * The roster used to render each action as a bare icon button on the row, so a
+ * test could reach for it directly. Two unlabelled glyphs side by side is what
+ * made the control misread as "open this person's options" when it was in fact
+ * an immediate role toggle, so the actions now live behind a named menu — and
+ * these cases go through the same two steps a manager does.
+ */
+async function menuItem(memberName, name) {
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`Manage ${memberName}`, 'i') }));
+  return screen.getByRole('menuitem', { name });
+}
+
   it('offers a manager the control on a member’s row', async () => {
     await show({ memberRole: 'manager', canManage: true });
-    const promote = screen.getByRole('button', { name: /Make Priya Patel a student organizer/i });
-    expect(promote).toHaveAttribute('aria-pressed', 'false');
+    /* The label states the action AND the current rank, so promote and demote
+       are different sentences rather than one button in two states. */
+    const promote = await menuItem('Priya Patel', /Make Priya Patel a student organizer/i);
 
     fireEvent.click(promote);
     await waitFor(() => expect(api.setOrganizationMemberRole)
@@ -93,8 +109,7 @@ describe('organization roster ranks', () => {
 
   it('turns the same control into a demotion for somebody who holds the rank', async () => {
     await show({ memberRole: 'manager', canManage: true });
-    const demote = screen.getByRole('button', { name: /Remove Leo Chen as a student organizer/i });
-    expect(demote).toHaveAttribute('aria-pressed', 'true');
+    const demote = await menuItem('Leo Chen', /Remove Leo Chen as a student organizer/i);
 
     fireEvent.click(demote);
     await waitFor(() => expect(api.setOrganizationMemberRole)
@@ -105,7 +120,11 @@ describe('organization roster ranks', () => {
     /* A manager already does everything the rank confers, so the toggle would
        be a demotion wearing the word promote. */
     await show({ memberRole: 'manager', canManage: true });
-    expect(screen.queryByRole('button', { name: /Jordan Whitfield.*student organizer/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Manage Jordan Whitfield/i }));
+    expect(screen.queryByRole('menuitem', { name: /student organizer/i })).toBeNull();
+    /* The menu still exists for a manager — removing and banning one is a real
+       thing a peer manager may do. Only the rank item is absent. */
+    expect(screen.getByRole('menuitem', { name: /Remove Jordan Whitfield/i })).toBeInTheDocument();
   });
 
   it('reports a refusal instead of pretending it worked', async () => {
@@ -115,7 +134,7 @@ describe('organization roster ranks', () => {
     render(<MemoryRouter><OrganizationPage addToast={addToast} /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Chess Club')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: /Make Priya Patel a student organizer/i }));
+    fireEvent.click(await menuItem('Priya Patel', /Make Priya Patel a student organizer/i));
     await waitFor(() => expect(addToast).toHaveBeenCalledWith('This is the only manager.', 'error'));
   });
 });

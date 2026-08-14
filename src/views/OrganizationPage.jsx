@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock, UserMinus, UserCog,
+  ShieldMinus,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
@@ -26,6 +27,7 @@ import OrgAvatar from '../components/common/OrgAvatar';
 import RemoveMemberDialog from '../components/organizations/RemoveMemberDialog';
 import AppealInbox from '../components/organizations/AppealInbox';
 import { formatHours, formatDay } from '../utils/helpers';
+import ActionsMenu from '../components/common/ActionsMenu';
 
 export default function OrganizationPage({ addToast }) {
   const { key } = useParams();
@@ -291,49 +293,73 @@ export default function OrganizationPage({ addToast }) {
                     )}
                   </Link>
                   {/**
-                    * Removal, for managers.
+                    * One control, and a menu behind it.
                     *
-                    * The route has been implemented and tested since
-                    * organizations shipped and nothing ever called it, so a
-                    * manager could promote, demote and leave but not remove.
+                    * ── What was here before ──
                     *
-                    * Outside the `<Link>`, never inside it: a button nested in
-                    * an anchor is invalid, and a mis-tap would navigate instead
-                    * of removing — or worse, remove instead of navigating. The
-                    * server refuses the last manager, so no guard is duplicated
-                    * here; it reports what the server says.
+                    * Two icon buttons sat side by side: a `UserCog` that toggled
+                    * student organizer, and a `UserMinus` that opened the removal
+                    * dialog. The cog reads as "manage this person" — a settings
+                    * glyph next to somebody's name means "open their options" to
+                    * almost everybody — but it was a switch, and pressing it
+                    * promoted or demoted them immediately with no confirmation
+                    * and no statement of what had happened.
+                    *
+                    * That is the worst kind of control: it looks like it opens
+                    * something and instead it does something, and what it does is
+                    * change a person's standing in their club.
+                    *
+                    * ── Why a menu fixes it rather than a better tooltip ──
+                    *
+                    * The problem is not that the icon was under-labelled; it is
+                    * that a row of unlabelled glyphs makes the reader guess which
+                    * of several similar-looking actions each one is. A menu names
+                    * every action in words, in one place, and the promote item
+                    * carries the CURRENT role in its label — so "Make Sam a
+                    * student organizer" and "Remove Sam as a student organizer"
+                    * are different sentences rather than the same button in a
+                    * different state.
+                    *
+                    * Removal and banning are separate items for the same reason.
+                    * They were one dialog with a mode chosen inside it, which
+                    * meant a manager had to open the destructive dialog before
+                    * discovering which destructive thing it offered.
                     */}
-                  {viewer.canManage && m.memberRole !== 'manager' && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm btn-icon"
-                      disabled={busy}
-                      aria-pressed={m.memberRole === 'student_organizer'}
-                      onClick={() => setMemberRole(
-                        m,
-                        m.memberRole === 'student_organizer' ? 'member' : 'student_organizer',
-                      )}
-                      title={m.memberRole === 'student_organizer'
-                        ? `Remove ${m.name} as a student organizer`
-                        : `Make ${m.name} a student organizer`}
-                      aria-label={m.memberRole === 'student_organizer'
-                        ? `Remove ${m.name} as a student organizer of ${org.name}`
-                        : `Make ${m.name} a student organizer of ${org.name}`}
-                    >
-                      <UserCog size={15} aria-hidden="true" />
-                    </button>
-                  )}
                   {viewer.canManage && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm btn-icon"
+                    <ActionsMenu
+                      icon={Settings2}
+                      label={`Manage ${m.name}`}
                       disabled={busy}
-                      onClick={() => setRemoving(m)}
-                      title={`Remove ${m.name}`}
-                      aria-label={`Remove ${m.name} from ${org.name}`}
-                    >
-                      <UserMinus size={15} aria-hidden="true" />
-                    </button>
+                      items={[
+                        /* A manager's rank is not changed from here — the server
+                           refuses the last manager, and demoting a peer is a
+                           different decision from managing a member. */
+                        ...(m.memberRole !== 'manager' ? [{
+                          id: 'role',
+                          icon: UserCog,
+                          label: m.memberRole === 'student_organizer'
+                            ? `Remove ${m.name} as a student organizer`
+                            : `Make ${m.name} a student organizer`,
+                          onSelect: () => setMemberRole(
+                            m,
+                            m.memberRole === 'student_organizer' ? 'member' : 'student_organizer',
+                          ),
+                        }] : []),
+                        {
+                          id: 'kick',
+                          icon: UserMinus,
+                          label: `Remove ${m.name} from ${org.name}`,
+                          onSelect: () => setRemoving({ ...m, intent: 'kick' }),
+                        },
+                        {
+                          id: 'ban',
+                          icon: ShieldMinus,
+                          label: `Ban ${m.name} from ${org.name}`,
+                          destructive: true,
+                          onSelect: () => setRemoving({ ...m, intent: 'ban' }),
+                        },
+                      ]}
+                    />
                   )}
                 </li>
               ))}
@@ -352,6 +378,7 @@ export default function OrganizationPage({ addToast }) {
           member={removing}
           organizationName={org.name}
           busy={busy}
+          intent={removing.intent}
           onCancel={() => setRemoving(null)}
           onConfirm={opts => removeMember(removing, opts)}
         />

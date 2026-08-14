@@ -190,7 +190,13 @@ export default function VolunteerProfile({
       )}
 
       <section>
-        <BadgesList userId={userId} />
+        {/* Your own badges live under /profile; somebody else's under their
+            handle, so the link a reader follows matches the profile they are
+            already looking at. */}
+        <BadgesList
+          userId={userId}
+          moreHref={isSelf ? '/profile/badges' : `/users/@${volunteer?.username}/badges`}
+        />
       </section>
 
       {/* The same two-column body as the dashboard, and the same class — it had
@@ -352,8 +358,27 @@ export default function VolunteerProfile({
                   style={{ padding: 'var(--s6) var(--s4)' }} 
                 />
               ) : (
-                <div className="list">
-                  {certificates.map(c => (
+                /**
+                 * Five, and the SAME five as the service record opposite.
+                 *
+                 * This list was uncapped, which is the defect the service record
+                 * had already been fixed for: a volunteer with forty completed
+                 * events got forty rows in a sidebar column, so the two columns
+                 * of the profile ended at wildly different heights and
+                 * everything below the shorter one was empty space.
+                 *
+                 * Matching `cap` to the service record's is what makes the two
+                 * columns line up. It is not a coincidence to be tidied away
+                 * later — change one and the profile goes lopsided again.
+                 */
+                <PreviewList
+                  items={certificates}
+                  cap={5}
+                  className="list"
+                  label="certificates"
+                  moreHref="/certificates"
+                  moreLabel={`Show all ${certificates.length} certificates`}
+                  renderItem={(c) => (
                     <button
                       key={c.eventId}
                       className="list-row"
@@ -369,8 +394,8 @@ export default function VolunteerProfile({
                       </span>
                       <span className="small dim nowrap">View</span>
                     </button>
-                  ))}
-                </div>
+                  )}
+                />
               )}
             </section>
           )}
