@@ -145,7 +145,13 @@ const COMMITMENTS = [
 
 export default function AboutUs() {
   return (
-    <div className="content legal-page stack-lg">
+    /* `main`, not a bare div, and `aria-labelledby` pointing at the h1 —
+       the same shape LegalCenter uses. `/about` is a PUBLIC route, so it renders
+       outside the signed-in shell and nothing above it supplies a landmark: a
+       screen-reader user had no main region to jump to and no skip target on the
+       one page that explains what this platform is. Every other public view
+       already did this; this one was the exception. */
+    <main className="content legal-page stack-lg" aria-labelledby="about-title">
       <div className="stack-sm">
         <h1 id="about-title" className="legal-title">About {APP_NAME}</h1>
         {/* Says what the thing IS. An earlier draft opened with a category —
@@ -449,7 +455,7 @@ export default function AboutUs() {
           'Contact details for privacy requests and safety reports are at the end of each legal document.'
         )}
       </p>
-    </div>
+    </main>
   );
 }
 
