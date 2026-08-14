@@ -10,7 +10,7 @@ import {
 } from '../email.js';
 import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
-import { authenticateToken, formatUserResponse, inTransaction, revokeSession, isSessionRevoked, enabledSecondFactors } from '../utils.js';
+import { authenticateToken, selfUserResponse, inTransaction, revokeSession, isSessionRevoked, enabledSecondFactors } from '../utils.js';
 import { assertConsent, recordAcceptances, ConsentMissing } from '../consent.js';
 import { withheldCapabilitiesFor } from '../organizerAgreement.js';
 import { grantsFor } from '../userCapabilities.js';
@@ -464,7 +464,9 @@ router.post('/api/auth/signup', async (req, res) => {
     });
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-    const user = formatUserResponse(userRow);
+    /* The caller describing themselves, so `grants` and `withheld` travel with
+       it — see `selfUserResponse`. Sign-in seeds `currentUser` directly. */
+    const user = selfUserResponse(userRow);
 
     /**
      * Sign the new account in either way, and let the email gate decide what
@@ -679,7 +681,9 @@ router.post('/api/auth/login', async (req, res) => {
 
     clearLoginFailuresForUser(userRow.id);
 
-    const user = formatUserResponse(userRow);
+    /* The caller describing themselves, so `grants` and `withheld` travel with
+       it — see `selfUserResponse`. Sign-in seeds `currentUser` directly. */
+    const user = selfUserResponse(userRow);
     
     if (userRow.tfa_enabled || userRow.tfa_email_enabled) {
       issuePreAuthSession(res, userRow);
@@ -1239,7 +1243,9 @@ router.post('/api/auth/login-2fa', async (req, res) => {
 
     // Success!
     res.clearCookie('wev_preauth', clearCookieOptions());
-    const user = formatUserResponse(userRow);
+    /* The caller describing themselves, so `grants` and `withheld` travel with
+       it — see `selfUserResponse`. Sign-in seeds `currentUser` directly. */
+    const user = selfUserResponse(userRow);
     issueSession(res, user, userRow.token_version);
 
     res.json({
@@ -1393,20 +1399,25 @@ router.post('/api/auth/login-2fa/email/send', async (req, res) => {
 /**
  * 3. Get Authenticated User Details (Me)
  *
- * ── Why `withheld` is added here and not in `formatUserResponse` ──
+ * ── Why `selfUserResponse` and not `formatUserResponse` ──
  *
- * This is the ONLY payload the client's `currentUser` is ever built from —
- * `SessionProvider` sets it from `api.getMe()` and from nowhere else, including
- * after an acceptance, which calls `refreshAll`. So this is the one place the
- * field is read, and adding it to the shared formatter would instead attach it
- * to two payloads describing OTHER people (the admin user list, and a profile
- * view), where it discloses whether some third party has signed an agreement to
- * anyone who can see them.
+ * `grants` and `withheld` describe the CALLER to themselves. On the shared
+ * formatter they would also attach to two payloads describing OTHER people —
+ * the admin user list and a profile view — where they disclose what a third
+ * party has been granted, and whether they have signed an agreement, to anybody
+ * who can see them.
  *
- * It is what lets the client's `can()` agree with the server about an organizer
- * who has not yet accepted; see the header in `src/authz.js`. The gate itself is
- * server-side and derived per request — this changes what is offered, never what
- * is allowed.
+ * This was once the only payload the client's `currentUser` was built from,
+ * which is why the two fields were written out here by hand. That stopped being
+ * true: signing in, changing a username, confirming an email and saving a
+ * profile all hand their result straight to `setCurrentUser`, replacing it
+ * wholesale. Those returned the bare formatter, so editing a bio emptied
+ * `grants` and a Student Organizer lost every helper capability client-side
+ * until a full reload.
+ *
+ * Together they let the client's `can()` agree with the server. The gate itself
+ * is server-side and derived per request — this changes what is offered, never
+ * what is allowed.
  */
 router.get('/api/auth/me', authenticateToken, (req, res) => {
   try {
@@ -1414,27 +1425,10 @@ router.get('/api/auth/me', authenticateToken, (req, res) => {
     if (!userRow) return res.status(404).json({ error: 'User not found' });
 
     res.json({
-      ...formatUserResponse(userRow),
-      withheld: withheldCapabilitiesFor(db, userRow),
-      /**
-       * The other half of the same mirror, and for exactly the same reason.
-       *
-       * `src/authz.js`'s `can()` reads `user.grants` and this payload never
-       * carried them, so anything granted to a PERSON rather than to their role
-       * was invisible to the client. A Student Organizer — whose four
-       * capabilities live only in `user_capabilities` — was refused
-       * `/events/new` by the client's own route table while the server would
-       * have allowed the request. Withholding drifts one way and this drifts
-       * the other; both end in the UI disagreeing with the API.
-       *
-       * Here rather than in `formatUserResponse` for the reason above: on the
-       * admin list or a profile view it would tell anybody who can see somebody
-       * else what that person has been granted.
-       *
-       * This changes what is OFFERED, never what is allowed. The gate is
-       * `requireCap` on the route, derived per request from this same table.
-       */
-      grants: grantsFor(db, userRow.id),
+      /* `grants` and `withheld` come from `selfUserResponse`, which every
+         endpoint returning the caller to themselves now uses. A second copy
+         here is how the two drift, and briefly did. */
+      ...selfUserResponse(userRow),
       /**
        * Attached by `authenticateToken`, not recomputed here.
        *
@@ -1529,7 +1523,7 @@ router.post('/api/auth/sign-out-others', authenticateToken, (req, res) => {
   try {
     db.prepare('UPDATE users SET token_version = token_version + 1 WHERE id = ?').run(req.user.id);
     const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-    issueSession(res, formatUserResponse(fresh), fresh.token_version);
+    issueSession(res, selfUserResponse(fresh), fresh.token_version);
     res.json({ success: true });
   } catch (err) {
     console.error('Sign out others error:', err);

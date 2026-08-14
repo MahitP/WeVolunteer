@@ -43,6 +43,9 @@ describe('one club, five people', () => {
 
   const idOf = async (session) => (await srv.call('GET', '/api/auth/me', undefined, session)).body.id;
 
+  const setRoleAsA = (userId, memberRole) =>
+    srv.call('PATCH', `/api/organizations/${orgKey}/members/${userId}`, { memberRole }, s.A);
+
   const seat = (userId, role) => db.prepare(`
     INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
     VALUES (?, ?, ?, ?)
@@ -318,13 +321,58 @@ describe('one club, five people', () => {
   });
 
   it('20. the events B made outlive B’s rank, and A can still run them', async () => {
-    /* Demotion is not a deletion. The club's Saturday shift does not disappear
-       because the student who typed it in is no longer the one who posts. */
+    /**
+     * Demotion is not a deletion. The club's Saturday shift does not disappear
+     * because the student who typed it in is no longer the one who posts.
+     *
+     * This assertion used to read `expect([200, 403]).toContain(...)`, which
+     * accepted both answers — and the real answer was 403. Every management
+     * route asked `event.organizer_id === userId` and nothing else, so an event
+     * a demoted helper had posted was left with NOBODY who could edit it,
+     * cancel it, accept its applicants or record who turned up. A review found
+     * it behind the very test that was supposed to cover it.
+     */
     const row = db.prepare('SELECT status, organization_id FROM events WHERE id = ?').get(openEventId);
     expect(row).toMatchObject({ status: 'open', organization_id: orgId });
 
     const cancelled = await srv.call('PATCH', `/api/events/${openEventId}/status`,
       { status: 'cancelled' }, s.A);
-    expect([200, 403]).toContain(cancelled.status);
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    expect(db.prepare('SELECT status FROM events WHERE id = ?').get(openEventId).status)
+      .toBe('cancelled');
+  });
+
+  it('21. and A could run them while B was still in post', async () => {
+    /**
+     * The manager is above every event published under the club's name, not
+     * only the ones left behind. Otherwise the club's own manager cannot cancel
+     * its shift while the helper is away, which is the ordinary case rather
+     * than the edge one.
+     *
+     * B is put back first — step 19 demoted them — so this measures the
+     * in-post state rather than repeating step 20.
+     */
+    await setRoleAsA(id.B, 'student_organizer');
+    const made = await createEvent({ organizationId: orgId, title: 'Helper’s shift' }, s.B);
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+
+    const cancelled = await srv.call('PATCH', `/api/events/${made.body.id}/status`,
+      { status: 'cancelled' }, s.A);
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+  });
+
+  it('22. but B cannot run an event A published under the same club', async () => {
+    /* The line the widening had to stop at. Being trusted to post the bake-sale
+       shift is not being trusted to call off the fundraiser somebody else
+       built, so `canRunEvent` asks `canManage` for the organization branch and
+       not `canHelpRun`. */
+    const theirs = await createEvent({ organizationId: orgId, title: 'The manager’s own' }, s.A);
+    expect(theirs.status, JSON.stringify(theirs.body)).toBe(201);
+
+    const attempt = await srv.call('PATCH', `/api/events/${theirs.body.id}/status`,
+      { status: 'cancelled' }, s.B);
+    expect(attempt.status).toBe(403);
+    expect(db.prepare('SELECT status FROM events WHERE id = ?').get(theirs.body.id).status)
+      .not.toBe('cancelled');
   });
 });

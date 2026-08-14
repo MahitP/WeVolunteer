@@ -10,7 +10,7 @@ import {
 } from '../email.js';
 import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
-import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
+import { authenticateToken, formatUserResponse, selfUserResponse, inTransaction } from '../utils.js';
 import { can } from '../authz.js';
 /* The milestone ladder. One definition, in a module — it was inline here, and
    duplicated byte-for-byte in utils.js where nothing imported it. See
@@ -455,7 +455,7 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
     db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
     const row = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-    res.json({ user: formatUserResponse(row) });
+    res.json({ user: selfUserResponse(row) });
   } catch (err) {
     console.error('Profile update error:', err);
     res.status(500).json({ error: 'Failed to update profile' });

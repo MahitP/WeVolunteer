@@ -485,7 +485,14 @@ export default function BrowseEvents({
   /* Both conditions the `/events/new` route enforces, mirrored for display only.
      `requiresVerified` has no capability of its own — no capability expresses
      "approved yet" — so it stays a separate flag here exactly as it is in NAV. */
-  const canCreate = can(currentUser, 'event.create') && Boolean(currentUser?.verified);
+  /* BOTH capabilities the route accepts, or the button disappears for exactly
+     the people the second one was added for. This is the only link to
+     `/events/new` in the application — "New event" is deliberately not in NAV,
+     and the organizer dashboard's buttons are unreachable to a student, whose
+     persona resolves to the volunteer dashboard. A Student Organizer with no
+     button here can reach the form only by typing the URL. */
+  const canCreate = (can(currentUser, 'event.create') || can(currentUser, 'organization.event.create'))
+    && Boolean(currentUser?.verified);
   /* Same shape, same reasoning: `/organizations/new` enforces both conditions
      itself, and so does every server route behind it. */
   /**

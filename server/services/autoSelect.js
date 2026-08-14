@@ -86,11 +86,21 @@ export function computeDraw(db, eventId, { runNumber }) {
      * seat somebody the organization had just refused, with no human deciding
      * anything and no record of a decision.
      *
-     * Their row is left `pending` rather than rejected: the draw declines to
-     * act on it, which is not the same as the organizer turning them down, and
-     * a lifted ban puts them back in the next run.
+     * They are WAITLISTED rather than dropped, and that detail is the whole of
+     * whether this is humane. Dropping them left a row `pending` on an event
+     * the confirmation then closes, with no further run possible and no
+     * notification of any kind — a person who applied, was never told anything,
+     * and stayed that way. Waitlisted is a state the screen can render, it is
+     * the honest description of where they stand, and `promoteFromWaitlist`
+     * re-asks eligibility every time a place frees: if the ban is lifted or
+     * they join the organization, they come off it by themselves.
+     *
+     * Not `rejected`, because the organizer did not reject them.
      */
     const pendingApps = allPending.filter(a => eventApplicationEligibility(event, a.user_id).ok);
+    for (const refused of allPending) {
+      if (!pendingApps.includes(refused)) waitlistIds.push(refused.id);
+    }
 
     if (pendingApps.length === 0) continue;
 

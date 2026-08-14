@@ -224,6 +224,57 @@ export function canHelpRun(db, organizationId, userId, { hasModerate = false } =
   return role === 'manager' || role === 'student_organizer';
 }
 
+/**
+ * May this principal run this event — edit it, review its applicants, take its
+ * attendance?
+ *
+ * ── The question this replaces, and why it was wrong ──
+ *
+ * Every one of those routes asked `event.organizer_id === userId`: personal
+ * ownership, nothing else. That was right while only organizers could host,
+ * because an event belonged to the adult who typed it in.
+ *
+ * It stopped being right the moment a Student Organizer could post for a club.
+ * Two consequences, both bad, and the second is worse:
+ *
+ *   • The club's own MANAGER could not touch an event published under the
+ *     club's name — not edit it, not cancel it, not accept an applicant, not
+ *     record who turned up.
+ *
+ *   • Demoting or removing the student left the event with nobody. They lose
+ *     the capability at the middleware, the manager never had the ownership,
+ *     and `POST /api/events/:id/attendance` is the only path that writes
+ *     credited hours. Everybody who worked that shift would silently never be
+ *     credited for it, and the design actively encourages the demotion that
+ *     causes it.
+ *
+ * So the question is now "do you host it, or do you MANAGE the organization it
+ * belongs to". A personal event with no organization is unchanged: only its
+ * host and a moderator.
+ *
+ * ── Why `canManage` here and `canHelpRun` on the create routes ──
+ *
+ * A Student Organizer runs the events they put up, and no more. They cannot
+ * cancel the manager's event, edit its shifts, or decide its applicants —
+ * being trusted to post the bake-sale shift is not being trusted to call off
+ * the fundraiser somebody else built.
+ *
+ * That leaves nobody stranded, because the manager is above every event in the
+ * club by construction: whatever a helper posts, and whatever becomes of the
+ * helper, a manager can always act on it. Two helpers covering for each other
+ * is the one thing this refuses, and the manager is the escalation for it.
+ *
+ * @param {object} event a row from `events` — needs `organizer_id` and
+ *   `organization_id`
+ */
+export function canRunEvent(db, event, userId, { hasModerate = false } = {}) {
+  if (hasModerate) return true;
+  if (!event || !userId) return false;
+  if (event.organizer_id && event.organizer_id === userId) return true;
+  if (!event.organization_id) return false;
+  return canManage(db, event.organization_id, userId);
+}
+
 export function createOrganization(db, { name, description = '', tags = [], creator, now = new Date().toISOString() }) {
   const orgId = `org-${crypto.randomUUID()}`;
   db.prepare(`

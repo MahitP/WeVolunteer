@@ -630,6 +630,41 @@ export function authenticateToken(req, res, next) {
 }
 
 // Helper to format database user row (calculating hours dynamically from Attendance)
+/**
+ * The signed-in user's OWN payload — everything `formatUserResponse` returns,
+ * plus the two fields the client's `can()` needs to agree with the server.
+ *
+ * ── Why this exists as a separate function ──
+ *
+ * `grants` and `withheld` must NOT go through `formatUserResponse`, which also
+ * describes OTHER people on the admin user list and on a profile view: there
+ * they would disclose what somebody else has been granted, or whether they have
+ * signed an agreement, to anybody who can see them.
+ *
+ * But `/api/auth/me` is not the only endpoint whose response the browser stores
+ * as `currentUser` — changing a username, confirming an email and saving a
+ * profile all hand their result straight to `setCurrentUser`, replacing it
+ * wholesale. Those returned the bare formatter, so editing a bio silently
+ * emptied `grants` and a Student Organizer lost every helper capability
+ * client-side until a full reload: the nav, the route guard and the create
+ * button all vanished.
+ *
+ * Note the asymmetry, because it is why nothing caught this. A missing
+ * `withheld` OVER-offers, which `src/authz.js` names as the safe direction. A
+ * missing `grants` UNDER-offers — it hides a control the server would have
+ * allowed, which is the failure this whole mirror exists to prevent.
+ *
+ * One function, called by every endpoint that returns the caller to itself.
+ */
+export function selfUserResponse(row) {
+  if (!row) return null;
+  return {
+    ...formatUserResponse(row),
+    grants: grantsFor(db, row.id),
+    withheld: withheldCapabilitiesFor(db, row),
+  };
+}
+
 export function formatUserResponse(row) {
   if (!row) return null;
 

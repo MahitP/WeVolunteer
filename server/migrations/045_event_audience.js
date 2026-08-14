@@ -31,10 +31,11 @@
  * SQLite cannot add one by ALTER, and the alternative is rebuilding the whole
  * `events` table — every column, every index, every foreign key referencing it —
  * to constrain a two-valued field. The value is validated where it is written
- * (`server/eventAudience.js`, used by both the create and update routes), and
- * `eventApplicationEligibility` treats anything that is not the literal
- * `'organization'` as open. Both directions fail safe: an unrecognised value
- * lets people apply rather than silently locking an event nobody can join.
+ * (`EVENT_AUDIENCES` in `server/eventEligibility.js`, checked by both the create
+ * and update routes), and `eventApplicationEligibility` treats anything that is
+ * not the literal `'organization'` as open. Both directions fail safe: an
+ * unrecognised value lets people apply rather than silently locking an event
+ * nobody can join.
  */
 export function up(db) {
   const columns = db.prepare('PRAGMA table_info(events)').all().map(c => c.name);
@@ -49,8 +50,15 @@ export function up(db) {
   db.exec(`UPDATE events SET audience = 'everyone' WHERE audience IS NULL`);
 
   /**
-   * The discovery query filters open events by audience, and the eligibility
-   * check reads `(organization_id, audience)` together on every application.
+   * Created ahead of a consumer, and worth being honest about: nothing reads it
+   * today. Eligibility loads the event by primary key, and the discovery query
+   * does not filter on audience — a members-only event is deliberately still
+   * listed to everybody, so there is nothing for a WHERE clause to remove.
+   *
+   * Left in place rather than dropped in a follow-up migration. It is two
+   * columns on a table that is written far less than it is read, and the
+   * alternative is a migration whose entire purpose is to reclaim a few
+   * kilobytes. If an audience-filtered browse ever ships, it is already here.
    */
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_events_audience
