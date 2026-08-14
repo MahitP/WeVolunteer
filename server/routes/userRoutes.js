@@ -66,9 +66,47 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
     // resolve — so without this a tombstone answers 200 as a live profile.
     // Suspended is deliberately NOT excluded: a suspended member still exists
     // and their profile is still theirs.
-    const row = db.prepare(
-      "SELECT * FROM users WHERE id = ? AND role = 'student' AND account_status <> 'deleted'"
-    ).get(req.params.id);
+    /**
+     * ── Who has a volunteer profile ──
+     *
+     * Every student, and anybody else who has actually volunteered.
+     *
+     * This used to be `role = 'student'` alone, and that was right while only
+     * students volunteered. It stopped being right for an account that runs the
+     * platform AND turns up to shifts: the platform owner's own service record —
+     * real hours, real attendance, real badges — answered 404 to everybody
+     * including themselves, because the row said `super_admin`.
+     *
+     * ── Why attendance and not a role list ──
+     *
+     * `role IN ('student', 'super_admin')` would have worked today and been
+     * wrong in principle: it says "the owner is a volunteer" as a fact about a
+     * ROLE, when what makes somebody a volunteer is that they volunteered. An
+     * organizer who never takes a shift still has no profile here; one who does
+     * has the record to show. The rule is about the ledger, which is the same
+     * thing every figure ON the profile is derived from.
+     *
+     * Presentation is unaffected: `profileSerializer` derives everything from
+     * the same columns whatever the role, and the one role-derived field
+     * (`distinction`) is the role restated in words. So the owner's profile is
+     * a volunteer's profile, with a word on it saying what else they are.
+     *
+     * `account_status <> 'deleted'` is part of the identity check, not a filter
+     * bolted on afterwards: a deleted account is anonymised in place rather than
+     * removed — the row survives so audit history and foreign keys still resolve
+     * — so without it a tombstone answers 200 as a live profile. Suspended is
+     * deliberately NOT excluded: a suspended member still exists and their
+     * profile is still theirs.
+     */
+    const row = db.prepare(`
+      SELECT * FROM users
+       WHERE id = ?
+         AND account_status <> 'deleted'
+         AND (
+           role = 'student'
+           OR EXISTS (SELECT 1 FROM attendance a WHERE a.user_id = users.id AND a.present = 1)
+         )
+    `).get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Volunteer not found' });
 
     const isSelf = req.params.id === req.principal.userId;
