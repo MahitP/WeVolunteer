@@ -15,6 +15,7 @@ import { badgeService } from '../services/badgeService.js';
 import { db } from '../db.js';
 import { recordAudit } from '../auditLog.js';
 import { canRunEvent } from '../organizations.js';
+import { canSeeCertificates } from '../serviceVisibility.js';
 
 const router = express.Router();
 
@@ -332,6 +333,88 @@ router.get('/api/certificates', authenticateToken, (req, res) => {
     })));
   } catch (err) {
     console.error('Certificates error:', err);
+    res.status(500).json({ error: 'Failed to load certificates' });
+  }
+});
+
+/**
+ * Somebody else's certificates — what they earned, never a way to hold it.
+ *
+ * ── The two things this must not do ──
+ *
+ * 1. It must not emit `code`. The code is a BEARER CREDENTIAL: whoever holds it
+ *    can call `/api/certificates/verify/:code` and be handed a verified record
+ *    in this student's name. `/api/certificates` gives you your own codes so you
+ *    can print them; handing somebody else's out would turn "see that Sam
+ *    volunteered" into "produce Sam's certificate on demand", which is the
+ *    difference between a profile and an impersonation kit.
+ *
+ * 2. It must not answer at all when the subject has made certificates private —
+ *    and that includes not answering with a COUNT. An empty array and a
+ *    forbidden response are different facts, and returning `[]` for a private
+ *    collection tells the caller the setting is on while a 200 with three rows
+ *    tells them it is off. So a private collection is a 403 with a code the UI
+ *    reads, not an empty success.
+ *
+ * The subject always sees their own here, so one page can serve both readers.
+ */
+router.get('/api/users/:id/certificates', authenticateToken, requireCap('directory.read'), (req, res) => {
+  try {
+    const subject = db.prepare(
+      "SELECT id, name, username, certificates_visibility FROM users WHERE id = ? AND account_status <> 'deleted'"
+    ).get(req.params.id);
+    /* Same refusal for "no such account" and "not visible" would be wrong here:
+       the account's existence is already public from the profile route, so a
+       404 that means both would make a live profile look broken. */
+    if (!subject) return res.status(404).json({ error: 'No such account.', code: 'not_found' });
+
+    const viewerId = req.principal?.userId ?? req.user?.id ?? null;
+    const canSeeContact = can(req.principal, 'user.contact.read');
+
+    if (!canSeeCertificates(subject, { viewerId, canSeeContact })) {
+      return res.status(403).json({
+        error: 'This volunteer keeps their certificates private.',
+        code: 'certificates_private',
+      });
+    }
+
+    const rows = db.prepare(`
+      SELECT e.id as event_id, e.title, e.category,
+             u.name as organizer_name, u.verified as organizer_verified,
+             COALESCE(SUM(at.hours_awarded), 0) as hours,
+             COUNT(*) as shifts,
+             MIN(s.start_datetime) as first_start,
+             MAX(s.end_datetime) as last_end
+      FROM attendance at
+      JOIN slots s ON at.slot_id = s.id
+      JOIN events e ON at.event_id = e.id
+      JOIN users u ON e.organizer_id = u.id
+      WHERE at.user_id = ? AND at.present = 1
+      GROUP BY e.id
+      ORDER BY last_end DESC
+    `).all(req.params.id);
+
+    res.json({
+      volunteer: { id: subject.id, name: subject.name, username: subject.username || null },
+      isSelf: viewerId === subject.id,
+      certificates: rows.map(r => ({
+        eventId: r.event_id,
+        title: r.title,
+        category: r.category,
+        organizerName: r.organizer_name,
+        organizerVerified: r.organizer_verified === 1,
+        hours: Number(r.hours),
+        shifts: r.shifts,
+        startDatetime: r.first_start,
+        endDatetime: r.last_end,
+        /* No `code`, and no `location`. The code is a bearer credential; the
+           location is where a named minor physically was on a given date, which
+           the itemised service record is already gated on and which a
+           certificate list has no reason to republish. */
+      })),
+    });
+  } catch (err) {
+    console.error('Public certificates error:', err);
     res.status(500).json({ error: 'Failed to load certificates' });
   }
 });

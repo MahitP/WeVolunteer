@@ -28,6 +28,12 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
   const [savingPrivacy, setSavingPrivacy] = useState(false);
   const [leaderboardOptIn, setLeaderboardOptIn] = useState(Boolean(currentUser?.leaderboardOptIn));
   const [profileVisibility, setProfileVisibility] = useState(currentUser?.profileVisibility || 'private');
+  /* Default 'public' to match the column default and the server's read rule:
+     anything that is not exactly 'private' is public. A client that defaulted
+     to 'private' would show the switch in a state the server disagrees with. */
+  const [hoursVisibility, setHoursVisibility] = useState(currentUser?.hoursVisibility || 'public');
+  const [certificatesVisibility, setCertificatesVisibility] =
+    useState(currentUser?.certificatesVisibility || 'public');
   const [friendActivityVisible, setFriendActivityVisible] = useState(currentUser?.friendActivityVisible !== false);
 
   useEffect(() => {
@@ -107,6 +113,24 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
       next === 'public' ? 'Your school and year are now visible on your profile.'
         : next === 'friends' ? 'Your school and year are visible to friends only.'
           : 'Your school and year are now hidden.');
+  };
+
+  const handleHoursVisibility = (next) => {
+    const previous = hoursVisibility;
+    setHoursVisibility(next);
+    savePrivacy({ hoursVisibility: next }, setHoursVisibility, previous,
+      next === 'public'
+        ? 'Your service history is visible on your profile.'
+        : 'Your service history is now only visible to you.');
+  };
+
+  const handleCertificatesVisibility = (next) => {
+    const previous = certificatesVisibility;
+    setCertificatesVisibility(next);
+    savePrivacy({ certificatesVisibility: next }, setCertificatesVisibility, previous,
+      next === 'public'
+        ? 'Your certificates are visible on your profile.'
+        : 'Your certificates are now only visible to you.');
   };
 
   const handleFriendActivityToggle = (next) => {
@@ -225,6 +249,63 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                   Your name, general area, hobbies, skills and volunteering totals are always
                   visible to signed-in members so they can find you. This setting controls your
                   school, year group and bio. Your email address is never shown to other students.
+                </span>
+              </div>
+            </div>
+
+            <div className="card card-pad" style={{ marginTop: 'var(--s4)' }}>
+              <h3 style={{ marginBottom: 'var(--s4)' }}>Your service record</h3>
+              {/**
+                * Two questions, two answers.
+                *
+                * They are separate because they disclose different things. The
+                * hours are a total; a certificate carries a full name, the
+                * organization that issued it and the dates somebody was there.
+                * A student may reasonably want the school to see one and not
+                * the other, in either direction.
+                *
+                * Both default to "Anyone at your school" — that is what the
+                * column defaults to and what the server treats an unset value
+                * as, so the control cannot show a state the server disagrees
+                * with. The wording says who, rather than "allow others to…",
+                * because the existing visibility control on this same screen
+                * asks "Who can see my school and year?" and a screen that asks
+                * the same question two ways is a screen that gets misread.
+                */}
+              <div className="field">
+                <label htmlFor="hours-visibility">Who can see my service history?</label>
+                <select
+                  id="hours-visibility"
+                  className="select"
+                  value={hoursVisibility}
+                  disabled={savingPrivacy}
+                  onChange={e => handleHoursVisibility(e.target.value)}
+                >
+                  <option value="public">Anyone at your school</option>
+                  <option value="private">Only me</option>
+                </select>
+                <span className="field-hint">
+                  Your total hours, the kinds of service you have done, and the badges you have
+                  earned. The individual events you attended — where you were and when — are
+                  never shown to other students, whichever you choose.
+                </span>
+              </div>
+
+              <div className="field" style={{ marginTop: 'var(--s4)' }}>
+                <label htmlFor="certificates-visibility">Who can see my certificates?</label>
+                <select
+                  id="certificates-visibility"
+                  className="select"
+                  value={certificatesVisibility}
+                  disabled={savingPrivacy}
+                  onChange={e => handleCertificatesVisibility(e.target.value)}
+                >
+                  <option value="public">Anyone at your school</option>
+                  <option value="private">Only me</option>
+                </select>
+                <span className="field-hint">
+                  Other people can see which certificates you have earned. Only you can open or
+                  print one, and only you can see your transcript.
                 </span>
               </div>
             </div>
