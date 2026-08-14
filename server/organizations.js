@@ -271,6 +271,29 @@ export function canRunEvent(db, event, userId, { hasModerate = false } = {}) {
   if (hasModerate) return true;
   if (!event || !userId) return false;
   if (event.organizer_id && event.organizer_id === userId) return true;
+
+  /**
+   * A row that does not CARRY `organization_id` is a caller bug, not an event
+   * belonging to nobody, and the two must not look alike.
+   *
+   * Several call sites load the event through a join that names its columns
+   * (`SELECT a.*, e.organizer_id, ...`). Omit `e.organization_id` from one of
+   * those and this function reads `undefined`, decides the event belongs to no
+   * organization, and refuses the club's own manager — silently, correctly-
+   * shaped, and wrong. That happened on both application-review routes within
+   * an hour of this function being written.
+   *
+   * `null` is a real answer and passes through. An absent property throws,
+   * because the caller has not been asked the question this function needs.
+   */
+  if (!('organization_id' in event)) {
+    throw new Error(
+      'canRunEvent needs `organization_id` on the event row. The query that '
+      + 'loaded it names its columns and does not select it — add '
+      + '`e.organization_id` there rather than letting this read as "no organization".'
+    );
+  }
+
   if (!event.organization_id) return false;
   return canManage(db, event.organization_id, userId);
 }
