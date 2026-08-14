@@ -83,21 +83,6 @@ export function helpsRunAnywhere(db, userId) {
 }
 
 /**
- * Does this person hold the Student Organizer rank specifically?
- *
- * Narrower than `helpsRunAnywhere` and kept separate because the two answer
- * different questions: this one is "is this person a helper", used where the
- * distinction from a manager matters.
- */
-export function isStudentOrganizerAnywhere(db, userId) {
-  if (!userId) return false;
-  return Boolean(db.prepare(`
-    SELECT 1 FROM organization_members
-     WHERE user_id = ? AND member_role = 'student_organizer' LIMIT 1
-  `).get(userId));
-}
-
-/**
  * Grants or revokes the four, to match the membership table as it stands now.
  *
  * Call after ANY change to a person's membership rows. Idempotent, and cheap

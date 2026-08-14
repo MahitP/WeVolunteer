@@ -425,6 +425,54 @@ describe('one club, five people', () => {
     expect(runs.status, JSON.stringify(runs.body)).toBe(200);
   });
 
+  it('21c. removing somebody takes the club’s applicant LIST with it', async () => {
+    /**
+     * The reads have to agree with the writes, or the tighter one is decoration.
+     *
+     * `canRunEvent` was taught to re-ask the membership table, so a removed
+     * organizer is refused `GET /api/events/:id` and `roster.csv`. The list
+     * route's own scope was written from `e.organizer_id` alone and reopened
+     * exactly that: every application to the club's events, with names,
+     * schools, grades, bios and skills, to somebody the club had removed.
+     *
+     * C is seated as a manager first so the club is not left without one.
+     */
+    seat(id.C, 'manager');
+    const made = await createEvent({
+      organizationId: orgId, title: 'A’s shift',
+      slots: [{
+        name: 'Shift', description: '',
+        startDatetime: new Date(Date.now() + 24 * 86400000).toISOString(),
+        endDatetime: new Date(Date.now() + 24 * 86400000 + 3600000).toISOString(),
+        maxSpots: 5, hoursAwarded: 2,
+      }],
+    }, s.A);
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(made.body.id).id;
+    expect((await srv.call('POST', `/api/events/${made.body.id}/apply`,
+      { slotId, message: 'I can help.' }, s.D)).status).toBe(201);
+
+    const listedBefore = async (session) => {
+      const res = await srv.call('GET', '/api/applications', undefined, session);
+      const rows = res.body.applications || res.body || [];
+      return (Array.isArray(rows) ? rows : []).filter(a => a.eventId === made.body.id).length;
+    };
+    expect(await listedBefore(s.A), 'the host could not see their own applicants')
+      .toBeGreaterThan(0);
+
+    /* A leaves the club they still host that event for. */
+    db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+      .run(orgId, id.A);
+    try {
+      expect((await srv.call('GET', `/api/events/${made.body.id}`, undefined, s.A)).status)
+        .toBe(403);
+      expect(await listedBefore(s.A), 'a removed member still listed the club’s applicants')
+        .toBe(0);
+    } finally {
+      seat(id.A, 'manager');
+    }
+  });
+
   it('22. but B cannot run an event A published under the same club', async () => {
     /* The line the widening had to stop at. Being trusted to post the bake-sale
        shift is not being trusted to call off the fundraiser somebody else

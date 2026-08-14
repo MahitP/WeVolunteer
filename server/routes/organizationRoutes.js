@@ -208,9 +208,14 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
        * the rule and would drift from `canHelpRun` the first time either
        * changed. The page renders what the server says it may do.
        */
-      canPost: canHelpRun(db, row.id, req.principal.userId, {
-        hasModerate: can(req.principal, 'organization.moderate'),
-      }),
+      /* The capability too, not membership alone. `can()` is what consults
+         `principal.withheld`, so a promoted student who has not yet accepted the
+         Student Organizer Agreement was shown the composer and met a 403 on
+         save — the same defect this file fixed one route over. */
+      canPost: can(req.principal, 'organization.post.create')
+        && canHelpRun(db, row.id, req.principal.userId, {
+          hasModerate: can(req.principal, 'organization.moderate'),
+        }),
       hours: viewerHours.hours,
       events: viewerHours.events,
       history: organizationHistoryForUser(db, row.id, req.principal.userId),

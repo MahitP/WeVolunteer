@@ -789,11 +789,11 @@ describe('authorization hygiene', () => {
       // see). See each entry's reason for the actual check and file:line. ──
 
       'GET /api/users/:id/profile': { category: CATEGORY.INLINE_GATED, reason: 'can(directory.read) at the top, else 403 (userRoutes.js) — this is what keeps partner, an EXTERNAL organization deliberately outside the member directory, off it; then canSeeContact = isSelf || can(user.contact.read) || hostsApplicant gates the PII fields' },
-      'GET /api/events/:id': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = can(event.moderate) || organizer_id === caller, else 403 (eventRoutes.js:392-394)' },
+      'GET /api/events/:id': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = a capability from EVENT_STAFF_CAPABILITIES AND canRunEvent (host, or a manager of the owning organization) — the capability half is what consults principal.withheld, else 403 (eventRoutes.js:392-394)' },
       'GET /api/applications': { category: CATEGORY.INLINE_GATED, reason: 'deny-by-default cascade can(user.contact.read) -> can(applicant.review) -> can(application.withdraw) -> [] (applicationRoutes.js:45-60); covered by authz.matrix.test.js' },
       'DELETE /api/comments/:id': { category: CATEGORY.INLINE_GATED, reason: 'own comment (user_id === caller) OR can(event.moderate), else 403 (contentRoutes.js:135)' },
-      'GET /api/events/:id/attendees': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = can(event.moderate) || organizer_id === caller, else accepted-applicant-only visibility (contentRoutes.js:156)' },
-      'GET /api/events/:id/announcements': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = can(event.moderate) || organizer_id === caller, else accepted-applicant-only visibility (contentRoutes.js:201)' },
+      'GET /api/events/:id/attendees': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = a capability from EVENT_STAFF_CAPABILITIES AND canRunEvent (host, or a manager of the owning organization) — the capability half is what consults principal.withheld, else accepted-applicant-only visibility (contentRoutes.js:156)' },
+      'GET /api/events/:id/announcements': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = a capability from EVENT_STAFF_CAPABILITIES AND canRunEvent (host, or a manager of the owning organization) — the capability half is what consults principal.withheld, else accepted-applicant-only visibility (contentRoutes.js:201)' },
       'POST /api/events/:id/announcements': { category: CATEGORY.INLINE_GATED, reason: 'can(announcement.post) OR can(event.moderate), plus ownership check (contentRoutes.js:245,248)' },
       'PATCH /api/announcements/:id': { category: CATEGORY.INLINE_GATED, reason: 'can(announcement.post) OR can(event.moderate), plus ownership check (contentRoutes.js:295,298)' },
       'DELETE /api/announcements/:id': { category: CATEGORY.INLINE_GATED, reason: 'can(announcement.post) OR can(event.moderate), plus ownership check (contentRoutes.js:316,319)' },
