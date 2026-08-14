@@ -67,7 +67,7 @@ export function computeDraw(db, eventId, { runNumber }) {
      * directly, over the real curve, so the two names cannot drift apart again
      * without the build going red.
      */
-    const pendingApps = db.prepare(`
+    const allPending = db.prepare(`
       SELECT a.id, a.user_id,
              COALESCE(SUM(att.hours_awarded), 0) as totalHours
       FROM applications a
@@ -90,11 +90,7 @@ export function computeDraw(db, eventId, { runNumber }) {
      * act on it, which is not the same as the organizer turning them down, and
      * a lifted ban puts them back in the next run.
      */
-    const eligible = pendingApps.filter(a => eventApplicationEligibility(event, a.user_id).ok);
-    if (eligible.length !== pendingApps.length) {
-      pendingApps.length = 0;
-      pendingApps.push(...eligible);
-    }
+    const pendingApps = allPending.filter(a => eventApplicationEligibility(event, a.user_id).ok);
 
     if (pendingApps.length === 0) continue;
 
