@@ -32,10 +32,20 @@ describe('canRunEvent', () => {
                         CHECK(member_role IN ('member', 'student_organizer', 'manager')),
       joined_at       TEXT NOT NULL,
       PRIMARY KEY (organization_id, user_id))`);
+
+    /* `canRunEvent` re-asks whether the host is still welcome in the club, so
+       the bans table is part of the question now — a host who was banned is no
+       longer running the club's events. */
+    db.exec(`CREATE TABLE organization_bans (
+      id              TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id         TEXT NOT NULL,
+      lifted_at       TEXT)`);
   });
 
   beforeEach(() => {
     db.exec('DELETE FROM organization_members');
+    db.exec('DELETE FROM organization_bans');
     const seat = db.prepare('INSERT INTO organization_members VALUES (?, ?, ?, ?)');
     seat.run('org-1', 'boss', 'manager', NOW);
     seat.run('org-1', 'helper', 'student_organizer', NOW);
@@ -114,6 +124,40 @@ describe('canRunEvent', () => {
     expect(canHelpRun(db, 'org-1', 'helper')).toBe(true);
     expect(canRunEvent(db, helpersEvent, 'helper')).toBe(true);
     expect(canRunEvent(db, bossesEvent, 'helper')).toBe(false);
+  });
+
+  it('stops the host once the club has removed them', () => {
+    /**
+     * Removal used to be incomplete. Somebody removed from a club kept every
+     * power over the events they had already posted for it — the roster export
+     * with names and emails, the attendance write that credits hours, the
+     * broadcast that emails everyone on it. The club had removed their ability
+     * to add more, and nothing else.
+     */
+    expect(canRunEvent(db, helpersEvent, 'helper')).toBe(true);
+    db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+      .run('org-1', 'helper');
+    expect(canRunEvent(db, helpersEvent, 'helper')).toBe(false);
+  });
+
+  it('stops the host once the club has BANNED them', () => {
+    db.prepare('INSERT INTO organization_bans VALUES (?, ?, ?, ?)')
+      .run('ban-1', 'org-1', 'helper', null);
+    expect(canRunEvent(db, helpersEvent, 'helper')).toBe(false);
+  });
+
+  it('restores them when the ban is lifted', () => {
+    /* Re-asked against the table rather than remembered, so lifting a ban needs
+       no second bookkeeping step. */
+    db.prepare('INSERT INTO organization_bans VALUES (?, ?, ?, ?)')
+      .run('ban-2', 'org-1', 'helper', null);
+    expect(canRunEvent(db, helpersEvent, 'helper')).toBe(false);
+    db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE id = ?').run('2026-08-13', 'ban-2');
+    expect(canRunEvent(db, helpersEvent, 'helper')).toBe(true);
+  });
+
+  it('leaves a PERSONAL event alone — there is no club to be removed from', () => {
+    expect(canRunEvent(db, personalEvent, 'stranger')).toBe(true);
   });
 
   it('answers false rather than throwing for a missing event or user', () => {

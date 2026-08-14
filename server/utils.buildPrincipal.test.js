@@ -46,11 +46,26 @@ afterEach(() => {
 describe('buildPrincipal — lazy, memoizing grants', () => {
   const userRow = { id: 'user-x', role: 'student' };
 
+  /**
+   * The withheld-capability provider, injected for the same reason `fetchGrants`
+   * is, and now needed by every case rather than one.
+   *
+   * The real provider reads `organization_members` — the Student Organizer
+   * Agreement withholds against a rank, so the question is asked of every
+   * account and not only of organizers. This file deliberately opens a bare
+   * connection with no schema, so letting the real one run would fail on a
+   * missing table while asserting something about laziness.
+   *
+   * Its behaviour is covered in `server/organizerAgreement.test.js` and
+   * `server/routes.studentOrganizerAgreement.test.js`.
+   */
+  const noWithholdings = () => [];
+
   it('issues zero calls to the provider when grants is never read', async () => {
     const { buildPrincipal } = await freshUtils();
     const fetchGrants = vi.fn(() => ['report.evidence.read']);
 
-    buildPrincipal(userRow, fetchGrants);
+    buildPrincipal(userRow, fetchGrants, noWithholdings);
 
     expect(fetchGrants).not.toHaveBeenCalled();
   });
@@ -58,7 +73,7 @@ describe('buildPrincipal — lazy, memoizing grants', () => {
   it('issues exactly one call no matter how many times grants is read', async () => {
     const { buildPrincipal } = await freshUtils();
     const fetchGrants = vi.fn(() => ['report.evidence.read']);
-    const principal = buildPrincipal(userRow, fetchGrants);
+    const principal = buildPrincipal(userRow, fetchGrants, noWithholdings);
 
     void principal.grants;
     void principal.grants;
@@ -70,7 +85,7 @@ describe('buildPrincipal — lazy, memoizing grants', () => {
   it('resolves to whatever the provider returns, and passes it the user id', async () => {
     const { buildPrincipal } = await freshUtils();
     const fetchGrants = vi.fn((id) => (id === 'user-x' ? ['a.capability', 'b.capability'] : []));
-    const principal = buildPrincipal(userRow, fetchGrants);
+    const principal = buildPrincipal(userRow, fetchGrants, noWithholdings);
 
     expect(principal.grants).toEqual(['a.capability', 'b.capability']);
     expect(fetchGrants).toHaveBeenCalledWith('user-x');

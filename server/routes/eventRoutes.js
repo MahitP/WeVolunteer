@@ -419,6 +419,18 @@ router.get('/api/events', authenticateToken, (req, res) => {
         ? Number(formattedSlots.reduce((sum, s) => sum + s.hours, 0).toFixed(2))
         : 0;
 
+      /**
+       * Deliberately NOT `canRunEvent` here, unlike every other authority
+       * question about an event.
+       *
+       * This runs once per card, up to sixty per request, on the busiest
+       * endpoint the platform has — and `canRunEvent`'s manager branch is a
+       * membership lookup, so asking it here would add sixty queries to a
+       * request that already carries a documented throughput ceiling. What it
+       * would buy is arrival instructions on a browse card for a manager who
+       * did not create the event; they read them on the event itself, where
+       * `canRunEvent` IS asked, one query for one event.
+       */
       const canSeeInstructions = can(req.principal, 'event.moderate') ||
         event.organizer_id === req.principal.userId ||
         acceptedEventIds.has(event.id);
@@ -618,7 +630,7 @@ router.get('/api/events/tags', authenticateToken, (req, res) => {
 router.get('/api/events/:id', authenticateToken, (req, res) => {
   try {
     const event = db.prepare(`
-      SELECT e.*, u.name as organizer_name, u.verified as organizer_verified, u.role as organizer_role,
+      SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
              u.school as organizer_school,
              org.name as organization_name, org.slug as organization_slug
       FROM events e JOIN users u ON e.organizer_id = u.id
@@ -1610,6 +1622,18 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['even
         code: 'organization_required',
       });
     }
+    /* An archived club is out of circulation, and duplicate is the third create
+       path that had to learn it — create refuses one, joining refuses one, and
+       this would have published a brand-new open event under a club that had
+       been wound up. */
+    if (event.organization_id) {
+      const org = db.prepare('SELECT status FROM organizations WHERE id = ?').get(event.organization_id);
+      if (!org || org.status !== 'active') {
+        return res.status(409).json({
+          error: 'That organization is archived.', code: 'organization_archived',
+        });
+      }
+    }
     if (event.organization_id && !canHelpRun(db, event.organization_id, req.user.id, {
       hasModerate: can(req.principal, 'organization.moderate'),
     })) {
@@ -1852,7 +1876,7 @@ router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['even
     }
 
     const confirmedApps = db.prepare(`
-      SELECT DISTINCT u.id, u.email 
+      SELECT DISTINCT u.id, u.email, u.email_opt_out 
       FROM applications a
       JOIN users u ON a.user_id = u.id
       WHERE a.event_id = ? 

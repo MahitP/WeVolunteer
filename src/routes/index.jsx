@@ -56,6 +56,7 @@ const LegalDocument = React.lazy(() => import('../views/legal/LegalDocument'));
 const AboutUs = React.lazy(() => import('../views/AboutUs'));
 const LegalEditor = React.lazy(() => import('../views/legal/LegalEditor'));
 const OrganizerAgreement = React.lazy(() => import('../views/legal/OrganizerAgreement'));
+const StudentOrganizerAgreement = React.lazy(() => import('../views/legal/StudentOrganizerAgreement'));
 const Appeal = React.lazy(() => import('../views/Appeal'));
 const NewAppeal = React.lazy(() => import('../views/NewAppeal'));
 const AdminAppeals = React.lazy(() => import('../views/AdminAppeals'));
@@ -268,6 +269,13 @@ export const APP_ROUTES = [
    * server/organizerAgreement.js.
    */
   { path: '/organizer-agreement', element: <OrganizerAgreement /> },
+  /**
+   * The same, for the Student Organizer rank, and ungated for the same reason:
+   * the four capabilities it releases are withheld until this page is used, so
+   * requiring any of them here would be a lock on the key. See
+   * server/studentOrganizerAgreement.js.
+   */
+  { path: '/student-organizer-agreement', element: <StudentOrganizerAgreement /> },
   /* Error triage. `error.read` is SUPER_ONLY, so `can()` refuses it before it
      consults per-user grants — no capability grant can reach this route, and
      the nav entry that points at it is hidden by the same capability. */

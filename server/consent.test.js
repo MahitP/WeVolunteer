@@ -174,7 +174,7 @@ describe('the document registry', () => {
     // silently unenforceable — which is the failure the registry exists to stop.
     for (const doc of LEGAL_DOCUMENTS.filter(d => d.consentType !== 'notice')) {
       expect(
-        ['signup', 'organizer-onboarding'].includes(doc.scope),
+        ['signup', 'organizer-onboarding', 'student-organizer-onboarding'].includes(doc.scope),
         `${doc.slug} needs acceptance but its scope (${doc.scope}) collects none`
       ).toBe(true);
     }

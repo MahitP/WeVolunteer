@@ -30,6 +30,23 @@ router.get('/api/applications', authenticateToken, (req, res) => {
       JOIN slots s ON a.slot_id = s.id
     `;
     
+    /**
+     * The rows somebody who RUNS events may see: their own events, plus the
+     * events of any organization they manage.
+     *
+     * The second half is what `canRunEvent` authorizes on the write paths, and
+     * this list is what feeds the screen those writes are made from. Scoped in
+     * SQL rather than filtered afterwards, so a club with four hundred
+     * applications does not load them all to discard most.
+     */
+    const ORGANIZATION_SCOPE = `
+      WHERE e.organizer_id = ?
+         OR e.organization_id IN (
+              SELECT organization_id FROM organization_members
+               WHERE user_id = ? AND member_role = 'manager'
+            )
+    `;
+
     // Result scoping, not a gate — every authenticated role reaches this route;
     // the capability only chooses which rows come back.
     //
@@ -54,7 +71,23 @@ router.get('/api/applications', authenticateToken, (req, res) => {
       rows = db.prepare(BASE_QUERY).all();
     } else if (can(req.principal, 'applicant.review')) {
       // organizer: applications to the events they host.
-      rows = db.prepare(`${BASE_QUERY} WHERE e.organizer_id = ?`).all(req.principal.userId);
+      rows = db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE}`)
+        .all(req.principal.userId, req.principal.userId);
+    } else if (can(req.principal, 'organization.event.manage.own')) {
+      /**
+       * A Student Organizer, or a student who manages a club.
+       *
+       * They hold neither `application.read_all` nor `applicant.review`, so
+       * without this branch they fell through to "your own applications" and
+       * could not list the applicants to the events they run at all — they could
+       * accept and reject through `PATCH /api/applications/:id`, blind, from a
+       * list that did not include the rows.
+       *
+       * Scoped by the same rule `canRunEvent` applies: events they host, plus
+       * events belonging to a club they manage.
+       */
+      rows = db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE}`)
+        .all(req.principal.userId, req.principal.userId);
     } else if (can(req.principal, 'application.withdraw')) {
       // student: their own applications only.
       rows = db.prepare(`${BASE_QUERY} WHERE a.user_id = ?`).all(req.principal.userId);
@@ -629,14 +662,24 @@ router.patch('/api/applications/:id', authenticateToken,
    * event". Asking whether they host THIS one is what keeps both doors open,
    * and it is the same ownership question the branch itself asks two lines
    * below, moved up so the cascade can use its answer.
+   *
+   * `canRunEvent` and not a bare `organizer_id` compare, so this gate gives the
+   * same answer as `PATCH /api/applications/bulk` — which asks `canRunEvent`
+   * directly. Written the narrow way, a club's manager could accept an
+   * applicant in bulk and be told "students may only withdraw their own
+   * applications" for the identical act on the identical row.
    */
-  const hostsThisEvent = can(req.principal, 'organization.event.manage.own')
-    && Boolean(db.prepare(`
-      SELECT 1 FROM applications a JOIN events e ON e.id = a.event_id
-       WHERE a.id = ? AND e.organizer_id = ?
-    `).get(appId, req.principal.userId));
+  const appForGate = db.prepare(`
+    SELECT a.id, e.organizer_id, e.organization_id
+      FROM applications a JOIN events e ON e.id = a.event_id
+     WHERE a.id = ?
+  `).get(appId);
+  const runsThisEvent = can(req.principal, 'organization.event.manage.own')
+    && canRunEvent(db, appForGate, req.principal.userId, {
+      hasModerate: can(req.principal, 'event.moderate'),
+    });
 
-  if (can(req.principal, 'applicant.review') || can(req.principal, 'event.moderate') || hostsThisEvent) {
+  if (can(req.principal, 'applicant.review') || can(req.principal, 'event.moderate') || runsThisEvent) {
     if (!['accepted', 'waitlisted', 'rejected'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status update. Must be accepted, waitlisted, or rejected.' });
     }

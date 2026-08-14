@@ -1435,6 +1435,20 @@ export const api = {
       body: JSON.stringify({ acknowledged: true })
     }),
 
+  /**
+   * The same pair for the Student Organizer Agreement.
+   *
+   * Reachable by somebody holding none of the four helper capabilities, for the
+   * same reason: that withheld state is what these two calls exist to escape.
+   */
+  fetchStudentOrganizerAgreement: async () => apiFetch('/api/legal/student-organizer-agreement'),
+
+  acceptStudentOrganizerAgreement: async () =>
+    apiFetch('/api/legal/student-organizer-agreement/accept', {
+      method: 'POST',
+      body: JSON.stringify({ acknowledged: true })
+    }),
+
   /* ── The Legal Center editor (owner only) ────────────────────────────────
    *
    * Separate paths from the four above, under `/api/admin/legal`. The server

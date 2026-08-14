@@ -176,6 +176,27 @@ export function canManage(db, organizationId, userId, { hasModerate = false } = 
 }
 
 /**
+ * Is this person still part of this organization, and not banned from it?
+ *
+ * The question `canRunEvent` asks about somebody who hosts one of the club's
+ * events. Membership alone is not enough — a ban removes the membership row, so
+ * both halves matter: a former member who was banned and then somehow re-added
+ * must not be running the club's shifts.
+ */
+function stillWelcomeIn(db, organizationId, userId) {
+  const member = db.prepare(
+    'SELECT 1 AS ok FROM organization_members WHERE organization_id = ? AND user_id = ?'
+  ).get(organizationId, userId);
+  if (!member) return false;
+
+  const banned = db.prepare(`
+    SELECT 1 AS ok FROM organization_bans
+     WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
+  `).get(organizationId, userId);
+  return !banned;
+}
+
+/**
  * The ranks a membership row may hold, weakest first.
  *
  * `member` belongs to the club. `student_organizer` helps run it — posts and
@@ -270,7 +291,25 @@ export function canHelpRun(db, organizationId, userId, { hasModerate = false } =
 export function canRunEvent(db, event, userId, { hasModerate = false } = {}) {
   if (hasModerate) return true;
   if (!event || !userId) return false;
-  if (event.organizer_id && event.organizer_id === userId) return true;
+  /**
+   * Hosting it is enough — UNLESS the club has since shown you the door.
+   *
+   * The host branch used to stand on its own, and that let removal be
+   * incomplete. Somebody removed or banned from a club kept every power over the
+   * events they had already posted for it: the roster export with names, emails,
+   * schools and grades, the attendance write that credits hours, the broadcast
+   * that emails everyone on it. A club that removed a helper had not removed
+   * their access to the club's people, only their ability to add more.
+   *
+   * Re-asked against the membership table rather than remembered, so lifting a
+   * ban or re-admitting somebody restores it without a second bookkeeping step.
+   * An event with no organization is unaffected: there is no club to be removed
+   * from, and its host keeps it.
+   */
+  if (event.organizer_id && event.organizer_id === userId) {
+    if (!event.organization_id) return true;
+    return stillWelcomeIn(db, event.organization_id, userId);
+  }
 
   /**
    * A row that does not CARRY `organization_id` is a caller bug, not an event

@@ -13,6 +13,7 @@ import { notificationService } from '../services/notificationService.js';
 import { getOrCreateCertificateCode } from '../certificates.js';
 import { badgeService } from '../services/badgeService.js';
 import { db } from '../db.js';
+import { recordAudit } from '../auditLog.js';
 import { canRunEvent } from '../organizations.js';
 
 const router = express.Router();
@@ -273,6 +274,22 @@ router.get('/api/events/:id/roster.csv', authenticateToken, requireCapAny(['atte
     ];
 
     const filename = `${event.title.replace(/[^a-z0-9]/gi, '_')}_roster.csv`;
+    /**
+     * The one bulk export of minors' contact details on the platform, recorded.
+     *
+     * A Student Organizer reaches this for the events they run, which is the
+     * point of the rank — but "who took the whole roster, and when" is the
+     * question an organization asks after something goes wrong, and it had no
+     * answer anywhere. The row names the caller and the event; it does not
+     * repeat the data.
+     */
+    recordAudit(db, {
+      adminId: req.principal.userId,
+      action: 'ORGANIZATION_ROSTER_EXPORTED',
+      targetUserId: null,
+      details: `Exported the accepted roster for "${event.title}" (${event.id})`,
+    });
+
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(csvLines.join('\n'));

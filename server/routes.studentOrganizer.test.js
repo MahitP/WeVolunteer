@@ -68,6 +68,17 @@ describe('Student Organizer', () => {
   const setRole = (key, userId, memberRole, session = owner) =>
     srv.call('PATCH', `/api/organizations/${key}/members/${userId}`, { memberRole }, session);
 
+  /**
+   * Accepting the Student Organizer Agreement, through the real route.
+   *
+   * Promotion GRANTS the four capabilities and the agreement RELEASES them, so
+   * a fixture that only promotes leaves the helper holding nothing. Every test
+   * below that expects the rank to work needs this, and the ones that expect it
+   * NOT to work get their own coverage in the agreement block.
+   */
+  const acceptAgreement = (session) =>
+    srv.call('POST', '/api/legal/student-organizer-agreement/accept', { acknowledged: true }, session);
+
   const createEvent = (body, session) => srv.call('POST', '/api/events', {
     title: 'Student organizer fixture',
     description: 'An event used by the student-organizer tests.',
@@ -115,6 +126,7 @@ describe('Student Organizer', () => {
     db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
       .run(otherId, helperId);
     await setRole(orgKey, helperId, 'student_organizer');
+    await acceptAgreement(helper);
   });
 
   // ───────────────────────────────────────────────────────────────────────────
