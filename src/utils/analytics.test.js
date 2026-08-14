@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
 
 /**
  * The Amplitude seam.
@@ -54,13 +57,57 @@ describe('when the key is configured', () => {
     expect(initAll).toHaveBeenCalledTimes(1);
     const [key, options] = initAll.mock.calls[0];
     expect(key).toBe('test-key-not-the-real-one');
-    /* Exactly the wizard's shape. `init` is not used and is not even exported
-       by this package — it is analytics-only and would silently leave Session
-       Replay off. */
-    expect(options).toEqual({
-      analytics: { autocapture: true },
-      sessionReplay: { sampleRate: 1 },
-    });
+    /* `init` is not used and is not even exported by this package — it is
+       analytics-only and would silently leave Session Replay off. */
+    expect(options.analytics).toEqual({ autocapture: true });
+    expect(options.sessionReplay.sampleRate).toBe(1);
+  });
+
+  it('records no page text at all, at any mask level below conservative', async () => {
+    /**
+     * THE regression, and it is worth stating why in the assertion rather than
+     * the name.
+     *
+     * Amplitude's own default is `medium`, which its source documents as
+     * "All inputs (form fields), text is NOT masked". Every sensitive thing
+     * this application shows is RENDERED rather than typed — hours,
+     * transcripts, messages, moderation notes, ban reasons, and the two-factor
+     * secret and recovery codes. Under `medium` all of it is uploaded verbatim.
+     */
+    const a = await loadWithKey('test-key-not-the-real-one');
+    a.initializeAmplitude();
+    const { privacyConfig } = initAll.mock.calls[0][1].sessionReplay;
+
+    expect(
+      privacyConfig?.defaultMaskLevel,
+      'the replay mask level is no longer conservative — rendered page text, '
+      + 'including service records and moderation notes, is being recorded'
+    ).toBe('conservative');
+  });
+
+  it('blocks the annotated subtrees outright, not merely masking them', async () => {
+    /* Masking replaces visible characters. It does nothing to an <img src>,
+       and the 2FA QR is a data URL containing the shared secret. */
+    const a = await loadWithKey('test-key-not-the-real-one');
+    a.initializeAmplitude();
+    const { privacyConfig } = initAll.mock.calls[0][1].sessionReplay;
+
+    expect(privacyConfig?.blockSelector).toContain(`[${a.REPLAY_BLOCK_ATTRIBUTE}]`);
+  });
+
+  it('enables interaction tracking, which is what applies the URL rules', async () => {
+    /**
+     * Not a decision to collect more. The SDK gates `ugcFilterRules` on
+     * `interactionConfig.enabled`, and with it off the INITIAL snapshot's href
+     * is stored raw — which is the one that carries the token, because it is
+     * the link out of the email.
+     */
+    const a = await loadWithKey('test-key-not-the-real-one');
+    a.initializeAmplitude();
+    const { interactionConfig } = initAll.mock.calls[0][1].sessionReplay;
+
+    expect(interactionConfig?.enabled).toBe(true);
+    expect(interactionConfig?.ugcFilterRules).toEqual([...a.REDACTED_URL_RULES]);
   });
 
   it('initialises only once, however many times it is called', async () => {
@@ -239,6 +286,114 @@ describe('the verification event is declared exactly once', () => {
     walk(serverDir);
 
     expect(offenders, `server code referencing Amplitude: ${offenders.join(', ')}`).toEqual([]);
+  });
+});
+
+describe('credentials in the address bar never reach the recorder', () => {
+  /**
+   * These cases run the rules through **Amplitude's own glob compiler**, not a
+   * reimplementation of it.
+   *
+   * That distinction is the whole value of this block. Asserting that
+   * `REDACTED_URL_RULES` contains the strings I typed proves only that I typed
+   * them; the property that matters is whether the SDK, given those strings and
+   * a real URL, produces a redacted one. The glob dialect is not obvious —
+   * `?` compiles to a single-character wildcard, `*` to `.*`, the pattern is
+   * anchored at both ends, and it is matched against the FULL href rather than
+   * the path — so a rule that looks right and matches nothing is the likely
+   * failure, and it would be a silent one.
+   *
+   * `createRequire` because the package's ESM build uses extensionless internal
+   * imports that only a bundler resolves; the CJS build loads under Node as-is.
+   */
+  const require = createRequire(import.meta.url);
+  const { getPageUrl, validateUGCFilterRules } =
+    require('@amplitude/session-replay-browser/lib/cjs/helpers.js');
+
+  /** Loads the module without touching the once-only init state. */
+  async function rules() {
+    const a = await import('./analytics.js');
+    return [...a.REDACTED_URL_RULES];
+  }
+
+  it('are accepted by the SDK, so a typo cannot silently disable analytics', async () => {
+    /**
+     * `validateUGCFilterRules` THROWS on a malformed rule, and the throw would
+     * happen inside `initAll` — which `initializeAmplitude` catches and turns
+     * into "analytics disabled". So a bad pattern here does not fail loudly, it
+     * quietly switches the whole integration off. This is the case that notices.
+     */
+    const rs = await rules();
+    expect(() => validateUGCFilterRules(rs)).not.toThrow();
+  });
+
+  it.each([
+    ['a password reset link', 'https://wevolunteers.org/?reset=Q7fNc2Lm9xKpR4'],
+    ['an email verification link', 'https://wevolunteers.org/?verify=Zk3Wq8Tb1vHy6N'],
+    ['the reset form it forwards to', 'https://wevolunteers.org/reset-password?token=Q7fNc2Lm9xKpR4'],
+    ['an invitation link', 'https://wevolunteers.org/accept-invitation?token=Bd5Jr0Pw7sXt2M'],
+    ['an appeal link, whose token is a path segment', 'https://wevolunteers.org/appeal/Vn8Hq3Lz6cRw1K'],
+    ['the same link over plain http', 'http://localhost:5184/?reset=Q7fNc2Lm9xKpR4'],
+  ])('redact %s', async (_label, href) => {
+    const recorded = getPageUrl(href, await rules());
+
+    /* The token itself is the thing that must be gone. Asserted by searching
+       for the secret rather than by comparing to an expected string, so the
+       case still fails if the replacement text changes but the token survives
+       somewhere else in the URL. */
+    const secret = href.split(/[=/]/).pop();
+    expect(recorded, `the token survived in ${recorded}`).not.toContain(secret);
+    expect(recorded).toContain('[redacted]');
+  });
+
+  it('leave ordinary URLs alone', async () => {
+    /**
+     * The control case, and it is not decoration: a rule broad enough to redact
+     * everything would pass every assertion above while destroying the dataset
+     * the recorder exists to produce. Both halves have to hold.
+     */
+    const untouched = [
+      'https://wevolunteers.org/dashboard',
+      'https://wevolunteers.org/discover',
+      'https://wevolunteers.org/organizations/river-club',
+      'https://wevolunteers.org/events?category=Environment',
+    ];
+    const rs = await rules();
+    for (const href of untouched) {
+      expect(getPageUrl(href, rs), `${href} was redacted and should not have been`).toBe(href);
+    }
+  });
+});
+
+describe('the screens that render a credential are blocked in the markup', () => {
+  /**
+   * A source check, because the property is "somebody remembered to annotate
+   * this element". Rendering the component and inspecting the DOM would prove
+   * the attribute reaches the browser, which is not in doubt — what is in doubt
+   * is whether a future edit moves the secret out from under it.
+   */
+  const tfa = fs.readFileSync(
+    path.join(process.cwd(), 'src', 'components', 'account', 'TwoFactorSetup.jsx'), 'utf8'
+  );
+
+  it('blocks the QR image, whose data URL contains the shared secret', () => {
+    expect(tfa).toMatch(/<div data-replay-block[^>]*>\s*\n\s*<img\s*\n\s*src=\{enrol\.qr\}/);
+  });
+
+  it('blocks the typed-out secret shown for people who cannot scan', () => {
+    expect(tfa).toMatch(/<code data-replay-block[^>]*>\{enrol\.secret\}<\/code>/);
+  });
+
+  it('blocks the recovery codes', () => {
+    expect(tfa).toMatch(/<ul\s*\n\s*data-replay-block/);
+  });
+
+  it('leaves the six-digit code field alone', () => {
+    /* Scoping matters in both directions. The input the user types their code
+       into is ephemeral and is masked anyway; blocking it would remove the one
+       part of the screen that is useful for diagnosing a failed enrolment. */
+    const inputBlock = tfa.slice(tfa.indexOf('id="tfa-enrol-code"') - 300, tfa.indexOf('id="tfa-enrol-code"') + 200);
+    expect(inputBlock).not.toContain('data-replay-block');
   });
 });
 

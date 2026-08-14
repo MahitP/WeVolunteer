@@ -70,6 +70,121 @@ export const isAnalyticsConfigured = () => Boolean(API_KEY);
 const environment = import.meta.env.MODE;
 
 /**
+ * The attribute that removes a subtree from the recording entirely.
+ *
+ * Not a class, because a class is a styling hook and somebody will eventually
+ * refactor one away without knowing it was load-bearing. An attribute that
+ * exists for one reason and has that reason in its name survives a redesign.
+ *
+ * `blockSelector` is stronger than masking: rrweb replaces the element with an
+ * empty placeholder and records nothing inside it — no text, no attributes, no
+ * child nodes. Masking only replaces visible characters.
+ */
+export const REPLAY_BLOCK_ATTRIBUTE = 'data-replay-block';
+
+/**
+ * URLs whose query string carries a live credential, rewritten before the
+ * recorder stores them.
+ *
+ * ── Why this is necessary at all ──
+ *
+ * `server/email.js` builds `?verify=<token>` and `?reset=<token>`, and
+ * `App.jsx` forwards the latter to `/reset-password?token=<token>`. Those are
+ * single-use credentials sitting in `location.href`, and Session Replay records
+ * `location.href` on the initial snapshot, on every URL change, and on click
+ * and scroll events.
+ *
+ * This application already decided that these must not be written down:
+ * `server/app.js` strips query strings from the access log and
+ * `server/errorReporter.js` normalises the route before storing it, both with
+ * these exact URLs named in the comment. A recorder that captures them anyway
+ * would quietly undo a decision taken twice elsewhere.
+ *
+ * ── Why the shape is what it is ──
+ *
+ * The rules are matched against the FULL href (`getPageUrl(location.href, …)`),
+ * and `validateUGCFilterRules` rejects any pattern that does not begin with `/`
+ * or `http`. So each rule is written twice, once per scheme — `http` is not
+ * only development, it is also what a misconfigured proxy would produce, and a
+ * rule that silently fails to match is the worst outcome here.
+ *
+ * `*` becomes `.*` and the whole pattern is anchored, so `https://*?reset=*`
+ * matches any host and any token. Verified against the installed SDK rather
+ * than assumed: the glob compiler turns `?` into a single-character wildcard,
+ * which still matches the literal `?` that separates the query string.
+ *
+ * An invalid rule makes the SDK THROW, which `initializeAmplitude` would then
+ * swallow — turning a typo here into silently disabled analytics rather than a
+ * visible failure. That is why these are pinned by a test.
+ */
+export const REDACTED_URL_RULES = Object.freeze([
+  { selector: 'https://*?reset=*', replacement: 'https://[redacted]/?reset=[redacted]' },
+  { selector: 'http://*?reset=*', replacement: 'http://[redacted]/?reset=[redacted]' },
+  { selector: 'https://*?verify=*', replacement: 'https://[redacted]/?verify=[redacted]' },
+  { selector: 'http://*?verify=*', replacement: 'http://[redacted]/?verify=[redacted]' },
+  { selector: 'https://*?token=*', replacement: 'https://[redacted]/?token=[redacted]' },
+  { selector: 'http://*?token=*', replacement: 'http://[redacted]/?token=[redacted]' },
+  /* `/appeal/:token` puts the credential in a path segment rather than a query
+     string, so the rules above cannot see it. */
+  { selector: 'https://*/appeal/*', replacement: 'https://[redacted]/appeal/[redacted]' },
+  { selector: 'http://*/appeal/*', replacement: 'http://[redacted]/appeal/[redacted]' },
+]);
+
+/**
+ * What Session Replay is allowed to record.
+ *
+ * ── The default was wrong for this application ──
+ *
+ * Amplitude's `DEFAULT_MASK_LEVEL` is `medium`, which the SDK's own source
+ * documents as: "All inputs (form fields), text is NOT masked". That is a
+ * reasonable default for a product whose sensitive data is typed into forms.
+ * It is the wrong default here, because WeVolunteer's sensitive data is
+ * RENDERED, not typed: service hours, transcripts, certificates, message
+ * threads, the admin roster, moderation notes, ban reasons, appeal text — and,
+ * most sharply, the two-factor secret and the recovery codes, which are a
+ * `<code>` element and a list of `<li>`s.
+ *
+ * `conservative` masks all inputs AND all text. It is the only level under
+ * which "a screen nobody remembered to annotate" fails closed.
+ *
+ * ── Why the block selector is not merely belt-and-braces ──
+ *
+ * Masking replaces visible CHARACTERS. The enrolment QR code is an `<img>`
+ * whose `src` is a data URL encoding the `otpauth://` URI — which contains the
+ * shared secret. No mask level touches an image's `src` attribute, so the
+ * secret would still leave the browser with `conservative` set. Blocking the
+ * subtree is what actually removes it.
+ *
+ * It also keeps the protection on the 2FA screen independent of the global
+ * level, so relaxing that level later for product reasons cannot silently
+ * re-expose the one screen that must never be recorded.
+ */
+const PRIVACY_CONFIG = {
+  defaultMaskLevel: 'conservative',
+  blockSelector: [`[${REPLAY_BLOCK_ATTRIBUTE}]`],
+};
+
+/**
+ * Interaction tracking, switched on for one specific reason.
+ *
+ * `ugcFilterRules` live under `interactionConfig`, and the SDK applies them to
+ * the recorded `href` only when `enabled` is true — `session-replay.js` reads
+ * `interactionConfig?.enabled && interactionConfig.ugcFilterRules ? … : []`.
+ * With it left off, the URL-tracking plugin still redacts navigations but the
+ * INITIAL snapshot's href is stored raw, and the initial href is precisely the
+ * one that carries the token, because it is the link out of the email.
+ *
+ * So this is not a decision to collect more; it is the switch that makes the
+ * redaction apply to the one URL that matters. `batch` is the SDK's own
+ * batching path for click events and is the cheaper of the two.
+ */
+const INTERACTION_CONFIG = {
+  enabled: true,
+  batch: true,
+  ugcFilterRules: [...REDACTED_URL_RULES],
+};
+
+/**
  * Starts Amplitude, once, in the browser.
  *
  * Never throws. An analytics SDK that can break the page it measures is worse
@@ -98,7 +213,11 @@ export function initializeAmplitude() {
        than a quiet half-installation. */
     amplitude.initAll(API_KEY, {
       analytics: { autocapture: true },
-      sessionReplay: { sampleRate: 1 },
+      sessionReplay: {
+        sampleRate: 1,
+        privacyConfig: PRIVACY_CONFIG,
+        interactionConfig: INTERACTION_CONFIG,
+      },
     });
     started = true;
     return true;
