@@ -23,11 +23,21 @@ import { authenticateToken, inTransaction } from '../utils.js';
 import { can, requireCap } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
+
 import {
   APPEAL_SUBJECTS, APPEAL_DECISIONS, MIN_REASONING_LENGTH,
   validateStatement, validateReasoning, disqualifiers, allOverridable,
   explainConflicts, recordAppealEvent, newAppealId, isFinal,
 } from '../appeals.js';
+
+/**
+ * How many NEW appeals one person may open in a rolling 30 days.
+ *
+ * Five is deliberately generous — somebody banned from three clubs in a bad
+ * month is not the problem this guards against. The loop is.
+ */
+export const APPEAL_WINDOW_MAX = Number(process.env.APPEAL_WINDOW_LIMIT) || 5;
+export const APPEAL_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 const router = express.Router();
 
@@ -322,6 +332,71 @@ router.post('/api/appeals', authenticateToken, (req, res) => {
   `).get(req.user.id, subject, subjectRef, subjectRef);
   if (existing) {
     return res.status(200).json({ success: true, appealId: existing.id, duplicate: true });
+  }
+
+  /**
+   * A ceiling on how often one person may open a NEW appeal.
+   *
+   * ── What this is for, and what it is not ──
+   *
+   * The duplicate guard above already stops the obvious case: you cannot have
+   * two live appeals about the same thing. What it does not stop is the loop —
+   * appeal, get a decision, appeal again the next morning, and again. Each one
+   * is technically a fresh case, so each one lands in a manager's inbox, and
+   * the manager is often a student volunteer running a club. An inbox that fills
+   * up with the same person is an inbox that stops being read, and the appeal
+   * that actually deserved attention is the one underneath.
+   *
+   * ── Why a rolling window and not a fixed one ──
+   *
+   * A calendar-month reset would let somebody file five on the 30th and five
+   * more on the 1st. Counting backwards from now means the limit means the same
+   * thing on every day of the month.
+   *
+   * ── Why WITHDRAWN and REJECTED appeals still count ──
+   *
+   * They are what the limit is about. Counting only live ones would let the
+   * loop run forever, because every appeal in it has already been decided.
+   *
+   * ── Why the refusal names a date ──
+   *
+   * "Try again later" is what makes somebody send five more. The response says
+   * exactly when the window opens, and points at the channel that is still open
+   * to them, because the person hitting this may still have a real grievance.
+   */
+  /**
+   * ── Why the count is scoped to the SUBJECT and not to the person ──
+   *
+   * The harm being prevented is one inbox filling up with one person. A count
+   * across everything would also punish the student who is genuinely dealing
+   * with three separate bans from three different clubs in a bad month — they
+   * would spend their allowance on unrelated cases and be unable to answer the
+   * fourth. That student is not the problem.
+   *
+   * Scoping to `(user, subject, subject_ref)` means each organization's inbox
+   * gets the same five-in-thirty-days tolerance independently, which is what
+   * "stop them being spammed" actually asks for. A suspension appeal has a NULL
+   * `subject_ref`, so for that case this is per-person anyway.
+   */
+  const windowStart = new Date(Date.now() - APPEAL_WINDOW_MS).toISOString();
+  const recent = db.prepare(`
+    SELECT COUNT(*) AS n, MIN(created_at) AS oldest
+      FROM appeals
+     WHERE user_id = ? AND created_at > ?
+       AND subject = ? AND (subject_ref IS ? OR subject_ref = ?)
+  `).get(req.user.id, windowStart, subject, subjectRef, subjectRef);
+
+  if (recent.n >= APPEAL_WINDOW_MAX) {
+    const opensAt = new Date(new Date(recent.oldest).getTime() + APPEAL_WINDOW_MS);
+    return res.status(429).json({
+      error:
+        `You have opened ${recent.n} appeals in the last 30 days, which is the most we can `
+        + 'review fairly. You can open another one after '
+        + `${opensAt.toISOString().slice(0, 10)}. If something urgent has changed before then, `
+        + 'write to us and say so.',
+      code: 'appeal_rate_limited',
+      retryAfter: opensAt.toISOString(),
+    });
   }
 
   const appealId = newAppealId();

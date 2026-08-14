@@ -36,6 +36,27 @@ describe('the organization appeal inbox', () => {
   let otherKey; let otherId;
 
   beforeAll(async () => {
+    /**
+     * The appeal rate limit is turned up for this file, deliberately.
+     *
+     * Every case here bans the same student from the same organization and
+     * files an appeal, so across the file one student opens roughly eighteen
+     * appeals about one ban — which is exactly the loop `APPEAL_WINDOW_LIMIT`
+     * exists to refuse. This file is about the organization appeal INBOX, not
+     * about the limiter, and the limiter has its own file
+     * (appeals.rateLimit.test.js) that drives it properly.
+     *
+     * Raising the ceiling is the honest way to say "out of scope here". The
+     * alternatives were worse: the appeals table is immutable by trigger and
+     * `appeal_events` is append-only, so the fixture cannot age or delete its
+     * own scaffolding — and it should not be able to. Those triggers are what
+     * keep a real appellant's account of events from being rewritten.
+     *
+     * Set before `startTestServer`, because the route module reads it once at
+     * import and the app is imported by that call.
+     */
+    process.env.APPEAL_WINDOW_LIMIT = '999';
+
     srv = await startTestServer();
     ({ db } = await import('./db.js'));
 
@@ -114,6 +135,7 @@ describe('the organization appeal inbox', () => {
   beforeEach(() => {
     db.prepare('DELETE FROM organization_bans WHERE organization_id IN (?, ?)').run(orgId, otherId);
     db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ? AND status IN ('open','reviewing')").run(studentId);
+
     join(orgId, managerId, 'manager');
   });
 
