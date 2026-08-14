@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import { ADDRESSES } from './emailIdentity.js';
 
 /**
  * Reporting a problem with the platform.
@@ -12,8 +11,31 @@ import { ADDRESSES } from './emailIdentity.js';
  * this file, so the dropdown and the server validation cannot drift — the same
  * arrangement `src/moderation.js` already uses, and for the same reason.
  *
- * It imports `node:crypto` and the address book, and nothing else. Keep it that
- * way: it is bundled into the browser.
+ * ── This file runs in the browser, and that is a hard constraint ──
+ *
+ * It used to import `ADDRESSES` from `./emailIdentity.js`, whose first
+ * statement is `process.env.MAIL_DOMAIN`. Under Vite's dev server that module
+ * is served to the browser as written, `process` does not exist there, and the
+ * read threw at import time — which took down `/report-issue` completely: the
+ * page never rendered, the crash boundary caught it, and the one screen a
+ * student reaches when everything else is broken showed "This page came off the
+ * board".
+ *
+ * It survived a production BUILD only by accident (the bundler rewrites
+ * `process.env` to `{}`, so the domain silently became the hardcoded fallback
+ * rather than the configured one), and it survived the test suite because
+ * Vitest runs under Node, where `process` exists.
+ *
+ * So the rule is stronger than "no database, no config": **nothing reachable
+ * from here may touch a Node global at module scope.** `node:crypto` is fine —
+ * the bundler stubs the import and the functions below are only ever called on
+ * the server. A bare `process.env` read is not. `src/serverModuleBoundary.test.js`
+ * enforces this.
+ *
+ * The category's `replyTo` is therefore a KEY (`'support'`, `'security'`), not
+ * an address. `server/routes/issueRoutes.js` resolves it against the address
+ * book, which keeps the mail identity where the mail is sent and keeps the
+ * address book out of the browser bundle entirely.
  */
 
 /**
@@ -59,10 +81,16 @@ export const SENSITIVE_CATEGORIES = Object.freeze(['security', 'privacy']);
 export const MIN_DESCRIPTION = 20;
 export const MAX_DESCRIPTION = 4000;
 
-/** The reply-to address for a category, from the one address book. */
-export function replyToFor(category) {
+/**
+ * Which mailbox KEY a category's replies belong in — `'support'`, `'security'`.
+ *
+ * Deliberately not the address: resolving the key against `emailIdentity.js`
+ * happens in `issueRoutes.js`, because that import is what used to break the
+ * browser bundle. See the header.
+ */
+export function replyToKeyFor(category) {
   const found = ISSUE_CATEGORIES.find(c => c.value === category);
-  return ADDRESSES[found?.replyTo || 'support'];
+  return found?.replyTo || 'support';
 }
 
 /** True when this category's contents deserve the narrower audience. */

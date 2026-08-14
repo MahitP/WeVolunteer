@@ -5,9 +5,13 @@ import { authenticateToken } from '../utils.js';
 import { requireCap } from '../authz.js';
 import { sendMail } from '../email.js';
 import { APP_NAME } from '../config.js';
+/* The address book stays on this side of the boundary — `issueReports.js` is
+   bundled into the browser and `emailIdentity.js` reads `process.env` at module
+   scope. See the header on `../issueReports.js`. */
+import { ADDRESSES } from '../emailIdentity.js';
 import {
   validateIssue, sanitiseContext, newIssueId, newReference,
-  replyToFor, isSensitive, ISSUE_CATEGORIES,
+  replyToKeyFor, isSensitive, ISSUE_CATEGORIES,
 } from '../issueReports.js';
 
 const router = express.Router();
@@ -99,7 +103,7 @@ router.post('/api/issues', authenticateToken, issueLimiter, async (req, res) => 
    * report into a 500, because the report IS stored and the reporter should be
    * told so.
    */
-  const replyTo = replyToFor(category);
+  const replyTo = ADDRESSES[replyToKeyFor(category)];
   const label = ISSUE_CATEGORIES.find(c => c.value === category)?.label || category;
 
   /**
