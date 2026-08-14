@@ -177,6 +177,7 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
      not even which student, because the reporter attaches no identity.
      "Somebody opened their own badges" is not a fact about a person. */
   '/certificates',
+  '/report-issue',
   '/profile/badges',
   '/users/:handle/badges',
   '/users/:handle/certificates',

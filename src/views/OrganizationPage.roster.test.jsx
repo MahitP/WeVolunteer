@@ -100,7 +100,7 @@ async function menuItem(memberName, name) {
     await show({ memberRole: 'manager', canManage: true });
     /* The label states the action AND the current rank, so promote and demote
        are different sentences rather than one button in two states. */
-    const promote = await menuItem('Priya Patel', /Make Priya Patel a student organizer/i);
+    const promote = await menuItem('Priya Patel', /Promote to Student Organizer/i);
 
     fireEvent.click(promote);
     await waitFor(() => expect(api.setOrganizationMemberRole)
@@ -109,7 +109,7 @@ async function menuItem(memberName, name) {
 
   it('turns the same control into a demotion for somebody who holds the rank', async () => {
     await show({ memberRole: 'manager', canManage: true });
-    const demote = await menuItem('Leo Chen', /Remove Leo Chen as a student organizer/i);
+    const demote = await menuItem('Leo Chen', /Demote to Student/i);
 
     fireEvent.click(demote);
     await waitFor(() => expect(api.setOrganizationMemberRole)
@@ -121,10 +121,12 @@ async function menuItem(memberName, name) {
        be a demotion wearing the word promote. */
     await show({ memberRole: 'manager', canManage: true });
     fireEvent.click(screen.getByRole('button', { name: /Manage Jordan Whitfield/i }));
-    expect(screen.queryByRole('menuitem', { name: /student organizer/i })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /Student Organizer/i })).toBeNull();
     /* The menu still exists for a manager — removing and banning one is a real
-       thing a peer manager may do. Only the rank item is absent. */
-    expect(screen.getByRole('menuitem', { name: /Remove Jordan Whitfield/i })).toBeInTheDocument();
+       thing a peer manager may do. Only the rank item is absent, because the
+       server refuses to demote the last manager and demoting a peer belongs
+       with a confirmation rather than in a row menu. */
+    expect(screen.getByRole('menuitem', { name: /Remove from organization/i })).toBeInTheDocument();
   });
 
   it('reports a refusal instead of pretending it worked', async () => {
@@ -134,7 +136,7 @@ async function menuItem(memberName, name) {
     render(<MemoryRouter><OrganizationPage addToast={addToast} /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Chess Club')).toBeInTheDocument());
 
-    fireEvent.click(await menuItem('Priya Patel', /Make Priya Patel a student organizer/i));
+    fireEvent.click(await menuItem('Priya Patel', /Promote to Student Organizer/i));
     await waitFor(() => expect(addToast).toHaveBeenCalledWith('This is the only manager.', 'error'));
   });
 });

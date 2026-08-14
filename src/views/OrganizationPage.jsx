@@ -14,8 +14,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
-  Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock, UserMinus, UserCog,
-  ShieldMinus,
+  Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock, UserMinus,
+  UserPlus2, UserMinus2, Ban,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
@@ -29,7 +29,7 @@ import AppealInbox from '../components/organizations/AppealInbox';
 import { formatHours, formatDay } from '../utils/helpers';
 import ActionsMenu from '../components/common/ActionsMenu';
 
-export default function OrganizationPage({ addToast }) {
+export default function OrganizationPage({ addToast, currentUser }) {
   const { key } = useParams();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -51,6 +51,66 @@ export default function OrganizationPage({ addToast }) {
   useEffect(() => load(), [load]);
 
   const [removing, setRemoving] = useState(null);
+
+  /**
+   * Is this roster row the person reading it?
+   *
+   * The menu is hidden on your own row. Every action in it is either something
+   * the server refuses for yourself — banning yourself is a 409, because it
+   * would lock you out of an organization only you can unlock — or something
+   * this page already offers better elsewhere: leaving is the `Leave` button in
+   * the header, which names the consequence and confirms it.
+   *
+   * Offering "Remove Sarah Jenkins" on Sarah's own row was a second, worse door
+   * to the same action, next to a third that the server would reject.
+   */
+  const isSelf = (m) => m.id === currentUser?.id;
+
+  /**
+   * The actions this manager may actually take on this member.
+   *
+   * Built here rather than inline so the rule is stated once: the menu offers
+   * only what the SERVER will accept. A frontend that offers more is not a
+   * security hole — the server is authoritative and independently refuses — but
+   * it is a promise the product cannot keep, and the person finds out by being
+   * told no.
+   */
+  const memberActions = (m) => {
+    const actions = [];
+
+    /* A manager's rank is not changed from here. The server refuses to demote
+       the last manager, and demoting a peer is a different decision from
+       managing a member — it belongs with a confirmation, not in a row menu. */
+    if (m.memberRole !== 'manager') {
+      const isOrganizer = m.memberRole === 'student_organizer';
+      actions.push({
+        id: 'role',
+        icon: isOrganizer ? UserMinus2 : UserPlus2,
+        /* The label states the destination, not the mechanism. "Demote to
+           Student" and "Promote to Student Organizer" are different sentences,
+           so the control cannot be misread as one button in two states. */
+        label: isOrganizer ? 'Demote to Student' : 'Promote to Student Organizer',
+        onSelect: () => setMemberRole(m, isOrganizer ? 'member' : 'student_organizer'),
+      });
+    }
+
+    actions.push({
+      id: 'kick',
+      icon: UserMinus,
+      label: 'Remove from organization',
+      onSelect: () => setRemoving({ ...m, intent: 'kick' }),
+    });
+
+    actions.push({
+      id: 'ban',
+      icon: Ban,
+      label: 'Ban from organization',
+      destructive: true,
+      onSelect: () => setRemoving({ ...m, intent: 'ban' }),
+    });
+
+    return actions;
+  };
 
   const removeMember = async (member, { mode = 'kick', reason = '' } = {}) => {
     setBusy(true);
@@ -325,40 +385,12 @@ export default function OrganizationPage({ addToast }) {
                     * meant a manager had to open the destructive dialog before
                     * discovering which destructive thing it offered.
                     */}
-                  {viewer.canManage && (
+                  {viewer.canManage && !isSelf(m) && (
                     <ActionsMenu
                       icon={Settings2}
                       label={`Manage ${m.name}`}
                       disabled={busy}
-                      items={[
-                        /* A manager's rank is not changed from here — the server
-                           refuses the last manager, and demoting a peer is a
-                           different decision from managing a member. */
-                        ...(m.memberRole !== 'manager' ? [{
-                          id: 'role',
-                          icon: UserCog,
-                          label: m.memberRole === 'student_organizer'
-                            ? `Remove ${m.name} as a student organizer`
-                            : `Make ${m.name} a student organizer`,
-                          onSelect: () => setMemberRole(
-                            m,
-                            m.memberRole === 'student_organizer' ? 'member' : 'student_organizer',
-                          ),
-                        }] : []),
-                        {
-                          id: 'kick',
-                          icon: UserMinus,
-                          label: `Remove ${m.name} from ${org.name}`,
-                          onSelect: () => setRemoving({ ...m, intent: 'kick' }),
-                        },
-                        {
-                          id: 'ban',
-                          icon: ShieldMinus,
-                          label: `Ban ${m.name} from ${org.name}`,
-                          destructive: true,
-                          onSelect: () => setRemoving({ ...m, intent: 'ban' }),
-                        },
-                      ]}
+                      items={memberActions(m)}
                     />
                   )}
                 </li>

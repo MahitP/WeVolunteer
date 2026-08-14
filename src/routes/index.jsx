@@ -43,6 +43,7 @@ const CalendarView = React.lazy(() => import('../views/CalendarView'));
 const VolunteerProfile = React.lazy(() => import('../views/VolunteerProfile'));
 const BadgesPage = React.lazy(() => import('../views/BadgesPage'));
 const CertificatesPage = React.lazy(() => import('../views/CertificatesPage'));
+const ReportIssue = React.lazy(() => import('../views/ReportIssue'));
 const PublicCertificates = React.lazy(() => import('../views/PublicCertificates'));
 const PublicServiceHistory = React.lazy(() => import('../views/PublicServiceHistory'));
 const OrganizerProfile = React.lazy(() => import('../views/OrganizerProfile'));
@@ -293,6 +294,15 @@ export const APP_ROUTES = [
      a verification code. */
   { path: '/certificates', element: <CertificatesPage />, requiredCap: 'portfolio.write' },
   { path: '/settings', element: <Settings /> },
+  /**
+   * Reporting a problem with the platform.
+   *
+   * No `requiredCap`: every account may report a broken page, and gating it on
+   * a capability would mean the people most likely to hit a permissions bug are
+   * the ones who cannot report it. Authenticated, though — an anonymous
+   * endpoint that emails staff is a spam relay.
+   */
+  { path: '/report-issue', element: <ReportIssue /> },
   /**
    * Declared with NO `requiredCap`, deliberately.
    *

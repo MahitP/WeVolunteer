@@ -475,6 +475,7 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/hours')) return 'loggedHours';
   if (pathname.startsWith('/certificates')) return 'certificates';
   if (pathname.startsWith('/settings')) return 'settings';
+  if (pathname.startsWith('/report-issue')) return 'reportIssue';
   /* These three had no branch, so they fell through to 'dashboard' — an
      organizer on /checkin read "Dashboard / Track your volunteers" with the
      Dashboard rail item lit, which is byte-for-byte the /errors bug this
@@ -527,6 +528,7 @@ export const RAIL_TAB = {
   portfolio: 'dashboard',
   loggedHours: 'dashboard',
   certificates: 'dashboard',
+  reportIssue: 'dashboard',
   externalHours: 'dashboard',
   organizerAgreement: 'dashboard',
   studentOrganizerAgreement: 'dashboard',
@@ -626,6 +628,7 @@ export const PAGE_META = {
     profile: { title: 'Profile', sub: 'Your service record, milestones, and certificates' },
     loggedHours: { title: 'Logged hours', sub: 'Everything you have volunteered, confirmed and self-reported' },
     certificates: { title: 'Certificates', sub: 'One for each event you have completed' },
+    reportIssue: { title: 'Report an Issue', sub: 'Tell us what is broken, confusing, or unsafe' },
     externalHours: { title: 'Log external hours', sub: 'Volunteering you did somewhere WeVolunteer does not run' },
     /* Reached from the search on Discover, and titled for what is on the
        page rather than for where the reader came from. */
@@ -692,6 +695,7 @@ export const PAGE_META = {
     /* An owner holds '*', so both hour pages are reachable from this persona. */
     loggedHours: { title: 'Logged hours', sub: 'Confirmed service and self-reported entries' },
     certificates: { title: 'Certificates', sub: 'One for each event you have completed' },
+    reportIssue: { title: 'Report an Issue', sub: 'Tell us what is broken, confusing, or unsafe' },
     externalHours: { title: 'Log external hours', sub: 'Volunteering done outside WeVolunteer' }
   },
   partner: {
@@ -1371,7 +1375,10 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/organizations': { currentUser },
     '/organizations/new': { addToast },
     '/organizations/:key/edit': { addToast },
-    '/organizations/:key': { addToast },
+    /* `currentUser` so the roster can tell which row is the reader's own —
+       the manage menu is hidden there, because every action in it is either
+       refused by the server for yourself or already offered as `Leave`. */
+    '/organizations/:key': { addToast, currentUser },
     '/hours/external': { addToast },
     '/hours': { currentUser, addToast },
     /* The destinations the profile's capped lists point at. `BadgesPage` needs
@@ -1383,6 +1390,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/users/:handle/hours': { currentUser },
     '/certificates': { currentUser, addToast },
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
+    '/report-issue': { currentUser, addToast },
     '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
     /* Same three. `refreshAll` is what makes the released capabilities visible
        to the navigation without a sign-out. */

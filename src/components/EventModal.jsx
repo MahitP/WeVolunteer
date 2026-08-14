@@ -4,7 +4,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useModal } from '../utils/useModal';
 import {
   X, CalendarClock, Users, Zap, ShieldCheck,
-  Pencil, ClipboardCheck, AlertCircle, Megaphone, MessageSquare, ListChecks, Info, Star, Flag, Scale
+  Pencil, ClipboardCheck, AlertCircle, Megaphone, MessageSquare, ListChecks, Info, Star, Flag, Scale,
+  ShieldBan, Clock
 } from 'lucide-react';
 import { api } from '../utils/api';
 import {
@@ -700,39 +701,94 @@ export default function EventModal({
 
               {tab === 'shifts' && event.viewerBan?.banned && (
                 <div className="alert alert-danger event-ban-notice" role="status">
-                  <div>
-                    <span className="alert-title">
-                      You cannot take part in {event.organizationName || 'this organization'}&rsquo;s events
+                  <div className="stack-sm">
+                    <span className="alert-title row" style={{ gap: 6 }}>
+                      <ShieldBan size={16} aria-hidden="true" />
+                      You are banned from {event.organizationName || 'this organization'}
                     </span>
-                    {event.viewerBan.reason && <p>{event.viewerBan.reason}</p>}
+                    <p className="small">
+                      You cannot join this or any other opportunity they run.
+                      {event.viewerBan.reason ? ` Reason: ${event.viewerBan.reason}` : ''}
+                    </p>
 
+                    {/**
+                      * The appeal control, and the ONLY control offered here.
+                      *
+                      * The shift rows below used to render a disabled "Request"
+                      * button under this notice — a Join button that is greyed
+                      * out still reads as "you could join", and the reader is
+                      * left to work out that the notice above is the reason. So
+                      * the shift list is suppressed entirely when banned and
+                      * this takes its place.
+                      *
+                      * Three states, because they mean three different things:
+                      * no appeal yet (act), one waiting (wait), one decided
+                      * (the outcome, which is what they actually want to know).
+                      */}
                     {!event.viewerBan.appeal ? (
                       <p>
                         <button
                           type="button"
-                          className="btn btn-secondary btn-sm"
+                          className="btn btn-danger-solid"
                           onClick={() => navigate(
                             `/appeals/new?subject=organization_ban&organization=${encodeURIComponent(event.organizationId)}`
                           )}
                         >
-                          <Scale size={14} aria-hidden="true" /> Appeal this
+                          <Scale size={16} aria-hidden="true" /> Appeal
                         </button>
                       </p>
                     ) : isFinal(event.viewerBan.appeal.status) ? (
-                      <p className="small">
-                        You appealed, and a manager decided:{' '}
-                        {DECISION_LABELS[event.viewerBan.appeal.decision] || 'the decision was recorded'}.
-                      </p>
+                      <>
+                        <p className="small">
+                          You appealed, and a manager decided:{' '}
+                          {DECISION_LABELS[event.viewerBan.appeal.decision] || 'the decision was recorded'}.
+                        </p>
+                        {/**
+                          * And they may appeal again.
+                          *
+                          * A decided appeal is not the end of the road — the
+                          * server's only bar on a fresh one is the rate limit
+                          * (five per subject per rolling thirty days), and the
+                          * duplicate guard blocks a second LIVE appeal, not a
+                          * second appeal. Showing the outcome with no way
+                          * forward made the UI stricter than the policy, which
+                          * on the one screen a banned student can reach reads
+                          * as a dead end that is not real.
+                          */}
+                        <p>
+                          <button
+                            type="button"
+                            className="btn btn-danger-solid"
+                            onClick={() => navigate(
+                              `/appeals/new?subject=organization_ban&organization=${encodeURIComponent(event.organizationId)}`
+                            )}
+                          >
+                            <Scale size={16} aria-hidden="true" /> Appeal again
+                          </button>
+                        </p>
+                      </>
                     ) : (
-                      <p className="small">
-                        Your appeal is with the organization&rsquo;s managers. You do not need to send another.
+                      <p>
+                        {/* Disabled, not hidden: the reader needs to see that
+                            the thing they did is recorded and in progress. */}
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled
+                          aria-disabled="true"
+                        >
+                          <Clock size={16} aria-hidden="true" /> Appeal Sent
+                        </button>
+                        <span className="small dim" style={{ display: 'block', marginTop: 'var(--s2)' }}>
+                          Your appeal is with the organization&rsquo;s managers. You do not need to send another.
+                        </span>
                       </p>
                     )}
                   </div>
                 </div>
               )}
 
-              {tab === 'shifts' && (
+              {tab === 'shifts' && !event.viewerBan?.banned && (
                 <EventShiftsTab
                   event={event}
                   eventApps={eventApps}

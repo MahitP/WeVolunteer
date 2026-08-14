@@ -925,6 +925,13 @@ export const api = {
 
   // ── Certificates ───────────────────────────────
   fetchCertificates: async () => apiFetch('/api/certificates'),
+
+  /* Reporting a problem with the PLATFORM. Not the moderation report, which is
+     about a person and lives on that person's own surfaces. */
+  submitIssueReport: async (report) => apiFetch('/api/issues', {
+    method: 'POST',
+    body: JSON.stringify(report),
+  }),
   /* Somebody ELSE's certificates: metadata only. The server never emits the
      verification code on this route, so there is no download to withhold in the
      client — the difference is enforced where it cannot be bypassed. */

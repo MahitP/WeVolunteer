@@ -14,6 +14,7 @@ import { recordError, hashUserId } from './errorReporter.js';
 
 import authRoutes from './routes/authRoutes.js';
 import webhookRoutes from './routes/webhookRoutes.js';
+import issueRoutes from './routes/issueRoutes.js';
 import accountRoutes from './routes/accountRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import eventRoutes from './routes/eventRoutes.js';
@@ -781,6 +782,7 @@ app.use('/api/certificates/verify', verifyLimiter);
 app.use('/api', apiLimiter);
 
 app.use(webhookRoutes);
+app.use(issueRoutes);
 app.use(authRoutes);
 app.use(accountRoutes);
 app.use(userRoutes);

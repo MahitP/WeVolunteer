@@ -59,6 +59,7 @@ import emailOutbox from './047_email_outbox.js';
 import hashAuthTokens from './048_hash_auth_tokens.js';
 import serviceVisibility from './049_service_visibility.js';
 import deliveryEvents from './050_delivery_events.js';
+import issueReports from './051_issue_reports.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -302,7 +303,12 @@ export const MIGRATIONS = [
    * 050 — what became of a message after the provider accepted it. Additive
    * columns plus an event table whose PRIMARY KEY is the webhook dedupe.
    */
-  deliveryEvents
+  deliveryEvents,
+  /**
+   * 051 — reports about the PLATFORM, kept out of the moderation queue that
+   * exists to protect children. A new table, not a reuse of `reports`.
+   */
+  issueReports
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

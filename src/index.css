@@ -9195,7 +9195,13 @@ input:disabled + .premium-slider {
   top: calc(100% + var(--s1));
   right: 0;
   z-index: 30;
-  min-width: 17rem;
+  /**
+   * `min()`, because 17rem is 272px and the narrowest supported viewport is
+   * 320px. A fixed 17rem left 24px either side once the 8px viewport margin was
+   * applied, and any padding on top of that pushed the page sideways.
+   */
+  min-width: min(17rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
   margin: 0;
   padding: var(--s1);
   list-style: none;
@@ -9227,6 +9233,33 @@ input:disabled + .premium-slider {
 .profile-menu-item:focus-visible { background: var(--surface-hover); }
 
 .profile-menu-item-danger { color: var(--danger); }
+
+/**
+ * The floating variant, rendered through a portal into `body`.
+ *
+ * ── Why this exists ──
+ *
+ * The absolutely-positioned menu above is clipped by any ancestor with a
+ * non-visible `overflow`, and `.list` sets `overflow: hidden` on purpose — it
+ * is what keeps row backgrounds inside the rounded corners, in sixty-seven
+ * places. On the organization roster that clipped the member menu to nine
+ * visible pixels: correct markup, correct state, `aria-expanded="true"`, and
+ * nothing on screen.
+ *
+ * Portaled into `body` there is no clipping ancestor, and `fixed` matches the
+ * viewport coordinates the trigger's `getBoundingClientRect()` already reports.
+ * `top`/`left` are set inline by the component; everything visual stays here.
+ *
+ * Above `.modal-overlay` (1000) and `.toasts` (1200) is deliberately NOT
+ * attempted — this menu never opens inside a modal, and a value that high would
+ * put a roster popover over a dialog. 30 is the same layer the anchored variant
+ * used; what changed is that nothing clips it any more.
+ */
+.profile-menu-list-floating {
+  position: fixed;
+  top: auto;
+  right: auto;
+}
 
 /* ── Directory search ─────────────────────────────────────────────────────── */
 
