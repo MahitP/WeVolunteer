@@ -213,7 +213,7 @@ router.get('/api/geocode', geocodeLimiter, authenticateToken, requireCap('geocod
       `https://nominatim.openstreetmap.org/search?${params}`,
       {
         headers: {
-          'User-Agent': 'WeVolunteer/1.0 (volunteer-app; contact@wevolunteer.app)',
+          'User-Agent': 'WeVolunteer/1.0 (volunteer-app; contact@wevolunteers.org)',
           'Accept': 'application/json'
         },
         signal: controller.signal

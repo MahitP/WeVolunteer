@@ -40,7 +40,7 @@ reading level.
   collected, no confirmation is sent, nothing is verified, and no guardian is notified of
   anything. The draft discloses that in plain words. Do not reintroduce language implying
   otherwise.
-- **Contact** — wevolunteer.platform@gmail.com, monitored by the operator.
+- **Contact** — privacy@wevolunteers.org, monitored by the operator.
 
 **Still open — one item, marked in the draft as blocking publication.** The production hosting
 provider and the country the database sits in. The email-sending provider is resolved: `SMTP_HOST`
@@ -75,7 +75,7 @@ WeVolunteer helps students find volunteer work and keep track of their service h
 that, it has to store some information about you. This page explains all of it.
 
 We wrote this to be read, not to be survived. If anything here is unclear, that is our
-problem and we want to hear about it: **wevolunteer.platform@gmail.com**.
+problem and we want to hear about it: **privacy@wevolunteers.org**.
 
 ## The short version
 
@@ -99,7 +99,7 @@ organizers post events, students volunteer — but **your school does not run We
 does not control your account.** If you want something corrected or removed, you ask us, not
 your school.
 
-Contact: **wevolunteer.platform@gmail.com**
+Contact: **privacy@wevolunteers.org**
 
 ## What we collect
 
@@ -172,7 +172,7 @@ draw. You should know how it works:
 - It is random within that weighting, and every draw is recorded so it can be checked later.
 
 If you were not selected and you want to know why, ask the organizer. If you think a draw was
-wrong, contact **wevolunteer.platform@gmail.com** and we will look at the recorded draw.
+wrong, contact **support@wevolunteers.org** and we will look at the recorded draw.
 
 ## What we do not do
 
@@ -257,19 +257,19 @@ it before you delete, not after.
 | You want to… | How |
 |---|---|
 | See everything we hold | Settings → Download my data. You will be asked to confirm it is you |
-| Fix something wrong | Settings → Profile for most things; email **wevolunteer.platform@gmail.com** for hours or attendance |
+| Fix something wrong | Settings → Profile for most things; email **support@wevolunteers.org** for hours or attendance |
 | Stop emails | Settings → Notifications. Security emails cannot be switched off |
 | Hide your profile | Settings → Privacy. It is already private unless you changed it |
 | Leave the leaderboard | Settings → Privacy. Takes effect immediately |
 | Delete your account | Settings → Delete account. **Please read the [Data Deletion Policy](/legal/data-deletion-policy) first** — some things are kept |
-| Complain | **wevolunteer.platform@gmail.com**. We will acknowledge within 10 business days |
+| Complain | **privacy@wevolunteers.org**. We will acknowledge within 10 business days |
 
 ## For parents and guardians
 
 If you are the parent or guardian of a student under 18, you can ask to see what we hold
 about your child, ask us to correct it, and ask us to delete it.
 
-Email **wevolunteer.platform@gmail.com**. We will ask you to confirm who you are and your
+Email **privacy@wevolunteers.org**. We will ask you to confirm who you are and your
 relationship to the student — proportionate to what you are asking for, and no more
 documentation than we actually need. We acknowledge within **10 business days** and respond
 within **45 days**.
@@ -312,7 +312,7 @@ including with Google. We do not tell you how close you were, because that would
 telling you which year to type instead.
 
 If we find out we have information about a child under 13, we delete it promptly. If you think
-a child under 13 has an account, email **wevolunteer.platform@gmail.com** and we will act on it.
+a child under 13 has an account, email **privacy@wevolunteers.org** and we will act on it.
 
 This is also why we can keep hours and certificates forever: the law does not allow keeping a
 child's information indefinitely, and the age check is what makes that promise a safe one.
@@ -387,13 +387,13 @@ current version.
 
 **This is version 1.0 — the first published version, so there are no earlier ones yet.** When we
 replace it we keep the version it replaced, and you can email
-**wevolunteer.platform@gmail.com** for any previous version and the dates it applied. Every
+**privacy@wevolunteers.org** for any previous version and the dates it applied. Every
 version is stored with a content fingerprint, so a copy you receive can be checked against the
 one your account accepted.
 
 ## Contact
 
-**wevolunteer.platform@gmail.com** — read by the operator personally. We acknowledge within 10
+**privacy@wevolunteers.org** — read by the operator personally. We acknowledge within 10
 business days.
 
 Being one person is the honest answer to "who monitors this?", and it is why we do not claim a

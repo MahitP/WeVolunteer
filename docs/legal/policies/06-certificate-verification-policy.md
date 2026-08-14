@@ -109,7 +109,7 @@ Two reasons, and we cannot tell you which from the outside:
 period to run out — see [Certificates stay verifiable indefinitely](#if-you-delete-your-account)
 below. A code that fails was mistyped or was never issued by us.
 
-If you believe you have been given a forged certificate, tell us at **wevolunteer.platform@gmail.com**. We
+If you believe you have been given a forged certificate, tell us at **security@wevolunteers.org**. We
 take that seriously and we will investigate.
 
 ## For students
@@ -159,7 +159,7 @@ See the [Data Deletion Policy](/legal/data-deletion-policy).
 ### If your certificate is wrong
 
 Tell the organizer first — they recorded the attendance and can correct it. If that does not
-work, email **wevolunteer.platform@gmail.com**.
+work, email **support@wevolunteers.org**.
 
 Note that hours are a **snapshot**: once credited, they keep the value they had when you earned
 them, even if the event is edited afterwards. That is deliberate, so that nobody's completed
@@ -183,4 +183,4 @@ Do not use verification to try to find out whether a particular person volunteer
 students' names, or to test codes at scale. That is a breach of the
 [Terms of Service](/legal/terms-of-service) and we will block it.
 
-Questions: **wevolunteer.platform@gmail.com**
+Questions: **support@wevolunteers.org**

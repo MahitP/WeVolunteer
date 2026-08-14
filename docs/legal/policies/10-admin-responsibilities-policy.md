@@ -129,7 +129,7 @@ As an administrator you are more likely than most people to encounter this. So:
 - **Do not investigate it yourself.** Do not interview the student. Do not contact a suspected
   abuser. Preserve what you have and report it.
 - **Then act on the platform** — suspend accounts, preserve records — and notify
-  **wevolunteer.platform@gmail.com**. Where a student may be at risk, also tell their school or
+  **security@wevolunteers.org**. Where a student may be at risk, also tell their school or
   guardian **if you can reach them**: WeVolunteer collects no guardian contact details, so DCP&P
   and the police are the routes that always work and the ones that must not be skipped.
 - **Preserve everything.** Do not delete a conversation that is part of a report, even at a

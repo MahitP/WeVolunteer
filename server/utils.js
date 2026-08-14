@@ -21,6 +21,7 @@ import { suspendedMayReach } from './suspendedAccess.js';
    disagree. profileSerializer imports only volunteerStats, so this is not a
    cycle. */
 import { distinctionFor, parseHighlights as parseHighlightsList } from './profileSerializer.js';
+import { normaliseVisibility } from './serviceVisibility.js';
 
 /**
  * The seeded demo administrator, and the ONLY account that may skip the policy.
@@ -759,6 +760,13 @@ export function formatUserResponse(row) {
      * See the note at the top of that file for why.
      */
     profileVisibility: row.profile_visibility || 'private',
+    /* The account's own two service-privacy answers, so the Settings screen can
+       render the switch in the state it is actually in rather than guessing a
+       default. Normalised through the same function the read path uses, so the
+       control and the enforcement can never disagree about what a stored value
+       means. */
+    hoursVisibility: normaliseVisibility(row.hours_visibility),
+    certificatesVisibility: normaliseVisibility(row.certificates_visibility),
     friendActivityVisible: row.friend_activity_visible !== 0,
     createdAt: row.created_at
   };
@@ -1065,7 +1073,14 @@ export function runNotificationSweep() {
      * unhandled rejection here would be reported by our own error capture,
      * which is the loop worth refusing outright.
      */
-    sendErrorAlerts(db, { send: sendMail, now, appUrl: process.env.APP_URL })
+    /* `flow: 'error-alert'` sends this under the platform identity rather than
+       the one users see. It goes to whoever runs the deployment, not to a
+       volunteer, and a reply belongs in the operators' mailbox. */
+    sendErrorAlerts(db, {
+      send: (msg) => sendMail({ ...msg, flow: 'error-alert' }),
+      now,
+      appUrl: process.env.APP_URL
+    })
       .then(({ sent, reason }) => {
         if (sent > 0) console.log(`[Alerts] Sent an alert covering ${sent} new problem(s).`);
         else if (reason === 'failed') console.warn('[Alerts] Alert send failed — see the error above.');

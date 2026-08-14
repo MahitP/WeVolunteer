@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { ShieldOff, Clock, CalendarX2 } from 'lucide-react';
 import { api } from '../../utils/api';
 import { isFinal, MIN_STATEMENT_LENGTH } from '../../appeals';
+import { APPEALS_EMAIL } from '../../config';
 
 /**
  * The screen a suspended account sees instead of the application.
@@ -239,7 +240,7 @@ export default function SuspendedWall({ user, suspension, onSignOut }) {
           </button>
           <p className="muted">
             Signed in as {user?.email}. If you think this is a mistake and the appeal is not
-            working, email wevolunteer.platform@gmail.com.
+            working, email {APPEALS_EMAIL}.
           </p>
         </div>
       </main>

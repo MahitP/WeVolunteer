@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'child_process';
+import { spawnSync } from 'child_process';
 
 /**
  * Production must refuse to boot without SMTP (P1-F).
@@ -13,29 +13,72 @@ import { execFileSync } from 'child_process';
  */
 function importEmail(env) {
   const root = process.cwd().replace(/\\/g, '/');
-  try {
-    const out = execFileSync(process.execPath, ['--input-type=module', '-e', `
+  /**
+   * `spawnSync`, not `execFileSync`, because a SUCCESSFUL boot can still have
+   * something to say. `execFileSync` returns stdout alone, so a `console.warn`
+   * on a process that exits 0 — which is exactly how "you have no fallback
+   * provider" is reported — was invisible to every assertion here, and a test
+   * for it would have failed while the warning worked perfectly.
+   */
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
       await import('${root}/server/email.js');
       console.log('IMPORT_OK');
     `], {
       cwd: process.cwd(),
       // Start from a clean slate so the host's own env cannot leak in.
-      env: { ...process.env, SMTP_HOST: '', SMTP_USER: '', SMTP_PASS: '', NODE_ENV: '', APP_URL: '', ...env },
+      env: {
+        ...process.env,
+        SMTP_HOST: '', SMTP_USER: '', SMTP_PASS: '', NODE_ENV: '', APP_URL: '',
+        /* Cleared explicitly: with Resend as the primary provider, a key left in
+           the developer's own environment would satisfy the boot guard and turn
+           every refusal case below into a false pass. */
+        RESEND_API_KEY: '',
+        ...env,
+      },
       stdio: 'pipe',
       encoding: 'utf8'
     });
-    return { code: 0, out };
-  } catch (err) {
-    return { code: err.status ?? 1, out: (err.stdout || '') + (err.stderr || '') };
-  }
+  return { code: r.status ?? 1, out: (r.stdout || '') + (r.stderr || '') };
 }
 
 describe('email transport boot policy (P1-F)', () => {
-  it('exits non-zero in production when SMTP is not configured', () => {
+  it('exits non-zero in production when NO provider is configured', () => {
+    /**
+     * The refusal used to be "SMTP is not configured", because SMTP was the only
+     * way out. Resend is now the primary and SMTP the fallback, so a deployment
+     * with Resend and no SMTP is a legitimate (if unprotected) choice. What must
+     * still be refused is having neither — the case where the console mock would
+     * otherwise print password-reset tokens to stdout and deliver nothing.
+     */
     const r = importEmail({ NODE_ENV: 'production' });
     expect(r.code).not.toBe(0);
-    expect(r.out).toMatch(/SMTP is not configured/i);
+    expect(r.out).toMatch(/no email provider is configured/i);
+    expect(r.out).toMatch(/RESEND_API_KEY/);
     expect(r.out).not.toContain('IMPORT_OK');
+  });
+
+  it('boots on Resend alone, and says out loud that there is no fallback', () => {
+    /* Legitimate, but the operator must know they have no second provider —
+       otherwise the first Resend outage is a surprise rather than a decision. */
+    const r = importEmail({
+      NODE_ENV: 'production',
+      RESEND_API_KEY: 'test-key-not-a-real-secret',
+      APP_URL: 'https://volunteers.example.org',
+    });
+    expect(r.code, r.out.slice(0, 300)).toBe(0);
+    expect(r.out).toContain('IMPORT_OK');
+    expect(r.out).toMatch(/no fallback provider/i);
+  });
+
+  it('never falls back to the console mock in production', () => {
+    /* The mock logs the full text of every message, tokens included. If it ever
+       runs in production the tokens are in the journal. */
+    const r = importEmail({
+      NODE_ENV: 'production',
+      RESEND_API_KEY: 'test-key-not-a-real-secret',
+      APP_URL: 'https://volunteers.example.org',
+    });
+    expect(r.out).not.toMatch(/mock mode/i);
   });
 
   it('boots in production when SMTP and APP_URL are fully configured', () => {
@@ -77,11 +120,11 @@ describe('APP_URL boot policy', () => {
     expect(r.out).toContain('IMPORT_OK');
   });
 
-  it('reports SMTP first when both SMTP and APP_URL are missing', () => {
-    // Order is load-bearing for the runbook: an operator fixes SMTP, then
-    // APP_URL. If this flips, the documented sequence is wrong.
+  it('reports the missing provider first when APP_URL is missing too', () => {
+    // Order is load-bearing for the runbook: an operator fixes the provider,
+    // then APP_URL. If this flips, the documented sequence is wrong.
     const r = importEmail({ NODE_ENV: 'production' });
-    expect(r.out).toMatch(/SMTP is not configured/i);
+    expect(r.out).toMatch(/no email provider is configured/i);
     expect(r.out).not.toMatch(/APP_URL must be set/i);
   });
 

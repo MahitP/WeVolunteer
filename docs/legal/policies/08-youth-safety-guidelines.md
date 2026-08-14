@@ -14,7 +14,7 @@ what happens after a report · mandated reporting · in-person event safety · w
 · contacts including crisis lines.
 
 **Decisions resolved.** Organizer↔applicant messaging is intentional and stays. Reports go to
-wevolunteer.platform@gmail.com. The operator is a sole proprietor, so "we" is one person and the
+contact@wevolunteers.org. The operator is a sole proprietor, so "we" is one person and the
 draft does not imply a safety team. **No guardian consent step exists and none is being built** —
 the "For parents and guardians" section says so rather than letting a reader assume it.
 
@@ -117,7 +117,7 @@ fifty reports that turn out fine than miss the one that was not.
 - Keep your phone with you and charged.
 - If you feel unsafe, leave. You do not owe anyone an explanation and you will not lose your
   hours for the part you did.
-- Tell us afterwards: wevolunteer.platform@gmail.com.
+- Tell us afterwards: security@wevolunteers.org.
 
 ---
 
@@ -174,7 +174,7 @@ Your student's account is theirs, but you have a right to understand it.
 Ask your student to show you the app. Ask who they are messaging. Ask where the event is and
 who else will be there.
 
-You can contact us directly at **wevolunteer.platform@gmail.com** with any concern, and you do not need
+You can contact us directly at **security@wevolunteers.org** with any concern, and you do not need
 your student's permission to do so.
 
 ### The part we would rather you heard from us
@@ -200,7 +200,7 @@ can ask us for at any time.
 **In the app** — every conversation, comment, and event page has a **Report** button. This is
 the fastest route and it tells us exactly what you are reporting.
 
-**By email** — **wevolunteer.platform@gmail.com**. We review safety reports as soon as
+**By email** — **security@wevolunteers.org**. We review safety reports as soon as
 reasonably possible. It is read by one person, so it is not monitored around the clock and there
 is nobody covering it when that person is unavailable — we would rather tell you that than
 publish hours we cannot hold to.
@@ -300,6 +300,6 @@ not exist.
 | Immediate danger | **911** |
 | Child abuse or neglect (NJ) | **1-877-NJ-ABUSE** (1-877-652-2873) |
 | Thoughts of suicide or crisis | **988** — call or text |
-| Something wrong on WeVolunteer | Report button, or **wevolunteer.platform@gmail.com** |
-| A privacy question | **wevolunteer.platform@gmail.com** |
+| Something wrong on WeVolunteer | Report button, or **security@wevolunteers.org** |
+| A privacy question | **privacy@wevolunteers.org** |
 | A trusted adult at school | Your counsellor, teacher, or principal — WeVolunteer is not run by your school, but they can still help you |

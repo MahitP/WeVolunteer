@@ -21,6 +21,7 @@ import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
 import {
   canManage, canHelpRun, canRunEvent, EVENT_STAFF_CAPABILITIES, memberIds,
 } from '../organizations.js';
+import { MAIL_DOMAIN } from '../emailIdentity.js';
 
 const router = express.Router();
 
@@ -1894,20 +1895,34 @@ router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['even
       return res.status(400).json({ error: 'No confirmed volunteers to email' });
     }
 
-    const { sendNotificationEmail } = await import('../email.js');
     const { notificationService } = await import('../services/notificationService.js');
-    
-    const emailPromises = [];
-    for (const u of confirmedApps) {
-      // Create in-app notification
-      notificationService.dispatch('IMPORTANT_ANNOUNCEMENT', { eventId: event.id, eventTitle: event.title, body: message }, u.id);
-      // Send email if not opted out
-      if (u.email && u.email_opt_out === 0) {
-        emailPromises.push(sendNotificationEmail(u.email, `Update: ${event.title} - ${subject}`, message));
-      }
-    }
 
-    Promise.allSettled(emailPromises).catch(err => console.error('Broadcast error:', err));
+    /**
+     * `dispatch` is the whole broadcast. It used not to be.
+     *
+     * This loop also called `sendNotificationEmail` directly, alongside
+     * `dispatch` — and `dispatch` already queues an email job of its own. So one
+     * broadcast produced TWO emails per volunteer, from two different code paths
+     * with two different rules:
+     *
+     *   - the direct send tested `email_opt_out === 0`, while dispatch tests
+     *     `!== 1`, so a row with a NULL opt-out got one email from dispatch and
+     *     none from here — the two halves disagreed about who had opted out;
+     *   - only the queued half retried; the direct half had three in-process
+     *     attempts and then vanished;
+     *   - `Promise.allSettled` never rejects, so the `.catch` that followed it
+     *     was dead code and no per-recipient failure was ever observed.
+     *
+     * Removing the direct send fixes the duplicate, puts every recipient under
+     * one opt-out rule, and puts every message in the durable outbox.
+     */
+    for (const u of confirmedApps) {
+      notificationService.dispatch(
+        'IMPORTANT_ANNOUNCEMENT',
+        { eventId: event.id, eventTitle: event.title, body: message },
+        u.id
+      );
+    }
 
     res.json({ success: true, count: confirmedApps.length });
   } catch (err) {
@@ -1948,7 +1963,12 @@ router.get('/api/events/:eventId/slots/:slotId/ics', authenticateToken, (req, re
     const reminderMinutes = Number.parseInt(req.query.remind, 10);
 
     const icsContent = buildShiftIcs({
-      uid: `${slot.id}@wevolunteer.org`,
+      /* The UID domain has to be one the platform controls: a calendar client
+         uses it to match an update to the entry it already holds, and it is
+         visible in the downloaded file. `MAIL_DOMAIN` rather than a literal so
+         this and the client-side exporter in src/utils/helpers.js cannot drift
+         apart — they mint UIDs for the same shifts. */
+      uid: `${slot.id}@${MAIL_DOMAIN}`,
       start: slot.start_datetime,
       end: slot.end_datetime,
       summary: `${event.title} (${slot.name})`,

@@ -1,3 +1,4 @@
+import { MAIL_DOMAIN } from '../config';
 /**
  * Formats a decimal hour value into a user-friendly string (e.g., 1.5 -> "1 hr 30 min", 0.75 -> "45 min")
  * @param {number|string} hours - The decimal hour value (e.g., 1.5, 2.25)
@@ -184,7 +185,10 @@ export function downloadIcs(event, slot) {
     'VERSION:2.0',
     'PRODID:-//WeVolunteer//EN',
     'BEGIN:VEVENT',
-    `UID:${slot.id}@wevolunteer.app`,
+    /* The UID domain must be one the platform actually controls: it is the
+       identity a calendar client uses to match an update to the entry it already
+       has, and it is visible in the exported file. */
+    `UID:${slot.id}@${MAIL_DOMAIN}`,
     `DTSTAMP:${formatDates(now)}`,
     `DTSTART:${formatDates(start)}`,
     `DTEND:${formatDates(end)}`,

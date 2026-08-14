@@ -101,7 +101,7 @@ An organizer cannot see or touch a record from someone else's event.
 **Step 1 — Tell the organizer.** They recorded it and they can fix it. Most problems are a
 forgotten confirmation and take a minute.
 
-**Step 2 — If that does not work**, email **wevolunteer.platform@gmail.com** with the event, the date, and
+**Step 2 — If that does not work**, email **support@wevolunteers.org** with the event, the date, and
 what you think is wrong. We will look at the recorded attendance and the ledger.
 
 **Step 3 — We respond within 10 business days** and tell you what we found, whether we changed
@@ -163,7 +163,7 @@ hours you logged yourself from outside WeVolunteer, or anything else about who y
 your credited hours and whether you turned up.
 
 **Every draw is recorded** — including the random seed — so any draw can be re-run and checked
-afterwards. If you think a draw went wrong, email **wevolunteer.platform@gmail.com** and we will
+afterwards. If you think a draw went wrong, email **support@wevolunteers.org** and we will
 reconstruct it.
 
 You will always be told whether an event used Auto Select.
@@ -198,4 +198,4 @@ happens to your certificates, which is the part most people do not expect — is
 - **Download it** — Settings → Download my data, as a complete file
 - **Correct it** — the process above
 - **Ask how a decision was made** — including any Auto Select draw
-- **Complain** — **wevolunteer.platform@gmail.com**, acknowledged within 10 business days
+- **Complain** — **privacy@wevolunteers.org**, acknowledged within 10 business days

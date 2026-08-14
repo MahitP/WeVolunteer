@@ -1,9 +1,24 @@
+import { ADDRESSES } from '../emailIdentity.js';
+
 /**
  * The published fallback channel, named in the Community Guidelines and the
  * Privacy Policy. One definition, because a student locked out of their account
  * has nothing else and a typo here is a dead end.
+ *
+ * ── Why this is now `admin@` and not a support address ──
+ *
+ * All three messages that name it are enforcement notices: a suspension, a ban,
+ * an appeal whose link has stopped working. What they say is "if you think this
+ * is wrong, write to us" — that is an adjudication channel, not a help desk, and
+ * the person reading it is contesting a decision somebody made about their
+ * account. `admin@` is where that belongs.
+ *
+ * It used to be a personal-tier Gmail address hard-coded here and in two more
+ * places in the client, none of which was the env-driven `SUPPORT_EMAIL` the
+ * config already exported. Now it comes from the same address book as every
+ * sender, so a domain move is one edit.
  */
-export const SUPPORT_EMAIL = 'wevolunteer.platform@gmail.com';
+export const SUPPORT_EMAIL = ADDRESSES.admin;
 
 /**
  * Notices that are served, not sent — the enforcement class.

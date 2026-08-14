@@ -280,9 +280,13 @@ describe('background failures are captured where nobody is watching', () => {
       'a retry is being reported — only permanent exhaustion should be'
     ).not.toContain('reportWorkerError');
 
-    // Exactly five call sites: reclaim, health, exhausted, bookkeeping, tick.
+    /* Exactly six call sites: reclaim, health, exhausted, bookkeeping, tick, and
+       the exhaustion report for the rendered-message channel. The sixth arrived
+       with the durable outbox for transactional mail: a queued verification or
+       password-reset message that runs out of attempts is a person locked out of
+       their account, which is the definition of something worth reporting. */
     const calls = [...src.matchAll(/reportWorkerError\(/g)].length - 1; // minus the definition
-    expect(calls, 'the number of reporting call sites changed').toBe(5);
+    expect(calls, 'the number of reporting call sites changed').toBe(6);
   });
 
   it('does not report the benign expired-file cleanup race', () => {
