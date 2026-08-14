@@ -208,6 +208,10 @@ describe('the bind address is configurable', () => {
         APP_URL: 'https://volunteers.example.org',
         // Fatal boot guard in production, same class as JWT_SECRET above.
         TFA_ENCRYPTION_KEY: 'c3VwZXJzZWNyZXRrZXkxMjM0NTY3ODkwYWJjZGVmZ2g=',
+        /* Production refuses to boot without it — every per-IP limiter would
+           otherwise share one bucket behind a proxy. Set here so this case
+           fails for its own reason rather than on an unrelated guard. */
+        TRUST_PROXY: '1',
         REQUIRE_ADMIN_2FA: 'true'
       }
     });

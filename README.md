@@ -267,11 +267,13 @@ Templates for both are in the repository: [`deploy/wevolunteer.env.example`](dep
 
 **Authentication.** Passwords are hashed with bcrypt and must be at least 8 characters long. Sessions are JWTs with a seven-day expiry transported in a secure `HttpOnly` cookie. Authorization is never taken from the token payload — the user row is re-read on every request, so a deleted account or a changed role takes effect at once. A `token_version` column lets a password reset or logout invalidate all existing sessions.
 
-**Startup guards.** Three misconfigurations cause the process to exit rather than run in a degraded state, in this order:
+**Startup guards.** Five misconfigurations cause the process to exit rather than run in a degraded state, in this order:
 
-1. `JWT_SECRET` missing — required in every environment. There is no fallback secret.
-2. `SMTP_*` incomplete in production — the development console transport would otherwise print live password-reset tokens to the log and deliver nothing.
-3. `APP_URL` missing in production — a wrong value would email single-use tokens to a domain the operator does not control.
+1. `JWT_SECRET` missing, too short, too repetitive, or a template placeholder — required in every environment. There is no fallback secret.
+2. `TFA_ENCRYPTION_KEY` missing, not 32 bytes of base64, the published development key, or too low-entropy — it encrypts stored two-factor secrets at rest, so a guessable value makes every one of them recoverable.
+3. `SMTP_*` incomplete in production — the development console transport would otherwise print live password-reset tokens to the log and deliver nothing.
+4. `APP_URL` missing, unparseable, or not https in production — these links carry single-use credentials, and a wrong value emails them to a domain the operator does not control.
+5. `TRUST_PROXY` missing in production — without it every per-IP rate limiter shares one bucket for the whole site, because Express reads the proxy's address as the client's.
 
 Enabling demo mode with `NODE_ENV=production` is also refused.
 

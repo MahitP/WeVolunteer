@@ -49,6 +49,31 @@ const __dirname = path.dirname(__filename);
 
 export const app = express();
 
+/**
+ * ── Why this is a production requirement and not a nicety ──
+ *
+ * Every per-IP control on this platform — the login limiter, the mail limiter,
+ * the export and re-auth limiters — reads `req.ip`. Behind a reverse proxy with
+ * `trust proxy` unset, Express reports the PROXY's address for every request, so
+ * all of them collapse into a single bucket: one person fumbling their password
+ * ten times locks out everybody, and a real attacker is rate-limited alongside
+ * the school they are attacking.
+ *
+ * `deploy/wevolunteer.env.example` has always called this required. Nothing
+ * enforced it, which is the gap between a document and a guarantee. Production
+ * now refuses to boot without it, in the same style as the other four blockers.
+ */
+if (!process.env.TRUST_PROXY && process.env.NODE_ENV === 'production') {
+  console.error(
+    'FATAL: TRUST_PROXY must be set in production. Without it Express reads the '
+    + 'proxy\'s address as the client address, and every per-IP rate limiter '
+    + '(sign-in, mail, export, re-auth) shares one bucket for the whole site. '
+    + 'Set it to the number of proxies in front of this process — TRUST_PROXY=1 '
+    + 'for a single nginx — or to a specific address list.'
+  );
+  process.exit(1);
+}
+
 if (process.env.TRUST_PROXY) {
   const value = Number(process.env.TRUST_PROXY);
   app.set('trust proxy', Number.isNaN(value) ? process.env.TRUST_PROXY : value);

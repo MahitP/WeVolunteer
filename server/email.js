@@ -76,6 +76,45 @@ if (IS_PRODUCTION && !APP_URL) {
 }
 
 /**
+ * And it has to be a URL, not merely a non-empty string.
+ *
+ * ── Why presence was not enough ──
+ *
+ * This value is concatenated into every password-reset and email-verification
+ * link. A trailing typo, a missing scheme, or a copied shell variable that never
+ * expanded all pass a truthiness check and then mail a live single-use token to
+ * an address nobody controls — which is the exact harm the guard above is
+ * written to prevent, arriving through the door it left open.
+ *
+ * `OAUTH_REDIRECT_URI` five files away gets a full parse, a loopback refusal and
+ * a scheme check. The link that carries a password-reset token deserves at least
+ * as much.
+ *
+ * http is refused in production rather than warned about: these links carry
+ * credentials, and a plaintext one is interceptable on any network the recipient
+ * happens to open their mail on.
+ */
+if (IS_PRODUCTION && APP_URL) {
+  let parsed = null;
+  try { parsed = new URL(APP_URL); } catch { parsed = null; }
+
+  if (!parsed) {
+    console.error(
+      `FATAL: APP_URL is not a valid absolute URL (${APP_URL}). It is the base of every `
+      + 'password-reset and verification link. Example: APP_URL=https://volunteers.example.org'
+    );
+    process.exit(1);
+  }
+  if (parsed.protocol !== 'https:') {
+    console.error(
+      `FATAL: APP_URL must use https in production (got ${parsed.protocol}//). These links `
+      + 'carry single-use credentials and must not travel in plaintext.'
+    );
+    process.exit(1);
+  }
+}
+
+/**
  * Health record for TRANSACTIONAL mail (verification, reset, email change).
  *
  * ── Why this exists ──

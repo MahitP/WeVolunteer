@@ -152,11 +152,28 @@ function resolveTfaKey() {
      one there is no safe interpretation, and silently falling back would encrypt
      with a different key than the operator believes they configured — which
      surfaces later as every stored secret failing to decrypt. */
-  let bytes;
-  try {
-    bytes = Buffer.from(configured, 'base64');
-  } catch (err) {
-    throw new Error(`FATAL: TFA_ENCRYPTION_KEY is not valid base64. ${err.message}`);
+  /**
+   * Validated by re-encoding, because `Buffer.from(x, 'base64')` never throws.
+   *
+   * Node's decoder silently DROPS characters outside the base64 alphabet, so the
+   * `try/catch` this replaced could not fire: `"!!!!not base64 at all!!!!…"`
+   * decoded to whatever the surviving characters happened to mean, and the error
+   * message naming base64 validity was unreachable. The 32-byte check caught most
+   * of it by luck — a string that decodes to exactly 32 bytes got through with a
+   * value the operator never configured.
+   *
+   * Round-tripping is the check the decoder does not give us: if re-encoding the
+   * bytes does not reproduce the input, the input was not the base64 of those
+   * bytes. Padding and whitespace are normalised first so a legitimately padded
+   * or line-wrapped value is not rejected for cosmetics.
+   */
+  const normalised = configured.trim().replace(/\s+/g, '');
+  const bytes = Buffer.from(normalised, 'base64');
+  if (Buffer.from(bytes).toString('base64').replace(/=+$/, '') !== normalised.replace(/=+$/, '')) {
+    throw new Error(
+      'FATAL: TFA_ENCRYPTION_KEY is not valid base64. Generate one with: '
+      + `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
+    );
   }
   if (bytes.length !== 32) {
     throw new Error(
