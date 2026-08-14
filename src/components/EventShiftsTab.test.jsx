@@ -121,3 +121,73 @@ describe('naming the organizer', () => {
     expect(container.textContent).toMatch(/The organizer decides who gets each spot/);
   });
 });
+
+describe('a shift you are not allowed to take', () => {
+  /**
+   * ── Why the button is disabled and not hidden ──
+   *
+   * The modal already carries a notice saying WHY — a ban, or an event for the
+   * club's own members. Removing the control under that notice would leave the
+   * explanation floating above nothing; leaving it enabled offers a press whose
+   * only possible outcome is a 403. Disabled beneath the reason is the one
+   * arrangement where the page reads as a sentence.
+   *
+   * The server refuses regardless (`server/routes.eventEligibility.test.js`);
+   * this is only about not asking somebody to find that out by pressing.
+   */
+  const membersOnly = {
+    ...withShifts,
+    audience: 'organization',
+    organizationId: 'org-1',
+    organizationName: 'Robotics Club',
+  };
+
+  const request = () => screen.getByRole('button', { name: /Request/i });
+
+  it('offers the shift on an ordinary event', () => {
+    draw(withShifts);
+    expect(request()).toBeEnabled();
+  });
+
+  it('offers it on a members-only event to a member', () => {
+    draw({ ...membersOnly, viewerIsMember: true });
+    expect(request()).toBeEnabled();
+  });
+
+  it('refuses it on a members-only event to somebody who is not a member', () => {
+    draw({ ...membersOnly, viewerIsMember: false });
+    expect(request()).toBeDisabled();
+  });
+
+  it('refuses it to somebody the organization has banned', () => {
+    draw({ ...withShifts, viewerBan: { banned: true, reason: 'Repeatedly no-showed shifts.' } });
+    expect(request()).toBeDisabled();
+  });
+
+  it('does NOT read an ABSENT viewerIsMember as "not a member"', () => {
+    /**
+     * The two readings — `viewerIsMember === false` and `!viewerIsMember` —
+     * differ only on a members-only event where the field is missing entirely:
+     * a payload from before the field existed, or a cached one. So that is the
+     * case this asserts. Written against an event with no `audience` it proved
+     * nothing, because the audience test short-circuits first; the mutation
+     * passed and this test did not notice.
+     *
+     * Failing OPEN is the deliberate choice, and it is the rule `src/authz.js`
+     * states for the whole client mirror: over-offer a control the server will
+     * refuse, never hide one it would have allowed. The server refuses in the
+     * one direction that matters; a stale payload must not lock a real member
+     * out of their own club's shift.
+     */
+    const { audience, organizationId, organizationName } = {
+      audience: 'organization', organizationId: 'org-1', organizationName: 'Robotics Club',
+    };
+    draw({ ...withShifts, audience, organizationId, organizationName });
+    expect(request()).toBeEnabled();
+  });
+
+  it('drops the how-selection-works note, which is addressed to an applicant', () => {
+    draw({ ...membersOnly, viewerIsMember: false });
+    expect(screen.queryByText(/Choose the shifts you want/i)).toBeNull();
+  });
+});

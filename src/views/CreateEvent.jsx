@@ -403,9 +403,14 @@ export default function CreateEvent({
                       checked={form.audience === 'everyone'}
                       onChange={() => set('audience', 'everyone')}
                     />
+                    {/* `check-title` / `check-desc`, the idiom the Service hours
+                        radios below already use. `field-hint` is inline, so the
+                        description ran straight on from the title —
+                        "EveryoneAnybody on WeVolunteer can apply." Measured at
+                        320px. */}
                     <span>
-                      Everyone
-                      <span className="field-hint">Anybody on WeVolunteer can apply.</span>
+                      <span className="check-title">Everyone</span>
+                      <span className="check-desc">Anybody on WeVolunteer can apply.</span>
                     </span>
                   </label>
                   <label className="check" data-checked={form.audience === 'organization' ? 'true' : 'false'}>
@@ -416,8 +421,8 @@ export default function CreateEvent({
                       onChange={() => set('audience', 'organization')}
                     />
                     <span>
-                      Members of this organization
-                      <span className="field-hint">
+                      <span className="check-title">Members of this organization</span>
+                      <span className="check-desc">
                         Everybody still sees the event and who it belongs to. Only members can take a place.
                       </span>
                     </span>

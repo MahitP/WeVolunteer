@@ -38,6 +38,22 @@ export default function EventShiftsTab({
      cannot present Saturday's code on Sunday. */
   const [qrFor, setQrFor] = useState(null);
 
+  /**
+   * Whether this reader is refused this event before they press anything.
+   *
+   * Two reasons, both decided by the server and carried on the event: an active
+   * ban from the organization running it, and a members-only event they are not
+   * a member of. The modal explains each of them in its own notice above; this
+   * is what stops the shift rows from offering a button underneath that notice
+   * whose only possible outcome is a 403.
+   *
+   * `viewerIsMember === false` and not `!viewerIsMember` — the field is `null`
+   * for an event that belongs to no organization, and a nullish test would read
+   * that as "not a member" and disable every ordinary event on the platform.
+   */
+  const refused = Boolean(event?.viewerBan?.banned)
+    || (event?.audience === 'organization' && event?.viewerIsMember === false);
+
   const days = useMemo(() => {
     if (!event?.slots) return [];
     const grouped = {};
@@ -57,7 +73,10 @@ export default function EventShiftsTab({
 
   return (
     <>
-      {isStudent && !signupsClosed && (
+      {/* The how-selection-works note is addressed to somebody who is about to
+          apply. Under a notice saying they cannot, it reads as instructions for
+          a thing that will not work. */}
+      {isStudent && !signupsClosed && !refused && (
         <div className="alert alert-info" style={{ marginBottom: 'var(--s4)' }}>
           <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>
@@ -270,7 +289,7 @@ export default function EventShiftsTab({
                         ) : (
                           <button
                             className="btn btn-secondary btn-sm"
-                            disabled={signupsClosed || (isFull && !isSelected)}
+                            disabled={refused || signupsClosed || (isFull && !isSelected)}
                             onClick={() => handleSlotSelect(slot.id)}>
                             {isSelected ? 'Selected' : isFull ? 'Full' : 'Request'}
                           </button>
