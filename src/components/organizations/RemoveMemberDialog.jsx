@@ -23,8 +23,19 @@ import Modal, { ModalHead } from '../Modal';
  * they are banned and not told why has nothing to appeal against, and the reason
  * is what an administrator hearing that appeal actually reads.
  */
-export default function RemoveMemberDialog({ member, organizationName, busy, onCancel, onConfirm }) {
-  const [mode, setMode] = useState('kick');
+export default function RemoveMemberDialog({ member, organizationName, busy, intent, onCancel, onConfirm }) {
+  /**
+   * `intent` is which of the two the manager actually chose.
+   *
+   * The roster used to open this dialog from a single unlabelled button, so the
+   * mode had to be picked inside it — a manager pressed "remove" and only then
+   * discovered the dialog also offered a ban. The roster now names both actions
+   * before opening anything, and the dialog starts on the one that was named.
+   *
+   * The mode switch below stays: changing your mind after reading the
+   * consequences is exactly what a confirmation step is for.
+   */
+  const [mode, setMode] = useState(intent === 'ban' ? 'ban' : 'kick');
   const [reason, setReason] = useState('');
 
   const banning = mode === 'ban';

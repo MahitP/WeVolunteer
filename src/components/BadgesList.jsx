@@ -24,6 +24,7 @@
  * that was told to ignore it. It now uses the design system's own classes.
  */
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
 import LoadingSkeleton from './common/LoadingSkeleton';
 import { orderBadges } from '../utils/badgeOrder';
@@ -37,7 +38,7 @@ import { orderBadges } from '../utils/badgeOrder';
  */
 const VISIBLE_BADGES = 12;
 
-export default function BadgesList({ userId }) {
+export default function BadgesList({ userId, moreHref }) {
   const [badges, setBadges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -113,12 +114,24 @@ export default function BadgesList({ userId }) {
       )}
 
       {hidden > 0 && (
-        /* A count rather than a control. There is no fuller page to send
-           somebody to yet, and an inline expander would recreate the wall this
-           cap exists to prevent — so it states the fact and stops. */
-        <p className="small dim">
-          and {hidden} more {hidden === 1 ? 'badge' : 'badges'}.
-        </p>
+        /**
+         * A real destination now, not a count.
+         *
+         * This used to be plain text — "and 4 more badges." — because there was
+         * no fuller page to send anybody to. That told a volunteer about
+         * achievements the product then refused to show them. An inline expander
+         * would have recreated the wall of medals the cap exists to prevent, so
+         * the overflow leaves the profile instead of growing it.
+         */
+        moreHref ? (
+          <Link to={moreHref} className="btn btn-secondary btn-sm preview-more">
+            See all {ordered.length} badges
+          </Link>
+        ) : (
+          <p className="small dim">
+            and {hidden} more {hidden === 1 ? 'badge' : 'badges'}.
+          </p>
+        )
       )}
     </section>
   );
