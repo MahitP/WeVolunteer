@@ -11,6 +11,7 @@ import { getQueueHealth } from '../workers/notificationWorker.js';
 import { requireCap, can, principalFor, ALL_CAPABILITIES, requireAAL2, ROLE } from '../authz.js';
 import { grantsFor } from '../userCapabilities.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
+import { syncOrganizerCapabilities } from '../organizationRoles.js';
 import { recordAudit } from '../auditLog.js';
 import { deleteUploadedFile } from './profilePictureRoutes.js';
 import {
@@ -2323,6 +2324,21 @@ router.post('/api/admin/users/:id/revoke', authenticateToken, requireCap('admin.
        * be a list that goes stale the first time a capability is added.
        */
       db.prepare('DELETE FROM user_capabilities WHERE user_id = ?').run(targetUserId);
+
+      /**
+       * Then put back whatever their CLUB memberships still say they hold.
+       *
+       * The wipe above is about administrative grants, and it is right to be
+       * indiscriminate about those. But since the Student Organizer rank, a
+       * `user_capabilities` row can also be an ordinary membership fact — this
+       * person helps run the robotics club — and stripping that as a side
+       * effect of ending an unrelated administrative role would silently take
+       * away a rank a club president granted, with nothing telling either of
+       * them. Recomputing from `organization_members` is the same call the
+       * membership routes make, so there is one answer to "what does this
+       * person's rank entitle them to" rather than two.
+       */
+      syncOrganizerCapabilities(db, targetUserId, req.user.id);
 
       recordAudit(db, {
         adminId: req.user.id,

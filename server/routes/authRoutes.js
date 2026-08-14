@@ -13,6 +13,7 @@ import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearC
 import { authenticateToken, formatUserResponse, inTransaction, revokeSession, isSessionRevoked, enabledSecondFactors } from '../utils.js';
 import { assertConsent, recordAcceptances, ConsentMissing } from '../consent.js';
 import { withheldCapabilitiesFor } from '../organizerAgreement.js';
+import { grantsFor } from '../userCapabilities.js';
 import { db, initDatabase } from '../db.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
@@ -1415,6 +1416,25 @@ router.get('/api/auth/me', authenticateToken, (req, res) => {
     res.json({
       ...formatUserResponse(userRow),
       withheld: withheldCapabilitiesFor(db, userRow),
+      /**
+       * The other half of the same mirror, and for exactly the same reason.
+       *
+       * `src/authz.js`'s `can()` reads `user.grants` and this payload never
+       * carried them, so anything granted to a PERSON rather than to their role
+       * was invisible to the client. A Student Organizer — whose four
+       * capabilities live only in `user_capabilities` — was refused
+       * `/events/new` by the client's own route table while the server would
+       * have allowed the request. Withholding drifts one way and this drifts
+       * the other; both end in the UI disagreeing with the API.
+       *
+       * Here rather than in `formatUserResponse` for the reason above: on the
+       * admin list or a profile view it would tell anybody who can see somebody
+       * else what that person has been granted.
+       *
+       * This changes what is OFFERED, never what is allowed. The gate is
+       * `requireCap` on the route, derived per request from this same table.
+       */
+      grants: grantsFor(db, userRow.id),
       /**
        * Attached by `authenticateToken`, not recomputed here.
        *

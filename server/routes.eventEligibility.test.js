@@ -526,4 +526,114 @@ describe('applying to an organization event', () => {
       expect(Object.keys(card).filter(k => /member/i.test(k))).toEqual(['viewerIsMember']);
     });
   });
+
+  describe('promotion and the draw are seating decisions, and ask again', () => {
+    /**
+     * ── The distinction this rests on ──
+     *
+     * An ACCEPTED place survives a ban. Somebody was given that place, and
+     * taking it back would be a second consequence with no record and no
+     * appeal — the organizer has a per-shift removal control for when that is
+     * what they meant.
+     *
+     * A WAITLISTED or PENDING row is not a place. It is a request, and the
+     * promotion or the draw is the moment the place is actually given — a new
+     * decision, taken by the platform, possibly weeks later. Acting on a stale
+     * request would have the platform seat somebody the organization had just
+     * refused, with nobody having decided anything.
+     *
+     * A security review found both paths seating banned applicants.
+     */
+    let promoteFromWaitlist; let computeDraw;
+
+    beforeAll(async () => {
+      ({ promoteFromWaitlist } = await import('./utils.js'));
+      ({ computeDraw } = await import('./services/autoSelect.js'));
+    });
+
+    const slotId = 'elig-org-slot';
+
+    const seed = (userId, status, order = null) => {
+      const id = `elig-app-${userId}-${status}`;
+      db.prepare(`INSERT OR REPLACE INTO applications
+        (id, user_id, event_id, slot_id, status, applied_at, waitlist_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, userId, orgEventId, slotId, status, new Date().toISOString(), order);
+      return id;
+    };
+
+    beforeEach(() => {
+      db.prepare('DELETE FROM applications WHERE slot_id = ?').run(slotId);
+      db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
+      db.prepare("UPDATE events SET audience = 'everyone' WHERE id = ?").run(orgEventId);
+      /* One free place, so exactly one person can be promoted and the test can
+         tell WHICH one. */
+      db.prepare('UPDATE slots SET max_spots = 1 WHERE id = ?').run(slotId);
+    });
+
+    it('promotes the person at the front of the queue when nothing is wrong', async () => {
+      const first = seed(memberId, 'waitlisted', 1);
+      const promoted = promoteFromWaitlist(slotId);
+      expect(promoted.map(p => p.applicationId)).toEqual([first]);
+      expect(db.prepare('SELECT status FROM applications WHERE id = ?').get(first).status)
+        .toBe('accepted');
+    });
+
+    it('does NOT promote somebody the organization has since banned', async () => {
+      const banned = seed(memberId, 'waitlisted', 1);
+      db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('elig-promo-ban', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
+        .run(orgId, memberId, organizerId, new Date().toISOString());
+
+      expect(promoteFromWaitlist(slotId)).toEqual([]);
+      expect(db.prepare('SELECT status, waitlist_order FROM applications WHERE id = ?').get(banned))
+        .toMatchObject({ status: 'waitlisted' });
+    });
+
+    it('skips PAST them to the next eligible person, rather than stopping', async () => {
+      /* The queue moves on. Holding the place empty would punish everybody
+         behind them for somebody else's ban. */
+      seed(memberId, 'waitlisted', 1);
+      const next = seed(outsiderId, 'waitlisted', 2);
+      db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('elig-promo-ban-2', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
+        .run(orgId, memberId, organizerId, new Date().toISOString());
+
+      expect(promoteFromWaitlist(slotId).map(p => p.applicationId)).toEqual([next]);
+    });
+
+    it('does NOT promote a non-member into an event narrowed to members', async () => {
+      db.prepare("UPDATE events SET audience = 'organization' WHERE id = ?").run(orgEventId);
+      const outsiderApp = seed(outsiderId, 'waitlisted', 1);
+
+      expect(promoteFromWaitlist(slotId)).toEqual([]);
+      expect(db.prepare('SELECT status FROM applications WHERE id = ?').get(outsiderApp).status)
+        .toBe('waitlisted');
+    });
+
+    it('leaves an already-accepted place alone — a ban is not a removal', async () => {
+      const held = seed(memberId, 'accepted');
+      db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('elig-promo-ban-3', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
+        .run(orgId, memberId, organizerId, new Date().toISOString());
+
+      promoteFromWaitlist(slotId);
+      expect(db.prepare('SELECT status FROM applications WHERE id = ?').get(held).status)
+        .toBe('accepted');
+    });
+
+    it('keeps a banned applicant out of the auto-select draw', async () => {
+      db.prepare('UPDATE slots SET max_spots = 5 WHERE id = ?').run(slotId);
+      const bannedApp = seed(memberId, 'pending');
+      const okApp = seed(outsiderId, 'pending');
+      db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('elig-draw-ban', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
+        .run(orgId, memberId, organizerId, new Date().toISOString());
+
+      const draw = computeDraw(db, orgEventId, { runNumber: 1 });
+      const named = [...(draw.selectedIds || []), ...(draw.waitlistIds || [])];
+      expect(named, 'the draw considered somebody the club had banned').not.toContain(bannedApp);
+      expect(named).toContain(okApp);
+    });
+  });
 });
