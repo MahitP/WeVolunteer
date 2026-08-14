@@ -9343,11 +9343,27 @@ input:disabled + .premium-slider {
   gap: var(--s2);
   align-items: center;
   width: 100%;
+  /**
+   * Wraps, because the rank tag does not.
+   *
+   * `Student organizer` is 112px of `white-space: nowrap`, and the name block
+   * is the only flexible item on the row — so at 320px the name was crushed to
+   * ZERO width and rendered on top of the tag, with the hours pushed past the
+   * row's right edge. Measured at 320px on the Robotics Club roster.
+   *
+   * Wrapping is the fix rather than truncating the tag, because a rank
+   * abbreviated to "Student org…" is a rank nobody can read, and it is the one
+   * piece of information the row exists to carry.
+   */
+  flex-wrap: wrap;
 }
 
 .org-member-body {
-  min-width: 0;
-  flex: 1;
+  /* A floor, so the name is the last thing to give rather than the first. It
+     wraps to a second line before it shrinks below this, and the tag drops
+     beneath it rather than over it. */
+  min-width: 9ch;
+  flex: 1 1 9ch;
 }
 
 .org-member-handle { font-size: 0.8125rem; }

@@ -6,6 +6,7 @@ import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, isEmailGateAllowed, COOKIE_NAME
 import { principalFor, requiresSecondFactor, ROLE, ROLES } from './authz.js';
 import { SERVICE_HOUR_GOAL } from './milestones.js';
 import { grantsFor } from './userCapabilities.js';
+import { eventApplicationEligibility } from './eventEligibility.js';
 import { withheldCapabilitiesFor } from './organizerAgreement.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
 import { sweepCheckinTokens } from './checkinTokens.js';
@@ -1120,7 +1121,8 @@ export function assignWaitlistOrder(applicationId, slotId) {
 export function promoteFromWaitlist(slotId) {
   const slot = db.prepare(`
     SELECT s.id, s.name, s.max_spots, s.event_id,
-           e.title AS event_title, e.organizer_id, e.status AS event_status
+           e.title AS event_title, e.organizer_id, e.status AS event_status,
+           e.organization_id, e.audience
     FROM slots s JOIN events e ON e.id = s.event_id
     WHERE s.id = ?
   `).get(slotId);
@@ -1140,13 +1142,39 @@ export function promoteFromWaitlist(slotId) {
   // NULLS LAST so a legacy row written before waitlist_order was assigned sorts
   // behind properly-queued ones instead of jumping the queue; applied_at then id
   // as a stable tiebreak so two rows can never swap places between calls.
-  const queue = db.prepare(`
+  /**
+   * The WHOLE queue, filtered, then cut to the free places.
+   *
+   * ── Why eligibility is re-asked here ──
+   *
+   * A waitlisted row is a request, not a place. Promotion is the moment the
+   * place is actually given — a NEW seating decision, taken by the platform,
+   * possibly weeks after the person joined the queue. In between, the
+   * organization may have banned them, or the event may have been narrowed to
+   * members only. Seating them anyway would have the platform hand somebody a
+   * shift the organization had just refused them, with nobody having decided
+   * anything.
+   *
+   * This is deliberately NOT the same rule as an already-accepted place, which
+   * a ban leaves alone (see `routes.eventEligibility.test.js`). Keeping a place
+   * somebody was given is not the same act as giving them one.
+   *
+   * Skipped rows stay `waitlisted` and keep their position — the queue moves
+   * past them rather than dropping them, so a lifted ban or a new membership
+   * puts them back in line where they were.
+   */
+  const waiting = db.prepare(`
     SELECT a.id, a.user_id, u.name AS volunteer_name
     FROM applications a JOIN users u ON u.id = a.user_id
     WHERE a.slot_id = ? AND a.status = 'waitlisted'
     ORDER BY a.waitlist_order IS NULL, a.waitlist_order ASC, a.applied_at ASC, a.id ASC
-    LIMIT ?
-  `).all(slotId, free);
+  `).all(slotId);
+
+  const queue = [];
+  for (const row of waiting) {
+    if (queue.length >= free) break;
+    if (eventApplicationEligibility(slot, row.user_id).ok) queue.push(row);
+  }
   if (queue.length === 0) return [];
 
   const promote = db.prepare(

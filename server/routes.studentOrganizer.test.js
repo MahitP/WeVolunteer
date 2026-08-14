@@ -418,4 +418,79 @@ describe('Student Organizer', () => {
       expect(res.status, JSON.stringify(res.body)).toBe(201);
     });
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('the paths a security review found', () => {
+    /**
+     * Every one of these was reachable. They are grouped because they share a
+     * cause: a rule enforced at the front door and not on the side entrances.
+     */
+
+    it('cannot mint a personal event by DUPLICATING a club one', async () => {
+      /**
+       * The escalation. `POST /api/events` refuses a Student Organizer an event
+       * with no organization behind it; duplicate was a second create path that
+       * had never learned the rule, and it copied neither `organization_id` nor
+       * `audience`. Create one legitimate club event, duplicate it, and the
+       * copy came out unattached: a platform-wide event hosted by a student,
+       * outside the club's sight, with no ban check and no membership check.
+       */
+      const created = await createEvent({ organizationId: orgId }, helper);
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+
+      const copy = await srv.call('POST', `/api/events/${created.body.id}/duplicate`, {}, helper);
+      expect(copy.status, JSON.stringify(copy.body)).toBe(201);
+
+      const row = db.prepare('SELECT organization_id, audience FROM events WHERE id = ?')
+        .get(copy.body.id ?? copy.body.event?.id);
+      expect(row.organization_id, 'the copy was detached from the organization').toBe(orgId);
+
+      expect(db.prepare(`SELECT COUNT(*) AS n FROM events
+                          WHERE organizer_id = ? AND organization_id IS NULL`).get(helperId).n)
+        .toBe(0);
+    });
+
+    it('carries the members-only setting onto the copy', async () => {
+      /* The same omission, hurting an ordinary organizer: duplicating a
+         members-only shift produced a public one, which is the setting they
+         had just chosen against. */
+      const created = await createEvent({ organizationId: orgId, audience: 'organization' }, owner);
+      const copy = await srv.call('POST', `/api/events/${created.body.id}/duplicate`, {}, owner);
+      expect(copy.status, JSON.stringify(copy.body)).toBe(201);
+
+      expect(db.prepare('SELECT audience, organization_id FROM events WHERE id = ?')
+        .get(copy.body.id ?? copy.body.event?.id))
+        .toMatchObject({ audience: 'organization', organization_id: orgId });
+    });
+
+    it('sends per-user grants to the client, or the page is unreachable', async () => {
+      /**
+       * `src/authz.js` decides what the navigation offers from `user.grants`,
+       * and this payload did not carry them — so a Student Organizer was
+       * refused `/events/new` by the client's own route table while the server
+       * would have allowed the request. It failed closed, which is why nothing
+       * caught it: the feature was simply dead in the browser.
+       */
+      const me = await srv.call('GET', '/api/auth/me', undefined, helper);
+      expect(me.status).toBe(200);
+      expect(me.body.grants).toContain('organization.event.create');
+
+      const theirs = await srv.call('GET', '/api/auth/me', undefined, bystander);
+      expect(theirs.body.grants, 'an ordinary member was sent a grant').toEqual([]);
+    });
+
+    it('does not let an ARCHIVED organization keep posting', async () => {
+      const archived = await srv.call('PATCH', `/api/organizations/${orgKey}`,
+        { status: 'archived' }, owner);
+      expect(archived.status, JSON.stringify(archived.body)).toBe(200);
+      try {
+        const posted = await srv.call('POST', `/api/organizations/${orgKey}/announcements`,
+          { body: 'Still going, apparently.' }, helper);
+        expect(posted.status).toBe(409);
+        expect(posted.body.code).toBe('organization_archived');
+      } finally {
+        await srv.call('PATCH', `/api/organizations/${orgKey}`, { status: 'active' }, owner);
+      }
+    });
+  });
 });

@@ -1550,9 +1550,47 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['even
       return res.status(403).json({ error: 'Access denied' });
     }
 
+    /**
+     * ── Duplicating carries the organization and the audience ──
+     *
+     * It did not, and that was two defects wearing one omission.
+     *
+     * For an organizer it silently detached the copy: duplicate a members-only
+     * NHS shift and you got a public event belonging to nobody, which is not
+     * the event anybody asked for and is exactly the setting they had just
+     * chosen against.
+     *
+     * For a Student Organizer it was an escalation. `POST /api/events` refuses
+     * them an event with no organization behind it — that refusal is the whole
+     * of what keeps the rank from being a promotion — and duplicate was a
+     * second create path that had never learned the rule. Create one legitimate
+     * club event, duplicate it, and the copy came out with `organization_id`
+     * NULL: a platform-wide event hosted by a student, outside the club's
+     * sight, with no ban check and no membership check, carrying every
+     * organizer power the ownership check confers.
+     *
+     * So the copy keeps the parent's organization, and the same two questions
+     * the create route asks are asked again about the copy. A caller who could
+     * not have created this event cannot arrive at it by copying one.
+     */
+    if (!can(req.principal, 'event.create') && !event.organization_id) {
+      return res.status(403).json({
+        error: 'You can only create events for an organization you help run.',
+        code: 'organization_required',
+      });
+    }
+    if (event.organization_id && !canHelpRun(db, event.organization_id, req.user.id, {
+      hasModerate: can(req.principal, 'organization.moderate'),
+    })) {
+      return res.status(403).json({
+        error: 'You do not help run that organization.',
+        code: 'not_manager',
+      });
+    }
+
     // Create a new event with the same data but as 'open' status and shifted dates by default
     // We shift dates forward by 7 days; the organizer can edit afterwards.
-    const newEventId = `event-${Date.now()}`;
+    const newEventId = `event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const shiftDays = 7;
     const shiftIso = (iso) => {
       const d = new Date(iso);
@@ -1560,8 +1598,9 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['even
       return d.toISOString();
     };
     db.prepare(`
-      INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, created_at, auto_approve)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
+      INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, created_at, auto_approve,
+                          organization_id, audience)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)
     `).run(
       newEventId,
       `${event.title} (Copy)`,
@@ -1571,7 +1610,12 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['even
       shiftIso(event.application_deadline),
       req.user.id,
       new Date().toISOString(),
-      event.auto_approve
+      event.auto_approve,
+      event.organization_id || null,
+      /* Belt and braces against the column drifting: an audience of
+         `organization` on a copy with no organization would be a shift nobody
+         can join, which is the state the create route refuses outright. */
+      event.organization_id ? (event.audience || DEFAULT_AUDIENCE) : DEFAULT_AUDIENCE
     );
 
     // Clone slots

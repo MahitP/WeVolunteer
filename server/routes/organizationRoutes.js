@@ -361,10 +361,15 @@ router.delete('/api/organizations/:key/membership', authenticateToken, requireCa
     }
   }
 
-  db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
-    .run(row.id, req.principal.userId);
-  /* Walking out of the club you helped run takes the rank with you. */
-  syncOrganizerCapabilities(db, req.principal.userId, req.principal.userId);
+  /* One transaction, for the reason the removal route gives: a throw between
+     the two statements would leave somebody who has walked out of the club
+     still holding the rank it granted. */
+  inTransaction(() => {
+    db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+      .run(row.id, req.principal.userId);
+    /* Walking out of the club you helped run takes the rank with you. */
+    syncOrganizerCapabilities(db, req.principal.userId, req.principal.userId);
+  });
   res.json({ isMember: false, memberCount: countMembers(row.id) });
 });
 
@@ -555,18 +560,25 @@ router.patch('/api/organizations/:key/members/:userId', authenticateToken, requi
     }
   }
 
-  const { changes } = db.prepare(
-    'UPDATE organization_members SET member_role = ? WHERE organization_id = ? AND user_id = ?'
-  ).run(memberRole, row.id, req.params.userId);
-  if (!changes) return res.status(404).json({ error: 'That person is not a member.', code: 'not_member' });
+  /* The rank and the capabilities it confers move together or not at all. A
+     throw in between would leave a demoted member holding what the rank gave
+     them, which is the one state this pair exists to make impossible. */
+  let changes = 0;
+  inTransaction(() => {
+    changes = db.prepare(
+      'UPDATE organization_members SET member_role = ? WHERE organization_id = ? AND user_id = ?'
+    ).run(memberRole, row.id, req.params.userId).changes;
+    if (!changes) return;
 
-  /**
-   * The capabilities are recomputed from the membership table, not derived from
-   * `memberRole` here — somebody demoted in this club may still be a Student
-   * Organizer in another, and reading the new value alone would strip a rank
-   * they still hold somewhere else.
-   */
-  syncOrganizerCapabilities(db, req.params.userId, req.principal.userId);
+    /**
+     * The capabilities are recomputed from the membership table, not derived
+     * from `memberRole` here — somebody demoted in this club may still be a
+     * Student Organizer in another, and reading the new value alone would strip
+     * a rank they still hold somewhere else.
+     */
+    syncOrganizerCapabilities(db, req.params.userId, req.principal.userId);
+  });
+  if (!changes) return res.status(404).json({ error: 'That person is not a member.', code: 'not_member' });
 
   res.json({ userId: req.params.userId, memberRole });
 });
@@ -671,6 +683,19 @@ router.post('/api/organizations/:key/announcements', authenticateToken, requireC
   if (!row) return undefined;
   if (!canHelpRun(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
     return res.status(403).json({ error: 'Only somebody who helps run this organization can post announcements.', code: 'not_manager' });
+  }
+  /**
+   * An archived organization is out of circulation, and that has to include
+   * posting as it.
+   *
+   * Joining refuses an archived club and event creation refuses one, so this
+   * was the last surface where an archived organization could still speak —
+   * and notify its members, who were told the club had been wound up. Editing
+   * and deleting existing announcements are deliberately still allowed: taking
+   * something down after archiving is exactly what a manager might need to do.
+   */
+  if (row.status !== 'active') {
+    return res.status(409).json({ error: 'This organization is archived.', code: 'organization_archived' });
   }
 
   const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';

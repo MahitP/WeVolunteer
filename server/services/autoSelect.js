@@ -27,6 +27,7 @@
  */
 import { createRandom, performWeightedSelection } from '../weighting.js';
 import { attendanceRecordsFor } from '../volunteerStats.js';
+import { eventApplicationEligibility } from '../eventEligibility.js';
 import { notificationService } from './notificationService.js';
 import { inTransaction } from '../utils.js';
 
@@ -74,6 +75,26 @@ export function computeDraw(db, eventId, { runNumber }) {
       WHERE a.slot_id = ? AND a.status = 'pending'
       GROUP BY a.id ORDER BY a.id
     `).all(slot.id);
+
+    /**
+     * Anybody the organization has since refused is out of the draw.
+     *
+     * A pending application is a request, not a place. The draw is where the
+     * place is actually given, and it can run weeks after the applications
+     * arrived — long enough for a ban to be issued or for the event to be
+     * narrowed to members only. Selecting them anyway would have the platform
+     * seat somebody the organization had just refused, with no human deciding
+     * anything and no record of a decision.
+     *
+     * Their row is left `pending` rather than rejected: the draw declines to
+     * act on it, which is not the same as the organizer turning them down, and
+     * a lifted ban puts them back in the next run.
+     */
+    const eligible = pendingApps.filter(a => eventApplicationEligibility(event, a.user_id).ok);
+    if (eligible.length !== pendingApps.length) {
+      pendingApps.length = 0;
+      pendingApps.push(...eligible);
+    }
 
     if (pendingApps.length === 0) continue;
 
