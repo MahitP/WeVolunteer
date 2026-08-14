@@ -149,7 +149,11 @@ export default function StudentOrganizerAgreement({ currentUser, addToast, onAcc
       <div className="stack-sm">
         <h1 id="soa-title">Before you help run this organization</h1>
         <p>
-          {currentUser?.name ? `${currentUser.name}, a` : 'A'} manager has trusted you to help
+          {/* An em dash, not a comma. "Alex Thompson, a manager has trusted
+              you" reads as an appositive — as though Alex is the manager — which
+              is exactly backwards. Caught at 320px, where the line wraps right
+              after the name and the misreading is hardest to shake. */}
+          {currentUser?.name ? `${currentUser.name} — a` : 'A'} manager has trusted you to help
           run their organization. One thing remains: the undertakings below are what you
           accept in exchange for being able to see the people who apply to its events.
         </p>
