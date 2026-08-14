@@ -1672,7 +1672,10 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['even
 router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
   try {
-    const event = db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(eventId);
+    /* The whole row, not just `organizer_id`: `canRunEvent` also asks which
+       organization the event belongs to, and a projection that omits it makes
+       the function throw rather than quietly refuse the club's manager. */
+    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {

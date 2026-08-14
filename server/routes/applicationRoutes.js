@@ -464,7 +464,7 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
     const apps = [];
     for (const id of applicationIds) {
       const app = db.prepare(`
-        SELECT a.*, e.organizer_id, e.title as event_title, e.auto_approve
+        SELECT a.*, e.organizer_id, e.organization_id, e.title as event_title, e.auto_approve
         FROM applications a
         JOIN events e ON a.event_id = e.id
         WHERE a.id = ?
@@ -643,7 +643,7 @@ router.patch('/api/applications/:id', authenticateToken,
 
     try {
       const app = db.prepare(`
-        SELECT a.*, e.organizer_id, e.title as event_title
+        SELECT a.*, e.organizer_id, e.organization_id, e.title as event_title
         FROM applications a
         JOIN events e ON a.event_id = e.id
         WHERE a.id = ?

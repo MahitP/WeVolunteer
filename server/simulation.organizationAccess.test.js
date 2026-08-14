@@ -361,6 +361,52 @@ describe('one club, five people', () => {
     expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
   });
 
+  it('21b. A can review the applicants on B’s event, and see its draws', async () => {
+    /**
+     * The half of the manager's authority that a status change does not reach.
+     *
+     * `canRunEvent` was added at fourteen sites and only ONE test moved, which
+     * should have been the warning. Two of the fourteen loaded the event through
+     * a join that names its columns and did not name `organization_id`, so the
+     * function read `undefined`, decided the event belonged to no organization,
+     * and refused the manager — correctly shaped, and wrong. Another loaded only
+     * `organizer_id`. This exercises the application path that missed it.
+     */
+    /* A shift on its own day. D already holds a place at step 7, and the
+       schedule-conflict guard would answer 409 before eligibility was reached —
+       a refusal that has nothing to do with what this test measures. */
+    const made = await createEvent({
+      organizationId: orgId, title: 'B’s applicants',
+      slots: [{
+        name: 'Shift', description: '',
+        startDatetime: new Date(Date.now() + 20 * 86400000).toISOString(),
+        endDatetime: new Date(Date.now() + 20 * 86400000 + 3600000).toISOString(),
+        maxSpots: 5, hoursAwarded: 2,
+      }],
+    }, s.B);
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(made.body.id).id;
+
+    const applied = await srv.call('POST', `/api/events/${made.body.id}/apply`,
+      { slotId, message: 'I can help.' }, s.D);
+    expect(applied.status, JSON.stringify(applied.body)).toBe(201);
+    const appId = db.prepare('SELECT id FROM applications WHERE user_id = ? AND slot_id = ?')
+      .get(id.D, slotId).id;
+
+    /* One at a time... */
+    const decided = await srv.call('PATCH', `/api/applications/${appId}`, { status: 'accepted' }, s.A);
+    expect(decided.status, JSON.stringify(decided.body)).toBe(200);
+
+    /* ...and in bulk, which is a second query with the same omission. */
+    const bulk = await srv.call('PATCH', '/api/applications/bulk',
+      { applicationIds: [appId], status: 'waitlisted' }, s.A);
+    expect(bulk.status, JSON.stringify(bulk.body)).toBe(200);
+
+    /* And the draw history, whose query loaded only `organizer_id`. */
+    const runs = await srv.call('GET', `/api/events/${made.body.id}/auto-select/runs`, undefined, s.A);
+    expect(runs.status, JSON.stringify(runs.body)).toBe(200);
+  });
+
   it('22. but B cannot run an event A published under the same club', async () => {
     /* The line the widening had to stop at. Being trusted to post the bake-sale
        shift is not being trusted to call off the fundraiser somebody else
