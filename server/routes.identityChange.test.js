@@ -18,6 +18,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 vi.setConfig({ testTimeout: 30000 });
 import { DatabaseSync } from 'node:sqlite';
 import { TEST_SIGNUP_DEFAULTS } from './testConsent.js';
+import { installMailbox } from './testMailbox.js';
 
 /**
  * Changing the email address, the password, and the username (audit findings
@@ -45,14 +46,17 @@ import { TEST_SIGNUP_DEFAULTS } from './testConsent.js';
  */
 
 let srv;
+let mailbox;
 beforeAll(async () => {
   process.env.REQUIRE_EMAIL_VERIFICATION = 'true';
   // The provider-only paths below have no password to verify with.
   process.env.OAUTH_ALLOW_MOCK = 'true';
   const { startTestServer } = await import('./testServer.js');
   srv = await startTestServer();
+  mailbox = installMailbox();
 });
 afterAll(async () => {
+  mailbox.restore();
   await srv?.close?.();
   delete process.env.REQUIRE_EMAIL_VERIFICATION;
   delete process.env.OAUTH_ALLOW_MOCK;
@@ -70,6 +74,9 @@ const openDb = () => new DatabaseSync(process.env.WEV_DB_PATH);
  * `bindTo` exists so a test can deliberately bind something else.
  */
 async function changeEmail(cookie, newEmail, { password = 'Password123', bindTo = newEmail } = {}) {
+  // Forget earlier messages first, so the confirmation link read afterwards can
+  // only be the one this request produced.
+  mailbox.clear();
   const challengeId = await srv.stepUp(cookie, 'email.change', { params: { newEmail: bindTo }, password });
   const res = await srv.call('POST', '/api/auth/change-email', { newEmail }, cookie, srv.reauthHeader(challengeId));
   return { ...res, challengeId };
@@ -101,10 +108,24 @@ async function makeProviderOnlyUser(over = {}) {
   return { cookie, user, sub, email };
 }
 
-/** The live email-change token for a user, read straight from the database. */
-function changeTokenFor(userId) {
+/**
+ * The live email-change token, read from the message sent to the new address.
+ *
+ * It used to come straight out of `email_change_tokens.token`. Migration 048
+ * replaced that column with a SHA-256 digest, so no usable token can be
+ * recovered from the table by anything — a test included. Reading the link out
+ * of the mail is what the person doing the change does anyway, and it proves
+ * more: that the token reached the message and that the URL is built correctly.
+ */
+const changeTokenFor = (newEmail) => mailbox.waitForToken(newEmail, 'emailchange');
+
+/**
+ * The pending row itself, for the cases that assert on its ABSENCE or on which
+ * address is pending. `new_email` is not a credential and is still stored plainly.
+ */
+function pendingChangeFor(userId) {
   const db = openDb();
-  const row = db.prepare('SELECT token, new_email FROM email_change_tokens WHERE user_id = ?').get(userId);
+  const row = db.prepare('SELECT new_email FROM email_change_tokens WHERE user_id = ?').get(userId);
   db.close();
   return row;
 }
@@ -138,11 +159,11 @@ describe('U2 — changing the email address', () => {
   });
 
   it('moves the address once the link is opened, and confirms it', async () => {
-    const { cookie, user } = await makeUser();
+    const { cookie } = await makeUser();
     const target = `moved-${rnd()}@example.org`;
 
     await changeEmail(cookie, target);
-    const { token } = changeTokenFor(user.id);
+    const token = await changeTokenFor(target);
 
     const res = await srv.call('POST', '/api/auth/confirm-email-change', { token });
     expect(res.status).toBe(200);
@@ -155,9 +176,10 @@ describe('U2 — changing the email address', () => {
   });
 
   it('burns the token — a confirmation link works exactly once', async () => {
-    const { cookie, user } = await makeUser();
-    await changeEmail(cookie, `once-${rnd()}@example.org`);
-    const { token } = changeTokenFor(user.id);
+    const { cookie } = await makeUser();
+    const target = `once-${rnd()}@example.org`;
+    await changeEmail(cookie, target);
+    const token = await changeTokenFor(target);
 
     expect((await srv.call('POST', '/api/auth/confirm-email-change', { token })).status).toBe(200);
     expect((await srv.call('POST', '/api/auth/confirm-email-change', { token })).status).toBe(400);
@@ -167,8 +189,9 @@ describe('U2 — changing the email address', () => {
     const { cookie, user } = await makeUser();
     const other = await srv.login(user.email, 'Password123');
 
-    await changeEmail(cookie, `sess-${rnd()}@example.org`);
-    const { token } = changeTokenFor(user.id);
+    const target = `sess-${rnd()}@example.org`;
+    await changeEmail(cookie, target);
+    const token = await changeTokenFor(target);
     await srv.call('POST', '/api/auth/confirm-email-change', { token });
 
     // The email address is the account's recovery channel, so moving it is as
@@ -224,7 +247,7 @@ describe('U2 — changing the email address', () => {
     expect(res.body.code).toBe('params_mismatch');
 
     // Nothing pending: the substituted address was never written anywhere.
-    expect(changeTokenFor(user.id)).toBeUndefined();
+    expect(pendingChangeFor(user.id)).toBeUndefined();
   });
 
   it('spends the grant exactly once', async () => {
@@ -258,7 +281,7 @@ describe('U2 — changing the email address', () => {
    * re-authenticates at its provider instead.
    */
   it('lets a provider-only account change its address via OAuth re-consent', async () => {
-    const { cookie, user, sub } = await makeProviderOnlyUser();
+    const { cookie, sub } = await makeProviderOnlyUser();
     const target = `provmoved-${rnd()}@example.org`;
 
     const opened = await srv.call('POST', '/api/auth/reauth/challenge',
@@ -275,7 +298,7 @@ describe('U2 — changing the email address', () => {
     expect(res.status).toBe(200);
     expect(res.body.pending).toBe(target);
 
-    const { token } = changeTokenFor(user.id);
+    const token = await changeTokenFor(target);
     const confirmed = await srv.call('POST', '/api/auth/confirm-email-change', { token });
     expect(confirmed.status).toBe(200);
     expect(confirmed.body.user.email).toBe(target);
@@ -298,11 +321,11 @@ describe('U2 — changing the email address', () => {
   });
 
   it('refuses an address claimed while the request was open', async () => {
-    const { cookie, user } = await makeUser();
+    const { cookie } = await makeUser();
     const target = `race-${rnd()}@example.org`;
 
     await changeEmail(cookie, target);
-    const { token } = changeTokenFor(user.id);
+    const token = await changeTokenFor(target);
 
     // Somebody else registers that address during the 24-hour window.
     await makeUser({ email: target });
@@ -321,18 +344,20 @@ describe('U2 — changing the email address', () => {
   });
 
   it('supersedes a previous request rather than leaving two live links', async () => {
-    const { cookie, user } = await makeUser();
+    const { cookie } = await makeUser();
 
-    await changeEmail(cookie, `first-${rnd()}@example.org`);
-    const first = changeTokenFor(user.id);
+    const firstTarget = `first-${rnd()}@example.org`;
+    await changeEmail(cookie, firstTarget);
+    const first = await changeTokenFor(firstTarget);
 
-    await changeEmail(cookie, `second-${rnd()}@example.org`);
-    const second = changeTokenFor(user.id);
+    const secondTarget = `second-${rnd()}@example.org`;
+    await changeEmail(cookie, secondTarget);
+    const second = await changeTokenFor(secondTarget);
 
-    expect(second.token).not.toBe(first.token);
+    expect(second).not.toBe(first);
     // Two live links would mean two different addresses could claim the account.
-    expect((await srv.call('POST', '/api/auth/confirm-email-change', { token: first.token })).status).toBe(400);
-    expect((await srv.call('POST', '/api/auth/confirm-email-change', { token: second.token })).status).toBe(200);
+    expect((await srv.call('POST', '/api/auth/confirm-email-change', { token: first })).status).toBe(400);
+    expect((await srv.call('POST', '/api/auth/confirm-email-change', { token: second })).status).toBe(200);
   });
 
   it('can be cancelled, and reports what is pending', async () => {
@@ -387,7 +412,7 @@ describe('U2 — changing the email address', () => {
     const fix = await changeEmail(cookie, target);
     expect(fix.status).toBe(200);
 
-    const { token } = changeTokenFor(signup.body.user.id);
+    const token = await changeTokenFor(target);
     const confirmed = await srv.call('POST', '/api/auth/confirm-email-change', { token });
     expect(confirmed.status).toBe(200);
     expect(confirmed.body.user.email).toBe(target);

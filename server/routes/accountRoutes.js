@@ -33,6 +33,7 @@ import { OAUTH_ONLY, issueSession, clearLoginFailuresForUser } from './authRoute
 // lives with the module that owns public/uploads/ and writes into it — read its
 // header before calling it, and never hand-roll a second unlink beside it.
 import { deleteUploadedFile } from './profilePictureRoutes.js';
+import { hashToken, issueToken } from '../tokenDigest.js';
 
 const router = express.Router();
 
@@ -322,13 +323,16 @@ router.post('/api/auth/forgot-password', async (req, res) => {
     `).get(identifier, identifier);
 
     if (user) {
-      const token = crypto.randomBytes(32).toString('hex');
+      /* Only the digest is stored. A reset token IS the account until it is
+         spent, so a readable copy of this table used to be a set of keys to
+         every account with an outstanding reset. See migration 048. */
+      const { token, tokenHash } = issueToken();
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
       // One live token per user: issuing a new link invalidates the old one.
       db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(user.id);
-      db.prepare('INSERT INTO password_reset_tokens (token, user_id, expires_at) VALUES (?, ?, ?)')
-        .run(token, user.id, expiresAt);
+      db.prepare('INSERT INTO password_reset_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
+        .run(tokenHash, user.id, expiresAt);
 
       await sendPasswordResetEmail(user.email, token);
     }
@@ -361,19 +365,22 @@ router.post('/api/auth/reset-password', async (req, res) => {
   }
 
   try {
-    const row = db.prepare('SELECT * FROM password_reset_tokens WHERE token = ?').get(token);
+    /* The link carries the plaintext; the table holds the digest. Hashing the
+       incoming value is what turns one into the other. */
+    const tokenHash = hashToken(token);
+    const row = db.prepare('SELECT * FROM password_reset_tokens WHERE token_hash = ?').get(tokenHash);
     if (!row) {
       return res.status(400).json({ error: 'That reset link is not valid. Request a new one.' });
     }
 
     if (new Date(row.expires_at) < new Date()) {
-      db.prepare('DELETE FROM password_reset_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That reset link has expired. Request a new one.' });
     }
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
     if (!userRow || userRow.account_status === 'deleted') {
-      db.prepare('DELETE FROM password_reset_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That reset link is not valid. Request a new one.' });
     }
 
@@ -389,7 +396,7 @@ router.post('/api/auth/reset-password', async (req, res) => {
        */
       db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?')
         .run(passwordHash, row.user_id);
-      db.prepare('DELETE FROM password_reset_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
       // Any other outstanding reset link for this account is now moot, and
       // leaving it live is a second key to a lock that was just changed.
       db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(row.user_id);
@@ -581,8 +588,11 @@ router.post('/api/auth/change-email', authenticateToken, requireAAL2('email.chan
       // transaction with the insert that replaces it, so a rollback cannot
       // discard the pending change the user already had.
       db.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(req.user.id);
-      db.prepare('INSERT INTO email_change_tokens (token, user_id, new_email, expires_at) VALUES (?, ?, ?, ?)')
-        .run(token, req.user.id, target, expiresAt);
+      /* Digest only. This link can move an account's only recovery channel to a
+         new address, so a readable copy of it is an account-takeover primitive.
+         See migration 048. */
+      db.prepare('INSERT INTO email_change_tokens (token_hash, user_id, new_email, expires_at) VALUES (?, ?, ?, ?)')
+        .run(hashToken(token), req.user.id, target, expiresAt);
     });
 
     await sendEmailChangeConfirmation(target, token);
@@ -616,25 +626,26 @@ router.post('/api/auth/confirm-email-change', (req, res) => {
   if (!token) return res.status(400).json({ error: 'Token is required' });
 
   try {
-    const row = db.prepare('SELECT * FROM email_change_tokens WHERE token = ?').get(token);
+    const tokenHash = hashToken(token);
+    const row = db.prepare('SELECT * FROM email_change_tokens WHERE token_hash = ?').get(tokenHash);
     if (!row) {
       return res.status(400).json({ error: 'That link is not valid. Request the change again from Settings.' });
     }
     if (new Date(row.expires_at) < new Date()) {
-      db.prepare('DELETE FROM email_change_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM email_change_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That link has expired. Request the change again from Settings.' });
     }
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
     if (!userRow || userRow.account_status !== 'active') {
-      db.prepare('DELETE FROM email_change_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM email_change_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That link is not valid. Request the change again from Settings.' });
     }
 
     // Re-check availability: the address was free when the request was made,
     // and someone else may have claimed it during the 24-hour window.
     if (db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE AND id != ?').get(row.new_email, row.user_id)) {
-      db.prepare('DELETE FROM email_change_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM email_change_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(409).json({
         error: 'Another account claimed that email address while this request was open. Try a different one.'
       });
@@ -778,24 +789,25 @@ router.post('/api/auth/verify-email', (req, res) => {
   if (!token) return res.status(400).json({ error: 'Token is required' });
 
   try {
-    const row = db.prepare('SELECT * FROM email_verification_tokens WHERE token = ?').get(token);
+    const tokenHash = hashToken(token);
+    const row = db.prepare('SELECT * FROM email_verification_tokens WHERE token_hash = ?').get(tokenHash);
     if (!row) {
       return res.status(400).json({ error: 'That confirmation link is not valid. Request a new one.' });
     }
     if (new Date(row.expires_at) < new Date()) {
-      db.prepare('DELETE FROM email_verification_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM email_verification_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That confirmation link has expired. Request a new one.' });
     }
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
     if (!userRow || userRow.account_status !== 'active') {
-      db.prepare('DELETE FROM email_verification_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM email_verification_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That confirmation link is not valid. Request a new one.' });
     }
 
     inTransaction(() => {
       db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(row.user_id);
-      db.prepare('DELETE FROM email_verification_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM email_verification_tokens WHERE token_hash = ?').run(tokenHash);
     });
 
     const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
