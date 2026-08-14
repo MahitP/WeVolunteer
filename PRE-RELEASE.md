@@ -160,6 +160,43 @@ to `security@wevolunteers.org`, the closest fit among the nine addresses.
 
 ---
 
+## 7. Analytics (Amplitude)
+
+Installed and working on localhost. **Off by default** — `.env.example` ships
+`VITE_AMPLITUDE_API_KEY` empty, and a build without it logs
+"Amplitude API key missing — analytics disabled" and runs normally. The CSP now
+permits the Amplitude hosts, but permitting is not enabling.
+
+Two of these are decisions, not tasks. I have not made them.
+
+- [ ] **Decide whether analytics needs consent.** WeVolunteer has privacy
+      controls for profile, leaderboard, hours and certificates — and nothing
+      covering third-party telemetry. The Privacy Policy does not mention
+      Amplitude. For a platform whose users are minors this is a question for
+      you and, plausibly, the district; the SDK working is not an answer to it.
+- [ ] **Decide the Session Replay sampling rate.** It is `1` — every session,
+      as the installation required. Audit before that ships: `Login`, `Signup`,
+      `TwoFactorSetup` (TOTP secrets and recovery codes are on screen),
+      `VerifyEmailWall`, `PasswordCard`, `ProfileEditModal`, `Messages`,
+      `AdminRoster`, `ModerationCenter`, `AdminAppeals`, and the free-text field
+      on `/report-issue`. I did not verify Amplitude's masking defaults —
+      an input being visually masked is not the same as being redacted in a
+      replay.
+- [ ] **Use a separate Amplitude project per environment.** The event carries an
+      `environment` property, which is a marker, not isolation. One key across
+      dev and production puts developer clicks in the same dataset as student
+      activity.
+- [ ] Remove `prompt_version: 'BA400.4'` from `src/main.jsx` once the first
+      event has been seen in Amplitude's live feed.
+
+Known, accepted for now: `initAll` also loads Amplitude's Engagement bundle,
+which mounts its own React in an `engagement-wrapper` node beside `#root` and
+logs "Invalid hook call — more than one copy of React" on every page load.
+WeVolunteer renders and navigates normally regardless; verified. `UnifiedOptions`
+exposes an `engagement` key if you later want to configure it.
+
+---
+
 ## 7. Email testing
 
 - [ ] Sign up as a real student on the real domain; confirm the verification

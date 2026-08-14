@@ -129,10 +129,26 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
 
-      // No 'unsafe-inline'. This is the directive that matters: it is what
-      // stops an injected <script> from executing. Stage 3's theme pre-paint
-      // script is an external file in public/ specifically to satisfy this.
-      scriptSrc: ["'self'"],
+      /**
+       * No 'unsafe-inline'. This is the directive that matters: it is what
+       * stops an injected <script> from executing. Stage 3's theme pre-paint
+       * script is an external file in public/ specifically to satisfy this.
+       *
+       * `cdn.amplitude.com` is here because `initAll` loads Amplitude's
+       * engagement bundle from it at runtime. It is a third-party script origin
+       * and therefore the most consequential line in this block — it is listed
+       * only because the SDK cannot function without it, and it stays inert
+       * while no API key is configured.
+       */
+      scriptSrc: ["'self'", 'https://cdn.amplitude.com'],
+
+      /**
+       * Session Replay compresses in a worker created from a blob.
+       * `workerSrc` falls back to `scriptSrc` and then `defaultSrc`, neither of
+       * which allows `blob:` — so without this the recorder is refused with an
+       * error that names the worker rather than Amplitude.
+       */
+      workerSrc: ["'self'", 'blob:'],
 
       /**
        * The client previously used 576 inline `style={{}}` blocks, but they have been
@@ -146,10 +162,36 @@ app.use(helmet({
       // data: covers the inline SVG favicon and any base64 image.
       imgSrc: ["'self'", 'data:', 'https://*.tile.openstreetmap.org', 'https://*.basemaps.cartocdn.com'],
 
-      // The API is same-origin in both topologies: production serves the SPA
-      // and the API from this process, and development proxies /api through
-      // Vite. Nothing legitimate calls a third-party origin.
-      connectSrc: ["'self'", 'https://*.tile.openstreetmap.org', 'https://*.basemaps.cartocdn.com'],
+      /**
+       * The API is same-origin in both topologies: production serves the SPA
+       * and the API from this process, and development proxies /api through
+       * Vite.
+       *
+       * The Amplitude hosts are the exception, and they are listed because the
+       * alternative is worse than listing them: without these the SDK fails
+       * silently in production — the page renders, nothing errors visibly, and
+       * every event is refused by the browser. That is a integration that looks
+       * installed and measures nothing.
+       *
+       * These four are the hosts actually observed in a running session:
+       * ingestion, the CDN bundle, the Session Replay config, and the
+       * general-settings endpoint. Named individually rather than as a wildcard
+       * on `amplitude.com`, so a future Amplitude product cannot start talking
+       * to a new subdomain without somebody adding it here on purpose.
+       *
+       * This widens what the page MAY reach; it does not switch anything on.
+       * Analytics stays inert unless VITE_AMPLITUDE_API_KEY is set at build
+       * time, and .env.example ships it empty.
+       */
+      connectSrc: [
+        "'self'",
+        'https://*.tile.openstreetmap.org',
+        'https://*.basemaps.cartocdn.com',
+        'https://api2.amplitude.com',
+        'https://sr-client-cfg.amplitude.com',
+        'https://gs.amplitude.com',
+        'https://cdn.amplitude.com',
+      ],
 
       frameAncestors: ["'none'"],
       objectSrc: ["'none'"],

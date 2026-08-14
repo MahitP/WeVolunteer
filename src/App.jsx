@@ -927,7 +927,22 @@ function AppShell({ toasts, addToast, removeToast }) {
       let changed = false;
       const next = { ...prev };
       for (const e of list) {
-        if (e?.id && next[e.id] !== e) { next[e.id] = e; changed = true; }
+        if (!e?.id) continue;
+        /**
+         * MERGED, not replaced.
+         *
+         * Browse reports what it rendered from more than one fetch path, and
+         * they do not all return the same projection. A later, thinner response
+         * used to overwrite an earlier richer one wholesale, so an event that
+         * arrived complete could lose `slots` — and with them the shift list —
+         * because a subsequent search or page load mentioned it in passing.
+         *
+         * Layering keeps whatever any response has supplied. A field is only
+         * ever replaced by a NEW value for that field, never erased by a
+         * response that simply did not carry it.
+         */
+        const merged = next[e.id] ? { ...next[e.id], ...e } : e;
+        if (next[e.id] !== merged) { next[e.id] = merged; changed = true; }
       }
       return changed ? next : prev;
     });
@@ -935,8 +950,38 @@ function AppShell({ toasts, addToast, removeToast }) {
 
   // Derived state from URL
   const selectedEventId = searchParams.get('event');
+  /**
+   * The event the modal renders, merged from the two places it can come from.
+   *
+   * ── Why a merge and not a pick ──
+   *
+   * `events` (SessionProvider) and `seenEvents` (whatever a browse surface just
+   * rendered) are DIFFERENT PROJECTIONS of the same row, not a fresh copy and a
+   * stale one. The session index is deliberately narrow — "only events this user
+   * is involved in" — while the browse response carries the fields the modal
+   * actually needs to decide what to show: `slots`, and `viewerBan`, which is
+   * computed per organization for this reader.
+   *
+   * This used to be `events.find(...) || seenEvents[id]`, so whenever an event
+   * appeared in BOTH — which is every event the reader has applied to — the
+   * narrower index won and the richer object was discarded. The visible symptom
+   * was a modal that said "No shifts yet" and "Applications closed" about an
+   * event with a live shift and a deadline five days out, and, for a banned
+   * reader, no ban notice at all: `viewerBan` was simply not on the object the
+   * modal received. Reproduced against a real ban, where `/api/events` returned
+   * both fields and the modal rendered neither.
+   *
+   * The seen object is layered ON TOP because it is the response the reader was
+   * just served, for the surface they are looking at. The index underneath still
+   * supplies anything browse omits, so nothing that worked before is lost.
+   */
   const selectedEvent = selectedEventId
-    ? (events.find(e => e.id === selectedEventId) || seenEvents[selectedEventId] || null)
+    ? (() => {
+      const indexed = events.find(e => e.id === selectedEventId);
+      const seen = seenEvents[selectedEventId];
+      if (!indexed && !seen) return null;
+      return { ...indexed, ...seen };
+    })()
     : null;
   const profileId = searchParams.get('profile');
   const profileType = searchParams.get('type');
