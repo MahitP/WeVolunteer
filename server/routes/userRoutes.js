@@ -21,6 +21,7 @@ import { db, initDatabase } from '../db.js';
 import { distinctionFor } from '../profileSerializer.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
+import { canSeeHours, isValidVisibility, normaliseVisibility } from '../serviceVisibility.js';
 
 const router = express.Router();
 
@@ -125,6 +126,28 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
     const canSeeContact = isSelf || can(req.principal, 'user.contact.read') || hostsApplicant;
 
     /**
+     * Whether the AGGREGATE service figures may be shown.
+     *
+     * The itemised `completed` array below has always been gated on
+     * `canSeeContact`, and correctly so. What was never gated was everything
+     * around it: total hours, events completed, shifts completed, the
+     * hours-by-category breakdown and the milestone tiers. Those were returned
+     * to every caller holding `directory.read`, which is every student.
+     *
+     * Individually each is only a number. Together they are a fairly complete
+     * picture of how much somebody volunteers and at what, and a student who
+     * wants that kept to themselves had no way to ask. Now they do.
+     *
+     * `canSeeContact` is deliberately part of the test rather than a separate
+     * branch: staff who may already read a student's particulars, and an
+     * organizer reviewing somebody who applied to their own event, are reading
+     * this as part of a workflow that is already a reviewed decision. Hiding a
+     * total from them would break applicant review without protecting anything
+     * they cannot reach another way.
+     */
+    const hoursVisible = canSeeHours(row, { viewerId: req.principal.userId, canSeeContact });
+
+    /**
      * Shared with the dashboard rather than restated here.
      *
      * This query and the dashboard's are the inputs to the same
@@ -186,10 +209,14 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
         // Contact details stay with the person and the adults coordinating them
         email: canSeeContact ? row.email : null
       },
+      /* Omitted, not zeroed, when the subject keeps their history private: a
+         zero is a claim about somebody, and it is a false one. `hoursVisible`
+         is reported alongside so the page can say why the figures are absent. */
+      hoursVisible,
       stats: {
-        hours: Number(totals.hours) || 0,
-        eventsCompleted: totals.events || 0,
-        shiftsCompleted: totals.shifts || 0,
+        hours: hoursVisible ? (Number(totals.hours) || 0) : null,
+        eventsCompleted: hoursVisible ? (totals.events || 0) : null,
+        shiftsCompleted: hoursVisible ? (totals.shifts || 0) : null,
         // The count alone carries no whereabouts, so staff who legitimately
         // see contact info may see it too — the array itself (event location,
         // exact times) is self-only, below.
@@ -200,8 +227,14 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
            read as an oversight rather than a decision. */
         pendingCount: isSelf || canSeeContact ? pendingCount : 0
       },
-      milestones: buildMilestones(Number(totals.hours) || 0, totals.events || 0),
-      byCategory: byCategory.map(c => ({ category: c.category, hours: Number(c.hours) })),
+      /* Both are derived from the hours, so publishing them while withholding
+         the total would hand the reader the same fact by another route — a
+         milestone tier IS an hours threshold, and the category breakdown sums
+         to the total. */
+      milestones: hoursVisible ? buildMilestones(Number(totals.hours) || 0, totals.events || 0) : [],
+      byCategory: hoursVisible
+        ? byCategory.map(c => ({ category: c.category, hours: Number(c.hours) }))
+        : [],
       /**
        * The itemised service record is NOT public.
        *
@@ -477,6 +510,29 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
     }
     if (req.body.friendActivityVisible !== undefined) {
       updates.push('friend_activity_visible = ?'); values.push(req.body.friendActivityVisible ? 1 : 0);
+    }
+
+    /**
+     * Who may see the service history and the certificates.
+     *
+     * Two separate questions with two separate answers, deliberately. A student
+     * may be happy for the school to see they volunteered forty hours while
+     * keeping the certificates — which carry their full name, the organization
+     * and a verification code — to themselves, or exactly the reverse.
+     *
+     * Validated against the closed set rather than coerced. `values.push(x ===
+     * 'private' ? 'private' : 'public')` would accept a typo and silently store
+     * the opposite of what the student chose, which for a privacy control is
+     * the one failure mode that must not be quiet.
+     */
+    for (const [field, column] of [['hoursVisibility', 'hours_visibility'],
+                                   ['certificatesVisibility', 'certificates_visibility']]) {
+      if (req.body[field] !== undefined) {
+        if (!isValidVisibility(req.body[field])) {
+          return res.status(400).json({ error: 'Choose public or private.', field });
+        }
+        updates.push(`${column} = ?`); values.push(req.body[field]);
+      }
     }
 
     if (grade !== undefined) {

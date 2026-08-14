@@ -551,6 +551,27 @@ router.get('/api/leaderboard', authenticateToken, (req, res) => {
       LEFT JOIN attendance a ON a.user_id = u.id AND a.present = 1
       WHERE u.role = 'student' AND u.leaderboard_opt_in = 1
         AND u.account_status <> 'deleted'
+        /**
+         * And the service history is not private.
+         *
+         * Two opt-ins could otherwise point opposite ways: a student who joined
+         * the leaderboard last term and has since set their hours to "Only me"
+         * would still have their name and hour total published here — through a
+         * different endpoint from the one the privacy setting guards, which is
+         * exactly how a privacy control ends up being technically enforced and
+         * practically useless.
+         *
+         * The narrower, more recent, more explicit answer wins. "Only me" is
+         * not ambiguous, and a board is the most public surface on the platform.
+         * Turning hours back to public restores the rank; nothing is lost.
+         *
+         * IS NOT 'private' rather than = 'public', matching
+         * normaliseVisibility: anything unrecognised reads as public, so a NULL
+         * on an older row keeps the behaviour it already had. (No backticks in
+         * this comment: it lives inside a template literal, and one would end
+         * the string mid-SQL — the same trap migration 046 records.)
+         */
+        AND u.hours_visibility IS NOT 'private'
       GROUP BY u.id
       ORDER BY hours DESC, shifts DESC
       LIMIT 25

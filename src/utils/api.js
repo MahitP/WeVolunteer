@@ -925,6 +925,10 @@ export const api = {
 
   // ── Certificates ───────────────────────────────
   fetchCertificates: async () => apiFetch('/api/certificates'),
+  /* Somebody ELSE's certificates: metadata only. The server never emits the
+     verification code on this route, so there is no download to withhold in the
+     client — the difference is enforced where it cannot be bypassed. */
+  fetchUserCertificates: async (userId) => apiFetch(`/api/users/${userId}/certificates`),
 
   // ── Attendees ──────────────────────────────────
   // Server decides what the caller may see; an empty list with visible:false

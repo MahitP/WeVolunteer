@@ -37,6 +37,9 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import ReportModal from '../components/ReportModal';
 import { DistinctionBanner, DistinctionTag } from '../components/profile/Distinction';
 import OrgAvatar from '../components/common/OrgAvatar';
+/* Extracted so the organization roster can use the same menu rather than a
+   second copy that drifts out of step on accessibility. */
+import ActionsMenu from '../components/common/ActionsMenu';
 
 /** "March 2025" — a joined date needs no day, and a day is more than is asked. */
 const monthYear = (iso) => (iso
@@ -46,63 +49,6 @@ const monthYear = (iso) => (iso
 const dayMonthYear = (iso) => (iso
   ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
   : null);
-
-/**
- * The three-dot menu.
- *
- * A `<menu>` of real buttons rather than a styled list, so keyboard and screen
- * reader users get the semantics for free. Escape and outside-click close it,
- * and focus returns to the trigger — the same contract `useModal` gives
- * dialogs, implemented here rather than reused because a popover that traps
- * focus would be wrong.
- */
-function ActionsMenu({ label, items }) {
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
-    const onClick = (e) => { if (!e.target.closest('.profile-menu')) setOpen(false); };
-    document.addEventListener('keydown', onKey);
-    document.addEventListener('click', onClick);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.removeEventListener('click', onClick);
-    };
-  }, [open]);
-
-  return (
-    <div className="profile-menu">
-      <button
-        type="button"
-        className="btn btn-ghost btn-icon"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={label}
-        onClick={() => setOpen(v => !v)}
-      >
-        <MoreHorizontal size={18} aria-hidden="true" />
-      </button>
-      {open && (
-        <menu className="profile-menu-list" role="menu">
-          {items.map(item => (
-            <li key={item.id} role="none">
-              <button
-                type="button"
-                role="menuitem"
-                className={item.destructive ? 'profile-menu-item profile-menu-item-danger' : 'profile-menu-item'}
-                onClick={() => { setOpen(false); item.onSelect(); }}
-              >
-                <item.icon size={15} aria-hidden="true" />
-                <span>{item.label}</span>
-              </button>
-            </li>
-          ))}
-        </menu>
-      )}
-    </div>
-  );
-}
 
 /**
  * `onEditProfile` opens the edit modal when the profile being viewed is the
@@ -195,7 +141,13 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
 
   const { profile, viewer } = data;
   const isSelf = profile.isSelf;
+  /* The server OMITS `stats` entirely when the subject keeps their service
+     history private — it does not zero it, because a zero is a claim and it
+     would be a false one. So this has to cope with absence rather than assume
+     an object. */
   const stats = profile.stats;
+  const hoursPrivate = profile.serviceVisibility?.hours === 'private';
+  const certificatesPrivate = profile.serviceVisibility?.certificates === 'private';
   const external = profile.externalService;
   const canBlock = can(currentUser, 'event.apply');
 
@@ -399,9 +351,10 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
         * returns, which is exactly what makes the owner/student hybrid work
         * without a rule naming anybody: the condition is the data, not the role.
         */}
-      {(!profile.distinction
-        || stats.eventsSignedUp > 0 || stats.eventsAttended > 0
-        || stats.hours > 0 || profile.lastVolunteeredAt) && (
+      {(hoursPrivate
+        || !profile.distinction
+        || stats?.eventsSignedUp > 0 || stats?.eventsAttended > 0
+        || stats?.hours > 0 || profile.lastVolunteeredAt) && (
       <section className="card">
         {/* "Volunteering" is the student word for it. An institutional account
             names the same section differently — the label comes from the
@@ -409,6 +362,20 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
             rather than a branch here. */}
         <div className="card-head"><h2>{profile.distinction?.contributionLabel ?? 'Volunteering'}</h2></div>
         <div className="card-body">
+          {/**
+            * Said plainly, rather than rendering zeroes.
+            *
+            * An empty record and a private one look identical if the page just
+            * omits the numbers, and the reader draws the wrong conclusion about
+            * a person — "they have never volunteered" instead of "they keep
+            * this to themselves". The server tells us which it is.
+            */}
+          {hoursPrivate ? (
+            <p className="muted row" style={{ gap: 6 }}>
+              <Lock size={14} aria-hidden="true" />
+              {profile.name} keeps their service history private.
+            </p>
+          ) : (<>
           <div className="stats profile-stats">
             <Stat icon={CalendarDays} label="Events signed up" value={stats.eventsSignedUp} />
             <Stat icon={Check} label="Events attended" value={stats.eventsAttended} />
@@ -448,6 +415,23 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
               outside WeVolunteer. <Link to="/hours">See your logged hours</Link>.
             </p>
           )}
+          {/* The fuller pages. Certificates are named only when the subject has
+              left them visible — a link to a page that will refuse is an
+              invitation to discover the setting, which is the count leaking one
+              click later. */}
+          {profile.username && (
+            <div className="row row-wrap" style={{ gap: 'var(--s2)', marginTop: 'var(--s4)' }}>
+              <Link to={`/users/@${profile.username}/hours`} className="btn btn-secondary btn-sm">
+                See service history
+              </Link>
+              {!certificatesPrivate && (
+                <Link to={`/users/@${profile.username}/certificates`} className="btn btn-secondary btn-sm">
+                  See certificates
+                </Link>
+              )}
+            </div>
+          )}
+          </>)}
         </div>
       </section>
       )}
