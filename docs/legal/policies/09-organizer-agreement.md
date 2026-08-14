@@ -113,7 +113,7 @@ spreadsheets, printouts, emails, notes on your phone. WeVolunteer keeps the reco
 not need to.
 
 If your own organization's rules require you to keep something longer, tell us what and why
-at wevolunteer.platform@gmail.com before you do.
+at admin@wevolunteers.org before you do.
 
 ## 6. How you may contact students
 
@@ -155,7 +155,7 @@ That includes you.
   legal duty.
 - You do not need proof — "reasonable cause to believe" is enough.
 - Do not promise a student you will keep something secret. You may not be able to.
-- Also tell us at **wevolunteer.platform@gmail.com** so we can act on the platform.
+- Also tell us at **security@wevolunteers.org** so we can act on the platform.
 
 ## 9. Hours must be accurate
 

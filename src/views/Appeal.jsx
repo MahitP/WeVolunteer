@@ -25,8 +25,12 @@ import { useParams } from 'react-router-dom';
 import { AlertTriangle, ShieldOff, CheckCircle2 } from 'lucide-react';
 import { api } from '../utils/api';
 import BrandMark from '../components/common/BrandMark';
+import { APPEALS_EMAIL } from '../config';
 
-const SUPPORT_EMAIL = 'wevolunteer.platform@gmail.com';
+/* Was a module-local literal that shadowed the real config export, so a
+   deployment could change the support address everywhere except the page
+   people reach when they have been suspended. */
+const SUPPORT_EMAIL = APPEALS_EMAIL;
 const MIN_STATEMENT = 20;
 
 const formatDate = (iso) => {

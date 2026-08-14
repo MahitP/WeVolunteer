@@ -169,7 +169,7 @@ router.get('/api/weather', weatherLimiter, authenticateToken, requireCap('event.
     const timeout = setTimeout(() => controller.abort(), 5000);
 
     const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`, {
-      headers: { 'User-Agent': 'WeVolunteer/1.0 (volunteer-app; contact@wevolunteer.app)' },
+      headers: { 'User-Agent': 'WeVolunteer/1.0 (volunteer-app; contact@wevolunteers.org)' },
       signal: controller.signal
     });
 

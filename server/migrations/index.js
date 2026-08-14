@@ -55,6 +55,10 @@ import avatarColour from './043_avatar_colour.js';
 import organizationBans from './044_organization_bans.js';
 import eventAudience from './045_event_audience.js';
 import studentOrganizerRole from './046_student_organizer_role.js';
+import emailOutbox from './047_email_outbox.js';
+import hashAuthTokens from './048_hash_auth_tokens.js';
+import serviceVisibility from './049_service_visibility.js';
+import deliveryEvents from './050_delivery_events.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -275,7 +279,30 @@ export const MIGRATIONS = [
    * its CHECK, so it must run after 031 created the table and after anything
    * that adds a column to it (nothing does).
    */
-  studentOrganizerRole
+  studentOrganizerRole,
+  /**
+   * 047 — the outbox learns to carry a rendered message, so transactional mail
+   * stops being the one category that could vanish on a restart. Additive
+   * columns only, so a queue with rows in flight drains across the upgrade.
+   */
+  emailOutbox,
+  /**
+   * 048 — verification, reset and email-change tokens stop being stored in
+   * plaintext. Rebuilds three tables to rename `token` to `token_hash`, so a
+   * future plaintext write fails loudly instead of silently reopening the hole.
+   */
+  hashAuthTokens,
+  /**
+   * 049 — a student decides who sees their service history and certificates.
+   * Two additive columns on `users`, both defaulting to 'public' so nothing a
+   * student had already published silently disappears on deploy.
+   */
+  serviceVisibility,
+  /**
+   * 050 — what became of a message after the provider accepted it. Additive
+   * columns plus an event table whose PRIMARY KEY is the webhook dedupe.
+   */
+  deliveryEvents
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

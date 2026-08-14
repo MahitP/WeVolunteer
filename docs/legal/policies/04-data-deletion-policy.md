@@ -208,7 +208,7 @@ organizer mid-event would strand the students who signed up.
 If you are the parent or guardian of a student under 18, you can ask us to delete their
 account.
 
-Email **wevolunteer.platform@gmail.com**. We will verify who you are and your relationship to
+Email **privacy@wevolunteers.org**. We will verify who you are and your relationship to
 the student, ask for no more documentation than we actually need, acknowledge within **10
 business days**, and complete within **45 days**.
 
@@ -224,5 +224,5 @@ guardian if you are under 18, can ask for that — and you ask us.
 
 ## Questions
 
-Ask **before** you delete, not after: **wevolunteer.platform@gmail.com**. We would much rather answer a
+Ask **before** you delete, not after: **privacy@wevolunteers.org**. We would much rather answer a
 question than reverse something we cannot reverse.

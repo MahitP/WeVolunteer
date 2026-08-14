@@ -159,6 +159,34 @@ export function publicOrigin() {
  * SUPPORT_EMAIL is the one that matters most — it is the fallback that makes the
  * screen useful even with nothing else configured.
  */
-export const SUPPORT_EMAIL = import.meta.env.VITE_SUPPORT_EMAIL || '';
+/**
+ * The domain the platform's own addresses live on. Mirrors `MAIL_DOMAIN` in
+ * server/emailIdentity.js — the two have to agree, and each is one line.
+ */
+export const MAIL_DOMAIN = import.meta.env.VITE_MAIL_DOMAIN || 'wevolunteers.org';
+
+/**
+ * The help address, and the first one with a working default.
+ *
+ * It used to default to the empty string, so the surfaces that check before
+ * rendering — About and Settings — simply hid the contact line, while three
+ * OTHER places hard-coded a personal Gmail address inline and showed it anyway.
+ * A district that set `VITE_SUPPORT_EMAIL` changed the two screens that were
+ * already blank and none of the three that were wrong.
+ *
+ * The platform now has its own addresses, so the default is a real one and the
+ * env var narrows to what it was for: a district that wants its own help desk.
+ */
+export const SUPPORT_EMAIL = import.meta.env.VITE_SUPPORT_EMAIL || `support@${MAIL_DOMAIN}`;
+
+/**
+ * Where somebody contests a decision made about their account.
+ *
+ * Deliberately NOT the support address. Every screen that names it — the appeal
+ * form, the suspended wall — is a person saying "I think this is wrong", which
+ * is an adjudication channel and not a help desk. Deliberately not
+ * district-overridable either: an appeal is heard by whoever runs the platform.
+ */
+export const APPEALS_EMAIL = `admin@${MAIL_DOMAIN}`;
 export const STUDENT_GUIDE_URL = import.meta.env.VITE_STUDENT_GUIDE_URL || '';
 export const ORGANIZER_GUIDE_URL = import.meta.env.VITE_ORGANIZER_GUIDE_URL || '';

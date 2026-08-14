@@ -118,7 +118,7 @@ you can delete it at any time.
 ## 3. Your account
 
 You are responsible for what happens on your account, so keep your password to yourself. Tell
-us straight away at wevolunteer.platform@gmail.com if you think someone else has got into it.
+us straight away at support@wevolunteers.org if you think someone else has got into it.
 
 For certain sensitive actions — deleting your account, changing your password or email,
 connecting or disconnecting a sign-in provider, and downloading your data — we will ask you
@@ -240,7 +240,7 @@ This matters, so it is its own section.
 - Certificates confirm what our records say. They are not a legal attestation and they are
   not issued by a school.
 - If your hours are wrong, tell the organizer first. If that does not resolve it, contact
-  wevolunteer.platform@gmail.com. Once hours are credited we do not re-price them if the event is later
+  support@wevolunteers.org. Once hours are credited we do not re-price them if the event is later
   edited — a credit is a snapshot of what was true when you earned it.
 
 ## 7. Events happen in the real world
@@ -257,7 +257,7 @@ Before you go somewhere to volunteer, especially somewhere new, tell a parent or
 where you are going. This is not legal boilerplate; it is the actual advice.
 
 If something at an event makes you uncomfortable or unsafe, leave, and then tell us at
-wevolunteer.platform@gmail.com and tell an adult you trust. See the
+admin@wevolunteers.org and tell an adult you trust. See the
 [Youth Safety Guidelines](/legal/youth-safety-guidelines).
 
 ## 8. Who owns what
@@ -294,7 +294,7 @@ will tell you what was removed and why, unless telling you would interfere with 
 investigation.
 
 If you believe something on WeVolunteer infringes your copyright, email
-wevolunteer.platform@gmail.com with a link to it, what it copies, and how to reach you. We will
+legal@wevolunteers.org with a link to it, what it copies, and how to reach you. We will
 look at it, and we will usually take the content down while we do.
 
 ## 9. Suspending or closing accounts
@@ -403,7 +403,7 @@ gets a minor version and notice only.
 
 **This is version 1.0 — the first published version, so there are no earlier ones yet.** When we
 replace it we keep the version it replaced, and you can email
-**wevolunteer.platform@gmail.com** for any previous version and the dates it applied. Every
+**legal@wevolunteers.org** for any previous version and the dates it applied. Every
 version is stored with a content fingerprint, so a copy you receive can be checked against the
 one your account accepted.
 
@@ -411,7 +411,7 @@ one your account accepted.
 
 We would much rather fix a problem than argue about one, so:
 
-1. **Tell us first.** Email wevolunteer.platform@gmail.com describing what happened and what
+1. **Tell us first.** Email legal@wevolunteers.org describing what happened and what
    you would like us to do. We will acknowledge within **10 business days**.
 2. **We try to sort it out within 30 days.** Most things are a mistake, a missing record, or a
    misunderstanding, and they get fixed at this step.
@@ -447,7 +447,7 @@ does not take them away from you.
 ## 17. Contact
 
 The operator named at the top of this document, at
-**wevolunteer.platform@gmail.com**, which that person reads directly.
+**legal@wevolunteers.org**, which that person reads directly.
 
 **If you need to send legal or regulatory correspondence on paper**, email that address and we
 will give you a postal address for service. We do not print one here, and the reason is worth
@@ -456,4 +456,4 @@ that exists today is a home address. Publishing the home address of the person w
 accounts, to the people whose accounts get suspended, is not a risk we are willing to take —
 and it is not necessary, because service can be arranged on request. If the operator later
 becomes an LLC, a business address will appear here instead.
-wevolunteer.platform@gmail.com
+legal@wevolunteers.org
