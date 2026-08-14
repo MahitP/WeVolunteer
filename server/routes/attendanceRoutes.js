@@ -13,6 +13,7 @@ import { notificationService } from '../services/notificationService.js';
 import { getOrCreateCertificateCode } from '../certificates.js';
 import { badgeService } from '../services/badgeService.js';
 import { db } from '../db.js';
+import { canRunEvent } from '../organizations.js';
 
 const router = express.Router();
 
@@ -238,7 +239,7 @@ router.get('/api/events/:id/roster.csv', authenticateToken, requireCapAny(['atte
     if (!event) return res.status(404).json({ error: 'Event not found' });
     // event.moderate is the "may act on any event" bypass; an organizer
     // (lacking it) is bound to the event they host.
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -384,8 +385,12 @@ router.get('/api/certificates/verify/:code', (req, res) => {
  * for `event.edit.own` elsewhere.
  */
 function hostRefusal(principal, event) {
-  if (can(principal, 'event.moderate')) return null;
-  if (event.organizer_id === principal.userId) return null;
+  /* `canRunEvent`, not a bare `organizer_id` compare: an event published under
+     a club's name is the club's to run, so its managers reach check-in and
+     attendance too. Without that, an event posted by a Student Organizer who
+     was later demoted had NOBODY who could record who turned up — and this is
+     the only path that writes credited hours. */
+  if (canRunEvent(db, event, principal.userId, { hasModerate: can(principal, 'event.moderate') })) return null;
   return { status: 403, body: { error: 'Access denied: You do not host this event' } };
 }
 

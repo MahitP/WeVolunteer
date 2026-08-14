@@ -10,7 +10,7 @@ import {
 } from '../email.js';
 import { VALID_GRADES, JWT_SECRET, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
-import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
+import { authenticateToken, selfUserResponse, inTransaction } from '../utils.js';
 import { requireAAL2, ROLE, can } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import { recordAudit } from '../auditLog.js';
@@ -482,7 +482,7 @@ router.post('/api/auth/change-password', authenticateToken, requireAAL2('passwor
     // for the caller so changing a password does not eject the person doing it,
     // while every other device is signed out — which is the point.
     const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-    issueSession(res, formatUserResponse(fresh), fresh.token_version);
+    issueSession(res, selfUserResponse(fresh), fresh.token_version);
 
     res.json({ success: true, addedPassword: isOauthOnly });
   } catch (err) {
@@ -659,7 +659,7 @@ router.post('/api/auth/confirm-email-change', (req, res) => {
     });
 
     const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
-    const user = formatUserResponse(fresh);
+    const user = selfUserResponse(fresh);
 
     // Opening the link proves control of the new mailbox, so the person holding
     // it gets a working session — otherwise confirming from a phone would leave
@@ -758,7 +758,7 @@ router.post('/api/auth/change-username', authenticateToken, (req, res) => {
       .run(target, caseOnly ? userRow.username_changed_at : new Date().toISOString(), req.user.id);
 
     const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-    res.json({ success: true, user: formatUserResponse(fresh) });
+    res.json({ success: true, user: selfUserResponse(fresh) });
   } catch (err) {
     console.error('Change username error:', err);
     if (String(err.message).includes('UNIQUE')) {
@@ -795,7 +795,7 @@ router.post('/api/auth/verify-email', (req, res) => {
     });
 
     const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
-    const user = formatUserResponse(fresh);
+    const user = selfUserResponse(fresh);
 
     /**
      * Confirming signs you in, which is what makes the link from the welcome

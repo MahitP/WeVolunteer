@@ -7,6 +7,7 @@ import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
+import { canRunEvent } from '../organizations.js';
 /* Derived from the Silver tier, so the meter and the milestone cannot disagree
    about what Silver means. See server/milestones.js. */
 import { SERVICE_HOUR_GOAL } from '../milestones.js';
@@ -203,7 +204,7 @@ router.get('/api/events/:id/attendees', authenticateToken, (req, res) => {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const isStaff = can(req.principal, 'event.moderate') || event.organizer_id === req.principal.userId;
+    const isStaff = canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') });
 
     if (!isStaff) {
       const mine = db.prepare(`
@@ -265,7 +266,7 @@ router.get('/api/events/:id/announcements', authenticateToken, (req, res) => {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const isStaff = can(req.principal, 'event.moderate') || event.organizer_id === req.principal.userId;
+    const isStaff = canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') });
 
     if (!isStaff) {
       const mine = db.prepare(`
@@ -312,7 +313,7 @@ router.post('/api/events/:id/announcements', authenticateToken, (req, res) => {
     if (!can(req.principal, 'announcement.post') && !can(req.principal, 'event.moderate')) {
       return res.status(403).json({ error: 'Only the event organizer can post announcements' });
     }
-    if (event.organizer_id !== req.principal.userId && !can(req.principal, 'event.moderate')) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Only the event organizer can post announcements' });
     }
 

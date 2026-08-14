@@ -479,6 +479,49 @@ describe('Student Organizer', () => {
       expect(theirs.body.grants, 'an ordinary member was sent a grant').toEqual([]);
     });
 
+    it('keeps the grants on every payload that replaces the session user', async () => {
+      /**
+       * `/api/auth/me` was not the only endpoint whose response the browser
+       * stores as `currentUser` — saving a profile replaces it wholesale, and
+       * that response carried no `grants`. So a Student Organizer who edited
+       * their bio lost all four helper capabilities client-side until a full
+       * reload: nav, route guard and create button all gone.
+       *
+       * Note which way this fails. A missing `withheld` OVER-offers, which
+       * `src/authz.js` names as the safe direction; a missing `grants`
+       * UNDER-offers, hiding a control the server would have allowed. That is
+       * the failure the whole mirror exists to prevent, which is why it is
+       * asserted on the endpoint rather than left to the one that reads it.
+       */
+      const saved = await srv.call('PATCH', '/api/auth/profile', { leaderboardOptIn: true }, helper);
+      expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+      expect(saved.body.user.grants).toContain('organization.event.create');
+      expect(saved.body.user.withheld).toEqual([]);
+    });
+
+    it('does not present a student’s event as run by a VERIFIED organizer', async () => {
+      /**
+       * `organizerVerified` came straight from `users.verified`, which signup
+       * writes as 1 for every non-organizer. Harmless while only organizers
+       * could host; since this rank, every event a student posted for their
+       * club rendered the administrator-approval shield.
+       */
+      const created = await createEvent({ organizationId: orgId }, helper);
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+
+      const list = await srv.call('GET', '/api/events?scope=listable&limit=60&offset=0', undefined, bystander);
+      const card = (list.body.events || []).find(e => e.id === created.body.id);
+      expect(card, 'the event was not listed').toBeTruthy();
+      expect(card.organizerVerified, 'a student was shown as a verified organizer').toBe(false);
+    });
+
+    it('still shows the shield on a real organizer’s event', async () => {
+      const created = await createEvent({ organizationId: orgId }, owner);
+      const list = await srv.call('GET', '/api/events?scope=listable&limit=60&offset=0', undefined, bystander);
+      const card = (list.body.events || []).find(e => e.id === created.body.id);
+      expect(card.organizerVerified).toBe(true);
+    });
+
     it('does not let an ARCHIVED organization keep posting', async () => {
       const archived = await srv.call('PATCH', `/api/organizations/${orgKey}`,
         { status: 'archived' }, owner);

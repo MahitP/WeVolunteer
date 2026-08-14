@@ -12,6 +12,7 @@ import { friendsToNotify } from '../relationships.js';
 import { participationCountsFor } from '../volunteerStats.js';
 import { eventApplicationEligibility } from '../eventEligibility.js';
 import { db } from '../db.js';
+import { canRunEvent } from '../organizations.js';
 import { slotHasStarted } from '../attendance.js';
 
 const router = express.Router();
@@ -469,7 +470,7 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
         WHERE a.id = ?
       `).get(id);
       if (!app) return res.status(404).json({ error: `Application not found: ${id}` });
-      if (!can(req.principal, 'event.moderate') && app.organizer_id !== req.principal.userId) {
+      if (!canRunEvent(db, app, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
         return res.status(403).json({ error: 'Access denied: You do not host this event' });
       }
       // A withdrawn application is the volunteer's own choice to leave; an
@@ -649,7 +650,7 @@ router.patch('/api/applications/:id', authenticateToken,
       `).get(appId);
 
       if (!app) return res.status(404).json({ error: 'Application not found' });
-      if (!can(req.principal, 'event.moderate') && app.organizer_id !== req.principal.userId) {
+      if (!canRunEvent(db, app, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
         return res.status(403).json({ error: 'Access denied: You do not host this event' });
       }
 

@@ -13,12 +13,12 @@ import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 import { validateTags, replaceEventTags, tagsForEvent, tagsForEvents, tagVocabulary, BROWSE_TAG_LIMIT } from '../eventTags.js';
-import { EVENT_AUDIENCES, DEFAULT_AUDIENCE } from '../eventEligibility.js';
+import { EVENT_AUDIENCES, DEFAULT_AUDIENCE, isMemberOf } from '../eventEligibility.js';
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
 import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
 import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
-import { canManage, canHelpRun, memberIds } from '../organizations.js';
+import { canManage, canHelpRun, canRunEvent, memberIds } from '../organizations.js';
 
 const router = express.Router();
 
@@ -263,7 +263,7 @@ router.get('/api/events', authenticateToken, (req, res) => {
      * from an explicit field list, so `total_count` never reaches a caller.
      */
     const SELECT = `
-      SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
+      SELECT e.*, u.name as organizer_name, u.verified as organizer_verified, u.role as organizer_role,
              u.school as organizer_school,
              /* One LEFT JOIN rather than a lookup per event. An event card shows
                 the organization's name, and fetching it per row is the N+1 the
@@ -441,7 +441,16 @@ router.get('/api/events', authenticateToken, (req, res) => {
         instructions: canSeeInstructions ? (event.instructions || '') : '',
         organizerId: event.organizer_id,
         organizerName: event.organizer_name,
-        organizerVerified: event.organizer_verified === 1,
+        /**
+         * "Verified organizer" means an administrator approved this ACCOUNT to
+         * run events. `users.verified` alone does not mean that: signup writes
+         * it as 1 for every non-organizer, and it was harmless only while a
+         * student could never be an event's host. Since the Student Organizer
+         * rank, every event a student posts for their club was rendering the
+         * approval shield.
+         */
+        organizerVerified: event.organizer_verified === 1
+          && ['organizer', 'admin', 'super_admin'].includes(event.organizer_role),
         organizerSchool: event.organizer_school || '',
         status: event.status,
         hasAttendance: withAttendance.has(event.id),
@@ -609,7 +618,7 @@ router.get('/api/events/tags', authenticateToken, (req, res) => {
 router.get('/api/events/:id', authenticateToken, (req, res) => {
   try {
     const event = db.prepare(`
-      SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
+      SELECT e.*, u.name as organizer_name, u.verified as organizer_verified, u.role as organizer_role,
              u.school as organizer_school,
              org.name as organization_name, org.slug as organization_slug
       FROM events e JOIN users u ON e.organizer_id = u.id
@@ -619,11 +628,18 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
 
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const isStaff = can(req.principal, 'event.moderate') ||
-      event.organizer_id === req.principal.userId;
+    const isStaff = canRunEvent(db, event, req.principal.userId, {
+      hasModerate: can(req.principal, 'event.moderate'),
+    });
     if (!isStaff) return res.status(403).json({ error: 'Access denied: You do not host this event' });
 
-    const viewerOrgs = viewerMembershipsFor(req.user?.id);
+    /* This route is staff-only (the `isStaff` gate above), so the reader always
+       runs the event and `viewerIsMember` is not a question anybody is asking
+       here. The field is still emitted for shape parity with the list, computed
+       from the one membership row rather than a sweep of the whole table. */
+    const viewerOrgs = event.organization_id
+      ? new Set(isMemberOf(event.organization_id, req.user?.id) ? [event.organization_id] : [])
+      : new Set();
     const slots = db.prepare('SELECT * FROM slots WHERE event_id = ?').all(event.id);
     const acceptedBySlot = new Map();
     for (const r of db.prepare(`
@@ -789,7 +805,22 @@ router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'or
    * it as open would be a different event from the one the organizer described.
    * So it is refused rather than corrected.
    */
-  const audience = EVENT_AUDIENCES.includes(req.body?.audience) ? req.body.audience : DEFAULT_AUDIENCE;
+  /**
+   * An audience the server does not recognise is REFUSED, not corrected.
+   *
+   * It used to coerce silently to `everyone`, which meant a client with a typo
+   * published a public event where its organizer had asked for a restricted one
+   * — the failure mode being quiet is what makes it bad, not the default being
+   * wrong. `PUT` already answered 400 for the same value, so the two halves of
+   * the same field also disagreed about their own contract.
+   */
+  const audience = req.body?.audience === undefined ? DEFAULT_AUDIENCE : req.body.audience;
+  if (!EVENT_AUDIENCES.includes(audience)) {
+    return res.status(400).json({
+      error: 'That is not a valid audience for an event.',
+      field: 'audience', code: 'invalid_audience',
+    });
+  }
   if (audience === 'organization' && (organizationId == null || organizationId === '')) {
     return res.status(400).json({
       error: 'Choose the organization whose members can apply.',
@@ -1017,7 +1048,7 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
 
@@ -1310,7 +1341,7 @@ router.post('/api/events/:id/auto-approve', authenticateToken, requireCapAny(['e
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1367,7 +1398,7 @@ router.patch('/api/events/:id', authenticateToken, requireCapAny(['event.edit.ow
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
     if (event.status === 'completed') {
@@ -1409,7 +1440,7 @@ router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.modera
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     // Allow Admin OR the organizer who hosted it to delete it
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1514,7 +1545,7 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
     if (event.status === 'completed') {
@@ -1546,7 +1577,7 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['even
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1644,7 +1675,7 @@ router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(
     const event = db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1679,7 +1710,7 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1760,7 +1791,7 @@ router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCap
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
     if (event.status === 'completed') {
@@ -1813,7 +1844,7 @@ router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['even
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
     
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Not authorized' });
     }
 

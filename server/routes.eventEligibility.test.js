@@ -347,12 +347,24 @@ describe('applying to an organization event', () => {
       expect(res.status).not.toBe(201);
     });
 
-    it('ignores an unrecognised audience rather than storing it', async () => {
-      /* Anything that is not the literal `organization` reads as open, so an
-         unknown value must not be persisted and later interpreted by somebody
-         else's code. */
+    it('REFUSES an unrecognised audience rather than quietly correcting it', async () => {
+      /**
+       * It used to coerce to `everyone` and answer 201, so a client with a typo
+       * published a public event where its organizer had asked for a restricted
+       * one. The default is not the problem; the silence is. `PUT` already
+       * answered 400 for the same value, so create and edit disagreed about the
+       * contract of one field.
+       */
       const res = await createEvent({ organizationId: orgId, audience: 'friends-only' }, organizer);
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('invalid_audience');
+    });
+
+    it('still defaults to everyone when the field is simply absent', async () => {
+      /* Refusing an unknown value must not turn "said nothing" into an error —
+         every existing client sends no audience at all. */
+      const res = await createEvent({ organizationId: orgId }, organizer);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
       expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(res.body.id).audience)
         .toBe('everyone');
     });
@@ -612,6 +624,14 @@ describe('applying to an organization event', () => {
     });
 
     it('leaves an already-accepted place alone — a ban is not a removal', async () => {
+      /**
+       * TWO places, deliberately. With one, the accepted row consumed it,
+       * `free` was 0, and `promoteFromWaitlist` returned before reading the
+       * waitlist at all — so the assertion held with the eligibility filter
+       * deleted, with the whole function deleted, and with no ban at all. A
+       * review caught it.
+       */
+      db.prepare('UPDATE slots SET max_spots = 2 WHERE id = ?').run(slotId);
       const held = seed(memberId, 'accepted');
       db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
                   VALUES ('elig-promo-ban-3', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
@@ -631,9 +651,33 @@ describe('applying to an organization event', () => {
         .run(orgId, memberId, organizerId, new Date().toISOString());
 
       const draw = computeDraw(db, orgEventId, { runNumber: 1 });
-      const named = [...(draw.selectedIds || []), ...(draw.waitlistIds || [])];
-      expect(named, 'the draw considered somebody the club had banned').not.toContain(bannedApp);
-      expect(named).toContain(okApp);
+      expect(draw.selectedIds, 'the draw SELECTED somebody the club had banned')
+        .not.toContain(bannedApp);
+      expect(draw.selectedIds).toContain(okApp);
+
+      /**
+       * Waitlisted, not dropped. Dropping them left a `pending` row on an event
+       * the confirmation closes, with no further run possible and no
+       * notification — somebody who applied and was never told anything.
+       * Waitlisted is renderable, honest, and self-healing: promotion re-asks
+       * eligibility, so a lifted ban takes them off it without anybody acting.
+       */
+      expect(draw.waitlistIds, 'the banned applicant was left in limbo')
+        .toContain(bannedApp);
+    });
+
+    it('takes a formerly-banned applicant off the waitlist once the ban lifts', async () => {
+      /* The self-healing half of the decision above, end to end. */
+      db.prepare('UPDATE slots SET max_spots = 1 WHERE id = ?').run(slotId);
+      const app = seed(memberId, 'waitlisted', 1);
+      db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('elig-lift-ban', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
+        .run(orgId, memberId, organizerId, new Date().toISOString());
+      expect(promoteFromWaitlist(slotId)).toEqual([]);
+
+      db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE id = ?')
+        .run(new Date().toISOString(), 'elig-lift-ban');
+      expect(promoteFromWaitlist(slotId).map(p => p.applicationId)).toEqual([app]);
     });
   });
 });
