@@ -14,6 +14,7 @@ import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthRespon
 import { syncOrganizerCapabilities } from '../organizationRoles.js';
 import { recordAudit } from '../auditLog.js';
 import { deleteUploadedFile } from './profilePictureRoutes.js';
+import { deliveryHealth } from '../resendWebhook.js';
 import {
   REPORT_PRIORITIES, REPORT_RESOLUTIONS, REPORT_STATUSES, REPORT_TARGET_TYPES,
   LIVE_REPORT_STATUSES, CATEGORY_VALUES, isValidCategory, normalizeTargetType,
@@ -1423,6 +1424,20 @@ router.get('/api/admin/system/status', authenticateToken, requireCap('analytics.
     // New: whether it is actually working. Local parts are never included — see
     // email.js recordFailure.
     mail: getMailHealth(),
+    /**
+     * What the PROVIDER said became of recent mail.
+     *
+     * `mail` above answers "can we hand a message over"; this answers "did it
+     * arrive". They are different questions and a healthy first one tells you
+     * nothing about the second — a message accepted by Resend and then hard-
+     * bounced looks like a success everywhere else in this payload.
+     *
+     * Counts only. No addresses, no subjects, no bodies. `configured: false`
+     * means no webhook secret is set, which is the honest answer for a
+     * deployment that has not finished the Resend setup rather than a
+     * misleading zero.
+     */
+    delivery: deliveryHealth(),
     notificationQueue: getQueueHealth(),
     backup: backupStatus(),
     hoursLedger: hoursLedgerStatus()

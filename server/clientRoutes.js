@@ -172,6 +172,15 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/organizations/:key/edit',
   '/organizations/:key',
   '/hours/external',
+  /* The same answer as `/hours`, twice over. A crash report from either carries
+     the path and nothing else — no certificate, no organization, no dates, and
+     not even which student, because the reporter attaches no identity.
+     "Somebody opened their own badges" is not a fact about a person. */
+  '/certificates',
+  '/profile/badges',
+  '/users/:handle/badges',
+  '/users/:handle/certificates',
+  '/users/:handle/hours',
 ]);
 
 /**

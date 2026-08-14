@@ -473,6 +473,7 @@ export function tabForPath(pathname) {
   /* Before `/hours`, which is a prefix of it. */
   if (pathname.startsWith('/hours/external')) return 'externalHours';
   if (pathname.startsWith('/hours')) return 'loggedHours';
+  if (pathname.startsWith('/certificates')) return 'certificates';
   if (pathname.startsWith('/settings')) return 'settings';
   /* These three had no branch, so they fell through to 'dashboard' — an
      organizer on /checkin read "Dashboard / Track your volunteers" with the
@@ -525,6 +526,7 @@ export const RAIL_TAB = {
   checkin: 'browse',
   portfolio: 'dashboard',
   loggedHours: 'dashboard',
+  certificates: 'dashboard',
   externalHours: 'dashboard',
   organizerAgreement: 'dashboard',
   studentOrganizerAgreement: 'dashboard',
@@ -623,6 +625,7 @@ export const PAGE_META = {
     notifications: { title: 'Notifications', sub: 'Replies, reminders, and event updates' },
     profile: { title: 'Profile', sub: 'Your service record, milestones, and certificates' },
     loggedHours: { title: 'Logged hours', sub: 'Everything you have volunteered, confirmed and self-reported' },
+    certificates: { title: 'Certificates', sub: 'One for each event you have completed' },
     externalHours: { title: 'Log external hours', sub: 'Volunteering you did somewhere WeVolunteer does not run' },
     /* Reached from the search on Discover, and titled for what is on the
        page rather than for where the reader came from. */
@@ -688,6 +691,7 @@ export const PAGE_META = {
     profile: { title: 'Profile', sub: 'Your account on this platform' },
     /* An owner holds '*', so both hour pages are reachable from this persona. */
     loggedHours: { title: 'Logged hours', sub: 'Confirmed service and self-reported entries' },
+    certificates: { title: 'Certificates', sub: 'One for each event you have completed' },
     externalHours: { title: 'Log external hours', sub: 'Volunteering done outside WeVolunteer' }
   },
   partner: {
@@ -1370,6 +1374,14 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/organizations/:key': { addToast },
     '/hours/external': { addToast },
     '/hours': { currentUser, addToast },
+    /* The destinations the profile's capped lists point at. `BadgesPage` needs
+       `currentUser` to know whose badges to read when the path carries no
+       handle; `CertificatesPage` hands both on to the certificate modal. */
+    '/profile/badges': { currentUser },
+    '/users/:handle/badges': { currentUser },
+    '/users/:handle/certificates': { currentUser },
+    '/users/:handle/hours': { currentUser },
+    '/certificates': { currentUser, addToast },
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
     '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
     /* Same three. `refreshAll` is what makes the released capabilities visible

@@ -13,6 +13,7 @@ import { db } from './db.js';
 import { recordError, hashUserId } from './errorReporter.js';
 
 import authRoutes from './routes/authRoutes.js';
+import webhookRoutes from './routes/webhookRoutes.js';
 import accountRoutes from './routes/accountRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import eventRoutes from './routes/eventRoutes.js';
@@ -296,6 +297,20 @@ if (REQUEST_LOG) {
  */
 app.use('/api/errors/report', express.json({ limit: '8kb' }));
 
+/**
+ * The Resend webhook needs the bytes as received, so it is mounted BEFORE the
+ * global JSON parser for exactly the reason the error-report cap above is.
+ *
+ * Its signature is an HMAC over the exact request body. A parsed-then-
+ * re-serialised object has different key order and whitespace, so verifying
+ * against `JSON.stringify(req.body)` fails for every legitimate request and
+ * passes for none — a failure that looks indistinguishable from a wrong secret.
+ *
+ * 64 kB: a delivery event is a few hundred bytes, and this is an
+ * unauthenticated endpoint.
+ */
+app.use('/api/webhooks/resend', express.raw({ type: '*/*', limit: '64kb' }));
+
 app.use(express.json({ limit: '100kb' }));
 
 // Populates req.cookies for authenticateToken. Mounted before the routers and
@@ -434,6 +449,22 @@ export const apiLimiter = rateLimit({
   limit: DEMO_MODE ? 10000 : 600,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  /**
+   * The Resend delivery webhook is exempt, and it is the only exemption.
+   *
+   * Every delivery event arrives from Resend's own addresses, so all of them
+   * share ONE bucket — and a single send produces up to three events (sent,
+   * delivered, and possibly bounced). Signup day at a school is a few hundred
+   * verification emails inside a few minutes, which is comfortably past 600 in
+   * fifteen. The 429s would not lose the events (Resend retries) but they would
+   * delay them and fill the log with a failure that is not one.
+   *
+   * Exempting it is safe because it is not an unauthenticated endpoint in the
+   * way the limiter cares about: the signature is checked before anything is
+   * parsed or written, and an unsigned request costs one HMAC and a 401. There
+   * is nothing to flood.
+   */
+  skip: (req) => req.path === '/webhooks/resend',
   handler: limitHandler('Too many requests from this device.'),
 });
 
@@ -749,6 +780,7 @@ app.use('/api/auth/check-email', lookupLimiter);
 app.use('/api/certificates/verify', verifyLimiter);
 app.use('/api', apiLimiter);
 
+app.use(webhookRoutes);
 app.use(authRoutes);
 app.use(accountRoutes);
 app.use(userRoutes);
