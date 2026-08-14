@@ -87,10 +87,10 @@ export default function Appeal() {
   if (loading) {
     return (
       <div className="auth">
-        <div className="auth-form auth-form-narrow auth-centered" role="status" aria-live="polite">
+        <main className="auth-form auth-form-narrow auth-centered" role="status" aria-live="polite">
           <BrandMark />
           <p className="auth-subtitle">Loading your appeal form…</p>
-        </div>
+        </main>
       </div>
     );
   }
@@ -107,7 +107,7 @@ export default function Appeal() {
   if (error) {
     return (
       <div className="auth">
-        <div className="auth-form auth-form-narrow auth-centered stack-md">
+        <main className="auth-form auth-form-narrow auth-centered stack-md">
           <BrandMark />
           <span className="auth-icon auth-icon-danger"><ShieldOff size={24} /></span>
           <h1 className="auth-title" tabIndex={-1} ref={headingRef}>
@@ -130,7 +130,7 @@ export default function Appeal() {
             If you are not sure which email your account uses, send it anyway and include your
             full name and your school.
           </p>
-        </div>
+        </main>
       </div>
     );
   }
@@ -142,7 +142,7 @@ export default function Appeal() {
   if (submitted || alreadyFiled) {
     return (
       <div className="auth">
-        <div className="auth-form auth-form-narrow auth-centered stack-md">
+        <main className="auth-form auth-form-narrow auth-centered stack-md">
           <BrandMark />
           <span className="auth-icon"><CheckCircle2 size={24} /></span>
           <h1 className="auth-title" tabIndex={-1} ref={headingRef}>
@@ -184,7 +184,7 @@ export default function Appeal() {
               </p>
             </>
           )}
-        </div>
+        </main>
       </div>
     );
   }
@@ -194,7 +194,7 @@ export default function Appeal() {
 
   return (
     <div className="auth">
-      <div className="auth-form auth-form-narrow stack-md">
+      <main className="auth-form auth-form-narrow stack-md">
         <div className="auth-head">
           <BrandMark />
           <h1 className="auth-title" tabIndex={-1} ref={headingRef}>Ask us to look at this again</h1>
@@ -276,7 +276,7 @@ export default function Appeal() {
           the one who decides it. We are a small team, so we cannot always promise a completely
           independent reviewer — but we will always tell you who reviewed it.
         </p>
-      </div>
+      </main>
     </div>
   );
 }
