@@ -524,15 +524,34 @@ export function requiredConsentKeys() {
  *     capabilities until the organizer re-accepts. Versions stay at 1.0, so
  *     nothing moves — but the mechanism is untouched and still works.
  *
- * ── Flipping it back ──
+ * ── It is now on ──
  *
- * Set this to `true` at launch. Run `node bin/migration-checksums.mjs`'s sibling,
- * `node bin/legal-hashes.mjs`, paste the printed constants into LEGAL_DOCUMENTS,
- * and the enforcement is live again with no other change. Everything that reads
- * a hash keeps reading one the whole time; the difference is only whether a
- * mismatch is fatal.
+ * Flipped at the end of the release-candidate audit, once the thing it protects
+ * existed. The audit is also the argument for it: three published documents had
+ * drifted out of agreement with the application — the Cookie Notice promised no
+ * analytics while an Amplitude SDK was bundled, and the Privacy Policy's
+ * subprocessor table omitted the email provider that receives every message —
+ * and advisory mode is precisely why nobody noticed. The server rewrote each
+ * recorded hash to match the new text on every boot and said so in a log line
+ * that reads like routine housekeeping.
+ *
+ * That was the correct trade while the documents were being drafted and there
+ * were no acceptance rows to protect. It stops being correct the moment a real
+ * student agrees to something.
+ *
+ * ── What this now costs, and it is the intended cost ──
+ *
+ * Editing a published policy is no longer an edit. It is: change the file, run
+ * `node bin/legal-hashes.mjs`, paste the printed constant into LEGAL_DOCUMENTS,
+ * and decide whether the change is MAJOR (re-acceptance) or MINOR (notice only)
+ * by the rule above. A production server refuses to boot in between. That
+ * friction is the feature — it is what makes a consent record mean something.
+ *
+ * To go back to advisory mode, set this to `false`. Do not do it to make a typo
+ * fix easier; do it only if the documents genuinely re-enter drafting and the
+ * acceptance rows are known to be disposable.
  */
-export const LEGAL_HASHES_ENFORCED = false;
+export const LEGAL_HASHES_ENFORCED = true;
 
 /**
  * The hash to RECORD for a document — what was actually published.

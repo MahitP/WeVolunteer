@@ -129,13 +129,41 @@ variable turns into a leaked authorization code. The runbook calls this out at
 - [ ] `ALERT_EMAIL` set, or operator alerting is silently off
 - [ ] `RESEND_API_KEY` set; SMTP set as fallback, or accept the "no fallback"
       warning at boot as a decision
+- [ ] `WEV_BACKUP_PUBKEY` points at the backup certificate — see §8
+
+### Bootstrap an owner — the platform has none until you do
+
+A fresh production database has **zero** super-admins. The boot log says so:
+
+```
+[ownership] WARNING: Platform has ZERO owners. Super admin access is completely lost.
+```
+
+Nothing inside the application can grant the first one, so this cannot be
+recovered from the UI.
+
+- [ ] `node bin/grant-ownership.mjs` against the production database, once, after
+      the first deploy and after your own account exists
+- [ ] Sign in and confirm you can reach `/admin`
+- [ ] Set `PLATFORM_OWNER_USERNAME` so the public About page names the right
+      account
+
+**If skipped:** the deployment comes up with no administrator, no way to appoint
+one, and no way to action a safety report.
 
 ---
 
 ## 6. Legal
 
-- [ ] Run `node bin/legal-hashes.mjs` — all 11 documents must report matching
-- [ ] Set `LEGAL_HASHES_ENFORCED = true` in `server/legalDocuments.js`
+**Enforcement is now ON.** `LEGAL_HASHES_ENFORCED = true`, all 11 documents match
+their pinned hashes, and a production server refuses to boot if one drifts.
+
+Editing a published policy is therefore no longer an edit: change the file, run
+`node bin/legal-hashes.mjs`, paste the printed constant into `LEGAL_DOCUMENTS`,
+and decide whether the change is MAJOR (re-acceptance) or MINOR (notice only).
+
+- [x] Run `node bin/legal-hashes.mjs` — all 11 documents report matching
+- [x] Set `LEGAL_HASHES_ENFORCED = true` in `server/legalDocuments.js`
 - [ ] Boot once and confirm
       `[legal] 11 published documents verified against their pinned hashes`
 - [ ] Open each policy in the Legal Center and confirm it still renders
@@ -162,38 +190,63 @@ to `security@wevolunteers.org`, the closest fit among the nine addresses.
 
 ## 7. Analytics (Amplitude)
 
-Installed and working on localhost. **Off by default** — `.env.example` ships
-`VITE_AMPLITUDE_API_KEY` empty, and a build without it logs
-"Amplitude API key missing — analytics disabled" and runs normally. The CSP now
-permits the Amplitude hosts, but permitting is not enabling.
+**The two decisions are made.** Analytics is opt-in per account, and Session
+Replay stays at `sampleRate: 1` but records almost nothing until somebody opts
+in. Both are implemented; what remains below are tasks, not questions.
 
-Two of these are decisions, not tasks. I have not made them.
+### What ships
 
-- [ ] **Decide whether analytics needs consent.** WeVolunteer has privacy
-      controls for profile, leaderboard, hours and certificates — and nothing
-      covering third-party telemetry. The Privacy Policy does not mention
-      Amplitude. For a platform whose users are minors this is a question for
-      you and, plausibly, the district; the SDK working is not an answer to it.
-- [ ] **Decide the Session Replay sampling rate.** It is `1` — every session,
-      as the installation required. Audit before that ships: `Login`, `Signup`,
-      `TwoFactorSetup` (TOTP secrets and recovery codes are on screen),
-      `VerifyEmailWall`, `PasswordCard`, `ProfileEditModal`, `Messages`,
-      `AdminRoster`, `ModerationCenter`, `AdminAppeals`, and the free-text field
-      on `/report-issue`. I did not verify Amplitude's masking defaults —
-      an input being visually masked is not the same as being redacted in a
-      replay.
-- [ ] **Use a separate Amplitude project per environment.** The event carries an
-      `environment` property, which is a marker, not isolation. One key across
-      dev and production puts developer clicks in the same dataset as student
-      activity.
-- [ ] Remove `prompt_version: 'BA400.4'` from `src/main.jsx` once the first
-      event has been seen in Amplitude's live feed.
+- **Off for everyone.** `users.analytics_consent` (migration 052) is `NULL` for
+  every account — "never asked", which is not consent. Verified against a copy of
+  `pilot.db`: 18 users, 18 NULL, 0 granted.
+- **Nothing runs for a signed-out visitor**, because nobody who has not signed in
+  has been asked. Confirmed in a browser: Amplitude's `engagement-wrapper` node,
+  previously always in the DOM, is absent.
+- **The switch is in Settings → Privacy**, beside the other privacy controls.
+  There is deliberately **no prompt, banner or nudge** — a consent control that
+  chases people collects consent from people who wanted the dialog to go away.
+- **Turning it off stops recording in the current tab**, via `setOptOut`, not at
+  the next reload.
+- **Masking is `conservative`**: all inputs *and* all page text. Amplitude's
+  default is `medium`, which its own source documents as "text is NOT masked" —
+  wrong here, because everything sensitive on this platform is rendered rather
+  than typed.
+- **The 2FA screen is blocked outright**, not masked. The enrolment QR is an
+  `<img>` whose data URL encodes the `otpauth://` secret, and no mask level
+  touches an image attribute.
+- **Reset and verification links are rewritten** before the recorder stores them,
+  using Amplitude's own UGC filter rules.
 
-Known, accepted for now: `initAll` also loads Amplitude's Engagement bundle,
-which mounts its own React in an `engagement-wrapper` node beside `#root` and
-logs "Invalid hook call — more than one copy of React" on every page load.
-WeVolunteer renders and navigates normally regardless; verified. `UnifiedOptions`
-exposes an `engagement` key if you later want to configure it.
+### Tasks
+
+- [ ] **Use a separate Amplitude project per environment.** Still outstanding and
+      now more pressing, because analytics genuinely works: one key across dev and
+      production puts developer clicks in the same dataset as student activity.
+      The `environment` event property is a marker, not isolation.
+- [ ] **Treat the Amplitude account as privileged.** Its remote configuration can
+      switch on console capture and network request/response body capture — from
+      the dashboard, with no code change and no deploy. Put 2FA on it and record
+      who holds it.
+- [ ] **Do not set `VITE_AMPLITUDE_API_KEY` in production until the above is
+      done.** With it unset the SDK is inert and the published Cookie Notice is
+      true either way; with it set, only people who opt in are measured.
+- [ ] Remove `prompt_version: 'BA400.4'` from `src/hooks/useAnalyticsConsent.js`
+      once the first event has been seen in Amplitude's live feed.
+      **Note:** that event only fires for a *consenting, signed-in* person landing
+      on `/`. It can no longer fire for an anonymous visitor on the landing page,
+      so opt in on a test account to see it.
+
+**If skipped:** setting the key without the separate project is survivable. Not
+securing the Amplitude account is not — dashboard access is equivalent to the
+ability to start capturing API response bodies from every consenting student's
+browser.
+
+### Corrected from the audit
+
+The "Invalid hook call — more than one copy of React" warning recorded here
+previously **did not reproduce** across three clean page loads during the
+release-candidate audit, despite the engagement bundle being mounted. Treat it as
+observed once, not as current behaviour.
 
 ---
 
@@ -213,11 +266,55 @@ exposes an `engagement` key if you later want to configure it.
 ## 8. Database and migrations
 
 - [ ] Back up the production database before the first deploy
-- [ ] Deploy and confirm migrations reach head 50
+- [ ] Deploy and confirm migrations reach head **52**
 - [ ] `PRAGMA integrity_check` → `ok`
 - [ ] `PRAGMA foreign_key_check` → empty
 - [ ] Restart once and confirm 0 migrations apply the second time
 - [ ] Rehearse a restore (`bin/verify-restore.sh`)
+
+### Encrypt the backups — do this before the first real student signs up
+
+A backup holds every student's name, address, school, year group, service
+record, messages and safety reports. Unencrypted, one copy of it is a complete
+copy of the platform's personal data with none of the access control.
+
+`bin/backup.sh` encrypts to a **public key**, so the host can write backups and
+cannot read them. The private key never touches the server.
+
+```bash
+openssl req -x509 -newkey rsa:4096 -keyout wev-backup-key.pem \
+  -out wev-backup-cert.pem -days 3650 -nodes -subj "/CN=wevolunteer-backup"
+```
+
+- [ ] Generate the pair **off the server**
+- [ ] Copy only `wev-backup-cert.pem` to the host; set `WEV_BACKUP_PUBKEY` to it
+- [ ] Store `wev-backup-key.pem` somewhere you will still have it in three years
+      and an attacker on the server will not — a password manager, not the host
+- [ ] Run `bin/backup.sh` once and confirm the output is `.db.gz.enc`
+- [ ] Rehearse the restore, end to end:
+      ```bash
+      openssl cms -decrypt -binary -inform DER -in <archive>.db.gz.enc \
+        -inkey wev-backup-key.pem | gunzip > restored.db
+      sqlite3 restored.db 'PRAGMA integrity_check;'
+      ```
+
+**If the key is lost, every backup is lost.** That is the trade for the host not
+being able to read them, and it is the right trade — but only if the key is
+genuinely kept.
+
+**If skipped:** backups still run and still say so on every line of the log
+(`WARNING: this backup is NOT encrypted`). The failure is silent to everyone who
+does not read that log.
+
+### Confirm someone hears about a failed backup
+
+The app now emails `ALERT_EMAIL` when the newest archive goes stale, on the
+existing sweep — separately from error alerts, because a system whose backups
+fail is usually otherwise healthy and generates no errors at all.
+
+- [ ] `ALERT_EMAIL` is set, or backup alerting is silently off
+- [ ] Confirm `/api/admin/system/status` reports `backup.status: "ok"` and
+      `backup.encrypted: true` after the first nightly run
 
 ---
 
