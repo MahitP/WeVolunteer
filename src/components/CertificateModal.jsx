@@ -45,7 +45,7 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
           <button className="modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
 
-        <div className="modal-body" style={{ background: 'var(--surface-2)' }}>
+        <div className="modal-body certificate-canvas">
           <div className="certificate" id="printable-certificate">
             <div style={{ textAlign: 'center' }}>
               <div className="certificate-org">
@@ -55,7 +55,17 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
               <h1>Certificate of Community Service</h1>
 
               <p style={{ marginTop: 'var(--s5)', color: 'var(--certificate-ink-2)' }}>This certifies that</p>
-              <div className="certificate-name">{volunteer?.name}</div>
+              {/**
+                * A name, or a visible admission that we do not have one.
+                *
+                * `{volunteer?.name}` alone renders an empty element when the
+                * prop is missing or the profile fetch failed, so the finished
+                * certificate has a blank where the subject belongs — printed,
+                * signed and handed to a college with nobody's name on it. A
+                * document that is silently wrong is worse than one that says it
+                * is incomplete.
+                */}
+              <div className="certificate-name">{volunteer?.name || 'Name unavailable'}</div>
               {volunteer?.grade && (
                 <p className="certificate-sub">{gradeLabel(volunteer.grade)}</p>
               )}
@@ -74,20 +84,56 @@ function CertificateDialog({ certificate, volunteer, onClose }) {
               <p className="certificate-sub">of verified community service</p>
             </div>
 
+            {/**
+              * Two parties, two rules.
+              *
+              * A certificate of service is a claim about a volunteer that an
+              * organizer attests to, and until now only the organizer appeared
+              * at the foot of it. The document named its subject in the body and
+              * then presented a single signature, which reads as an organizer
+              * signing something about themselves.
+              *
+              * Both names sit ABOVE their rule with the capacity below it, the
+              * way a signed document is laid out and the same shape the
+              * transcript already uses. `.certificate-sign`'s `min-height` is
+              * what keeps the two rules on one line when one name wraps and the
+              * other does not — it was written for this pairing before there was
+              * anything to pair.
+              */}
             <div className="certificate-foot">
-              <div>
+              <div className="certificate-sign-block">
+                {/* Same reasoning as the volunteer name in the body: an empty
+                    signature line is indistinguishable from an unsigned
+                    certificate. */}
                 <div className="certificate-sign">
-                  {certificate.organizerName}
-                  {certificate.organizerVerified && ' · Verified organizer'}
+                  {volunteer?.name || 'Name unavailable'}
                 </div>
-                <div className="certificate-sign-label">Confirmed by</div>
+                <div className="certificate-sign-label">Volunteer</div>
               </div>
 
-              <div style={{ textAlign: 'right' }}>
-                <div className="certificate-code">{certificate.code}</div>
-                <div className="certificate-sign-label">
-                  Verify at {verifyHost}{verifyPath}
+              <div className="certificate-sign-block">
+                <div className="certificate-sign">
+                  {certificate.organizerName || 'Organizer unavailable'}
+                  {certificate.organizerVerified && ' · Verified organizer'}
                 </div>
+                <div className="certificate-sign-label">Program Coordinator</div>
+              </div>
+            </div>
+
+            {/**
+              * The verification code, displaced by the second signature and
+              * given its own line rather than dropped.
+              *
+              * It is the only thing on the certificate a school office can act
+              * on, so it keeps its own rule and its own caption. Centred beneath
+              * both signatures it reads as belonging to the document rather than
+              * to either party — which is accurate: the platform issues it, not
+              * the organizer.
+              */}
+            <div className="certificate-verify">
+              <div className="certificate-code">{certificate.code}</div>
+              <div className="certificate-sign-label">
+                Verify at {verifyHost}{verifyPath}
               </div>
             </div>
           </div>

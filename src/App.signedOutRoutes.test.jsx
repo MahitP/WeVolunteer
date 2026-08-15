@@ -98,7 +98,25 @@ const renderAt = (path) => render(
 
 Element.prototype.scrollTo = () => {};
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+
+  /**
+   * The signed-in shell mounts `LegalUpdateModal`, whose effect calls
+   * `api.fetchLegalUpdates().then(…)`. Under `vi.mock('./utils/api')` every
+   * export is a `vi.fn()` returning `undefined`, so that is `undefined.then` —
+   * an exception thrown inside a passive effect, outside any test's control,
+   * which Vitest reports as an unhandled error while the suite still prints
+   * green. `App.routeTable.test.jsx` documents the same trap for
+   * `fetchLegalDocument`.
+   *
+   * A promise that never settles is the honest stand-in: this file asserts on
+   * routing and shell composition, never on legal notices, so "still loading"
+   * is exactly the state it means. Resolving would land a state update after
+   * the assertions and trade the unhandled error for an act() warning.
+   */
+  api.fetchLegalUpdates.mockReturnValue(new Promise(() => {}));
+});
 
 describe('a signed-in reader on a signed-out screen', () => {
   /**

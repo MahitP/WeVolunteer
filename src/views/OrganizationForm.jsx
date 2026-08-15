@@ -12,20 +12,46 @@
  * express. If the server refuses, the refusal is what the user sees.
  */
 import { useState, useEffect } from 'react';
+
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { AlertCircle, Building2, Archive } from 'lucide-react';
+import { AlertCircle, Building2, Archive, ImagePlus } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import TagInput from '../components/common/TagInput';
+import { normaliseOrgTag, MAX_ORG_TAGS, MAX_ORG_TAG_LENGTH } from '../organizationTags.js';
+import EmojiAvatarPicker from '../components/common/EmojiAvatarPicker';
+
+/**
+ * A stored tag label, as the chip `TagInput` expects.
+ *
+ * ── Nothing is ever dropped here ──
+ *
+ * This used to normalise with the EVENT rules and `.filter(Boolean)` away
+ * whatever failed them. Since the submit path sends the surviving chips and the
+ * route replaces the whole column, opening an organization whose tags contained
+ * an ampersand or a full stop — both of which the API accepts — and saving a
+ * change to the description silently and permanently deleted them. The editor
+ * showed no tags, so there was nothing to notice.
+ *
+ * It normalises with the ORGANIZATION rules now, under which every stored tag
+ * round-trips. A tag that still cannot be normalised is kept verbatim rather
+ * than discarded: the worst case then is the route refusing the save and NAMING
+ * the tag, which is recoverable, instead of the form quietly destroying data.
+ */
+const toChip = (label) => {
+  if (typeof label !== 'string') return label || null;
+  return normaliseOrgTag(label) || { tag: label.toLocaleLowerCase(), label };
+};
 
 export default function OrganizationForm({ addToast }) {
   const { key } = useParams();
   const navigate = useNavigate();
   const editing = Boolean(key);
 
-  const [form, setForm] = useState({ name: '', description: '', tags: [] });
+  const [form, setForm] = useState({ name: '', description: '', tags: [], avatar: null, avatarColor: null, allowReplies: true });
+  const [imageUrl, setImageUrl] = useState(null);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(editing);
   const [loadError, setLoadError] = useState('');
@@ -41,10 +67,17 @@ export default function OrganizationForm({ addToast }) {
         /* The server says whether this caller may manage it. Trusting that
            rather than re-deriving it here means one answer to the question. */
         if (!res.viewer.canManage) { setLoadError('forbidden'); return; }
+        setImageUrl(res.organization.imageUrl ?? null);
         setForm({
           name: res.organization.name,
           description: res.organization.description,
-          tags: res.organization.tags ?? [],
+          avatar: res.organization.avatar ?? null,
+          avatarColor: res.organization.avatarColor ?? null,
+          allowReplies: res.organization.allowReplies !== false,
+          /* Stored as plain labels; `TagInput` renders `{tag, label}` chips.
+             Mapping in here and back out on submit keeps the shared editor
+             usable without teaching it a second storage format. */
+          tags: (res.organization.tags ?? []).map(toChip).filter(Boolean),
         });
       })
       .catch(err => { if (!cancelled) setLoadError(err.status === 404 ? 'not_found' : err.message); })
@@ -62,7 +95,7 @@ export default function OrganizationForm({ addToast }) {
     if (!form.name.trim()) next.name = 'Give the organization a name.';
     else if (form.name.length > 120) next.name = 'Keep the name to 120 characters or fewer.';
     if (form.description.length > 2000) next.description = 'Keep the description to 2000 characters or fewer.';
-    if (form.tags.length > 8) next.tags = 'Use eight tags or fewer.';
+    if (form.tags.length > MAX_ORG_TAGS) next.tags = `Use ${MAX_ORG_TAGS} tags or fewer.`;
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -75,7 +108,21 @@ export default function OrganizationForm({ addToast }) {
     }
     setSubmitting(true);
     try {
-      const body = { name: form.name.trim(), description: form.description, tags: form.tags };
+      /**
+       * `TagInput` is shared with the event editor and emits `{tag, label}`
+       * objects; organizations store plain labels. Sending the objects through
+       * unmapped is what made tags unusable — the server refused every one of
+       * them with a message about a 40-character limit none of them came near.
+       *
+       * The label rather than the key, so the capitalisation somebody typed
+       * survives. The server accepts both shapes now, but agreeing here is what
+       * stops the round trip from depending on that tolerance.
+       */
+      const tags = form.tags.map(t => (typeof t === 'string' ? t : t.label));
+      const body = {
+        name: form.name.trim(), description: form.description, tags,
+        avatar: form.avatar, avatarColor: form.avatarColor, allowReplies: form.allowReplies,
+      };
       const res = editing
         ? await api.updateOrganization(key, body)
         : await api.createOrganization(body);
@@ -123,7 +170,7 @@ export default function OrganizationForm({ addToast }) {
   return (
     <div className="page stack-lg">
       <div className="page-head">
-        <h1>{editing ? 'Manage organization' : 'New organization'}</h1>
+        <h2 className="page-title">{editing ? 'Manage organization' : 'New organization'}</h2>
         <p className="muted">
           {editing
             ? 'Change how this organization appears to students.'
@@ -155,6 +202,103 @@ export default function OrganizationForm({ addToast }) {
           </div>
 
           <div className="field">
+            <span id="org-icon-label">Icon</span>
+            {/* A radiogroup, not a row of buttons: these are one choice among
+                several, which is what a radio group means, and it gives arrow-key
+                navigation for free. `None` is a real option — an organization is
+                allowed to have no mark and fall back to the building glyph. */}
+            {/**
+              * Upload first, then the emoji row.
+              *
+              * Only when editing: an upload needs an organization to attach to,
+              * and the create form has not made one yet. Offering it there
+              * would mean holding a file in memory across a request that might
+              * fail — an emoji at creation and a logo afterwards is the simpler
+              * and more honest order.
+              */}
+            {editing && (
+              <div className="row row-wrap" style={{ gap: 'var(--s3)', marginBottom: 'var(--s3)' }}>
+                <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+                  <ImagePlus size={14} aria-hidden="true" /> Upload a logo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const res = await api.uploadOrganizationImage(key, file);
+                        setImageUrl(res.organization.imageUrl);
+                        addToast?.('Logo updated.', 'success');
+                      } catch (err) {
+                        addToast?.(err.message, 'error');
+                      } finally {
+                        /* Cleared so choosing the same file twice still fires a
+                           change event — otherwise a failed upload cannot be
+                           retried without picking a different file. */
+                        e.target.value = '';
+                      }
+                    }}
+                  />
+                </label>
+                {imageUrl && (
+                  <>
+                    <img src={imageUrl} alt="" className="org-logo-preview" />
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={async () => {
+                        try {
+                          await api.deleteOrganizationImage(key);
+                          setImageUrl(null);
+                        } catch (err) { addToast?.(err.message, 'error'); }
+                      }}
+                    >
+                      Remove logo
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            <EmojiAvatarPicker
+              emoji={form.avatar}
+              color={form.avatarColor}
+              idPrefix="org"
+              onChange={patch => setForm(f => ({
+                ...f,
+                ...('emoji' in patch ? { avatar: patch.emoji } : {}),
+                ...('color' in patch ? { avatarColor: patch.color } : {}),
+              }))}
+            />
+          </div>
+
+          <div className="field">
+            {/**
+              * One setting for the whole organization, not one per post.
+              *
+              * A manager deciding "we do not take replies" is describing how
+              * their club communicates, not annotating an individual notice.
+              *
+              * The hint says what turning it off does NOT do, because that is
+              * the thing a manager hesitates over: nobody's words are deleted.
+              */}
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={form.allowReplies}
+                onChange={e => set('allowReplies', e.target.checked)}
+              />
+              <span>Allow replies to announcements</span>
+            </label>
+            <span className="field-hint">
+              Members can reply to anything this organization posts. Turning it off
+              stops new replies; the ones already written stay visible.
+            </span>
+          </div>
+
+          <div className="field">
             <label htmlFor="org-desc">Description <span className="muted">(optional)</span></label>
             <textarea
               id="org-desc" className="textarea" rows={4} value={form.description}
@@ -169,7 +313,17 @@ export default function OrganizationForm({ addToast }) {
 
           <div className="field">
             <span className="label" id="org-tags-label">Tags <span className="muted">(optional)</span></span>
-            <TagInput value={form.tags} onChange={tags => set('tags', tags)} />
+            {/* The organization rules, not the event ones — see
+                `src/organizationTags.js` for what the difference cost. */}
+            <TagInput
+              value={form.tags}
+              onChange={tags => set('tags', tags)}
+              normalise={normaliseOrgTag}
+              maxTags={MAX_ORG_TAGS}
+              maxLength={MAX_ORG_TAG_LENGTH}
+              subject="organization"
+              invalidHint={`Keep each tag to ${MAX_ORG_TAG_LENGTH} characters or fewer.`}
+            />
             {errors.tags && (
               <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.tags}</span>
             )}

@@ -14,18 +14,25 @@ there is no cookie banner · third-party storage · changes.
 **Resolved.** The policy-archive placeholder is gone: this is v1.0, so there are no superseded
 versions yet, and the draft says that instead of promising a URL that does not resolve.
 
-**Why write it when there are no trackers?** Three reasons. It is a **procurement asset** —
-school and nonprofit reviewers ask this question and a written answer shortens the review. It is a
-**commitment** — publishing it makes adding an analytics SDK a policy change rather than a
-Tuesday. And "we don't track you" is only credible when accompanied by a precise account of
-what you *do* store; unaccompanied, it reads as marketing.
+**Why write it?** Three reasons. It is a **procurement asset** — school and nonprofit reviewers
+ask this question and a written answer shortens the review. It is a **commitment** — publishing
+it makes adding an analytics SDK a policy change rather than a Tuesday. And a claim about
+tracking is only credible when accompanied by a precise account of what you *do* store;
+unaccompanied, it reads as marketing.
+
+**The commitment was tested and it worked, slowly.** An Amplitude SDK with Session Replay was
+added in v1.2 without this page changing, which made the page false for the length of one
+release-candidate audit. The fix was both halves: analytics became opt-in and off by default,
+and this document was rewritten to describe it. Recorded here rather than quietly corrected,
+because "adding one would require changing this page first" is only a commitment if the time
+it was not honoured is written down.
 
 **Verification note.** Every claim below was checked against the code. If a future change adds
-storage, this document must change in the same commit. (It used to name
+storage or a recipient, this document must change in the same commit. (It used to name
 `src/views/PrivacyNotice.jsx` as the other half of that pair; that view has been deleted, and
-this registry document is now the only place the claim is made.) A test asserting the absence of
-third-party network calls at build time would make that automatic — recommended in the handoff
-spec.
+this registry document is now the only place the claim is made.) The absence of third-party
+network calls is still not asserted by a build-time test — that remains the recommendation, and
+the episode above is the argument for it.
 
 ---
 
@@ -33,12 +40,17 @@ spec.
 
 # Cookies and tracking
 
-**Version 1.1 · Last updated 2026-08-06**
+**Version 1.0 · Last updated 2026-08-06**
 
-**Short version: WeVolunteer does not track you.** No advertising cookies, no analytics
-services, no pixels, no fingerprinting, no third-party scripts of any kind.
+**Short version: nothing about how you use WeVolunteer is shared with anyone unless you
+switch it on.** No advertising cookies, no pixels, no fingerprinting, no cross-site tracking,
+and nothing sold to anybody — ever, regardless of any setting.
 
-This page explains what we do store, so you can check that claim rather than take our word.
+There is one thing you *can* switch on: **usage analytics**, which is off until you turn it on
+in **Settings → Privacy**. It is described in full below, including what it collects and who
+receives it. If you never touch that switch, no analytics company hears about you at all.
+
+This page explains what we do store, so you can check that rather than take our word.
 
 ## What we store on your device
 
@@ -97,25 +109,76 @@ you answered.
 Some screens can show you events near you. If you use that, your browser asks your permission
 first — we cannot get your location without you agreeing.
 
-**Your coordinates are never sent to our servers and never stored.** They are held in the
-page's memory while you are looking at it and discarded when you reload or leave. If you say
-no, everything still works; you just sort events by date instead of distance.
+**Your coordinates are never stored.** They are held in the page's memory while you are
+looking at it and discarded when you reload or leave. If you say no, everything still works;
+you just sort events by date instead of distance.
+
+Your coordinates reach our servers in exactly two situations, and in both of them they are
+blurred first and written down nowhere:
+
+- **Sorting events by distance.** Rounded to about a kilometre before being sent, which is
+  enough to order a list and not enough to say where you are.
+- **"About 14 min by car" on an event page.** Rounded to about 110 metres — enough to pick the
+  right road, not enough to identify a house — and passed to a route-planning service
+  (OpenRouteService) along with the event's location. They are told nothing about who you are.
+
+Neither is saved to the database, written to a log, or kept after the answer comes back. There
+is no column anywhere in WeVolunteer that holds a person's location.
+
+**Tapping "Get directions"** hands the *event's* address to the maps app on your device —
+Apple Maps, Google Maps, or whatever you have chosen as your default. That happens on your
+device and tells us nothing; from that point you are in their app and their terms apply.
+
+## Usage analytics — off unless you turn it on
+
+There is one optional feature that shares information with an outside company, and this
+section describes it completely. **It is off for everyone by default.** We do not ask you to
+turn it on, there is no pop-up, and nothing in the app nags you about it. You will only ever
+have it on if you went looking for it in **Settings → Privacy** and switched it on yourself.
+
+**Who receives it.** [Amplitude](https://amplitude.com), a product-analytics company.
+
+**What it collects, when it is on:**
+
+- Which pages you open and in what order, and the buttons you click
+- A recording of what your screen looked like as you used the app
+- Your device type, browser, screen size and IP address, which Amplitude sees the way any
+  website you visit does
+
+**What is hidden before the recording leaves your device:**
+
+- **All text on the page is replaced with `****` before it is sent.** Names, hours,
+  certificates, messages and notifications are not readable in a recording
+- Everything you type into a form
+- Your two-factor setup screen — the QR code, the setup key and your recovery codes are
+  removed entirely rather than hidden, so no part of them is recorded
+- Sign-in links from your email, so the one-time codes in them are never stored
+
+**What is never collected, on or off:** your name, your email address, your school, your year
+group, your password, your service hours, the contents of your messages, or anything you have
+written.
+
+**Turning it off** stops the recording immediately, in the tab you are sitting in. You do not
+have to reload, and you can change your mind as often as you like.
+
+**Why we offer it at all.** We cannot see what is confusing or broken from the outside, and
+guessing produces a worse app. It is opt-in rather than opt-out because most of the people
+here are under 18, and consent that was never asked for is not consent.
 
 ## What we do not use
 
 | | |
 |---|---|
-| Google Analytics, or any analytics service | **No** |
 | Advertising or retargeting pixels (Meta, TikTok, Google Ads) | **No** |
 | Social media embeds or share buttons | **No** |
-| Session recording or heatmaps (Hotjar, FullStory) | **No** |
 | Device fingerprinting | **No** |
 | Cross-site tracking of any kind | **No** |
 | Tag managers | **No** |
 | Selling or sharing any information with data brokers | **No** |
+| Any analytics at all, unless you switched it on yourself | **No** |
 
-**We have never used any of these and we are not planning to.** Adding one would require
-changing this page first.
+**We have never used any of the first six and we are not planning to.** Adding one would
+require changing this page first.
 
 ### One thing that is not tracking, but is a third party
 
@@ -137,11 +200,14 @@ anything at all. Until then, this is the honest description.
 
 ## Why there is no cookie banner
 
-Cookie banners exist to collect consent for **non-essential** cookies — mostly advertising
-and analytics. We do not have any, so there is nothing to ask you about.
+Cookie banners exist to collect consent for **non-essential** cookies — mostly advertising and
+analytics. We have no advertising at all, and the one optional thing we do have starts **off**,
+so there is nothing we need to interrupt you to ask.
 
-A banner here would ask you to consent to your own sign-in working. That is not consent, it is
-theatre, and clicking through fake choices teaches people to click through real ones.
+A banner that asked you to consent to your own sign-in working would not be consent, it would
+be theatre — and clicking through fake choices teaches people to click through real ones. The
+analytics switch lives in Settings, alongside every other privacy choice, where you can find it
+when you want it and it cannot pester you when you do not.
 
 ## Error diagnostics
 
@@ -168,21 +234,23 @@ records behind it. The same schedule is in the
 
 ## Other companies
 
-Three outside services are contacted while you use WeVolunteer:
-
 | Service | Contacted by | What it receives |
 |---|---|---|
 | **OpenStreetMap / Nominatim** | Our server | The *event's* address, to turn it into coordinates. Nothing about you |
 | **Open-Meteo** | Our server | The *event's* coordinates, for the forecast. Nothing about you |
+| **OpenRouteService** | Our server | The *event's* coordinates and your position blurred to about 110 metres, to work out a rough driving time. Nothing that says who you are |
+| **Resend** | Our server | Your email address and the message, when we send you one |
 | **CARTO** | **Your browser** | Your IP address and which map squares you loaded. Not your name or account |
+| **Amplitude** — **only if you switched analytics on** | **Your browser** | See the analytics section above |
 
-The first two are contacted by our servers, so those services never see your device at all.
-CARTO is the exception, described above.
+Everything contacted by *our server* never sees your device at all — it sees ours.
 
-None of them sets a cookie in your browser.
+CARTO is the exception that applies to everybody, described above. Amplitude is the exception
+that applies only to people who chose it, described above. Neither sets a cookie for
+advertising, and nothing on this list is a data broker.
 
-If you tap **Directions** on an event, that opens Google Maps in a new tab. At that point you
-are on Google's site and their terms apply — the same as clicking any link.
+If you tap **Get directions** on an event, your device opens whichever maps app you use. From
+that point you are in their app and their terms apply — the same as clicking any link.
 
 If you sign in with Google, Google knows you signed in with Google. That is between you and
 Google, and it only happens if you choose that option.
@@ -198,7 +266,7 @@ clearing your browser storage.
 If we ever add anything that stores data on your device, we will update this page **before**
 it ships and tell you in the app. Previous versions are kept at
 **This is version 1.0 — the first published version, so there are no earlier ones yet.** When we
-replace it we keep the version it replaced; email **wevolunteer.platform@gmail.com** for any
+replace it we keep the version it replaced; email **privacy@wevolunteers.org** for any
 previous version and the dates it applied.
 
-Questions: **wevolunteer.platform@gmail.com**
+Questions: **privacy@wevolunteers.org**

@@ -23,6 +23,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@amplitude/unified": "^1.1.29",
+    "jsqr": "^1.4.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.24.0",
     "react": "^19.2.7",

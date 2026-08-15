@@ -21,10 +21,30 @@
  */
 
 import crypto from 'node:crypto';
+import { isAvatarColor } from './avatarColors.js';
 
 export const ORG_NAME_MAX = 120;
 export const ORG_DESCRIPTION_MAX = 2000;
-export const MAX_ORG_TAGS = 8;
+
+/**
+ * Tag rules live in `organizationTags.js` and are re-exported here.
+ *
+ * They moved because the organization form needs them in the browser, and this
+ * module imports `node:crypto`. Re-exported rather than relocated outright so
+ * the ~dozen existing importers of `organizations.js` keep working and there is
+ * one obvious place to look.
+ */
+export {
+  MAX_ORG_TAGS,
+  MAX_ORG_TAG_LENGTH,
+  cleanOrgTag,
+  normaliseOrgTag,
+  normaliseOrgTags,
+} from './organizationTags.js';
+
+/* `export … from` re-exports without binding the name locally, and
+   `validateOrganizationPayload` below calls this one. */
+import { normaliseOrgTags } from './organizationTags.js';
 
 /**
  * A URL-safe identity derived from the name.
@@ -87,16 +107,53 @@ export function validateOrganization(payload, { partial = false } = {}) {
   }
 
   if (payload.tags !== undefined) {
-    if (!Array.isArray(payload.tags)) {
-      return { ok: false, field: 'tags', error: 'Tags must be a list.' };
+    const tags = normaliseOrgTags(payload.tags);
+    if (!tags.ok) return tags;
+    out.tags = tags.value;
+  }
+
+  /**
+   * The emoji mark, under exactly the rule `users.avatar` uses.
+   *
+   * Eight characters, because a single emoji can be several code units once
+   * skin tone and zero-width joiners are involved, and anything past that is
+   * either a mistake or an attempt to smuggle a payload into a field that gets
+   * rendered on every card. Copied in spirit rather than imported because
+   * `accountValidation` is about a person's account and this module
+   * deliberately depends on nothing.
+   *
+   * `null` clears it — an organization is allowed to go back to having no mark.
+   */
+  /**
+   * Whether members may reply to this organization's announcements.
+   *
+   * An organization-level setting with no per-post override: a manager deciding
+   * "we do not take replies" is describing how their club communicates, not
+   * annotating one notice. Turning it off keeps the replies already written and
+   * stops new ones — see migration 042.
+   */
+  if (payload.allowReplies !== undefined) {
+    if (typeof payload.allowReplies !== 'boolean') {
+      return { ok: false, field: 'allowReplies', error: 'That setting must be on or off.' };
     }
-    if (payload.tags.length > MAX_ORG_TAGS) {
-      return { ok: false, field: 'tags', error: `Please use ${MAX_ORG_TAGS} tags or fewer.` };
+    out.allowReplies = payload.allowReplies;
+  }
+
+  if (payload.avatar !== undefined) {
+    if (payload.avatar !== null && (typeof payload.avatar !== 'string' || payload.avatar.length > 8)) {
+      return { ok: false, field: 'avatar', error: 'Pick one of the available icons.' };
     }
-    if (payload.tags.some(t => typeof t !== 'string' || !t.trim() || t.length > 40)) {
-      return { ok: false, field: 'tags', error: 'Each tag must be text of 40 characters or fewer.' };
+    out.avatar = payload.avatar === null ? null : payload.avatar.trim() || null;
+  }
+
+  /* A key from the fixed palette, never a colour. A hex from a client would be
+     arbitrary text rendered into a style attribute on every surface that draws
+     this organization. */
+  if (payload.avatarColor !== undefined) {
+    if (!isAvatarColor(payload.avatarColor)) {
+      return { ok: false, field: 'avatarColor', error: 'Pick one of the available colours.' };
     }
-    out.tags = payload.tags.map(t => t.trim());
+    out.avatarColor = payload.avatarColor;
   }
 
   return { ok: true, value: out };
@@ -116,6 +173,189 @@ export function canManage(db, organizationId, userId, { hasModerate = false } = 
     SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?
   `).get(organizationId, userId);
   return row?.member_role === 'manager';
+}
+
+/**
+ * Is this person still part of this organization, and not banned from it?
+ *
+ * The question `canRunEvent` asks about somebody who hosts one of the club's
+ * events. Membership alone is not enough — a ban removes the membership row, so
+ * both halves matter: a former member who was banned and then somehow re-added
+ * must not be running the club's shifts.
+ */
+function stillWelcomeIn(db, organizationId, userId) {
+  const member = db.prepare(
+    'SELECT 1 AS ok FROM organization_members WHERE organization_id = ? AND user_id = ?'
+  ).get(organizationId, userId);
+  if (!member) return false;
+
+  const banned = db.prepare(`
+    SELECT 1 AS ok FROM organization_bans
+     WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
+  `).get(organizationId, userId);
+  return !banned;
+}
+
+/**
+ * The ranks a membership row may hold, weakest first.
+ *
+ * `member` belongs to the club. `student_organizer` helps run it — posts and
+ * events, and nothing else. `manager` is the organization itself: who else runs
+ * it, who is banned, whether it continues to exist.
+ *
+ * Migration 046 carries the same three values as a CHECK constraint. This array
+ * is the readable copy the routes validate against; the constraint is what stops
+ * a fourth value reaching the column by some path nobody wrote a test for.
+ */
+export const MEMBER_ROLES = Object.freeze(['member', 'student_organizer', 'manager']);
+
+/** This person's rank in this organization, or `null` if they are not in it. */
+export function memberRoleOf(db, organizationId, userId) {
+  if (!organizationId || !userId) return null;
+  const row = db.prepare(`
+    SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?
+  `).get(organizationId, userId);
+  return row?.member_role ?? null;
+}
+
+/**
+ * True when this principal may act as the organization for the day-to-day work:
+ * posting announcements and putting events up.
+ *
+ * ── Why this is a second function and not a flag on `canManage` ──
+ *
+ * `canManage` is asked by archive, member removal, role changes, bans and the
+ * appeal inbox. Widening it — even behind an option — would make the safe answer
+ * the one you have to remember to ask for, and a route added next year that
+ * simply calls `canManage(db, id, user)` would silently hand a sixteen-year-old
+ * the power to delete the club. Two functions means the dangerous question keeps
+ * its own name and its own answer, and a new route has to say which it means.
+ *
+ * Managers are included: every power a student organizer has, a manager has.
+ * Nobody should have to promote themselves downward to post a notice.
+ */
+export function canHelpRun(db, organizationId, userId, { hasModerate = false } = {}) {
+  if (hasModerate) return true;
+  const role = memberRoleOf(db, organizationId, userId);
+  return role === 'manager' || role === 'student_organizer';
+}
+
+/**
+ * The capabilities that make somebody staff on an event.
+ *
+ * ── Why a list rather than a middleware ──
+ *
+ * `canRunEvent` reads the membership table and knows nothing about agreements.
+ * That is right for what it answers — "is this your event" — and it is why the
+ * WRITE routes pair it with `requireCapAny`: the middleware is where a withheld
+ * capability is refused, because `can()` is the only thing that consults
+ * `principal.withheld`.
+ *
+ * Three READ routes had no middleware at all and stood on `canRunEvent` alone,
+ * so a student who had been promoted but had not yet accepted the Student
+ * Organizer Agreement could still open the applicant list with everybody's
+ * grade and school on it — the exact data the agreement is about. They cannot
+ * take the whole route behind a gate, because two of them also serve ordinary
+ * attendees, so they ask this list where they compute "is the reader staff".
+ */
+export const EVENT_STAFF_CAPABILITIES = Object.freeze([
+  'event.moderate',
+  'event.edit.own',
+  'applicant.review',
+  'attendance.view',
+  'organization.event.manage.own',
+]);
+
+/**
+ * May this principal run this event — edit it, review its applicants, take its
+ * attendance?
+ *
+ * ── The question this replaces, and why it was wrong ──
+ *
+ * Every one of those routes asked `event.organizer_id === userId`: personal
+ * ownership, nothing else. That was right while only organizers could host,
+ * because an event belonged to the adult who typed it in.
+ *
+ * It stopped being right the moment a Student Organizer could post for a club.
+ * Two consequences, both bad, and the second is worse:
+ *
+ *   • The club's own MANAGER could not touch an event published under the
+ *     club's name — not edit it, not cancel it, not accept an applicant, not
+ *     record who turned up.
+ *
+ *   • Demoting or removing the student left the event with nobody. They lose
+ *     the capability at the middleware, the manager never had the ownership,
+ *     and `POST /api/events/:id/attendance` is the only path that writes
+ *     credited hours. Everybody who worked that shift would silently never be
+ *     credited for it, and the design actively encourages the demotion that
+ *     causes it.
+ *
+ * So the question is now "do you host it, or do you MANAGE the organization it
+ * belongs to". A personal event with no organization is unchanged: only its
+ * host and a moderator.
+ *
+ * ── Why `canManage` here and `canHelpRun` on the create routes ──
+ *
+ * A Student Organizer runs the events they put up, and no more. They cannot
+ * cancel the manager's event, edit its shifts, or decide its applicants —
+ * being trusted to post the bake-sale shift is not being trusted to call off
+ * the fundraiser somebody else built.
+ *
+ * That leaves nobody stranded, because the manager is above every event in the
+ * club by construction: whatever a helper posts, and whatever becomes of the
+ * helper, a manager can always act on it. Two helpers covering for each other
+ * is the one thing this refuses, and the manager is the escalation for it.
+ *
+ * @param {object} event a row from `events` — needs `organizer_id` and
+ *   `organization_id`
+ */
+export function canRunEvent(db, event, userId, { hasModerate = false } = {}) {
+  if (hasModerate) return true;
+  if (!event || !userId) return false;
+  /**
+   * Hosting it is enough — UNLESS the club has since shown you the door.
+   *
+   * The host branch used to stand on its own, and that let removal be
+   * incomplete. Somebody removed or banned from a club kept every power over the
+   * events they had already posted for it: the roster export with names, emails,
+   * schools and grades, the attendance write that credits hours, the broadcast
+   * that emails everyone on it. A club that removed a helper had not removed
+   * their access to the club's people, only their ability to add more.
+   *
+   * Re-asked against the membership table rather than remembered, so lifting a
+   * ban or re-admitting somebody restores it without a second bookkeeping step.
+   * An event with no organization is unaffected: there is no club to be removed
+   * from, and its host keeps it.
+   */
+  if (event.organizer_id && event.organizer_id === userId) {
+    if (!event.organization_id) return true;
+    return stillWelcomeIn(db, event.organization_id, userId);
+  }
+
+  /**
+   * A row that does not CARRY `organization_id` is a caller bug, not an event
+   * belonging to nobody, and the two must not look alike.
+   *
+   * Several call sites load the event through a join that names its columns
+   * (`SELECT a.*, e.organizer_id, ...`). Omit `e.organization_id` from one of
+   * those and this function reads `undefined`, decides the event belongs to no
+   * organization, and refuses the club's own manager — silently, correctly-
+   * shaped, and wrong. That happened on both application-review routes within
+   * an hour of this function being written.
+   *
+   * `null` is a real answer and passes through. An absent property throws,
+   * because the caller has not been asked the question this function needs.
+   */
+  if (!('organization_id' in event)) {
+    throw new Error(
+      'canRunEvent needs `organization_id` on the event row. The query that '
+      + 'loaded it names its columns and does not select it — add '
+      + '`e.organization_id` there rather than letting this read as "no organization".'
+    );
+  }
+
+  if (!event.organization_id) return false;
+  return canManage(db, event.organization_id, userId);
 }
 
 export function createOrganization(db, { name, description = '', tags = [], creator, now = new Date().toISOString() }) {
@@ -170,6 +410,17 @@ export function formatOrganization(row) {
     createdBy: row.created_by
       ? { id: row.created_by, name: row.created_by_name_snapshot || 'Organizer' }
       : { id: null, name: row.created_by_name_snapshot || 'Former member' },
+    /* Both, so the renderer can prefer the upload and fall back to the emoji —
+       the same contract `users` publishes, so one avatar component serves
+       people and organizations without learning which it was handed. */
+    avatar: row.avatar || null,
+    imageUrl: row.image_url || null,
+    allowReplies: row.allow_replies !== 0,
+    avatarColor: row.avatar_color || null,
+    /* Present only on the "mine" listing, which joins membership. Undefined
+       elsewhere rather than null, so a caller can tell "not asked" from "not a
+       manager". */
+    viewerRole: row.viewer_role ?? undefined,
     memberCount: row.memberCount ?? 0,
     eventCount: row.eventCount ?? 0,
     status: row.status,

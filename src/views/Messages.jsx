@@ -145,7 +145,7 @@ export default function Messages() {
         />
       )}
       <div className="page-head" style={{ marginBottom: 'var(--s2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>
+        <h2 className="page-title">
           Messages
           {isOffline && (
             <span className="offline-pill" style={{ marginLeft: '0.75rem', verticalAlign: 'middle' }}>
@@ -153,9 +153,32 @@ export default function Messages() {
               Reconnecting
             </span>
           )}
-        </h1>
-        <button className="btn btn-primary" onClick={() => setShowPicker(true)}>
-          <Plus size={18} style={{ marginRight: '8px' }} /> New Message
+        </h2>
+        {/**
+          * Words on a desktop, a glyph on a phone.
+          *
+          * This was a full `btn btn-primary` with an 18px icon carrying a
+          * hardcoded 8px margin ON TOP of `.btn`'s own gap, so the icon spacing
+          * was doubled. At 375px it came out about 150×44 sitting beside a
+          * 1.5rem "Messages" heading on a row whose flex lives in an inline
+          * style — which means no media query can reach it, the same class of
+          * bug the dashboard comment describes.
+          *
+          * The label is hidden rather than dropped, so the accessible name is
+          * unchanged at every width and a screen reader still hears "New
+          * message". `title` gives sighted phone users the tooltip. `btn-icon`
+          * is what carries the 44px WIDTH floor — without it an icon-only
+          * button is a 44px-tall sliver, which index.css's own comment warns
+          * about.
+          */}
+        <button
+          className="btn btn-primary btn-icon-responsive"
+          onClick={() => setShowPicker(true)}
+          title="New message"
+          aria-label="New message"
+        >
+          <Plus size={18} aria-hidden="true" />
+          <span className="btn-label-wide">New Message</span>
         </button>
       </div>
       <div className="messages-layout">
@@ -192,7 +215,11 @@ export default function Messages() {
             <div className="messages-empty-state">
               <div className="empty-state-content">
                 <MessageSquare size={48} className="empty-state-icon" />
-                <h3>{copy.noneSelected.title}</h3>
+                {/* `h2`, not `h3`: with no conversation open this is the only
+                    heading under the page's `h1`, so `h3` skipped a level for
+                    anybody navigating by heading — which is how a screen reader
+                    user skims. The styling is unchanged; only the level moved. */}
+                <h2>{copy.noneSelected.title}</h2>
                 <p>{copy.noneSelected.body}</p>
               </div>
             </div>

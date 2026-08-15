@@ -1,44 +1,51 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
 import { TEST_SIGNUP_DEFAULTS } from './testConsent.js';
+import { installMailbox } from './testMailbox.js';
 
 describe('auth: email verification (flag on)', () => {
   let srv;
+  let mailbox;
 
   beforeAll(async () => {
     process.env.REQUIRE_EMAIL_VERIFICATION = 'true';
     const { startTestServer } = await import('./testServer.js');
     srv = await startTestServer();
+    mailbox = installMailbox();
   });
   afterAll(async () => {
+    mailbox.restore();
     await srv.close();
     delete process.env.REQUIRE_EMAIL_VERIFICATION;
   });
 
-  const tokenFor = (userId) => {
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const row = db.prepare(
-      'SELECT token FROM email_verification_tokens WHERE user_id = ? ORDER BY expires_at DESC LIMIT 1'
-    ).get(userId);
-    db.close();
-    return row?.token;
-  };
+  /**
+   * The token is read out of the message that was actually sent, the way the
+   * person receiving it does. The column it used to be read from holds a
+   * SHA-256 digest since migration 048, so nothing can recover it from the
+   * table — which is the point of that migration.
+   */
+  const tokenFor = (email) => mailbox.waitForToken(email, 'verify');
 
-  const signup = (email) => srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
-    email, password: 'Password123', name: 'Test Person', role: 'student', grade: '10',
-    username: `u${Math.random().toString(36).slice(2, 9)}`
-  });
+  // Clears first, so a token from an earlier case can never be mistaken for
+  // the one this signup triggers.
+  const signup = (email) => {
+    mailbox.clear();
+    return srv.call('POST', '/api/auth/signup', { ...TEST_SIGNUP_DEFAULTS,
+      email, password: 'Password123', name: 'Test Person', role: 'student', grade: '10',
+      username: `u${Math.random().toString(36).slice(2, 9)}`
+    });
+  };
 
   it('creates a new account unverified and issues a token', async () => {
     const res = await signup('unverified@example.org');
     expect(res.status).toBe(201);
     expect(res.body.user.emailVerified).toBe(false);
-    expect(tokenFor(res.body.user.id)).toBeTruthy();
+    expect(await tokenFor('unverified@example.org')).toBeTruthy();
   });
 
   it('marks the account verified when the token is presented', async () => {
     const res = await signup('confirms@example.org');
-    const token = tokenFor(res.body.user.id);
+    const token = await tokenFor('confirms@example.org');
 
     const verify = await srv.call('POST', '/api/auth/verify-email', { token });
     expect(verify.status).toBe(200);
@@ -54,18 +61,22 @@ describe('auth: email verification (flag on)', () => {
 
   it('burns the token so it cannot be replayed', async () => {
     const res = await signup('replay@example.org');
-    const token = tokenFor(res.body.user.id);
+    expect(res.status).toBe(201);
+    const token = await tokenFor('replay@example.org');
     expect((await srv.call('POST', '/api/auth/verify-email', { token })).status).toBe(200);
     expect((await srv.call('POST', '/api/auth/verify-email', { token })).status).toBe(400);
   });
 
   it('resends a fresh token to the signed-in user', async () => {
     const res = await signup('resend@example.org');
-    const first = tokenFor(res.body.user.id);
+    const first = await tokenFor('resend@example.org');
 
+    // Forget the signup message, so the token read below can only be the one
+    // the resend produced.
+    mailbox.clear();
     const resend = await srv.call('POST', '/api/auth/resend-verification', undefined, res.cookie);
     expect(resend.status).toBe(200);
-    expect(tokenFor(res.body.user.id)).not.toBe(first);
+    expect(await tokenFor('resend@example.org')).not.toBe(first);
   });
 
   it('requires authentication to resend', async () => {
@@ -101,7 +112,7 @@ describe('auth: email verification (flag on)', () => {
     const blocked = await srv.call('GET', '/api/applications', undefined, token);
     expect(blocked.status).toBe(403);
 
-    const verifyToken = tokenFor(res.body.user.id);
+    const verifyToken = await tokenFor('unblock@example.org');
     const verify = await srv.call('POST', '/api/auth/verify-email', { token: verifyToken });
     expect(verify.status).toBe(200);
 

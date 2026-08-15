@@ -32,6 +32,7 @@ const CreateEvent = React.lazy(() => import('../views/CreateEvent'));
 const PublicProfile = React.lazy(() => import('../views/PublicProfile'));
 const OrganizationPage = React.lazy(() => import('../views/OrganizationPage'));
 const OrganizationForm = React.lazy(() => import('../views/OrganizationForm'));
+const OrganizationsHome = React.lazy(() => import('../views/OrganizationsHome'));
 const LogExternalHours = React.lazy(() => import('../views/LogExternalHours'));
 const LoggedHours = React.lazy(() => import('../views/LoggedHours'));
 const VolunteerDashboard = React.lazy(() => import('../views/VolunteerDashboard'));
@@ -40,6 +41,11 @@ const AdminDashboard = React.lazy(() => import('../views/AdminDashboard'));
 const Notifications = React.lazy(() => import('../views/Notifications'));
 const CalendarView = React.lazy(() => import('../views/CalendarView'));
 const VolunteerProfile = React.lazy(() => import('../views/VolunteerProfile'));
+const BadgesPage = React.lazy(() => import('../views/BadgesPage'));
+const CertificatesPage = React.lazy(() => import('../views/CertificatesPage'));
+const ReportIssue = React.lazy(() => import('../views/ReportIssue'));
+const PublicCertificates = React.lazy(() => import('../views/PublicCertificates'));
+const PublicServiceHistory = React.lazy(() => import('../views/PublicServiceHistory'));
 const OrganizerProfile = React.lazy(() => import('../views/OrganizerProfile'));
 const ResetPassword = React.lazy(() => import('../views/ResetPassword'));
 const OAuthCallback = React.lazy(() => import('../views/OAuthCallback'));
@@ -55,7 +61,9 @@ const LegalDocument = React.lazy(() => import('../views/legal/LegalDocument'));
 const AboutUs = React.lazy(() => import('../views/AboutUs'));
 const LegalEditor = React.lazy(() => import('../views/legal/LegalEditor'));
 const OrganizerAgreement = React.lazy(() => import('../views/legal/OrganizerAgreement'));
+const StudentOrganizerAgreement = React.lazy(() => import('../views/legal/StudentOrganizerAgreement'));
 const Appeal = React.lazy(() => import('../views/Appeal'));
+const NewAppeal = React.lazy(() => import('../views/NewAppeal'));
 const AdminAppeals = React.lazy(() => import('../views/AdminAppeals'));
 const AdminAuditExplorer = React.lazy(() => import('../views/AdminAuditExplorer'));
 const ImpactDashboard = React.lazy(() => import('../views/ImpactDashboard.jsx'));
@@ -170,7 +178,23 @@ export const APP_ROUTES = [
    * noun for that, the same way `event.create` is still the right capability,
    * and renaming them would be renaming the concept rather than the page.
    */
-  { path: '/events/new', element: <CreateEvent />, requiredCap: 'event.create', requiresVerified: true },
+  /**
+   * Two capabilities reach this form, and neither implies the other.
+   *
+   * `event.create` is the organizer's: put a shift up anywhere, under your own
+   * name. `organization.event.create` is the Student Organizer's: put one up for
+   * the club you help run. A student holds the second only while they hold the
+   * rank, and the form itself refuses to submit without an organization for
+   * them — the same refusal the server gives.
+   *
+   * Declared as `requiredCapAny` rather than by dropping the gate, so a plain
+   * student still never reaches the page.
+   */
+  {
+    path: '/events/new', element: <CreateEvent />,
+    requiredCapAny: ['event.create', 'organization.event.create'],
+    requiresVerified: true,
+  },
   { path: '/events/:id/edit', element: <RedirectToEvent /> },
   { path: '/checkin/:eventId', element: <CheckInView />, requiredCap: 'attendance.mark' },
   { path: '/calendar', element: <CalendarView />, requiredCap: 'event.view' },
@@ -211,6 +235,17 @@ export const APP_ROUTES = [
   { path: '/users/id/:id', element: <PublicProfile />, requiredCap: 'directory.read' },
   { path: '/users/:handle', element: <PublicProfile />, requiredCap: 'directory.read' },
   /* Declared BEFORE `/organizations/:key`, so "new" is never matched as a slug. */
+  /**
+   * The organizations you run or belong to.
+   *
+   * `organization.join` rather than `organization.create`: a student who has
+   * joined a club has organizations, and this is where they are. Creating is a
+   * control ON this page, gated separately.
+   *
+   * Declared before `/organizations/:key` for the same reason `new` is — a
+   * bare `/organizations` must not be read as a slug.
+   */
+  { path: '/organizations', element: <OrganizationsHome />, requiredCap: 'organization.join' },
   { path: '/organizations/new', element: <OrganizationForm />, requiredCap: 'organization.create', requiresVerified: true },
   { path: '/organizations/:key/edit', element: <OrganizationForm />, requiredCap: 'organization.manage.own' },
   { path: '/organizations/:key', element: <OrganizationPage />, requiredCap: 'directory.read' },
@@ -228,7 +263,46 @@ export const APP_ROUTES = [
    * own history is not a thing anybody needs approval for.
    */
   { path: '/hours', element: <LoggedHours />, requiredCap: 'portfolio.write' },
+  /**
+   * The destinations the profile's capped lists point at.
+   *
+   * `BadgesList` showed twelve and then said "and 4 more badges." as plain text,
+   * because — in its own words — "there is no fuller page to send somebody to
+   * yet". A count with nowhere to go tells a volunteer about achievements the
+   * product then refuses to show them.
+   *
+   * Two paths, one component: whose badges these are is the only difference, and
+   * splitting it would let a student's own achievements drift into being
+   * presented differently from how everybody else sees them.
+   *
+   * `directory.read` on the handle route, matching `/users/:handle` itself —
+   * reading somebody's badges is reading their profile.
+   */
+  /* `portfolio.write` — the same capability `/hours` and `/certificates` use
+     for "your own service record". Inventing a fourth name for that idea
+     would mean four things to keep in step. */
+  { path: '/profile/badges', element: <BadgesPage />, requiredCap: 'portfolio.write' },
+  { path: '/users/:handle/badges', element: <BadgesPage />, requiredCap: 'directory.read' },
+  /* The same convention the badges page established: your own record lives
+     under /profile and /certificates, somebody else's under their handle. Both
+     are `directory.read`, matching `/users/:handle` itself — reading somebody's
+     public record is reading their profile. What each ACTUALLY discloses is
+     decided by the subject's own setting, at the server. */
+  { path: '/users/:handle/certificates', element: <PublicCertificates />, requiredCap: 'directory.read' },
+  { path: '/users/:handle/hours', element: <PublicServiceHistory />, requiredCap: 'directory.read' },
+  /* Own certificates only: one carries a full name, an organization, dates and
+     a verification code. */
+  { path: '/certificates', element: <CertificatesPage />, requiredCap: 'portfolio.write' },
   { path: '/settings', element: <Settings /> },
+  /**
+   * Reporting a problem with the platform.
+   *
+   * No `requiredCap`: every account may report a broken page, and gating it on
+   * a capability would mean the people most likely to hit a permissions bug are
+   * the ones who cannot report it. Authenticated, though — an anonymous
+   * endpoint that emails staff is a spam relay.
+   */
+  { path: '/report-issue', element: <ReportIssue /> },
   /**
    * Declared with NO `requiredCap`, deliberately.
    *
@@ -239,6 +313,13 @@ export const APP_ROUTES = [
    * server/organizerAgreement.js.
    */
   { path: '/organizer-agreement', element: <OrganizerAgreement /> },
+  /**
+   * The same, for the Student Organizer rank, and ungated for the same reason:
+   * the four capabilities it releases are withheld until this page is used, so
+   * requiring any of them here would be a lock on the key. See
+   * server/studentOrganizerAgreement.js.
+   */
+  { path: '/student-organizer-agreement', element: <StudentOrganizerAgreement /> },
   /* Error triage. `error.read` is SUPER_ONLY, so `can()` refuses it before it
      consults per-user grants — no capability grant can reach this route, and
      the nav entry that points at it is hidden by the same capability. */
@@ -283,6 +364,19 @@ export const APP_ROUTES = [
    * handler name, so the rail, the route and the server agree on one word.
    */
   { path: '/admin/impact', element: <AdminImpact />, requiredCap: 'analytics.platform' },
+  /**
+   * Filing an appeal.
+   *
+   * An APP route, not a public one. `POST /api/appeals` requires a session and
+   * decides ownership from it — a signed-out visitor reaching this form would
+   * write out their case and be refused on submit, which is the worst possible
+   * moment to discover you had to sign in first.
+   *
+   * No `requiredCap`: appealing is not a privilege. Every signed-in account can
+   * contest a decision taken about them, and the server checks that the thing
+   * being appealed is actually theirs.
+   */
+  { path: '/appeals/new', element: <NewAppeal /> },
 ];
 
 /**

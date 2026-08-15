@@ -142,9 +142,23 @@ describe('a shift that ended earlier today is not reported as upcoming', () => {
   it('excludes it from the volunteer stats upcoming count', async () => {
     const me = (await srv.call('GET', '/api/auth/me', undefined, student)).body;
 
-    const before = (await srv.call('GET', '/api/stats/volunteer', undefined, student)).body.upcoming;
+    /**
+     * `upcomingCount`, not `upcoming`.
+     *
+     * This read `body.upcoming`, which the endpoint has never returned — so
+     * both sides were `undefined` and the assertion was
+     * `expect(undefined).toBe(undefined)`. It has been vacuously green since it
+     * was written, which is worse than absent: the suite claimed this figure
+     * was covered.
+     */
+    const read = async () =>
+      (await srv.call('GET', '/api/stats/volunteer', undefined, student)).body.upcomingCount;
+
+    const before = await read();
+    expect(before, 'the endpoint no longer returns upcomingCount').toBeTypeOf('number');
+
     await acceptedShiftEndedEarlierToday(me.id);
-    const after = (await srv.call('GET', '/api/stats/volunteer', undefined, student)).body.upcoming;
+    const after = await read();
 
     expect(after, 'the upcoming count grew for a shift that already finished').toBe(before);
   });

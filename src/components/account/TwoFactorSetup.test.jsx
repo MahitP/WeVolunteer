@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
+import { __resetModalStack, __modalStackDepth } from '../../utils/useModal';
 import TwoFactorSetup from './TwoFactorSetup';
 import { api } from '../../utils/api';
 import { REAUTH_CHALLENGE_HEADER } from '../../utils/stepUp';
@@ -118,6 +119,16 @@ async function answerPassword(password = 'correct horse') {
 }
 
 beforeEach(() => {
+  /**
+   * The shared modal stack, reset.
+   *
+   * A token left behind by an earlier test in this file makes `isTopmost()`
+   * false for every dialog that follows, so Escape is silently ignored — the
+   * dialog stays open, nothing throws, and the failure looks like a timing
+   * problem. That is what made the Escape test below fail about one full-suite
+   * run in two and never in isolation.
+   */
+  __resetModalStack();
   vi.restoreAllMocks();
   sessionStorage.clear();
   vi.spyOn(api, 'fetchOAuthProviders').mockResolvedValue([]);
@@ -319,37 +330,67 @@ describe('the password step during authenticator enrolment', () => {
     expect(container.querySelector('.modal-overlay'), 'still inside the card').toBeNull();
   });
 
-  /**
-   * ── A known flake, and an honest note about it ──
-   *
-   * This assertion was `waitFor(... toBeNull())`, failed roughly one full-suite
-   * run in two, and never failed in isolation. It was changed to a synchronous
-   * assertion on the reasoning that `fireEvent` is act-wrapped and the close is
-   * a plain `setState`, so the dialog must be gone before the next line — and
-   * that reasoning was WRONG, or at least incomplete: the synchronous form
-   * still fails under full-suite load, which means the dialog genuinely has not
-   * closed at that moment rather than merely not been observed.
-   *
-   * The suspected cause is the module-level stack in `useModal`: Escape is
-   * ignored by a dialog that is not `isTopmost()`, so a token left behind by an
-   * earlier mount would silence this one. That is a real defect if true, but it
-   * is in shared modal infrastructure and diagnosing it properly needs a
-   * reproduction this test has not yet produced.
-   *
-   * So `waitFor` is restored — not as a fix, but because it is the honest shape
-   * for an assertion whose timing is not understood, and it fails loudly rather
-   * than silently when the dialog never closes at all. Recorded here rather than
-   * left as a mystery for whoever hits it next.
-   */
-  it('moves focus into the dialog and closes on Escape', async () => {
+  it('starts with focus in the password field', async () => {
+    /**
+     * Split from the Escape test, and named for what actually holds it up.
+     *
+     * This passes because of `autoFocus` on the input, NOT because of
+     * `useModal`'s focus loop — that loop filters candidates on
+     * `offsetParent !== null`, which is always null in jsdom, so it selects
+     * nothing here. `VerifyIdentityModal` says so at its `autoFocus`. Claiming
+     * this covers `useModal`'s focus behaviour would be claiming coverage that
+     * does not exist.
+     */
     mockServer();
     mockChallenges();
     setup();
 
     fireEvent.click(await screen.findByRole('button', { name: /use authenticator app/i }));
 
-    const field = await screen.findByLabelText(/your password/i);
-    expect(document.activeElement).toBe(field);
+    await screen.findByLabelText(/your password/i);
+    await act(async () => {});
+
+    /**
+     * Focus is INSIDE the dialog — the property that actually matters.
+     *
+     * Not "on the password field": `useModal` filters focus candidates on
+     * `offsetParent !== null`, which is always null in jsdom, so its loop picks
+     * the dialog container rather than the input. Asserting the field would be
+     * asserting `autoFocus` and calling it modal focus management.
+     *
+     * This assertion caught a real defect: the container fallback called
+     * `.focus()` on a div with no `tabindex`, which does nothing but blur — so
+     * focus landed on `<body>` with a modal open in front of it, stranding
+     * exactly the keyboard user the hook exists to protect.
+     */
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('closes on Escape', async () => {
+    /**
+     * Deterministic now, and it was not before.
+     *
+     * Two things were wrong. The shared `modalStack` in `useModal` had no reset
+     * seam, so a token leaked by an earlier test in this file silenced Escape
+     * for every dialog after it — `beforeEach` resets it now. And Escape was
+     * dispatched to a NATIVE listener registered in a passive effect, which
+     * under a saturated worker pool had not necessarily run yet: the flush
+     * below guarantees it has.
+     *
+     * The stack depth is asserted first, so if the leak ever returns this fails
+     * by name instead of looking like a timing problem again.
+     */
+    mockServer();
+    mockChallenges();
+    setup();
+
+    fireEvent.click(await screen.findByRole('button', { name: /use authenticator app/i }));
+    await screen.findByLabelText(/your password/i);
+
+    await act(async () => {});
+    expect(__modalStackDepth(), 'a leaked token would make Escape a silent no-op').toBe(1);
 
     fireEvent.keyDown(document, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());

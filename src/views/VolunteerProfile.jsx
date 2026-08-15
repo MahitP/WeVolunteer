@@ -3,11 +3,13 @@ import {
   CalendarCheck, MapPin, Mail, Award, ArrowLeft, History, Medal, Sparkles, FileText, Lock, Pencil
 } from 'lucide-react';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
+import { DistinctionTag } from '../components/profile/Distinction';
 import EmptyState from '../components/common/EmptyState';
 import { api } from '../utils/api';
 import { formatHours, formatDay, formatTimeRange, gradeLabel, countdown } from '../utils/helpers';
 import { DateChip } from '../components/Seats';
 import CertificateModal from '../components/CertificateModal';
+import PreviewList from '../components/common/PreviewList';
 import BadgesList from '../components/BadgesList';
 import { Link } from 'react-router-dom';
 
@@ -96,7 +98,22 @@ export default function VolunteerProfile({
           </span>
 
           <div style={{ flex: 1, minWidth: 200 }}>
-            <h1 style={{ fontSize: '1.375rem' }}>{volunteer.name}</h1>
+            <h2 style={{ fontSize: '1.375rem' }}>{volunteer.name}</h2>
+            {/**
+              * The owner or partner pill, if this account carries one.
+              *
+              * An account can be the platform owner AND a volunteer — the owner
+              * of this platform deliberately is both — and this page is now
+              * where such an account lands, because privilege should not decide
+              * whether somebody gets to see their own service record. The pill
+              * keeps the distinction visible without turning the page into a
+              * different page: everything below it is the ordinary student
+              * presentation, which is the whole point.
+              *
+              * `distinctionFor` is a pure function of role on the server and is
+              * presentation only — no capability is derived from it.
+              */}
+            <DistinctionTag distinction={currentUser?.id === userId ? currentUser?.distinction : volunteer.distinction} />
             <p className="lead" style={{ marginTop: 2 }}>
               {[gradeLabel(volunteer.grade), 'Volunteer'].filter(Boolean).join(' · ')}
             </p>
@@ -173,7 +190,13 @@ export default function VolunteerProfile({
       )}
 
       <section>
-        <BadgesList userId={userId} />
+        {/* Your own badges live under /profile; somebody else's under their
+            handle, so the link a reader follows matches the profile they are
+            already looking at. */}
+        <BadgesList
+          userId={userId}
+          moreHref={isSelf ? '/profile/badges' : `/users/@${volunteer?.username}/badges`}
+        />
       </section>
 
       {/* The same two-column body as the dashboard, and the same class — it had
@@ -235,9 +258,18 @@ export default function VolunteerProfile({
                 style={{ padding: 'var(--s8) var(--s4)' }} 
               />
             ) : (
-              <div className="list">
-                {/* Same reason as the upcoming list above. */}
-                {completed.map((c, i) => (
+              /* Five, not all of them. This list was uncapped on both the
+                 client and the server, so a volunteer with two hundred
+                 confirmed shifts rendered two hundred rows on their own
+                 profile — and on anybody else's view of it. */
+              <PreviewList
+                items={completed}
+                cap={5}
+                className="list"
+                label="completed shifts"
+                moreHref="/hours"
+                moreLabel={`Show all ${completed.length} shifts`}
+                renderItem={(c, i) => (
                   <div key={`${c.eventId}-${c.startDatetime}-${i}`} className="list-row">
                     <DateChip iso={c.startDatetime} />
                     <div className="truncate" style={{ flex: 1 }}>
@@ -251,8 +283,8 @@ export default function VolunteerProfile({
                     </div>
                     <span className="hourspill">+{formatHours(c.hours)}</span>
                   </div>
-                ))}
-              </div>
+                )}
+              />
             )}
           </section>
         </div>
@@ -326,8 +358,27 @@ export default function VolunteerProfile({
                   style={{ padding: 'var(--s6) var(--s4)' }} 
                 />
               ) : (
-                <div className="list">
-                  {certificates.map(c => (
+                /**
+                 * Five, and the SAME five as the service record opposite.
+                 *
+                 * This list was uncapped, which is the defect the service record
+                 * had already been fixed for: a volunteer with forty completed
+                 * events got forty rows in a sidebar column, so the two columns
+                 * of the profile ended at wildly different heights and
+                 * everything below the shorter one was empty space.
+                 *
+                 * Matching `cap` to the service record's is what makes the two
+                 * columns line up. It is not a coincidence to be tidied away
+                 * later — change one and the profile goes lopsided again.
+                 */
+                <PreviewList
+                  items={certificates}
+                  cap={5}
+                  className="list"
+                  label="certificates"
+                  moreHref="/certificates"
+                  moreLabel={`Show all ${certificates.length} certificates`}
+                  renderItem={(c) => (
                     <button
                       key={c.eventId}
                       className="list-row"
@@ -343,8 +394,8 @@ export default function VolunteerProfile({
                       </span>
                       <span className="small dim nowrap">View</span>
                     </button>
-                  ))}
-                </div>
+                  )}
+                />
               )}
             </section>
           )}

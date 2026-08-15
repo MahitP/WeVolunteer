@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { sendEmail, registerSmtpTransport, describeProviders } from './emailService.js';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const SMTP_HOST = process.env.SMTP_HOST;
@@ -6,7 +7,29 @@ const SMTP_PORT = process.env.SMTP_PORT || 587;
 const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
 const APP_NAME = process.env.APP_NAME || 'WeVolunteer';
-const EMAIL_FROM = process.env.EMAIL_FROM || `"${APP_NAME}" <noreply@wevolunteer.org>`;
+
+/**
+ * There is no `EMAIL_FROM` any more, and that is the point.
+ *
+ * Every message used to leave from one address — the login code, the suspension
+ * notice, the privacy-policy update and the shift reminder alike — whose default
+ * was `noreply@wevolunteer.org`: a domain one character away from the one this
+ * platform actually sends as, and therefore one nothing had ever authorised.
+ *
+ * The sender is now a function of what the message is. `emailIdentity.js` owns
+ * that mapping and enforces the rule that every authentication message leaves
+ * from `noreply@wevolunteers.org`. `MAIL_DOMAIN` is the knob a deployment turns.
+ *
+ * A deployment that still sets `EMAIL_FROM` is told, once, that it no longer
+ * does anything — silently ignoring it would mean an operator believing they had
+ * changed the sender when they had not.
+ */
+if (process.env.EMAIL_FROM) {
+  console.warn(
+    '[Email] EMAIL_FROM is set but no longer used. The sender is chosen per message '
+    + 'by server/emailIdentity.js; set MAIL_DOMAIN to change the domain it sends from.'
+  );
+}
 
 /**
  * Base URL for the links in verification and password-reset emails.
@@ -37,11 +60,33 @@ if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
   });
   console.log(`[Email] Configured to send via ${SMTP_HOST}`);
 } else if (IS_PRODUCTION) {
-  // The console mock is a development convenience. In production it would print
-  // password-reset and verification tokens to the server log and deliver
-  // nothing — a silent failure that also leaks credentials. Refuse to boot.
-  console.error('FATAL: SMTP is not configured (SMTP_HOST, SMTP_USER, SMTP_PASS are required in production).');
-  process.exit(1);
+  /**
+   * The console mock is a development convenience. In production it would print
+   * password-reset and verification tokens to the server log and deliver
+   * nothing — a silent failure that also leaks credentials.
+   *
+   * SMTP is no longer the only way out, though. Since Resend became the primary
+   * provider, a deployment that configures Resend and no SMTP is a legitimate
+   * choice — it simply has no emergency fallback. So the refusal is now "no
+   * provider at all", not "no SMTP", and the no-fallback case gets a warning
+   * loud enough to be a decision rather than an accident.
+   *
+   * `transporter` is deliberately left undefined here: the SMTP provider then
+   * reports itself unconfigured and is skipped, which is very different from
+   * quietly substituting the mock and logging every token to stdout.
+   */
+  if (!process.env.RESEND_API_KEY) {
+    console.error(
+      'FATAL: no email provider is configured. Set RESEND_API_KEY (preferred), or '
+      + 'SMTP_HOST, SMTP_USER and SMTP_PASS, or both. Production refuses to boot '
+      + 'without a way to send verification and password-reset mail.'
+    );
+    process.exit(1);
+  }
+  console.warn(
+    '[Email] SMTP is not configured, so there is no fallback provider. If Resend '
+    + 'is unavailable, mail will go to the durable outbox and wait there.'
+  );
 } else {
   // Fallback to console logger for development
   transporter = {
@@ -76,6 +121,45 @@ if (IS_PRODUCTION && !APP_URL) {
 }
 
 /**
+ * And it has to be a URL, not merely a non-empty string.
+ *
+ * ── Why presence was not enough ──
+ *
+ * This value is concatenated into every password-reset and email-verification
+ * link. A trailing typo, a missing scheme, or a copied shell variable that never
+ * expanded all pass a truthiness check and then mail a live single-use token to
+ * an address nobody controls — which is the exact harm the guard above is
+ * written to prevent, arriving through the door it left open.
+ *
+ * `OAUTH_REDIRECT_URI` five files away gets a full parse, a loopback refusal and
+ * a scheme check. The link that carries a password-reset token deserves at least
+ * as much.
+ *
+ * http is refused in production rather than warned about: these links carry
+ * credentials, and a plaintext one is interceptable on any network the recipient
+ * happens to open their mail on.
+ */
+if (IS_PRODUCTION && APP_URL) {
+  let parsed = null;
+  try { parsed = new URL(APP_URL); } catch { parsed = null; }
+
+  if (!parsed) {
+    console.error(
+      `FATAL: APP_URL is not a valid absolute URL (${APP_URL}). It is the base of every `
+      + 'password-reset and verification link. Example: APP_URL=https://volunteers.example.org'
+    );
+    process.exit(1);
+  }
+  if (parsed.protocol !== 'https:') {
+    console.error(
+      `FATAL: APP_URL must use https in production (got ${parsed.protocol}//). These links `
+      + 'carry single-use credentials and must not travel in plaintext.'
+    );
+    process.exit(1);
+  }
+}
+
+/**
  * Health record for TRANSACTIONAL mail (verification, reset, email change).
  *
  * ── Why this exists ──
@@ -104,18 +188,48 @@ const mailHealth = {
   successes: 0,
   lastSuccessAt: null,
   lastError: null,
-  attemptsOnLastFailure: 0
+  attemptsOnLastFailure: 0,
+  /* Held by the outbox rather than delivered. Not a failure — the message is
+     still going — but an operator watching this number climb is watching an
+     incident, and it used to be indistinguishable from healthy. */
+  queued: 0,
+  /* Undeliverable for good: a bad address, or a provider's outright refusal.
+     Retrying these is what turns a typo into five wasted attempts. */
+  permanentFailures: 0,
+  /* We could not RENDER the message. Counted apart from everything else because
+     the fix is in this repository, not at a provider. */
+  templateFailures: 0,
+  /* Which provider carried the last successful message. Diagnostic only — no
+     caller branches on it, and none should. */
+  lastProvider: null
 };
 
-/** How many times a transactional message is attempted before giving up. */
-const MAX_MAIL_ATTEMPTS = Number(process.env.MAIL_MAX_ATTEMPTS) || 3;
+/**
+ * The SMTP transport belongs to this module — it is built here, guarded at boot
+ * here, and swapped by `setMailTransportForTests` here. The service is handed
+ * getters rather than the transport itself so that a test swap is visible to it;
+ * a captured reference would keep sending through the real relay.
+ */
+registerSmtpTransport(
+  () => transporter,
+  () => Boolean(transporter)
+);
 
-/** Base delay between attempts. Overridable so tests do not sleep. */
-const RETRY_DELAY_MS = Number(process.env.MAIL_RETRY_DELAY_MS) || 500;
+/* `MAIL_MAX_ATTEMPTS` and `MAIL_RETRY_DELAY_MS` still exist and still mean what
+   they meant — they now govern how hard ONE provider is tried before the
+   fallback takes over, and they live in emailService.js beside the loop that
+   reads them. */
 
 /** Current transactional-mail health, for the admin status endpoint. */
 export function getMailHealth() {
-  return { ...mailHealth, smtpConfigured: Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS) };
+  return {
+    ...mailHealth,
+    smtpConfigured: Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS),
+    /* Whether each provider is configured — never anything about the key
+       itself. `describeProviders` exists precisely so this line cannot grow
+       into one that reports a secret. */
+    providers: describeProviders(),
+  };
 }
 
 /** Test seam: resets the counters between cases. */
@@ -145,6 +259,10 @@ export function resetMailHealthForTests() {
   mailHealth.lastSuccessAt = null;
   mailHealth.lastError = null;
   mailHealth.attemptsOnLastFailure = 0;
+  mailHealth.queued = 0;
+  mailHealth.permanentFailures = 0;
+  mailHealth.templateFailures = 0;
+  mailHealth.lastProvider = null;
 }
 
 /**
@@ -161,31 +279,76 @@ export function resetMailHealthForTests() {
  * different consequences: a failed reset is an annoyance, a failed verification is a
  * lockout, and a failed email-change notice is a missed security warning.
  */
-async function sendTransactional(flow, mailOptions) {
-  let lastErr = null;
+/**
+ * Flows for which a LATE delivery is worse than none.
+ *
+ * A login code is valid for ten minutes and is invalidated the moment the person
+ * asks for another one. Queueing it means the code arrives after the user has
+ * already given up and requested a second — so they receive two messages, one of
+ * which is dead, and the one that looks newest may be the one that no longer
+ * works. Better to fail the request honestly and let them press the button.
+ */
+const NEVER_QUEUE = new Set(['2fa-code']);
 
-  for (let attempt = 1; attempt <= MAX_MAIL_ATTEMPTS; attempt++) {
-    try {
-      await transporter.sendMail(mailOptions);
-      mailHealth.successes++;
-      mailHealth.lastSuccessAt = new Date().toISOString();
-      if (attempt > 1) {
-        console.warn(`[Email] ${flow} succeeded on attempt ${attempt}.`);
-      }
-      return true;
-    } catch (err) {
-      lastErr = err;
-      if (attempt < MAX_MAIL_ATTEMPTS) {
-        console.warn(
-          `[Email] ${flow} attempt ${attempt}/${MAX_MAIL_ATTEMPTS} failed `
-          + `(${err.message}); retrying.`
-        );
-        await new Promise(r => setTimeout(r, RETRY_DELAY_MS * attempt));
-      }
+async function sendTransactional(flow, mailOptions, { event = null, idempotencyKey } = {}) {
+  let result;
+  try {
+    result = await sendEmail(
+      {
+        to: mailOptions.to,
+        subject: mailOptions.subject,
+        text: mailOptions.text,
+        html: mailOptions.html,
+      },
+      { flow, event, idempotencyKey, queueOnFailure: !NEVER_QUEUE.has(flow) }
+    );
+  } catch (err) {
+    /**
+     * `EmailApplicationError` — we could not build the message. That is a bug in
+     * a template, not a delivery problem, and it must not be filed as one: a
+     * provider failure sends whoever is on call to a provider dashboard, and
+     * this one would show everything healthy.
+     */
+    if (err?.name === 'EmailApplicationError') {
+      mailHealth.templateFailures++;
+      mailHealth.lastError = { flow, at: new Date().toISOString(), category: 'application' };
+      console.error(`[Email] ${flow} could not be rendered: ${err.message}`);
+      throw err;
     }
+    throw err;
   }
 
-  recordFailure(flow, mailOptions.to, lastErr, MAX_MAIL_ATTEMPTS);
+  if (result.delivered) {
+    mailHealth.successes++;
+    mailHealth.lastSuccessAt = new Date().toISOString();
+    mailHealth.lastProvider = result.provider;
+    return true;
+  }
+
+  /* The classified category says what KIND of failure it was; the provider's own
+     message says which one, which is what an operator actually greps for
+     ("ECONNREFUSED", "429"). Both are kept. The provider messages are built in
+     emailProviders.js from codes and statuses only, so no recipient address
+     travels in here. */
+  const detail = result.error?.message ? `${result.category}: ${result.error.message}` : String(result.category);
+
+  if (result.queued) {
+    /* Not delivered, but not lost either — the outbox holds it and the worker
+       will keep trying. The caller is told `true` because the message WILL go;
+       "check your email" remains an honest thing to say. */
+    mailHealth.queued++;
+    recordFailure(flow, mailOptions.to, { message: `queued (${detail})` }, 1);
+    console.warn(`[Email] ${flow} could not be delivered now (${result.category}); queued.`);
+    return true;
+  }
+
+  if (result.permanent) {
+    mailHealth.permanentFailures++;
+    recordFailure(flow, mailOptions.to, { message: `permanent (${detail})` }, 1);
+    return false;
+  }
+
+  recordFailure(flow, mailOptions.to, { message: detail }, 1);
   return false;
 }
 
@@ -454,7 +617,6 @@ export async function sendVerificationEmail(toEmail, token) {
   `;
 
   const mailOptions = {
-    from: EMAIL_FROM,
     to: toEmail,
     subject: `Please verify your email - ${APP_NAME}`,
     text: `Welcome to ${APP_NAME}!\n\nPlease verify your email address by clicking the link below:\n${verifyLink}\n\nIf you did not sign up, please ignore this email.`,
@@ -492,7 +654,6 @@ export async function sendAdminInvitationEmail(toEmail, token) {
   `;
 
   return sendTransactional('admin-invitation', {
-    from: EMAIL_FROM,
     to: toEmail,
     subject: `You have been invited to help moderate ${APP_NAME}`,
     text: [
@@ -522,7 +683,6 @@ export async function sendPasswordResetEmail(toEmail, token) {
   `;
 
   const mailOptions = {
-    from: EMAIL_FROM,
     to: toEmail,
     subject: `Password Reset - ${APP_NAME}`,
     text: `We received a request to reset your password.\n\nClick the link below to choose a new password:\n${resetLink}\n\nIf you did not request this, please ignore this email.`,
@@ -550,7 +710,6 @@ export async function sendEmailChangeConfirmation(toEmail, token) {
   `;
 
   const mailOptions = {
-    from: EMAIL_FROM,
     to: toEmail,
     subject: `Confirm your new email address - ${APP_NAME}`,
     text: `You asked to use this address for your ${APP_NAME} account.\n\nConfirm it by opening the link below:\n${confirmLink}\n\nThis link expires in 24 hours. If you did not ask for this, ignore this email — nothing will change.`,
@@ -585,7 +744,6 @@ export async function sendEmailChangeNotice(toEmail, newEmail) {
   `;
 
   const mailOptions = {
-    from: EMAIL_FROM,
     to: toEmail,
     subject: `Security notice: email change requested - ${APP_NAME}`,
     text: `A request was made to move your ${APP_NAME} account to ${masked}.\n\nThe change only takes effect once that address is confirmed.\n\nIf this was not you, sign in and change your password straight away — someone else may have access to your account.`,
@@ -601,10 +759,14 @@ export async function sendNotificationEmail(toEmail, subject, text, htmlContent)
     <p>${htmlContent || text.replace(/\n/g, '<br/>')}</p>
   `;
 
-  const loginUrl = APP_URL || 'https://wevolunteer.org';
+  /* No `|| 'https://wevolunteer.org'` here any more. That fallback was the same
+     wrong-domain default the block at the top of this file was written to
+     remove, surviving in a second place — and unlike the one that was removed,
+     this one shipped a working-looking link to a domain nobody owns. Production
+     cannot reach an empty APP_URL: boot refuses without it. */
+  const loginUrl = APP_URL;
 
   const mailOptions = {
-    from: EMAIL_FROM,
     to: toEmail,
     subject: `${subject} - ${APP_NAME}`,
     text: `${text}\n\nLog in at ${loginUrl} to see more details.`,
@@ -614,20 +776,55 @@ export async function sendNotificationEmail(toEmail, subject, text, htmlContent)
   return sendTransactional('notification-direct', mailOptions);
 }
 
-export async function sendMail({ to, subject, text, html }) {
-  try {
-    await transporter.sendMail({
-      from: EMAIL_FROM,
-      to,
-      subject,
-      text,
-      html
-    });
+/**
+ * Send a message whose retry somebody else owns.
+ *
+ * ── What this used to be, and why it mattered ──
+ *
+ * This function called `transporter.sendMail` directly. It was the ONE send
+ * path in the codebase that never touched the retry logic, never touched the
+ * health counters, and — once Resend arrived — would have been the one path
+ * that never touched the primary provider either. Both of its callers are
+ * significant: the notification outbox worker, and the operator error-alert
+ * digest. So the rule "the provider is an implementation detail" would have
+ * been true of every send in the repository except the two that run on a timer
+ * without anybody watching.
+ *
+ * It now goes through the same service as everything else. What stays different
+ * is deliberate: `queueOnFailure` is false and a failure THROWS, because these
+ * callers already have durability of their own — the worker has the outbox row
+ * it is currently processing, and enqueueing a second copy from underneath it
+ * would be the duplicate-send the queue exists to prevent.
+ *
+ * @param {object} opts
+ * @param {string} [opts.flow]   identity category; defaults to notification mail
+ * @param {string} [opts.event]  notification event name, so an enforcement or
+ *                               legal notice is sent under the right identity
+ */
+export async function sendMail({ to, subject, text, html, flow = 'notification', event = null }) {
+  const result = await sendEmail({ to, subject, text, html }, {
+    flow,
+    event,
+    queueOnFailure: false,
+  });
+
+  if (result.delivered) {
+    mailHealth.successes++;
+    mailHealth.lastSuccessAt = new Date().toISOString();
+    mailHealth.lastProvider = result.provider;
     return true;
-  } catch (err) {
-    console.error('Error sending mail:', err);
-    throw err; // throw to let the worker handle retry
   }
+
+  if (result.permanent) mailHealth.permanentFailures++;
+  recordFailure(flow, to, { message: String(result.category) }, 1);
+
+  /* Throwing is the contract the callers were written against: the worker
+     catches this and schedules its own next attempt. The message text carries
+     the classified category and nothing about the recipient. */
+  const err = new Error(`mail delivery failed (${result.category})`);
+  err.category = result.category;
+  err.permanent = Boolean(result.permanent);
+  throw err;
 }
 
 export async function send2FACode(to, code) {
@@ -639,7 +836,6 @@ export async function send2FACode(to, code) {
   `;
 
   const mailOptions = {
-    from: EMAIL_FROM,
     to,
     subject: `Your ${APP_NAME} verification code`,
     text: `Your verification code is: ${code}\n\nThis code expires in 10 minutes.\n\nIf you did not request this code, you can safely ignore this email.`,

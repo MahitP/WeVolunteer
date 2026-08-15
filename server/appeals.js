@@ -18,8 +18,20 @@
  */
 import crypto from 'node:crypto';
 
-/** What an appeal can be about. Free text in the column; validated here. */
-export const APPEAL_SUBJECTS = Object.freeze(['suspension', 'content_removal', 'report_outcome']);
+/**
+ * What an appeal can be about. Free text in the column; validated here.
+ *
+ * `organization_ban` is the odd one out and is worth saying why it belongs. The
+ * other three are platform decisions taken by staff. A ban is taken by another
+ * student — a club manager — and is the only decision on this platform that one
+ * young person can make about another and have the software enforce. That is
+ * exactly the kind of decision that needs somewhere to go, so it goes through
+ * the same queue, the same conflict-of-interest rule, and the same record as
+ * every other appeal rather than into a manager's inbox.
+ */
+export const APPEAL_SUBJECTS = Object.freeze([
+  'suspension', 'content_removal', 'report_outcome', 'organization_ban',
+]);
 
 /**
  * The two outcomes, and the words shown to humans.

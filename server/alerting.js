@@ -67,6 +67,31 @@ export const DEFAULT_MIN_INTERVAL_MS = 60 * 60 * 1000;
 const minIntervalMs = () =>
   Number(process.env.ALERT_MIN_INTERVAL_MS) || DEFAULT_MIN_INTERVAL_MS;
 
+/**
+ * Backups get their own, much longer interval.
+ *
+ * A stale backup is a standing condition, not a stream of new events: once it
+ * is true it stays true until somebody fixes it, so the hourly cadence that
+ * suits errors would produce twenty-four identical emails a day and get the
+ * channel muted. Twelve hours is often enough that it cannot be forgotten and
+ * rare enough that it still reads as important.
+ */
+export const BACKUP_ALERT_INTERVAL_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * The backup states that mean somebody should be told without being asked.
+ *
+ * Declared here rather than imported from `backupStatus.js`, and that is not an
+ * accident: `alerting.integration.test.js` asserts this module imports NOTHING —
+ * not the database, not the mailer, not anything. That constraint is what keeps
+ * a monitoring failure from being able to take down the sweep it runs inside, so
+ * the status is passed in as an argument like everything else.
+ *
+ * `unconfigured` is deliberately absent. That is a development machine with no
+ * backup directory, not an incident.
+ */
+export const BACKUP_ALERT_STATES = Object.freeze(['stale', 'none', 'unknown']);
+
 /** Named in one place so the query, the email and the tests cannot disagree. */
 export const ALERTED_SOURCES = Object.freeze(['server', 'worker']);
 
@@ -142,6 +167,101 @@ export function buildAlertBody(groups, appUrl) {
   );
 
   return lines.join('\n');
+}
+
+/**
+ * When the last backup warning went out, per process.
+ *
+ * Deliberately NOT a database column. Every other alert in this file throttles
+ * off `error_groups.alerted_at`, which is right for a row that represents one
+ * problem; a stale backup is a CONDITION rather than an event, so there is no
+ * row to mark and adding a table for one timestamp is not worth a migration.
+ *
+ * The cost of keeping it in memory is that a restart re-arms the warning, and
+ * that is the direction to fail in: a process that restarts nightly emails once
+ * a night about a backup that is genuinely broken. The reverse — persisting it
+ * and going quiet — is how this stops being noticed again.
+ */
+let lastBackupAlertAt = 0;
+
+/** Test seam, for the same reason `__clearCache` exists in travelRoutes.js. */
+export function __resetBackupAlertThrottle() { lastBackupAlertAt = 0; }
+
+/**
+ * Tells somebody the backups stopped.
+ *
+ * ── The gap ──
+ *
+ * `deploy/README.md` says it plainly: "systemd will mark the unit failed, but
+ * nothing tells a human." The admin dashboard has reported backup freshness
+ * since v1.2c, and a dashboard answers the question for somebody who came to
+ * ask it. Nobody comes to ask it. The one failure where that matters most is
+ * this one, because a backup that quietly stopped is only discovered on the day
+ * it is needed — which is the worst day to discover it.
+ *
+ * ── Why it cannot be folded into the error digest ──
+ *
+ * `sendErrorAlerts` returns early on `nothing_new`, and a stale backup produces
+ * no error rows at all. A system that is otherwise completely healthy is
+ * exactly the system whose backups fail unnoticed, so the check has to run on a
+ * path that a quiet error table does not short-circuit.
+ *
+ * ── What it deliberately does not do ──
+ *
+ * It does not distinguish "the timer is disabled" from "the timer ran and
+ * failed" — `backupStatus` cannot, and the message says so rather than guessing.
+ * It also stays quiet on `unconfigured`, which is a development machine with no
+ * backup directory, not an incident.
+ *
+ * @param {{send: Function, now?: Date, appUrl?: string}} opts
+ */
+export async function sendBackupAlert({ send, now = new Date(), appUrl, status } = {}) {
+  try {
+    const to = recipients();
+    if (to.length === 0) return { sent: 0, reason: 'not_configured' };
+    if (typeof send !== 'function') return { sent: 0, reason: 'no_sender' };
+    if (!status || !BACKUP_ALERT_STATES.includes(status.status)) return { sent: 0, reason: 'healthy' };
+
+    /* Throttled AFTER establishing there is something to say, matching
+       sendErrorAlerts: a quiet week must never start the clock. */
+    if (lastBackupAlertAt && now.getTime() - lastBackupAlertAt < BACKUP_ALERT_INTERVAL_MS) {
+      return { sent: 0, reason: 'throttled' };
+    }
+    lastBackupAlertAt = now.getTime();
+
+    const detail = status.status === 'stale'
+      ? `The newest backup is ${status.ageHours} hours old. Anything older than `
+        + `${status.staleAfterHours} hours means at least one nightly run did not produce a file.`
+      : status.status === 'none'
+        ? 'The backup directory exists but contains no archives at all.'
+        : 'The backup directory could not be read.';
+
+    await send({
+      to: to.join(', '),
+      subject: '[WeVolunteer] Backups are not running',
+      text: [
+        detail,
+        '',
+        'This cannot tell you whether the timer is disabled or whether it ran and failed —',
+        'both look the same from here. Check both:',
+        '',
+        '  systemctl list-timers wevolunteer-backup.timer',
+        '  systemctl status wevolunteer-backup.service',
+        '  journalctl -u wevolunteer-backup.service -n 50',
+        '',
+        'The database holds every student\'s service record. Until this is fixed there is no',
+        'copy of it anywhere else.',
+        appUrl ? `\n${appUrl}/admin` : '',
+      ].join('\n'),
+    });
+
+    return { sent: 1, reason: 'sent', status: status.status };
+  } catch (err) {
+    /* Same rule as everything else here: monitoring that can take down the
+       thing it monitors is worse than no monitoring. */
+    try { console.error('[alerting] failed to send a backup alert:', err?.message ?? err); } catch { /* nothing left */ }
+    return { sent: 0, reason: 'failed' };
+  }
 }
 
 /**

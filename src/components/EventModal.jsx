@@ -1,16 +1,25 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useModal } from '../utils/useModal';
 import {
   X, CalendarClock, Users, Zap, ShieldCheck,
-  Pencil, ClipboardCheck, AlertCircle, Megaphone, MessageSquare, ListChecks, Info, Star, Flag
+  Pencil, ClipboardCheck, AlertCircle, Megaphone, MessageSquare, ListChecks, Info, Star, Flag, Scale,
+  ShieldBan, Clock
 } from 'lucide-react';
 import { api } from '../utils/api';
 import {
   formatDay, formatTime, formatTimeRange, countdown,
-  selectionMethodLabel, eventPermissions, usesAutoSelect
+  selectionMethodLabel, eventPermissions, usesAutoSelect, haversineDistance
 } from '../utils/helpers';
+import { useLocationContext } from '../contexts/LocationContext';
+import TagChips from './common/TagChips';
+import { DECISION_LABELS, isFinal } from '../appeals';
+import LocationLink from './location/LocationLink';
+import DirectionsButton from './location/DirectionsButton';
+import MapReveal from './location/MapReveal';
+import WeatherSummary from './location/WeatherSummary';
+import TravelTime from './location/TravelTime';
 import EventEditForm from './EventEditForm';
 import EventAttendance from './EventAttendance';
 import EventComments from './EventComments';
@@ -62,6 +71,30 @@ export default function EventModal({
         slots: [...slots].sort((a, b) => new Date(a.startDatetime) - new Date(b.startDatetime))
       }));
   }, [event?.slots]);
+
+  /**
+   * How far this event is from wherever the volunteer is standing.
+   *
+   * Computed here rather than read from `event.distance`: the server only fills
+   * that field in when the request carried coordinates, which the browse list
+   * does and the index feeding this modal does not. So a modal opened from the
+   * calendar or the dashboard would show no distance at all.
+   *
+   * Doing it client-side also means the volunteer's exact position never leaves
+   * the device. The browse filter sends a coordinate coarsened to about a
+   * kilometre, which is fine for "within five miles" and much too coarse for a
+   * number somebody reads — this one is exact because it is computed where the
+   * exact position already is. `useLocationContext` holds it only in memory,
+   * only for the session, and only after the volunteer has opted in.
+   *
+   * Above the early return, with the `days` memo, so hook order cannot shift
+   * between a render with an event and one without.
+   */
+  const { location: myLocation } = useLocationContext();
+  const distanceMiles = useMemo(() => {
+    if (!myLocation || event?.latitude == null || event?.longitude == null) return null;
+    return haversineDistance(myLocation.latitude, myLocation.longitude, event.latitude, event.longitude);
+  }, [myLocation, event?.latitude, event?.longitude]);
 
   const permissions = eventPermissions(event);
   const isOwner = currentUser?.role === 'organizer' && currentUser.id === event?.organizerId;
@@ -396,6 +429,30 @@ export default function EventModal({
           />
         ) : (
           <div className="modal-body">
+            {/**
+              * ── Every tag, which is what this surface is for ──
+              *
+              * The card shows four and counts the rest; this is where the rest
+              * are. Until now they were nowhere: the only full list in the
+              * codebase was in `EventDetailsExperience.jsx`, which has no
+              * importers, so a `+9` on a card pointed at a page that did not
+              * exist. `limit={Infinity}` rather than a large number, because
+              * "all of them" is the rule and a number would be a second cap to
+              * keep in step with `MAX_TAGS_PER_EVENT`.
+              *
+              * Interactive when the caller can filter, inert otherwise —
+              * `onSelect` is `TagChips`'s own test for that, and the modal
+              * opens over a filterable list on Discover but also over places
+              * that have no filter to drive.
+              */}
+            {event.tags?.length > 0 && (
+              <TagChips
+                tags={event.tags}
+                limit={Infinity}
+                className="event-modal-tags"
+              />
+            )}
+
             {/* ── Facts ── */}
             <div className="inset" style={{ marginBottom: 'var(--s5)' }}>
               <div className="grid grid-3" style={{ gap: 'var(--s4)' }}>
@@ -406,7 +463,22 @@ export default function EventModal({
                 </div>
                 <div>
                   <div className="eyebrow">Where</div>
-                  <div className="small strong" style={{ marginTop: 2 }}>{event.location}</div>
+                  <div className="small strong" style={{ marginTop: 2 }}>
+                    <LocationLink
+                      location={event.location}
+                      address={event.address}
+                      latitude={event.latitude}
+                      longitude={event.longitude}
+                    />
+                  </div>
+                  {/* The street address only when it says something the name did
+                      not. "Reichler Park / Reichler Park" is noise. */}
+                  {event.address && event.address !== event.location && (
+                    <div className="small muted">{event.address}</div>
+                  )}
+                  {distanceMiles != null && (
+                    <div className="small muted tnum">{distanceMiles.toFixed(1)} mi away</div>
+                  )}
                 </div>
                 <div>
                   <div className="eyebrow">Applications close</div>
@@ -428,6 +500,46 @@ export default function EventModal({
                 </p>
               )}
             </div>
+
+            {/**
+              * Getting there.
+              *
+              * Above "Before you go" on purpose: arrival instructions assume you
+              * already know where you are going, so the directions and the
+              * forecast belong first.
+              *
+              * Every part of this is conditional and the block degrades to
+              * nothing. An event with no location information at all renders no
+              * empty container, no heading and no disabled button.
+              */}
+            {(event.latitude != null || event.address || event.location) && (
+              <div style={{ marginBottom: 'var(--s5)' }}>
+                <div className="row row-wrap" style={{ gap: 'var(--s3)', marginBottom: 'var(--s3)' }}>
+                  <DirectionsButton
+                    latitude={event.latitude}
+                    longitude={event.longitude}
+                    address={event.address}
+                    label={event.location}
+                  />
+                  <WeatherSummary
+                    latitude={event.latitude}
+                    longitude={event.longitude}
+                    datetime={event.startDatetime}
+                  />
+                  {/* A rough driving time, on the same row as the directions
+                      link that produces the real, traffic-aware one. Renders
+                      nothing without location, without coordinates, or without a
+                      routing provider configured. */}
+                  <TravelTime latitude={event.latitude} longitude={event.longitude} />
+                </div>
+                <MapReveal
+                  latitude={event.latitude}
+                  longitude={event.longitude}
+                  label={event.location}
+                  height={220}
+                />
+              </div>
+            )}
 
             {/* Arrival instructions are for people actually going */}
             {event.instructions && (iAmConfirmed || isOwner || isAdmin) && (
@@ -537,7 +649,146 @@ export default function EventModal({
               aria-labelledby={`tab-${tab}`}
               tabIndex={0}
             >
-              {tab === 'shifts' && (
+              {/**
+                * ── Banned from the club running this, and what to do about it ──
+                *
+                * Beside the participation controls rather than in a
+                * notification, because a notification is read once and then
+                * buried. Somebody who comes back to the event a fortnight later
+                * and finds they cannot take part learns why where they are
+                * standing, and can act on it without going hunting.
+                *
+                * Only ever the reader's OWN ban: `viewerBan` is keyed on the
+                * session server-side and has no parameter to point elsewhere.
+                *
+                * Three states, because they need different things said. No
+                * appeal yet — offer one. One waiting — say so, and do not offer
+                * a second, which would just make two rows for one grievance.
+                * One already decided — say what was decided, and stop.
+                */}
+              {/**
+                * ── For the club's own members, and you are not one ──
+                *
+                * Said here rather than by removing the apply button, because a
+                * disabled control with no explanation is the thing people press
+                * twice and then give up on. It names the club and points at it:
+                * the answer to "why can't I" is usually "join, then you can".
+                *
+                * Suppressed when they are banned — that notice is the more
+                * specific one, and stacking two refusals reads as two problems.
+                */}
+              {tab === 'shifts' && !event.viewerBan?.banned
+                && event.audience === 'organization' && event.viewerIsMember === false && (
+                <div className="alert event-members-only" role="status">
+                  <div>
+                    <span className="alert-title">
+                      This one is for {event.organizationName || 'the organization'}&rsquo;s members
+                    </span>
+                    <p className="small">
+                      Anybody can see it. Only members can take a place on a shift.
+                      {event.organizationSlug && (
+                        <>
+                          {' '}
+                          <Link to={`/organizations/${event.organizationSlug}`}>
+                            See {event.organizationName || 'the organization'}
+                          </Link>
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {tab === 'shifts' && event.viewerBan?.banned && (
+                <div className="alert alert-danger event-ban-notice" role="status">
+                  <div className="stack-sm">
+                    <span className="alert-title row" style={{ gap: 6 }}>
+                      <ShieldBan size={16} aria-hidden="true" />
+                      You are banned from {event.organizationName || 'this organization'}
+                    </span>
+                    <p className="small">
+                      You cannot join this or any other opportunity they run.
+                      {event.viewerBan.reason ? ` Reason: ${event.viewerBan.reason}` : ''}
+                    </p>
+
+                    {/**
+                      * The appeal control, and the ONLY control offered here.
+                      *
+                      * The shift rows below used to render a disabled "Request"
+                      * button under this notice — a Join button that is greyed
+                      * out still reads as "you could join", and the reader is
+                      * left to work out that the notice above is the reason. So
+                      * the shift list is suppressed entirely when banned and
+                      * this takes its place.
+                      *
+                      * Three states, because they mean three different things:
+                      * no appeal yet (act), one waiting (wait), one decided
+                      * (the outcome, which is what they actually want to know).
+                      */}
+                    {!event.viewerBan.appeal ? (
+                      <p>
+                        <button
+                          type="button"
+                          className="btn btn-danger-solid"
+                          onClick={() => navigate(
+                            `/appeals/new?subject=organization_ban&organization=${encodeURIComponent(event.organizationId)}`
+                          )}
+                        >
+                          <Scale size={16} aria-hidden="true" /> Appeal
+                        </button>
+                      </p>
+                    ) : isFinal(event.viewerBan.appeal.status) ? (
+                      <>
+                        <p className="small">
+                          You appealed, and a manager decided:{' '}
+                          {DECISION_LABELS[event.viewerBan.appeal.decision] || 'the decision was recorded'}.
+                        </p>
+                        {/**
+                          * And they may appeal again.
+                          *
+                          * A decided appeal is not the end of the road — the
+                          * server's only bar on a fresh one is the rate limit
+                          * (five per subject per rolling thirty days), and the
+                          * duplicate guard blocks a second LIVE appeal, not a
+                          * second appeal. Showing the outcome with no way
+                          * forward made the UI stricter than the policy, which
+                          * on the one screen a banned student can reach reads
+                          * as a dead end that is not real.
+                          */}
+                        <p>
+                          <button
+                            type="button"
+                            className="btn btn-danger-solid"
+                            onClick={() => navigate(
+                              `/appeals/new?subject=organization_ban&organization=${encodeURIComponent(event.organizationId)}`
+                            )}
+                          >
+                            <Scale size={16} aria-hidden="true" /> Appeal again
+                          </button>
+                        </p>
+                      </>
+                    ) : (
+                      <p>
+                        {/* Disabled, not hidden: the reader needs to see that
+                            the thing they did is recorded and in progress. */}
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled
+                          aria-disabled="true"
+                        >
+                          <Clock size={16} aria-hidden="true" /> Appeal Sent
+                        </button>
+                        <span className="small dim" style={{ display: 'block', marginTop: 'var(--s2)' }}>
+                          Your appeal is with the organization&rsquo;s managers. You do not need to send another.
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {tab === 'shifts' && !event.viewerBan?.banned && (
                 <EventShiftsTab
                   event={event}
                   eventApps={eventApps}

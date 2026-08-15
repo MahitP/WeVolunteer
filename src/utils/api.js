@@ -485,9 +485,32 @@ export const api = {
     }
   },
 
+  /**
+   * The cached user, or null — never a throw.
+   *
+   * `JSON.parse` on a bare string was one corrupt localStorage entry away from
+   * taking down every caller, and there are several, including one that runs
+   * during render on the public About page. A half-written value (storage quota
+   * hit mid-write, a browser extension, a hand-edit in devtools) is not a
+   * reason for a page to fail to appear.
+   *
+   * A cache that cannot be read is treated exactly as a cache that is not there,
+   * which is the state every caller already handles.
+   */
   getCurrentCachedUser: () => {
-    const user = localStorage.getItem(STORAGE_KEYS.USER);
-    return user ? JSON.parse(user) : null;
+    try {
+      const user = localStorage.getItem(STORAGE_KEYS.USER);
+      const parsed = user ? JSON.parse(user) : null;
+      /* `JSON.parse('"hello"')` and `JSON.parse('7')` succeed and return a
+         primitive. A caller reading `.id` off that gets undefined rather than a
+         throw, which is worse than nothing because it looks like a user.
+         Arrays are excluded for the same reason and are easy to miss:
+         `typeof [] === 'object'`, so a stored array passes a naive check. */
+      const usable = parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+      return usable ? parsed : null;
+    } catch {
+      return null;
+    }
   },
 
   // ── Events ──────────────────────────────────────
@@ -716,6 +739,21 @@ export const api = {
     body: JSON.stringify({ checkinMap })
   }),
 
+  /**
+   * Mints a five-minute check-in code for one of the caller's own shifts.
+   *
+   * POST because it creates a token and retires the previous one — and because
+   * a GET would put the code in browser history and make it prefetchable.
+   */
+  createCheckinCode: async (applicationId) =>
+    apiFetch(`/api/applications/${applicationId}/checkin-code`, { method: 'POST' }),
+
+  /** Redeems a scanned code. The token is the only field the server reads. */
+  scanCheckinCode: async (eventId, token) => apiFetch(`/api/events/${eventId}/checkin/scan`, {
+    method: 'POST',
+    body: JSON.stringify({ token })
+  }),
+
   // Removed: resetDatabase(). `POST /api/auth/reset` no longer exists — a
   // reachable endpoint that dropped tables destroyed the database rather than
   // resetting it (it died partway through a hand-maintained DROP list, before
@@ -781,6 +819,103 @@ export const api = {
   leaveOrganization: async (key) =>
     apiFetch(`/api/organizations/${encodeURIComponent(key)}/membership`, { method: 'DELETE' }),
 
+  /**
+   * Removing a member.
+   *
+   * The route has existed and been tested since organizations shipped, and
+   * nothing on the client ever called it — so a manager could promote, demote
+   * and leave, but the one action the server was ready for was unreachable.
+   */
+  /**
+   * Removing somebody, or banning them.
+   *
+   * `mode` defaults to `kick` on the server too, deliberately: an older client
+   * or an omitted field must get the reversible action, and the permanent one
+   * has to be asked for by name.
+   */
+  /* The organization's own appeal inbox. Scoped server-side to the org in the
+     path, so a manager of one club cannot read another's. */
+  fetchOrganizationAppeals: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/appeals`),
+
+  decideOrganizationAppeal: async (key, appealId, { decision, reasoning }) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/appeals/${encodeURIComponent(appealId)}/decision`, {
+      method: 'POST',
+      body: JSON.stringify({ decision, reasoning }),
+    }),
+
+  removeOrganizationMember: async (key, userId, { mode = 'kick', reason = '' } = {}) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`,
+      { method: 'DELETE', body: JSON.stringify({ mode, reason }) }),
+
+  /**
+   * Promote or demote a member: `member`, `student_organizer` or `manager`.
+   *
+   * The route has existed since organizations shipped and nothing ever called
+   * it — a manager could remove somebody but not change their rank. It is
+   * reached from the roster now that there is a rank worth handing out.
+   */
+  setOrganizationMemberRole: async (key, userId, memberRole) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`,
+      { method: 'PATCH', body: JSON.stringify({ memberRole }) }),
+
+  // ── Organization announcements ─────────────────
+  /**
+   * The organization logo.
+   *
+   * Same shape as `uploadProfilePicture`: a bare `fetch` rather than `apiFetch`,
+   * because the Content-Type header must be left unset so the browser can write
+   * its own multipart boundary. The field is still called `avatar` — that is the
+   * name the shared multer config listens for, and renaming it here would mean
+   * a second `upload.single()` on the server.
+   */
+  uploadOrganizationImage: async (key, file) => {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    return fetch(`/api/organizations/${encodeURIComponent(key)}/image`, {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    }).then(async res => {
+      if (!res.ok) {
+        let err;
+        try { err = await res.json(); } catch { /* non-JSON body */ }
+        throw new ApiError(err?.error || 'Upload failed', { status: res.status });
+      }
+      return res.json();
+    });
+  },
+  deleteOrganizationImage: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/image`, { method: 'DELETE' }),
+
+  fetchOrganizationAnnouncements: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/announcements`),
+  postOrganizationAnnouncement: async (key, body) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/announcements`, {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  updateOrganizationAnnouncement: async (key, id, body) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/announcements/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: JSON.stringify(body),
+    }),
+  deleteOrganizationAnnouncement: async (key, id) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/announcements/${encodeURIComponent(id)}`,
+      { method: 'DELETE' }),
+  replyToOrganizationAnnouncement: async (key, id, body) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/announcements/${encodeURIComponent(id)}/replies`, {
+      method: 'POST', body: JSON.stringify({ body }),
+    }),
+
+  // ── Legal change notices ───────────────────────
+  /** Legal documents this account has not been shown the change to. */
+  fetchLegalUpdates: async () => apiFetch('/api/legal/updates'),
+  /** Records that the account has read one. Idempotent server-side. */
+  acknowledgeLegalUpdate: async (slug, version) =>
+    apiFetch('/api/legal/updates/acknowledge', {
+      method: 'POST',
+      body: JSON.stringify({ slug, version }),
+    }),
+
   // ── External hours ─────────────────────────────
   fetchExternalHours: async () => apiFetch('/api/external-hours'),
   createExternalHours: async (body) => apiFetch('/api/external-hours', { method: 'POST', body: JSON.stringify(body) }),
@@ -790,6 +925,17 @@ export const api = {
 
   // ── Certificates ───────────────────────────────
   fetchCertificates: async () => apiFetch('/api/certificates'),
+
+  /* Reporting a problem with the PLATFORM. Not the moderation report, which is
+     about a person and lives on that person's own surfaces. */
+  submitIssueReport: async (report) => apiFetch('/api/issues', {
+    method: 'POST',
+    body: JSON.stringify(report),
+  }),
+  /* Somebody ELSE's certificates: metadata only. The server never emits the
+     verification code on this route, so there is no download to withhold in the
+     client — the difference is enforced where it cannot be bypassed. */
+  fetchUserCertificates: async (userId) => apiFetch(`/api/users/${userId}/certificates`),
 
   // ── Attendees ──────────────────────────────────
   // Server decides what the caller may see; an empty list with visible:false
@@ -1094,8 +1240,15 @@ export const api = {
    * The whole feature was dead: `api.geocodeSearch` was never defined, so typing in
    * the search box threw on the first keystroke that triggered a lookup.
    */
-  geocodeSearch: async (query, signal) =>
-    apiFetch(`/api/geocode?q=${encodeURIComponent(query)}`, { signal }),
+  geocodeSearch: async (query, signal, near) => {
+    /* `near` biases the search to a ~35 mile box around a coarse position. The
+       server has supported it since it was written; nothing ever sent it, so
+       the bias was unreachable. See LocationPicker for why 1dp is enough. */
+    const bias = near?.lat != null && near?.lon != null
+      ? `&lat=${encodeURIComponent(near.lat)}&lon=${encodeURIComponent(near.lon)}`
+      : '';
+    return apiFetch(`/api/geocode?q=${encodeURIComponent(query)}${bias}`, { signal });
+  },
 
   /**
    * Forecast for an event's coordinates and start time (`WeatherSummary.jsx`).
@@ -1110,6 +1263,24 @@ export const api = {
       + `&datetime=${encodeURIComponent(datetime)}`,
       { signal }
     ),
+
+  /**
+   * Roughly how long the drive to a shift takes.
+   *
+   * POST, and that is a privacy decision rather than a REST one: a GET would put
+   * a student's coordinates in a query string, where the browser's history, any
+   * proxy and every access log along the way keep a copy of them. It creates
+   * nothing and is safe to repeat.
+   *
+   * No `signal`. Callers guard with a `cancelled` flag instead — two of these
+   * can share a page, and an AbortController belonging to one component
+   * cancels the other's request when it unmounts.
+   */
+  getTravelTime: async (fromLat, fromLon, toLat, toLon) =>
+    apiFetch('/api/travel-time', {
+      method: 'POST',
+      body: JSON.stringify({ fromLat, fromLon, toLat, toLon }),
+    }),
 
   /**
    * The appeal form a suspended student reaches from their emailed link.
@@ -1175,10 +1346,13 @@ export const api = {
 
   listMyAppeals: async () => apiFetch('/api/appeals/mine'),
 
-  submitAppeal: async ({ subject, statement }) =>
+  /* `organizationId` is only meaningful for an `organization_ban` appeal; the
+     server ignores it for every other subject and re-checks that the ban named
+     is actually against this caller. */
+  submitAppeal: async ({ subject, statement, organizationId }) =>
     apiFetch('/api/appeals', {
       method: 'POST',
-      body: JSON.stringify({ subject, statement }),
+      body: JSON.stringify({ subject, statement, organizationId }),
     }),
 
   /* ── The moderator-facing appeals queue (`AdminAppeals.jsx`) ─────────────────── */
@@ -1247,6 +1421,11 @@ export const api = {
 
   fetchLegalDocuments: async () => apiFetch('/api/legal/documents'),
 
+  /* Who runs this deployment, resolved server-side by ROLE. Public, because the
+     people most likely to ask — a parent, a student who wants to complain to
+     somebody real — do not have an account yet. */
+  fetchPlatformOwner: async () => apiFetch('/api/platform/owner'),
+
   /** One document and its Markdown source, verified against its pinned hash. */
   fetchLegalDocument: async (slug) =>
     apiFetch(`/api/legal/documents/${encodeURIComponent(slug)}`),
@@ -1263,6 +1442,20 @@ export const api = {
   /** Records acceptance. The server refuses a body that acknowledges nothing. */
   acceptOrganizerAgreement: async () =>
     apiFetch('/api/legal/organizer-agreement/accept', {
+      method: 'POST',
+      body: JSON.stringify({ acknowledged: true })
+    }),
+
+  /**
+   * The same pair for the Student Organizer Agreement.
+   *
+   * Reachable by somebody holding none of the four helper capabilities, for the
+   * same reason: that withheld state is what these two calls exist to escape.
+   */
+  fetchStudentOrganizerAgreement: async () => apiFetch('/api/legal/student-organizer-agreement'),
+
+  acceptStudentOrganizerAgreement: async () =>
+    apiFetch('/api/legal/student-organizer-agreement/accept', {
       method: 'POST',
       body: JSON.stringify({ acknowledged: true })
     }),

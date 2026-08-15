@@ -56,6 +56,7 @@
  */
 
 import { volunteerStats, externalHoursSummary } from './volunteerStats.js';
+import { visibilityState } from './serviceVisibility.js';
 
 /**
  * The distinguished presentation an account carries, or null for a member.
@@ -173,9 +174,13 @@ export function parseHighlights(raw) {
  * asserts against it rather than against a hand-copied list.
  */
 export const PUBLIC_BASELINE_FIELDS = Object.freeze([
-  'id', 'username', 'name', 'avatar', 'profilePictureUrl', 'role',
+  'id', 'username', 'name', 'avatar', 'avatarColor', 'profilePictureUrl', 'role',
   'location', 'hobbies', 'skills', 'joinedAt', 'lastVolunteeredAt',
   'stats', 'organizations', 'visibility', 'isSelf',
+  /* Says WHY a figure is absent, never the figure. A page that rendered an
+     empty list instead would be telling the reader this student has never
+     volunteered, which is a lie about a person. */
+  'serviceVisibility',
   /* `distinction` is `role` restated in words, so it discloses nothing the
      baseline did not already carry. `externalService` used to be here and is
      NOT any more — it is emitted to the subject alone; see the note at its
@@ -242,6 +247,16 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
     || (stated === 'friends' && isFriend);
 
   const stats = volunteerStats(db, row.id);
+
+  /**
+   * Whether this reader may see the service figures at all.
+   *
+   * Decided by `serviceVisibility.js` rather than here, because three other
+   * surfaces ask the same question and a privacy rule written out four times is
+   * a rule enforced in three of them.
+   */
+  const serviceVisibility = visibilityState(row, { viewerId, canSeeContact });
+  const hoursVisible = serviceVisibility.hours === 'visible';
   /* Derived once: it decides both what is emitted and whether the two
      free-text fields below are exempt from the privacy setting. */
   const distinction = distinctionFor(row.role);
@@ -251,13 +266,17 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
     username: row.username || null,
     name: row.name,
     avatar: row.avatar || null,
+    avatarColor: row.avatar_color || null,
     profilePictureUrl: row.profile_picture_url || null,
     role: row.role,
     location: row.location || null,
     hobbies: parseList(row.hobbies),
     skills: parseList(row.skills),
     joinedAt: row.created_at,
-    lastVolunteeredAt: stats.lastVolunteeredAt,
+    /* Both of these are service data. When the subject keeps their history
+       private they are OMITTED rather than zeroed: a zero is a claim, and it is
+       a false one. */
+    ...(hoursVisible ? { lastVolunteeredAt: stats.lastVolunteeredAt } : {}),
     /**
      * The counts, and deliberately no percentage.
      *
@@ -269,12 +288,18 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
      * attended-versus-signed-up gap is legible as "not confirmed yet" rather
      * than as absence.
      */
-    stats: {
-      eventsSignedUp: stats.eventsSignedUp,
-      eventsAttended: stats.eventsAttended,
-      eventsAwaitingRecord: stats.eventsAwaitingRecord,
-      hours: stats.hoursCredited,
-    },
+    ...(hoursVisible ? {
+      stats: {
+        eventsSignedUp: stats.eventsSignedUp,
+        eventsAttended: stats.eventsAttended,
+        eventsAwaitingRecord: stats.eventsAwaitingRecord,
+        hours: stats.hoursCredited,
+      },
+    } : {}),
+    /* The setting is disclosed; the data behind it is not. The page has to be
+       able to say "they keep this private" instead of rendering an empty
+       record — and the count is what would leak if only the list were hidden. */
+    serviceVisibility,
     organizations: organizationsFor(db, row.id),
     /**
      * How the account is INTRODUCED, for every reader.
@@ -399,6 +424,7 @@ export function profileSummary(row) {
     username: row.username || null,
     name: row.name,
     avatar: row.avatar || null,
+    avatarColor: row.avatar_color || null,
     profilePictureUrl: row.profile_picture_url || null,
     role: row.role,
     location: row.location || null,

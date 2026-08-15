@@ -174,7 +174,7 @@ describe('the document registry', () => {
     // silently unenforceable — which is the failure the registry exists to stop.
     for (const doc of LEGAL_DOCUMENTS.filter(d => d.consentType !== 'notice')) {
       expect(
-        ['signup', 'organizer-onboarding'].includes(doc.scope),
+        ['signup', 'organizer-onboarding', 'student-organizer-onboarding'].includes(doc.scope),
         `${doc.slug} needs acceptance but its scope (${doc.scope}) collects none`
       ).toBe(true);
     }
@@ -383,7 +383,16 @@ describe('signup enforces and records consent', () => {
    * checking and also stopped recording would leave the table describing text
    * that no longer exists, which is worse than either enforcing or ignoring.
    */
-  it('brings a drifted published version back into line before launch', async () => {
+  /**
+   * Advisory mode only, and it is now off.
+   *
+   * `runIf` rather than deletion, mirroring the `skipIf` on the pinned-hash case
+   * above: the two are the same switch read from opposite sides. Deleting this
+   * would mean that turning enforcement back off — which is legitimate if the
+   * documents ever genuinely re-enter drafting — left the absorbing behaviour
+   * with no coverage at all, and it is the more dangerous of the two modes.
+   */
+  it.runIf(!LEGAL_HASHES_ENFORCED)('brings a drifted published version back into line before launch', async () => {
     const { syncLegalDocuments } = await import('./consent.js');
     const doc = LEGAL_DOCUMENTS[0];
 

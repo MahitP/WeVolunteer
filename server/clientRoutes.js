@@ -90,6 +90,7 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   /* The Organizer Agreement acceptance screen. A literal path carrying no
      parameter, so it says nothing about who was reading it. */
   '/organizer-agreement',
+  '/student-organizer-agreement',
   /* Allowed, not excluded. The path is a literal with no parameter, so it can
      carry no value about anybody. And a crash ON the triage screen is the one
      failure that must never report as `unknown`: it is the tool used to find
@@ -136,6 +137,7 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
      parameter, read by people who do not have an account yet. */
   '/about',
   '/appeal/:token',
+  '/appeals/new',
 
   /* ── v1.3, the member directory ──────────────────────────────────────────
    *
@@ -165,10 +167,21 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/hours',
   '/users/id/:id',
   '/users/:handle',
+  '/organizations',
   '/organizations/new',
   '/organizations/:key/edit',
   '/organizations/:key',
   '/hours/external',
+  /* The same answer as `/hours`, twice over. A crash report from either carries
+     the path and nothing else — no certificate, no organization, no dates, and
+     not even which student, because the reporter attaches no identity.
+     "Somebody opened their own badges" is not a fact about a person. */
+  '/certificates',
+  '/report-issue',
+  '/profile/badges',
+  '/users/:handle/badges',
+  '/users/:handle/certificates',
+  '/users/:handle/hours',
 ]);
 
 /**

@@ -126,8 +126,30 @@ describe('the Create event action on Opportunities', () => {
    * naive `role === 'organizer'` check would get wrong, which is most of why the
    * button asks `can()` instead.
    */
-  it('is not offered to an organizer with event.create withheld', () => {
-    renderFor(USER('organizer', { withheld: ['event.create'] }));
+  it('is not offered to an organizer with event creation withheld', () => {
+    /**
+     * BOTH capabilities, because the button now accepts either and the server
+     * withholds both — `ORGANIZER_GATED_CAPABILITIES` in
+     * `server/organizerAgreement.js` lists all four helper capabilities
+     * alongside `event.create`. A fixture withholding only the first describes
+     * a state the server never produces, and it would pass while the button was
+     * offered to somebody who cannot use it.
+     */
+    renderFor(USER('organizer', { withheld: ['event.create', 'organization.event.create'] }));
+    expect(createLink()).not.toBeInTheDocument();
+  });
+
+  it('IS offered to a Student Organizer, who holds only the scoped capability', () => {
+    /* The gap this closes: "New event" is not in NAV and a student's persona
+       resolves to the volunteer dashboard, so this button is the only way to
+       reach `/events/new` in the whole application. Asking for `event.create`
+       alone made the rank's create half unreachable outside the URL bar. */
+    renderFor(USER('student', { grants: ['organization.event.create'] }));
+    expect(createLink()).toBeInTheDocument();
+  });
+
+  it('is not offered to an ordinary student', () => {
+    renderFor(USER('student'));
     expect(createLink()).not.toBeInTheDocument();
   });
 

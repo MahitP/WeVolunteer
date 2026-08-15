@@ -27,6 +27,7 @@
  */
 import { createRandom, performWeightedSelection } from '../weighting.js';
 import { attendanceRecordsFor } from '../volunteerStats.js';
+import { eventApplicationEligibility } from '../eventEligibility.js';
 import { notificationService } from './notificationService.js';
 import { inTransaction } from '../utils.js';
 
@@ -66,7 +67,7 @@ export function computeDraw(db, eventId, { runNumber }) {
      * directly, over the real curve, so the two names cannot drift apart again
      * without the build going red.
      */
-    const pendingApps = db.prepare(`
+    const allPending = db.prepare(`
       SELECT a.id, a.user_id,
              COALESCE(SUM(att.hours_awarded), 0) as totalHours
       FROM applications a
@@ -74,6 +75,32 @@ export function computeDraw(db, eventId, { runNumber }) {
       WHERE a.slot_id = ? AND a.status = 'pending'
       GROUP BY a.id ORDER BY a.id
     `).all(slot.id);
+
+    /**
+     * Anybody the organization has since refused is out of the draw.
+     *
+     * A pending application is a request, not a place. The draw is where the
+     * place is actually given, and it can run weeks after the applications
+     * arrived — long enough for a ban to be issued or for the event to be
+     * narrowed to members only. Selecting them anyway would have the platform
+     * seat somebody the organization had just refused, with no human deciding
+     * anything and no record of a decision.
+     *
+     * They are WAITLISTED rather than dropped, and that detail is the whole of
+     * whether this is humane. Dropping them left a row `pending` on an event
+     * the confirmation then closes, with no further run possible and no
+     * notification of any kind — a person who applied, was never told anything,
+     * and stayed that way. Waitlisted is a state the screen can render, it is
+     * the honest description of where they stand, and `promoteFromWaitlist`
+     * re-asks eligibility every time a place frees: if the ban is lifted or
+     * they join the organization, they come off it by themselves.
+     *
+     * Not `rejected`, because the organizer did not reject them.
+     */
+    const pendingApps = allPending.filter(a => eventApplicationEligibility(event, a.user_id).ok);
+    for (const refused of allPending) {
+      if (!pendingApps.includes(refused)) waitlistIds.push(refused.id);
+    }
 
     if (pendingApps.length === 0) continue;
 

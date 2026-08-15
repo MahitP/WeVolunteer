@@ -1,25 +1,30 @@
 import express from 'express';
 
-import { recordCheckins, checkinWindowState, getCheckins, finalizeAttendance, computeEventCompletion } from '../attendance.js';
+import QRCode from 'qrcode';
+
+import { recordCheckins, checkinWindowState, getCheckins, finalizeAttendance, computeEventCompletion, slotHasStarted } from '../attendance.js';
 import { authenticateToken, inTransaction } from '../utils.js';
-import { can, requireCap } from '../authz.js';
+import { can, requireCap, requireCapAny } from '../authz.js';
+import {
+  issueCheckinToken, resolveCheckinToken, consumeCheckinToken, CODE_TTL_MS,
+} from '../checkinTokens.js';
+import { checkinCodeLimiter, checkinScanLimiter } from '../checkinLimiters.js';
 import { notificationService } from '../services/notificationService.js';
 import { getOrCreateCertificateCode } from '../certificates.js';
 import { badgeService } from '../services/badgeService.js';
 import { db } from '../db.js';
+import { recordAudit } from '../auditLog.js';
+import { canRunEvent } from '../organizations.js';
+import { canSeeCertificates } from '../serviceVisibility.js';
 
 const router = express.Router();
 
-router.post('/api/events/:id/checkin', authenticateToken, requireCap('attendance.mark'), (req, res) => {
+router.post('/api/events/:id/checkin', authenticateToken, requireCapAny(['attendance.mark', 'organization.event.manage.own']), (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    // event.moderate is the "may act on any event" bypass (same idiom used for
-    // event.edit.own elsewhere) — anyone without it is bound to the event they
-    // host.
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
-      return res.status(403).json({ error: 'Access denied: You do not host this event' });
-    }
+    const refusal = hostRefusal(req.principal, event);
+    if (refusal) return res.status(refusal.status).json(refusal.body);
 
     /**
      * A cancelled event has no attendance to take.
@@ -65,15 +70,12 @@ router.post('/api/events/:id/checkin', authenticateToken, requireCap('attendance
   }
 });
 
-router.get('/api/events/:id/checkin', authenticateToken, requireCap('attendance.view'), (req, res) => {
+router.get('/api/events/:id/checkin', authenticateToken, requireCapAny(['attendance.view', 'organization.event.manage.own']), (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    // event.moderate is the "may act on any event" bypass; an organizer
-    // (lacking it) is bound to the event they host.
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
-      return res.status(403).json({ error: 'Access denied: You do not host this event' });
-    }
+    const refusal = hostRefusal(req.principal, event);
+    if (refusal) return res.status(refusal.status).json(refusal.body);
 
     res.json(getCheckins(db, req.params.id).map(c => ({
       slotId: c.slot_id, userId: c.user_id, present: c.present === 1, markedAt: c.marked_at
@@ -90,7 +92,7 @@ router.get('/api/events/:id/checkin', authenticateToken, requireCap('attendance.
 // records named in the request — never the rest — so a partial or stale submission
 // can no longer mark anyone absent, and a credit can only be removed by an
 // explicit instruction that carries a reason.
-router.post('/api/events/:id/attendance', authenticateToken, requireCap('attendance.mark'), (req, res) => {
+router.post('/api/events/:id/attendance', authenticateToken, requireCapAny(['attendance.mark', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
   const { attendanceMap, hoursMap, reason } = req.body;
 
@@ -105,9 +107,8 @@ router.post('/api/events/:id/attendance', authenticateToken, requireCap('attenda
     // same as attendance.mark grants them elsewhere — only an organizer
     // (lacking event.moderate) is additionally bound to hosting the event
     // themselves.
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
-      return res.status(403).json({ error: 'Access denied: You do not host this event' });
-    }
+    const refusal = hostRefusal(req.principal, event);
+    if (refusal) return res.status(refusal.status).json(refusal.body);
     if (event.status === 'cancelled') {
       return res.status(409).json({ error: 'This event was cancelled, so hours cannot be credited for it.' });
     }
@@ -177,6 +178,24 @@ router.post('/api/events/:id/attendance', authenticateToken, requireCap('attenda
       }
     }
     for (const r of outcome.revoked) {
+      /**
+       * Re-evaluated BEFORE the `wasCredited` guard, and deliberately.
+       *
+       * This loop used to notify and move on, so the single action that can
+       * take a badge away was the one path that never recomputed one. A
+       * volunteer marked absent kept an hour tier they no longer reached, and
+       * kept a reliability badge their record no longer supported —
+       * `evaluateBadges` has always known how to withdraw an automatic award,
+       * it was simply never asked on the way down.
+       *
+       * Above the guard because that guard is about NOTIFYING. Somebody who was
+       * never credited has had nothing taken from them and should not be told
+       * their hours changed — but being marked absent still changes the
+       * denominator their reliability is computed from, so their badges still
+       * need recomputing.
+       */
+      badgeService.evaluateBadges(r.userId);
+
       if (!r.wasCredited) continue; // never credited, so nothing was taken away
       notificationService.dispatch(
         'HOURS_ADJUSTED',
@@ -214,7 +233,7 @@ class AttendanceRefused extends Error {
 
 // 10. Edit Event Details and Slots (Organizer only)
 
-router.get('/api/events/:id/roster.csv', authenticateToken, requireCap('attendance.view'), (req, res) => {
+router.get('/api/events/:id/roster.csv', authenticateToken, requireCapAny(['attendance.view', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
 
   try {
@@ -222,7 +241,7 @@ router.get('/api/events/:id/roster.csv', authenticateToken, requireCap('attendan
     if (!event) return res.status(404).json({ error: 'Event not found' });
     // event.moderate is the "may act on any event" bypass; an organizer
     // (lacking it) is bound to the event they host.
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -256,6 +275,22 @@ router.get('/api/events/:id/roster.csv', authenticateToken, requireCap('attendan
     ];
 
     const filename = `${event.title.replace(/[^a-z0-9]/gi, '_')}_roster.csv`;
+    /**
+     * The one bulk export of minors' contact details on the platform, recorded.
+     *
+     * A Student Organizer reaches this for the events they run, which is the
+     * point of the rank — but "who took the whole roster, and when" is the
+     * question an organization asks after something goes wrong, and it had no
+     * answer anywhere. The row names the caller and the event; it does not
+     * repeat the data.
+     */
+    recordAudit(db, {
+      adminId: req.principal.userId,
+      action: 'ORGANIZATION_ROSTER_EXPORTED',
+      targetUserId: null,
+      details: `Exported the accepted roster for "${event.title}" (${event.id})`,
+    });
+
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(csvLines.join('\n'));
@@ -298,6 +333,88 @@ router.get('/api/certificates', authenticateToken, (req, res) => {
     })));
   } catch (err) {
     console.error('Certificates error:', err);
+    res.status(500).json({ error: 'Failed to load certificates' });
+  }
+});
+
+/**
+ * Somebody else's certificates — what they earned, never a way to hold it.
+ *
+ * ── The two things this must not do ──
+ *
+ * 1. It must not emit `code`. The code is a BEARER CREDENTIAL: whoever holds it
+ *    can call `/api/certificates/verify/:code` and be handed a verified record
+ *    in this student's name. `/api/certificates` gives you your own codes so you
+ *    can print them; handing somebody else's out would turn "see that Sam
+ *    volunteered" into "produce Sam's certificate on demand", which is the
+ *    difference between a profile and an impersonation kit.
+ *
+ * 2. It must not answer at all when the subject has made certificates private —
+ *    and that includes not answering with a COUNT. An empty array and a
+ *    forbidden response are different facts, and returning `[]` for a private
+ *    collection tells the caller the setting is on while a 200 with three rows
+ *    tells them it is off. So a private collection is a 403 with a code the UI
+ *    reads, not an empty success.
+ *
+ * The subject always sees their own here, so one page can serve both readers.
+ */
+router.get('/api/users/:id/certificates', authenticateToken, requireCap('directory.read'), (req, res) => {
+  try {
+    const subject = db.prepare(
+      "SELECT id, name, username, certificates_visibility FROM users WHERE id = ? AND account_status <> 'deleted'"
+    ).get(req.params.id);
+    /* Same refusal for "no such account" and "not visible" would be wrong here:
+       the account's existence is already public from the profile route, so a
+       404 that means both would make a live profile look broken. */
+    if (!subject) return res.status(404).json({ error: 'No such account.', code: 'not_found' });
+
+    const viewerId = req.principal?.userId ?? req.user?.id ?? null;
+    const canSeeContact = can(req.principal, 'user.contact.read');
+
+    if (!canSeeCertificates(subject, { viewerId, canSeeContact })) {
+      return res.status(403).json({
+        error: 'This volunteer keeps their certificates private.',
+        code: 'certificates_private',
+      });
+    }
+
+    const rows = db.prepare(`
+      SELECT e.id as event_id, e.title, e.category,
+             u.name as organizer_name, u.verified as organizer_verified,
+             COALESCE(SUM(at.hours_awarded), 0) as hours,
+             COUNT(*) as shifts,
+             MIN(s.start_datetime) as first_start,
+             MAX(s.end_datetime) as last_end
+      FROM attendance at
+      JOIN slots s ON at.slot_id = s.id
+      JOIN events e ON at.event_id = e.id
+      JOIN users u ON e.organizer_id = u.id
+      WHERE at.user_id = ? AND at.present = 1
+      GROUP BY e.id
+      ORDER BY last_end DESC
+    `).all(req.params.id);
+
+    res.json({
+      volunteer: { id: subject.id, name: subject.name, username: subject.username || null },
+      isSelf: viewerId === subject.id,
+      certificates: rows.map(r => ({
+        eventId: r.event_id,
+        title: r.title,
+        category: r.category,
+        organizerName: r.organizer_name,
+        organizerVerified: r.organizer_verified === 1,
+        hours: Number(r.hours),
+        shifts: r.shifts,
+        startDatetime: r.first_start,
+        endDatetime: r.last_end,
+        /* No `code`, and no `location`. The code is a bearer credential; the
+           location is where a named minor physically was on a given date, which
+           the itemised service record is already gated on and which a
+           certificate list has no reason to republish. */
+      })),
+    });
+  } catch (err) {
+    console.error('Public certificates error:', err);
     res.status(500).json({ error: 'Failed to load certificates' });
   }
 });
@@ -353,5 +470,296 @@ router.get('/api/certificates/verify/:code', (req, res) => {
 
 // ── Organizer profile ───────────────────────────────────────────────
 // The page a student checks before trusting an event.
+
+/* ── QR check-in ─────────────────────────────────────────────────────────── */
+
+/**
+ * The one place the "do you host this event?" question is answered.
+ *
+ * The same four lines were copy-pasted at every organizer-scoped route in this
+ * file, and the QR scan route would have been the fifth. Extracted rather than
+ * copied again; the four existing sites now call it too, so a change to the
+ * rule reaches all of them.
+ *
+ * `event.moderate` is the "may act on any event" bypass, the same idiom used
+ * for `event.edit.own` elsewhere.
+ */
+function hostRefusal(principal, event) {
+  /* `canRunEvent`, not a bare `organizer_id` compare: an event published under
+     a club's name is the club's to run, so its managers reach check-in and
+     attendance too. Without that, an event posted by a Student Organizer who
+     was later demoted had NOBODY who could record who turned up — and this is
+     the only path that writes credited hours. */
+  if (canRunEvent(db, event, principal.userId, { hasModerate: can(principal, 'event.moderate') })) return null;
+  return { status: 403, body: { error: 'Access denied: You do not host this event' } };
+}
+
+/**
+ * Mints a five-minute check-in code for one of the caller's own accepted shifts.
+ *
+ * POST rather than GET because it creates a token and retires the previous one.
+ * A GET that mutated would also land the code in browser history and be
+ * prefetchable by anything that speculatively loads links.
+ *
+ * The application is the resource because it is the one object naming a user, a
+ * slot and an event at once — and because `recordCheckins`, the canonical
+ * writer this eventually reaches, is keyed by application id.
+ */
+router.post(
+  '/api/applications/:applicationId/checkin-code',
+  authenticateToken,
+  requireCap('qr.present'),
+  checkinCodeLimiter,
+  async (req, res) => {
+    try {
+      const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.applicationId);
+
+      /**
+       * An application that is not the caller's own gets the same 404 as one
+       * that does not exist.
+       *
+       * A 403 would confirm the id is real, and application ids are
+       * `app-<timestamp>-<six chars>` — a walkable space. The same reasoning,
+       * and the same 404, as `POST /api/appeals`.
+       */
+      if (!app || app.user_id !== req.user.id) {
+        return res.status(404).json({ error: 'We could not find that shift signup.', code: 'application_not_found' });
+      }
+      if (app.status !== 'accepted') {
+        return res.status(409).json({
+          error: 'Your place at this shift is not confirmed yet, so there is no code to show.',
+          code: 'not_accepted',
+        });
+      }
+
+      const event = db.prepare('SELECT * FROM events WHERE id = ?').get(app.event_id);
+      const slot = db.prepare('SELECT * FROM slots WHERE id = ?').get(app.slot_id);
+      if (!event || !slot) {
+        return res.status(404).json({ error: 'We could not find that shift signup.', code: 'application_not_found' });
+      }
+
+      if (event.status === 'cancelled') {
+        return res.status(409).json({
+          error: 'This event was cancelled, so attendance cannot be taken for it.',
+          code: 'event_cancelled',
+        });
+      }
+
+      const now = new Date();
+      const started = slotHasStarted(slot, now);
+      if (started === null) {
+        return res.status(409).json({
+          error: "This shift's start time cannot be read. Ask the organizer to check you in by name.",
+          code: 'slot_unreadable',
+        });
+      }
+      if (started === false) {
+        return res.status(409).json({
+          error: 'Your code becomes available when the shift starts.',
+          code: 'checkin_not_started',
+          startsAt: slot.start_datetime,
+        });
+      }
+
+      const issued = inTransaction(() => issueCheckinToken(db, { application: app, now }));
+
+      /**
+       * Rendered server-side, with the existing `qrcode` dependency.
+       *
+       * Three reasons rather than sending the string and drawing it in the
+       * browser: it keeps a QR library out of the client bundle, it makes the
+       * black-on-white quiet zone unconditional regardless of the viewer's
+       * theme (a dark-mode QR is unreadable), and it keeps the colour literals
+       * in server code, which the no-hardcoded-colours guard does not scan.
+       */
+      const qr = await QRCode.toDataURL(issued.token, {
+        errorCorrectionLevel: 'M',
+        margin: 4,
+        width: 320,
+        color: { dark: '#000000ff', light: '#ffffffff' },
+      });
+
+      res.json({
+        token: issued.token,
+        qr,
+        issuedAt: issued.issuedAt,
+        expiresAt: issued.expiresAt,
+        ttlSeconds: Math.round(CODE_TTL_MS / 1000),
+        eventTitle: event.title,
+        slotName: slot.name,
+        displayName: req.user.username ? `@${req.user.username}` : req.user.name,
+      });
+    } catch (err) {
+      console.error('Check-in code error:', err.message);
+      res.status(500).json({ error: 'Could not create a check-in code' });
+    }
+  },
+);
+
+/**
+ * Scans a volunteer's code and checks them in.
+ *
+ * ── The guard order matters, and this is the order ──
+ *
+ * The host check runs BEFORE the token is looked at, so somebody who does not
+ * host this event cannot burn a stranger's live code by scanning it. The whole
+ * refusal cascade is the manual route's, verbatim, so a QR refusal is shaped
+ * exactly like the refusal an organizer already knows.
+ *
+ * ── What is deliberately NOT here ──
+ *
+ * No new time bound. Generation already requires the slot to have started, so a
+ * code cannot exist before then, and check-in has an opening time and no
+ * closing time on purpose — organizers reconcile after the fact. A volunteer
+ * arriving two hours late is an ordinary case, not an attack.
+ *
+ * ── The capability ──
+ *
+ * `attendance.scan` names the power and is withheld until the Organizer
+ * Agreement is signed, which must survive. But it alone would lock out admins,
+ * who hold `attendance.mark` and can already do this by hand — an arbitrary gap
+ * with no security story. Granting admins `attendance.scan` instead would
+ * silently widen an agreement-gated capability onto the one role that agreement
+ * deliberately does not bind. `requireCapAny` says "either way in is
+ * legitimate" without touching the capability table.
+ */
+router.post(
+  '/api/events/:id/checkin/scan',
+  authenticateToken,
+  requireCapAny(['attendance.scan', 'attendance.mark', 'organization.event.manage.own']),
+  checkinScanLimiter,
+  (req, res) => {
+    try {
+      /* Exactly one field is read from the body. A `slotId` or `userId` here
+         would be a value the volunteer's device chose, and a field that does
+         not exist cannot be trusted by a later edit. */
+      const { token } = req.body || {};
+      if (typeof token !== 'string' || !token || token.length > 200) {
+        return res.status(400).json({ error: 'No code was read. Try scanning again.', code: 'token_required' });
+      }
+
+      const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+      if (!event) return res.status(404).json({ error: 'Event not found' });
+
+      const refusal = hostRefusal(req.principal, event);
+      if (refusal) return res.status(refusal.status).json(refusal.body);
+
+      if (event.status === 'cancelled') {
+        return res.status(409).json({
+          error: 'This event was cancelled, so attendance cannot be taken for it.',
+          code: 'event_cancelled',
+        });
+      }
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+
+      const window = checkinWindowState(db, event, nowIso);
+      if (!window.open) {
+        return res.status(409).json({
+          error: 'Check-in opens two hours before the first shift starts.',
+          code: 'checkin_not_open',
+          opensAt: window.opensAt,
+        });
+      }
+
+      const resolved = resolveCheckinToken(db, { token, eventId: event.id, now });
+      if (!resolved.ok) {
+        /* The real reason goes to the log, never to the caller, and never with
+           the code or its hash in it. */
+        console.warn(`[check-in] ${resolved.logReason} (event ${event.id}, actor ${req.user.id})`);
+        /**
+         * Only these three fields are sent.
+         *
+         * Destructuring the rest of `resolved` would have shipped `logReason`
+         * to the caller — the precise reason the code failed, which is the one
+         * thing the collapsed refusals exist to withhold. Naming the fields
+         * means a field added to the resolver later cannot leak by default.
+         */
+        return res.status(resolved.status).json({
+          ok: false,
+          code: resolved.code,
+          error: resolved.error,
+        });
+      }
+
+      const row = resolved.row;
+
+      /**
+       * The row is a pointer, not an authority.
+       *
+       * Minutes may have passed since the code was minted, and a volunteer can
+       * have been un-accepted in them. Everything is re-read and re-checked
+       * here, and then `recordCheckins` validates it a third time — it is the
+       * canonical writer and stays the single source of truth about what a
+       * check-in means.
+       */
+      const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(row.application_id);
+      if (!app || app.event_id !== event.id || app.status !== 'accepted') {
+        console.warn(`[check-in] signup no longer eligible (event ${event.id}, actor ${req.user.id})`);
+        return res.status(422).json({
+          code: 'code_invalid',
+          error: 'That code did not work. Ask the volunteer to refresh it, or check them in by name.',
+        });
+      }
+
+      const volunteer = db.prepare('SELECT id, name, avatar FROM users WHERE id = ?').get(app.user_id);
+      const slot = db.prepare('SELECT id, name FROM slots WHERE id = ?').get(app.slot_id);
+
+      const already = db.prepare(
+        'SELECT present FROM attendance_checkin WHERE slot_id = ? AND user_id = ?'
+      ).get(app.slot_id, app.user_id);
+
+      const outcome = inTransaction(() => {
+        /**
+         * Spending the code is what makes a replay safe, and it is done inside
+         * the transaction with the mark.
+         *
+         * The `status = 'pending'` predicate is the whole of it: two organizers
+         * scanning the same phone in the same instant both reach here, and
+         * exactly one UPDATE matches a row.
+         */
+        if (!consumeCheckinToken(db, { tokenId: row.id, actorId: req.user.id, now })) {
+          return { raced: true };
+        }
+        return recordCheckins(db, {
+          event,
+          checkinMap: { [app.id]: true },
+          actor: req.user,
+          now: nowIso,
+          method: 'qr',
+        });
+      });
+
+      if (outcome.raced) {
+        console.warn(`[check-in] code spent concurrently (event ${event.id}, actor ${req.user.id})`);
+        return res.status(422).json({
+          code: 'code_invalid',
+          error: 'That code did not work. Ask the volunteer to refresh it, or check them in by name.',
+        });
+      }
+
+      /**
+       * Already present is a 200, not an error.
+       *
+       * The outcome the organizer wanted is already true. Returning an error
+       * would tell them it failed, and they would redo it by hand — turning a
+       * successful check-in into a support question.
+       */
+      res.json({
+        success: true,
+        marked: outcome.marked,
+        alreadyPresent: already?.present === 1,
+        volunteer: volunteer
+          ? { id: volunteer.id, name: volunteer.name, avatar: volunteer.avatar }
+          : null,
+        slot: slot ? { id: slot.id, name: slot.name } : null,
+      });
+    } catch (err) {
+      console.error('Check-in scan error:', err.message);
+      res.status(500).json({ error: 'Internal server error recording check-in' });
+    }
+  },
+);
 
 export default router;

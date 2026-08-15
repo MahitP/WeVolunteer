@@ -424,12 +424,24 @@ export async function startTestServer() {
    * directly, so the fixtures keep exercising the actual flow.
    */
   const confirmEmail = async (userId) => {
-    const { db } = await import('./db.js');
-    const row = db.prepare(
-      'SELECT token FROM email_verification_tokens WHERE user_id = ? ORDER BY expires_at DESC LIMIT 1'
-    ).get(userId);
-    if (!row) throw new Error(`No verification token outstanding for ${userId}`);
-    const res = await call('POST', '/api/auth/verify-email', { token: row.token });
+    /**
+     * Issues a FRESH token rather than reading the outstanding one.
+     *
+     * It used to `SELECT token FROM email_verification_tokens`, which stopped
+     * being possible when migration 048 replaced the plaintext with its digest
+     * — and that is the whole point of 048: nothing, including this, can read a
+     * usable credential out of the table.
+     *
+     * `issueVerificationToken` is the same function signup and resend call, and
+     * it returns the plaintext to its immediate caller exactly as it does in
+     * production when it hands it to the email template. So this is not a test
+     * backdoor; it is the ordinary issue path, and it still goes through the
+     * real endpoint afterwards. Issuing supersedes any previous link, which is
+     * the documented behaviour of that function anyway.
+     */
+    const { issueVerificationToken } = await import('./services/verification.js');
+    const token = issueVerificationToken(userId);
+    const res = await call('POST', '/api/auth/verify-email', { token });
     if (res.status !== 200) throw new Error(`Could not confirm ${userId}: ${JSON.stringify(res.body)}`);
     return res.cookie;
   };

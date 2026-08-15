@@ -40,11 +40,11 @@ reading level.
   collected, no confirmation is sent, nothing is verified, and no guardian is notified of
   anything. The draft discloses that in plain words. Do not reintroduce language implying
   otherwise.
-- **Contact** — wevolunteer.platform@gmail.com, monitored by the operator.
+- **Contact** — privacy@wevolunteers.org, monitored by the operator.
 
 **Still open — one item, marked in the draft as blocking publication.** The production hosting
-provider and the country the database sits in. The email-sending provider is resolved: `SMTP_HOST`
-is Gmail, so it is Google, and the row merges with the existing Google entry. The policy-archive
+provider and the country the database sits in. The email-sending provider is resolved: Resend is
+primary and Gmail is the fallback, and both are named in the table. The policy-archive
 promise is resolved by this being v1.0 — there are no superseded versions yet, so the draft says
 so and offers previous versions on request once there are any.
 
@@ -62,7 +62,7 @@ no district-specific facts — that branch is gone.
 
 # Privacy at WeVolunteer
 
-**Version 1.1 · Last updated 2026-08-06** · Applies to WeVolunteer version 1.2 and later
+**Version 1.0 · Last updated 2026-08-06** · Applies to WeVolunteer version 1.2 and later
 
 > **THE OPERATOR — the only place in this document that names the legal entity.**
 > WeVolunteer is operated by **Mahit Pulavarthi, a sole proprietor doing business as
@@ -75,7 +75,7 @@ WeVolunteer helps students find volunteer work and keep track of their service h
 that, it has to store some information about you. This page explains all of it.
 
 We wrote this to be read, not to be survived. If anything here is unclear, that is our
-problem and we want to hear about it: **wevolunteer.platform@gmail.com**.
+problem and we want to hear about it: **privacy@wevolunteers.org**.
 
 ## The short version
 
@@ -99,7 +99,7 @@ organizers post events, students volunteer — but **your school does not run We
 does not control your account.** If you want something corrected or removed, you ask us, not
 your school.
 
-Contact: **wevolunteer.platform@gmail.com**
+Contact: **privacy@wevolunteers.org**
 
 ## What we collect
 
@@ -172,21 +172,27 @@ draw. You should know how it works:
 - It is random within that weighting, and every draw is recorded so it can be checked later.
 
 If you were not selected and you want to know why, ask the organizer. If you think a draw was
-wrong, contact **wevolunteer.platform@gmail.com** and we will look at the recorded draw.
+wrong, contact **support@wevolunteers.org** and we will look at the recorded draw.
 
 ## What we do not do
 
 - **We do not sell your information.** Not to advertisers, not to colleges, not to anyone.
 - **We do not show you ads**, and we do not use your information to target ads anywhere else.
-- **We do not use tracking cookies or third-party analytics.** See the
+- **We do not use tracking cookies**, advertising pixels, fingerprinting or cross-site
+  tracking of any kind.
+- **We do not turn analytics on for you.** WeVolunteer has one optional analytics feature. It
+  is **off unless you switch it on** in Settings → Privacy, we never prompt you to, and you can
+  switch it off again at any time. Everything it collects is listed in the
   [Cookie and Tracking Notice](/legal/cookie-and-tracking-notice).
 - **We do not read your messages routinely.** An administrator reads a conversation only when
   somebody reports it, or when we are required to investigate a safety concern.
-- **We do not record what is on your screen when something breaks.** When the app hits an
-  error it sends us a diagnostic record. Before that record is stored, email addresses and
-  security tokens are stripped out, you are recorded as a one-way scrambled code rather than
-  a name, and the page address is stored as a pattern (`/events/:id`) rather than the real
-  one.
+- **We do not record your screen because something broke.** When the app hits an error it
+  sends us a diagnostic record. Before that record is stored, email addresses and security
+  tokens are stripped out, you are recorded as a one-way scrambled code rather than a name,
+  and the page address is stored as a pattern (`/events/:id`) rather than the real one. The
+  screen recording described in the Cookie Notice is a different thing entirely: it happens
+  only if you switched analytics on, it is not triggered by errors, and the text on the page
+  is hidden before it is sent.
 
 ## How long we keep things
 
@@ -257,19 +263,19 @@ it before you delete, not after.
 | You want to… | How |
 |---|---|
 | See everything we hold | Settings → Download my data. You will be asked to confirm it is you |
-| Fix something wrong | Settings → Profile for most things; email **wevolunteer.platform@gmail.com** for hours or attendance |
+| Fix something wrong | Settings → Profile for most things; email **support@wevolunteers.org** for hours or attendance |
 | Stop emails | Settings → Notifications. Security emails cannot be switched off |
 | Hide your profile | Settings → Privacy. It is already private unless you changed it |
 | Leave the leaderboard | Settings → Privacy. Takes effect immediately |
 | Delete your account | Settings → Delete account. **Please read the [Data Deletion Policy](/legal/data-deletion-policy) first** — some things are kept |
-| Complain | **wevolunteer.platform@gmail.com**. We will acknowledge within 10 business days |
+| Complain | **privacy@wevolunteers.org**. We will acknowledge within 10 business days |
 
 ## For parents and guardians
 
 If you are the parent or guardian of a student under 18, you can ask to see what we hold
 about your child, ask us to correct it, and ask us to delete it.
 
-Email **wevolunteer.platform@gmail.com**. We will ask you to confirm who you are and your
+Email **privacy@wevolunteers.org**. We will ask you to confirm who you are and your
 relationship to the student — proportionate to what you are asking for, and no more
 documentation than we actually need. We acknowledge within **10 business days** and respond
 within **45 days**.
@@ -312,7 +318,7 @@ including with Google. We do not tell you how close you were, because that would
 telling you which year to type instead.
 
 If we find out we have information about a child under 13, we delete it promptly. If you think
-a child under 13 has an account, email **wevolunteer.platform@gmail.com** and we will act on it.
+a child under 13 has an account, email **privacy@wevolunteers.org** and we will act on it.
 
 This is also why we can keep hours and certificates forever: the law does not allow keeping a
 child's information indefinitely, and the age check is what makes that promise a safe one.
@@ -329,11 +335,15 @@ WeVolunteer runs on a small number of outside services. Here is all of them:
 
 | Service | What it receives | What it is for |
 |---|---|---|
-| **Google** (Gmail, for outgoing mail) | Your email address and the message | Sending you notification and security emails. This is the same account as the contact address on this page |
+| **Resend** | Your email address and the message | Sending you notification and security emails. This is our main email provider |
+| **Google** (Gmail) | Your email address and the message | The backup route for email, used only when Resend cannot deliver |
 | **Google** (only if you sign in with Google) | Your email address and basic profile | Signing you in. We ask Google for nothing else |
+| **Microsoft** (only if you sign in with Microsoft) | Your email address and basic profile | Signing you in. We ask Microsoft for nothing else |
 | **OpenStreetMap / Nominatim** | Event location text | Turning an event address into map coordinates. **Never anything about you** |
 | **Open-Meteo** | Event coordinates | The weather forecast on an event page. **Never anything about you** |
+| **OpenRouteService** | Event coordinates, and your position blurred to about 110 metres | Working out a rough driving time to an event. It is told nothing that identifies you, and your position is never stored |
 | **CARTO** | **Your IP address**, when a map is shown | Loading the map images. It does not receive your name or account — see below |
+| **Amplitude** — **only if you switched analytics on** | How you use the app, and a recording of your screen with the text hidden | Finding what is confusing or broken. **Off unless you turn it on**; see the [Cookie and Tracking Notice](/legal/cookie-and-tracking-notice) |
 | **Our hosting provider** — not yet chosen. See the note below this table | Stores the database | Running the service |
 
 **About the hosting provider.** WeVolunteer has not launched yet and the company that will host
@@ -342,7 +352,9 @@ When it is chosen we will name it in this table, say which country the database 
 the date at the top of this page. If you are reading this and that row still says "not yet
 chosen", it means the service is not yet running anywhere that holds your information.
 
-Two of these are contacted by our servers, so they never see your device.
+Most of these are contacted by our servers, so they never see your device at all. CARTO and
+Amplitude are the two your browser talks to directly — CARTO whenever a map is shown, Amplitude
+only if you switched analytics on.
 
 **CARTO is different and we want to be clear about it.** When a page shows a map, your browser
 loads the map images directly from CARTO. That means CARTO can see your IP address and which
@@ -352,10 +364,17 @@ happens on pages with a map. See the
 
 ### Your device location
 
-Some screens can sort events by distance from you. Your browser will ask your permission
-first. **Your coordinates never reach our servers and are never stored** — they stay in the
-page while you are looking at it and are gone when you reload. Saying no costs you nothing but
-the distance sort.
+Some screens can sort events by distance from you, and an event page can show roughly how long
+it takes to drive there. Your browser will ask your permission before any of that happens.
+
+**Your coordinates are never stored** — not in our database, not in a log, not anywhere. There
+is no column in WeVolunteer that holds a person's location. They stay in the page while you are
+looking at it and are gone when you reload.
+
+They do reach our servers, blurred, in two cases: rounded to about a kilometre to sort a list
+by distance, and rounded to about 110 metres to ask a route planner for a driving time. Both are
+used to answer the question and then discarded. Saying no costs you nothing but the distance
+sort and that estimate.
 
 ## Security
 
@@ -387,13 +406,13 @@ current version.
 
 **This is version 1.0 — the first published version, so there are no earlier ones yet.** When we
 replace it we keep the version it replaced, and you can email
-**wevolunteer.platform@gmail.com** for any previous version and the dates it applied. Every
+**privacy@wevolunteers.org** for any previous version and the dates it applied. Every
 version is stored with a content fingerprint, so a copy you receive can be checked against the
 one your account accepted.
 
 ## Contact
 
-**wevolunteer.platform@gmail.com** — read by the operator personally. We acknowledge within 10
+**privacy@wevolunteers.org** — read by the operator personally. We acknowledge within 10
 business days.
 
 Being one person is the honest answer to "who monitors this?", and it is why we do not claim a

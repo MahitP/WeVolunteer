@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Check, Clock4, Ban, ArrowUpDown, Sparkles, AlertCircle } from 'lucide-react';
 import { formatHours, formatDay, gradeLabel } from '../utils/helpers';
+import { organizerBadges } from '../utils/badgeOrder';
 
 /**
  * The screen where an organizer decides who gets a spot.
@@ -105,7 +106,21 @@ export default function ApplicantReview({
       <div className="list">
         {sorted.map(app => {
         const v = app.volunteer || {};
-        const isNew = (v.completedEvents || 0) === 0;
+        /**
+         * Too little history to say anything, rather than nothing at all.
+         *
+         * This was `completedEvents === 0`, so a volunteer with exactly one
+         * completed commitment showed "0 of 1 attended" — which reads as a
+         * damning fact and is one shift's worth of evidence. Below three, the
+         * honest thing to show an organizer is that there is no record yet, not
+         * a ratio they cannot help reading as a verdict.
+         */
+        const completedCommitments = v.eventsSignedUp ?? v.completedEvents ?? 0;
+        const isNew = completedCommitments < 3;
+        /* A first-timer's row is a status line, so it carries no badges — an
+           Early Supporter chip beside "First event" would read as experience
+           they do not have. */
+        const shown = isNew ? [] : organizerBadges(v.badges);
         const isSelected = selectedIds.has(app.id);
         return <div key={app.id} className={`list-row ${isSelected ? 'selected' : ''}`} style={isSelected ? {
           backgroundColor: 'var(--brand-tint)'
@@ -128,6 +143,25 @@ export default function ApplicantReview({
                       <AlertCircle size={10} style={{ marginRight: 2 }} /> Conflict
                     </span>
                   )}
+                  {/**
+                    * At most three badges, chosen by `organizerBadges`.
+                    *
+                    * Not the volunteer's whole cabinet. An organizer with twenty
+                    * places is asking "have they done this before, and do they
+                    * turn up" — a row of nine hour tiers answers neither and
+                    * buries the reliability badge that answers the second. The
+                    * icon is decorative; the name carries the meaning, so both
+                    * are rendered rather than the glyph alone.
+                    */}
+                  {shown.length > 0 && (
+                    <span style={{ marginTop: 2, display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                      {shown.map(b => (
+                        <span key={b.name} className="tag" style={{ padding: '1px 4px', fontSize: 10 }}>
+                          <span aria-hidden="true">{b.icon}</span> {b.name}
+                        </span>
+                      ))}
+                    </span>
+                  )}
                 </span>
               </button>
               
@@ -141,7 +175,7 @@ export default function ApplicantReview({
               
               <div className="s-0c206e">
                 {isNew ? <span className="tag tag-brand">
-                    <Sparkles size={10} /> First event
+                    <Sparkles size={10} /> {completedCommitments === 0 ? 'First event' : 'New volunteer'}
                   </span> : <>
                     {/**
                       * Signed up versus attended — the follow-through question.
@@ -163,8 +197,43 @@ export default function ApplicantReview({
                     <div className="small tnum">
                       {v.eventsAttended ?? v.completedEvents} of {v.eventsSignedUp ?? v.completedEvents} attended
                     </div>
+                    {/**
+                      * Why the gap is what it is.
+                      *
+                      * "7 of 9" invites one reading — that somebody missed two
+                      * — and that reading is wrong whenever an organizer simply
+                      * never confirmed attendance. The volunteer has no way to
+                      * make it happen and no way to see it being held against
+                      * them. Naming the unconfirmed shifts is the difference
+                      * between evidence and an accusation, so it is shown
+                      * whenever there are any.
+                      */}
+                    {v.eventsAwaitingRecord > 0 && (
+                      <div className="small dim tnum">
+                        {v.eventsAwaitingRecord} not confirmed by an organizer
+                      </div>
+                    )}
+                    {/**
+                      * When they last served, or a neutral sentence when never.
+                      *
+                      * This was `last {formatDay(v.lastVolunteeredDate)}`
+                      * unconditionally, and `formatDay` returns an em dash for a
+                      * missing date — so a volunteer with three commitments and
+                      * no confirmed attendance read "last —". That is not
+                      * neutral, it is a blank an organizer fills in themselves,
+                      * and the likeliest guess is the unkindest one. Both cases
+                      * are said in words instead.
+                      *
+                      * Neither line is framed as a lapse. A gap since March is a
+                      * fact about a calendar, not a character reference — a
+                      * student sits exams, breaks an ankle, moves house. The
+                      * date is given; the reading is left to the person who
+                      * knows the context.
+                      */}
                     <div className="small dim tnum">
-                      last {formatDay(v.lastVolunteeredDate)}
+                      {v.lastVolunteeredDate
+                        ? `last ${formatDay(v.lastVolunteeredDate)}`
+                        : 'no confirmed shifts yet'}
                     </div>
                   </>}
               </div>

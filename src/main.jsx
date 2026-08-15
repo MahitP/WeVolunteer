@@ -41,6 +41,19 @@ globalThis.addEventListener?.('unhandledrejection', (event) => {
   });
 });
 
+/**
+ * Amplitude is deliberately NOT started here.
+ *
+ * It used to be, at module scope, which was the right shape for something
+ * unconditional. It is now conditional on an answer stored against an account —
+ * `users.analytics_consent`, migration 052 — and at module scope there is no
+ * account yet, so the decision cannot be made from this file.
+ *
+ * `useAnalyticsConsent`, mounted inside the session, owns it instead. Nothing
+ * is recorded for a visitor who has not signed in, because nobody who has not
+ * signed in has been asked.
+ */
+
 // Two last-resort boundaries, because they can rely on different amounts of the
 // app still working.
 //

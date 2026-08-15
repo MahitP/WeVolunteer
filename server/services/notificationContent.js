@@ -1,9 +1,24 @@
+import { ADDRESSES } from '../emailIdentity.js';
+
 /**
  * The published fallback channel, named in the Community Guidelines and the
  * Privacy Policy. One definition, because a student locked out of their account
  * has nothing else and a typo here is a dead end.
+ *
+ * ── Why this is now `admin@` and not a support address ──
+ *
+ * All three messages that name it are enforcement notices: a suspension, a ban,
+ * an appeal whose link has stopped working. What they say is "if you think this
+ * is wrong, write to us" — that is an adjudication channel, not a help desk, and
+ * the person reading it is contesting a decision somebody made about their
+ * account. `admin@` is where that belongs.
+ *
+ * It used to be a personal-tier Gmail address hard-coded here and in two more
+ * places in the client, none of which was the env-driven `SUPPORT_EMAIL` the
+ * config already exported. Now it comes from the same address book as every
+ * sender, so a domain move is one edit.
  */
-export const SUPPORT_EMAIL = 'wevolunteer.platform@gmail.com';
+export const SUPPORT_EMAIL = ADDRESSES.admin;
 
 /**
  * Notices that are served, not sent — the enforcement class.
@@ -36,6 +51,26 @@ export const SUPPORT_EMAIL = 'wevolunteer.platform@gmail.com';
  */
 export const MANDATORY_NOTICE_EVENTS = new Set([
   'ACCOUNT_SUSPENDED',
+  /**
+   * A legal document changing is a mandatory notice because the product has
+   * published a promise to give one: "If a change matters, we will tell you in
+   * the app at least 30 days before it takes effect… We will not change them
+   * quietly" (Terms of Service). A notification preference is a choice about
+   * how much the product talks to you; it cannot be a way to opt out of being
+   * told that the agreement you are held to has been rewritten.
+   */
+  'LEGAL_DOCUMENT_UPDATED',
+  /**
+   * Being banned from an organization is a mandatory notice for the same reason
+   * a suspension is: it is an enforcement decision recorded against the person,
+   * it is what an appeal is heard against, and it is worthless if they do not
+   * receive it. A notification preference is a choice about how much the
+   * product talks to you; it cannot be a way to not be told you were banned.
+   *
+   * An ordinary removal is NOT mandatory. Leaving a club is routine, and a
+   * volunteer who has muted membership chatter has made a reasonable choice.
+   */
+  'ORGANIZATION_BANNED',
   /**
    * A formal warning is a mandatory notice for the same reason a suspension is:
    * it is an enforcement action recorded against the person, it is the step that
@@ -185,6 +220,20 @@ export const EVENT_CATEGORIES = {
    * System is one they have to already know to look for.
    */
   ACCOUNT_SUSPENDED: 'ACCOUNT',
+  /**
+   * A legal document you accepted has changed.
+   *
+   * ACCOUNT rather than SYSTEM: it is a fact about this person's relationship
+   * with the platform — the terms they agreed to are not the terms in force —
+   * and it belongs beside suspensions and appeals in the Account filter, not
+   * beside maintenance notices.
+   */
+  LEGAL_DOCUMENT_UPDATED: 'ACCOUNT',
+  /* Membership of a club is a relationship with the platform, not an event. */
+  ORGANIZATION_MEMBERSHIP_REMOVED: 'ACCOUNT',
+  ORGANIZATION_BANNED: 'ACCOUNT',
+  ORGANIZATION_BAN_APPEAL_STANDS: 'ACCOUNT',
+  ORGANIZATION_BAN_APPEAL_REVERSED: 'ACCOUNT',
   ACCOUNT_WARNED: 'ACCOUNT',
   ACCOUNT_REINSTATED: 'ACCOUNT',
   APPEAL_DECISION_STANDS: 'ACCOUNT',
@@ -325,20 +374,45 @@ export function getInAppContent(event, payload) {
         body: `"${payload.eventTitle}" stops accepting applications ${payload.countdownPhrase}.`,
         link: `event:${payload.eventId}`
       };
+    /**
+     * `slotName` is a SHIFT NAME, not a time.
+     *
+     * This read "Food Drive starts at Morning Setup in Community Center" —
+     * grammar written for a value that never went in that slot. The shift name
+     * belongs in apposition, and the place belongs after "at".
+     */
     case 'EVENT_REMINDER_24H':
       return {
         kind,
         priority: NOTIFICATION_PRIORITY.IMPORTANT,
         title: 'Your shift starts tomorrow',
-        body: `${payload.eventTitle} starts at ${payload.slotName} in ${payload.location}.`,
+        body: [
+          `${payload.eventTitle}`,
+          payload.slotName ? ` (${payload.slotName})` : '',
+          ' is tomorrow',
+          payload.location ? ` at ${payload.location}` : '',
+          '.',
+        ].join(''),
         link: `event:${payload.eventId}`
       };
+    /**
+     * The two-hour reminder never named the place, though the one the day
+     * before did — so the message that arrives when somebody is deciding
+     * whether to set off was the one carrying least. It also arrives at exactly
+     * the moment check-in opens (`CHECKIN_OPENS_BEFORE_MS` is the same two
+     * hours), which is worth saying out loud rather than leaving as a
+     * coincidence only the code knows about.
+     */
     case 'EVENT_REMINDER_2H':
       return {
         kind,
         priority: NOTIFICATION_PRIORITY.IMPORTANT,
         title: 'Your shift starts soon',
-        body: `${payload.eventTitle} is starting in less than 2 hours.`,
+        body: [
+          `${payload.eventTitle} starts in under 2 hours`,
+          payload.location ? ` at ${payload.location}` : '',
+          '. Check-in is open.',
+        ].join(''),
         link: `event:${payload.eventId}`
       };
     case 'SCHEDULE_CONFLICT_WARNING':
@@ -417,6 +491,128 @@ export function getInAppContent(event, payload) {
      * an indefinite suspension is still a real option and must not be described
      * as having an end.
      */
+    case 'LEGAL_DOCUMENT_UPDATED': {
+      /**
+       * The excerpt is a SAMPLE, and the copy says so.
+       *
+       * `buildExcerpt` quotes one sentence that is new. It cannot know which
+       * change matters most, so presenting it as "what changed" would overstate
+       * it — "among other changes" is the honest frame when there is more than
+       * one, and the link is what actually discharges the obligation.
+       */
+      const quoted = payload.excerpt
+        ? `\n\n\u201c${payload.excerpt}\u201d`
+        : '';
+      const others = payload.changeCount > 1
+        ? `\n\nThat is one of ${payload.changeCount} changes.`
+        : '';
+
+      return {
+        kind,
+        /* IMPORTANT, not NORMAL: the retention sweep is allowed to delete
+           NORMAL notices, and a mandatory notice that can be swept is a notice
+           the product only pretended to give. */
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: `${payload.title} has been updated`,
+        body:
+          `We have made changes to the ${payload.title}.${quoted}${others}\n\n`
+          + 'Please read the full document. If you do not agree with the changes, '
+          + 'you can close your account at any time.',
+        link: `/legal/${payload.slug}`,
+        ctaText: `Read the ${payload.title}`,
+      };
+    }
+
+    case 'ORGANIZATION_MEMBERSHIP_REMOVED': {
+      const org = payload.organizationName || 'an organization';
+      const actor = payload.actorName || 'A manager';
+      const why = payload.reason ? `\n\nReason: ${payload.reason}` : '';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `You were removed from ${org}`,
+        body:
+          `${actor} removed you from ${org}.${why}`
+          + '\n\nYou can still join this organization again.',
+        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : '/organizations',
+        ctaText: `View ${org}`,
+      };
+    }
+
+    case 'ORGANIZATION_BANNED': {
+      /* Named defensively. This is delivered over the recipient's opt-out, so
+         "You were banned from undefined" is not a cosmetic slip — it is the
+         one message they cannot choose not to receive. */
+      const org = payload.organizationName || 'an organization';
+      const actor = payload.actorName || 'A manager';
+      /**
+       * The reason is not decoration here — it is what the appeal is heard
+       * against, and a person told they are banned without being told why has
+       * nothing to answer. The route refuses a ban with no reason, so this
+       * fallback should be unreachable; it exists because a notification that
+       * renders "Reason: undefined" to somebody being excluded is worse than
+       * one that admits the record is incomplete.
+       */
+      const why = payload.reason
+        ? `\n\nReason: ${payload.reason}`
+        : '\n\nNo reason was recorded.';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: `You were banned from ${org}`,
+        body:
+          `${actor} banned you from ${org}.${why}`
+          + '\n\nYou cannot rejoin this organization while this ban is active. '
+          + 'If you think this is wrong, you can make an appeal.',
+        /* The organization travels in the link so the form knows what is being
+           appealed without asking somebody to identify it themselves — and the
+           server re-checks that this ban is theirs regardless of what the query
+           string says. */
+        link: payload.organizationId
+          ? `/appeals/new?subject=organization_ban&organization=${encodeURIComponent(payload.organizationId)}`
+          : '/appeals/new?subject=organization_ban',
+        ctaText: 'Make an appeal',
+      };
+    }
+
+    case 'ORGANIZATION_BAN_APPEAL_STANDS': {
+      /**
+       * Written for a BAN, not borrowed from the suspension wording.
+       *
+       * `APPEAL_DECISION_STANDS` says "we are keeping the suspension in place"
+       * and offers a link to the suspension appeal page. Sent to somebody
+       * appealing a club ban, that names a punishment they are not under and
+       * points at a page about it. Two decisions, two vocabularies.
+       */
+      const org = payload.organizationName || 'the organization';
+      const why = payload.reasoning ? `\n\nWhat they said: ${payload.reasoning}` : '';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: `Your appeal to ${org} was not upheld`,
+        body:
+          `A manager of ${org} has looked at your appeal, and the ban stays in place.${why}`
+          + '\n\nThis does not affect your account, your hours, or any other organization.',
+        /* No CTA. There is nothing useful to press: the decision is made, and a
+           link back to the organization they cannot rejoin would be a taunt. */
+      };
+    }
+
+    case 'ORGANIZATION_BAN_APPEAL_REVERSED': {
+      const org = payload.organizationName || 'the organization';
+      const why = payload.reasoning ? `\n\nWhat they said: ${payload.reasoning}` : '';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: `Your appeal to ${org} was upheld`,
+        body:
+          `A manager of ${org} has looked at your appeal and lifted the ban. `
+          + 'You can join again whenever you like.' + why,
+        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : undefined,
+        ctaText: payload.organizationSlug ? `Go to ${org}` : undefined,
+      };
+    }
+
     case 'ACCOUNT_SUSPENDED': {
       const endsAt = payload.suspendedUntil ? new Date(payload.suspendedUntil) : null;
       const endsOn = endsAt && !Number.isNaN(endsAt.getTime())

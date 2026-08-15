@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer } from './testServer.js';
+import { MAIL_DOMAIN } from './emailIdentity.js';
 
 describe('events: ICS Export', () => {
   let srv;
@@ -58,7 +59,12 @@ describe('events: ICS Export', () => {
       lines.map(l => [l.slice(0, l.indexOf(':')), l.slice(l.indexOf(':') + 1)])
     );
     expect(props['VERSION']).toBe('2.0');
-    expect(props['UID']).toBe(`${slot.id}@wevolunteer.org`);
+    /* The UID domain moved to the one the platform actually controls. A calendar
+       client matches an update to the entry it already holds by this string, so
+       it has to be stable AND ours — the old value was a domain nobody owns, one
+       character off the real one. `MAIL_DOMAIN` rather than a literal so this
+       test and the two exporters cannot drift apart. */
+    expect(props['UID']).toBe(`${slot.id}@${MAIL_DOMAIN}`);
     expect(props['SUMMARY']).toBe('ICS Export Test (Slot A)');
     expect(props['DTSTART']).toMatch(/^\d{8}T\d{6}Z$/);
     expect(props['DTEND']).toMatch(/^\d{8}T\d{6}Z$/);

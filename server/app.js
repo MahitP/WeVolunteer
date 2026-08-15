@@ -13,6 +13,8 @@ import { db } from './db.js';
 import { recordError, hashUserId } from './errorReporter.js';
 
 import authRoutes from './routes/authRoutes.js';
+import webhookRoutes from './routes/webhookRoutes.js';
+import issueRoutes from './routes/issueRoutes.js';
 import accountRoutes from './routes/accountRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import eventRoutes from './routes/eventRoutes.js';
@@ -22,6 +24,7 @@ import adminRoutes from './routes/adminRoutes.js';
 import contentRoutes from './routes/contentRoutes.js';
 import geocodeRoutes from './routes/geocodeRoutes.js';
 import weatherRoutes from './routes/weatherRoutes.js';
+import travelRoutes from './routes/travelRoutes.js';
 import messageRoutes from './routes/messageRoutes.js';
 import privacyRoutes from './routes/privacyRoutes.js';
 import oauthRoutes from './routes/oauthRoutes.js';
@@ -47,6 +50,31 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const app = express();
+
+/**
+ * ── Why this is a production requirement and not a nicety ──
+ *
+ * Every per-IP control on this platform — the login limiter, the mail limiter,
+ * the export and re-auth limiters — reads `req.ip`. Behind a reverse proxy with
+ * `trust proxy` unset, Express reports the PROXY's address for every request, so
+ * all of them collapse into a single bucket: one person fumbling their password
+ * ten times locks out everybody, and a real attacker is rate-limited alongside
+ * the school they are attacking.
+ *
+ * `deploy/wevolunteer.env.example` has always called this required. Nothing
+ * enforced it, which is the gap between a document and a guarantee. Production
+ * now refuses to boot without it, in the same style as the other four blockers.
+ */
+if (!process.env.TRUST_PROXY && process.env.NODE_ENV === 'production') {
+  console.error(
+    'FATAL: TRUST_PROXY must be set in production. Without it Express reads the '
+    + 'proxy\'s address as the client address, and every per-IP rate limiter '
+    + '(sign-in, mail, export, re-auth) shares one bucket for the whole site. '
+    + 'Set it to the number of proxies in front of this process — TRUST_PROXY=1 '
+    + 'for a single nginx — or to a specific address list.'
+  );
+  process.exit(1);
+}
 
 if (process.env.TRUST_PROXY) {
   const value = Number(process.env.TRUST_PROXY);
@@ -101,10 +129,26 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
 
-      // No 'unsafe-inline'. This is the directive that matters: it is what
-      // stops an injected <script> from executing. Stage 3's theme pre-paint
-      // script is an external file in public/ specifically to satisfy this.
-      scriptSrc: ["'self'"],
+      /**
+       * No 'unsafe-inline'. This is the directive that matters: it is what
+       * stops an injected <script> from executing. Stage 3's theme pre-paint
+       * script is an external file in public/ specifically to satisfy this.
+       *
+       * `cdn.amplitude.com` is here because `initAll` loads Amplitude's
+       * engagement bundle from it at runtime. It is a third-party script origin
+       * and therefore the most consequential line in this block — it is listed
+       * only because the SDK cannot function without it, and it stays inert
+       * while no API key is configured.
+       */
+      scriptSrc: ["'self'", 'https://cdn.amplitude.com'],
+
+      /**
+       * Session Replay compresses in a worker created from a blob.
+       * `workerSrc` falls back to `scriptSrc` and then `defaultSrc`, neither of
+       * which allows `blob:` — so without this the recorder is refused with an
+       * error that names the worker rather than Amplitude.
+       */
+      workerSrc: ["'self'", 'blob:'],
 
       /**
        * The client previously used 576 inline `style={{}}` blocks, but they have been
@@ -118,10 +162,36 @@ app.use(helmet({
       // data: covers the inline SVG favicon and any base64 image.
       imgSrc: ["'self'", 'data:', 'https://*.tile.openstreetmap.org', 'https://*.basemaps.cartocdn.com'],
 
-      // The API is same-origin in both topologies: production serves the SPA
-      // and the API from this process, and development proxies /api through
-      // Vite. Nothing legitimate calls a third-party origin.
-      connectSrc: ["'self'", 'https://*.tile.openstreetmap.org', 'https://*.basemaps.cartocdn.com'],
+      /**
+       * The API is same-origin in both topologies: production serves the SPA
+       * and the API from this process, and development proxies /api through
+       * Vite.
+       *
+       * The Amplitude hosts are the exception, and they are listed because the
+       * alternative is worse than listing them: without these the SDK fails
+       * silently in production — the page renders, nothing errors visibly, and
+       * every event is refused by the browser. That is a integration that looks
+       * installed and measures nothing.
+       *
+       * These four are the hosts actually observed in a running session:
+       * ingestion, the CDN bundle, the Session Replay config, and the
+       * general-settings endpoint. Named individually rather than as a wildcard
+       * on `amplitude.com`, so a future Amplitude product cannot start talking
+       * to a new subdomain without somebody adding it here on purpose.
+       *
+       * This widens what the page MAY reach; it does not switch anything on.
+       * Analytics stays inert unless VITE_AMPLITUDE_API_KEY is set at build
+       * time, and .env.example ships it empty.
+       */
+      connectSrc: [
+        "'self'",
+        'https://*.tile.openstreetmap.org',
+        'https://*.basemaps.cartocdn.com',
+        'https://api2.amplitude.com',
+        'https://sr-client-cfg.amplitude.com',
+        'https://gs.amplitude.com',
+        'https://cdn.amplitude.com',
+      ],
 
       frameAncestors: ["'none'"],
       objectSrc: ["'none'"],
@@ -270,6 +340,20 @@ if (REQUEST_LOG) {
  */
 app.use('/api/errors/report', express.json({ limit: '8kb' }));
 
+/**
+ * The Resend webhook needs the bytes as received, so it is mounted BEFORE the
+ * global JSON parser for exactly the reason the error-report cap above is.
+ *
+ * Its signature is an HMAC over the exact request body. A parsed-then-
+ * re-serialised object has different key order and whitespace, so verifying
+ * against `JSON.stringify(req.body)` fails for every legitimate request and
+ * passes for none — a failure that looks indistinguishable from a wrong secret.
+ *
+ * 64 kB: a delivery event is a few hundred bytes, and this is an
+ * unauthenticated endpoint.
+ */
+app.use('/api/webhooks/resend', express.raw({ type: '*/*', limit: '64kb' }));
+
 app.use(express.json({ limit: '100kb' }));
 
 // Populates req.cookies for authenticateToken. Mounted before the routers and
@@ -408,6 +492,22 @@ export const apiLimiter = rateLimit({
   limit: DEMO_MODE ? 10000 : 600,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  /**
+   * The Resend delivery webhook is exempt, and it is the only exemption.
+   *
+   * Every delivery event arrives from Resend's own addresses, so all of them
+   * share ONE bucket — and a single send produces up to three events (sent,
+   * delivered, and possibly bounced). Signup day at a school is a few hundred
+   * verification emails inside a few minutes, which is comfortably past 600 in
+   * fifteen. The 429s would not lose the events (Resend retries) but they would
+   * delay them and fill the log with a failure that is not one.
+   *
+   * Exempting it is safe because it is not an unauthenticated endpoint in the
+   * way the limiter cares about: the signature is checked before anything is
+   * parsed or written, and an unsigned request costs one HMAC and a 401. There
+   * is nothing to flood.
+   */
+  skip: (req) => req.path === '/webhooks/resend',
   handler: limitHandler('Too many requests from this device.'),
 });
 
@@ -723,6 +823,8 @@ app.use('/api/auth/check-email', lookupLimiter);
 app.use('/api/certificates/verify', verifyLimiter);
 app.use('/api', apiLimiter);
 
+app.use(webhookRoutes);
+app.use(issueRoutes);
 app.use(authRoutes);
 app.use(accountRoutes);
 app.use(userRoutes);
@@ -742,6 +844,7 @@ app.use(adminRoutes);
 app.use(contentRoutes);
 app.use(geocodeRoutes);
 app.use(weatherRoutes);
+app.use(travelRoutes);
 app.use(messageRoutes);
 app.use(privacyRoutes);
 app.use(errorRoutes);

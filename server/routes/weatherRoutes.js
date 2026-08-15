@@ -1,8 +1,27 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
+import { authenticateToken } from '../utils.js';
+import { requireCap } from '../authz.js';
 import { DEMO_MODE } from '../config.js';
 
 const router = express.Router();
+
+/**
+ * How precisely a coordinate is used, for the upstream call and the cache key.
+ *
+ * Two decimal places is about 1.1 km. Open-Meteo's model grid is 1–11 km, so
+ * the forecast this returns is byte-identical to what four decimal places
+ * returns — the extra precision bought nothing and cost twice.
+ *
+ * It cost cache hits: at four decimal places (~11 m) two events at opposite
+ * ends of one car park are different keys, so a shift and the event listing it
+ * belongs to each paid for their own upstream request.
+ *
+ * And it cost privacy. The cache key is a record of which points somebody
+ * looked up, and at 11 m resolution that is a record of buildings. At 1.1 km it
+ * is a record of neighbourhoods, which is all a forecast ever needed.
+ */
+const COORD_PRECISION = 2;
 
 // --- In-memory cache ---
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
@@ -70,7 +89,29 @@ const WMO_MAP = {
   99: { label: 'Thunderstorm with heavy hail', icon: 'CloudLightning' }
 };
 
-router.get('/api/weather', weatherLimiter, async (req, res) => {
+/**
+ * Forecast for a point and an hour.
+ *
+ * ── Why this is gated, when it once was not ──
+ *
+ * This route carried the rate limiter and nothing else: no `authenticateToken`,
+ * no capability. Anyone on the internet could use the application as a free,
+ * cached weather proxy for any coordinate on earth, and the only cost to them
+ * was 100 requests per fifteen minutes per address.
+ *
+ * `event.view` rather than `geocode.use`, because students do not hold
+ * `geocode.use` — it is an organizer/admin/partner capability for the address
+ * search behind the location picker — and students are the entire audience for
+ * a forecast on an event they are about to attend. `event.view` is also the
+ * honest name for it: the forecast is a property of an event you are permitted
+ * to see.
+ *
+ * Order matters. The limiter runs first so an unauthenticated flood is refused
+ * before it costs a JWT verification and a database read; `authenticateToken`
+ * runs before `requireCap` because the capability gate reads `req.principal`.
+ * This is the same order `geocodeRoutes` uses.
+ */
+router.get('/api/weather', weatherLimiter, authenticateToken, requireCap('event.view'), async (req, res) => {
   const { lat, lon, datetime } = req.query;
   
   if (!lat || !lon || !datetime) {
@@ -92,7 +133,12 @@ router.get('/api/weather', weatherLimiter, async (req, res) => {
   targetDate.setMinutes(0, 0, 0);
   const targetIso = targetDate.toISOString().slice(0, 13); // e.g. "2024-06-15T10"
   
-  const cacheKey = `${latitude.toFixed(4)}_${longitude.toFixed(4)}_${targetIso}`;
+  /* Rounded once, then used for both the key and the upstream call, so the
+     thing cached is exactly the thing that was asked for. */
+  const qLat = Number(latitude.toFixed(COORD_PRECISION));
+  const qLon = Number(longitude.toFixed(COORD_PRECISION));
+
+  const cacheKey = `${qLat}_${qLon}_${targetIso}`;
   const cached = getCached(cacheKey);
   
   if (cached) {
@@ -111,8 +157,8 @@ router.get('/api/weather', weatherLimiter, async (req, res) => {
     }
 
     const params = new URLSearchParams({
-      latitude: latitude.toFixed(4),
-      longitude: longitude.toFixed(4),
+      latitude: String(qLat),
+      longitude: String(qLon),
       hourly: 'temperature_2m,apparent_temperature,weather_code',
       temperature_unit: 'fahrenheit',
       timezone: 'UTC',
@@ -123,7 +169,7 @@ router.get('/api/weather', weatherLimiter, async (req, res) => {
     const timeout = setTimeout(() => controller.abort(), 5000);
 
     const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`, {
-      headers: { 'User-Agent': 'WeVolunteer/1.0 (volunteer-app; contact@wevolunteer.app)' },
+      headers: { 'User-Agent': 'WeVolunteer/1.0 (volunteer-app; contact@wevolunteers.org)' },
       signal: controller.signal
     });
 

@@ -106,7 +106,22 @@ if (process.env.NODE_ENV === 'production' && !isSqliteLocator(dbPath) && !fs.exi
 
 console.log(`[db] using ${dbPath}`);
 
-const db = new DatabaseSync(dbPath);
+/**
+ * `enableForeignKeyConstraints` is stated rather than inherited.
+ *
+ * `node:sqlite` already defaults it to true, so this changes no behaviour
+ * today — every declared key in this schema is enforced either way, and
+ * `rebuildApplicationsForWithdrawn` below depends on that being true.
+ *
+ * It is written down because the guarantee was resting on a library default
+ * that nobody had recorded, one line above two pragmas that each got a
+ * paragraph. If a future Node release flips it, or somebody adds an options
+ * object for an unrelated reason and omits this key, forty-four tables lose
+ * referential integrity **silently** — no error, no failing test, cascades
+ * simply stop firing and orphans accumulate. A setting whose absence is
+ * undetectable is worth one line to make explicit.
+ */
+const db = new DatabaseSync(dbPath, { enableForeignKeyConstraints: true });
 
 // Connection durability/concurrency settings, applied before any statement runs.
 //
@@ -788,7 +803,10 @@ export function initDatabase() {
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS email_verification_tokens (
-      token TEXT PRIMARY KEY,
+      /* The SHA-256 digest, never the token itself — see migration 048 and
+         server/tokenDigest.js. The link in somebody's inbox works; a copy of
+         this table does not. */
+      token_hash TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -826,7 +844,10 @@ export function initDatabase() {
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS password_reset_tokens (
-      token TEXT PRIMARY KEY,
+      /* The SHA-256 digest, never the token itself — see migration 048 and
+         server/tokenDigest.js. The link in somebody's inbox works; a copy of
+         this table does not. */
+      token_hash TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -845,7 +866,10 @@ export function initDatabase() {
    */
   db.exec(`
     CREATE TABLE IF NOT EXISTS email_change_tokens (
-      token TEXT PRIMARY KEY,
+      /* The SHA-256 digest, never the token itself — see migration 048 and
+         server/tokenDigest.js. The link in somebody's inbox works; a copy of
+         this table does not. */
+      token_hash TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       new_email TEXT NOT NULL,
       expires_at TEXT NOT NULL,
@@ -1413,10 +1437,22 @@ function seedDatabase() {
     return d.toISOString();
   };
 
-  // Seed Events
+  /**
+   * Seed events, with coordinates.
+   *
+   * The geo columns were absent from this statement, so every seeded event had
+   * a NULL latitude — which meant the map, the distance filter, "nearest to me"
+   * and the forecast all had nothing to render on a freshly seeded database.
+   * Every one of those features looked broken when it was merely unfed.
+   *
+   * The coordinates are invented places in one invented town, in the same
+   * register as the rest of this seed. They are spread over roughly six miles
+   * so that each of the 5 / 10 / 25 / 50-mile filters returns a different
+   * number of events, which is the only way to see the filter working.
+   */
   const insertEvent = db.prepare(`
-    INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, auto_approve, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, auto_approve, created_at, address, latitude, longitude)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   insertEvent.run(
@@ -1429,9 +1465,21 @@ function seedDatabase() {
     'user-org-1',
     'open',
     0,
-    nowStr
+    nowStr,
+    '100 Reichler Park Drive, Example Valley, NJ 08824',
+    40.3860,
+    -74.5560
   );
 
+  /**
+   * Deliberately left without coordinates.
+   *
+   * An event with no pin is an ordinary thing — an organizer typed a place name
+   * and never opened the picker — and every location surface has to degrade for
+   * it: no map, no distance, no forecast, and a directions link that falls back
+   * to the text address. That path is the one most likely to regress, and a
+   * seed where every event has a pin is a seed where nobody ever sees it.
+   */
   insertEvent.run(
     'event-pantry-past',
     'Food Pantry Boxing & Distribution',
@@ -1442,7 +1490,10 @@ function seedDatabase() {
     'user-org-1',
     'completed',
     0,
-    nowStr
+    nowStr,
+    null,
+    null,
+    null
   );
 
   // Seed Slots

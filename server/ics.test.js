@@ -45,7 +45,7 @@ function longestOctetLine(ics) {
 }
 
 const SHIFT = {
-  uid: 'slot-1@wevolunteer.org',
+  uid: 'slot-1@wevolunteers.org',
   start: '2026-08-11T07:30:00.000Z',
   end: '2026-08-11T09:30:00.000Z',
   summary: 'Softball Snack Shack (Adult)',
@@ -80,7 +80,7 @@ describe('ICS structure (§3.1, §3.4)', () => {
     const { props } = parse(buildShiftIcs(SHIFT));
     expect(props['BEGIN']).toBeDefined();
     expect(props['VERSION']).toBe('2.0');
-    expect(props['UID']).toBe('slot-1@wevolunteer.org');
+    expect(props['UID']).toBe('slot-1@wevolunteers.org');
     expect(props['DTSTART']).toBe('20260811T073000Z');
     expect(props['DTEND']).toBe('20260811T093000Z');
     expect(props['DTSTAMP']).toBe('20260730T120000Z');
@@ -179,5 +179,95 @@ describe('ICS dates', () => {
 
   it('rejects an unparseable date rather than emitting "InvalidDate"', () => {
     expect(() => formatIcsDate('not-a-date')).toThrow(/Invalid date/);
+  });
+});
+
+/**
+ * GEO and VALARM — the two properties that hand the "when should I leave"
+ * question to the calendar application, which can actually answer it.
+ *
+ * WeVolunteer cannot compute a travel time: there is no routing provider, the
+ * CSP forbids calling one from the browser, and the server has no origin to
+ * route from because student coordinates are deliberately never stored. A
+ * calendar that knows an event's coordinates already routes from the device,
+ * at the time, with live traffic. So these two lines are the feature.
+ */
+describe('ICS location and alarms', () => {
+  const base = {
+    uid: 'slot-1@wevolunteers.org',
+    start: '2026-08-20T14:00:00.000Z',
+    end: '2026-08-20T17:00:00.000Z',
+    summary: 'Park Cleanup (Morning)',
+    description: 'Bring gloves',
+    location: 'Reichler Park, 100 Reichler Park Drive',
+    stamp: '2026-08-11T12:00:00.000Z',
+  };
+
+  const lines = (ics) => ics.split('\r\n');
+
+  it('emits GEO when the event has coordinates', () => {
+    const ics = buildShiftIcs({ ...base, latitude: 40.386, longitude: -74.556 });
+    expect(lines(ics)).toContain('GEO:40.386;-74.556');
+  });
+
+  it('does not escape the GEO separator', () => {
+    /* GEO is a float pair, not a TEXT property. Running it through escapeText
+       would emit `40.386\;-74.556`, which no parser accepts. */
+    const ics = buildShiftIcs({ ...base, latitude: 40.386, longitude: -74.556 });
+    expect(ics).not.toContain('\\;');
+  });
+
+  it('omits GEO entirely for an event with no pin', () => {
+    const ics = buildShiftIcs({ ...base });
+    expect(ics).not.toContain('GEO:');
+  });
+
+  it('omits GEO rather than emitting half of it', () => {
+    /* A lone coordinate is not a place, and `GEO:40.386;` is malformed rather
+       than partial. */
+    expect(buildShiftIcs({ ...base, latitude: 40.386 })).not.toContain('GEO:');
+    expect(buildShiftIcs({ ...base, longitude: -74.556 })).not.toContain('GEO:');
+  });
+
+  it('emits a VALARM at the requested lead time', () => {
+    const ics = buildShiftIcs({ ...base, reminderMinutes: 60 });
+    const out = lines(ics);
+    expect(out).toContain('BEGIN:VALARM');
+    expect(out).toContain('ACTION:DISPLAY');
+    expect(out).toContain('TRIGGER:-PT60M');
+    expect(out).toContain('END:VALARM');
+  });
+
+  it('puts the alarm inside the event, where RFC 5545 requires it', () => {
+    const out = lines(buildShiftIcs({ ...base, reminderMinutes: 30 }));
+    expect(out.indexOf('BEGIN:VALARM')).toBeGreaterThan(out.indexOf('BEGIN:VEVENT'));
+    expect(out.indexOf('END:VALARM')).toBeLessThan(out.indexOf('END:VEVENT'));
+  });
+
+  it('emits no alarm when none was asked for', () => {
+    expect(buildShiftIcs({ ...base })).not.toContain('VALARM');
+  });
+
+  it('refuses a lead time that is not a reminder', () => {
+    /* Zero and negatives would fire at or after the start; fractions are not
+       expressible in an RFC 5545 duration; a month ahead is noise somebody
+       disables along with the useful alarms. */
+    for (const bad of [0, -15, 12.5, 60 * 24 * 30, 'soon', null]) {
+      expect(buildShiftIcs({ ...base, reminderMinutes: bad })).not.toContain('VALARM');
+    }
+  });
+
+  it('still folds and terminates correctly with the new properties present', () => {
+    const ics = buildShiftIcs({
+      ...base,
+      latitude: 40.386,
+      longitude: -74.556,
+      reminderMinutes: 45,
+    });
+    expect(ics.endsWith('\r\n')).toBe(true);
+    for (const line of lines(ics)) {
+      expect(Buffer.from(line, 'utf8').length).toBeLessThanOrEqual(75);
+    }
+    expect(lines(ics).at(-2)).toBe('END:VCALENDAR');
   });
 });

@@ -696,6 +696,10 @@ describe('authorization hygiene', () => {
       'GET /api/user/preferences': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
       'POST /api/user/preferences': { category: CATEGORY.SELF_ONLY, reason: 'insert/update scoped to caller\'s own id' },
       'GET /api/certificates': { category: CATEGORY.SELF_ONLY, reason: 'WHERE at.user_id = caller' },
+      'POST /api/issues': { category: CATEGORY.SELF_ONLY, reason: 'files a report about the PLATFORM, stamped with the caller\'s own id and reading nothing about anybody else. Deliberately ungated: every account may say a page is broken, and requiring a capability would mean the people most likely to hit a permissions bug are the ones unable to report it. Rate limited per ACCOUNT (10/hour). Reading these back is a separate route behind report.resolve — this one only writes' },
+      'GET /api/issues/categories': { category: CATEGORY.SELF_ONLY, reason: 'returns the static list of issue categories the report form offers, so the dropdown cannot drift from server validation. No per-user data of any kind, and the internal reply-to routing is deliberately stripped before it is sent' },
+      'GET /api/legal/updates': { category: CATEGORY.SELF_ONLY, reason: 'lists legal-document changes THIS account has not acknowledged; every query is WHERE user_id = caller. No capability gate because none of them means "read your own legal notices" — the only two every role holds are event.view and persona.preview.exit, and gating on either would misdescribe the check' },
+      'POST /api/legal/updates/acknowledge': { category: CATEGORY.SELF_ONLY, reason: 'upserts one row keyed (caller, slug, version) recording that the caller dismissed a change notice. Acknowledgement is not consent and is stored apart from legal_acceptances, so this cannot manufacture agreement' },
       'GET /api/notifications': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
       'PATCH /api/notifications': { category: CATEGORY.SELF_ONLY, reason: 'update scoped to caller\'s own id' },
       'GET /api/favorites': { category: CATEGORY.SELF_ONLY, reason: 'WHERE user_id = caller' },
@@ -734,6 +738,17 @@ describe('authorization hygiene', () => {
        */
       'GET /api/legal/organizer-agreement': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'reads only the caller\'s own acceptance state (organizerAgreementStatus scoped to req.user.id); every role may ask, and a non-organizer gets required:false rather than a refusal' },
       'POST /api/legal/organizer-agreement/accept': { category: CATEGORY.SELF_ONLY, reason: 'writes acceptance rows for req.user.id only; refuses a non-organizer with 400 rather than recording a false acceptance, and must stay reachable while the organizer\'s student-facing capabilities are withheld (accountRoutes.js)' },
+      /**
+       * ── The Student Organizer Agreement, the same shape as the pair above ──
+       *
+       * Ungated for the same reasons, and one more: the four capabilities the
+       * rank confers are WITHHELD until this is accepted, so a capability gate
+       * on the acceptance route would be a gate on the only action that lifts
+       * it. The rank is a membership row rather than a role, so there is no
+       * capability that means "is a student organizer" to gate on either.
+       */
+      'GET /api/legal/student-organizer-agreement': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'reads only the caller\'s own acceptance state (studentOrganizerAgreementStatus scoped to req.user.id); every role may ask, and somebody who holds the rank nowhere gets required:false rather than a refusal' },
+      'POST /api/legal/student-organizer-agreement/accept': { category: CATEGORY.SELF_ONLY, reason: 'writes acceptance rows for req.user.id only; refuses somebody who holds the rank nowhere with 400 rather than recording a false acceptance, and must stay reachable while the four helper capabilities are withheld (accountRoutes.js)' },
       'GET /api/privacy/export/download/:id': { category: CATEGORY.SELF_ONLY, reason: 'job.user_id !== caller -> 404 (always the caller\'s own export job); behind requireAAL2(\'data.download\') with the jobId bound — this is where the archive actually leaves, and gating only the request left a completed one behind a bare session for seven days (v1.2b audit F-1)' },
 
       /**
@@ -776,11 +791,11 @@ describe('authorization hygiene', () => {
       // see). See each entry's reason for the actual check and file:line. ──
 
       'GET /api/users/:id/profile': { category: CATEGORY.INLINE_GATED, reason: 'can(directory.read) at the top, else 403 (userRoutes.js) — this is what keeps partner, an EXTERNAL organization deliberately outside the member directory, off it; then canSeeContact = isSelf || can(user.contact.read) || hostsApplicant gates the PII fields' },
-      'GET /api/events/:id': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = can(event.moderate) || organizer_id === caller, else 403 (eventRoutes.js:392-394)' },
+      'GET /api/events/:id': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = a capability from EVENT_STAFF_CAPABILITIES AND canRunEvent (host, or a manager of the owning organization) — the capability half is what consults principal.withheld, else 403 (eventRoutes.js:392-394)' },
       'GET /api/applications': { category: CATEGORY.INLINE_GATED, reason: 'deny-by-default cascade can(user.contact.read) -> can(applicant.review) -> can(application.withdraw) -> [] (applicationRoutes.js:45-60); covered by authz.matrix.test.js' },
       'DELETE /api/comments/:id': { category: CATEGORY.INLINE_GATED, reason: 'own comment (user_id === caller) OR can(event.moderate), else 403 (contentRoutes.js:135)' },
-      'GET /api/events/:id/attendees': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = can(event.moderate) || organizer_id === caller, else accepted-applicant-only visibility (contentRoutes.js:156)' },
-      'GET /api/events/:id/announcements': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = can(event.moderate) || organizer_id === caller, else accepted-applicant-only visibility (contentRoutes.js:201)' },
+      'GET /api/events/:id/attendees': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = a capability from EVENT_STAFF_CAPABILITIES AND canRunEvent (host, or a manager of the owning organization) — the capability half is what consults principal.withheld, else accepted-applicant-only visibility (contentRoutes.js:156)' },
+      'GET /api/events/:id/announcements': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = a capability from EVENT_STAFF_CAPABILITIES AND canRunEvent (host, or a manager of the owning organization) — the capability half is what consults principal.withheld, else accepted-applicant-only visibility (contentRoutes.js:201)' },
       'POST /api/events/:id/announcements': { category: CATEGORY.INLINE_GATED, reason: 'can(announcement.post) OR can(event.moderate), plus ownership check (contentRoutes.js:245,248)' },
       'PATCH /api/announcements/:id': { category: CATEGORY.INLINE_GATED, reason: 'can(announcement.post) OR can(event.moderate), plus ownership check (contentRoutes.js:295,298)' },
       'DELETE /api/announcements/:id': { category: CATEGORY.INLINE_GATED, reason: 'can(announcement.post) OR can(event.moderate), plus ownership check (contentRoutes.js:316,319)' },

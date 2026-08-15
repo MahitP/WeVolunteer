@@ -45,6 +45,24 @@ import distinguishedProfiles from './033_distinguished_profiles.js';
 import legalDocumentRevisions from './034_legal_document_revisions.js';
 import peerConversations from './035_peer_conversations.js';
 import slotWindowIndex from './036_slot_window_index.js';
+import checkinTokens from './037_checkin_tokens.js';
+import attendanceForeignKeys from './038_attendance_foreign_keys.js';
+import legalChangeNotices from './039_legal_change_notices.js';
+import organizationIdentity from './040_organization_identity.js';
+import organizationAnnouncements from './041_organization_announcements.js';
+import organizationAllowReplies from './042_organization_allow_replies.js';
+import avatarColour from './043_avatar_colour.js';
+import organizationBans from './044_organization_bans.js';
+import eventAudience from './045_event_audience.js';
+import studentOrganizerRole from './046_student_organizer_role.js';
+import emailOutbox from './047_email_outbox.js';
+import hashAuthTokens from './048_hash_auth_tokens.js';
+import serviceVisibility from './049_service_visibility.js';
+import deliveryEvents from './050_delivery_events.js';
+import issueReports from './051_issue_reports.js';
+import analyticsConsent from './052_analytics_consent.js';
+import ledgerDuplicateBackfill from './053_ledger_duplicate_backfill.js';
+import resyncUnacceptedLegalHashes from './054_resync_unaccepted_legal_hashes.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -187,7 +205,134 @@ export const MIGRATIONS = [
    * database that has a `slots` table — which is every one, since the initial
    * schema creates it.
    */
-  slotWindowIndex
+  slotWindowIndex,
+
+  /**
+   * 037 — per-volunteer check-in codes, and how a check-in mark was taken.
+   *
+   * Additive and order-independent: a new table, plus a defaulted column on
+   * `attendance_checkin`. Nothing existing reads either, so it can be applied to
+   * a database at any prior version without touching a row that is already
+   * there. See the file for why the codes are stored rather than signed.
+   */
+  checkinTokens,
+
+  /**
+   * 038 — foreign keys for the two attendance tables that never declared any.
+   *
+   * A table rebuild, so it is NOT order-independent: it must run after 037,
+   * which adds `attendance_checkin.method` and creates `checkin_tokens`. The
+   * rebuild carries both through. Guarded by `PRAGMA foreign_key_list`, so a
+   * second run is a no-op.
+   */
+  attendanceForeignKeys,
+
+  /**
+   * 039 — who has been told a legal document changed, and who has read it.
+   *
+   * Order-independent: a new table with one foreign key to `users`, no data
+   * migration and no dependency on any earlier schema beyond that.
+   */
+  legalChangeNotices,
+
+  /**
+   * 040 — an emoji or an uploaded image for an organization.
+   *
+   * Three ALTER TABLE ADD COLUMNs, each guarded on `PRAGMA table_info`, so a
+   * half-applied earlier run recovers rather than failing forever.
+   */
+  organizationIdentity,
+
+  /**
+   * 041 — organization announcements and their replies.
+   *
+   * Order-dependent only on `organizations` and `users` existing, both of which
+   * long predate it. Idempotent: `CREATE TABLE IF NOT EXISTS` throughout.
+   */
+  organizationAnnouncements,
+
+  /**
+   * 042 — replies become an organization setting rather than a per-post one.
+   *
+   * One guarded ALTER TABLE ADD COLUMN. Depends on 041 only in meaning, not in
+   * schema: it touches `organizations`, which long predates it.
+   */
+  organizationAllowReplies,
+
+  /**
+   * 043 — a background colour behind an emoji avatar, for people and for
+   * organizations. Two guarded ALTER TABLE ADD COLUMNs; order-independent.
+   */
+  avatarColour,
+
+  /**
+   * 044 — organization bans. A new table plus two indexes; order-independent
+   * beyond `organizations` and `users`, both of which long predate it.
+   */
+  organizationBans,
+
+  /**
+   * 045 — who an event is for. One column on `events` plus an index; depends
+   * only on `events`, and on migration 031 having added `organization_id`,
+   * which the column is meaningless without.
+   */
+  eventAudience,
+
+  /**
+   * 046 — the Student Organizer rank. Rebuilds `organization_members` to widen
+   * its CHECK, so it must run after 031 created the table and after anything
+   * that adds a column to it (nothing does).
+   */
+  studentOrganizerRole,
+  /**
+   * 047 — the outbox learns to carry a rendered message, so transactional mail
+   * stops being the one category that could vanish on a restart. Additive
+   * columns only, so a queue with rows in flight drains across the upgrade.
+   */
+  emailOutbox,
+  /**
+   * 048 — verification, reset and email-change tokens stop being stored in
+   * plaintext. Rebuilds three tables to rename `token` to `token_hash`, so a
+   * future plaintext write fails loudly instead of silently reopening the hole.
+   */
+  hashAuthTokens,
+  /**
+   * 049 — a student decides who sees their service history and certificates.
+   * Two additive columns on `users`, both defaulting to 'public' so nothing a
+   * student had already published silently disappears on deploy.
+   */
+  serviceVisibility,
+  /**
+   * 050 — what became of a message after the provider accepted it. Additive
+   * columns plus an event table whose PRIMARY KEY is the webhook dedupe.
+   */
+  deliveryEvents,
+  /**
+   * 051 — reports about the PLATFORM, kept out of the moderation queue that
+   * exists to protect children. A new table, not a reuse of `reports`.
+   */
+  issueReports,
+  /**
+   * 052 — whether a person has agreed to be measured. One nullable column, no
+   * DEFAULT, no backfill: every existing row becomes "not asked", which is off.
+   * The only privacy column in the schema that does NOT carry forward the
+   * behaviour already in place, and the header says why.
+   */
+  analyticsConsent,
+  /**
+   * 053 — removes the duplicate rows the ledger backfill wrote while it was
+   * idempotent against its own entries and blind to everybody else's. Deletes
+   * only the migration-sourced copy, only where a real one survives for the
+   * same (slot, user).
+   */
+  ledgerDuplicateBackfill,
+  /**
+   * 054 — lets hash enforcement start on a database that predates it, by
+   * re-syncing only the published versions nobody has ever accepted. A version
+   * with an acceptance row keeps its hash and keeps refusing the boot, which is
+   * the invariant working rather than an obstacle to it.
+   */
+  resyncUnacceptedLegalHashes
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

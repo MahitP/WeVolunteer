@@ -42,6 +42,15 @@ const router = express.Router();
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
 export const UPLOADS_ROOT = path.join(PUBLIC_DIR, 'uploads');
 const UPLOADS_DIR = path.join(UPLOADS_ROOT, 'avatars');
+
+/**
+ * Exported so organization images land in the same directory, are written by
+ * the same pipeline, and are deleted by the same `deleteUploadedFile`. A second
+ * uploads directory would be a second containment check to get right — and the
+ * comment on `deleteUploadedFile` records what happened the last time one was
+ * written by hand.
+ */
+export { UPLOADS_DIR as AVATAR_UPLOADS_DIR };
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
@@ -170,7 +179,7 @@ const upload = multer({
  * `payload_too_large` code, so a client sees one shape for "too big" whichever
  * limit it hit.
  */
-function receiveAvatar(req, res, next) {
+export function receiveAvatar(req, res, next) {
   upload.single('avatar')(req, res, (err) => {
     if (!err) return next();
 

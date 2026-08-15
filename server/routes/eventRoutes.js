@@ -12,14 +12,115 @@ import { can, requireCap, requireCapAny } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
-import { validateTags, replaceEventTags, tagsForEvent, tagsForEvents, tagVocabulary } from '../eventTags.js';
+import { validateTags, replaceEventTags, tagsForEvent, tagsForEvents, tagVocabulary, BROWSE_TAG_LIMIT } from '../eventTags.js';
+import { EVENT_AUDIENCES, DEFAULT_AUDIENCE, isMemberOf } from '../eventEligibility.js';
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
 import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
 import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
-import { canManage, memberIds } from '../organizations.js';
+import {
+  canManage, canHelpRun, canRunEvent, EVENT_STAFF_CAPABILITIES, memberIds,
+} from '../organizations.js';
+import { MAIL_DOMAIN } from '../emailIdentity.js';
 
 const router = express.Router();
+
+/**
+ * The caller's own active ban from an organization, with any appeal they filed.
+ *
+ * Returns `null` for "nothing to say" — no organization on the event, no
+ * session, or no active ban — so a client can render on truthiness alone.
+ *
+ * The appeal is looked up by the same `(subject, subject_ref, user_id)` triple
+ * `POST /api/appeals` writes, which is what keeps the button on the event and
+ * the row in the organization's inbox describing one thing.
+ */
+/**
+ * Every organization this reader is currently banned from, with the reason and
+ * their latest appeal — as a Map keyed by organization id.
+ *
+ * Built once per list response. The per-event form below would otherwise run
+ * two queries for each of sixty cards, and a list is the surface where that
+ * cost is actually paid.
+ */
+/**
+ * The organizations this reader belongs to, as a Set of ids.
+ *
+ * One query for the whole page rather than one per card, for the same reason
+ * `viewerBansFor` is batched: a browse list is up to sixty events, and a
+ * membership lookup per card is sixty round trips to answer one question.
+ *
+ * Used only to decide what a members-only event SAYS. It is not the
+ * enforcement — `eventApplicationEligibility` re-reads the membership row when
+ * an application is actually made, and would refuse regardless of what this
+ * told the browser.
+ */
+function viewerMembershipsFor(userId) {
+  if (!userId) return new Set();
+  return new Set(db.prepare('SELECT organization_id FROM organization_members WHERE user_id = ?')
+    .all(userId).map(r => r.organization_id));
+}
+
+function viewerBansFor(userId) {
+  if (!userId) return new Map();
+
+  const bans = db.prepare(`
+    SELECT organization_id, reason FROM organization_bans
+     WHERE user_id = ? AND lifted_at IS NULL
+  `).all(userId);
+  if (bans.length === 0) return new Map();
+
+  const appeals = db.prepare(`
+    SELECT subject_ref, id, status, decision FROM appeals
+     WHERE subject = 'organization_ban' AND user_id = ?
+     ORDER BY created_at ASC
+  `).all(userId);
+  /* Last write wins, and the rows arrive oldest-first, so this keeps the most
+     recent appeal per organization — the one belonging to the ban they are
+     under now rather than one from a ban already lifted. */
+  const latest = new Map(appeals.map(a => [a.subject_ref, a]));
+
+  return new Map(bans.map(b => [b.organization_id, {
+    banned: true,
+    reason: b.reason,
+    appeal: latest.has(b.organization_id)
+      ? {
+        id: latest.get(b.organization_id).id,
+        status: latest.get(b.organization_id).status,
+        decision: latest.get(b.organization_id).decision,
+      }
+      : null,
+  }]));
+}
+
+function viewerBanFor(organizationId, userId) {
+  if (!organizationId || !userId) return null;
+
+  const ban = db.prepare(`
+    SELECT reason FROM organization_bans
+     WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
+  `).get(organizationId, userId);
+  if (!ban) return null;
+
+  /* The most recent, so a reader who appealed, was refused, and was banned
+     again sees the appeal that belongs to the ban they are under. */
+  const appeal = db.prepare(`
+    SELECT id, status, decision FROM appeals
+     WHERE subject = 'organization_ban' AND subject_ref = ? AND user_id = ?
+     ORDER BY created_at DESC LIMIT 1
+  `).get(organizationId, userId);
+
+  return {
+    banned: true,
+    /* Their own ban reason. They were sent it when it happened; withholding it
+       here would mean the one place they act on it is the one place it is not
+       stated. */
+    reason: ban.reason,
+    appeal: appeal
+      ? { id: appeal.id, status: appeal.status, decision: appeal.decision }
+      : null,
+  };
+}
 
 /**
  * One slot as the client consumes it. Shared by the list and single-event
@@ -165,7 +266,7 @@ router.get('/api/events', authenticateToken, (req, res) => {
      * from an explicit field list, so `total_count` never reaches a caller.
      */
     const SELECT = `
-      SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
+      SELECT e.*, u.name as organizer_name, u.verified as organizer_verified, u.role as organizer_role,
              u.school as organizer_school,
              /* One LEFT JOIN rather than a lookup per event. An event card shows
                 the organization's name, and fetching it per row is the N+1 the
@@ -296,6 +397,10 @@ router.get('/api/events', authenticateToken, (req, res) => {
        browse screen calls on every keystroke. */
     const tagsByEvent = tagsForEvents(db, pageIds);
 
+    /* One lookup for the page rather than two per card — see viewerBansFor. */
+    const viewerBans = viewerBansFor(req.user?.id);
+    const viewerOrgs = viewerMembershipsFor(req.user?.id);
+
     const formattedEvents = events.map(event => {
       const slots = slotsByEvent.get(event.id) || [];
 
@@ -317,6 +422,18 @@ router.get('/api/events', authenticateToken, (req, res) => {
         ? Number(formattedSlots.reduce((sum, s) => sum + s.hours, 0).toFixed(2))
         : 0;
 
+      /**
+       * Deliberately NOT `canRunEvent` here, unlike every other authority
+       * question about an event.
+       *
+       * This runs once per card, up to sixty per request, on the busiest
+       * endpoint the platform has — and `canRunEvent`'s manager branch is a
+       * membership lookup, so asking it here would add sixty queries to a
+       * request that already carries a documented throughput ceiling. What it
+       * would buy is arrival instructions on a browse card for a manager who
+       * did not create the event; they read them on the event itself, where
+       * `canRunEvent` IS asked, one query for one event.
+       */
       const canSeeInstructions = can(req.principal, 'event.moderate') ||
         event.organizer_id === req.principal.userId ||
         acceptedEventIds.has(event.id);
@@ -339,7 +456,16 @@ router.get('/api/events', authenticateToken, (req, res) => {
         instructions: canSeeInstructions ? (event.instructions || '') : '',
         organizerId: event.organizer_id,
         organizerName: event.organizer_name,
-        organizerVerified: event.organizer_verified === 1,
+        /**
+         * "Verified organizer" means an administrator approved this ACCOUNT to
+         * run events. `users.verified` alone does not mean that: signup writes
+         * it as 1 for every non-organizer, and it was harmless only while a
+         * student could never be an event's host. Since the Student Organizer
+         * rank, every event a student posts for their club was rendering the
+         * approval shield.
+         */
+        organizerVerified: event.organizer_verified === 1
+          && ['organizer', 'admin', 'super_admin'].includes(event.organizer_role),
         organizerSchool: event.organizer_school || '',
         status: event.status,
         hasAttendance: withAttendance.has(event.id),
@@ -355,6 +481,28 @@ router.get('/api/events', authenticateToken, (req, res) => {
          */
         creditsHours: event.credits_hours !== 0,
         organizationId: event.organization_id || null,
+        /* Who may apply. The client labels members-only events and explains
+           ineligibility rather than showing a button that will be refused. */
+        audience: event.audience || 'everyone',
+        /**
+         * Whether THIS reader is on the inside of that restriction.
+         *
+         * A members-only event is still listed to everybody and still says
+         * whose it is — hiding it would mean somebody who would happily join
+         * the club never learns the club exists. What changes is what the card
+         * says: "members only, and you are not one" instead of a button that
+         * 403s.
+         *
+         * Presentation only. The server re-reads the membership row on the
+         * application itself and refuses there.
+         */
+        viewerIsMember: event.organization_id
+          ? viewerOrgs.has(event.organization_id)
+          : null,
+        /* The reader's own ban from the organization running this event, if
+           any — see `viewerBansFor`. Only ever theirs; there is no parameter
+           that could point it at somebody else. */
+        viewerBan: viewerBans.get(event.organization_id) || null,
         organizationName: event.organization_name || null,
         organizationSlug: event.organization_slug || null,
         selectionSummary: event.selection_summary ? JSON.parse(event.selection_summary) : null,
@@ -416,7 +564,10 @@ router.get('/api/events', authenticateToken, (req, res) => {
      * browse screen renders its filter bar from the response it already makes,
      * instead of a second round trip on first paint.
      */
-    const tags = tagVocabulary(db);
+    /* The fifteen most used, not the fifty this defaults to — see
+       BROWSE_TAG_LIMIT. Ordered by usage with a deterministic tie-break, so the
+       bar does not reshuffle between requests. */
+    const tags = tagVocabulary(db, { limit: BROWSE_TAG_LIMIT });
 
     res.json({
       events: formattedEvents,
@@ -492,10 +643,23 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
 
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const isStaff = can(req.principal, 'event.moderate') ||
-      event.organizer_id === req.principal.userId;
+    /* BOTH halves. `canRunEvent` says the event is yours; the capability list is
+       what consults `principal.withheld`, so a promoted student who has not
+       accepted the Student Organizer Agreement is refused here as they are on
+       every write route. Membership alone left this one open. */
+    const isStaff = EVENT_STAFF_CAPABILITIES.some(c => can(req.principal, c))
+      && canRunEvent(db, event, req.principal.userId, {
+        hasModerate: can(req.principal, 'event.moderate'),
+      });
     if (!isStaff) return res.status(403).json({ error: 'Access denied: You do not host this event' });
 
+    /* This route is staff-only (the `isStaff` gate above), so the reader always
+       runs the event and `viewerIsMember` is not a question anybody is asking
+       here. The field is still emitted for shape parity with the list, computed
+       from the one membership row rather than a sweep of the whole table. */
+    const viewerOrgs = event.organization_id
+      ? new Set(isMemberOf(event.organization_id, req.user?.id) ? [event.organization_id] : [])
+      : new Set();
     const slots = db.prepare('SELECT * FROM slots WHERE event_id = ?').all(event.id);
     const acceptedBySlot = new Map();
     for (const r of db.prepare(`
@@ -541,8 +705,50 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
         autoApprove: event.auto_approve === 1,
         creditsHours: event.credits_hours !== 0,
         organizationId: event.organization_id || null,
+        /* Who may apply. The client labels members-only events and explains
+           ineligibility rather than showing a button that will be refused. */
+        audience: event.audience || 'everyone',
+        /**
+         * Whether THIS reader is on the inside of that restriction.
+         *
+         * A members-only event is still listed to everybody and still says
+         * whose it is — hiding it would mean somebody who would happily join
+         * the club never learns the club exists. What changes is what the card
+         * says: "members only, and you are not one" instead of a button that
+         * 403s.
+         *
+         * Presentation only. The server re-reads the membership row on the
+         * application itself and refuses there.
+         */
+        viewerIsMember: event.organization_id
+          ? viewerOrgs.has(event.organization_id)
+          : null,
         organizationName: event.organization_name || null,
         organizationSlug: event.organization_slug || null,
+        /**
+         * Whether THIS reader is banned from the organization running this
+         * event, and what became of any appeal they have already filed.
+         *
+         * ── Why it lives on the event ──
+         *
+         * Being told you are banned only through a notification means being
+         * told once, in a list that fills up. Somebody who comes back to the
+         * event a week later and finds they cannot join deserves to learn why
+         * where they are standing, and to be able to do something about it
+         * without hunting through their notifications.
+         *
+         * ── Whose ban ──
+         *
+         * Only the caller's. It is keyed on `req.user.id` and there is no
+         * parameter to change that, so this cannot be turned into a way to ask
+         * whether somebody else is banned. Managers read bans through the
+         * organization's own surfaces, which are separately authorized.
+         *
+         * `null` when there is no organization, no ban, or no session — the
+         * absence of a ban and the absence of an organization look the same to
+         * a reader, and neither needs explaining.
+         */
+        viewerBan: viewerBanFor(event.organization_id, req.user?.id),
         /* Same shape as the list response, so a client that renders chips from
            one can render them from the other without a second code path. */
         tags: tagsForEvent(db, event.id),
@@ -557,7 +763,19 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
 });
 
 
-router.post('/api/events', authenticateToken, requireCap('event.create'), (req, res) => {
+/**
+ * Creating an event.
+ *
+ * ── Why the gate accepts two capabilities ──
+ *
+ * `event.create` is the account-level power: this person may put a shift up
+ * anywhere, under their own name. `organization.event.create` is the smaller
+ * one: this person may put a shift up FOR A CLUB THEY HELP RUN, and nothing
+ * else. Students hold the second so that a Student Organizer can reach this
+ * handler at all; the block below is what stops a student who helps run nothing
+ * from getting any further than the door.
+ */
+router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'organization.event.create']), (req, res) => {
   // Check if organizer is verified by Admin
   const organizer = db.prepare('SELECT verified FROM users WHERE id = ?').get(req.user.id);
   if (!organizer || organizer.verified !== 1) {
@@ -599,15 +817,67 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
    * that check is `canManage`, the same one organizationRoutes uses — so there
    * is one answer to "may you act for this organization" rather than two.
    */
+  /**
+   * Who the event is for.
+   *
+   * `organization` is only meaningful with an organization behind it — a shift
+   * "for members" of nothing is a shift nobody can join, and silently treating
+   * it as open would be a different event from the one the organizer described.
+   * So it is refused rather than corrected.
+   */
+  /**
+   * An audience the server does not recognise is REFUSED, not corrected.
+   *
+   * It used to coerce silently to `everyone`, which meant a client with a typo
+   * published a public event where its organizer had asked for a restricted one
+   * — the failure mode being quiet is what makes it bad, not the default being
+   * wrong. `PUT` already answered 400 for the same value, so the two halves of
+   * the same field also disagreed about their own contract.
+   */
+  const audience = req.body?.audience === undefined ? DEFAULT_AUDIENCE : req.body.audience;
+  if (!EVENT_AUDIENCES.includes(audience)) {
+    return res.status(400).json({
+      error: 'That is not a valid audience for an event.',
+      field: 'audience', code: 'invalid_audience',
+    });
+  }
+  if (audience === 'organization' && (organizationId == null || organizationId === '')) {
+    return res.status(400).json({
+      error: 'Choose the organization whose members can apply.',
+      field: 'organizationId', code: 'organization_required',
+    });
+  }
+
+  /**
+   * An account with no `event.create` may ONLY create for an organization.
+   *
+   * This is the whole of what keeps `organization.event.create` from being a
+   * quiet promotion. A Student Organizer reached this handler because they help
+   * run one club; without this line the same request with `organizationId`
+   * omitted would produce a personal event under their own name, which is the
+   * `organizer` role, granted by a club president who was only choosing who
+   * posts the bake-sale shift.
+   */
+  const orgScopedOnly = !can(req.principal, 'event.create');
+  if (orgScopedOnly && (organizationId == null || organizationId === '')) {
+    return res.status(403).json({
+      error: 'You can only create events for an organization you help run.',
+      field: 'organizationId', code: 'organization_required',
+    });
+  }
+
   let organization = null;
   if (organizationId != null && organizationId !== '') {
     organization = db.prepare('SELECT * FROM organizations WHERE id = ?').get(organizationId);
     if (!organization || organization.status !== 'active') {
       return res.status(400).json({ error: 'That organization does not exist.', field: 'organizationId' });
     }
-    if (!canManage(db, organization.id, req.user.id, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    /* `canHelpRun`, not `canManage` — a Student Organizer posting their club's
+       shift is the point of the rank. Managers and moderators are included by
+       that function, so nobody loses anything they had. */
+    if (!canHelpRun(db, organization.id, req.user.id, { hasModerate: can(req.principal, 'organization.moderate') })) {
       return res.status(403).json({
-        error: 'You are not a manager of that organization.',
+        error: 'You do not help run that organization.',
         field: 'organizationId', code: 'not_manager',
       });
     }
@@ -649,8 +919,8 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
       db.prepare(`
         INSERT INTO events (id, title, description, category, location, application_deadline,
                             organizer_id, status, created_at, auto_approve, instructions, attendee_visibility,
-                            address, latitude, longitude, organization_id, credits_hours)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            address, latitude, longitude, organization_id, credits_hours, audience)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         eventId,
         title,
@@ -667,7 +937,11 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
         latitude != null ? latitude : null,
         longitude != null ? longitude : null,
         organization ? organization.id : null,
-        awardsHours ? 1 : 0
+        awardsHours ? 1 : 0,
+        /* An event with no organization is always open, whatever was asked for
+           — the validation above refuses the combination, so this is belt and
+           braces against a future caller skipping it. */
+        organization ? audience : DEFAULT_AUDIENCE
       );
 
       // B. Insert slots
@@ -767,11 +1041,11 @@ router.post('/api/events', authenticateToken, requireCap('event.create'), (req, 
 
 // 6. Fetch All Applications (Enriched with Student profile, Slot, and Event details)
 
-router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), async (req, res) => {
+router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own', 'organization.event.manage.own']), async (req, res) => {
   const eventId = req.params.id;
   const {
     title, description, category, location, applicationDeadline, slots,
-    autoApprove, instructions, attendeeVisibility,
+    autoApprove, instructions, attendeeVisibility, audience,
     address, latitude, longitude, tags
   } = req.body;
 
@@ -794,7 +1068,7 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
 
@@ -805,9 +1079,34 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
       });
     }
 
+    /**
+     * An absent geo field means "not editing it", not "clear it".
+     *
+     * The UPDATE below wrote `address`, `latitude` and `longitude`
+     * unconditionally from the body. `OrganizerDashboard`'s quick-edit form
+     * sends title, description, location and category and nothing else — so
+     * every quick save silently nulled the coordinates an organizer had picked
+     * on the map, and with them that event's distance filtering, its directions
+     * link and its forecast. The map data disappeared through the form that
+     * never mentions maps.
+     *
+     * Same distinction the `tags` block below makes, for the same reason: a
+     * client written before a field existed must not strip that field by saving
+     * something else. Explicit `null` still clears, so a deliberate "remove the
+     * pin" is still expressible.
+     *
+     * The coordinates move as a pair — `validateEventPayload` refuses one
+     * without the other — so they are kept or replaced together and never left
+     * half-written.
+     */
+    const nextAddress = address === undefined ? event.address : (address || null);
+    const editingCoords = latitude !== undefined || longitude !== undefined;
+    const nextLatitude = editingCoords ? (latitude ?? null) : event.latitude;
+    const nextLongitude = editingCoords ? (longitude ?? null) : event.longitude;
+
     const changes = [];
     if (event.title !== title) changes.push('title');
-    if (event.location !== location || event.address !== address) changes.push('location');
+    if (event.location !== location || event.address !== nextAddress) changes.push('location');
     if (event.application_deadline !== applicationDeadline) changes.push('deadline');
     if (event.description !== description) changes.push('description');
 
@@ -929,7 +1228,7 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
         SET title = ?, description = ?, category = ?, location = ?, application_deadline = ?,
             address = ?, latitude = ?, longitude = ?
         WHERE id = ?
-      `).run(title, description, category, location, applicationDeadline, address || null, latitude != null ? latitude : null, longitude != null ? longitude : null, eventId);
+      `).run(title, description, category, location, applicationDeadline, nextAddress, nextLatitude, nextLongitude, eventId);
 
       if (autoApprove !== undefined) {
         db.prepare('UPDATE events SET auto_approve = ? WHERE id = ?').run(autoApprove ? 1 : 0, eventId);
@@ -940,6 +1239,45 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
       if (attendeeVisibility !== undefined) {
         db.prepare('UPDATE events SET attendee_visibility = ? WHERE id = ?')
           .run(attendeeVisibility === 'private' ? 'private' : 'accepted', eventId);
+      }
+
+      /**
+       * Changing who the event is for.
+       *
+       * ── Only when the field is sent ──
+       *
+       * Omitting `audience` leaves it alone, the same rule `tags` follows below.
+       * A client that predates this field must not silently reopen a
+       * members-only shift by saving an unrelated edit.
+       *
+       * ── The organization is not editable here, so narrowing is safe ──
+       *
+       * `PUT` never accepted `organizationId` and still does not, so an event
+       * cannot be pointed at a different club. Narrowing to `organization`
+       * therefore restricts the event to the members of the club it already
+       * belonged to, which is the only club it was ever announced under.
+       *
+       * ── Existing applications are NOT invalidated ──
+       *
+       * Somebody who applied while the event was open keeps their place when it
+       * narrows. They applied to something that was genuinely open at the time,
+       * and revoking it silently would take a place away with no notice and no
+       * record. The audience governs who may apply from now on; an organizer who
+       * wants a specific person off the shift has a control for that.
+       *
+       * ── An event with no organization cannot be narrowed ──
+       *
+       * "Members only" of nothing is a shift nobody can join. Refused rather
+       * than corrected, so the organizer finds out now.
+       */
+      if (audience !== undefined) {
+        if (!EVENT_AUDIENCES.includes(audience)) {
+          throw Object.assign(new Error('bad audience'), { httpStatus: 400, field: 'audience' });
+        }
+        if (audience === 'organization' && !event.organization_id) {
+          throw Object.assign(new Error('no organization'), { httpStatus: 400, field: 'audience', code: 'organization_required' });
+        }
+        db.prepare('UPDATE events SET audience = ? WHERE id = ?').run(audience, eventId);
       }
 
       /**
@@ -998,19 +1336,32 @@ router.put('/api/events/:id', authenticateToken, requireCap('event.edit.own'), a
 
     res.json({ success: true, notified });
   } catch (error) {
+    /* A validation failure raised from inside the transaction carries its own
+       status. Without this it would roll back correctly and then be reported as
+       a server fault, telling an organizer their edit broke the site when they
+       had simply asked for something the event cannot be. */
+    if (error?.httpStatus) {
+      return res.status(error.httpStatus).json({
+        error: error.field === 'audience' && error.code === 'organization_required'
+          ? 'Only an event that belongs to an organization can be limited to its members.'
+          : 'That is not a valid audience for an event.',
+        field: error.field,
+        ...(error.code ? { code: error.code } : {}),
+      });
+    }
     console.error('Update event details error:', error);
     res.status(500).json({ error: 'Internal server error editing event details' });
   }
 });
 
 // 11. Run Equalizer Hour Sorting (Organizer only)
-router.post('/api/events/:id/auto-approve', authenticateToken, requireCap('event.edit.own'), (req, res) => {
+router.post('/api/events/:id/auto-approve', authenticateToken, requireCapAny(['event.edit.own', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1060,14 +1411,14 @@ router.post('/api/events/:id/auto-approve', authenticateToken, requireCap('event
 });
 
 // 12. Update Event Settings (Organizer only)
-router.patch('/api/events/:id', authenticateToken, requireCap('event.edit.own'), (req, res) => {
+router.patch('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
   const { autoApprove, attendeeVisibility } = req.body;
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
     if (event.status === 'completed') {
@@ -1101,7 +1452,7 @@ router.patch('/api/events/:id', authenticateToken, requireCap('event.edit.own'),
 
 // A1. Fetch Pending Organizer accounts
 
-router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own']), (req, res) => {
+router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
 
   try {
@@ -1109,7 +1460,7 @@ router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.modera
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     // Allow Admin OR the organizer who hosted it to delete it
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1203,7 +1554,7 @@ router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.modera
 });
 
 // A5. Toggle Event Status (Organizer only)
-router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own']), async (req, res) => {
+router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own', 'organization.event.manage.own']), async (req, res) => {
   const eventId = req.params.id;
   const { status } = req.body;
 
@@ -1214,7 +1565,7 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
     if (event.status === 'completed') {
@@ -1242,17 +1593,67 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
 
 // A6. Export Accepted Roster as CSV (Organizer only)
 
-router.post('/api/events/:id/duplicate', authenticateToken, requireCap('event.create'), (req, res) => {
+router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['event.create', 'organization.event.manage.own']), (req, res) => {
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
+    }
+
+    /**
+     * ── Duplicating carries the organization and the audience ──
+     *
+     * It did not, and that was two defects wearing one omission.
+     *
+     * For an organizer it silently detached the copy: duplicate a members-only
+     * NHS shift and you got a public event belonging to nobody, which is not
+     * the event anybody asked for and is exactly the setting they had just
+     * chosen against.
+     *
+     * For a Student Organizer it was an escalation. `POST /api/events` refuses
+     * them an event with no organization behind it — that refusal is the whole
+     * of what keeps the rank from being a promotion — and duplicate was a
+     * second create path that had never learned the rule. Create one legitimate
+     * club event, duplicate it, and the copy came out with `organization_id`
+     * NULL: a platform-wide event hosted by a student, outside the club's
+     * sight, with no ban check and no membership check, carrying every
+     * organizer power the ownership check confers.
+     *
+     * So the copy keeps the parent's organization, and the same two questions
+     * the create route asks are asked again about the copy. A caller who could
+     * not have created this event cannot arrive at it by copying one.
+     */
+    if (!can(req.principal, 'event.create') && !event.organization_id) {
+      return res.status(403).json({
+        error: 'You can only create events for an organization you help run.',
+        code: 'organization_required',
+      });
+    }
+    /* An archived club is out of circulation, and duplicate is the third create
+       path that had to learn it — create refuses one, joining refuses one, and
+       this would have published a brand-new open event under a club that had
+       been wound up. */
+    if (event.organization_id) {
+      const org = db.prepare('SELECT status FROM organizations WHERE id = ?').get(event.organization_id);
+      if (!org || org.status !== 'active') {
+        return res.status(409).json({
+          error: 'That organization is archived.', code: 'organization_archived',
+        });
+      }
+    }
+    if (event.organization_id && !canHelpRun(db, event.organization_id, req.user.id, {
+      hasModerate: can(req.principal, 'organization.moderate'),
+    })) {
+      return res.status(403).json({
+        error: 'You do not help run that organization.',
+        code: 'not_manager',
+      });
     }
 
     // Create a new event with the same data but as 'open' status and shifted dates by default
     // We shift dates forward by 7 days; the organizer can edit afterwards.
-    const newEventId = `event-${Date.now()}`;
+    const newEventId = `event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const shiftDays = 7;
     const shiftIso = (iso) => {
       const d = new Date(iso);
@@ -1260,8 +1661,9 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCap('event.cr
       return d.toISOString();
     };
     db.prepare(`
-      INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, created_at, auto_approve)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
+      INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, created_at, auto_approve,
+                          organization_id, audience)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)
     `).run(
       newEventId,
       `${event.title} (Copy)`,
@@ -1271,7 +1673,12 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCap('event.cr
       shiftIso(event.application_deadline),
       req.user.id,
       new Date().toISOString(),
-      event.auto_approve
+      event.auto_approve,
+      event.organization_id || null,
+      /* Belt and braces against the column drifting: an audience of
+         `organization` on a copy with no organization would be a shift nobody
+         can join, which is the state the create route refuses outright. */
+      event.organization_id ? (event.audience || DEFAULT_AUDIENCE) : DEFAULT_AUDIENCE
     );
 
     // Clone slots
@@ -1294,13 +1701,16 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCap('event.cr
 
 // 25. Quick stats (admin) — used to enrich the admin panel
 
-router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
+router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
   try {
-    const event = db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(eventId);
+    /* The whole row, not just `organizer_id`: `canRunEvent` also asks which
+       organization the event belongs to, and a projection that omits it makes
+       the function throw rather than quietly refuse the club's manager. */
+    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1328,14 +1738,14 @@ router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(
 });
 
 // A27. Execute Draft Auto Select Draw (Organizer only)
-router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
+router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1409,14 +1819,14 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(
 });
 
 // A28. Confirm and Lock Auto Select Results (Organizer only)
-router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCapAny(['event.moderate', 'applicant.review']), (req, res) => {
+router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), (req, res) => {
   const eventId = req.params.id;
 
   try {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
     if (event.status === 'completed') {
@@ -1457,7 +1867,7 @@ router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCap
 });
 
 // Broadcast email to confirmed roster
-router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['event.moderate', 'announcement.post']), async (req, res) => {
+router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['event.moderate', 'announcement.post', 'organization.event.manage.own']), async (req, res) => {
   const { id: eventId } = req.params;
   const { subject, message } = req.body;
 
@@ -1469,12 +1879,12 @@ router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['even
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
     
-    if (!can(req.principal, 'event.moderate') && event.organizer_id !== req.principal.userId) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
     const confirmedApps = db.prepare(`
-      SELECT DISTINCT u.id, u.email 
+      SELECT DISTINCT u.id, u.email, u.email_opt_out 
       FROM applications a
       JOIN users u ON a.user_id = u.id
       WHERE a.event_id = ? 
@@ -1485,20 +1895,34 @@ router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['even
       return res.status(400).json({ error: 'No confirmed volunteers to email' });
     }
 
-    const { sendNotificationEmail } = await import('../email.js');
     const { notificationService } = await import('../services/notificationService.js');
-    
-    const emailPromises = [];
-    for (const u of confirmedApps) {
-      // Create in-app notification
-      notificationService.dispatch('IMPORTANT_ANNOUNCEMENT', { eventId: event.id, eventTitle: event.title, body: message }, u.id);
-      // Send email if not opted out
-      if (u.email && u.email_opt_out === 0) {
-        emailPromises.push(sendNotificationEmail(u.email, `Update: ${event.title} - ${subject}`, message));
-      }
-    }
 
-    Promise.allSettled(emailPromises).catch(err => console.error('Broadcast error:', err));
+    /**
+     * `dispatch` is the whole broadcast. It used not to be.
+     *
+     * This loop also called `sendNotificationEmail` directly, alongside
+     * `dispatch` — and `dispatch` already queues an email job of its own. So one
+     * broadcast produced TWO emails per volunteer, from two different code paths
+     * with two different rules:
+     *
+     *   - the direct send tested `email_opt_out === 0`, while dispatch tests
+     *     `!== 1`, so a row with a NULL opt-out got one email from dispatch and
+     *     none from here — the two halves disagreed about who had opted out;
+     *   - only the queued half retried; the direct half had three in-process
+     *     attempts and then vanished;
+     *   - `Promise.allSettled` never rejects, so the `.catch` that followed it
+     *     was dead code and no per-recipient failure was ever observed.
+     *
+     * Removing the direct send fixes the duplicate, puts every recipient under
+     * one opt-out rule, and puts every message in the durable outbox.
+     */
+    for (const u of confirmedApps) {
+      notificationService.dispatch(
+        'IMPORTANT_ANNOUNCEMENT',
+        { eventId: event.id, eventTitle: event.title, body: message },
+        u.id
+      );
+    }
 
     res.json({ success: true, count: confirmedApps.length });
   } catch (err) {
@@ -1528,15 +1952,35 @@ router.get('/api/events/:eventId/slots/:slotId/ics', authenticateToken, (req, re
      * inline here joined its lines with a literal `\r\n` TEXT sequence and
      * produced a one-line file no calendar application could parse.
      */
+    /**
+     * `?remind=<minutes>` adds a VALARM that many minutes before the shift.
+     *
+     * The volunteer chooses it, because they are the only one who knows whether
+     * they walk, cycle, take a bus or get driven — a difference of a factor of
+     * five that no distance we hold can resolve. Absent or unparseable means no
+     * alarm, so a bookmarked URL without the parameter behaves as it always did.
+     */
+    const reminderMinutes = Number.parseInt(req.query.remind, 10);
+
     const icsContent = buildShiftIcs({
-      uid: `${slot.id}@wevolunteer.org`,
+      /* The UID domain has to be one the platform controls: a calendar client
+         uses it to match an update to the entry it already holds, and it is
+         visible in the downloaded file. `MAIL_DOMAIN` rather than a literal so
+         this and the client-side exporter in src/utils/helpers.js cannot drift
+         apart — they mint UIDs for the same shifts. */
+      uid: `${slot.id}@${MAIL_DOMAIN}`,
       start: slot.start_datetime,
       end: slot.end_datetime,
       summary: `${event.title} (${slot.name})`,
       // A blank line between the event blurb and the shift-specific note. The
       // escaping in buildShiftIcs turns these into the `\n` TEXT escape.
       description: `${event.description}\n\n${slot.description}`,
-      location: event.location
+      /* The street address was being dropped, so a calendar entry said
+         "Reichler Park" and left the volunteer to work out which one. */
+      location: [event.location, event.address].filter(Boolean).join(', '),
+      latitude: event.latitude,
+      longitude: event.longitude,
+      reminderMinutes: Number.isFinite(reminderMinutes) ? reminderMinutes : null,
     });
 
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');

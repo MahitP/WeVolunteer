@@ -61,9 +61,22 @@ export default function EventCard({
         {/* min-width:0 (not .truncate) so the title can clamp to two lines
             instead of inheriting nowrap from a truncating parent. */}
         <div className="s-7b2db8">
-          <h3 className="eventcard-title" title={event.title}>{event.title}</h3>
+          {/* `h2`, not `h3`: these cards sit directly under the page's `h1` on
+              Discover — the only surface that renders them — so `h3` skipped a
+              level for anybody navigating by heading. The class carries the
+              styling, so nothing about the card looks different. */}
+          <h2 className="eventcard-title" title={event.title}>{event.title}</h2>
           <p className="eventcard-meta truncate">
             <span className="tag">{event.category}</span>
+            {/* A members-only event stays in the list and stays labelled.
+                Hiding it would mean somebody who would happily join the club
+                never learns the club exists; saying so on the card is how they
+                find out there is one to join. */}
+            {event.audience === 'organization' && (
+              <span className="tag">
+                {event.viewerIsMember ? 'Members only' : `${event.organizationName || 'Members'} only`}
+              </span>
+            )}
             <span className="truncate">{event.organizerName}</span>
             {event.organizerVerified && <ShieldCheck size={13} aria-label="Verified organizer" className="s-733461" />}
           </p>
@@ -72,7 +85,7 @@ export default function EventCard({
               chips wrap to three lines and push the date and spots out of view.
               Inert here — there is no filter on a card to drive, and a chip that
               looks clickable and is not is worse than plain metadata. */}
-          <TagChips tags={event.tags} limit={3} />
+          <TagChips tags={event.tags} limit={4} expandable={false} />
         </div>
         {currentUser?.role === 'student' && onToggleFavorite && <button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={e => {
         e.stopPropagation();

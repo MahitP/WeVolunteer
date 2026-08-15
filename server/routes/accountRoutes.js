@@ -10,7 +10,7 @@ import {
 } from '../email.js';
 import { VALID_GRADES, JWT_SECRET, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
-import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
+import { authenticateToken, selfUserResponse, inTransaction } from '../utils.js';
 import { requireAAL2, ROLE, can } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import { recordAudit } from '../auditLog.js';
@@ -18,7 +18,11 @@ import { db } from '../db.js';
 import {
   acceptOrganizerAgreement, organizerAgreementStatus
 } from '../organizerAgreement.js';
-import { ORGANIZER_DOCUMENTS } from '../legalDocuments.js';
+import { ORGANIZER_DOCUMENTS, STUDENT_ORGANIZER_DOCUMENTS } from '../legalDocuments.js';
+import {
+  acceptStudentOrganizerAgreement, studentOrganizerAgreementStatus,
+} from '../studentOrganizerAgreement.js';
+import { helpsRunAnywhere } from '../organizationRoles.js';
 import {
   validateAccountFields, validatePassword, validateUsername, validateEmail,
   validateProfilePatch, isCurrentPassword
@@ -29,6 +33,7 @@ import { OAUTH_ONLY, issueSession, clearLoginFailuresForUser } from './authRoute
 // lives with the module that owns public/uploads/ and writes into it — read its
 // header before calling it, and never hand-roll a second unlink beside it.
 import { deleteUploadedFile } from './profilePictureRoutes.js';
+import { hashToken, issueToken } from '../tokenDigest.js';
 
 const router = express.Router();
 
@@ -318,13 +323,16 @@ router.post('/api/auth/forgot-password', async (req, res) => {
     `).get(identifier, identifier);
 
     if (user) {
-      const token = crypto.randomBytes(32).toString('hex');
+      /* Only the digest is stored. A reset token IS the account until it is
+         spent, so a readable copy of this table used to be a set of keys to
+         every account with an outstanding reset. See migration 048. */
+      const { token, tokenHash } = issueToken();
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
       // One live token per user: issuing a new link invalidates the old one.
       db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(user.id);
-      db.prepare('INSERT INTO password_reset_tokens (token, user_id, expires_at) VALUES (?, ?, ?)')
-        .run(token, user.id, expiresAt);
+      db.prepare('INSERT INTO password_reset_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
+        .run(tokenHash, user.id, expiresAt);
 
       await sendPasswordResetEmail(user.email, token);
     }
@@ -357,19 +365,22 @@ router.post('/api/auth/reset-password', async (req, res) => {
   }
 
   try {
-    const row = db.prepare('SELECT * FROM password_reset_tokens WHERE token = ?').get(token);
+    /* The link carries the plaintext; the table holds the digest. Hashing the
+       incoming value is what turns one into the other. */
+    const tokenHash = hashToken(token);
+    const row = db.prepare('SELECT * FROM password_reset_tokens WHERE token_hash = ?').get(tokenHash);
     if (!row) {
       return res.status(400).json({ error: 'That reset link is not valid. Request a new one.' });
     }
 
     if (new Date(row.expires_at) < new Date()) {
-      db.prepare('DELETE FROM password_reset_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That reset link has expired. Request a new one.' });
     }
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
     if (!userRow || userRow.account_status === 'deleted') {
-      db.prepare('DELETE FROM password_reset_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That reset link is not valid. Request a new one.' });
     }
 
@@ -385,7 +396,7 @@ router.post('/api/auth/reset-password', async (req, res) => {
        */
       db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?')
         .run(passwordHash, row.user_id);
-      db.prepare('DELETE FROM password_reset_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
       // Any other outstanding reset link for this account is now moot, and
       // leaving it live is a second key to a lock that was just changed.
       db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(row.user_id);
@@ -482,7 +493,7 @@ router.post('/api/auth/change-password', authenticateToken, requireAAL2('passwor
     // for the caller so changing a password does not eject the person doing it,
     // while every other device is signed out — which is the point.
     const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-    issueSession(res, formatUserResponse(fresh), fresh.token_version);
+    issueSession(res, selfUserResponse(fresh), fresh.token_version);
 
     res.json({ success: true, addedPassword: isOauthOnly });
   } catch (err) {
@@ -577,8 +588,11 @@ router.post('/api/auth/change-email', authenticateToken, requireAAL2('email.chan
       // transaction with the insert that replaces it, so a rollback cannot
       // discard the pending change the user already had.
       db.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(req.user.id);
-      db.prepare('INSERT INTO email_change_tokens (token, user_id, new_email, expires_at) VALUES (?, ?, ?, ?)')
-        .run(token, req.user.id, target, expiresAt);
+      /* Digest only. This link can move an account's only recovery channel to a
+         new address, so a readable copy of it is an account-takeover primitive.
+         See migration 048. */
+      db.prepare('INSERT INTO email_change_tokens (token_hash, user_id, new_email, expires_at) VALUES (?, ?, ?, ?)')
+        .run(hashToken(token), req.user.id, target, expiresAt);
     });
 
     await sendEmailChangeConfirmation(target, token);
@@ -612,25 +626,26 @@ router.post('/api/auth/confirm-email-change', (req, res) => {
   if (!token) return res.status(400).json({ error: 'Token is required' });
 
   try {
-    const row = db.prepare('SELECT * FROM email_change_tokens WHERE token = ?').get(token);
+    const tokenHash = hashToken(token);
+    const row = db.prepare('SELECT * FROM email_change_tokens WHERE token_hash = ?').get(tokenHash);
     if (!row) {
       return res.status(400).json({ error: 'That link is not valid. Request the change again from Settings.' });
     }
     if (new Date(row.expires_at) < new Date()) {
-      db.prepare('DELETE FROM email_change_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM email_change_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That link has expired. Request the change again from Settings.' });
     }
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
     if (!userRow || userRow.account_status !== 'active') {
-      db.prepare('DELETE FROM email_change_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM email_change_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That link is not valid. Request the change again from Settings.' });
     }
 
     // Re-check availability: the address was free when the request was made,
     // and someone else may have claimed it during the 24-hour window.
     if (db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE AND id != ?').get(row.new_email, row.user_id)) {
-      db.prepare('DELETE FROM email_change_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM email_change_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(409).json({
         error: 'Another account claimed that email address while this request was open. Try a different one.'
       });
@@ -659,7 +674,7 @@ router.post('/api/auth/confirm-email-change', (req, res) => {
     });
 
     const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
-    const user = formatUserResponse(fresh);
+    const user = selfUserResponse(fresh);
 
     // Opening the link proves control of the new mailbox, so the person holding
     // it gets a working session — otherwise confirming from a phone would leave
@@ -758,7 +773,7 @@ router.post('/api/auth/change-username', authenticateToken, (req, res) => {
       .run(target, caseOnly ? userRow.username_changed_at : new Date().toISOString(), req.user.id);
 
     const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-    res.json({ success: true, user: formatUserResponse(fresh) });
+    res.json({ success: true, user: selfUserResponse(fresh) });
   } catch (err) {
     console.error('Change username error:', err);
     if (String(err.message).includes('UNIQUE')) {
@@ -774,28 +789,29 @@ router.post('/api/auth/verify-email', (req, res) => {
   if (!token) return res.status(400).json({ error: 'Token is required' });
 
   try {
-    const row = db.prepare('SELECT * FROM email_verification_tokens WHERE token = ?').get(token);
+    const tokenHash = hashToken(token);
+    const row = db.prepare('SELECT * FROM email_verification_tokens WHERE token_hash = ?').get(tokenHash);
     if (!row) {
       return res.status(400).json({ error: 'That confirmation link is not valid. Request a new one.' });
     }
     if (new Date(row.expires_at) < new Date()) {
-      db.prepare('DELETE FROM email_verification_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM email_verification_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That confirmation link has expired. Request a new one.' });
     }
 
     const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
     if (!userRow || userRow.account_status !== 'active') {
-      db.prepare('DELETE FROM email_verification_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM email_verification_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That confirmation link is not valid. Request a new one.' });
     }
 
     inTransaction(() => {
       db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(row.user_id);
-      db.prepare('DELETE FROM email_verification_tokens WHERE token = ?').run(token);
+      db.prepare('DELETE FROM email_verification_tokens WHERE token_hash = ?').run(tokenHash);
     });
 
     const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
-    const user = formatUserResponse(fresh);
+    const user = selfUserResponse(fresh);
 
     /**
      * Confirming signs you in, which is what makes the link from the welcome
@@ -947,6 +963,88 @@ router.post('/api/legal/organizer-agreement/accept', authenticateToken, (req, re
     res.json({ accepted: true, alreadyAccepted: result.already, recorded: result.recorded });
   } catch (error) {
     console.error('Organizer agreement acceptance error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * ── The Student Organizer Agreement, same shape and a different document ──
+ *
+ * Separate routes rather than a parameter on the pair above. The two agreements
+ * bind different people to different undertakings and are withheld against
+ * different capability sets; a `?which=` parameter would put the choice of
+ * which contract somebody is accepting into a query string.
+ */
+
+/**
+ * What the caller must accept, and whether they have.
+ *
+ * Readable by any authenticated user. An ordinary member gets
+ * `required: false` rather than a 403, for the reason the organizer route
+ * gives: the client asks on load, and an error would make "nothing to accept"
+ * indistinguishable from "the request failed".
+ */
+router.get('/api/legal/student-organizer-agreement', authenticateToken, (req, res) => {
+  try {
+    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'Account not found' });
+    res.json(studentOrganizerAgreementStatus(db, user));
+  } catch (error) {
+    console.error('Student organizer agreement status error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Accept it.
+ *
+ * Refused for somebody who does not hold the rank anywhere, rather than
+ * recorded: an acceptance row for a person the agreement does not bind is a
+ * false record, and a false record in this table is worse than a missing one.
+ * It is checked against the membership table and not against a role, because
+ * the rank IS a membership row.
+ *
+ * `=== true` and not a truthy test, for the reason `assertConsent` gives: the
+ * string "false" is truthy.
+ *
+ * No step-up re-authentication, matching the organizer route — this adds an
+ * obligation to somebody already signed in rather than changing who can reach
+ * the account, and gating it would lock a student out of the only action that
+ * releases their capabilities.
+ */
+router.post('/api/legal/student-organizer-agreement/accept', authenticateToken, (req, res) => {
+  try {
+    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'Account not found' });
+
+    if (!helpsRunAnywhere(db, user.id)) {
+      return res.status(400).json({
+        error: 'The Student Organizer Agreement applies to student organizers.',
+        code: 'not_a_student_organizer',
+      });
+    }
+
+    if (req.body?.acknowledged !== true) {
+      return res.status(400).json({
+        error: 'Every undertaking must be acknowledged before the agreement can be accepted.',
+        code: 'acknowledgement_required',
+      });
+    }
+
+    const result = acceptStudentOrganizerAgreement(db, { userId: user.id, req });
+
+    recordAudit(db, {
+      adminId: user.id,
+      action: 'ACCEPT_STUDENT_ORGANIZER_AGREEMENT',
+      targetUserId: user.id,
+      details: result.already
+        ? 'Re-submitted an agreement already accepted at the current version; no new record written'
+        : `Accepted ${STUDENT_ORGANIZER_DOCUMENTS.map(d => `${d.slug}@${d.version}`).join(', ')}`,
+    });
+
+    res.json({ accepted: true, alreadyAccepted: result.already, recorded: result.recorded });
+  } catch (error) {
+    console.error('Student organizer agreement acceptance error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

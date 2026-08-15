@@ -105,19 +105,42 @@
   border-radius: 50%;
 }
 
-/* Hide leaflet controls on small previews to reduce clutter */
-.location-inline-map .leaflet-control-container,
-.map-preview-thumb .leaflet-control-container,
-.map-preview .leaflet-control-container {
+/* Hide the zoom buttons on small previews to reduce clutter.
+
+   This used to hide `.leaflet-control-container`, which is the parent of BOTH
+   the zoom buttons and the attribution — so it removed the OpenStreetMap and
+   CARTO credit from every map in the app. That credit is a licence condition of
+   both providers, not decoration, and the privacy notice asserts it is shown.
+   Only the zoom control is clutter; the attribution stays. */
+.location-inline-map .leaflet-control-zoom,
+.map-preview-thumb .leaflet-control-zoom,
+.map-preview .leaflet-control-zoom {
   display: none;
 }
 
-.map-dark-mode .leaflet-layer,
-.map-dark-mode .leaflet-control-zoom-in,
-.map-dark-mode .leaflet-control-zoom-out,
-.map-dark-mode .leaflet-control-attribution {
-  filter: invert(100%) hue-rotate(180deg) brightness(105%) contrast(90%);
+.location-inline-map .leaflet-control-attribution,
+.map-preview-thumb .leaflet-control-attribution,
+.map-preview .leaflet-control-attribution {
+  font-size: 0.625rem;
+  padding: 0 4px;
 }
+
+/**
+ * The dark-mode invert filter used to live here and is deliberately gone.
+ *
+ *     .map-dark-mode .leaflet-layer { filter: invert(100%) hue-rotate(180deg) … }
+ *
+ * It was applied over CARTO Voyager, which is a light pastel cartography.
+ * Inverting it does not produce a dark map, it produces a photographic
+ * negative: parks magenta, water the colour of sand, and every white label halo
+ * turned into a black smear around black text. `LeafletMap.jsx` now requests
+ * CARTO's `dark_all` basemap instead — the same streets, drawn for a dark
+ * background by people who draw maps.
+ *
+ * Nothing sets `map-dark-mode` any more. Do not reintroduce a filter here: it
+ * would composite over every tile on every pan, and it would land on the
+ * attribution control, which must stay legible for licence reasons.
+ */
 
 /* --------------------------------------------------------------------------
    Weather Summary
@@ -215,5 +238,123 @@
   
   .directions-btn {
     width: 100%;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Location link — the inline "this address is clickable" affordance
+   --------------------------------------------------------------------------
+   Quiet at rest, brand on interaction. Green in this app means "the platform,
+   and any action you can take" (index.css header), so a location IS eligible
+   for it — but painting every address on the dashboard, the calendar and the
+   modal green would drown the actual calls to action on those screens. The
+   dotted underline plus the external-link glyph is what carries "clickable"
+   at rest; the colour arrives on hover and focus, when the reader is asking.
+   -------------------------------------------------------------------------- */
+.location-link {
+  color: inherit;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--ink-3);
+  text-underline-offset: 3px;
+  transition: color var(--t-fast), text-decoration-color var(--t-fast);
+}
+
+.location-link:hover {
+  color: var(--brand);
+  text-decoration-color: var(--brand);
+}
+
+.location-link:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.location-link-glyph {
+  opacity: 0.6;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+/* --------------------------------------------------------------------------
+   Map reveal — tiles load only when asked for
+   --------------------------------------------------------------------------
+   Map tiles are fetched by the student's own browser, which makes the tile
+   provider the one third party that sees a student's IP address. Loading them
+   because a page happened to render is a disclosure nobody asked for; loading
+   them because somebody pressed "Show map" is one they did.
+   -------------------------------------------------------------------------- */
+.map-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  align-items: flex-start;
+}
+
+.map-reveal-note {
+  font-size: 0.75rem;
+  color: var(--ink-3);
+}
+
+.map-reveal.is-shown {
+  align-items: stretch;
+}
+
+/* --------------------------------------------------------------------------
+   Location opt-in banner
+   --------------------------------------------------------------------------
+   Sits above the page content in the signed-in shell. Quiet on purpose: this
+   asks for something, and a request styled like an alert reads as a demand.
+   -------------------------------------------------------------------------- */
+.location-prompt {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s5);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+}
+
+.location-prompt-icon {
+  display: inline-flex;
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+.location-prompt-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.location-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-shrink: 0;
+}
+
+/* Below the shell breakpoint the banner stacks, so the two buttons do not
+   squeeze the copy into a two-word column. */
+@media (max-width: 700px) {
+  .location-prompt {
+    flex-wrap: wrap;
+  }
+  .location-prompt-body {
+    flex-basis: 100%;
+    order: 2;
+  }
+  .location-prompt-actions {
+    order: 3;
+    width: 100%;
+    justify-content: space-between;
   }
 }

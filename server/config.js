@@ -152,11 +152,28 @@ function resolveTfaKey() {
      one there is no safe interpretation, and silently falling back would encrypt
      with a different key than the operator believes they configured — which
      surfaces later as every stored secret failing to decrypt. */
-  let bytes;
-  try {
-    bytes = Buffer.from(configured, 'base64');
-  } catch (err) {
-    throw new Error(`FATAL: TFA_ENCRYPTION_KEY is not valid base64. ${err.message}`);
+  /**
+   * Validated by re-encoding, because `Buffer.from(x, 'base64')` never throws.
+   *
+   * Node's decoder silently DROPS characters outside the base64 alphabet, so the
+   * `try/catch` this replaced could not fire: `"!!!!not base64 at all!!!!…"`
+   * decoded to whatever the surviving characters happened to mean, and the error
+   * message naming base64 validity was unreachable. The 32-byte check caught most
+   * of it by luck — a string that decodes to exactly 32 bytes got through with a
+   * value the operator never configured.
+   *
+   * Round-tripping is the check the decoder does not give us: if re-encoding the
+   * bytes does not reproduce the input, the input was not the base64 of those
+   * bytes. Padding and whitespace are normalised first so a legitimately padded
+   * or line-wrapped value is not rejected for cosmetics.
+   */
+  const normalised = configured.trim().replace(/\s+/g, '');
+  const bytes = Buffer.from(normalised, 'base64');
+  if (Buffer.from(bytes).toString('base64').replace(/=+$/, '') !== normalised.replace(/=+$/, '')) {
+    throw new Error(
+      'FATAL: TFA_ENCRYPTION_KEY is not valid base64. Generate one with: '
+      + `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
+    );
   }
   if (bytes.length !== 32) {
     throw new Error(
@@ -164,6 +181,48 @@ function resolveTfaKey() {
       + 'AES-256 takes a 256-bit key.'
     );
   }
+
+  /**
+   * A key of the right SHAPE can still be no key at all.
+   *
+   * `JWT_SECRET` a hundred lines above refuses placeholders and low-entropy
+   * values; this function only ever checked base64 validity and length. The
+   * development key is valid base64 and decodes to exactly 32 bytes — every one
+   * of them ZERO — so an operator who copied it from this file, or from a
+   * tutorial, into `/etc/wevolunteer/wevolunteer.env` would have booted
+   * production with AES-256 keyed on a published constant of all zeros, and
+   * nothing would have said a word.
+   *
+   * Every stored two-factor secret is encrypted with this. A guessable key means
+   * anybody who reads the database can mint valid codes for an administrator,
+   * which is the entire thing the second factor exists to prevent.
+   *
+   * The distinct-byte floor rather than an equality check on the dev key alone:
+   * a hand-typed "key" of repeated characters is the same defect wearing a
+   * different value, and a real 32-byte random key has around thirty distinct
+   * bytes. Eight is the same floor `describeWeakSecret` applies to JWT_SECRET.
+   */
+  const distinctBytes = new Set(bytes).size;
+  const weakness = configured.trim() === DEV_TFA_KEY
+    ? 'it is the development key published in this source file'
+    : distinctBytes < 8
+      ? `it has only ${distinctBytes} distinct byte values, so it carries no real entropy`
+      : null;
+
+  if (weakness) {
+    const message =
+      `TFA_ENCRYPTION_KEY is not usable as an encryption key: ${weakness}.\n`
+      + 'Stored two-factor secrets are encrypted with it, so a guessable key lets\n'
+      + 'anyone who reads the database mint valid codes for any account.\n'
+      + "Generate one with:  node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"";
+    /* Fatal in production, loud in development — the same split JWT_SECRET
+       uses, and for the same reason: refusing to boot locally over the
+       documented dev key would push somebody to paste a real production key
+       into their .env to get past it. */
+    if (IS_PRODUCTION) throw new Error(`FATAL: ${message}`);
+    console.warn(`[config] WARNING: ${message}`);
+  }
+
   return configured;
 }
 
@@ -215,6 +274,28 @@ export const VALID_GRADES = ['9', '10', '11', '12', 'Adult', 'N/A'];
 export const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
 
 export const APP_NAME = process.env.APP_NAME || 'WeVolunteer';
+
+/**
+ * Which account the public About page names as running the platform.
+ *
+ * ── Why this is configuration and not a query ──
+ *
+ * `super_admin` is the ROLE that confers owner status, and nothing about that
+ * changes here: the endpoint still requires the named account to hold it, so
+ * this can only ever choose BETWEEN owners, never create one. But a deployment
+ * can legitimately hold several — this one holds two, a person and a service
+ * account, both created in the same seeding run with identical timestamps — and
+ * "earliest created" then decays into an arbitrary tiebreak on the id. Featuring
+ * whichever account sorted first is not a decision anybody made.
+ *
+ * So the deployment says who it is, in the same spirit as
+ * `DOCUMENT_SIGNATORY`: which human is publicly answerable for this instance is
+ * an editorial fact about the deployment, not something the schema knows.
+ *
+ * Unset falls back to the earliest active owner, so an install that never sets
+ * it still names somebody rather than nobody.
+ */
+export const PLATFORM_OWNER_USERNAME = process.env.PLATFORM_OWNER_USERNAME || '';
 export const MAX_AUTO_SELECT_DRAWS = Number(process.env.MAX_AUTO_SELECT_DRAWS) || 5;
 
 /**
@@ -260,6 +341,20 @@ if (OAUTH_ALLOW_MOCK && IS_PRODUCTION) {
     + 'anyone sign in as any user. Unset it, and configure real provider credentials.'
   );
 }
+
+/**
+ * The routing provider's API key, for travel times. Optional.
+ *
+ * Absent is a supported, silent state rather than an error: `/api/travel-time`
+ * answers 503 `routing_unconfigured` and the client renders nothing, leaving the
+ * directions link — which needs no provider — exactly as it was. A pilot that
+ * has not signed up for OpenRouteService loses a rough number and nothing else.
+ *
+ * It lives here and never reaches the browser. A key shipped to a browser is a
+ * published key, and that is the entire reason `/api/travel-time` is a server
+ * route instead of a fetch from the page.
+ */
+export const ROUTING_API_KEY = process.env.ROUTING_API_KEY || '';
 
 export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';

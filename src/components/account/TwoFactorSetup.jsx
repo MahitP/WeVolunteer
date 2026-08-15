@@ -475,7 +475,16 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
             )}
           </div>
 
+          {/**
+            * Never recorded. `data-replay-block` removes this subtree from
+            * Session Replay entirely — see src/utils/analytics.js. These codes
+            * are shown exactly once and each one is a complete bypass of the
+            * second factor, so a recording of this list is a recording of the
+            * account. Masking would not be enough on its own and blocking does
+            * not depend on the global mask level staying where it is.
+            */}
           <ul
+            data-replay-block
             className="card card-body grid grid-2"
             style={{ background: 'var(--surface-2)', fontFamily: 'monospace', listStyle: 'none' }}
             aria-label="Recovery codes"
@@ -534,7 +543,15 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
                 readable, and in dark mode every surface token is dark. This is
                 the one place in the app where the colour is a function of the
                 thing rather than of the theme. */}
-            <div style={{ background: 'white', padding: 8, borderRadius: 8 }}>
+            {/**
+              * Never recorded, and this one is not obvious: the `src` is a data
+              * URL encoding the `otpauth://` URI, which CONTAINS the shared
+              * secret. No Session Replay mask level touches an image's `src`
+              * attribute — masking replaces visible characters — so the secret
+              * would leave the browser intact without this. The alt text names
+              * the account's email address, which goes with it.
+              */}
+            <div data-replay-block style={{ background: 'white', padding: 8, borderRadius: 8 }}>
               <img
                 src={enrol.qr}
                 alt={`QR code enrolling ${currentUser?.email || 'your account'} in an authenticator app`}
@@ -549,7 +566,8 @@ export default function TwoFactorSetup({ currentUser, addToast, onSetupComplete 
                 Google Authenticator, Authy, 1Password and Microsoft Authenticator all work.
                 Cannot scan it? Type this key in instead:
               </span>
-              <code className="small" style={{ wordBreak: 'break-all' }}>{enrol.secret}</code>
+              {/* The same secret in plain text, for anyone who cannot scan. */}
+              <code data-replay-block className="small" style={{ wordBreak: 'break-all' }}>{enrol.secret}</code>
 
               <div className="field" style={{ marginTop: 'var(--s2)' }}>
                 <label htmlFor="tfa-enrol-code">2. Enter the six-digit code it shows</label>

@@ -88,7 +88,11 @@ function bootProdAndProbe() {
         APP_URL: 'https://volunteers.example.org',
         // Required in production since two-factor authentication started
         // encrypting stored TOTP secrets. Same class of guard as JWT_SECRET.
-        TFA_ENCRYPTION_KEY: 'c3VwZXJzZWNyZXRrZXkxMjM0NTY3ODkwYWJjZGVmZ2g='
+        TFA_ENCRYPTION_KEY: 'c3VwZXJzZWNyZXRrZXkxMjM0NTY3ODkwYWJjZGVmZ2g=',
+        /* Production refuses to boot without it — every per-IP limiter would
+           otherwise share one bucket behind a proxy. Set here so this case
+           fails for its own reason rather than on an unrelated guard. */
+        TRUST_PROXY: '1',
       },
       stdio: 'pipe',
       encoding: 'utf8'

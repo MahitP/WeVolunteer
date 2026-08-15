@@ -104,6 +104,19 @@ beforeEach(() => {
    * assertions and trade the unhandled error for an act() warning.
    */
   api.fetchLegalDocument.mockReturnValue(new Promise(() => {}));
+
+  /**
+   * Same reason as `fetchLegalDocument` above: the signed-in shell mounts
+   * `LegalUpdateModal`, whose effect calls `api.fetchLegalUpdates().then(…)`.
+   * Under the automock that is `undefined.then` — an exception thrown inside a
+   * passive effect, outside any test's control, which Vitest reports as an
+   * unhandled error while the suite still prints green.
+   *
+   * A promise that never settles is again the honest stand-in: these tests
+   * assert on routing and shell composition, never on legal notices, so "still
+   * loading" is exactly the state they mean.
+   */
+  api.fetchLegalUpdates.mockReturnValue(new Promise(() => {}));
 });
 
 describe('authenticated route table', () => {
@@ -190,7 +203,7 @@ describe('authenticated route table', () => {
     signedInAs(USER('organizer'));
     renderAt('/events/new');
     const el = await screen.findByTestId('create');
-    expect(el.dataset.props).toBe('addToast,onSubmitEvent,setActiveTab');
+    expect(el.dataset.props).toBe('addToast,currentUser,onSubmitEvent,setActiveTab');
   });
 
   it('unverified organizer: /events/new is still refused', async () => {
@@ -204,7 +217,9 @@ describe('authenticated route table', () => {
     signedInAs(USER('organizer'));
     renderAt('/checkin/evt-1');
     const el = await screen.findByTestId('checkin');
-    expect(el.dataset.props).toBe('currentUser');
+    /* `addToast` joined the props when this screen stopped using window.alert
+       for its two failure paths — it was the only view in the app doing so. */
+    expect(el.dataset.props).toBe('addToast,currentUser');
   });
 
   /**

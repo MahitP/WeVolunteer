@@ -10,7 +10,10 @@ import { friendsToNotify } from '../relationships.js';
 /* Signed-up / attended, batched, and defined identically to the profile's own
    figures — see the header on `participationCountsFor`. */
 import { participationCountsFor } from '../volunteerStats.js';
+import { eventApplicationEligibility } from '../eventEligibility.js';
 import { db } from '../db.js';
+import { canRunEvent } from '../organizations.js';
+import { slotHasStarted } from '../attendance.js';
 
 const router = express.Router();
 
@@ -27,6 +30,44 @@ router.get('/api/applications', authenticateToken, (req, res) => {
       JOIN slots s ON a.slot_id = s.id
     `;
     
+    /**
+     * The rows somebody who RUNS events may see: their own events, plus the
+     * events of any organization they manage.
+     *
+     * The second half is what `canRunEvent` authorizes on the write paths, and
+     * this list is what feeds the screen those writes are made from. Scoped in
+     * SQL rather than filtered afterwards, so a club with four hundred
+     * applications does not load them all to discard most.
+     *
+     * ── Why hosting is not enough on its own ──
+     *
+     * It mirrors `stillWelcomeIn` in `canRunEvent`, and it has to. Without it
+     * this list reopened exactly what that function closed: an organizer removed
+     * or banned from a club was refused `GET /api/events/:id` and
+     * `roster.csv` — and kept listing every application to the club's events
+     * here, names, schools, grades, bios and all. The reads have to agree with
+     * the writes or the tighter one is decoration.
+     */
+    const ORGANIZATION_SCOPE = `
+      WHERE (
+              e.organizer_id = ?
+              AND (
+                e.organization_id IS NULL
+                OR (
+                  EXISTS (SELECT 1 FROM organization_members m
+                           WHERE m.organization_id = e.organization_id AND m.user_id = ?)
+                  AND NOT EXISTS (SELECT 1 FROM organization_bans b
+                                   WHERE b.organization_id = e.organization_id
+                                     AND b.user_id = ? AND b.lifted_at IS NULL)
+                )
+              )
+            )
+         OR e.organization_id IN (
+              SELECT organization_id FROM organization_members
+               WHERE user_id = ? AND member_role = 'manager'
+            )
+    `;
+
     // Result scoping, not a gate — every authenticated role reaches this route;
     // the capability only chooses which rows come back.
     //
@@ -51,7 +92,23 @@ router.get('/api/applications', authenticateToken, (req, res) => {
       rows = db.prepare(BASE_QUERY).all();
     } else if (can(req.principal, 'applicant.review')) {
       // organizer: applications to the events they host.
-      rows = db.prepare(`${BASE_QUERY} WHERE e.organizer_id = ?`).all(req.principal.userId);
+      rows = db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE}`)
+        .all(req.principal.userId, req.principal.userId, req.principal.userId, req.principal.userId);
+    } else if (can(req.principal, 'organization.event.manage.own')) {
+      /**
+       * A Student Organizer, or a student who manages a club.
+       *
+       * They hold neither `application.read_all` nor `applicant.review`, so
+       * without this branch they fell through to "your own applications" and
+       * could not list the applicants to the events they run at all — they could
+       * accept and reject through `PATCH /api/applications/:id`, blind, from a
+       * list that did not include the rows.
+       *
+       * Scoped by the same rule `canRunEvent` applies: events they host, plus
+       * events belonging to a club they manage.
+       */
+      rows = db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE}`)
+        .all(req.principal.userId, req.principal.userId, req.principal.userId, req.principal.userId);
     } else if (can(req.principal, 'application.withdraw')) {
       // student: their own applications only.
       rows = db.prepare(`${BASE_QUERY} WHERE a.user_id = ?`).all(req.principal.userId);
@@ -110,6 +167,49 @@ router.get('/api/applications', authenticateToken, (req, res) => {
       conflictsByAppId.add(c.application_id);
     }
 
+    /**
+     * Conferred badges, for the handful the organizer view actually shows.
+     *
+     * One query for the page, in keeping with the two above — a per-row read
+     * would be twenty round trips to render three chips. `UNIQUE(user_id,
+     * badge_id)` makes this a covering index search on `user_id`, so no index
+     * was added for it; `EXPLAIN QUERY PLAN` confirms `SEARCH ub USING COVERING
+     * INDEX ... (user_id=?)`.
+     *
+     * Everything sent here is already public on the volunteer's profile. The
+     * client decides WHICH of them to show — `organizerBadges` in
+     * `src/utils/badgeOrder.js` keeps it to the status badge and the top of each
+     * progression, because a row of nine hour tiers buries the two badges an
+     * organizer is actually reading for.
+     *
+     * `active = 1` only. A retired definition stays in `user_badges` on purpose
+     * (nobody's record is edited when the catalogue changes) but it should not
+     * be presented as current standing.
+     */
+    const badgesByUser = new Map();
+    if (rows.length > 0) {
+      const userIds = [...new Set(rows.map(r => r.user_id))];
+      const placeholders = userIds.map(() => '?').join(',');
+      const badgeRows = db.prepare(`
+        SELECT ub.user_id, b.name, b.icon, b.category, b.criteria_type, b.criteria_value, ub.earned_at
+        FROM user_badges ub
+        JOIN badges b ON b.id = ub.badge_id
+        WHERE ub.user_id IN (${placeholders}) AND b.active = 1
+      `).all(...userIds);
+
+      for (const b of badgeRows) {
+        if (!badgesByUser.has(b.user_id)) badgesByUser.set(b.user_id, []);
+        badgesByUser.get(b.user_id).push({
+          name: b.name,
+          icon: b.icon,
+          category: b.category,
+          criteria_type: b.criteria_type,
+          criteria_value: b.criteria_value,
+          earnedAt: b.earned_at,
+        });
+      }
+    }
+
     const formattedApps = rows.map(r => {
       const history = historyByUser.get(r.user_id);
       const totalHours = history ? Number(history.total_hours) : 0.0;
@@ -161,9 +261,26 @@ router.get('/api/applications', authenticateToken, (req, res) => {
           /* Counts, never a rate — see `participationCountsFor`. `signedUp`
              counts commitments whose shift has ENDED, so an upcoming shift is
              not held against somebody who has not had the chance to attend it
-             yet. */
+             yet.
+
+             `eventsAbsent` was computed and then dropped here, which left the
+             organizer unable to tell "8 of 9, one missed" from "8 of 9, one the
+             organizer never got round to confirming". Those are a fact about
+             the volunteer and a fact about the paperwork, and reading the
+             second as the first is the specific unfairness this whole set of
+             definitions exists to prevent. `eventsAwaitingRecord` is the
+             remainder, published alongside so the gap is legible rather than
+             assumed. */
           eventsSignedUp: participation.get(r.user_id)?.signedUp ?? 0,
           eventsAttended: participation.get(r.user_id)?.attended ?? 0,
+          eventsAbsent: participation.get(r.user_id)?.absent ?? 0,
+          eventsAwaitingRecord: Math.max(
+            0,
+            (participation.get(r.user_id)?.signedUp ?? 0)
+            - (participation.get(r.user_id)?.attended ?? 0)
+            - (participation.get(r.user_id)?.absent ?? 0),
+          ),
+          badges: badgesByUser.get(r.user_id) ?? [],
           bio: r.bio,
           skills: r.skills ? JSON.parse(r.skills) : []
         },
@@ -206,6 +323,37 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (event.status !== 'open') return res.status(400).json({ error: 'Event registrations are closed' });
+
+    /**
+     * May this person take part at all — banned, not a member, or it is their
+     * own event.
+     *
+     * ── Why it is here, before everything else ──
+     *
+     * This is the only production path that creates an application, and both
+     * branches below run through it: the INSERT for a first application and the
+     * UPDATE that revives a withdrawn one. So one check covers both, and every
+     * downstream state — waitlisted, promoted, accepted by a draw — is covered
+     * too, because none of them can happen to somebody who never got a row.
+     *
+     * Placed above the deadline and conflict checks deliberately. Eligibility
+     * precedes them: telling a banned person that they have a schedule clash,
+     * or that the deadline passed, answers a question they were never allowed to
+     * ask and tells them something about the event's state they should not
+     * learn from a refusal.
+     *
+     * Nothing here is taken from the request. The organization comes from the
+     * event row, so a client cannot nominate the organization it would like to
+     * be measured against.
+     */
+    const eligibility = eventApplicationEligibility(event, req.user.id);
+    if (!eligibility.ok) {
+      return res.status(eligibility.status).json({
+        error: eligibility.error,
+        code: eligibility.code,
+        ...(eligibility.reason ? { reason: eligibility.reason } : {}),
+      });
+    }
 
     // Verify slot belongs to event
     const slot = db.prepare('SELECT * FROM slots WHERE id = ? AND event_id = ?').get(slotId, eventId);
@@ -353,7 +501,7 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
 // capacity rules — so the two cannot diverge. All writes happen in one
 // transaction; notifications and waitlist promotion run only after it commits,
 // because createNotification performs its own writes.
-router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applicant.review', 'event.moderate']), (req, res) => {
+router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applicant.review', 'event.moderate', 'organization.event.manage.own']), (req, res) => {
   const { applicationIds, status } = req.body;
 
   if (!Array.isArray(applicationIds) || applicationIds.length === 0) {
@@ -370,13 +518,13 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
     const apps = [];
     for (const id of applicationIds) {
       const app = db.prepare(`
-        SELECT a.*, e.organizer_id, e.title as event_title, e.auto_approve
+        SELECT a.*, e.organizer_id, e.organization_id, e.title as event_title, e.auto_approve
         FROM applications a
         JOIN events e ON a.event_id = e.id
         WHERE a.id = ?
       `).get(id);
       if (!app) return res.status(404).json({ error: `Application not found: ${id}` });
-      if (!can(req.principal, 'event.moderate') && app.organizer_id !== req.principal.userId) {
+      if (!canRunEvent(db, app, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
         return res.status(403).json({ error: 'Access denied: You do not host this event' });
       }
       // A withdrawn application is the volunteer's own choice to leave; an
@@ -414,6 +562,9 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
 
     const promotions = [];
     const freedSlots = new Set();
+    /* One clock for the whole batch, so a long transaction cannot let two
+       applications on the same slot disagree about whether it had started. */
+    const removalClock = new Date();
     inTransaction(() => {
       const update = db.prepare('UPDATE applications SET status = ? WHERE id = ?');
       for (const app of apps) {
@@ -431,6 +582,26 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
         }
 
         const wasAccepted = app.status === 'accepted';
+
+        /**
+         * Removing somebody from a shift that has already started is refused
+         * here too, and skipped rather than failing the batch.
+         *
+         * Setting an accepted volunteer to `rejected` IS removal: it frees
+         * their place and promotes from the waitlist. Doing that after the
+         * shift has run is not roster management, it is editing the past —
+         * somebody turned up and worked. Skipping matches how this route
+         * already handles a full slot: the rest of the batch is honest work
+         * and should not be lost to one application that cannot move.
+         */
+        if (wasAccepted && status !== 'accepted') {
+          const slot = db.prepare('SELECT start_datetime FROM slots WHERE id = ?').get(app.slot_id);
+          if (slotHasStarted(slot, removalClock) !== false) {
+            skipped.push({ id: app.id, reason: 'shift_started' });
+            continue;
+          }
+        }
+
         update.run(status, app.id);
         applied.push({ id: app.id, status, userId: app.user_id, eventId: app.event_id, eventTitle: app.event_title });
 
@@ -491,7 +662,7 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
 // stack is what puts this route in front of Guard 2's scanner instead of
 // leaving it to a hand-written ROUTE_REGISTRY entry.
 router.patch('/api/applications/:id', authenticateToken,
-  requireCapAny(['applicant.review', 'event.moderate', 'application.withdraw']), (req, res) => {
+  requireCapAny(['applicant.review', 'event.moderate', 'organization.event.manage.own', 'application.withdraw']), (req, res) => {
   const appId = req.params.id;
   const { status } = req.body; // 'accepted', 'waitlisted', 'rejected'
 
@@ -501,21 +672,49 @@ router.patch('/api/applications/:id', authenticateToken,
   // so a wildcard principal (super_admin) resolves to the broader branch
   // rather than being caught by the narrower one and failing its ownership
   // check below. The cascade ends in an explicit 403, never a bare else.
-  if (can(req.principal, 'applicant.review') || can(req.principal, 'event.moderate')) {
+  /**
+   * A Student Organizer reaches the review branch only for THEIR OWN event.
+   *
+   * `organization.event.manage.own` cannot be tested on its own here the way the
+   * other two are. The person holding it is a student, and a student also has
+   * applications of their own to withdraw — so an unconditional branch on the
+   * capability would send them into the organizer path for every application
+   * they touch, including their own, and refuse it with "you do not host this
+   * event". Asking whether they host THIS one is what keeps both doors open,
+   * and it is the same ownership question the branch itself asks two lines
+   * below, moved up so the cascade can use its answer.
+   *
+   * `canRunEvent` and not a bare `organizer_id` compare, so this gate gives the
+   * same answer as `PATCH /api/applications/bulk` — which asks `canRunEvent`
+   * directly. Written the narrow way, a club's manager could accept an
+   * applicant in bulk and be told "students may only withdraw their own
+   * applications" for the identical act on the identical row.
+   */
+  const appForGate = db.prepare(`
+    SELECT a.id, e.organizer_id, e.organization_id
+      FROM applications a JOIN events e ON e.id = a.event_id
+     WHERE a.id = ?
+  `).get(appId);
+  const runsThisEvent = can(req.principal, 'organization.event.manage.own')
+    && canRunEvent(db, appForGate, req.principal.userId, {
+      hasModerate: can(req.principal, 'event.moderate'),
+    });
+
+  if (can(req.principal, 'applicant.review') || can(req.principal, 'event.moderate') || runsThisEvent) {
     if (!['accepted', 'waitlisted', 'rejected'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status update. Must be accepted, waitlisted, or rejected.' });
     }
 
     try {
       const app = db.prepare(`
-        SELECT a.*, e.organizer_id, e.title as event_title
+        SELECT a.*, e.organizer_id, e.organization_id, e.title as event_title
         FROM applications a
         JOIN events e ON a.event_id = e.id
         WHERE a.id = ?
       `).get(appId);
 
       if (!app) return res.status(404).json({ error: 'Application not found' });
-      if (!can(req.principal, 'event.moderate') && app.organizer_id !== req.principal.userId) {
+      if (!canRunEvent(db, app, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
         return res.status(403).json({ error: 'Access denied: You do not host this event' });
       }
 
@@ -545,6 +744,51 @@ router.patch('/api/applications/:id', authenticateToken,
       }
 
       const wasAccepted = app.status === 'accepted';
+
+      /**
+       * An organizer may remove somebody from a shift, but only before it
+       * starts.
+       *
+       * ── What this closes ──
+       *
+       * Setting an accepted volunteer to `rejected` IS removal — it frees their
+       * place and promotes from the waitlist. Nothing stopped an organizer
+       * doing it after the shift had run, which meant somebody who turned up
+       * and worked could be taken off the roster afterwards. That is not
+       * managing a roster; it is editing the past.
+       *
+       * The bound is per SLOT, not per event, and matches check-in: on a
+       * two-day festival a volunteer holding Sunday's shift can still be
+       * removed on Saturday, because their own commitment has not begun.
+       *
+       * Declining a PENDING application is untouched. That is not removing a
+       * participant — nobody held a place — and organizers reconcile
+       * applications after the fact all the time.
+       *
+       * Hours are unreachable from here by construction: this route writes
+       * `applications.status` and nothing else. Attendance and credited hours
+       * live in their own tables and are not read, written, or cascaded to.
+       * A removed volunteer keeps every hour they earned.
+       */
+      if (wasAccepted && status !== 'accepted') {
+        const slot = db.prepare('SELECT id, name, start_datetime FROM slots WHERE id = ?').get(app.slot_id);
+        const started = slotHasStarted(slot, new Date());
+
+        if (started === null) {
+          return res.status(409).json({
+            error: "This shift's start time cannot be read, so it is not clear whether it has begun.",
+            code: 'slot_unreadable',
+          });
+        }
+        if (started === true) {
+          return res.status(409).json({
+            error: 'This shift has already started, so volunteers can no longer be removed from it. '
+              + 'Attendance is recorded on the check-in screen.',
+            code: 'shift_started',
+            startedAt: slot.start_datetime,
+          });
+        }
+      }
 
       // The status change and any resulting promotion must land together: a spot
       // freed but not refilled, or refilled twice, are both worse than neither.

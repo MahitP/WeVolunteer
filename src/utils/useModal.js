@@ -16,6 +16,32 @@ import { useEffect, useRef } from 'react';
 const modalStack = [];
 
 /**
+ * Test seam: the stack is module state and suites must not inherit each other's.
+ *
+ * ── Why this exists ──
+ *
+ * A token is pushed in a passive effect and popped in its cleanup. If a tree is
+ * torn down in a way that skips the cleanup — an unmount while the effect is
+ * still queued, or an exception thrown from an earlier cleanup in the same
+ * pass — the token stays on top FOREVER. From then on `isTopmost()` is false
+ * for every dialog that follows, and Escape becomes a silent no-op: the dialog
+ * is open, the key is pressed, nothing happens, no error is raised.
+ *
+ * That is exactly what made `TwoFactorSetup.test.jsx` fail about one full-suite
+ * run in two and never in isolation. `geocodeRoutes.js` already gives its
+ * module state a `__resetUpstreamThrottle` seam for the same reason; this had
+ * equivalent state and none.
+ */
+export function __resetModalStack() {
+  modalStack.length = 0;
+}
+
+/** How many dialogs believe they are open. Lets a test name the leak. */
+export function __modalStackDepth() {
+  return modalStack.length;
+}
+
+/**
  * Standard dialog behaviour, applied identically by every modal in the app.
  *
  * Without this each modal was mouse-only: no Escape, no focus containment, and
@@ -57,6 +83,29 @@ export function useModal(onClose) {
     // land on the content rather than on "dismiss".
     const items = focusable();
     const target = items.find(el => !el.classList.contains('modal-close')) || items[0] || node;
+
+    /**
+     * Falling back to the dialog itself has to actually work.
+     *
+     * When the filter finds no candidate, `target` is the dialog `<div>` — and
+     * calling `.focus()` on a div with no `tabindex` does nothing except blur
+     * whatever had focus, dropping it to `<body>`. That is precisely the
+     * failure this hook's own docblock says it exists to prevent: a keyboard or
+     * screen-reader user stranded at the top of the page, now with a modal open
+     * in front of them.
+     *
+     * `tabIndex = -1` makes the container programmatically focusable without
+     * putting it in the tab order, which is the standard way to give a dialog a
+     * focus target of last resort.
+     *
+     * It is not only a jsdom concern, though jsdom is where it is reliably
+     * reproducible: `offsetParent` is null for anything inside a
+     * `position: fixed` ancestor in some engines, and for a dialog that
+     * genuinely contains no controls, the fallback is the only path.
+     */
+    if (target === node && node && !node.hasAttribute('tabindex')) {
+      node.setAttribute('tabindex', '-1');
+    }
     target?.focus?.();
 
     const onKeyDown = (e) => {

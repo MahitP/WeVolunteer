@@ -30,7 +30,7 @@ import {
   Search, Sparkles, SlidersHorizontal, CalendarX2, Star, Filter, X, Plus,
   Building2, UserRound, MapPin, Users,
 } from 'lucide-react';
-import { formatHours } from '../utils/helpers';
+import { formatHours, haversineDistance } from '../utils/helpers';
 import { api } from '../utils/api';
 import EmptyState from '../components/common/EmptyState';
 import { useLocationContext } from '../contexts/LocationContext';
@@ -38,7 +38,16 @@ import { useWindowedRows } from '../hooks/useWindowedRows';
 import { useDebounce } from '../hooks/useDebounce';
 import DatePicker from '../components/common/DatePicker';
 import { DistinctionTag } from '../components/profile/Distinction';
+import OrgAvatar from '../components/common/OrgAvatar';
 const CATEGORIES = ['All', 'School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
+
+/**
+ * A coordinate rounded to the neighbourhood before it leaves the device.
+ *
+ * Two decimal places, about 1.1km. See the call site for why the filter can
+ * afford it and why the displayed distance is computed separately.
+ */
+const coarsen = (deg) => Math.round(deg * 100) / 100;
 
 /**
  * What the reader is looking for.
@@ -75,6 +84,38 @@ export function discoveryAnnouncement(directory) {
   if (orgs > 0) parts.push(`${orgs} ${orgs === 1 ? 'organization' : 'organizations'}`);
   return `${parts.join(' and ')} found`;
 }
+/**
+ * The filter bar's chips: the popular fifteen, plus anything already ticked.
+ *
+ * ── Why a selected tag is forced back in ──
+ *
+ * The server sends the fifteen most-USED tags (`BROWSE_TAG_LIMIT`), recomputed
+ * on every request. A tag can therefore be selected and then fall out of that
+ * fifteen — usage shifts, an organizer retags an event, a filter change brings
+ * back a different slice. When that happens the list is still filtered by the
+ * tag while its chip has gone: the reader sees a shortened list, no indication
+ * why, and no control to switch it off.
+ *
+ * So a selected tag is always shown. Its label comes from the events on screen,
+ * where the organizer's real spelling lives, and falls back to the normalised
+ * key — ugly, but true, and better than a chip with no words on it.
+ *
+ * Pure and exported because the alternative is testing it by rendering the
+ * whole browse screen, and the case worth testing is precisely the one that is
+ * awkward to reach through the UI.
+ */
+export function tagChipsToShow(tagOptions = [], selectedTags = [], events = []) {
+  const shown = new Map((tagOptions || []).map(t => [t.tag, t]));
+  for (const tag of selectedTags || []) {
+    if (shown.has(tag)) continue;
+    const fromEvents = (events || [])
+      .flatMap(e => e?.tags || [])
+      .find(t => t?.tag === tag);
+    shown.set(tag, { tag, label: fromEvents?.label || tag });
+  }
+  return [...shown.values()];
+}
+
 export default function BrowseEvents({
   currentUser,
   applications = [],
@@ -246,6 +287,11 @@ export default function BrowseEvents({
   const PAGE_SIZE = 60;
 
 
+  const visibleTagOptions = useMemo(
+    () => tagChipsToShow(tagOptions, selectedTags, results),
+    [tagOptions, selectedTags, results],
+  );
+
   /** Exactly what the server needs; `undefined` values are dropped by the api layer. */
   const serverFilters = useMemo(() => ({
     scope: 'listable',
@@ -268,10 +314,23 @@ export default function BrowseEvents({
     to: toDate || undefined,
     minHours: minHours || undefined,
     closingSoon: closingSoon || undefined,
-    // Coordinates travel only when they are actually needed, so a user who has
-    // not granted location is never asked for it implicitly.
-    lat: (maxDistance || sortBy === 'distance') && location ? location.latitude : undefined,
-    lng: (maxDistance || sortBy === 'distance') && location ? location.longitude : undefined,
+    /**
+     * Coordinates travel only when they are actually needed, so a user who has
+     * not granted location is never asked for it implicitly — and when they do
+     * travel, they are coarsened to two decimal places first.
+     *
+     * Two decimal places is about 1.1km. That is accurate enough for "within
+     * five miles" (the boundary blurs by well under a mile) and far too coarse
+     * to say where somebody is. The exact position stays on the device, which
+     * is where the displayed "1.8 mi away" is computed — so the number a
+     * volunteer reads is exact while the number the server sees is a
+     * neighbourhood.
+     *
+     * These are minors' positions, and the master plan required this. It had
+     * not been implemented.
+     */
+    lat: (maxDistance || sortBy === 'distance') && location ? coarsen(location.latitude) : undefined,
+    lng: (maxDistance || sortBy === 'distance') && location ? coarsen(location.longitude) : undefined,
     maxDistance: location ? (maxDistance || undefined) : undefined,
     sort: sortBy
   }), [searchIntent, category, place, openOnly, showFavoritesOnly, fromDate, toDate, minHours, closingSoon, maxDistance, sortBy, location, selectedTags]);
@@ -392,7 +451,26 @@ export default function BrowseEvents({
 
   const advancedCount = [fromDate, toDate, minHours, place !== 'All' ? place : '', closingSoon ? 'x' : '', maxDistance].filter(Boolean).length;
 
-  const filtered = results;
+  /**
+   * The distance a volunteer READS is computed here, not on the server.
+   *
+   * The server's `distance_miles` is measured from the coarsened centre we
+   * send, so it can be off by up to about half a mile — invisible in a "within
+   * 5 miles" filter, and wrong in a number printed on a card. Recomputing from
+   * the exact position, which never left the device, keeps the card, the modal
+   * and the dashboard all saying the same thing.
+   *
+   * Falls through to the server's value when there is no shared position, so
+   * nothing regresses for a volunteer who has not opted in.
+   */
+  const filtered = useMemo(() => {
+    if (!location) return results;
+    return results.map(e => (
+      e.latitude != null && e.longitude != null
+        ? { ...e, distance: haversineDistance(location.latitude, location.longitude, e.latitude, e.longitude) }
+        : e
+    ));
+  }, [results, location]);
 
   /**
    * Row windowing for the results grid.
@@ -407,10 +485,26 @@ export default function BrowseEvents({
   /* Both conditions the `/events/new` route enforces, mirrored for display only.
      `requiresVerified` has no capability of its own — no capability expresses
      "approved yet" — so it stays a separate flag here exactly as it is in NAV. */
-  const canCreate = can(currentUser, 'event.create') && Boolean(currentUser?.verified);
+  /* BOTH capabilities the route accepts, or the button disappears for exactly
+     the people the second one was added for. This is the only link to
+     `/events/new` in the application — "New event" is deliberately not in NAV,
+     and the organizer dashboard's buttons are unreachable to a student, whose
+     persona resolves to the volunteer dashboard. A Student Organizer with no
+     button here can reach the form only by typing the URL. */
+  const canCreate = (can(currentUser, 'event.create') || can(currentUser, 'organization.event.create'))
+    && Boolean(currentUser?.verified);
   /* Same shape, same reasoning: `/organizations/new` enforces both conditions
      itself, and so does every server route behind it. */
-  const canCreateOrganization = can(currentUser, 'organization.create') && Boolean(currentUser?.verified);
+  /**
+   * Who sees the Organizations entry.
+   *
+   * `organization.join`, not `organization.create`. The destination is now a
+   * page listing the organizations you run OR belong to, and a student who has
+   * joined a club has organizations — gating the way in on the ability to
+   * CREATE one would hide their own clubs from them. Creating is a control on
+   * that page, gated separately and re-checked by the server.
+   */
+  const canSeeOrganizations = can(currentUser, 'organization.join');
 
   const hasFilters = query || category !== 'All' || !openOnly || showFavoritesOnly || selectedTags.length > 0 || advancedCount > 0;
   const clearFilters = () => {
@@ -456,7 +550,7 @@ export default function BrowseEvents({
       {/* `row-between row-wrap` is the same pair the student summary above uses —
           no new class, because this needs no layout the shell does not already
           have, and an undefined class fails `noDanglingClasses.test.js`. */}
-      {(canCreate || canCreateOrganization) && <div className="row-between row-wrap">
+      {(canCreate || canSeeOrganizations) && <div className="row-between row-wrap">
           <p className="lead">
             {total} opportunit{total === 1 ? 'y' : 'ies'} posted
           </p>
@@ -465,9 +559,9 @@ export default function BrowseEvents({
                 It was the header action on the Find people page, and deleting
                 that page without it would have left creating a club reachable
                 from nowhere at all. */}
-            {canCreateOrganization && (
-              <Link to="/organizations/new" className="btn btn-secondary">
-                <Building2 size={16} aria-hidden="true" /> New organization
+            {canSeeOrganizations && (
+              <Link to="/organizations" className="btn btn-secondary">
+                <Building2 size={16} aria-hidden="true" /> Organizations
               </Link>
             )}
             {canCreate && (
@@ -490,8 +584,14 @@ export default function BrowseEvents({
             {recommended.map(event => <button key={event.id} className="card card-link card-pad" onClick={() => onViewDetails(event)}>
                 <div className="eyebrow">{event.category}</div>
                 <div className="strong s-57eca1">{event.title}</div>
+                {/* Same defect as the shifts tab: an event with no shifts has
+                    neither total, and this rendered " of  spots open" with two
+                    blanks where the numbers should be. */}
                 <div className="small muted s-956c6f">
-                  {event.spotsRemaining} of {event.maxSpots} spots open · {event.applicantCount} applied ·{' '}
+                  {Number.isFinite(event.spotsRemaining) && Number.isFinite(event.maxSpots) && (
+                    <>{event.spotsRemaining} of {event.maxSpots} spots open · </>
+                  )}
+                  {event.applicantCount} applied ·{' '}
                   up to {formatHours(event.hoursAwarded)}
                 </div>
               </button>)}
@@ -619,7 +719,7 @@ export default function BrowseEvents({
               {directory.organizations.map(org => (
                 <li key={org.id} className="list-row">
                   <Link to={`/organizations/${org.slug}`} className="card card-pad card-link directory-row">
-                    <span className="avatar directory-avatar" aria-hidden="true"><Building2 size={18} /></span>
+                    <OrgAvatar organization={org} className="directory-avatar" />
                     <span className="directory-body">
                       <span className="directory-name">{org.name}</span>
                       <span className="muted directory-meta">
@@ -649,7 +749,7 @@ export default function BrowseEvents({
               {browsedOrgs.map(org => (
                 <li key={org.id} className="list-row">
                   <Link to={`/organizations/${org.slug}`} className="card card-pad card-link directory-row">
-                    <span className="avatar directory-avatar" aria-hidden="true"><Building2 size={18} /></span>
+                    <OrgAvatar organization={org} className="directory-avatar" />
                     <span className="directory-body">
                       <span className="directory-name">{org.name}</span>
                       <span className="muted directory-meta">
@@ -731,10 +831,10 @@ export default function BrowseEvents({
           * of controls beside the category chips, and each chip already reports
           * its own pressed state.
           */}
-        {tagOptions.length > 0 && (
+        {visibleTagOptions.length > 0 && (
           <div className="row row-wrap s-775d10" role="group" aria-label="Filter by tag">
             <div className="chips">
-              {tagOptions.map(({ tag, label }) => {
+              {visibleTagOptions.map(({ tag, label }) => {
                 const on = selectedTags.includes(tag);
                 return (
                   <button

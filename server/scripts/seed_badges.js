@@ -64,6 +64,74 @@ import { fileURLToPath } from 'node:url';
  */
 
 /**
+ * Progressive service-hour tiers.
+ *
+ * ── The boundary this deliberately moves ──
+ *
+ * Until now the rule was: milestones own every threshold derivable from the
+ * service record, badges own what a milestone cannot express. Under it the
+ * shipped catalogue defined no hour badge at all, and `badges.test.js` asserted
+ * exactly that.
+ *
+ * The owner has moved the boundary, and it moves for a reason rather than by
+ * accident. A milestone and a badge are not two names for one thing:
+ *
+ *   · A MILESTONE is a rung on the ladder the volunteer sees on their OWN
+ *     dashboard. It answers "how far along am I", it is derived on read, and it
+ *     is undated — if hours are corrected downward it simply un-earns.
+ *   · A BADGE is a dated, conferred, revocable credential that appears where
+ *     OTHER PEOPLE look. It answers "what has this person done", it carries the
+ *     date it was earned, and it survives in `user_badges` as a record.
+ *
+ * The same underlying fact can honestly produce both, for different audiences,
+ * the way a school report and a certificate can both mention the same exam.
+ * What must never happen is the two DISAGREEING, which is why both derive from
+ * `SUM(hours_awarded) WHERE present = 1` and neither restates a number.
+ *
+ * ── Why these thresholds ──
+ *
+ * The owner's progression. It tightens early, where the difference between five
+ * and ten hours is a real change in commitment, and widens later, where it is
+ * not. It stops at 500 because beyond that the tiers stop marking anything a
+ * reader would distinguish — and an unbounded ladder is how a profile becomes
+ * a wall of medals.
+ */
+export const HOUR_BADGE_TIERS = Object.freeze([5, 10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500]);
+
+/**
+ * Consecutive-month service tiers.
+ *
+ * The month definition is `buildStreak`'s and is not restated here: consecutive
+ * calendar months containing at least one credited attendance, where the
+ * current month is live and a cancelled event cannot break a run.
+ *
+ * Starts at two because a one-month streak is one month with a flame next to
+ * it. Ends at 24 because a two-year run is the longest thing a high-school
+ * volunteer can hold, and a tier nobody can reach is a tier that only ever
+ * reads as unfinished.
+ */
+export const STREAK_BADGE_TIERS = Object.freeze([2, 3, 6, 9, 12, 18, 24]);
+
+/** "5 Hours" / "1 Hour". */
+const hourBadge = (hours) => ({
+  name: `${hours} Hours`,
+  description: `Completed ${hours} hours of verified volunteer service.`,
+  icon: '🏅',
+  category: 'Service hours',
+  criteria_type: 'hours',
+  criteria_value: hours,
+});
+
+const streakBadge = (months) => ({
+  name: `${months} Month Streak`,
+  description: `Volunteered in ${months} consecutive months.`,
+  icon: '🔥',
+  category: 'Consistency',
+  criteria_type: 'streak_months',
+  criteria_value: months,
+});
+
+/**
  * Every badge this product ships.
  *
  * Names match the rows migration 024 seeds, so reconciliation UPDATES them
@@ -110,6 +178,10 @@ export const CONFERRED_CATALOGUE = Object.freeze([
     criteria_type: 'events_created',
     criteria_value: 10,
   },
+  /* Generated from the published tier lists rather than written out, so the
+     catalogue and the lists cannot drift apart. */
+  ...HOUR_BADGE_TIERS.map(hourBadge),
+  ...STREAK_BADGE_TIERS.map(streakBadge),
 ]);
 
 /**

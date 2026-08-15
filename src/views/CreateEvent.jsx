@@ -5,6 +5,7 @@ import { LocationPicker } from '../components/location';
 import TagInput from '../components/common/TagInput';
 import DatePicker from '../components/common/DatePicker';
 import { api } from '../utils/api';
+import { can } from '../authz';
 const CATEGORIES = [{
   value: 'School',
   label: 'School project'
@@ -24,8 +25,20 @@ const CATEGORIES = [{
 export default function CreateEvent({
   onSubmitEvent,
   addToast,
-  setActiveTab
+  setActiveTab,
+  currentUser
 }) {
+  /**
+   * A Student Organizer reached this page on `organization.event.create`, which
+   * only ever means "for a club you help run". They have no `event.create`, so
+   * an event with no organization behind it is not theirs to make — the server
+   * answers 403 `organization_required`, and this is the same rule said before
+   * the request rather than after it.
+   *
+   * Read from the capability rather than from the role, so it stays true if the
+   * rank is ever given to somebody who is not a student.
+   */
+  const orgRequired = Boolean(currentUser) && !can(currentUser, 'event.create');
   /**
    * The organizations this account may publish under.
    *
@@ -40,7 +53,25 @@ export default function CreateEvent({
   useEffect(() => {
     let cancelled = false;
     api.fetchOrganizations({ mine: true, limit: 50 })
-      .then(res => { if (!cancelled) setManageableOrgs(res.organizations || []); })
+      /**
+       * FILTERED, which the comment above has always claimed and the code did
+       * not do: `?mine=true` returns every organization the account belongs to,
+       * so an organizer who had joined a club as an ordinary member was offered
+       * it here and refused by the server on submit.
+       *
+       * `student_organizer` is included because that rank exists to put the
+       * club's events up. `canHelpRun` on the server decides the same way, and
+       * re-checks — this list only exists so nobody is offered a choice that
+       * will be refused.
+       */
+      .then(res => {
+        if (cancelled) return;
+        const mine = res.organizations || [];
+        setManageableOrgs(mine.filter((o) => {
+          const rank = o.viewerRole ?? o.memberRole;
+          return rank === 'manager' || rank === 'student_organizer';
+        }));
+      })
       /* A missing list is not an error worth showing: the field is optional, so
          it simply does not appear. */
       .catch(() => { if (!cancelled) setManageableOrgs([]); });
@@ -56,6 +87,9 @@ export default function CreateEvent({
     applicationDeadline: '',
     autoApprove: false,
     organizationId: '',
+    /* `everyone` unless the organizer says otherwise, which is what every event
+       on the platform was before there was a choice. */
+    audience: 'everyone',
     creditsHours: true,
     attendeeVisibility: 'accepted',
     /* `{tag, label}` pairs, the same shape the API returns — so an edit loads its
@@ -183,6 +217,9 @@ export default function CreateEvent({
     if (!locText?.trim()) next.location = 'Add a location';
     if (!form.applicationDeadline) next.applicationDeadline = 'Set an application deadline';
     if (slots.length === 0) next.slots = 'Add at least one shift before publishing';
+    if (orgRequired && !form.organizationId) {
+      next.organizationId = 'Choose the organization this event is for';
+    }
     if (form.applicationDeadline && slots.length > 0) {
       const first = new Date([...slots].sort((a, b) => a.startDatetime.localeCompare(b.startDatetime))[0].startDatetime);
       if (new Date(form.applicationDeadline) >= first) {
@@ -219,6 +256,10 @@ export default function CreateEvent({
            absent field, and only a manager of the named organization may set
            one (it re-checks; this select only lists the ones they manage). */
         organizationId: form.organizationId || null,
+        /* Forced back to open when no organization is chosen. "Members only" of
+           nothing is a shift nobody can join, and the server refuses it — this
+           keeps a stale radio from producing that request at all. */
+        audience: form.organizationId ? form.audience : 'everyone',
         creditsHours: form.creditsHours,
         /* Sent as the raw labels. The server normalises and de-duplicates them —
            it is the authority on what a tag is, and sending the client's
@@ -311,19 +352,83 @@ export default function CreateEvent({
 
             {manageableOrgs.length > 0 && (
               <div className="field">
-                <label htmlFor="ce-org">Organization <span className="dim">(optional)</span></label>
+                <label htmlFor="ce-org">
+                  Organization {!orgRequired && <span className="dim">(optional)</span>}
+                </label>
                 <select id="ce-org" className="select" value={form.organizationId}
+                  aria-invalid={!!errors.organizationId}
                   onChange={e => set('organizationId', e.target.value)}>
-                  <option value="">No organization</option>
+                  {/* Offered only to somebody who could actually publish without
+                      one. For a Student Organizer there is no such event, so the
+                      option that leads to a 403 is not in the list. */}
+                  {!orgRequired && <option value="">No organization</option>}
+                  {orgRequired && <option value="">Choose an organization</option>}
                   {manageableOrgs.map(org => (
                     <option key={org.id} value={org.id}>{org.name}</option>
                   ))}
                 </select>
-                <span className="field-hint">
-                  The event appears on that organization&rsquo;s page, and its members are notified
-                  that a new opportunity is open.
-                </span>
+                {errors.organizationId
+                  ? <span className="field-error"><AlertCircle size={12} />{errors.organizationId}</span>
+                  : (
+                    <span className="field-hint">
+                      The event appears on that organization&rsquo;s page, and its members are notified
+                      that a new opportunity is open.
+                    </span>
+                  )}
               </div>
+            )}
+
+            {/**
+              * Who may apply.
+              *
+              * Shown only once an organization is chosen, because that is the
+              * only state in which the question has two answers — "members
+              * only" of nothing is a shift nobody can join. Radios rather than
+              * a checkbox: both options are named, so neither is the one you
+              * get by not reading.
+              *
+              * A members-only event is still LISTED to everybody and still says
+              * whose it is. Hiding it would mean somebody who would happily
+              * join the club never learns the club exists; refusing the
+              * application, with a reason, is the honest version.
+              */}
+            {form.organizationId && (
+              <fieldset className="field">
+                <legend className="label">Who can apply</legend>
+                <div className="stack-sm">
+                  <label className="check" data-checked={form.audience === 'everyone' ? 'true' : 'false'}>
+                    <input
+                      type="radio"
+                      name="ce-audience"
+                      checked={form.audience === 'everyone'}
+                      onChange={() => set('audience', 'everyone')}
+                    />
+                    {/* `check-title` / `check-desc`, the idiom the Service hours
+                        radios below already use. `field-hint` is inline, so the
+                        description ran straight on from the title —
+                        "EveryoneAnybody on WeVolunteer can apply." Measured at
+                        320px. */}
+                    <span>
+                      <span className="check-title">Everyone</span>
+                      <span className="check-desc">Anybody on WeVolunteer can apply.</span>
+                    </span>
+                  </label>
+                  <label className="check" data-checked={form.audience === 'organization' ? 'true' : 'false'}>
+                    <input
+                      type="radio"
+                      name="ce-audience"
+                      checked={form.audience === 'organization'}
+                      onChange={() => set('audience', 'organization')}
+                    />
+                    <span>
+                      <span className="check-title">Members of this organization</span>
+                      <span className="check-desc">
+                        Everybody still sees the event and who it belongs to. Only members can take a place.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
             )}
 
             {/**

@@ -10,16 +10,18 @@ import {
 } from '../email.js';
 import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
-import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
+import { authenticateToken, formatUserResponse, selfUserResponse, inTransaction } from '../utils.js';
 import { can } from '../authz.js';
 /* The milestone ladder. One definition, in a module — it was inline here, and
    duplicated byte-for-byte in utils.js where nothing imported it. See
    server/milestones.js for the badge/milestone boundary this sits on. */
 import { buildMilestones } from '../milestones.js';
+import { milestoneInputs } from '../volunteerInsights.js';
 import { db, initDatabase } from '../db.js';
 import { distinctionFor } from '../profileSerializer.js';
 import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
+import { canSeeHours, isValidVisibility, normaliseVisibility } from '../serviceVisibility.js';
 
 const router = express.Router();
 
@@ -65,9 +67,47 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
     // resolve — so without this a tombstone answers 200 as a live profile.
     // Suspended is deliberately NOT excluded: a suspended member still exists
     // and their profile is still theirs.
-    const row = db.prepare(
-      "SELECT * FROM users WHERE id = ? AND role = 'student' AND account_status <> 'deleted'"
-    ).get(req.params.id);
+    /**
+     * ── Who has a volunteer profile ──
+     *
+     * Every student, and anybody else who has actually volunteered.
+     *
+     * This used to be `role = 'student'` alone, and that was right while only
+     * students volunteered. It stopped being right for an account that runs the
+     * platform AND turns up to shifts: the platform owner's own service record —
+     * real hours, real attendance, real badges — answered 404 to everybody
+     * including themselves, because the row said `super_admin`.
+     *
+     * ── Why attendance and not a role list ──
+     *
+     * `role IN ('student', 'super_admin')` would have worked today and been
+     * wrong in principle: it says "the owner is a volunteer" as a fact about a
+     * ROLE, when what makes somebody a volunteer is that they volunteered. An
+     * organizer who never takes a shift still has no profile here; one who does
+     * has the record to show. The rule is about the ledger, which is the same
+     * thing every figure ON the profile is derived from.
+     *
+     * Presentation is unaffected: `profileSerializer` derives everything from
+     * the same columns whatever the role, and the one role-derived field
+     * (`distinction`) is the role restated in words. So the owner's profile is
+     * a volunteer's profile, with a word on it saying what else they are.
+     *
+     * `account_status <> 'deleted'` is part of the identity check, not a filter
+     * bolted on afterwards: a deleted account is anonymised in place rather than
+     * removed — the row survives so audit history and foreign keys still resolve
+     * — so without it a tombstone answers 200 as a live profile. Suspended is
+     * deliberately NOT excluded: a suspended member still exists and their
+     * profile is still theirs.
+     */
+    const row = db.prepare(`
+      SELECT * FROM users
+       WHERE id = ?
+         AND account_status <> 'deleted'
+         AND (
+           role = 'student'
+           OR EXISTS (SELECT 1 FROM attendance a WHERE a.user_id = users.id AND a.present = 1)
+         )
+    `).get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Volunteer not found' });
 
     const isSelf = req.params.id === req.principal.userId;
@@ -85,12 +125,38 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
     `).get(req.params.id, req.principal.userId);
     const canSeeContact = isSelf || can(req.principal, 'user.contact.read') || hostsApplicant;
 
-    const totals = db.prepare(`
-      SELECT COALESCE(SUM(hours_awarded), 0) as hours,
-             COUNT(DISTINCT event_id) as events,
-             COUNT(*) as shifts
-      FROM attendance WHERE user_id = ? AND present = 1
-    `).get(req.params.id);
+    /**
+     * Whether the AGGREGATE service figures may be shown.
+     *
+     * The itemised `completed` array below has always been gated on
+     * `canSeeContact`, and correctly so. What was never gated was everything
+     * around it: total hours, events completed, shifts completed, the
+     * hours-by-category breakdown and the milestone tiers. Those were returned
+     * to every caller holding `directory.read`, which is every student.
+     *
+     * Individually each is only a number. Together they are a fairly complete
+     * picture of how much somebody volunteers and at what, and a student who
+     * wants that kept to themselves had no way to ask. Now they do.
+     *
+     * `canSeeContact` is deliberately part of the test rather than a separate
+     * branch: staff who may already read a student's particulars, and an
+     * organizer reviewing somebody who applied to their own event, are reading
+     * this as part of a workflow that is already a reviewed decision. Hiding a
+     * total from them would break applicant review without protecting anything
+     * they cannot reach another way.
+     */
+    const hoursVisible = canSeeHours(row, { viewerId: req.principal.userId, canSeeContact });
+
+    /**
+     * Shared with the dashboard rather than restated here.
+     *
+     * This query and the dashboard's are the inputs to the same
+     * `buildMilestones` call, so if they ever drift the two surfaces disagree
+     * about whether a student has earned a tier — on the same afternoon, for
+     * the same student. `milestoneInputs` is the single derivation, and
+     * `volunteerInsights.test.js` asserts the agreement.
+     */
+    const totals = milestoneInputs(db, req.params.id);
 
     // Completed service, newest first
     const completed = db.prepare(`
@@ -143,10 +209,14 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
         // Contact details stay with the person and the adults coordinating them
         email: canSeeContact ? row.email : null
       },
+      /* Omitted, not zeroed, when the subject keeps their history private: a
+         zero is a claim about somebody, and it is a false one. `hoursVisible`
+         is reported alongside so the page can say why the figures are absent. */
+      hoursVisible,
       stats: {
-        hours: Number(totals.hours) || 0,
-        eventsCompleted: totals.events || 0,
-        shiftsCompleted: totals.shifts || 0,
+        hours: hoursVisible ? (Number(totals.hours) || 0) : null,
+        eventsCompleted: hoursVisible ? (totals.events || 0) : null,
+        shiftsCompleted: hoursVisible ? (totals.shifts || 0) : null,
         // The count alone carries no whereabouts, so staff who legitimately
         // see contact info may see it too — the array itself (event location,
         // exact times) is self-only, below.
@@ -157,8 +227,14 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
            read as an oversight rather than a decision. */
         pendingCount: isSelf || canSeeContact ? pendingCount : 0
       },
-      milestones: buildMilestones(Number(totals.hours) || 0, totals.events || 0),
-      byCategory: byCategory.map(c => ({ category: c.category, hours: Number(c.hours) })),
+      /* Both are derived from the hours, so publishing them while withholding
+         the total would hand the reader the same fact by another route — a
+         milestone tier IS an hours threshold, and the category breakdown sums
+         to the total. */
+      milestones: hoursVisible ? buildMilestones(Number(totals.hours) || 0, totals.events || 0) : [],
+      byCategory: hoursVisible
+        ? byCategory.map(c => ({ category: c.category, hours: Number(c.hours) }))
+        : [],
       /**
        * The itemised service record is NOT public.
        *
@@ -366,6 +442,9 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
     for (const [column, value] of [
       ['name', check.value.name],
       ['avatar', check.value.avatar],
+      /* The colour behind the emoji. A palette KEY, validated in
+         `accountValidation`, never a colour from the client. */
+      ['avatar_color', check.value.avatarColor],
       ['bio', check.value.bio],
       ['school', check.value.school]
     ]) {
@@ -433,6 +512,50 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
       updates.push('friend_activity_visible = ?'); values.push(req.body.friendActivityVisible ? 1 : 0);
     }
 
+    /**
+     * Who may see the service history and the certificates.
+     *
+     * Two separate questions with two separate answers, deliberately. A student
+     * may be happy for the school to see they volunteered forty hours while
+     * keeping the certificates — which carry their full name, the organization
+     * and a verification code — to themselves, or exactly the reverse.
+     *
+     * Validated against the closed set rather than coerced. `values.push(x ===
+     * 'private' ? 'private' : 'public')` would accept a typo and silently store
+     * the opposite of what the student chose, which for a privacy control is
+     * the one failure mode that must not be quiet.
+     */
+    for (const [field, column] of [['hoursVisibility', 'hours_visibility'],
+                                   ['certificatesVisibility', 'certificates_visibility']]) {
+      if (req.body[field] !== undefined) {
+        if (!isValidVisibility(req.body[field])) {
+          return res.status(400).json({ error: 'Choose public or private.', field });
+        }
+        updates.push(`${column} = ?`); values.push(req.body[field]);
+      }
+    }
+
+    /**
+     * Consent to analytics.
+     *
+     * A strict boolean, and the strictness is the point. Every other switch on
+     * this endpoint coerces — `leaderboardOptIn ? 1 : 0` — which is fine for a
+     * preference and wrong for a consent record: `'false'`, the string, is
+     * truthy, so a client bug would store a yes that nobody gave. The column
+     * has three meaningful states (see migration 052) and only two of them may
+     * be reached from here; `null` means "not asked" and is not something a
+     * request may assert about a person.
+     */
+    if (req.body.analyticsConsent !== undefined) {
+      if (typeof req.body.analyticsConsent !== 'boolean') {
+        return res.status(400).json({
+          error: 'Analytics consent must be true or false.',
+          field: 'analyticsConsent',
+        });
+      }
+      updates.push('analytics_consent = ?'); values.push(req.body.analyticsConsent ? 1 : 0);
+    }
+
     if (grade !== undefined) {
       if (!VALID_GRADES.includes(grade)) {
         return res.status(400).json({ error: `Grade must be one of: ${VALID_GRADES.join(', ')}`, field: 'grade' });
@@ -447,7 +570,7 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
     db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
     const row = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-    res.json({ user: formatUserResponse(row) });
+    res.json({ user: selfUserResponse(row) });
   } catch (err) {
     console.error('Profile update error:', err);
     res.status(500).json({ error: 'Failed to update profile' });

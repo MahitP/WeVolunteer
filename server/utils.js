@@ -6,10 +6,15 @@ import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, isEmailGateAllowed, COOKIE_NAME
 import { principalFor, requiresSecondFactor, ROLE, ROLES } from './authz.js';
 import { SERVICE_HOUR_GOAL } from './milestones.js';
 import { grantsFor } from './userCapabilities.js';
+import { eventApplicationEligibility } from './eventEligibility.js';
 import { withheldCapabilitiesFor } from './organizerAgreement.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
+import { sweepCheckinTokens } from './checkinTokens.js';
 import { sweepErrors } from './errorReporter.js';
-import { sendErrorAlerts } from './alerting.js';
+import { sendErrorAlerts, sendBackupAlert } from './alerting.js';
+/* Read here rather than inside alerting.js — that module imports nothing on
+   purpose, so everything it needs arrives as an argument. */
+import { backupStatus } from './backupStatus.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
 import { isSuspended, liftIfExpired, suspensionNotice } from './suspension.js';
 import { suspendedMayReach } from './suspendedAccess.js';
@@ -19,6 +24,7 @@ import { suspendedMayReach } from './suspendedAccess.js';
    disagree. profileSerializer imports only volunteerStats, so this is not a
    cycle. */
 import { distinctionFor, parseHighlights as parseHighlightsList } from './profileSerializer.js';
+import { normaliseVisibility } from './serviceVisibility.js';
 
 /**
  * The seeded demo administrator, and the ONLY account that may skip the policy.
@@ -296,9 +302,15 @@ export function sweepTwoFactorRemnants(dbHandle = db, now = new Date()) {
  * buy nothing and a lazy getter that `can()` forgets to trigger would fail open —
  * the one direction an authorization mechanism must never fail.
  *
- * It costs one indexed query per authenticated request, and only for organizers:
- * `withheldCapabilitiesFor` returns `[]` without touching the database for every
- * other role. See `server/organizerAgreement.js` for why the list exists.
+ * It costs one or two indexed queries per authenticated request. It used to be
+ * organizers only, and is not since the Student Organizer Agreement: that gate
+ * withholds against a RANK rather than a role, so "do you help run a club" is
+ * asked of every account (`organization_members`, covered by
+ * `idx_org_members_user`). Organizers and administrators are answered from their
+ * role and never reach it; everybody else pays the one lookup, and only somebody
+ * who does hold a rank pays the second (`legal_acceptances`, covered by
+ * `idx_acceptances_user`). See `server/organizerAgreement.js` and
+ * `server/studentOrganizerAgreement.js` for why the lists exist.
  *
  * `computeWithheld` is injectable for the same reason `fetchGrants` is: so this
  * function's own contract — the shape of the principal, and the laziness of
@@ -628,6 +640,41 @@ export function authenticateToken(req, res, next) {
 }
 
 // Helper to format database user row (calculating hours dynamically from Attendance)
+/**
+ * The signed-in user's OWN payload — everything `formatUserResponse` returns,
+ * plus the two fields the client's `can()` needs to agree with the server.
+ *
+ * ── Why this exists as a separate function ──
+ *
+ * `grants` and `withheld` must NOT go through `formatUserResponse`, which also
+ * describes OTHER people on the admin user list and on a profile view: there
+ * they would disclose what somebody else has been granted, or whether they have
+ * signed an agreement, to anybody who can see them.
+ *
+ * But `/api/auth/me` is not the only endpoint whose response the browser stores
+ * as `currentUser` — changing a username, confirming an email and saving a
+ * profile all hand their result straight to `setCurrentUser`, replacing it
+ * wholesale. Those returned the bare formatter, so editing a bio silently
+ * emptied `grants` and a Student Organizer lost every helper capability
+ * client-side until a full reload: the nav, the route guard and the create
+ * button all vanished.
+ *
+ * Note the asymmetry, because it is why nothing caught this. A missing
+ * `withheld` OVER-offers, which `src/authz.js` names as the safe direction. A
+ * missing `grants` UNDER-offers — it hides a control the server would have
+ * allowed, which is the failure this whole mirror exists to prevent.
+ *
+ * One function, called by every endpoint that returns the caller to itself.
+ */
+export function selfUserResponse(row) {
+  if (!row) return null;
+  return {
+    ...formatUserResponse(row),
+    grants: grantsFor(db, row.id),
+    withheld: withheldCapabilitiesFor(db, row),
+  };
+}
+
 export function formatUserResponse(row) {
   if (!row) return null;
 
@@ -660,6 +707,7 @@ export function formatUserResponse(row) {
     ],
     tfaRequired: secondFactorRequiredFor(row.role, row) && !row.tfa_enabled && !row.tfa_email_enabled,
     avatar: row.avatar,
+    avatarColor: row.avatar_color || null,
     profile_picture_url: row.profile_picture_url,
     volunteeredHours: totalHours,
     /**
@@ -715,7 +763,30 @@ export function formatUserResponse(row) {
      * See the note at the top of that file for why.
      */
     profileVisibility: row.profile_visibility || 'private',
+    /* The account's own two service-privacy answers, so the Settings screen can
+       render the switch in the state it is actually in rather than guessing a
+       default. Normalised through the same function the read path uses, so the
+       control and the enforcement can never disagree about what a stored value
+       means. */
+    hoursVisibility: normaliseVisibility(row.hours_visibility),
+    certificatesVisibility: normaliseVisibility(row.certificates_visibility),
     friendActivityVisible: row.friend_activity_visible !== 0,
+    /**
+     * Whether this person agreed to be measured — and whether they have been
+     * asked at all.
+     *
+     * Three states deliberately survive the trip to the client (see migration
+     * 052): `null` is "not asked", which Settings renders differently from a
+     * considered "no". Everything except exactly `1` reads as no consent, so a
+     * corrupted value fails towards collecting nothing.
+     *
+     * It is on the SELF response only. `profileSerializer.js` is an allowlist
+     * and this is not in it, which is correct: whether somebody agreed to
+     * analytics is nobody else's business, including an organizer's.
+     */
+    analyticsConsent: row.analytics_consent === null || row.analytics_consent === undefined
+      ? null
+      : row.analytics_consent === 1,
     createdAt: row.created_at
   };
 }
@@ -984,6 +1055,13 @@ export function runNotificationSweep() {
     const tfa = sweepTwoFactorRemnants(db, now);
     if (tfa > 0) console.log(`[2FA] Purged ${tfa} expired code and attempt row(s).`);
 
+    /* Check-in codes expire after five minutes; these are swept a day later, so
+       "did Leo's code work this morning?" is still answerable in the afternoon.
+       After that it is credential material with no remaining purpose, which is
+       the same reason the 2FA codes above are swept. */
+    const codes = sweepCheckinTokens(db, now);
+    if (codes > 0) console.log(`[Check-in] Purged ${codes} expired check-in code(s).`);
+
     /**
      * Error records: aged evidence, closed groups, and the single-occurrence
      * client groups an unauthenticated flood leaves behind.
@@ -1014,12 +1092,44 @@ export function runNotificationSweep() {
      * unhandled rejection here would be reported by our own error capture,
      * which is the loop worth refusing outright.
      */
-    sendErrorAlerts(db, { send: sendMail, now, appUrl: process.env.APP_URL })
+    /* `flow: 'error-alert'` sends this under the platform identity rather than
+       the one users see. It goes to whoever runs the deployment, not to a
+       volunteer, and a reply belongs in the operators' mailbox. */
+    sendErrorAlerts(db, {
+      send: (msg) => sendMail({ ...msg, flow: 'error-alert' }),
+      now,
+      appUrl: process.env.APP_URL
+    })
       .then(({ sent, reason }) => {
         if (sent > 0) console.log(`[Alerts] Sent an alert covering ${sent} new problem(s).`);
         else if (reason === 'failed') console.warn('[Alerts] Alert send failed — see the error above.');
       })
       .catch(() => { /* sendErrorAlerts does not reject; this is belt and braces */ });
+
+    /**
+     * The backups, separately — and it has to be separate.
+     *
+     * `sendErrorAlerts` returns early on `nothing_new`, and a backup that
+     * stopped running produces no error rows at all. A system that is otherwise
+     * perfectly healthy is exactly the one whose backups fail unnoticed, so this
+     * cannot ride on a path that a quiet error table short-circuits.
+     *
+     * Same contract as the call above: not awaited, catches internally, throttles
+     * itself. Its own 12-hour floor rather than the hourly one, because a stale
+     * backup is a standing condition and hourly mail about it gets the channel
+     * muted — which is how this became invisible in the first place.
+     */
+    sendBackupAlert({
+      status: backupStatus(),
+      send: (msg) => sendMail({ ...msg, flow: 'error-alert' }),
+      now,
+      appUrl: process.env.APP_URL
+    })
+      .then(({ sent, reason, status }) => {
+        if (sent > 0) console.warn(`[Alerts] Backups need attention (${status}) — an alert was sent.`);
+        else if (reason === 'failed') console.warn('[Alerts] Backup alert send failed — see the error above.');
+      })
+      .catch(() => { /* does not reject; belt and braces */ });
 
     if (removed > 0) {
       console.log(`[Notifications] Cleaned up ${removed} expired notifications.`);
@@ -1111,7 +1221,8 @@ export function assignWaitlistOrder(applicationId, slotId) {
 export function promoteFromWaitlist(slotId) {
   const slot = db.prepare(`
     SELECT s.id, s.name, s.max_spots, s.event_id,
-           e.title AS event_title, e.organizer_id, e.status AS event_status
+           e.title AS event_title, e.organizer_id, e.status AS event_status,
+           e.organization_id, e.audience
     FROM slots s JOIN events e ON e.id = s.event_id
     WHERE s.id = ?
   `).get(slotId);
@@ -1131,13 +1242,39 @@ export function promoteFromWaitlist(slotId) {
   // NULLS LAST so a legacy row written before waitlist_order was assigned sorts
   // behind properly-queued ones instead of jumping the queue; applied_at then id
   // as a stable tiebreak so two rows can never swap places between calls.
-  const queue = db.prepare(`
+  /**
+   * The WHOLE queue, filtered, then cut to the free places.
+   *
+   * ── Why eligibility is re-asked here ──
+   *
+   * A waitlisted row is a request, not a place. Promotion is the moment the
+   * place is actually given — a NEW seating decision, taken by the platform,
+   * possibly weeks after the person joined the queue. In between, the
+   * organization may have banned them, or the event may have been narrowed to
+   * members only. Seating them anyway would have the platform hand somebody a
+   * shift the organization had just refused them, with nobody having decided
+   * anything.
+   *
+   * This is deliberately NOT the same rule as an already-accepted place, which
+   * a ban leaves alone (see `routes.eventEligibility.test.js`). Keeping a place
+   * somebody was given is not the same act as giving them one.
+   *
+   * Skipped rows stay `waitlisted` and keep their position — the queue moves
+   * past them rather than dropping them, so a lifted ban or a new membership
+   * puts them back in line where they were.
+   */
+  const waiting = db.prepare(`
     SELECT a.id, a.user_id, u.name AS volunteer_name
     FROM applications a JOIN users u ON u.id = a.user_id
     WHERE a.slot_id = ? AND a.status = 'waitlisted'
     ORDER BY a.waitlist_order IS NULL, a.waitlist_order ASC, a.applied_at ASC, a.id ASC
-    LIMIT ?
-  `).all(slotId, free);
+  `).all(slotId);
+
+  const queue = [];
+  for (const row of waiting) {
+    if (queue.length >= free) break;
+    if (eventApplicationEligibility(slot, row.user_id).ok) queue.push(row);
+  }
   if (queue.length === 0) return [];
 
   const promote = db.prepare(

@@ -1809,7 +1809,7 @@ when they are done, not when they become uncomfortable to look at.
   the missing capability when the favourites work is next touched.
 - **Effort:** small. **Opened:** 2026-08-01.
 
-#### TD-19 — geocoding is rate-limited per IP, but Nominatim's policy is per application
+#### TD-19 — geocoding was rate-limited per IP, but Nominatim's policy is per application — **resolved**
 
 - **Detail:** `geocodeLimiter` in `server/routes/geocodeRoutes.js` is
   `rateLimit({ windowMs: 60_000, limit: 30 })` with **no `keyGenerator`**, so
@@ -1829,14 +1829,25 @@ when they are done, not when they become uncomfortable to look at.
   User-Agent, which takes address lookup out for every school at once and is
   awkward to get reversed. Bounded in practice by the cache and by how rarely
   organizers create events, which is why this is Medium and not Critical.
-- **Action:** a **server-wide** throttle in front of the upstream call, not a
-  second per-IP limiter — a small queue that serialises to ≤1/s, or a
-  fail-fast 429 when a token bucket is empty. Which of those depends on what the
-  UI should do while waiting, so it is a design decision, not a one-liner. The
-  cache is already the first line and should stay. Planned as v1.4 Task 12; this
-  entry exists because the breach is live in shipped code and the plan is not
-  where anyone would look for that.
-- **Effort:** small. **Opened:** 2026-08-03.
+- **Resolution:** `reserveUpstreamSlot` in `server/routes/geocodeRoutes.js` — an
+  application-wide reservation bucket placed **after** the cache check and
+  immediately before the `fetch`, so a cached lookup never waits. A caller
+  reserves the next 1-second slot and is told how long it would wait *before*
+  waiting; beyond `NOMINATIM_MAX_WAIT_MS` (3s) it fail-fasts with the 429 this
+  route already returned, which the client already understands.
+  - A reservation rather than a promise chain: chaining serialises correctly but
+    queues without bound, parking the two-hundredth caller for two hundred
+    seconds on a request abandoned three minutes ago.
+  - The per-IP limiter **stays**. It bounds how much one client may ask for,
+    which is a different job from bounding what the application asks upstream.
+  - The interval is hardcoded, not an env var. One request per second is
+    somebody else's published policy, not an operator tunable.
+  - Process-local state is application-wide state here, for the reason
+    `instanceLock.js` already gives.
+  - Covered by `server/routes.geocode.test.js`: two distinct uncached lookups
+    are ≥1000ms apart at the outbound call, a cached lookup never waits, and a
+    queue deeper than the limit returns 429 without spending a slot.
+- **Effort:** small. **Opened:** 2026-08-03. **Resolved:** 2026-08-11.
 
 #### TD-20 — the authz guards' reviewed-exception registries were line-keyed — **resolved**
 
@@ -1878,6 +1889,42 @@ when they are done, not when they become uncomfortable to look at.
   change to how a security guard decides whether a declaration still applies is a
   change to a security control.
 - **Effort:** small. **Opened and resolved:** 2026-08-08.
+
+#### TD-21 — foreign-key enforcement rests on a library default, not a pragma
+
+- **Detail:** `node:sqlite` sets `enableForeignKeyConstraints: true` by default,
+  and `server/db.js:109` constructs `new DatabaseSync(dbPath)` with no options.
+  So every declared foreign key in this schema **is** enforced — all forty-four
+  tables, including `attendance`'s three `ON DELETE CASCADE` clauses and
+  `user_badges`' two. Verified against the production database:
+  `PRAGMA foreign_keys` reads 1 on a fresh connection, and 0 only when
+  `enableForeignKeyConstraints: false` is passed explicitly.
+- **Why it is still debt:** the guarantee is *implicit*. The two lines below that
+  constructor set `journal_mode` and `busy_timeout` explicitly, with a paragraph
+  each explaining why — and the far more consequential setting is the one nobody
+  wrote down. If a future Node release flips the default, or somebody adds an
+  options object for an unrelated reason and omits this key, forty-four tables
+  lose referential integrity **silently**. No test fails, no error is raised;
+  cascades simply stop firing and orphans start accumulating.
+- **The fix is one line** — pass `enableForeignKeyConstraints: true` explicitly,
+  beside the two pragmas, with a comment — plus a test asserting
+  `PRAGMA foreign_keys` reads 1 on the application's own connection. It is
+  written up rather than done here because it belongs with the person who can
+  run the delete-path review it deserves, and because the behaviour is correct
+  today: it is the *durability of the guarantee* that is thin, not the guarantee.
+- **What was corrected:** an earlier draft of this entry claimed the opposite —
+  that enforcement was off and every declared key was decoration. That was
+  wrong, and `server/db.js:339` already said so in a comment about
+  `application_conflicts` cascading during a table rebuild. Recorded here
+  because a false claim in the guide is worse than no claim: it would have sent
+  somebody to "enable" a thing that was already on, and to reason about delete
+  paths as if cascades were inert.
+- **Related, and genuinely resolved:** `attendance_checkin` and `checkin_tokens`
+  declared no foreign keys at all and now do (migration 038). Because
+  enforcement is live, those cascades took effect immediately rather than
+  waiting on a future switch. `PRAGMA foreign_key_check` over the production
+  database returns nothing, before and after.
+- **Effort:** small. **Opened:** 2026-08-12.
 
 #### TD-17 — every gated action costs two requests
 
@@ -2021,6 +2068,15 @@ Kept rather than deleted, because the reasoning is the part worth having.
 - **Root cause.** The test used `isoFromNow(-4 * HOUR)` to generate a past timestamp and compared it against SQLite's `datetime('now')`. The test was meant to demonstrate how `T` (0x54) and space (0x20) break comparisons, but it depended on the timestamps being on the *same calendar day*. During those 4 hours of the day, `datetime('now')` and the past timestamp land on different UTC days, which sidestepped the quirk the test was trying to verify.
 - **Fix.** Replaced the clock-dependent inputs (`datetime('now')` and `isoFromNow`) with hardcoded, explicit same-day strings (`2026-07-31T16:00:00.000Z` vs `2026-07-31 20:00:00`) for the lexicographic demonstration. This makes the test deterministic regardless of the wall clock time.
 - **Opened and closed:** 2026-07-31.
+
+#### TD-22 — historical PII in published git refs — **accepted, deferred by the owner**
+
+- **Symptom.** Nine git refs pin commits whose contents include real pilot participants' data — minors' names and service records — as they stood before the demo/QA seeding conventions were introduced. The data is reachable to anybody who can read those refs.
+- **Why it is not a launch blocker.** The repository is **private**. The population that can reach those refs is exactly the population already trusted with the live database, so removing them changes who can see the data by approximately nobody. The exposure is real but its blast radius is the same set of people either way.
+- **Owner decision (2026-08-13).** Accepted and deferred. Explicitly **not** a launch blocker, and history is **not** to be rewritten: a rebase or filter across published refs would invalidate every existing clone and checkout for a benefit that, on a private repository, is close to nil.
+- **What would change this.** Making the repository public, granting read access to anybody outside the group already trusted with production data, or a regulatory request that reaches historical copies. Any of those reopens this at the top of the queue, and the remedy at that point is history rewriting with every collaborator warned in advance — not a quiet fix.
+- **Deliberately not done.** No `filter-repo`, no force-push, no ref deletion. Recording the decision is the deliverable.
+- **Opened:** 2026-08-13. **Status:** accepted debt, reviewed at each release.
 
 ### Register maintenance
 

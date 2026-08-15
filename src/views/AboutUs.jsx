@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Compass, ClipboardList, Users, HeartHandshake } from 'lucide-react';
-import { APP_NAME, SUPPORT_EMAIL } from '../config';
+import { Compass, ClipboardList, Users, HeartHandshake, Crown } from 'lucide-react';
+import { APP_NAME, SUPPORT_EMAIL, DOCUMENT_SIGNATORY_TITLE } from '../config';
+import { api } from '../utils/api';
+import { avatarColorValue } from '../utils/avatarColors';
 
 /**
  * About Us — what WeVolunteer is for.
@@ -143,7 +145,13 @@ const COMMITMENTS = [
 
 export default function AboutUs() {
   return (
-    <div className="content legal-page stack-lg">
+    /* `main`, not a bare div, and `aria-labelledby` pointing at the h1 —
+       the same shape LegalCenter uses. `/about` is a PUBLIC route, so it renders
+       outside the signed-in shell and nothing above it supplies a landmark: a
+       screen-reader user had no main region to jump to and no skip target on the
+       one page that explains what this platform is. Every other public view
+       already did this; this one was the exception. */
+    <main className="content legal-page stack-lg" aria-labelledby="about-title">
       <div className="stack-sm">
         <h1 id="about-title" className="legal-title">About {APP_NAME}</h1>
         {/* Says what the thing IS. An earlier draft opened with a category —
@@ -410,6 +418,23 @@ export default function AboutUs() {
         </p>
       </section>
 
+      {/**
+        * Who runs this.
+        *
+        * Every legal document on this surface says "we" and "the platform", and
+        * nothing anywhere named the account behind those words. A parent
+        * deciding whether their child should sign up, or a student who wants to
+        * complain to somebody real, could not find out without already having an
+        * account — which is backwards, so this page (public, and reached by
+        * exactly those people) is where it belongs.
+        *
+        * The name comes from the server by ROLE, never by matching a username,
+        * so an account that changes hands needs no edit here. The title comes
+        * from configuration, the same value the transcript footer signs with, so
+        * the document and the page cannot disagree about who issued what.
+        */}
+      <OwnerSection />
+
       <p className="about-motto">
         <HeartHandshake size={20} aria-hidden="true" />
         <span>{APP_NAME}: because we care.</span>
@@ -430,6 +455,108 @@ export default function AboutUs() {
           'Contact details for privacy requests and safety reports are at the end of each legal document.'
         )}
       </p>
-    </div>
+    </main>
+  );
+}
+
+/**
+ * The platform owner, named.
+ *
+ * ── Why it renders nothing rather than an error ──
+ *
+ * A deployment with no owner account yet is a legitimate state — a fresh
+ * install, or a district mid-handover — and so is a failed request on a page
+ * somebody opened to read prose. Neither is worth a red box on an About page,
+ * and the surrounding nineteen hundred words are still true without this. So a
+ * miss is silence.
+ *
+ * ── Why the profile link is not always there ──
+ *
+ * `/users/@handle` is an APP route, deliberately: "public profile" on this
+ * platform means visible to the school community, not to the open internet,
+ * because the members are children. A signed-out reader gets the name and the
+ * role — which is what they came for — and no link into a members-only surface
+ * that would only bounce them to a sign-in screen.
+ */
+function OwnerSection() {
+  const [owner, setOwner] = useState(null);
+
+  /**
+   * Whether to offer the profile link, decided WITHOUT a request.
+   *
+   * This used to call `api.getMe()`. That is authoritative, and on this page it
+   * is the wrong trade: `/about` is public and is read mostly by people who have
+   * no account — a parent, somebody sent a link — so the call was a guaranteed
+   * 401 on almost every view, from anonymous visitors, purely to decide whether
+   * to render one anchor.
+   *
+   * The cached user is enough for that decision and costs nothing. Being wrong
+   * is cheap in both directions: a stale cache offers a link to somebody signed
+   * out, who meets the sign-in screen the link was always gated by, or withholds
+   * it from somebody signed in, who still has the whole navigation. Neither is
+   * worth an auth probe on a public page.
+   */
+  const signedIn = Boolean(api.getCurrentCachedUser?.());
+
+  useEffect(() => {
+    let cancelled = false;
+    api.fetchPlatformOwner()
+      .then(res => { if (!cancelled) setOwner(res?.owner ?? null); })
+      .catch(() => { if (!cancelled) setOwner(null); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!owner) return null;
+
+  return (
+    <section className="about-section about-owner" aria-labelledby="about-owner-heading">
+      <h2 id="about-owner-heading">Who runs {APP_NAME}</h2>
+      <div className="about-owner-card">
+        {/* The same three lines PublicProfile uses. There is no shared user
+            avatar component to reuse — only OrgAvatar, for organizations — and
+            inventing one for a single caller would be the wrong moment. */}
+        <span
+          className="avatar avatar-lg"
+          style={avatarColorValue(owner.avatarColor)
+            ? { '--avatar-bg': avatarColorValue(owner.avatarColor) }
+            : undefined}
+          aria-hidden="true"
+        >
+          {owner.profilePictureUrl
+            ? <img src={owner.profilePictureUrl} alt="" className="avatar-img" />
+            : (owner.avatar || '🙂')}
+        </span>
+        <div className="stack-xs">
+          <p className="about-owner-name">
+            {owner.name}
+            {owner.username && <span className="about-owner-handle"> @{owner.username}</span>}
+          </p>
+          <p className="about-owner-title">
+            <Crown size={14} aria-hidden="true" /> {DOCUMENT_SIGNATORY_TITLE}
+          </p>
+        </div>
+      </div>
+      <p>
+        {APP_NAME} is run by one person, not a company. They are responsible for how
+        the platform works, what it does with your information, and every policy in
+        the Legal Center. When a document here says &ldquo;we&rdquo;, this is who it
+        means, and the signature at the foot of a service transcript is the same
+        name.
+      </p>
+      <p>
+        They are also a student who volunteers, so their own service record sits on
+        their profile exactly as anybody else&rsquo;s does — the hours there were
+        earned the same way and confirmed by the same organizers.
+        {signedIn && owner.username && (
+          <>
+            {' '}
+            <Link className="policy-link" to={`/users/@${owner.username}`}>
+              See their profile
+            </Link>
+            .
+          </>
+        )}
+      </p>
+    </section>
   );
 }

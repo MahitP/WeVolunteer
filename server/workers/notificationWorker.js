@@ -2,6 +2,14 @@ import { db } from '../db.js';
 import { recordError } from '../errorReporter.js';
 import { sendMail, buildHtmlTemplate, escapeHtml } from '../email.js';
 import { getInAppContent } from '../services/notificationContent.js';
+import {
+  MESSAGE_CHANNEL,
+  QUEUE_MAX_ATTEMPTS,
+  attemptDelivery,
+  recordQueueOutcome,
+  sweepSentMessages,
+} from '../emailService.js';
+import { TERMINAL, EmailApplicationError } from '../emailProviders.js';
 
 /**
  * The notification kinds whose email may carry the shift's date, time,
@@ -45,6 +53,9 @@ const APP_URL = process.env.APP_URL || (process.env.NODE_ENV === 'production' ? 
 
 /** Attempts before a job is abandoned. Unchanged from the original behaviour. */
 const MAX_ATTEMPTS = 5;
+
+/** Ticks since start, so the delivered-row sweep does not run every ten seconds. */
+let sweepCounter = 0;
 
 /**
  * How long a job may sit in `processing` before it is presumed orphaned.
@@ -169,6 +180,27 @@ export async function processNotificationJobs() {
   try {
     reclaimStaleJobs();
 
+    /**
+     * Delivered rows are kept so the queue can answer "did it go out?", which
+     * means something has to remove them or the table becomes a permanent record
+     * of every address the platform has ever mailed. A day is long enough for a
+     * same-morning support question and short enough that this is not a growing
+     * pile of the email addresses of minors.
+     *
+     * Counted rather than run every tick: the tick is ten seconds and this is a
+     * whole-table delete. Every hundredth tick is roughly every seventeen
+     * minutes, which is far more often than a one-day window needs.
+     */
+    if (sweepCounter++ % 100 === 0) {
+      try {
+        const removed = sweepSentMessages({ handle: db });
+        if (removed > 0) console.log(`[Worker] Swept ${removed} delivered mail rows.`);
+      } catch (err) {
+        /* Housekeeping must never stop delivery. */
+        console.error('[Worker] Could not sweep delivered mail rows:', err.message);
+      }
+    }
+
     const pendingJobs = db.prepare(`
       SELECT * FROM notification_jobs
       WHERE status = 'pending' AND next_attempt_at <= ?
@@ -176,24 +208,57 @@ export async function processNotificationJobs() {
     `).all(new Date().toISOString());
 
     for (const job of pendingJobs) {
-      // The claim doubles as the staleness clock: reclaimStaleJobs compares
-      // next_attempt_at against its cutoff, so stamping it now means a job
-      // abandoned by a crash becomes reclaimable STALE_PROCESSING_MS later.
-      db.prepare(
-        "UPDATE notification_jobs SET status = 'processing', next_attempt_at = ? WHERE id = ?"
-      ).run(new Date().toISOString(), job.id);
+      /**
+       * The claim doubles as the staleness clock: reclaimStaleJobs compares
+       * next_attempt_at against its cutoff, so stamping it now means a job
+       * abandoned by a crash becomes reclaimable STALE_PROCESSING_MS later.
+       *
+       * `AND status = 'pending'` is the part that makes this a CLAIM rather than
+       * a label. The select and the update are two statements, so between them
+       * another worker — a second process, a stray `npm run dev` against the
+       * same file, a restart overlapping its predecessor — can select the same
+       * row. Guarding on the status the row was selected with means exactly one
+       * of them wins and the loser skips, which is enforced here rather than
+       * being a property of how the service happens to be deployed. Without it,
+       * two workers both send, and the person gets the email twice.
+       */
+      const claim = db.prepare(
+        "UPDATE notification_jobs SET status = 'processing', next_attempt_at = ?, updated_at = ? "
+        + "WHERE id = ? AND status = 'pending'"
+      ).run(new Date().toISOString(), new Date().toISOString(), job.id);
+      if (claim.changes === 0) continue;
 
       try {
         if (job.channel === 'email') {
           await handleEmailJob(job);
+          /* Delivered, or deliberately dropped. Either way it is finished and the
+             row carries no provider result worth keeping — see the DROPPED
+             return in handleEmailJob. */
+          db.prepare("DELETE FROM notification_jobs WHERE id = ?").run(job.id);
+        } else if (job.channel === MESSAGE_CHANNEL) {
+          const outcome = await handleMessageJob(job);
+          if (outcome.ok) {
+            /* Kept, not deleted, and swept a day later. The one question an
+               operator asks during a mail incident is "did that verification
+               email actually go out", and a deleted row cannot answer it. */
+            recordQueueOutcome(job.id, outcome, { handle: db });
+          } else {
+            recordQueueOutcome(job.id, {
+              ...outcome,
+              attemptCount: job.attempts + 1,
+            }, { handle: db });
+
+            if (TERMINAL.has(outcome.category) || job.attempts + 1 >= QUEUE_MAX_ATTEMPTS) {
+              const err = new Error(`queued mail failed: ${outcome.category}`);
+              console.error(
+                `[Worker] Queued message ${job.id} FAILED permanently (${outcome.category}).`
+              );
+              reportWorkerError(err, 'notificationJobExhausted', { jobId: job.id });
+            }
+          }
         } else {
           throw new Error(`Unknown channel: ${job.channel}`);
         }
-
-        // On success — or on a deliberate drop — we just delete the job to save
-        // space. A dropped job is not a failure and must not be retried; see
-        // `handleEmailJob`'s DROPPED return.
-        db.prepare("DELETE FROM notification_jobs WHERE id = ?").run(job.id);
       } catch (err) {
         try {
           const newAttempts = job.attempts + 1;
@@ -438,12 +503,51 @@ async function handleEmailJob(job) {
     text += `\n\nLink: ${ctaUrl}`;
   }
 
-  await sendMail({
+  /* `event` decides the sender. An enforcement notice, a legal-policy update and
+     a shift reminder are three different kinds of message and no longer leave
+     from one address; emailIdentity.js owns that mapping. */
+  return sendMail({
     to: user.email,
     subject: `${subject} - ${APP_NAME}`,
     text,
-    html
+    html,
+    event
   });
+}
+
+/**
+ * Deliver a job that is already a finished message.
+ *
+ * This is the channel transactional mail falls into when neither provider would
+ * take it. There is no user lookup, no content builder and no template: the
+ * message was rendered at the moment it was requested and the only thing left to
+ * do is put it on a wire. Re-rendering here would be a second code path that
+ * could disagree with the first — the recipient would get a different email on
+ * the retry than they would have got on the first attempt.
+ */
+async function handleMessageJob(job) {
+  let message;
+  try {
+    message = JSON.parse(job.payload);
+  } catch (err) {
+    throw new EmailApplicationError(`queued message payload is not readable: ${err.message}`);
+  }
+
+  const outcome = await attemptDelivery({
+    to: job.recipient,
+    from: message.from,
+    replyTo: message.replyTo || null,
+    subject: job.subject || message.subject,
+    text: message.text || null,
+    html: message.html || null,
+    headers: message.headers || null,
+    /* The same key the first attempt used, so a provider that already accepted
+       this message the last time we could not hear the answer does not send a
+       second copy. */
+    idempotencyKey: job.idempotency_key || null,
+  });
+
+  return outcome;
 }
 
 let workerInterval = null;

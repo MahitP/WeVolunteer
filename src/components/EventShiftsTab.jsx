@@ -1,8 +1,24 @@
-import React, { useMemo } from 'react';
-import { Info, CalendarClock, MapPin, Users, Check, Clock, Edit2 } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Info, CalendarClock, MapPin, Users, Check, Clock, Edit2, CalendarPlus, QrCode } from 'lucide-react';
 import { formatDay, formatTime, formatHours, usesAutoSelect } from '../utils/helpers';
 import { Seats } from './Seats';
 import EmptyState from './common/EmptyState';
+import CheckInCodeModal from './CheckInCodeModal';
+
+/**
+ * How long before a shift the downloaded calendar entry should sound an alarm.
+ *
+ * A fixed default rather than a picker in the row. That row already carries the
+ * seat count, the status pill, this button and Release; a fifth control for a
+ * decision most people will not make is clutter — and the one place changing an
+ * alert is genuinely easy is the calendar application it just landed in.
+ *
+ * The .ics also carries GEO, so on a calendar that supports departure alerts
+ * (iOS "Time to Leave") the device works out the real leaving time from live
+ * traffic and the volunteer's actual position, which is something this
+ * application cannot do and should not pretend to.
+ */
+const CALENDAR_REMINDER_MINUTES = 60;
 
 export default function EventShiftsTab({
   event,
@@ -18,6 +34,26 @@ export default function EventShiftsTab({
   submitting,
   onRelease
 }) {
+  /* The slot whose code is being shown, or null. Per slot, so a two-day event
+     cannot present Saturday's code on Sunday. */
+  const [qrFor, setQrFor] = useState(null);
+
+  /**
+   * Whether this reader is refused this event before they press anything.
+   *
+   * Two reasons, both decided by the server and carried on the event: an active
+   * ban from the organization running it, and a members-only event they are not
+   * a member of. The modal explains each of them in its own notice above; this
+   * is what stops the shift rows from offering a button underneath that notice
+   * whose only possible outcome is a 403.
+   *
+   * `viewerIsMember === false` and not `!viewerIsMember` — the field is `null`
+   * for an event that belongs to no organization, and a nullish test would read
+   * that as "not a member" and disable every ordinary event on the platform.
+   */
+  const refused = Boolean(event?.viewerBan?.banned)
+    || (event?.audience === 'organization' && event?.viewerIsMember === false);
+
   const days = useMemo(() => {
     if (!event?.slots) return [];
     const grouped = {};
@@ -37,7 +73,10 @@ export default function EventShiftsTab({
 
   return (
     <>
-      {isStudent && !signupsClosed && (
+      {/* The how-selection-works note is addressed to somebody who is about to
+          apply. Under a notice saying they cannot, it reads as instructions for
+          a thing that will not work. */}
+      {isStudent && !signupsClosed && !refused && (
         <div className="alert alert-info" style={{ marginBottom: 'var(--s4)' }}>
           <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>
@@ -49,7 +88,11 @@ export default function EventShiftsTab({
                 </div>
               </div>
             ) : (
-              `Choose the shifts you want and send an application. ${event.organizerName} decides who gets each spot, and you'll be notified either way.`
+              /* Named when we know the name. An event whose organizer has been
+                 tombstoned has no `organizerName`, and interpolating it
+                 unguarded put the literal word "undefined" in a sentence about
+                 who decides whether a student gets a place. */
+              `Choose the shifts you want and send an application. ${event.organizerName || 'The organizer'} decides who gets each spot, and you'll be notified either way.`
             )}
           </span>
         </div>
@@ -74,9 +117,24 @@ export default function EventShiftsTab({
 
       <div className="section-head">
         <h3>Shifts</h3>
-        <span className="section-action small dim tnum">
-          {event.maxSpots - event.spotsRemaining} of {event.maxSpots} spots filled
-        </span>
+        {/**
+          * The count only when there is something to count.
+          *
+          * An event with no shifts yet has no `maxSpots` and no
+          * `spotsRemaining`, so this read `undefined - undefined` and rendered
+          * the literal string "NaN of  spots filled" — directly above an empty
+          * state that says, correctly, "No shifts yet". Found in the browser on
+          * a seeded event, not by a test.
+          *
+          * Guarded on the numbers rather than on `days.length`, because a
+          * malformed event with shifts but no spot totals produces exactly the
+          * same nonsense and would slip past a length check.
+          */}
+        {Number.isFinite(event.maxSpots) && Number.isFinite(event.spotsRemaining) && (
+          <span className="section-action small dim tnum">
+            {event.maxSpots - event.spotsRemaining} of {event.maxSpots} spots filled
+          </span>
+        )}
       </div>
 
       {days.length === 0 ? (
@@ -142,7 +200,7 @@ export default function EventShiftsTab({
                         )}
                         {(isOwner || isAdmin) && (
                           <a 
-                            href={`/api/events/${event.id}/slots/${slot.id}/ics`} 
+                            href={`/api/events/${event.id}/slots/${slot.id}/ics?remind=${CALENDAR_REMINDER_MINUTES}`} 
                             className="btn btn-ghost btn-sm" 
                             style={{ marginTop: 4 }}
                             download
@@ -166,14 +224,59 @@ export default function EventShiftsTab({
                                 rejected: 'Not accepted'
                               }[mine.status]}
                             </span>
+                            {/**
+                              * The two utilities are icons; the destructive one
+                              * keeps its word.
+                              *
+                              * This row carried four full-width controls — a
+                              * status pill, "Add to Calendar", "Check in with
+                              * QR" and "Release" — and on a phone
+                              * `.sheet-action .btn { width: 100% }` stacked all
+                              * four into a column taller than the shift it
+                              * belonged to. Multiply by a three-shift event and
+                              * the page is nothing but buttons.
+                              *
+                              * Calendar and QR are recognisable as glyphs, are
+                              * safe to press by accident, and are the two a
+                              * volunteer reaches for repeatedly — they compress
+                              * well. Release does not: it gives up a place
+                              * somebody else wanted, it is pressed once, and an
+                              * unlabelled icon for a destructive action is how
+                              * people lose their shift by mis-tapping. It stays
+                              * a word.
+                              *
+                              * Both icons carry `title` AND `aria-label`, the
+                              * house pattern (there is no Tooltip component —
+                              * `title` is the browser's own and is read out).
+                              * The labels name the shift, so a screen reader on
+                              * a three-shift event hears which one.
+                              */}
                             {mine.status === 'accepted' && (
-                              <a 
-                                href={`/api/events/${event.id}/slots/${slot.id}/ics`} 
-                                className="btn btn-secondary btn-sm" 
+                              <a
+                                href={`/api/events/${event.id}/slots/${slot.id}/ics?remind=${CALENDAR_REMINDER_MINUTES}`}
+                                className="btn btn-secondary btn-sm btn-icon shift-util"
                                 download
+                                title="Add to calendar"
+                                aria-label={`Add ${slot.name} to your calendar`}
                               >
-                                Add to Calendar
+                                <CalendarPlus size={16} aria-hidden="true" />
                               </a>
+                            )}
+                            {/* Per slot, because check-in is per slot: on a
+                                two-day festival a Sunday volunteer's code must
+                                not work on Saturday. The button is always
+                                offered; the server decides whether a code can
+                                exist yet and says so in the dialog. */}
+                            {mine.status === 'accepted' && (
+                              <button
+                                className="btn btn-secondary btn-sm btn-icon shift-util"
+                                type="button"
+                                onClick={() => setQrFor({ application: mine, slot })}
+                                title="Check in with QR"
+                                aria-label={`Show your check-in code for ${slot.name}`}
+                              >
+                                <QrCode size={16} aria-hidden="true" />
+                              </button>
                             )}
                             {(mine.status === 'accepted' || mine.status === 'pending' || mine.status === 'waitlisted') && (
                               <button className="btn btn-ghost btn-sm"
@@ -186,7 +289,7 @@ export default function EventShiftsTab({
                         ) : (
                           <button
                             className="btn btn-secondary btn-sm"
-                            disabled={signupsClosed || (isFull && !isSelected)}
+                            disabled={refused || signupsClosed || (isFull && !isSelected)}
                             onClick={() => handleSlotSelect(slot.id)}>
                             {isSelected ? 'Selected' : isFull ? 'Full' : 'Request'}
                           </button>
@@ -210,6 +313,14 @@ export default function EventShiftsTab({
             {formatHours(selectedSlots.reduce((sum, id) => sum + (event.slots.find(s => s.id === id)?.hours || 0), 0))} total
           </span>
         </div>
+      )}
+      {qrFor && (
+        <CheckInCodeModal
+          application={qrFor.application}
+          slot={qrFor.slot}
+          event={event}
+          onClose={() => setQrFor(null)}
+        />
       )}
     </>
   );

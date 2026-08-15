@@ -1,10 +1,12 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { DEMO_MODE } from '../config.js';
+import { DEMO_MODE, PLATFORM_OWNER_USERNAME } from '../config.js';
 import { documentBySlug } from '../legalDocuments.js';
 import { PolicyContentError } from '../legalContent.js';
 import { db } from '../db.js';
 import { effectiveDocuments, resolveDocument } from '../legalStore.js';
+import { authenticateToken } from '../utils.js';
+import { pendingNoticesFor, acknowledgeNotice } from '../legalNotices.js';
 
 /**
  * Publishes the legal documents the product asks people to rely on.
@@ -116,6 +118,89 @@ router.get('/api/legal/documents', (req, res) => {
 });
 
 /**
+ * Who runs this platform.
+ *
+ * ── Why it is public, and why it is here ──
+ *
+ * Every legal document on this surface says things like "we", "the platform"
+ * and "the account that can change it", and until now nothing anywhere named
+ * that account. A parent deciding whether their child should sign up, or a
+ * student who wants to complain to somebody real, had no way to find out who
+ * that is without already having an account — which is precisely backwards.
+ * It sits beside the documents because it answers the same question they raise.
+ *
+ * ── Resolved by ROLE, never by name ──
+ *
+ * `super_admin` is the definition. Nothing here matches a username, an email or
+ * a display name, so an account that changes hands, or a second owner, needs no
+ * edit anywhere — the same rule `distinctionFor` follows in the profile
+ * serializer, for the same reason.
+ *
+ * Earliest-created wins when there is more than one, because a deployment can
+ * legitimately hold several: it is stable across restarts, needs no new column,
+ * and picks the founding account rather than whoever was promoted most recently.
+ *
+ * ── What is disclosed ──
+ *
+ * A name, a handle and an avatar: exactly what any signed-in member already sees
+ * on the profile, and less than the transcript footer, which prints the
+ * founder's full name on every document the platform issues. No email, no
+ * hours, no history, no id — this answers "who is responsible", not "tell me
+ * about this person". An empty answer is a normal 200, because a deployment
+ * with no owner yet is a state the page renders around rather than an error.
+ */
+router.get('/api/platform/owner', (req, res) => {
+  /**
+   * The role is the authority; the configured username only chooses between
+   * accounts that already hold it. A `PLATFORM_OWNER_USERNAME` naming a student
+   * resolves to nothing — configuration cannot mint an owner, only point at one.
+   *
+   * ── Why a configured name does NOT fall back ──
+   *
+   * The fallback used to run whenever the lookup missed, including when the
+   * variable was set and simply did not match. That is the wrong direction on
+   * the one deployment that matters: this installation holds two owner
+   * accounts, a person and an internal service account, created in the same
+   * seeding run with identical timestamps. A typo in the variable would
+   * therefore have been answered by naming whichever id happened to sort first
+   * — quite possibly the service account — on a public page, with nothing
+   * anywhere reporting a problem.
+   *
+   * So the two cases are separated. Configured means configured: if it does not
+   * resolve, the answer is nobody, and the page renders without an owner rather
+   * than with the wrong one. The fallback survives only for a deployment that
+   * has not set the variable at all, where naming the earliest owner beats
+   * naming none.
+   */
+  const byRole = `FROM users WHERE role = 'super_admin' AND account_status = 'active'`;
+  const columns = 'SELECT name, username, avatar, avatar_color, profile_picture_url';
+
+  const owner = PLATFORM_OWNER_USERNAME
+    ? db.prepare(`${columns} ${byRole} AND LOWER(username) = LOWER(?)`).get(PLATFORM_OWNER_USERNAME)
+    : db.prepare(`${columns} ${byRole} ORDER BY created_at ASC, id ASC LIMIT 1`).get();
+
+  if (PLATFORM_OWNER_USERNAME && !owner) {
+    /* Loud, because the symptom is silence: a public page that simply stops
+       naming anybody. The username is operator-supplied configuration, not user
+       input, so echoing it is what makes the message actionable. */
+    console.warn(
+      `[platform] PLATFORM_OWNER_USERNAME="${PLATFORM_OWNER_USERNAME}" matches no active `
+      + 'super_admin account. The public About page will not name an owner.'
+    );
+  }
+
+  res.json({
+    owner: owner ? {
+      name: owner.name,
+      username: owner.username,
+      avatar: owner.avatar,
+      avatarColor: owner.avatar_color,
+      profilePictureUrl: owner.profile_picture_url,
+    } : null,
+  });
+});
+
+/**
  * One document, with its text.
  *
  * A `PolicyContentError` is a 500 and not a 404: the document IS registered, so
@@ -148,6 +233,59 @@ router.get('/api/legal/documents/:slug', (req, res) => {
   }
 
   res.json({ ...publicMeta(resolved), markdown: resolved.body });
+});
+
+/**
+ * Legal documents this account has not been shown the change to.
+ *
+ * ── Why this is authenticated when the rest of this file is not ──
+ *
+ * The documents themselves are public because a fourteen-year-old has to read
+ * the Terms before they have an account. "Which changes has THIS person not
+ * seen" is the opposite: it is a fact about one account and is answerable only
+ * for the caller.
+ *
+ * ── Why no capability gate ──
+ *
+ * There is no capability that means "read your own legal notices", and the two
+ * that every role happens to hold are `event.view` and `persona.preview.exit`
+ * — gating on either would be a lie about what is being checked, and the next
+ * person to read it would have to work out that it meant nothing. The route is
+ * scoped to `req.user.id` and is declared SELF_ONLY in the completeness
+ * registry, which is the mechanism this codebase provides for exactly this.
+ */
+router.get('/api/legal/updates', authenticateToken, (req, res) => {
+  try {
+    res.json({ updates: pendingNoticesFor(db, req.user.id) });
+  } catch (err) {
+    console.error('Legal updates error:', err.message);
+    /* An empty list rather than a 500. A failure to compute the excerpt must
+       not be able to block the application shell, which fetches this on load. */
+    res.json({ updates: [] });
+  }
+});
+
+/**
+ * Records that this account has read a change notice.
+ *
+ * Acknowledgement is NOT consent and is deliberately stored in a different
+ * table from `legal_acceptances` — see the migration. Dismissing a modal must
+ * never become evidence that somebody agreed to anything.
+ *
+ * Idempotent: the upsert keeps the first acknowledgement, so a double-click, a
+ * retry and a second tab all converge on one row.
+ */
+router.post('/api/legal/updates/acknowledge', authenticateToken, (req, res) => {
+  const { slug, version } = req.body ?? {};
+  if (typeof slug !== 'string' || typeof version !== 'string' || !slug || !version) {
+    return res.status(400).json({ error: 'slug and version are required.', code: 'slug_required' });
+  }
+  if (!documentBySlug(slug)) {
+    return res.status(404).json({ error: 'No such legal document.' });
+  }
+
+  acknowledgeNotice(db, req.user.id, slug, version);
+  res.json({ ok: true });
 });
 
 export default router;

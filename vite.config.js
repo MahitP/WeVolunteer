@@ -31,6 +31,28 @@ export default defineConfig({
         changeOrigin: true
       },
       /**
+       * Uploaded pictures — profile photographs and organization logos.
+       *
+       * `server/app.js` already serves these from `UPLOADS_ROOT` and already
+       * answers a miss with a real 404 rather than the SPA shell, and its
+       * comment describes fixing exactly this symptom ("I can edit my avatar but
+       * it never appears"). But that only closed the API side. In development
+       * the browser does not talk to the API — it talks to Vite, and Vite
+       * proxied `/api` and `/socket.io` and nothing else. So a request for
+       * `/uploads/whatever.png` fell through to the SPA fallback and came back
+       * as `index.html`: HTTP 200, `content-type: text/html`, which an `<img>`
+       * cannot decode and renders as nothing at all.
+       *
+       * That is the whole reason organization logos "did not appear" — not the
+       * serializer, not the component. A 200 that is silently the wrong content
+       * type is the worst shape of this bug, because nothing in the network
+       * panel looks red.
+       */
+      '/uploads': {
+        target: API_TARGET,
+        changeOrigin: true
+      },
+      /**
        * Socket.IO. This entry did not exist.
        *
        * src/services/socket.js already documented that "in development, the Vite

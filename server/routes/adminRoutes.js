@@ -8,11 +8,16 @@ import { db } from '../db.js';
 import { notificationService } from '../services/notificationService.js';
 import { getMailHealth } from '../email.js';
 import { getQueueHealth } from '../workers/notificationWorker.js';
+/* Shared with `alerting.js`, which asks the same question for somebody who did
+   not come to look. Two definitions of "stale" would drift. */
+import { backupStatus } from '../backupStatus.js';
 import { requireCap, can, principalFor, ALL_CAPABILITIES, requireAAL2, ROLE } from '../authz.js';
 import { grantsFor } from '../userCapabilities.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
+import { syncOrganizerCapabilities } from '../organizationRoles.js';
 import { recordAudit } from '../auditLog.js';
 import { deleteUploadedFile } from './profilePictureRoutes.js';
+import { deliveryHealth } from '../resendWebhook.js';
 import {
   REPORT_PRIORITIES, REPORT_RESOLUTIONS, REPORT_STATUSES, REPORT_TARGET_TYPES,
   LIVE_REPORT_STATUSES, CATEGORY_VALUES, isValidCategory, normalizeTargetType,
@@ -1283,75 +1288,6 @@ router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('rep
 
 
 // A6. System Status
-/**
- * How old the newest backup may be before it is reported stale.
- *
- * The timer runs nightly at 03:00 with up to 5 minutes of jitter, so a healthy
- * system is never more than ~24h behind. 26 hours leaves room for the jitter and a
- * slow run while still catching a single missed night — the same threshold the
- * runbook's alerting table uses.
- */
-const BACKUP_STALE_HOURS = Number(process.env.BACKUP_STALE_HOURS) || 26;
-
-/**
- * Freshness of the newest backup archive.
- *
- * ── Why the app reports this at all ──
- *
- * The backup runs as a systemd timer that the application knows nothing about, and
- * `deploy/README.md` is honest that "systemd will mark the unit failed, but nothing
- * tells a human". So a failing backup was invisible for as long as nobody thought
- * to SSH in and look — on the volume holding a school's service-hour records.
- *
- * Reading the directory is not a substitute for alerting on the unit, and it does
- * not claim to be: it cannot distinguish "the timer is disabled" from "the timer ran
- * and failed", both of which present as a stale file. What it does give is a number
- * on a screen an administrator already visits, which is the difference between
- * finding out in a week and finding out tonight.
- *
- * The directory path is deliberately NOT returned. Admins here are school staff,
- * not sysadmins; filesystem layout is not theirs to need and it is useful to anyone
- * who reaches an admin session.
- */
-function backupStatus() {
-  const dir = process.env.WEV_BACKUP_DIR || '/var/backups/wevolunteer';
-  try {
-    if (!fs.existsSync(dir)) {
-      // Unconfigured is distinct from "ran and produced nothing", and an operator
-      // needs to be able to tell them apart.
-      return { status: 'unconfigured', lastBackupAt: null, ageHours: null, count: 0 };
-    }
-
-    const archives = fs.readdirSync(dir)
-      .filter(f => f.endsWith('.db.gz'))
-      .map(f => {
-        try {
-          return { mtime: fs.statSync(path.join(dir, f)).mtime };
-        } catch {
-          return null; // pruned between readdir and stat
-        }
-      })
-      .filter(Boolean);
-
-    if (archives.length === 0) {
-      return { status: 'none', lastBackupAt: null, ageHours: null, count: 0 };
-    }
-
-    const newest = archives.reduce((a, b) => (b.mtime > a.mtime ? b : a));
-    const ageHours = (Date.now() - newest.mtime.getTime()) / 3_600_000;
-
-    return {
-      status: ageHours > BACKUP_STALE_HOURS ? 'stale' : 'ok',
-      lastBackupAt: newest.mtime.toISOString(),
-      ageHours: Math.round(ageHours * 10) / 10,
-      count: archives.length,
-      staleAfterHours: BACKUP_STALE_HOURS
-    };
-  } catch (err) {
-    console.error('[Admin] Could not read backup directory:', err);
-    return { status: 'unknown', lastBackupAt: null, ageHours: null, count: 0 };
-  }
-}
 
 /**
  * Whether the append-only ledger still agrees with `attendance`.
@@ -1422,6 +1358,20 @@ router.get('/api/admin/system/status', authenticateToken, requireCap('analytics.
     // New: whether it is actually working. Local parts are never included — see
     // email.js recordFailure.
     mail: getMailHealth(),
+    /**
+     * What the PROVIDER said became of recent mail.
+     *
+     * `mail` above answers "can we hand a message over"; this answers "did it
+     * arrive". They are different questions and a healthy first one tells you
+     * nothing about the second — a message accepted by Resend and then hard-
+     * bounced looks like a success everywhere else in this payload.
+     *
+     * Counts only. No addresses, no subjects, no bodies. `configured: false`
+     * means no webhook secret is set, which is the honest answer for a
+     * deployment that has not finished the Resend setup rather than a
+     * misleading zero.
+     */
+    delivery: deliveryHealth(),
     notificationQueue: getQueueHealth(),
     backup: backupStatus(),
     hoursLedger: hoursLedgerStatus()
@@ -2323,6 +2273,21 @@ router.post('/api/admin/users/:id/revoke', authenticateToken, requireCap('admin.
        * be a list that goes stale the first time a capability is added.
        */
       db.prepare('DELETE FROM user_capabilities WHERE user_id = ?').run(targetUserId);
+
+      /**
+       * Then put back whatever their CLUB memberships still say they hold.
+       *
+       * The wipe above is about administrative grants, and it is right to be
+       * indiscriminate about those. But since the Student Organizer rank, a
+       * `user_capabilities` row can also be an ordinary membership fact — this
+       * person helps run the robotics club — and stripping that as a side
+       * effect of ending an unrelated administrative role would silently take
+       * away a rank a club president granted, with nothing telling either of
+       * them. Recomputing from `organization_members` is the same call the
+       * membership routes make, so there is one answer to "what does this
+       * person's rank entitle them to" rather than two.
+       */
+      syncOrganizerCapabilities(db, targetUserId, req.user.id);
 
       recordAudit(db, {
         adminId: req.user.id,

@@ -213,7 +213,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'The agreement between you and WeVolunteer: what you may do here, what we owe you, and how an account ends.',
     effectiveAt: '2026-08-06',
     file: '02-terms-of-service.md',
-    contentHash: '59dd2cb44ced3c5ee4e3a983ef868fc85c79ddcb990a37abf3cb574a496f5242',
+    contentHash: 'b37cfe18ae0927a47f09445852b3a84ba2112dcffd39232b2346f94dcf5f9ab7',
     /** Presented with, and accepted by, the same control as the Terms. */
     bundledWith: null,
   },
@@ -238,7 +238,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What we collect, why, who can see it, how long we keep it, and how to get it back or have it deleted.',
     effectiveAt: '2026-08-06',
     file: '01-privacy-policy.md',
-    contentHash: '0bfc976497fadbc231138363c73e556d21860435c4d1673d827536533c1a0c33',
+    contentHash: '90c09ee6e52c3ff5aa3b920b6495e627a92e3830e77d1a6d6aef79369a6b4504',
     bundledWith: null,
   },
   {
@@ -248,9 +248,21 @@ export const LEGAL_DOCUMENTS = [
     consentType: 'agree',
     scope: 'organizer-onboarding',
     summary: 'The undertakings an organizer makes before receiving students\' contact details: protect it, use it only for the event, record attendance honestly.',
-    effectiveAt: '2026-08-05',
+    effectiveAt: '2026-08-06',
     file: '09-organizer-agreement.md',
-    contentHash: '3267acbae5de9732bc44ec6843565d13755dc8bda11ffd2e993b724046e3d60c',
+    contentHash: 'e3da0fe2e897651bb7e4254a428bebec636890775e5167203aa0bcd5057ae192',
+    bundledWith: null,
+  },
+  {
+    slug: 'student-organizer-agreement',
+    version: '1.0',
+    title: 'Student Organizer Agreement',
+    consentType: 'agree',
+    scope: 'student-organizer-onboarding',
+    summary: 'What a student promoted to help run a club takes on: use what you can see to run the events, share it with nobody, credit hours honestly.',
+    effectiveAt: '2026-08-13',
+    file: '11-student-organizer-agreement.md',
+    contentHash: '1e7d904c8096482437aaa3f8a66890b0844e751127d8f4766bfcdc9834026764',
     bundledWith: null,
   },
   {
@@ -262,7 +274,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'How to stay safe volunteering, what an adult here should never ask you for, and how to report it when they do.',
     effectiveAt: '2026-08-06',
     file: '08-youth-safety-guidelines.md',
-    contentHash: '4b4cd1aaf9e8e6b0da562e81a6e0357690307db50187da90ca955960164c4471',
+    contentHash: '68c860b21099c600a0a381fdeaa8ef167cc5fad9735a3cd2ebf6413895e8eff8',
     bundledWith: null,
   },
   {
@@ -274,7 +286,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What a WeVolunteer certificate proves, what it does not, and how anyone can check whether one is real.',
     effectiveAt: '2026-08-06',
     file: '06-certificate-verification-policy.md',
-    contentHash: 'a8c022d0813d685eab3cbd491238a8b875ab98dc89cb98ea4d416486ffa747db',
+    contentHash: 'd02414f03a876749d4c57e90f98284feab4dedc112e9626a8208d9f290889f68',
     bundledWith: null,
   },
   {
@@ -292,7 +304,7 @@ export const LEGAL_DOCUMENTS = [
        `notice` (no acceptance is collected) and nothing here has been published
        to a reader yet, so this is a correction before first publication rather
        than a revision of something somebody read. */
-    contentHash: '1c1eb6c86943378ab20dd373071fef47759951d7db5aba54603e653bb1e1406f',
+    contentHash: '1abd5562b9752eb2553e9865aa8d563d5307f5f805eb0455ce2dba37327fd23f',
     bundledWith: null,
   },
   {
@@ -304,7 +316,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What deleting your account removes, what survives and why, and how to ask for something to be erased.',
     effectiveAt: '2026-08-06',
     file: '04-data-deletion-policy.md',
-    contentHash: 'f80350653dd607035aaf08fd6fa2e9c1b5815533145d8d3a45ec995df132e653',
+    contentHash: '2c930a316bc840c3d3b5b57bf0bad2d22c81f70ff7d98b7cca598afed58aa8b1',
     bundledWith: null,
   },
   {
@@ -316,7 +328,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'The cookies this site sets, all of which are needed to keep you signed in. No advertising or analytics trackers.',
     effectiveAt: '2026-08-06',
     file: '05-cookie-and-tracking-notice.md',
-    contentHash: '10e7ed5f16f6c1773f41a8c52ce8611174dea13029c67f99ae179f863815cf1b',
+    contentHash: '2a1d059a5d26e4aef5975749bcb12ee155fffba6eff16deddfb4d74209350f71',
     bundledWith: null,
   },
   {
@@ -328,7 +340,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What administrators may do, what is logged when they do it, and the limits on looking at a student\'s record.',
     effectiveAt: '2026-08-06',
     file: '10-admin-responsibilities-policy.md',
-    contentHash: 'da264f205032cf796e10eed11019faba64732f113155fa834e1f56cc444f189c',
+    contentHash: '63d42b5c1d4e41a0ffd3c8aa81c6b2972ad92b6351407ef058c390f79fb5e458',
     bundledWith: null,
   },
 ];
@@ -360,6 +372,33 @@ export const SIGNUP_DOCUMENTS = LEGAL_DOCUMENTS.filter(d => d.scope === 'signup'
  * document is collected rather than who the reader is.
  */
 export const ORGANIZER_DOCUMENTS = LEGAL_DOCUMENTS.filter(d => d.scope === 'organizer-onboarding');
+
+/**
+ * What a student accepts before the Student Organizer rank does anything.
+ *
+ * ── Why a separate scope, and not a second document under the organizer one ──
+ *
+ * `ORGANIZER_DOCUMENTS` is read by `withheldCapabilitiesFor`, which withholds
+ * from accounts whose role is `organizer`. Adding this document there would
+ * start demanding it from every adult organizer — people it does not bind and
+ * whose acceptance of it would be a false record — and would silently make the
+ * adult agreement a precondition for a student rank.
+ *
+ * ── Why the two documents are separate at all ──
+ *
+ * The Organizer Agreement asks its reader to confirm things a student cannot
+ * truthfully confirm: that they understand most students here are minors
+ * (addressed to somebody who is not one), that New Jersey mandated-reporter law
+ * binds them personally, and that at least two adults will be present at their
+ * events. A record of undertakings the signer cannot perform is weaker evidence
+ * than no record.
+ *
+ * The `-onboarding` suffix is deliberate, for the reason given above:
+ * `'student-organizer'` alone reads as a role name, and this codebase fails the
+ * build on authorization decisions made by comparing role strings.
+ */
+export const STUDENT_ORGANIZER_DOCUMENTS =
+  LEGAL_DOCUMENTS.filter(d => d.scope === 'student-organizer-onboarding');
 
 /**
  * The distinct consent controls a signup form must show.
@@ -485,15 +524,34 @@ export function requiredConsentKeys() {
  *     capabilities until the organizer re-accepts. Versions stay at 1.0, so
  *     nothing moves — but the mechanism is untouched and still works.
  *
- * ── Flipping it back ──
+ * ── It is now on ──
  *
- * Set this to `true` at launch. Run `node bin/migration-checksums.mjs`'s sibling,
- * `node bin/legal-hashes.mjs`, paste the printed constants into LEGAL_DOCUMENTS,
- * and the enforcement is live again with no other change. Everything that reads
- * a hash keeps reading one the whole time; the difference is only whether a
- * mismatch is fatal.
+ * Flipped at the end of the release-candidate audit, once the thing it protects
+ * existed. The audit is also the argument for it: three published documents had
+ * drifted out of agreement with the application — the Cookie Notice promised no
+ * analytics while an Amplitude SDK was bundled, and the Privacy Policy's
+ * subprocessor table omitted the email provider that receives every message —
+ * and advisory mode is precisely why nobody noticed. The server rewrote each
+ * recorded hash to match the new text on every boot and said so in a log line
+ * that reads like routine housekeeping.
+ *
+ * That was the correct trade while the documents were being drafted and there
+ * were no acceptance rows to protect. It stops being correct the moment a real
+ * student agrees to something.
+ *
+ * ── What this now costs, and it is the intended cost ──
+ *
+ * Editing a published policy is no longer an edit. It is: change the file, run
+ * `node bin/legal-hashes.mjs`, paste the printed constant into LEGAL_DOCUMENTS,
+ * and decide whether the change is MAJOR (re-acceptance) or MINOR (notice only)
+ * by the rule above. A production server refuses to boot in between. That
+ * friction is the feature — it is what makes a consent record mean something.
+ *
+ * To go back to advisory mode, set this to `false`. Do not do it to make a typo
+ * fix easier; do it only if the documents genuinely re-enter drafting and the
+ * acceptance rows are known to be disposable.
  */
-export const LEGAL_HASHES_ENFORCED = false;
+export const LEGAL_HASHES_ENFORCED = true;
 
 /**
  * The hash to RECORD for a document — what was actually published.

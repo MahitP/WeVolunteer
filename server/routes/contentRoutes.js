@@ -7,9 +7,11 @@ import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
+import { canRunEvent, EVENT_STAFF_CAPABILITIES } from '../organizations.js';
 /* Derived from the Silver tier, so the meter and the milestone cannot disagree
    about what Silver means. See server/milestones.js. */
 import { SERVICE_HOUR_GOAL } from '../milestones.js';
+import { volunteerInsights } from '../volunteerInsights.js';
 import { commentHasLiveReport, COMMENT_HELD_MESSAGE } from '../evidenceHolds.js';
 
 const router = express.Router();
@@ -202,7 +204,8 @@ router.get('/api/events/:id/attendees', authenticateToken, (req, res) => {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const isStaff = can(req.principal, 'event.moderate') || event.organizer_id === req.principal.userId;
+    const isStaff = EVENT_STAFF_CAPABILITIES.some(c => can(req.principal, c))
+      && canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') });
 
     if (!isStaff) {
       const mine = db.prepare(`
@@ -264,7 +267,8 @@ router.get('/api/events/:id/announcements', authenticateToken, (req, res) => {
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const isStaff = can(req.principal, 'event.moderate') || event.organizer_id === req.principal.userId;
+    const isStaff = EVENT_STAFF_CAPABILITIES.some(c => can(req.principal, c))
+      && canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') });
 
     if (!isStaff) {
       const mine = db.prepare(`
@@ -305,13 +309,22 @@ router.post('/api/events/:id/announcements', authenticateToken, (req, res) => {
 
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    // `announcement.post` is the kind-of-actor check (organizer, and
-    // super_admin via the wildcard); `event.moderate` is admin's bypass of the
-    // ownership comparison, same pattern as eventRoutes.js's broadcast route.
-    if (!can(req.principal, 'announcement.post') && !can(req.principal, 'event.moderate')) {
+    /**
+     * `announcement.post` is the kind-of-actor check (organizer, and super_admin
+     * via the wildcard); `event.moderate` is admin's bypass of the ownership
+     * comparison, same pattern as eventRoutes.js's broadcast route.
+     *
+     * `organization.event.manage.own` is here because the host of a club's event
+     * holds it and neither of the other two. Without it a Student Organizer was
+     * refused the in-app announcement on their own event while
+     * `POST /api/events/:id/broadcast` — which emails the same roster — accepted
+     * them, and the composer rendered for them and 403'd on save.
+     */
+    if (!can(req.principal, 'announcement.post') && !can(req.principal, 'event.moderate')
+        && !can(req.principal, 'organization.event.manage.own')) {
       return res.status(403).json({ error: 'Only the event organizer can post announcements' });
     }
-    if (event.organizer_id !== req.principal.userId && !can(req.principal, 'event.moderate')) {
+    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Only the event organizer can post announcements' });
     }
 
@@ -433,61 +446,34 @@ router.post('/api/favorites/:eventId', authenticateToken, (req, res) => {
 
 // 19. Profile update (self only)
 
+/**
+ * Everything the dashboard's insight section shows a volunteer about themselves.
+ *
+ * ── Why the body is one call ──
+ *
+ * The queries lived here, inline, which is why two of them were wrong in ways
+ * nothing could see: `upcoming` scanned every slot in the database to answer a
+ * question about one student and counted commitments to cancelled events, and
+ * `monthlyHours` omitted quiet months so the chart's axis was a list of
+ * qualifying months rather than a timeline. They are definitions, so they now
+ * live in `volunteerInsights.js` where they can be tested without HTTP and
+ * where the milestone derivation can be shared with the profile route.
+ *
+ * ── What was removed, deliberately ──
+ *
+ * `categoryHours` and `applications` were computed on every request and had
+ * never been rendered by anything. `routes.volunteerInsights.test.js` asserts
+ * they are gone, so adding either back is a decision somebody makes rather than
+ * a shape that drifts.
+ *
+ * `serviceHourGoal` stays. It is the district's Silver Award threshold, derived
+ * from `server/milestones.js` rather than restated, and it replaced two
+ * hardcoded copies in two client views that could disagree with the milestone
+ * rendered beside them.
+ */
 router.get('/api/stats/volunteer', authenticateToken, requireCap('stats.self'), (req, res) => {
   try {
-    // Hours by month for last 6 months
-    const monthlyHours = db.prepare(`
-      SELECT strftime('%Y-%m', s.end_datetime) as month,
-             SUM(a.hours_awarded) as hours
-      FROM attendance a
-      JOIN slots s ON a.slot_id = s.id
-      WHERE a.user_id = ? AND a.present = 1
-        AND s.end_datetime >= date('now', '-6 months')
-      GROUP BY month
-      ORDER BY month ASC
-    `).all(req.user.id);
-
-    // Hours by category
-    const categoryHours = db.prepare(`
-      SELECT e.category as category, SUM(a.hours_awarded) as hours
-      FROM attendance a
-      JOIN slots s ON a.slot_id = s.id
-      JOIN events e ON s.event_id = e.id
-      WHERE a.user_id = ? AND a.present = 1
-      GROUP BY e.category
-    `).all(req.user.id);
-
-    // Application stats
-    const appStats = db.prepare(`
-      SELECT status, COUNT(*) as c FROM applications
-      WHERE user_id = ? GROUP BY status
-    `).all(req.user.id);
-
-    // Upcoming vs completed
-    const upcoming = db.prepare(`
-      SELECT COUNT(*) as c FROM applications
-      WHERE user_id = ? AND status = 'accepted'
-        AND slot_id IN (SELECT id FROM slots WHERE end_datetime > ?)
-    `).get(req.user.id, new Date().toISOString()).c;
-
-    res.json({
-      monthlyHours: monthlyHours.map(m => ({ month: m.month, hours: Number(m.hours) })),
-      categoryHours: categoryHours.map(c => ({ category: c.category, hours: Number(c.hours) })),
-      applications: appStats.reduce((acc, s) => ({ ...acc, [s.status]: s.c }), {}),
-      upcomingCount: upcoming,
-      /**
-       * The hours figure the dashboard draws its progress meter against.
-       *
-       * Sent rather than known, because it was `const HOUR_GOAL = 25` in
-       * VolunteerDashboard.jsx and again in VolunteerProfile.jsx — two copies of
-       * the district's Silver Award threshold, in a different language from the
-       * server that decides whether the milestone is earned. Nothing could check
-       * them against it, so the meter could read "8 hours to go" beside a
-       * milestone already rendered as achieved. It is derived from the Silver
-       * tier in server/milestones.js, so there is one number.
-       */
-      serviceHourGoal: SERVICE_HOUR_GOAL
-    });
+    res.json(volunteerInsights(db, req.user.id));
   } catch (err) {
     console.error('Volunteer stats error:', err);
     res.status(500).json({ error: 'Failed to fetch stats' });
@@ -549,6 +535,14 @@ router.get('/api/stats/organizer', authenticateToken, requireCap('analytics.own_
 // 22. Leaderboard (requires login — prevents public student data exposure)
 router.get('/api/leaderboard', authenticateToken, (req, res) => {
   try {
+    /**
+     * The deleted-account clause is part of the identity check, not a filter.
+     *
+     * Deleting an account renames the row and keeps its role, its opt-in and
+     * its attendance — so a tombstoned student went on holding a rank here,
+     * under their anonymised name, with their hours intact, on a board they can
+     * no longer ask to be removed from because the account is gone.
+     */
     const rows = db.prepare(`
       SELECT u.id, u.name, u.avatar,
              COALESCE(SUM(a.hours_awarded), 0) as hours,
@@ -556,6 +550,28 @@ router.get('/api/leaderboard', authenticateToken, (req, res) => {
       FROM users u
       LEFT JOIN attendance a ON a.user_id = u.id AND a.present = 1
       WHERE u.role = 'student' AND u.leaderboard_opt_in = 1
+        AND u.account_status <> 'deleted'
+        /**
+         * And the service history is not private.
+         *
+         * Two opt-ins could otherwise point opposite ways: a student who joined
+         * the leaderboard last term and has since set their hours to "Only me"
+         * would still have their name and hour total published here — through a
+         * different endpoint from the one the privacy setting guards, which is
+         * exactly how a privacy control ends up being technically enforced and
+         * practically useless.
+         *
+         * The narrower, more recent, more explicit answer wins. "Only me" is
+         * not ambiguous, and a board is the most public surface on the platform.
+         * Turning hours back to public restores the rank; nothing is lost.
+         *
+         * IS NOT 'private' rather than = 'public', matching
+         * normaliseVisibility: anything unrecognised reads as public, so a NULL
+         * on an older row keeps the behaviour it already had. (No backticks in
+         * this comment: it lives inside a template literal, and one would end
+         * the string mid-SQL — the same trap migration 046 records.)
+         */
+        AND u.hours_visibility IS NOT 'private'
       GROUP BY u.id
       ORDER BY hours DESC, shifts DESC
       LIMIT 25

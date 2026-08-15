@@ -4,27 +4,55 @@ import {
   FileText, ArrowRight, Printer, X, Ban, Trophy, MapPin, CalendarCheck, History, ShieldCheck
 } from 'lucide-react';
 import { APP_NAME, SCHOOL_NAME } from '../config';
-import { formatHours, formatDay, formatTimeRange, countdown } from '../utils/helpers';
+import { formatHours, formatDay, formatTimeRange, countdown, haversineDistance } from '../utils/helpers';
 import { api } from '../utils/api';
 import Modal from '../components/Modal';
-import { BarChart, DonutChart } from '../components/BarChart';
 import { DateChip } from '../components/Seats';
 import EmptyState from '../components/common/EmptyState';
+import ServiceInsights from '../components/ServiceInsights';
+import PreviewList from '../components/common/PreviewList';
+import { useLocationContext } from '../contexts/LocationContext';
+import LocationLink from '../components/location/LocationLink';
+import WeatherSummary from '../components/location/WeatherSummary';
 
 export default function VolunteerDashboard({
   currentUser, events = [], applications = [], addToast, setActiveTab, refreshEvents, refreshApplications, onViewDetails
 }) {
   const [showCertificate, setShowCertificate] = useState(false);
   const [withdrawingId, setWithdrawingId] = useState(null);
-  const [stats, setStats] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
+
+  /**
+   * Leaderboard only. `ServiceInsights` fetches its own figures.
+   *
+   * This used to fetch the volunteer statistics here too, swallow every error,
+   * and re-run whenever `applications.length` changed. All three were wrong:
+   * the section that consumes the figures is the one that should own the
+   * request, a swallowed 500 was indistinguishable from "no data", and none of
+   * those figures depend on applications.
+   */
+  /**
+   * Whether this student has been trusted to help run a club and has not yet
+   * accepted the Student Organizer Agreement.
+   *
+   * The four capabilities the rank confers are WITHHELD until they do, so
+   * without this banner the promotion is invisible: a manager tells them they
+   * are a Student Organizer, they sign in, and nothing about the app has
+   * changed. This is the only place that says why.
+   */
+  const [helperAgreementOutstanding, setHelperAgreementOutstanding] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    api.fetchVolunteerStats().then(s => !cancelled && setStats(s)).catch(() => {});
     api.fetchLeaderboard().then(l => !cancelled && setLeaderboard(l || [])).catch(() => {});
+    api.fetchStudentOrganizerAgreement?.()
+      .then(st => !cancelled && setHelperAgreementOutstanding(Boolean(st?.required) && !st?.accepted))
+      /* A failed status check must not invent an obligation. Silence is the safe
+         direction: the server enforces the gate regardless, so the worst case is
+         a missing explanation rather than a false accusation. */
+      .catch(() => !cancelled && setHelperAgreementOutstanding(false));
     return () => { cancelled = true; };
-  }, [currentUser.id, applications.length]);
+  }, [currentUser.id]);
 
   const myApps = useMemo(
     () => applications.filter(a => a.userId === currentUser.id),
@@ -57,6 +85,17 @@ export default function VolunteerDashboard({
     [mine]);
 
   const nextShift = upcoming[0];
+
+  /* How far the next shift is, computed on the device so the volunteer's exact
+     position never leaves it. Null whenever they have not opted in, or the
+     event has no pin — both ordinary, both render nothing. */
+  const { location: myLocation } = useLocationContext();
+  const nextDistance = useMemo(() => {
+    const e = nextShift?.event;
+    if (!myLocation || !e || e.latitude == null || e.longitude == null) return null;
+    return haversineDistance(myLocation.latitude, myLocation.longitude, e.latitude, e.longitude);
+  }, [myLocation, nextShift]);
+
   const totalHours = currentUser.volunteeredHours || 0;
   /* The district's Silver Award threshold, from the server. It was
      `const HOUR_GOAL = 25` here and again in VolunteerProfile.jsx — two copies
@@ -147,10 +186,25 @@ export default function VolunteerDashboard({
 
   return (
     <div className="stack-lg">
+      {/* Above everything, because it explains why the rest of the app looks
+          unchanged after a promotion. `null` while the status loads, so it never
+          flashes at somebody who has already accepted. */}
+      {helperAgreementOutstanding && (
+        <a className="alert alert-warn oa-banner" href="/student-organizer-agreement">
+          <ShieldCheck size={18} aria-hidden="true" />
+          <span className="stack-xs">
+            <strong>You have been asked to help run an organization</strong>
+            <span className="small">
+              Before you can post as it, create its events or take attendance, there is a
+              short agreement to read. It takes a minute.
+            </span>
+          </span>
+        </a>
+      )}
       <div className="dashboard-greeting" style={{ marginBottom: '-var(--s4)' }}>
-        <h1 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
+        <h2 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
           {greetingMessage}
-        </h1>
+        </h2>
       </div>
       {/* ── What's next: the single most useful thing on the page ── */}
       {nextShift ? (
@@ -167,8 +221,24 @@ export default function VolunteerDashboard({
                 {formatDay(nextShift.slot?.startDatetime)}, {formatTimeRange(nextShift.slot?.startDatetime, nextShift.slot?.endDatetime)}
               </span>
               <span className="row" style={{ gap: 5 }}>
-                <MapPin size={13} /> {nextShift.event.location}
+                <MapPin size={13} aria-hidden="true" />
+                <LocationLink
+                  location={nextShift.event.location}
+                  address={nextShift.event.address}
+                  latitude={nextShift.event.latitude}
+                  longitude={nextShift.event.longitude}
+                />
               </span>
+              {nextDistance != null && (
+                <span className="row tnum" style={{ gap: 5 }}>{nextDistance.toFixed(1)} mi away</span>
+              )}
+              {/* Keyed to the SLOT's start, not the event's: this is a specific
+                  shift, and that hour is the one they will be standing outside in. */}
+              <WeatherSummary
+                latitude={nextShift.event.latitude}
+                longitude={nextShift.event.longitude}
+                datetime={nextShift.slot?.startDatetime}
+              />
             </div>
           </div>
           <button className="btn btn-secondary" onClick={() => onViewDetails(nextShift.event)}>
@@ -360,7 +430,21 @@ export default function VolunteerDashboard({
                         {slot?.name} · {formatTimeRange(slot?.startDatetime, slot?.endDatetime)} · {formatHours(slot?.hours)}
                       </div>
                     </div>
-                    <span className="status status-ok">Confirmed</span>
+                    {/**
+                      * No "Confirmed" pill here.
+                      *
+                      * It sat between the shift and two `btn-ghost` buttons at
+                      * the same weight and height as both, so it read as a
+                      * third control — and the only thing it could plausibly
+                      * mean when clicked is "confirm", which the volunteer has
+                      * already done. A status that looks like an unfinished
+                      * task is worse than no status at all.
+                      *
+                      * The fact is not lost: this list renders under a
+                      * "Confirmed shifts" heading and only accepted
+                      * applications reach it. The row can now spend its width
+                      * on the two things that really are actions.
+                      */}
                     <button className="btn btn-ghost btn-sm" onClick={() => onViewDetails(event)}>View</button>
                     <button
                       className="btn btn-ghost btn-sm"
@@ -377,26 +461,7 @@ export default function VolunteerDashboard({
             )}
           </section>
 
-          {/* ── Impact charts, only once there's something to show ── */}
-          {stats && (stats.monthlyHours?.length > 0 || stats.categoryHours?.length > 0) && (
-            <section>
-              <div className="section-head"><h2>Where your hours came from</h2></div>
-              <div className="grid grid-2">
-                {stats.monthlyHours?.length > 0 && (
-                  <div className="card card-pad">
-                    <div className="eyebrow" style={{ marginBottom: 'var(--s3)' }}>By month</div>
-                    <BarChart data={stats.monthlyHours} valueKey="hours" labelKey="month" highlightLast />
-                  </div>
-                )}
-                {stats.categoryHours?.length > 0 && (
-                  <div className="card card-pad">
-                    <div className="eyebrow" style={{ marginBottom: 'var(--s3)' }}>By type of service</div>
-                    <DonutChart data={stats.categoryHours} valueKey="hours" labelKey="category" />
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
+          <ServiceInsights userId={currentUser.id} setActiveTab={setActiveTab} />
         </div>
 
         {/* ── Right column ── */}
@@ -441,11 +506,19 @@ export default function VolunteerDashboard({
                   icon={History}
                   title="No completed shifts yet"
                   message="Hours appear here once an organizer confirms you attended."
-                  compact={true}
                 />
               ) : (
-                <div className="timeline">
-                  {completed.map(({ app, event, slot }) => (
+                /* Three, not all of them. A timeline item is four lines tall,
+                   so a volunteer with a real history turned this card into the
+                   longest thing on the dashboard. The full record has its own
+                   page. */
+                <PreviewList
+                  items={completed}
+                  cap={3}
+                  className="timeline"
+                  label="completed shifts"
+                  moreHref="/hours"
+                  renderItem={({ app, event, slot }) => (
                     <div key={app.id} className="timeline-item">
                       <div className="timeline-date">{formatDay(slot?.startDatetime)}</div>
                       <div className="timeline-title">{event.title}</div>
@@ -454,8 +527,8 @@ export default function VolunteerDashboard({
                         +{formatHours(app.attendance?.hoursAwarded)} <span>credited</span>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  )}
+                />
               )}
             </div>
           </section>
@@ -508,6 +581,25 @@ function buildBoard(leaderboard, myId) {
 function CertificateModal({ user, shifts, onClose }) {
   const total = shifts.reduce((sum, s) => sum + Number(s.app.attendance?.hoursAwarded || 0), 0);
 
+  /**
+   * Who stands behind this document.
+   *
+   * Unlike the per-event certificate, this one summarises service across many
+   * events and therefore often across many organizers. Naming one of them would
+   * be a claim they did not make — they confirmed their own event, not the
+   * total. So: one organizer gets named, several are counted, and when the
+   * shifts carry no organizer at all the programme itself is named, which is
+   * true of every row on the page.
+   */
+  const organizers = [...new Set(
+    shifts.map(s => s.event?.organizerName).filter(Boolean)
+  )];
+  const authorisedBy = organizers.length === 1
+    ? organizers[0]
+    : organizers.length > 1
+      ? `${SCHOOL_NAME} · ${organizers.length} organizers`
+      : SCHOOL_NAME;
+
   return (
     <Modal onClose={onClose} label="Hours certificate" size="lg">
       <div className="modal-head no-print">
@@ -518,7 +610,7 @@ function CertificateModal({ user, shifts, onClose }) {
         <button className="modal-close" onClick={onClose} aria-label="Close dialog"><X size={18} /></button>
       </div>
 
-        <div className="modal-body" style={{ background: 'var(--surface-2)' }}>
+        <div className="modal-body certificate-canvas">
           <div className="certificate" id="printable-certificate">
             <div style={{ textAlign: 'center' }}>
               <div className="certificate-org">{SCHOOL_NAME}</div>
@@ -556,12 +648,29 @@ function CertificateModal({ user, shifts, onClose }) {
               </tbody>
             </table>
 
+            {/**
+              * Names on the name lines, labels on the label lines.
+              *
+              * This block printed the strings "Volunteer signature" and
+              * "Program coordinator" inside `.certificate-sign` — which is the
+              * NAME slot: bold, dark, with the signature rule above it. The
+              * label slot, `.certificate-sign-label`, was not used at all. So
+              * the finished document had a caption where each name belonged and
+              * nothing anywhere that said who it was about or who stood behind
+              * it. Printed, it reads as two blank signature lines.
+              *
+              * `CertificateModal.jsx` has had the right shape all along — name
+              * in `.certificate-sign`, caption in `.certificate-sign-label` —
+              * and this is now the same.
+              */}
             <div className="row" style={{ marginTop: 'var(--s12)', gap: 'var(--s8)' }}>
               <div style={{ flex: 1 }}>
-                <div className="certificate-sign">Volunteer signature</div>
+                <div className="certificate-sign">{user?.name || '—'}</div>
+                <div className="certificate-sign-label">Volunteer</div>
               </div>
               <div style={{ flex: 1 }}>
-                <div className="certificate-sign">Program coordinator</div>
+                <div className="certificate-sign">{authorisedBy}</div>
+                <div className="certificate-sign-label">Program Coordinator</div>
               </div>
             </div>
           </div>

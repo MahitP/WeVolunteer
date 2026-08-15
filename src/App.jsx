@@ -12,6 +12,8 @@ import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
 import useOnline from './hooks/useOnline';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
 import PersonaPreviewBanner from './components/admin/PersonaPreviewBanner';
+import LocationPrompt from './components/location/LocationPrompt';
+import LegalUpdateModal from './components/LegalUpdateModal';
 import AccountProfile from './views/AccountProfile';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
@@ -23,6 +25,7 @@ import { Can } from './components/common/Can.jsx';
 import EmptyState from './components/common/EmptyState';
 import { can } from './authz.js';
 import { SessionProvider, useSession } from './session/SessionProvider.jsx';
+import { useAnalyticsConsent } from './hooks/useAnalyticsConsent.js';
 import {
   APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES, isPublicPath, isSignedOutOnlyPath, withProps,
   AdminDashboard, VolunteerDashboard, OrganizerDashboard,
@@ -181,7 +184,66 @@ const SELF_PROFILE = [
   { cap: 'event.view', view: 'account' }         // partner, and any later role
 ];
 
-const selfProfileFor = (user) => SELF_PROFILE.find(p => can(user, p.cap))?.view ?? 'denied';
+/**
+ * Which of the three profile pages this account gets.
+ *
+ * The list above is a most-privileged-first cascade, which is right for an
+ * account that only administers: an administrator's profile is about their
+ * account, not about shifts they never worked.
+ *
+ * It is wrong for an account that administers AND volunteers. The platform
+ * owner is deliberately both — they run the district's programme and they turn
+ * up to events — and the cascade sent them to `AccountProfile`, which shows a
+ * total and nothing else: no badges, no milestones, no service record, no
+ * certificates. Their own record was the one record the product would not show
+ * them.
+ *
+ * So privilege picks the page only when there is nothing else to go on. An
+ * account that can hold a portfolio AND has actually served gets the volunteer
+ * page, whatever else it can do. The rule names no person and no role — it
+ * reads a capability and a number — and `AccountProfile` already draws its
+ * volunteering block from the same fact for the same reason.
+ *
+ * The owner distinction is not lost by this: `VolunteerProfile` renders the
+ * banner, so the page says "Platform owner" and then shows their service.
+ */
+export const selfProfileFor = (user) => {
+  if (can(user, 'portfolio.write') && Number(user?.volunteeredHours) > 0) return 'volunteer';
+  return SELF_PROFILE.find(p => can(user, p.cap))?.view ?? 'denied';
+};
+
+/**
+ * The chrome for a page: its heading and subtitle.
+ *
+ * ── Why this is a function and not a lookup at the call site ──
+ *
+ * `PAGE_META` is keyed by persona, and for every page but one that is right.
+ * `/profile` is the exception: its BODY comes from `selfProfileFor` and its
+ * chrome came from `personaFor`, and those two deliberately disagree for an
+ * account that holds administrative capability AND has volunteered.
+ *
+ * The person who runs this platform is a student who volunteers, so
+ * `selfProfileFor` sends them to `VolunteerProfile` — while the heading, drawn
+ * from the `staff` block, called that page "Your account on this platform". A
+ * service record, milestones and a Silver Award meter, captioned as an admin
+ * account.
+ *
+ * Only the disagreement is corrected. `account` is deliberately unmapped,
+ * because there the persona lookup is already right: a staff persona rendering
+ * `AccountProfile` should read the staff wording, and a partner the partner's.
+ *
+ * Exported because its test would otherwise have to re-implement the rule, and
+ * a test that owns a second copy can pass while the shell is wrong.
+ */
+const PROFILE_META_PERSONA = { volunteer: 'volunteer', host: 'host' };
+
+export function pageMetaFor(user, activeTab) {
+  const persona = personaFor(user);
+  const key = activeTab === 'profile'
+    ? (PROFILE_META_PERSONA[selfProfileFor(user)] ?? persona)
+    : persona;
+  return PAGE_META[key]?.[activeTab] || { title: APP_NAME, sub: '' };
+}
 
 /** Derived, not repeated, so the nav entry and the route can never disagree. */
 const SELF_PROFILE_CAPS = SELF_PROFILE.filter(p => p.view !== 'denied').map(p => p.cap);
@@ -412,7 +474,9 @@ export function tabForPath(pathname) {
   /* Before `/hours`, which is a prefix of it. */
   if (pathname.startsWith('/hours/external')) return 'externalHours';
   if (pathname.startsWith('/hours')) return 'loggedHours';
+  if (pathname.startsWith('/certificates')) return 'certificates';
   if (pathname.startsWith('/settings')) return 'settings';
+  if (pathname.startsWith('/report-issue')) return 'reportIssue';
   /* These three had no branch, so they fell through to 'dashboard' — an
      organizer on /checkin read "Dashboard / Track your volunteers" with the
      Dashboard rail item lit, which is byte-for-byte the /errors bug this
@@ -420,7 +484,13 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/portfolio')) return 'portfolio';
   if (pathname.startsWith('/checkin')) return 'checkin';
   if (pathname.startsWith('/organizer-agreement')) return 'organizerAgreement';
+  if (pathname.startsWith('/student-organizer-agreement')) return 'studentOrganizerAgreement';
   if (pathname.startsWith('/messages')) return 'messages';
+  /* Before `/admin/appeals`? No — different prefixes, no conflict. But it must
+     exist at all: without a branch, filing an appeal was titled "Dashboard /
+     Your shifts, hours, and history", which is the /checkin and /errors bug
+     recorded above, for the third time. */
+  if (pathname.startsWith('/appeals')) return 'appealForm';
   if (pathname.startsWith('/admin/appeals')) return 'appeals';
   if (pathname.startsWith('/admin/moderation')) return 'moderation';
   if (pathname.startsWith('/admin/impact')) return 'adminImpact';
@@ -458,8 +528,12 @@ export const RAIL_TAB = {
   checkin: 'browse',
   portfolio: 'dashboard',
   loggedHours: 'dashboard',
+  certificates: 'dashboard',
+  reportIssue: 'dashboard',
   externalHours: 'dashboard',
   organizerAgreement: 'dashboard',
+  studentOrganizerAgreement: 'dashboard',
+  appealForm: 'dashboard',
 };
 
 /** Every nav entry the user may see, `/` first, in the order the shell renders. */
@@ -525,9 +599,11 @@ export function navSectionsFor(user) {
    one destination means two people cannot describe it to each other. */
 export const PAGE_META = {
   volunteer: {
+    appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
     /**
      * ── "Discover", matching the rail entry and the route ──
@@ -552,6 +628,8 @@ export const PAGE_META = {
     notifications: { title: 'Notifications', sub: 'Replies, reminders, and event updates' },
     profile: { title: 'Profile', sub: 'Your service record, milestones, and certificates' },
     loggedHours: { title: 'Logged hours', sub: 'Everything you have volunteered, confirmed and self-reported' },
+    certificates: { title: 'Certificates', sub: 'One for each event you have completed' },
+    reportIssue: { title: 'Report an Issue', sub: 'Tell us what is broken, confusing, or unsafe' },
     externalHours: { title: 'Log external hours', sub: 'Volunteering you did somewhere WeVolunteer does not run' },
     /* Reached from the search on Discover, and titled for what is on the
        page rather than for where the reader came from. */
@@ -559,8 +637,10 @@ export const PAGE_META = {
     organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
   },
   host: {
+    appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
     dashboard: { title: 'Dashboard', sub: 'Track your volunteers, hours, and pending reviews' },
@@ -573,9 +653,11 @@ export const PAGE_META = {
     organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
   },
   staff: {
+    appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
     calendar: { title: 'Calendar', sub: 'Events across the district and when they close' },
@@ -613,14 +695,18 @@ export const PAGE_META = {
     profile: { title: 'Profile', sub: 'Your account on this platform' },
     /* An owner holds '*', so both hour pages are reachable from this persona. */
     loggedHours: { title: 'Logged hours', sub: 'Confirmed service and self-reported entries' },
+    certificates: { title: 'Certificates', sub: 'One for each event you have completed' },
+    reportIssue: { title: 'Report an Issue', sub: 'Tell us what is broken, confusing, or unsafe' },
     externalHours: { title: 'Log external hours', sub: 'Volunteering done outside WeVolunteer' }
   },
   partner: {
+    appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
     /* `/organizer-agreement` is the one route declared with NO capability, on
        purpose — it is how an organizer accepts the terms that grant the rest —
        so any signed-in role can open it, partner included. */
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
     /* "All events" was the pre-consolidation title, and it survived the rename
        into two personas. It disagreed with the rail item that opens the page
@@ -740,11 +826,13 @@ function shellServes(pathname) {
  *
  * The two conditions below MIRROR the route table's own element ternary exactly
  * — `requiresVerified` first, then `requiredCap` — and deliberately nothing
- * more. This function decides whether the shell is built at all, so any
- * condition here that the table does not also apply would refuse a route the
- * table would have rendered, with no way for the reader to reach it. The NAV
- * table in this file additionally supports `requiredCapAny`; APP_ROUTES does
- * not use it, and this must not start honouring it before the table does.
+ * more, plus `requiredCapAny` — which both now honour. This function decides
+ * whether the shell is built at all, so any condition here that the table does
+ * not also apply would refuse a route the table would have rendered, with no way
+ * for the reader to reach it; and any condition the table applies that this does
+ * not would build a shell around a page the reader is then refused, which is the
+ * same drift the other way round. The two lists below must stay identical to the
+ * element ternary further down.
  */
 function deniedRoute(pathname, user) {
   const matched = matchRoutes(APP_ROUTES.map(r => ({ path: r.path, route: r })), pathname);
@@ -753,6 +841,7 @@ function deniedRoute(pathname, user) {
 
   if (route.requiresVerified && !user.verified) return route;
   if (route.requiredCap && !can(user, route.requiredCap)) return route;
+  if (route.requiredCapAny?.length && !route.requiredCapAny.some(c => can(user, c))) return route;
   return null;
 }
 
@@ -790,6 +879,41 @@ function AppShell({ toasts, addToast, removeToast }) {
     currentUser, setCurrentUser, isCheckingSession, refresh: refreshAll, signOut,
     events, applications, favorites, refreshEvents, refreshApplications, toggleFavorite
   } = useSession();
+
+  /* Analytics follows the account, so it can only be decided once there is one.
+     Called unconditionally and before any early return, because a hook that
+     runs on some renders and not others is the exact fault `hookOrder.test.jsx`
+     exists to catch — and this component has several early returns below. */
+  useAnalyticsConsent(currentUser);
+
+  /**
+   * The browser tab's name.
+   *
+   * `PAGE_META` has carried a title for every route for several releases and
+   * `pageTitleCoverage.test.js` checks the table is complete — but nothing ever
+   * wrote it to `document.title`, so every tab said "WeVolunteer" and the value
+   * was only ever rendered as the heading in the top bar. The guard was testing
+   * the DATA, not the effect, which is why a complete table and a wrong title
+   * coexisted happily for so long.
+   *
+   * It matters most to the people least able to work around it: a screen reader
+   * announces the document title on navigation, and somebody with a dozen tabs
+   * open has nothing else to tell them apart. `APP_NAME` is appended so a tab is
+   * still identifiable when the title alone is generic ("Settings").
+   *
+   * Placed here, beside the analytics hook and ABOVE every early return, and
+   * deriving its own tab from the path rather than reusing the `meta` computed
+   * further down — that local sits below the session-check and public-route
+   * returns, so an effect using it would run on some renders and not others.
+   * `hookOrder.test.jsx` exists because of exactly that mistake, and oxlint
+   * caught this one on the first attempt.
+   */
+  const documentTitle = pageMetaFor(currentUser, tabForPath(location.pathname)).title;
+  useEffect(() => {
+    document.title = documentTitle && documentTitle !== APP_NAME
+      ? `${documentTitle} · ${APP_NAME}`
+      : APP_NAME;
+  }, [documentTitle]);
 
   // Global intercept for password reset links
   useEffect(() => {
@@ -839,7 +963,22 @@ function AppShell({ toasts, addToast, removeToast }) {
       let changed = false;
       const next = { ...prev };
       for (const e of list) {
-        if (e?.id && next[e.id] !== e) { next[e.id] = e; changed = true; }
+        if (!e?.id) continue;
+        /**
+         * MERGED, not replaced.
+         *
+         * Browse reports what it rendered from more than one fetch path, and
+         * they do not all return the same projection. A later, thinner response
+         * used to overwrite an earlier richer one wholesale, so an event that
+         * arrived complete could lose `slots` — and with them the shift list —
+         * because a subsequent search or page load mentioned it in passing.
+         *
+         * Layering keeps whatever any response has supplied. A field is only
+         * ever replaced by a NEW value for that field, never erased by a
+         * response that simply did not carry it.
+         */
+        const merged = next[e.id] ? { ...next[e.id], ...e } : e;
+        if (next[e.id] !== merged) { next[e.id] = merged; changed = true; }
       }
       return changed ? next : prev;
     });
@@ -847,8 +986,38 @@ function AppShell({ toasts, addToast, removeToast }) {
 
   // Derived state from URL
   const selectedEventId = searchParams.get('event');
+  /**
+   * The event the modal renders, merged from the two places it can come from.
+   *
+   * ── Why a merge and not a pick ──
+   *
+   * `events` (SessionProvider) and `seenEvents` (whatever a browse surface just
+   * rendered) are DIFFERENT PROJECTIONS of the same row, not a fresh copy and a
+   * stale one. The session index is deliberately narrow — "only events this user
+   * is involved in" — while the browse response carries the fields the modal
+   * actually needs to decide what to show: `slots`, and `viewerBan`, which is
+   * computed per organization for this reader.
+   *
+   * This used to be `events.find(...) || seenEvents[id]`, so whenever an event
+   * appeared in BOTH — which is every event the reader has applied to — the
+   * narrower index won and the richer object was discarded. The visible symptom
+   * was a modal that said "No shifts yet" and "Applications closed" about an
+   * event with a live shift and a deadline five days out, and, for a banned
+   * reader, no ban notice at all: `viewerBan` was simply not on the object the
+   * modal received. Reproduced against a real ban, where `/api/events` returned
+   * both fields and the modal rendered neither.
+   *
+   * The seen object is layered ON TOP because it is the response the reader was
+   * just served, for the surface they are looking at. The index underneath still
+   * supplies anything browse omits, so nothing that worked before is lost.
+   */
   const selectedEvent = selectedEventId
-    ? (events.find(e => e.id === selectedEventId) || seenEvents[selectedEventId] || null)
+    ? (() => {
+      const indexed = events.find(e => e.id === selectedEventId);
+      const seen = seenEvents[selectedEventId];
+      if (!indexed && !seen) return null;
+      return { ...indexed, ...seen };
+    })()
     : null;
   const profileId = searchParams.get('profile');
   const profileType = searchParams.get('type');
@@ -1221,7 +1390,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     </button>
   );
 
-  const meta = PAGE_META[persona]?.[activeTab] || { title: APP_NAME, sub: '' };
+  const meta = pageMetaFor(currentUser, activeTab);
 
   /* Reviewing applicants is what makes this count meaningful, and the filter
      below already scopes it to events this user actually hosts — so a wildcard
@@ -1248,9 +1417,9 @@ function AppShell({ toasts, addToast, removeToast }) {
     /* Redirect elements, so they take nothing — declared `{}` rather than
        omitted, because `withProps` treats an omission as a forgotten entry. */
     '/events': {},
-    '/events/new': { onSubmitEvent: handleCreateEvent, addToast, setActiveTab },
+    '/events/new': { onSubmitEvent: handleCreateEvent, addToast, setActiveTab, currentUser },
     '/events/:id/edit': {},
-    '/checkin/:eventId': { currentUser },
+    '/checkin/:eventId': { currentUser, addToast },
     '/calendar': { currentUser, events, applications, onViewEvent: openEventById },
     '/notifications': { onViewEvent: openEventById, onCountChange: () => setNotifKey(k => k + 1) },
     '/messages': {},
@@ -1284,17 +1453,37 @@ function AppShell({ toasts, addToast, removeToast }) {
       key: `profile-${profileRefreshKey}`,
       currentUser, addToast, onEditProfile: () => setEditingProfile(true),
     },
+    '/organizations': { currentUser },
     '/organizations/new': { addToast },
     '/organizations/:key/edit': { addToast },
-    '/organizations/:key': { addToast },
+    /* `currentUser` so the roster can tell which row is the reader's own —
+       the manage menu is hidden there, because every action in it is either
+       refused by the server for yourself or already offered as `Leave`. */
+    '/organizations/:key': { addToast, currentUser },
     '/hours/external': { addToast },
     '/hours': { currentUser, addToast },
+    /* The destinations the profile's capped lists point at. `BadgesPage` needs
+       `currentUser` to know whose badges to read when the path carries no
+       handle; `CertificatesPage` hands both on to the certificate modal. */
+    '/profile/badges': { currentUser },
+    '/users/:handle/badges': { currentUser },
+    '/users/:handle/certificates': { currentUser },
+    '/users/:handle/hours': { currentUser },
+    '/certificates': { currentUser, addToast },
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
+    '/report-issue': { currentUser, addToast },
     '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
+    /* Same three. `refreshAll` is what makes the released capabilities visible
+       to the navigation without a sign-out. */
+    '/student-organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
     '/errors': { addToast },
     '/admin/appeals': {
       userRole: currentUser.role,
     },
+    /* Deliberately empty. The form reads the session from the server and the
+       case it is contesting from the URL, so there is nothing the shell knows
+       that it needs. */
+    '/appeals/new': {},
     '/impact': {},
     '/admin/audit-logs': {},
     '/admin/roster': {},
@@ -1448,6 +1637,17 @@ function AppShell({ toasts, addToast, removeToast }) {
               narrows capabilities — so the surfaces that would otherwise host the
               way out are the first ones it removes. See the component header. */}
           <PersonaPreviewBanner preview={currentUser.preview} onEnded={refreshAll} />
+          {/* Inside the signed-in shell, not in main.jsx with the provider: a
+              banner asking to use your location has no business on the sign-in
+              screen, and the browser would refuse the permission there anyway
+              because nobody has pressed anything yet. */}
+          <LocationPrompt />
+          {/* Inside the signed-in shell for the same reason as the banner
+              above: "which documents has THIS account not been shown" is only
+              answerable once there is an account, and the Terms promise notice
+              in the app rather than at the sign-in screen. Renders nothing when
+              there is nothing to say, which is almost always. */}
+          <LegalUpdateModal />
           {/* Inside the shell boundary above, so a chunk that fails to load is
               caught alongside a view that throws while rendering — and covering
               both arms of the ternary below, since the profile views are lazy
@@ -1527,9 +1727,14 @@ function AppShell({ toasts, addToast, removeToast }) {
                   element={
                     route.requiresVerified && !currentUser.verified
                       ? deniedFallback(route)
-                      : route.requiredCap
+                      : (route.requiredCap || route.requiredCapAny?.length)
                         ? (
-                          <Can user={currentUser} cap={route.requiredCap} fallback={deniedFallback(route)}>
+                          <Can
+                            user={currentUser}
+                            cap={route.requiredCap}
+                            capAny={route.requiredCapAny}
+                            fallback={deniedFallback(route)}
+                          >
                             {withProps(route, appRouteProps)}
                           </Can>
                         )

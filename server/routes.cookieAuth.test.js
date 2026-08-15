@@ -32,14 +32,32 @@ describe('Content-Security-Policy', () => {
     expect(csp).toBeTruthy();
   });
 
-  it('restricts script to self, which is what stops injected script running', async () => {
+  it('restricts script to self and one named third party', async () => {
     const res = await fetch(`${srv.base}/health`);
     const csp = res.headers.get('content-security-policy');
 
-    // Strict equality, not containment: script-src must be 'self' and nothing
-    // else. Anything appended — an origin, 'unsafe-inline', 'unsafe-eval' —
-    // fails here, which is the point.
-    expect(directive(csp, 'script-src')).toBe("script-src 'self'");
+    /**
+     * Still strict equality, not containment.
+     *
+     * This read `script-src 'self'` and nothing else. `cdn.amplitude.com` was
+     * added when the analytics SDK shipped — `initAll` loads its engagement
+     * bundle from there at runtime, so the alternative was an integration that
+     * fails silently in production while looking installed.
+     *
+     * The equality is kept deliberately: a third-party SCRIPT origin is the
+     * most consequential thing in this policy, so the list has to be enumerated
+     * rather than merely contain what we expect. A second origin appearing here
+     * should fail this test and be argued for on its own merits.
+     */
+    expect(directive(csp, 'script-src')).toBe("script-src 'self' https://cdn.amplitude.com");
+  });
+
+  it('still refuses inline and eval', async () => {
+    /* The part that actually stops an injected <script>. Widening the policy
+       for analytics must not have relaxed it. */
+    const res = await fetch(`${srv.base}/health`);
+    const script = directive(res.headers.get('content-security-policy'), 'script-src');
+    expect(script).not.toMatch(/unsafe-inline|unsafe-eval/);
   });
 
   it('allows the Google Fonts origins on the directives that actually need them', async () => {

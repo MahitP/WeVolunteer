@@ -53,12 +53,36 @@ export default function LeafletMap({ latitude, longitude, label, interactive = f
       keyboard={interactive}
       touchZoom={interactive}
       attributionControl={true}
-      className={isDark ? 'map-dark-mode' : ''}
       style={{ height: '100%', width: '100%' }}
     >
+      {/**
+        * A basemap drawn dark, rather than a light one turned inside out.
+        *
+        * This used to serve Voyager at every theme and, in dark mode, put
+        * `filter: invert(100%) hue-rotate(180deg)` over it. Voyager is a light
+        * pastel cartography; inverting it does not produce a dark map, it
+        * produces a photographic negative — parks turn magenta, water turns
+        * sand, and the label halos that were white become black smears around
+        * black text. That is the "ugly, high-contrast" map, and it was on the
+        * organizer's event-creation picker and the student's event map alike,
+        * because both render this one component.
+        *
+        * CARTO publishes `dark_all` for exactly this purpose: the same street
+        * network, drawn for a dark background, with labels designed to be
+        * legible on it. Swapping the URL is also cheaper than compositing a
+        * full-tile filter on every pan.
+        *
+        * `{r}` is Leaflet's retina suffix and both basemaps honour it.
+        * Attribution is identical and non-negotiable — OpenStreetMap's licence
+        * and CARTO's terms both require it, and it is rendered by the control,
+        * not by this string alone.
+        */}
       <TileLayer
+        key={isDark ? 'dark' : 'light'}
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+        url={isDark
+          ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+          : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'}
       />
       <Marker position={[latitude, longitude]} icon={customIcon}>
         {label && <Popup>{label}</Popup>}
