@@ -768,6 +768,22 @@ export function formatUserResponse(row) {
     hoursVisibility: normaliseVisibility(row.hours_visibility),
     certificatesVisibility: normaliseVisibility(row.certificates_visibility),
     friendActivityVisible: row.friend_activity_visible !== 0,
+    /**
+     * Whether this person agreed to be measured — and whether they have been
+     * asked at all.
+     *
+     * Three states deliberately survive the trip to the client (see migration
+     * 052): `null` is "not asked", which Settings renders differently from a
+     * considered "no". Everything except exactly `1` reads as no consent, so a
+     * corrupted value fails towards collecting nothing.
+     *
+     * It is on the SELF response only. `profileSerializer.js` is an allowlist
+     * and this is not in it, which is correct: whether somebody agreed to
+     * analytics is nobody else's business, including an organizer's.
+     */
+    analyticsConsent: row.analytics_consent === null || row.analytics_consent === undefined
+      ? null
+      : row.analytics_consent === 1,
     createdAt: row.created_at
   };
 }

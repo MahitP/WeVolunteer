@@ -229,6 +229,56 @@ export function initializeAmplitude() {
 }
 
 /**
+ * Turns analytics on or off to match what this person actually agreed to.
+ *
+ * ── Why initialisation moved out of `main.jsx` ──
+ *
+ * It used to run at module scope, before React mounted anything. That is the
+ * right place for something unconditional and the wrong place for something
+ * conditional: the answer lives on the account, and at module scope there is no
+ * account yet. So the call now happens once the session is known, which means
+ * a signed-out visitor is never measured — correct, because nobody who has not
+ * signed in has been asked.
+ *
+ * ── Why revocation uses `setOptOut` rather than doing nothing ──
+ *
+ * Amplitude cannot be un-initialised. Somebody who turns the switch off in
+ * Settings expects recording to stop in the tab they are sitting in, not at the
+ * next reload — and Session Replay is capturing continuously, so "next reload"
+ * could be an hour of recording they withdrew consent for. `setOptOut(true)`
+ * is the SDK's own answer and it takes effect immediately.
+ *
+ * Idempotent and safe to call on every session change, which is how it is used.
+ *
+ * @param {boolean} consented `true` only for an explicit yes. `null` — meaning
+ *   the person has not been asked — is not consent.
+ * @returns {boolean} whether analytics is running after this call
+ */
+export function applyAnalyticsConsent(consented) {
+  if (consented !== true) {
+    if (started) {
+      try {
+        amplitude.setOptOut(true);
+      } catch (err) {
+        console.warn('Amplitude could not be switched off:', err?.message);
+      }
+    }
+    return false;
+  }
+
+  if (!started) return initializeAmplitude();
+
+  /* Consent given back after being withdrawn, in the same tab. */
+  try {
+    amplitude.setOptOut(false);
+  } catch (err) {
+    console.warn('Amplitude could not be switched on:', err?.message);
+    return false;
+  }
+  return true;
+}
+
+/**
  * Records one event.
  *
  * A no-op when Amplitude is not configured or did not start, so a caller never

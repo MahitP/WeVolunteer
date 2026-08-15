@@ -26,10 +26,12 @@ import { createRequire } from 'node:module';
 
 const track = vi.fn();
 const initAll = vi.fn();
+const setOptOut = vi.fn();
 
 vi.mock('@amplitude/unified', () => ({
   initAll: (...args) => initAll(...args),
   track: (...args) => track(...args),
+  setOptOut: (...args) => setOptOut(...args),
 }));
 
 /** Loads the module fresh with a chosen key, so module-scope state is clean. */
@@ -42,6 +44,7 @@ async function loadWithKey(key) {
 beforeEach(() => {
   track.mockClear();
   initAll.mockClear();
+  setOptOut.mockReset();
 });
 
 afterEach(() => {
@@ -263,8 +266,31 @@ describe('the verification event is declared exactly once', () => {
     expect(callSites, `expected one explicit event, found: ${JSON.stringify(callSites)}`).toHaveLength(1);
     expect(callSites[0].event).toBe('Viewed Home Page');
 
-    const mainSrc = fs.readFileSync(path.join(src, 'main.jsx'), 'utf8');
-    expect(mainSrc).toContain("prompt_version: 'BA400.4'");
+    /**
+     * The call site moved out of `main.jsx` when analytics became conditional
+     * on consent: at module scope there is no account, so there is no answer to
+     * read. It lives in the hook that owns the decision instead.
+     */
+    expect(callSites[0].file).toBe(path.join('hooks', 'useAnalyticsConsent.js'));
+    const hookSrc = fs.readFileSync(path.join(src, 'hooks', 'useAnalyticsConsent.js'), 'utf8');
+    expect(hookSrc).toContain("prompt_version: 'BA400.4'");
+  });
+
+  it('is not started from module scope any more', () => {
+    /**
+     * The regression that would silently un-do consent.
+     *
+     * `main.jsx` runs before React mounts and therefore before any session
+     * exists. A call to `initializeAmplitude` there starts recording for
+     * everybody, including people who declined — and it would look perfectly
+     * reasonable in a diff, because that is where it used to live.
+     */
+    const mainSrc = fs.readFileSync(path.join(process.cwd(), 'src', 'main.jsx'), 'utf8');
+    expect(
+      /^\s*(const\s+\w+\s*=\s*)?initializeAmplitude\(\)/m.test(mainSrc),
+      'main.jsx starts Amplitude at module scope again — that runs before the '
+      + 'session loads, so it cannot know whether this person consented'
+    ).toBe(false);
   });
 
   it('is not imported anywhere on the server', async () => {
@@ -286,6 +312,70 @@ describe('the verification event is declared exactly once', () => {
     walk(serverDir);
 
     expect(offenders, `server code referencing Amplitude: ${offenders.join(', ')}`).toEqual([]);
+  });
+});
+
+describe('nothing is recorded without consent', () => {
+  /**
+   * The property the whole consent mechanism exists for, asserted at the seam
+   * rather than through the UI.
+   *
+   * `analyticsConsent` has three states and only one of them is a yes.
+   * `null` — the value every existing account has after migration 052, because
+   * none of them was ever asked — must behave exactly like an explicit no.
+   */
+  it.each([
+    ['null, meaning never asked', null],
+    ['an explicit decline', false],
+    ['undefined, for a signed-out visitor', undefined],
+    ['the STRING "true", which is truthy and is not consent', 'true'],
+    ['the number 1', 1],
+  ])('does not start Amplitude for %s', async (_label, value) => {
+    const a = await loadWithKey('test-key-not-the-real-one');
+    expect(a.applyAnalyticsConsent(value)).toBe(false);
+    expect(initAll, 'Amplitude was initialised without consent').not.toHaveBeenCalled();
+  });
+
+  it('starts it for an explicit yes', async () => {
+    const a = await loadWithKey('test-key-not-the-real-one');
+    expect(a.applyAnalyticsConsent(true)).toBe(true);
+    expect(initAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops recording immediately when consent is withdrawn', async () => {
+    /**
+     * Not "stops at the next reload". Session Replay records continuously, so
+     * the gap between turning the switch off and the page reloading is a period
+     * of recording the person has explicitly withdrawn consent for. Amplitude
+     * cannot be un-initialised, and `setOptOut` is its own answer to this.
+     */
+    const a = await loadWithKey('test-key-not-the-real-one');
+    a.applyAnalyticsConsent(true);
+    expect(setOptOut).not.toHaveBeenCalled();
+
+    expect(a.applyAnalyticsConsent(false)).toBe(false);
+    expect(setOptOut).toHaveBeenCalledWith(true);
+  });
+
+  it('resumes when consent is given back in the same tab', async () => {
+    const a = await loadWithKey('test-key-not-the-real-one');
+    a.applyAnalyticsConsent(true);
+    a.applyAnalyticsConsent(false);
+    setOptOut.mockClear();
+
+    expect(a.applyAnalyticsConsent(true)).toBe(true);
+    expect(setOptOut).toHaveBeenCalledWith(false);
+    /* Not initialised a second time — the SDK is already running. */
+    expect(initAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not throw when the SDK refuses to switch off', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const a = await loadWithKey('test-key-not-the-real-one');
+    a.applyAnalyticsConsent(true);
+    setOptOut.mockImplementationOnce(() => { throw new Error('gone'); });
+
+    expect(() => a.applyAnalyticsConsent(false)).not.toThrow();
   });
 });
 

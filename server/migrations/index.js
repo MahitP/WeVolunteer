@@ -60,6 +60,7 @@ import hashAuthTokens from './048_hash_auth_tokens.js';
 import serviceVisibility from './049_service_visibility.js';
 import deliveryEvents from './050_delivery_events.js';
 import issueReports from './051_issue_reports.js';
+import analyticsConsent from './052_analytics_consent.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -308,7 +309,14 @@ export const MIGRATIONS = [
    * 051 — reports about the PLATFORM, kept out of the moderation queue that
    * exists to protect children. A new table, not a reuse of `reports`.
    */
-  issueReports
+  issueReports,
+  /**
+   * 052 — whether a person has agreed to be measured. One nullable column, no
+   * DEFAULT, no backfill: every existing row becomes "not asked", which is off.
+   * The only privacy column in the schema that does NOT carry forward the
+   * behaviour already in place, and the header says why.
+   */
+  analyticsConsent
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

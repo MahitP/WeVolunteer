@@ -25,6 +25,7 @@ import { Can } from './components/common/Can.jsx';
 import EmptyState from './components/common/EmptyState';
 import { can } from './authz.js';
 import { SessionProvider, useSession } from './session/SessionProvider.jsx';
+import { useAnalyticsConsent } from './hooks/useAnalyticsConsent.js';
 import {
   APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES, isPublicPath, isSignedOutOnlyPath, withProps,
   AdminDashboard, VolunteerDashboard, OrganizerDashboard,
@@ -878,6 +879,12 @@ function AppShell({ toasts, addToast, removeToast }) {
     currentUser, setCurrentUser, isCheckingSession, refresh: refreshAll, signOut,
     events, applications, favorites, refreshEvents, refreshApplications, toggleFavorite
   } = useSession();
+
+  /* Analytics follows the account, so it can only be decided once there is one.
+     Called unconditionally and before any early return, because a hook that
+     runs on some renders and not others is the exact fault `hookOrder.test.jsx`
+     exists to catch — and this component has several early returns below. */
+  useAnalyticsConsent(currentUser);
 
   // Global intercept for password reset links
   useEffect(() => {
