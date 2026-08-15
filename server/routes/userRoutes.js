@@ -535,6 +535,27 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
       }
     }
 
+    /**
+     * Consent to analytics.
+     *
+     * A strict boolean, and the strictness is the point. Every other switch on
+     * this endpoint coerces — `leaderboardOptIn ? 1 : 0` — which is fine for a
+     * preference and wrong for a consent record: `'false'`, the string, is
+     * truthy, so a client bug would store a yes that nobody gave. The column
+     * has three meaningful states (see migration 052) and only two of them may
+     * be reached from here; `null` means "not asked" and is not something a
+     * request may assert about a person.
+     */
+    if (req.body.analyticsConsent !== undefined) {
+      if (typeof req.body.analyticsConsent !== 'boolean') {
+        return res.status(400).json({
+          error: 'Analytics consent must be true or false.',
+          field: 'analyticsConsent',
+        });
+      }
+      updates.push('analytics_consent = ?'); values.push(req.body.analyticsConsent ? 1 : 0);
+    }
+
     if (grade !== undefined) {
       if (!VALID_GRADES.includes(grade)) {
         return res.status(400).json({ error: `Grade must be one of: ${VALID_GRADES.join(', ')}`, field: 'grade' });

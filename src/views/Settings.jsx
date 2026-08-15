@@ -35,6 +35,9 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
   const [certificatesVisibility, setCertificatesVisibility] =
     useState(currentUser?.certificatesVisibility || 'public');
   const [friendActivityVisible, setFriendActivityVisible] = useState(currentUser?.friendActivityVisible !== false);
+  /* `null` means never asked, and it is not consent — so anything but an
+     explicit `true` renders the switch off. */
+  const [analyticsConsent, setAnalyticsConsent] = useState(currentUser?.analyticsConsent === true);
 
   useEffect(() => {
     setLeaderboardOptIn(Boolean(currentUser?.leaderboardOptIn));
@@ -141,6 +144,23 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
         : 'Friends will no longer be told when you sign up.');
   };
 
+  /**
+   * Consent to analytics.
+   *
+   * Sent as a real boolean rather than a coerced one — the server refuses
+   * anything else, because a consent record that accepts `'false'` (truthy)
+   * would store a yes nobody gave. `analyticsConsent` is `null` until it is
+   * answered, and `null` is not consent, so the control starts off.
+   */
+  const handleAnalyticsToggle = (next) => {
+    const previous = analyticsConsent;
+    setAnalyticsConsent(next);
+    savePrivacy({ analyticsConsent: next }, setAnalyticsConsent, previous,
+      next
+        ? 'Thank you — usage analytics are on. You can turn this off at any time.'
+        : 'Analytics are off. Nothing more will be recorded.');
+  };
+
   const handleLeaderboardToggle = async (nextValue) => {
     const previous = leaderboardOptIn;
     setLeaderboardOptIn(nextValue);
@@ -213,6 +233,44 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                   <span className="dim small">
                     Adds your name and total hours to the school leaderboard. Off by default —
                     turning it off again removes you immediately.
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            <div className="card card-pad" style={{ marginTop: 'var(--s4)' }}>
+              <h3 style={{ marginBottom: 'var(--s4)' }}>Usage analytics</h3>
+              {/**
+                * Off unless someone says otherwise.
+                *
+                * The other switches on this screen control who among PEOPLE can
+                * see something. This one controls whether an outside company
+                * sees anything at all, which is a different kind of question and
+                * is why the copy names the company rather than saying
+                * "analytics" and leaving the reader to guess who has the data.
+                *
+                * There is deliberately no prompt, banner or nudge anywhere in
+                * the app. A consent control that chases people produces consent
+                * from people who wanted the dialog to go away, and on a platform
+                * whose users are minors that is worth less than no data.
+                */}
+              <label className="row" style={{ alignItems: 'flex-start' }}>
+                <input
+                  type="checkbox"
+                  checked={analyticsConsent}
+                  disabled={savingPrivacy}
+                  onChange={e => handleAnalyticsToggle(e.target.checked)}
+                />
+                <div className="stack-xs" style={{ flex: 1 }}>
+                  <span className="strong">Help improve WeVolunteer</span>
+                  <span className="dim small">
+                    Shares how you use the app — the pages you open and a recording of what
+                    the screen looked like — with Amplitude, an analytics company, so we can
+                    find what is confusing or broken. Your name, email and messages are never
+                    sent, and text on the page is hidden before the recording leaves your
+                    device. <strong>Off unless you turn it on</strong>, and turning it off
+                    stops the recording straight away. See the{' '}
+                    <Link to="/legal/cookie-and-tracking-notice">Cookie and Tracking Notice</Link>.
                   </span>
                 </div>
               </label>

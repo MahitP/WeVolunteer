@@ -8,7 +8,6 @@ import { crashFallback } from './views/ErrorExperience/ErrorExperience.jsx'
 
 import { LocationProvider } from './contexts/LocationContext.jsx'
 import { reportClientError } from './utils/errorReporting.js'
-import { initializeAmplitude, trackAmplitudeEvent } from './utils/analytics.js'
 
 /**
  * The failures no React boundary can see.
@@ -43,51 +42,17 @@ globalThis.addEventListener?.('unhandledrejection', (event) => {
 });
 
 /**
- * Amplitude.
+ * Amplitude is deliberately NOT started here.
  *
- * ── Why here, and not in a component ──
+ * It used to be, at module scope, which was the right shape for something
+ * unconditional. It is now conditional on an answer stored against an account —
+ * `users.analytics_consent`, migration 052 — and at module scope there is no
+ * account yet, so the decision cannot be made from this file.
  *
- * This module runs once per page load, before React mounts anything. A
- * component effect would run twice in development — `<StrictMode>` below mounts
- * everything twice deliberately — and `initializeAmplitude` guards against that
- * anyway, but the guard should not be the only thing standing between us and a
- * double install. One call site, above the tree, is simpler to reason about
- * than a guarded call inside a component that may remount.
- *
- * It is client-only by construction: `main.jsx` is the browser entry point and
- * is never imported by the Express server, which has no Amplitude code at all.
- *
- * Deliberately NOT awaited and deliberately unable to throw. If Amplitude is
- * blocked — by an extension, by a Content Security Policy, by a network that
- * refuses it — the application must render exactly as it does now.
+ * `useAnalyticsConsent`, mounted inside the session, owns it instead. Nothing
+ * is recorded for a visitor who has not signed in, because nobody who has not
+ * signed in has been asked.
  */
-const analyticsRunning = initializeAmplitude();
-
-/**
- * The one explicit event.
- *
- * Autocapture already records generic interactions; this exists to prove the
- * pipeline end to end, and there is exactly one of it. `/` and `/welcome` both
- * render `Welcome` (src/routes/index.jsx), which is the landing surface a
- * first-time visitor sees — so the name is literally true.
- *
- * Gated on the path rather than fired unconditionally: an event called
- * "Viewed Home Page" that also fires on `/settings` and every deep link is a
- * lie in the dataset, and a dataset nobody trusts is worse than no dataset.
- *
- * Read from `window.location` rather than the router because this runs before
- * the router mounts. The properties carry no person: a route constant and a
- * build marker, nothing typed, nothing identifying.
- *
- * `prompt_version` is the installation wizard's verification marker. Safe to
- * remove once the event has been seen in Amplitude's live feed.
- */
-if (analyticsRunning) {
-  const path = window.location?.pathname;
-  if (path === '/' || path === '/welcome') {
-    trackAmplitudeEvent('Viewed Home Page', { prompt_version: 'BA400.4' });
-  }
-}
 
 // Two last-resort boundaries, because they can rely on different amounts of the
 // app still working.
