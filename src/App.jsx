@@ -886,6 +886,35 @@ function AppShell({ toasts, addToast, removeToast }) {
      exists to catch — and this component has several early returns below. */
   useAnalyticsConsent(currentUser);
 
+  /**
+   * The browser tab's name.
+   *
+   * `PAGE_META` has carried a title for every route for several releases and
+   * `pageTitleCoverage.test.js` checks the table is complete — but nothing ever
+   * wrote it to `document.title`, so every tab said "WeVolunteer" and the value
+   * was only ever rendered as the heading in the top bar. The guard was testing
+   * the DATA, not the effect, which is why a complete table and a wrong title
+   * coexisted happily for so long.
+   *
+   * It matters most to the people least able to work around it: a screen reader
+   * announces the document title on navigation, and somebody with a dozen tabs
+   * open has nothing else to tell them apart. `APP_NAME` is appended so a tab is
+   * still identifiable when the title alone is generic ("Settings").
+   *
+   * Placed here, beside the analytics hook and ABOVE every early return, and
+   * deriving its own tab from the path rather than reusing the `meta` computed
+   * further down — that local sits below the session-check and public-route
+   * returns, so an effect using it would run on some renders and not others.
+   * `hookOrder.test.jsx` exists because of exactly that mistake, and oxlint
+   * caught this one on the first attempt.
+   */
+  const documentTitle = pageMetaFor(currentUser, tabForPath(location.pathname)).title;
+  useEffect(() => {
+    document.title = documentTitle && documentTitle !== APP_NAME
+      ? `${documentTitle} · ${APP_NAME}`
+      : APP_NAME;
+  }, [documentTitle]);
+
   // Global intercept for password reset links
   useEffect(() => {
     if (searchParams.has('reset') && location.pathname !== '/reset-password') {
