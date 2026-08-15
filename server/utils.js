@@ -11,7 +11,10 @@ import { withheldCapabilitiesFor } from './organizerAgreement.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
 import { sweepCheckinTokens } from './checkinTokens.js';
 import { sweepErrors } from './errorReporter.js';
-import { sendErrorAlerts } from './alerting.js';
+import { sendErrorAlerts, sendBackupAlert } from './alerting.js';
+/* Read here rather than inside alerting.js — that module imports nothing on
+   purpose, so everything it needs arrives as an argument. */
+import { backupStatus } from './backupStatus.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
 import { isSuspended, liftIfExpired, suspensionNotice } from './suspension.js';
 import { suspendedMayReach } from './suspendedAccess.js';
@@ -1102,6 +1105,31 @@ export function runNotificationSweep() {
         else if (reason === 'failed') console.warn('[Alerts] Alert send failed — see the error above.');
       })
       .catch(() => { /* sendErrorAlerts does not reject; this is belt and braces */ });
+
+    /**
+     * The backups, separately — and it has to be separate.
+     *
+     * `sendErrorAlerts` returns early on `nothing_new`, and a backup that
+     * stopped running produces no error rows at all. A system that is otherwise
+     * perfectly healthy is exactly the one whose backups fail unnoticed, so this
+     * cannot ride on a path that a quiet error table short-circuits.
+     *
+     * Same contract as the call above: not awaited, catches internally, throttles
+     * itself. Its own 12-hour floor rather than the hourly one, because a stale
+     * backup is a standing condition and hourly mail about it gets the channel
+     * muted — which is how this became invisible in the first place.
+     */
+    sendBackupAlert({
+      status: backupStatus(),
+      send: (msg) => sendMail({ ...msg, flow: 'error-alert' }),
+      now,
+      appUrl: process.env.APP_URL
+    })
+      .then(({ sent, reason, status }) => {
+        if (sent > 0) console.warn(`[Alerts] Backups need attention (${status}) — an alert was sent.`);
+        else if (reason === 'failed') console.warn('[Alerts] Backup alert send failed — see the error above.');
+      })
+      .catch(() => { /* does not reject; belt and braces */ });
 
     if (removed > 0) {
       console.log(`[Notifications] Cleaned up ${removed} expired notifications.`);
