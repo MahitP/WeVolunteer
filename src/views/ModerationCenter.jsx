@@ -187,7 +187,7 @@ export default function ModerationCenter({ currentUser, onPreviewStarted }) {
         {/* "Admin", matching the rail entry and PAGE_META — see the NAV table in
             src/App.jsx. Two names for one destination means two people cannot
             describe it to each other. */}
-        <h1>Admin</h1>
+        <h2 className="page-title">Admin</h2>
         <p className="lead">
           The administrative areas this account can open. Each one re-checks your access when you get there.
         </p>

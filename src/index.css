@@ -556,6 +556,19 @@ h6 {
 }
 
 h1 { font-size: 1.5rem; }
+
+/**
+ * A heading that LOOKS like the page title but is not the document's `h1`.
+ *
+ * The top bar owns the one `h1` on every signed-in screen — it is driven by
+ * `PAGE_META`, so it is guaranteed present on every route, which the content
+ * headings are not. Nine views also opened with their own `h1`, giving those
+ * pages two, and a screen reader announced both as the page's title.
+ *
+ * Demoting them to `h2` fixes the semantics and would have shrunk them from
+ * 1.5rem to 1.0625rem. This keeps the appearance exactly as it was.
+ */
+.page-title { font-size: 1.5rem; }
 h2 { font-size: 1.0625rem; font-weight: 700; letter-spacing: -0.01em; }
 h3 { font-size: 0.9375rem; font-weight: 700; letter-spacing: -0.005em; }
 h4 { font-size: 0.875rem; font-weight: 700; }
@@ -915,7 +928,7 @@ time { font-variant-numeric: tabular-nums; }
 }
 
 .page-head { margin-bottom: var(--s6); }
-.page-head h1 { font-size: 1.5rem; }
+.page-head h1, .page-head h2 { font-size: 1.5rem; }
 .page-head .lead { margin-top: var(--s1); }
 
 /* Section header with a hairline that fills remaining width */

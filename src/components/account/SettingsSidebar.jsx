@@ -23,7 +23,7 @@ export default function SettingsSidebar({ activeSection, onSelectSection, isMobi
       {!isMobile && <h2 className="settings-sidebar-title">Settings</h2>}
       {isMobile && (
         <div className="settings-mobile-header">
-           <h1 className="topbar-title">Settings</h1>
+           <h2 className="topbar-title">Settings</h2>
         </div>
       )}
       <ul className="settings-nav-list stack-xs">

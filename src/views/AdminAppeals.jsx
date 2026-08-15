@@ -100,7 +100,7 @@ export default function AdminAppeals() {
   return (
     <div className="page">
       <header className="page-head">
-        <h1>Appeals</h1>
+        <h2 className="page-title">Appeals</h2>
         <p className="muted">
           Oldest first. We tell appellants we reply within {SLA_DAYS} school days, so the oldest
           item is the promise.
@@ -359,7 +359,7 @@ function AppealDetail({ id, onBack }) {
 
       <header className="page-head">
         <button className="btn btn-secondary" onClick={onBack}>&larr; Back to the queue</button>
-        <h1>Review an appeal</h1>
+        <h2 className="page-title">Review an appeal</h2>
         <p className="muted">From {appeal.user_name} · <SlaBadge createdAt={appeal.created_at} /></p>
       </header>
 

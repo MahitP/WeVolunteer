@@ -93,7 +93,7 @@ export default function VolunteerPortfolio({ currentUser }) {
         <header className="transcript-head">
           <div>
             <p className="transcript-org">{APP_NAME}</p>
-            <h1 className="transcript-title">Record of Verified Service</h1>
+            <h2 className="transcript-title">Record of Verified Service</h2>
           </div>
           <div className="transcript-issued">
             <div>{SCHOOL_NAME}</div>

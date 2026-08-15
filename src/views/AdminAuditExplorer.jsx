@@ -111,7 +111,7 @@ export default function AdminAuditExplorer() {
   return (
     <div className="page">
       <header className="page-head">
-        <h1>Audit Explorer</h1>
+        <h2 className="page-title">Audit Explorer</h2>
         <p className="muted">
           Every privileged action, append-only and impossible to edit. Kept for one year.
         </p>

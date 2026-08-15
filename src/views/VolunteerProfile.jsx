@@ -98,7 +98,7 @@ export default function VolunteerProfile({
           </span>
 
           <div style={{ flex: 1, minWidth: 200 }}>
-            <h1 style={{ fontSize: '1.375rem' }}>{volunteer.name}</h1>
+            <h2 style={{ fontSize: '1.375rem' }}>{volunteer.name}</h2>
             {/**
               * The owner or partner pill, if this account carries one.
               *

@@ -88,7 +88,7 @@ export default function ImpactDashboard() {
   if (error) {
     return (
       <div className="page">
-        <header className="page-head"><h1>Community impact</h1></header>
+        <header className="page-head"><h2>Community impact</h2></header>
         <EmptyState
           icon={Sprout}
           title="Couldn't load the figures"
@@ -101,7 +101,7 @@ export default function ImpactDashboard() {
   if (!data) {
     return (
       <div className="page">
-        <header className="page-head"><h1>Community impact</h1></header>
+        <header className="page-head"><h2>Community impact</h2></header>
         <LoadingSkeleton heights={[120, 200, 200]} />
       </div>
     );
@@ -117,7 +117,7 @@ export default function ImpactDashboard() {
   return (
     <div className="page">
       <header className="page-head">
-        <h1>Community impact</h1>
+        <h2>Community impact</h2>
         <p className="muted">
           What this community has actually done — counted from confirmed attendance,
           never from sign-ups.

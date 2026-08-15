@@ -218,7 +218,7 @@ export default function OrganizationPage({ addToast, currentUser }) {
                 the others drifted. */}
             <OrgAvatar organization={org} size={22} className="avatar-lg org-avatar" />
             <div className="stack-xs">
-              <h1>{org.name}</h1>
+              <h2 className="page-title">{org.name}</h2>
               <p className="muted org-meta">
                 <Users size={13} aria-hidden="true" /> {org.memberCount} {org.memberCount === 1 ? 'member' : 'members'}
                 {org.eventCount > 0 && <> · <CalendarDays size={13} aria-hidden="true" /> {org.eventCount} {org.eventCount === 1 ? 'event' : 'events'}</>}

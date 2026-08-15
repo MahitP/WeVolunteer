@@ -112,7 +112,7 @@ export default function LoggedHours({ currentUser, addToast }) {
           <Link to="/" className="btn btn-ghost btn-sm loggedhours-back">
             <ArrowLeft size={15} aria-hidden="true" /> Back to dashboard
           </Link>
-          <h1>Logged hours</h1>
+          <h2 className="page-title">Logged hours</h2>
           <p className="muted">
             Everything you have volunteered, in one place — what WeVolunteer confirmed, and what
             you have recorded yourself.

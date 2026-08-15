@@ -202,9 +202,9 @@ export default function VolunteerDashboard({
         </a>
       )}
       <div className="dashboard-greeting" style={{ marginBottom: '-var(--s4)' }}>
-        <h1 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
+        <h2 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
           {greetingMessage}
-        </h1>
+        </h2>
       </div>
       {/* ── What's next: the single most useful thing on the page ── */}
       {nextShift ? (

@@ -353,7 +353,7 @@ export default function LegalEditor({ addToast }) {
   if (listError) {
     return (
       <div className="content stack-lg">
-        <h1>Legal Center editor</h1>
+        <h2 className="page-title">Legal Center editor</h2>
         <p className="alert alert-danger" role="alert">{listError}</p>
       </div>
     );
@@ -364,7 +364,7 @@ export default function LegalEditor({ addToast }) {
   return (
     <div className="content stack-lg">
       <div className="stack-sm">
-        <h1 id="legal-editor-title">Legal Center editor</h1>
+        <h2 id="legal-editor-title" className="page-title">Legal Center editor</h2>
         <p className="dim">
           Publish new versions of the documents people are asked to agree to. Every
           save keeps the version before it, so nothing here is destroyed — and the
