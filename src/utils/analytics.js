@@ -1,5 +1,3 @@
-import * as amplitude from '@amplitude/unified';
-
 /**
  * Amplitude, behind a seam.
  *
@@ -49,6 +47,33 @@ const API_KEY = import.meta.env.VITE_AMPLITUDE_API_KEY;
  * the module rather than of who happens to call it.
  */
 let started = false;
+
+/**
+ * The SDK itself, once somebody has consented — and not before.
+ *
+ * ── Why this is a dynamic import ──
+ *
+ * `import * as amplitude from '@amplitude/unified'` is a static import, so the
+ * whole package was compiled into the main bundle and every visitor downloaded
+ * it whether or not it ever ran. Measured on a production build: `rrweb-record`
+ * 180 kB and `rrweb-plugin-console-record` 124 kB as separate chunks, plus the
+ * analytics core inside an 841 kB main chunk that Vite already warns about.
+ *
+ * That was defensible when analytics was on for everyone. It stopped being
+ * defensible the moment it became opt-in and OFF by default: the common case is
+ * now a student who never consents, and charging them ~300 kB on school
+ * cellular for a recorder that will never start is the wrong trade.
+ *
+ * `await import()` moves the whole package into a chunk fetched at the moment
+ * consent is granted. Nobody who declines pays for it, and nobody signed out
+ * pays for it either.
+ *
+ * The cost is that everything here becomes async, which is why
+ * `applyAnalyticsConsent` returns a promise and the caller is an effect rather
+ * than a module-scope call. That is a fair price and it matches what the code
+ * already had to be once the answer lived on an account.
+ */
+let sdk = null;
 
 /** Whether analytics is configured at all. Also the test seam's read. */
 export const isAnalyticsConfigured = () => Boolean(API_KEY);
@@ -194,7 +219,7 @@ const INTERACTION_CONFIG = {
  *
  * @returns {boolean} whether Amplitude is running after this call
  */
-export function initializeAmplitude() {
+export async function initializeAmplitude() {
   if (started) return true;
 
   /* Browser only. This module is imported by tests running under Node and must
@@ -207,11 +232,17 @@ export function initializeAmplitude() {
   }
 
   try {
+    /* Fetched here, not at page load. See `sdk` above. A failure to load — an
+       offline network, a blocking extension, a CSP — lands in the same catch as
+       a failure to initialise, and is handled the same way: silently, with the
+       application unaffected. */
+    sdk = await import('@amplitude/unified');
+
     /* `initAll`, not `init`. They are different entry points: `init` is
        analytics only and does not start Session Replay. This package does not
        even export `init`, so the mistake would be a runtime TypeError rather
        than a quiet half-installation. */
-    amplitude.initAll(API_KEY, {
+    sdk.initAll(API_KEY, {
       analytics: { autocapture: true },
       sessionReplay: {
         sampleRate: 1,
@@ -254,11 +285,11 @@ export function initializeAmplitude() {
  *   the person has not been asked — is not consent.
  * @returns {boolean} whether analytics is running after this call
  */
-export function applyAnalyticsConsent(consented) {
+export async function applyAnalyticsConsent(consented) {
   if (consented !== true) {
-    if (started) {
+    if (started && sdk) {
       try {
-        amplitude.setOptOut(true);
+        sdk.setOptOut(true);
       } catch (err) {
         console.warn('Amplitude could not be switched off:', err?.message);
       }
@@ -270,7 +301,7 @@ export function applyAnalyticsConsent(consented) {
 
   /* Consent given back after being withdrawn, in the same tab. */
   try {
-    amplitude.setOptOut(false);
+    sdk.setOptOut(false);
   } catch (err) {
     console.warn('Amplitude could not be switched on:', err?.message);
     return false;
@@ -291,9 +322,9 @@ export function applyAnalyticsConsent(consented) {
  * @param {object} [properties]
  */
 export function trackAmplitudeEvent(name, properties = {}) {
-  if (!started) return;
+  if (!started || !sdk) return;
   try {
-    amplitude.track(name, { ...properties, environment });
+    sdk.track(name, { ...properties, environment });
   } catch (err) {
     /* An event that cannot be sent must never reach the caller as an
        exception. The caller is a render path or a click handler. */
@@ -304,4 +335,5 @@ export function trackAmplitudeEvent(name, properties = {}) {
 /** Test seam. Lets a suite assert the once-only behaviour from a clean slate. */
 export function __resetAnalyticsForTests() {
   started = false;
+  sdk = null;
 }

@@ -43,8 +43,14 @@ export function useAnalyticsConsent(user) {
   const sent = useRef(false);
 
   useEffect(() => {
-    const running = applyAnalyticsConsent(consented);
-    if (!running || sent.current) return;
+    /* Async because the SDK is fetched on demand — see `sdk` in analytics.js.
+       `cancelled` rather than an AbortController: there is nothing to abort, and
+       the only thing that must not happen is sending an event for a session that
+       has already been replaced. */
+    let cancelled = false;
+
+    applyAnalyticsConsent(consented).then((running) => {
+      if (cancelled || !running || sent.current) return;
 
     /**
      * `Viewed Home Page` — the installation's verification marker.
@@ -60,11 +66,14 @@ export function useAnalyticsConsent(user) {
      * on the landing page has given no consent, so this event no longer fires
      * for them at all. It fires for a consenting member who arrives at `/`.
      */
-    const path = window.location?.pathname;
-    if (path === '/' || path === '/welcome') {
-      trackAmplitudeEvent('Viewed Home Page', { prompt_version: 'BA400.4' });
-      sent.current = true;
-    }
+      const path = window.location?.pathname;
+      if (path === '/' || path === '/welcome') {
+        trackAmplitudeEvent('Viewed Home Page', { prompt_version: 'BA400.4' });
+        sent.current = true;
+      }
+    });
+
+    return () => { cancelled = true; };
   }, [consented]);
 }
 
