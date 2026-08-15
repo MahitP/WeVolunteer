@@ -341,9 +341,9 @@ export default function OrganizerDashboard({
       )}
 
       <div className="dashboard-greeting" style={{ marginBottom: '-var(--s4)' }}>
-        <h1 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
+        <h2 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
           {greetingMessage}
-        </h1>
+        </h2>
       </div>
       {/* ── What needs a decision ── */}
       {needsReview.length > 0 && <section className="card" style={{

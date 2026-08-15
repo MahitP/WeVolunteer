@@ -145,7 +145,7 @@ export default function Messages() {
         />
       )}
       <div className="page-head" style={{ marginBottom: 'var(--s2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>
+        <h2 className="page-title">
           Messages
           {isOffline && (
             <span className="offline-pill" style={{ marginLeft: '0.75rem', verticalAlign: 'middle' }}>
@@ -153,7 +153,7 @@ export default function Messages() {
               Reconnecting
             </span>
           )}
-        </h1>
+        </h2>
         {/**
           * Words on a desktop, a glyph on a phone.
           *

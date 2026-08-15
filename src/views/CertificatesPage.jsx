@@ -53,9 +53,9 @@ export default function CertificatesPage({ currentUser, addToast }) {
         <Link to="/profile" className="btn btn-ghost btn-sm row" style={{ gap: 6, alignSelf: 'flex-start' }}>
           <ArrowLeft size={14} aria-hidden="true" /> Back to profile
         </Link>
-        <h1 className="row" style={{ gap: 8 }}>
+        <h2 className="row page-title" style={{ gap: 8 }}>
           <Award size={20} style={{ color: 'var(--brand)' }} aria-hidden="true" /> Your certificates
-        </h1>
+        </h2>
         {!loading && !error && certificates.length > 0 && (
           <p className="dim small">
             {certificates.length} {certificates.length === 1 ? 'certificate' : 'certificates'}.

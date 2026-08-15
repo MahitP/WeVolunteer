@@ -90,7 +90,7 @@ export default function AccountProfile({ currentUser, onEditProfile }) {
                 : (avatar || '🙂')}
             </span>
             <div className="stack-xs">
-              <h1 className="profile-name">{name}</h1>
+              <h2 className="profile-name">{name}</h2>
               <DistinctionTag distinction={distinction} />
               {username && <p className="muted profile-handle">@{username}</p>}
               {location && (

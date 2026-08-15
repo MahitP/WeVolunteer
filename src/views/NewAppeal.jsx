@@ -99,7 +99,7 @@ export default function NewAppeal() {
         <div className="card">
           <div className="card-body stack-md">
             <div className="auth-icon" aria-hidden="true"><CheckCircle2 size={26} /></div>
-            <h1>{sent === 'duplicate' ? 'You have already appealed this' : 'Your appeal is with us'}</h1>
+            <h2 className="page-title">{sent === 'duplicate' ? 'You have already appealed this' : 'Your appeal is with us'}</h2>
             <p className="muted">
               {sent === 'duplicate'
                 ? 'We already have an open appeal from you about this, so we have not '
@@ -121,7 +121,7 @@ export default function NewAppeal() {
   return (
     <div className="page stack-lg">
       <div className="page-head">
-        <h1>{copy.title}</h1>
+        <h2 className="page-title">{copy.title}</h2>
         <p className="muted">{copy.lede}</p>
       </div>
 

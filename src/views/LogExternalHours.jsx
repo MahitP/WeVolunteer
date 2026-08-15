@@ -200,7 +200,7 @@ export default function LogExternalHours({ addToast }) {
   return (
     <div className="page stack-lg">
       <div className="page-head">
-        <h1>Log external hours</h1>
+        <h2 className="page-title">Log external hours</h2>
         <p className="muted">
           Volunteering you did somewhere WeVolunteer doesn&rsquo;t run — a food bank, a place of
           worship, a community clean-up.

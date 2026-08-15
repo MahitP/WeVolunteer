@@ -54,7 +54,7 @@ export default function OrganizationsHome({ currentUser }) {
     <div className="page stack-lg">
       <div className="page-head row-between row-wrap" style={{ gap: 'var(--s3)' }}>
         <div>
-          <h1>Organizations</h1>
+          <h2 className="page-title">Organizations</h2>
           <p className="muted">Clubs and programmes you run or belong to.</p>
         </div>
         {canCreate && (

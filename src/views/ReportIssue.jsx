@@ -108,7 +108,7 @@ export default function ReportIssue({ currentUser, addToast }) {
     return (
       <div className="page stack-lg">
         <section className="card card-pad stack-md">
-          <h1
+          <h2
             className="row"
             style={{ gap: 8 }}
             ref={receiptRef}
@@ -116,7 +116,7 @@ export default function ReportIssue({ currentUser, addToast }) {
           >
             <CheckCircle2 size={22} style={{ color: 'var(--brand)' }} aria-hidden="true" />
             Report received
-          </h1>
+          </h2>
           <p>Thank you. Your report has been submitted successfully.</p>
           <p className="stack-xs">
             <span className="dim small">Reference</span>
@@ -144,10 +144,10 @@ export default function ReportIssue({ currentUser, addToast }) {
   return (
     <div className="page stack-lg">
       <div className="stack-xs">
-        <h1 className="row" style={{ gap: 8 }}>
+        <h2 className="row page-title" style={{ gap: 8 }}>
           <LifeBuoy size={22} style={{ color: 'var(--brand)' }} aria-hidden="true" />
           Report an Issue
-        </h1>
+        </h2>
         <p className="muted">
           Something broken, confusing, wrong, or unsafe? Tell us and we will look into it.
         </p>

@@ -87,7 +87,7 @@ export default function BadgesPage({ currentUser }) {
         <Link to={backHref} className="btn btn-ghost btn-sm row" style={{ gap: 6, alignSelf: 'flex-start' }}>
           <ArrowLeft size={14} aria-hidden="true" /> Back to profile
         </Link>
-        <h1>{whose}</h1>
+        <h2 className="page-title">{whose}</h2>
         {!loading && !error && ordered.length > 0 && (
           <p className="dim small">
             {ordered.length} {ordered.length === 1 ? 'badge' : 'badges'}, newest kind first.

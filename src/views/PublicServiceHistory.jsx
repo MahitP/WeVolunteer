@@ -76,10 +76,10 @@ export default function PublicServiceHistory({ currentUser }) {
         <Link to={backHref} className="btn btn-ghost btn-sm row" style={{ gap: 6, alignSelf: 'flex-start' }}>
           <ArrowLeft size={14} aria-hidden="true" /> Back to profile
         </Link>
-        <h1 className="row" style={{ gap: 8 }}>
+        <h2 className="row page-title" style={{ gap: 8 }}>
           <Clock size={20} style={{ color: 'var(--brand)' }} aria-hidden="true" />
           {isSelf ? 'Your service history' : `${name}’s service history`}
-        </h1>
+        </h2>
       </div>
 
       {state.status === 'loading' && <LoadingSkeleton heights={[120, 120]} className="stack-lg" />}

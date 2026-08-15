@@ -274,7 +274,7 @@ export default function AdminRoster() {
       <div className="page">
         <header className="page-head">
           <div>
-            <h1>Administrator Roster</h1>
+            <h2 className="page-title">Administrator Roster</h2>
           </div>
         </header>
         <div className="stack">
@@ -289,7 +289,7 @@ export default function AdminRoster() {
       <div className="page">
         <header className="page-head">
           <div>
-            <h1>Administrator Roster</h1>
+            <h2 className="page-title">Administrator Roster</h2>
           </div>
         </header>
         <div className="stack">
@@ -307,7 +307,7 @@ export default function AdminRoster() {
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Administrator Roster</h1>
+          <h2 className="page-title">Administrator Roster</h2>
           <p className="muted">Platform administrators and their effective capabilities</p>
         </div>
         <div>

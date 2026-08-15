@@ -170,7 +170,7 @@ export default function OrganizationForm({ addToast }) {
   return (
     <div className="page stack-lg">
       <div className="page-head">
-        <h1>{editing ? 'Manage organization' : 'New organization'}</h1>
+        <h2 className="page-title">{editing ? 'Manage organization' : 'New organization'}</h2>
         <p className="muted">
           {editing
             ? 'Change how this organization appears to students.'

@@ -91,7 +91,7 @@ export default function OrganizerProfile({ userId, onBack, onEditProfile, onView
           <div style={{ flex: 1, minWidth: 200 }}>
             <div className="row-between row-wrap" style={{ gap: 'var(--s2)' }}>
               <div className="row row-wrap" style={{ gap: 'var(--s2)' }}>
-                <h1 style={{ fontSize: '1.375rem' }}>{organizer.name}</h1>
+                <h2 style={{ fontSize: '1.375rem' }}>{organizer.name}</h2>
                 {organizer.verified ? (
                   <span className="tag tag-ok"><ShieldCheck size={11} /> Verified organizer</span>
                 ) : (
