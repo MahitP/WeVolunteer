@@ -53,7 +53,7 @@ route for anything urgent.
 
 # Staying safe on WeVolunteer
 
-**Version 1.1 · Last updated 2026-08-06**
+**Version 1.0 · Last updated 2026-08-06**
 
 WeVolunteer connects students with adults who run volunteer events. That is the point of it,
 and it is also the thing we have to be most careful about. This page explains the rules,

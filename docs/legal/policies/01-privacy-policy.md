@@ -43,8 +43,8 @@ reading level.
 - **Contact** — privacy@wevolunteers.org, monitored by the operator.
 
 **Still open — one item, marked in the draft as blocking publication.** The production hosting
-provider and the country the database sits in. The email-sending provider is resolved: `SMTP_HOST`
-is Gmail, so it is Google, and the row merges with the existing Google entry. The policy-archive
+provider and the country the database sits in. The email-sending provider is resolved: Resend is
+primary and Gmail is the fallback, and both are named in the table. The policy-archive
 promise is resolved by this being v1.0 — there are no superseded versions yet, so the draft says
 so and offers previous versions on request once there are any.
 
@@ -62,7 +62,7 @@ no district-specific facts — that branch is gone.
 
 # Privacy at WeVolunteer
 
-**Version 1.1 · Last updated 2026-08-06** · Applies to WeVolunteer version 1.2 and later
+**Version 1.0 · Last updated 2026-08-06** · Applies to WeVolunteer version 1.2 and later
 
 > **THE OPERATOR — the only place in this document that names the legal entity.**
 > WeVolunteer is operated by **Mahit Pulavarthi, a sole proprietor doing business as
@@ -178,15 +178,21 @@ wrong, contact **support@wevolunteers.org** and we will look at the recorded dra
 
 - **We do not sell your information.** Not to advertisers, not to colleges, not to anyone.
 - **We do not show you ads**, and we do not use your information to target ads anywhere else.
-- **We do not use tracking cookies or third-party analytics.** See the
+- **We do not use tracking cookies**, advertising pixels, fingerprinting or cross-site
+  tracking of any kind.
+- **We do not turn analytics on for you.** WeVolunteer has one optional analytics feature. It
+  is **off unless you switch it on** in Settings → Privacy, we never prompt you to, and you can
+  switch it off again at any time. Everything it collects is listed in the
   [Cookie and Tracking Notice](/legal/cookie-and-tracking-notice).
 - **We do not read your messages routinely.** An administrator reads a conversation only when
   somebody reports it, or when we are required to investigate a safety concern.
-- **We do not record what is on your screen when something breaks.** When the app hits an
-  error it sends us a diagnostic record. Before that record is stored, email addresses and
-  security tokens are stripped out, you are recorded as a one-way scrambled code rather than
-  a name, and the page address is stored as a pattern (`/events/:id`) rather than the real
-  one.
+- **We do not record your screen because something broke.** When the app hits an error it
+  sends us a diagnostic record. Before that record is stored, email addresses and security
+  tokens are stripped out, you are recorded as a one-way scrambled code rather than a name,
+  and the page address is stored as a pattern (`/events/:id`) rather than the real one. The
+  screen recording described in the Cookie Notice is a different thing entirely: it happens
+  only if you switched analytics on, it is not triggered by errors, and the text on the page
+  is hidden before it is sent.
 
 ## How long we keep things
 
@@ -329,11 +335,15 @@ WeVolunteer runs on a small number of outside services. Here is all of them:
 
 | Service | What it receives | What it is for |
 |---|---|---|
-| **Google** (Gmail, for outgoing mail) | Your email address and the message | Sending you notification and security emails. This is the same account as the contact address on this page |
+| **Resend** | Your email address and the message | Sending you notification and security emails. This is our main email provider |
+| **Google** (Gmail) | Your email address and the message | The backup route for email, used only when Resend cannot deliver |
 | **Google** (only if you sign in with Google) | Your email address and basic profile | Signing you in. We ask Google for nothing else |
+| **Microsoft** (only if you sign in with Microsoft) | Your email address and basic profile | Signing you in. We ask Microsoft for nothing else |
 | **OpenStreetMap / Nominatim** | Event location text | Turning an event address into map coordinates. **Never anything about you** |
 | **Open-Meteo** | Event coordinates | The weather forecast on an event page. **Never anything about you** |
+| **OpenRouteService** | Event coordinates, and your position blurred to about 110 metres | Working out a rough driving time to an event. It is told nothing that identifies you, and your position is never stored |
 | **CARTO** | **Your IP address**, when a map is shown | Loading the map images. It does not receive your name or account — see below |
+| **Amplitude** — **only if you switched analytics on** | How you use the app, and a recording of your screen with the text hidden | Finding what is confusing or broken. **Off unless you turn it on**; see the [Cookie and Tracking Notice](/legal/cookie-and-tracking-notice) |
 | **Our hosting provider** — not yet chosen. See the note below this table | Stores the database | Running the service |
 
 **About the hosting provider.** WeVolunteer has not launched yet and the company that will host
@@ -342,7 +352,9 @@ When it is chosen we will name it in this table, say which country the database 
 the date at the top of this page. If you are reading this and that row still says "not yet
 chosen", it means the service is not yet running anywhere that holds your information.
 
-Two of these are contacted by our servers, so they never see your device.
+Most of these are contacted by our servers, so they never see your device at all. CARTO and
+Amplitude are the two your browser talks to directly — CARTO whenever a map is shown, Amplitude
+only if you switched analytics on.
 
 **CARTO is different and we want to be clear about it.** When a page shows a map, your browser
 loads the map images directly from CARTO. That means CARTO can see your IP address and which
@@ -352,10 +364,17 @@ happens on pages with a map. See the
 
 ### Your device location
 
-Some screens can sort events by distance from you. Your browser will ask your permission
-first. **Your coordinates never reach our servers and are never stored** — they stay in the
-page while you are looking at it and are gone when you reload. Saying no costs you nothing but
-the distance sort.
+Some screens can sort events by distance from you, and an event page can show roughly how long
+it takes to drive there. Your browser will ask your permission before any of that happens.
+
+**Your coordinates are never stored** — not in our database, not in a log, not anywhere. There
+is no column in WeVolunteer that holds a person's location. They stay in the page while you are
+looking at it and are gone when you reload.
+
+They do reach our servers, blurred, in two cases: rounded to about a kilometre to sort a list
+by distance, and rounded to about 110 metres to ask a route planner for a driving time. Both are
+used to answer the question and then discarded. Saying no costs you nothing but the distance
+sort and that estimate.
 
 ## Security
 
