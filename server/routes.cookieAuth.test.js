@@ -48,16 +48,67 @@ describe('Content-Security-Policy', () => {
      * most consequential thing in this policy, so the list has to be enumerated
      * rather than merely contain what we expect. A second origin appearing here
      * should fail this test and be argued for on its own merits.
+     *
+     * `'wasm-unsafe-eval'` was added for on-device AI: without it the browser
+     * refuses to compile the inference runtime's WebAssembly module and the
+     * feature cannot start. It is a keyword, not an origin — the origin list is
+     * still exactly one third party.
      */
-    expect(directive(csp, 'script-src')).toBe("script-src 'self' https://cdn.amplitude.com");
+    expect(directive(csp, 'script-src'))
+      .toBe("script-src 'self' 'wasm-unsafe-eval' https://cdn.amplitude.com");
   });
 
   it('still refuses inline and eval', async () => {
     /* The part that actually stops an injected <script>. Widening the policy
-       for analytics must not have relaxed it. */
+       for analytics — and later for WebAssembly — must not have relaxed it. */
     const res = await fetch(`${srv.base}/health`);
     const script = directive(res.headers.get('content-security-policy'), 'script-src');
-    expect(script).not.toMatch(/unsafe-inline|unsafe-eval/);
+
+    /**
+     * Tokenised rather than matched with a regex, because `'wasm-unsafe-eval'`
+     * CONTAINS the substring `unsafe-eval`. The previous `/unsafe-inline|
+     * unsafe-eval/` would fail on it, and the obvious repair — a negative
+     * lookbehind — would quietly also accept any other `*-unsafe-eval` token a
+     * future spec introduces.
+     *
+     * The distinction is real and worth keeping precise. `'wasm-unsafe-eval'`
+     * permits compiling WebAssembly only; `'unsafe-eval'` restores `eval()` and
+     * `new Function()`. This asserts the second is still absent, which is what
+     * stops an injected script from executing.
+     */
+    const tokens = script.split(/\s+/);
+    expect(tokens).not.toContain("'unsafe-inline'");
+    expect(tokens).not.toContain("'unsafe-eval'");
+    expect(tokens).toContain("'wasm-unsafe-eval'");
+  });
+
+  it('permits the model host only on connect-src, and only under the CDN label', async () => {
+    /**
+     * Model weights are downloaded from Hugging Face. Two properties matter and
+     * neither is implied by the other.
+     *
+     * The wildcard is scoped to `*.cdn.hf.co` rather than `*.hf.co` because a
+     * `/resolve/` request redirects to a region-specific delivery host
+     * (`us.aws.cdn.hf.co` when measured) and Hugging Face documents that those
+     * hostnames may change. Scoping to the `cdn.` label follows the redirect
+     * without also permitting some future Hugging Face product on an unrelated
+     * subdomain.
+     *
+     * And it must stay on connect-src: a model host that reached script-src
+     * would be a third-party code origin, which is a different and much larger
+     * claim than "the page may download a file from here".
+     */
+    const csp = (await fetch(`${srv.base}/health`)).headers.get('content-security-policy');
+    const connect = directive(csp, 'connect-src').split(/\s+/);
+
+    expect(connect).toContain('https://huggingface.co');
+    expect(connect).toContain('https://*.cdn.hf.co');
+
+    /* Exact tokens, not substrings: 'https://*.cdn.hf.co' would satisfy a
+       containment check for the broader wildcard it is deliberately narrower
+       than. */
+    expect(connect).not.toContain('https://*.hf.co');
+    expect(directive(csp, 'script-src').split(/\s+/).some(t => t.includes('hf.co'))).toBe(false);
   });
 
   it('allows the Google Fonts origins on the directives that actually need them', async () => {

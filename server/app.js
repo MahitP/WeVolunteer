@@ -140,7 +140,30 @@ app.use(helmet({
        * only because the SDK cannot function without it, and it stays inert
        * while no API key is configured.
        */
-      scriptSrc: ["'self'", 'https://cdn.amplitude.com'],
+      /**
+       * `'wasm-unsafe-eval'` is what lets the on-device AI runtime compile its
+       * WebAssembly module. Without it the browser refuses every
+       * `WebAssembly.compile`/`instantiate` in the page and local inference
+       * cannot start at all — there is no way to ship that feature without this
+       * token.
+       *
+       * It is narrower than it reads. `'wasm-unsafe-eval'` permits compiling
+       * WebAssembly and nothing else; it does NOT restore `eval()`, `new
+       * Function()`, or inline script. Those remain refused, which is the
+       * property this directive block exists to hold. An injected script still
+       * cannot execute — and a script that cannot execute cannot reach
+       * WebAssembly either.
+       *
+       * Unconditional rather than gated on a server flag, following the same
+       * reasoning as the Amplitude host below: this widens what the page MAY do
+       * and switches nothing on. Local AI is a build-time client flag
+       * (VITE_LOCAL_AI), and the server cannot see it. Gating this on a second,
+       * server-side flag would mean two settings that must agree, and the
+       * failure when they disagree is the worst kind — the feature ships, the
+       * page renders, and every model load is refused by the browser with an
+       * error that names WebAssembly rather than the misconfiguration.
+       */
+      scriptSrc: ["'self'", "'wasm-unsafe-eval'", 'https://cdn.amplitude.com'],
 
       /**
        * Session Replay compresses in a worker created from a blob.
@@ -191,6 +214,44 @@ app.use(helmet({
         'https://sr-client-cfg.amplitude.com',
         'https://gs.amplitude.com',
         'https://cdn.amplitude.com',
+
+        /**
+         * Where the on-device AI models are downloaded from.
+         *
+         * `huggingface.co` serves two things: the metadata API, which is where
+         * the expected byte length and SHA-256 of every model file come from,
+         * and the `/resolve/` URL that 302s to the CDN.
+         *
+         * ── The wildcard, and why it is not the pattern above ──
+         *
+         * The Amplitude hosts are named individually precisely so a new
+         * subdomain cannot be reached without somebody adding it on purpose,
+         * and the same instinct applies here. It does not survive contact with
+         * how Hugging Face actually serves files. Measured on 2026-08-15, a
+         * `/resolve/` request redirects to `us.aws.cdn.hf.co` — a
+         * region-and-provider-specific host, and Hugging Face's own
+         * documentation warns these hostnames may change without notice.
+         *
+         * Pinning the one observed host would mean a student routed to a
+         * different region gets a refused request instead of a model, with no
+         * error anybody would connect to this file. So the wildcard is scoped
+         * to the `cdn.` label rather than to `hf.co`: it covers the regional
+         * variants of the content-delivery subtree and nothing else. A future
+         * Hugging Face *product* on some other `hf.co` subdomain is still
+         * refused, which is the property the Amplitude comment is protecting.
+         *
+         * ── If this ever needs to go away ──
+         *
+         * Self-hosting the weights removes both lines and returns connect-src
+         * to same-origin. Client-side that is one constant, `MODEL_BASE_URL` in
+         * `src/ai/models.js`; nothing else knows where the files come from.
+         *
+         * As with Amplitude, this widens what the page MAY reach and switches
+         * nothing on. Nothing is fetched unless VITE_LOCAL_AI is set at build
+         * time AND somebody chooses a model.
+         */
+        'https://huggingface.co',
+        'https://*.cdn.hf.co',
       ],
 
       frameAncestors: ["'none'"],

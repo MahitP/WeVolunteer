@@ -50,6 +50,35 @@ const CATEGORIES = ['All', 'School', '5K', 'Food Pantry', 'Fundraiser', 'Other']
 const coarsen = (deg) => Math.round(deg * 100) / 100;
 
 /**
+ * A suggestion's reason, in words.
+ *
+ * The server returns typed reasons rather than prose so that this stays a
+ * presentation decision, and so the wording can never claim more than the
+ * ranking actually used. Every branch here corresponds to a term that fired;
+ * an unrecognised kind renders nothing rather than something vague, because a
+ * vague reason is worse than none — it reads as an explanation while explaining
+ * nothing.
+ *
+ * Exported for its own test: this is the text that tells a student why they are
+ * being shown something, and it should not be reachable only through a full
+ * page render.
+ */
+export function reasonLabel(reason) {
+  if (!reason) return null;
+  switch (reason.kind) {
+    case 'tag':
+    case 'skill':
+      return reason.value ? `Matches ${reason.value}` : null;
+    case 'category':
+      return reason.value ? `You have volunteered for ${reason.value} before` : null;
+    case 'distance':
+      return typeof reason.miles === 'number' ? `${reason.miles} mi away` : null;
+    default:
+      return null;
+  }
+}
+
+/**
  * What the reader is looking for.
  *
  * A filter over one search, not a router for three. `all` is the default and
@@ -429,14 +458,22 @@ export default function BrowseEvents({
     }
   };
 
+  /**
+   * Refetched when a position becomes available, because distance changes both
+   * the ranking and what the suggestions can say about themselves. Coarsened
+   * before it is sent, exactly as the browse filter does.
+   */
   useEffect(() => {
     if (!isStudent) return;
     let cancelled = false;
-    api.fetchRecommendations().then(recs => {
+    const at = location
+      ? { lat: coarsen(location.latitude), lng: coarsen(location.longitude) }
+      : {};
+    api.fetchRecommendations(at).then(recs => {
       if (!cancelled) setRecommendations(recs || []);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [currentUser?.id, isStudent]);
+  }, [currentUser?.id, isStudent, location]);
 
   /**
    * Recommendations arrive with only summary fields, so they are rendered from
@@ -444,8 +481,18 @@ export default function BrowseEvents({
    * present here.
    */
   const recommended = useMemo(
-    () => recommendations.filter(r => r && r.id).slice(0, 3),
-    [recommendations]
+    () => recommendations
+      .filter(r => r && r.id)
+      .slice(0, 3)
+      /* Same correction the results grid makes: the server measured from the
+         coarsened centre, so the number a student reads is recomputed here
+         from the exact position. Without one, the server's figure stands. */
+      .map(r => (
+        location && r.latitude != null && r.longitude != null
+          ? { ...r, distance: haversineDistance(location.latitude, location.longitude, r.latitude, r.longitude) }
+          : r
+      )),
+    [recommendations, location]
   );
   const hasMatches = useMemo(() => recommended.some(e => (e.score || 0) > 0), [recommended]);
 
@@ -584,16 +631,63 @@ export default function BrowseEvents({
             {recommended.map(event => <button key={event.id} className="card card-link card-pad" onClick={() => onViewDetails(event)}>
                 <div className="eyebrow">{event.category}</div>
                 <div className="strong s-57eca1">{event.title}</div>
-                {/* Same defect as the shifts tab: an event with no shifts has
-                    neither total, and this rendered " of  spots open" with two
-                    blanks where the numbers should be. */}
-                <div className="small muted s-956c6f">
-                  {Number.isFinite(event.spotsRemaining) && Number.isFinite(event.maxSpots) && (
-                    <>{event.spotsRemaining} of {event.maxSpots} spots open · </>
-                  )}
-                  {event.applicantCount} applied ·{' '}
-                  up to {formatHours(event.hoursAwarded)}
-                </div>
+                {/**
+                  * Every part of this line is conditional, because the
+                  * recommendations payload carries none of these fields.
+                  *
+                  * It used to render `{event.applicantCount} applied · up to
+                  * {formatHours(event.hoursAwarded)}` unguarded, which on this
+                  * card meant a leading blank and a false zero: "applied · up
+                  * to 0 hrs". The spots half was already guarded for exactly
+                  * this reason — an event with no shifts printed " of  spots
+                  * open" — and the other half was left behind.
+                  *
+                  * Stating nothing is right here. A suggestion card is an
+                  * invitation to open the event, and "0 hrs" is a reason not
+                  * to.
+                  */}
+                {(Number.isFinite(event.spotsRemaining) || Number.isFinite(event.applicantCount)
+                  || Number.isFinite(event.hoursAwarded) || typeof event.distance === 'number') && (
+                  <div className="small muted s-956c6f">
+                    {[
+                      Number.isFinite(event.spotsRemaining) && Number.isFinite(event.maxSpots)
+                        ? `${event.spotsRemaining} of ${event.maxSpots} spots open` : null,
+                      Number.isFinite(event.applicantCount)
+                        ? `${event.applicantCount} applied` : null,
+                      Number.isFinite(event.hoursAwarded)
+                        ? `up to ${formatHours(event.hoursAwarded)}` : null,
+                      typeof event.distance === 'number'
+                        ? `${event.distance.toFixed(1)} mi away` : null,
+                    ].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+
+                {/* Why this one. Rendered only when the server actually
+                    reported a reason, so a fallback suggestion — which has
+                    none — makes no claim about why it is there. */}
+                {(() => {
+                  /**
+                   * Distance is stated once, in the line above, and left out of
+                   * the chips.
+                   *
+                   * It genuinely is one of the ranking terms, so the server
+                   * returns it as a reason — but rendering it here as well put
+                   * "0.1 mi away" on the card twice, a few pixels apart. The
+                   * chips answer "why does this match me", which is about
+                   * interests and history; how far away it is is a fact about
+                   * the event and belongs with the other facts.
+                   */
+                  const chips = (event.reasons || [])
+                    .filter(r => r.kind !== 'distance')
+                    .map(reasonLabel)
+                    .filter(Boolean);
+                  if (!chips.length) return null;
+                  return (
+                    <ul className="chips rec-reasons" aria-label="Why this is suggested">
+                      {chips.map((label, i) => <li key={i} className="tag">{label}</li>)}
+                    </ul>
+                  );
+                })()}
               </button>)}
           </div>
         </section>}

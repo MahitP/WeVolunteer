@@ -1020,7 +1020,20 @@ export const api = {
   fetchVolunteerStats: async () => apiFetch('/api/stats/volunteer'),
   fetchOrganizerStats: async () => apiFetch('/api/stats/organizer'),
   fetchLeaderboard: async () => apiFetch('/api/leaderboard'),
-  fetchRecommendations: async () => apiFetch('/api/recommendations'),
+  /**
+   * Suggested opportunities, optionally measured from a coarsened position.
+   *
+   * The coordinates are the same 2-decimal-place centre the browse filter
+   * sends — enough for "is this nearby", not enough to place somebody. The
+   * distance a student actually reads is recomputed on the device from the
+   * exact position, which never leaves it.
+   */
+  fetchRecommendations: async ({ lat, lng } = {}) => {
+    const qs = new URLSearchParams();
+    if (lat != null && lng != null) { qs.set('lat', String(lat)); qs.set('lng', String(lng)); }
+    const query = qs.toString();
+    return apiFetch(`/api/recommendations${query ? `?${query}` : ''}`);
+  },
 
   // ── V2: Admin totals & Organizer duplicate ─────
   fetchAdminStats: async () => apiFetch('/api/admin/stats'),

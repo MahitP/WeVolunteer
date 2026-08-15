@@ -343,6 +343,48 @@ export const LEGAL_DOCUMENTS = [
     contentHash: '63d42b5c1d4e41a0ffd3c8aa81c6b2972ad92b6351407ef058c390f79fb5e458',
     bundledWith: null,
   },
+  {
+    /**
+     * `notice`, not `acknowledge`.
+     *
+     * The assistant is opt-in and off by default, and the enable screen states
+     * what is downloaded and from whom before anybody agrees to anything. That
+     * screen is where the decision is actually made, so collecting a second
+     * acceptance here would record a consent nobody gave in this context — and
+     * `scope: 'signup'` would put it in front of every student at registration
+     * for a feature most will never switch on.
+     */
+    slug: 'ai-and-on-device-processing',
+    /**
+     * 2.0, and MAJOR rather than MINOR.
+     *
+     * v1.0 said the assistant runs in the browser and set out what leaves the
+     * device. 2.0 adds optional dictation, which sends a recording of somebody's
+     * voice to their browser vendor's speech service. That is new sharing with a
+     * third party, so by the versioning test at the top of this file — would a
+     * reasonable reader of the previous version be surprised or worse off — it
+     * is MAJOR, whatever the size of the diff.
+     *
+     * No re-acceptance follows, because this is a notice: nothing is collected
+     * against it in either version. The bump exists so the published record says
+     * what changed rather than v1.0 quietly meaning something new.
+     *
+     * Worth knowing when reviewing: v1.0 was registered the same day and the
+     * feature has never been deployed, so nobody has read either version. If you
+     * would rather this shipped as a single 1.0, that is a defensible call and
+     * it is yours to make — the rule was followed literally here because the
+     * alternative is judging when "never really published" starts and stops.
+     */
+    version: '2.0',
+    title: 'AI and On-Device Processing Policy',
+    consentType: 'notice',
+    scope: 'notice',
+    summary: 'Where the optional assistant runs, what is downloaded and from whom, what stays on your device, and what it is not permitted to decide.',
+    effectiveAt: '2026-08-15',
+    file: '12-ai-and-on-device-processing.md',
+    contentHash: 'dbd6dd4a4d70405e5648514dc18c48f47cf9d6237e6a12e01c12ab80b87f22ba',
+    bundledWith: null,
+  },
 ];
 
 /**

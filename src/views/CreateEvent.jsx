@@ -3,6 +3,8 @@ import { Calendar, Plus, AlertCircle, Trash2, Info, X } from 'lucide-react';
 import { formatHours } from '../utils/helpers';
 import { LocationPicker } from '../components/location';
 import TagInput from '../components/common/TagInput';
+import TagSuggestions from '../components/common/TagSuggestions';
+import { normaliseTag } from '../eventTags';
 import DatePicker from '../components/common/DatePicker';
 import { api } from '../utils/api';
 import { can } from '../authz';
@@ -326,6 +328,28 @@ export default function CreateEvent({
               value={form.tags}
               onChange={(tags) => set('tags', tags)}
               suggestions={tagSuggestions}
+            />
+
+            {/**
+              * Offered beside the input, never applied to it.
+              *
+              * `tagSuggestions` is the usage-ranked vocabulary already fetched
+              * for the input's autocomplete, reused here so a proposal that
+              * matches a tag other organizers already use adopts their
+              * spelling instead of adding a synonym beside it.
+              */}
+            <TagSuggestions
+              title={form.title}
+              description={form.description}
+              value={form.tags}
+              vocabulary={tagSuggestions}
+              onAdd={(label) => {
+                const normalised = normaliseTag(label);
+                if (!normalised) return;
+                set('tags', form.tags.some(t => t.tag === normalised.tag)
+                  ? form.tags
+                  : [...form.tags, normalised]);
+              }}
             />
 
             <div className="field">

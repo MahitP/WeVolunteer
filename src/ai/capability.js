@@ -1,0 +1,150 @@
+/**
+ * What this device can actually run, decided before anything is offered.
+ *
+ * ── Why detection comes before the picker, not after the download ──
+ *
+ * The failure this exists to prevent is not a slow model. It is Safari killing
+ * the tab when a page exceeds its memory allowance: uncatchable, unreportable,
+ * and indistinguishable from the application crashing. A student on an iPad
+ * would experience "I tried the AI thing and WeVolunteer broke".
+ *
+ * So the question "will this fit" is answered before a size is ever shown, and
+ * a model that will not fit is not offered at all. Offering it with a warning
+ * would be pushing an unrecoverable failure onto the person least able to
+ * diagnose it.
+ *
+ * ── This is capability detection, not fingerprinting ──
+ *
+ * Everything below is read locally, used to pick a default, and never
+ * transmitted. It is deliberately coarse — three tiers and a byte ceiling — and
+ * the values are never combined into anything that would distinguish one device
+ * from another. Nothing here reaches the server, the analytics SDK, or a log.
+ * If a future change wants to send any of it anywhere, that is a privacy
+ * decision and not a refactor.
+ */
+
+import { IOS_MAX_MODEL_BYTES, MODELS } from './models.js';
+
+/**
+ * iPadOS 13 and later identify as Macintosh, deliberately, to receive desktop
+ * pages. The touch-point count is what separates a real Mac from an iPad
+ * claiming to be one — a Mac reports 0 or 1, an iPad reports 5.
+ *
+ * Getting this wrong in the permissive direction is the expensive mistake: an
+ * iPad treated as a Mac is offered a model that kills the tab.
+ */
+function detectIOS(nav) {
+  const ua = nav.userAgent || '';
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  return /Mac/.test(ua) && Number(nav.maxTouchPoints || 0) > 1;
+}
+
+/**
+ * The recommended tier for a device whose memory we can and cannot see.
+ *
+ * `navigator.deviceMemory` is Chromium-only. Safari and Firefox report nothing,
+ * which covers a large share of the users this has to serve, so "unknown" is a
+ * normal case rather than an edge one and must not simply fall through to the
+ * largest option.
+ *
+ * When memory is unknown the fallback leans on two weaker signals together —
+ * a working WebGPU adapter and a healthy core count — and still stops at the
+ * middle tier. A machine that can genuinely run the largest model is one
+ * setting away from it; a machine that cannot is spared a download it will not
+ * survive. The asymmetry is intentional: the cost of guessing low is a smaller
+ * model, and the cost of guessing high is a dead tab.
+ */
+function recommendTier({ deviceMemoryGB, webgpu, cores }) {
+  if (deviceMemoryGB != null) {
+    if (deviceMemoryGB >= 8) return 'advanced';
+    if (deviceMemoryGB >= 4) return 'balanced';
+    return 'fast';
+  }
+  if (webgpu && cores >= 8) return 'balanced';
+  return 'fast';
+}
+
+/**
+ * Inspect the device.
+ *
+ * `nav` is injectable so the tiers can be tested across device profiles without
+ * a browser; production callers pass nothing and get `navigator`.
+ *
+ * Returns:
+ *   supported        can anything be offered at all
+ *   reason           plain language, set only when something is being withheld
+ *   recommendedTier  which model to preselect, or null when unsupported
+ *   maxBytes         the hard ceiling; a model above it is never offered
+ *   webgpu           whether inference will be accelerated
+ *   isIOS            whether the ceiling above is the iOS one
+ */
+export function detectCapability(nav = typeof navigator !== 'undefined' ? navigator : null) {
+  if (!nav || typeof WebAssembly !== 'object') {
+    return {
+      supported: false,
+      reason: 'This browser cannot run WebAssembly, which the on-device assistant needs.',
+      recommendedTier: null,
+      maxBytes: 0,
+      webgpu: false,
+      isIOS: false,
+      deviceMemoryGB: null,
+    };
+  }
+
+  const isIOS = detectIOS(nav);
+  const webgpu = Boolean(nav.gpu);
+  const cores = Number(nav.hardwareConcurrency || 0);
+  const deviceMemoryGB = typeof nav.deviceMemory === 'number' ? nav.deviceMemory : null;
+
+  const maxBytes = isIOS ? IOS_MAX_MODEL_BYTES : Number.POSITIVE_INFINITY;
+  const fits = MODELS.filter(m => m.bytes <= maxBytes);
+
+  if (fits.length === 0) {
+    return {
+      supported: false,
+      reason: 'No available model is small enough to run safely on this device.',
+      recommendedTier: null,
+      maxBytes,
+      webgpu,
+      isIOS,
+      deviceMemoryGB,
+    };
+  }
+
+  /* Recommend a tier, then pull it back to something that actually fits. On
+     iOS the ceiling does the deciding and the memory heuristic is advisory. */
+  const wanted = recommendTier({ deviceMemoryGB, webgpu, cores });
+  const recommendedTier = fits.some(m => m.tier === wanted) ? wanted : fits[0].tier;
+
+  let reason = null;
+  if (isIOS) {
+    reason =
+      'On iPhone and iPad, Safari limits how much memory a page may use, so only '
+      + 'the smallest model is offered here.';
+  } else if (!webgpu) {
+    reason =
+      'This browser has no graphics acceleration available for AI, so responses '
+      + 'will be slower.';
+  }
+
+  return { supported: true, reason, recommendedTier, maxBytes, webgpu, isIOS, deviceMemoryGB };
+}
+
+/**
+ * The models this device may be shown, largest-fitting first excluded.
+ *
+ * Filtered on the byte ceiling AND on the model's own memory floor, because the
+ * two catch different devices: the ceiling stops an iPad loading something that
+ * kills the tab, and the floor stops a low-memory laptop being recommended
+ * something that will thrash. A device that reports no memory is not excluded
+ * by the floor — absence of evidence is not evidence of a small machine, and
+ * the tier recommendation is already conservative in that case.
+ */
+export function offerableModels(capability) {
+  if (!capability.supported) return [];
+  return MODELS.filter(m => {
+    if (m.bytes > capability.maxBytes) return false;
+    if (capability.deviceMemoryGB == null) return true;
+    return capability.deviceMemoryGB >= m.minDeviceMemoryGB;
+  });
+}

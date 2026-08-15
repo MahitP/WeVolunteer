@@ -18,6 +18,7 @@ import AccountProfile from './views/AccountProfile';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
 import Toasts from './components/common/Toasts';
+import AssistantLauncher from './components/ai/AssistantLauncher';
 import VerifyEmailWall from './components/account/VerifyEmailWall';
 import SuspendedWall from './components/account/SuspendedWall';
 import TwoFactorRequiredWall from './components/auth/TwoFactorRequiredWall';
@@ -1962,6 +1963,13 @@ function AppShell({ toasts, addToast, removeToast }) {
           />
         </React.Suspense>
       )}
+
+      {/**
+        * Inside the signed-in shell, because every tool the assistant can reach
+        * requires an authenticated session. It renders nothing unless the build
+        * has the feature, the device can run it, and this person set it up.
+        */}
+      <AssistantLauncher />
 
       <Toasts toasts={toasts} onRemove={removeToast} />
     </div>

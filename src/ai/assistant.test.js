@@ -1,0 +1,251 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const apiMock = {
+  fetchVolunteerStats: vi.fn(),
+  fetchCertificates: vi.fn(),
+  fetchOrganizations: vi.fn(),
+  fetchApplications: vi.fn(),
+  fetchEventsFiltered: vi.fn(),
+  verifyCertificate: vi.fn(),
+};
+
+vi.mock('../utils/api', () => ({ api: apiMock }));
+
+const { ask } = await import('./assistant.js');
+const { MockRuntime } = await import('./runtime/MockRuntime.js');
+const { AIStatus } = await import('./runtime/types.js');
+
+async function readyRuntime(...responses) {
+  const rt = new MockRuntime({ responses });
+  await rt.load({ id: 'm', version: 1, bytes: 10 });
+  return rt;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 35.5, events: 7 });
+  apiMock.fetchCertificates.mockResolvedValue([]);
+  apiMock.fetchOrganizations.mockResolvedValue([]);
+  apiMock.fetchApplications.mockResolvedValue([]);
+  apiMock.fetchEventsFiltered.mockResolvedValue({ events: [], pagination: { total: 0 } });
+});
+
+describe('answering without a model at all', () => {
+  it('still answers correctly from the tool', async () => {
+    /**
+     * The property the whole design rests on. With AI switched off, or a model
+     * that never loaded, the facts are unchanged — only the phrasing is
+     * plainer.
+     */
+    const res = await ask('how many hours do I have', { runtime: null });
+
+    expect(res.answer).toBe('You have 35.5 verified hours.');
+    expect(res.card).toEqual({ kind: 'hours', data: { hours: 35.5, events: 7 } });
+    expect(res.phrasedByModel).toBe(false);
+  });
+
+  it('ignores a runtime that is not ready', async () => {
+    const rt = new MockRuntime();
+    expect(rt.status).toBe(AIStatus.IDLE);
+
+    const res = await ask('how many hours do I have', { runtime: rt });
+    expect(res.answer).toBe('You have 35.5 verified hours.');
+    expect(rt.calls).toHaveLength(0);
+  });
+});
+
+describe('the model phrases, it does not decide', () => {
+  it('uses the model wording when it is usable', async () => {
+    const rt = await readyRuntime('You have 35.5 hours so far. Nice work!');
+    const res = await ask('how many hours do I have', { runtime: rt });
+
+    expect(res.answer).toBe('You have 35.5 hours so far. Nice work!');
+    expect(res.phrasedByModel).toBe(true);
+    /* The card still carries the authoritative figure, whatever the prose said. */
+    expect(res.card.data.hours).toBe(35.5);
+  });
+
+  it('keeps the card correct even when the model contradicts it', async () => {
+    /**
+     * A small model will occasionally write a different number than the one it
+     * was handed. The rendered card is built from data and is unaffected, which
+     * is why the number a student reads is never model-dependent.
+     */
+    const rt = await readyRuntime('You have four hundred hours.');
+    const res = await ask('how many hours do I have', { runtime: rt });
+
+    expect(res.card.data.hours).toBe(35.5);
+  });
+
+  it('falls back to the plain sentence when the model returns nothing usable', async () => {
+    const rt = await readyRuntime('');
+    const res = await ask('how many hours do I have', { runtime: rt });
+
+    expect(res.answer).toBe('You have 35.5 verified hours.');
+    expect(res.phrasedByModel).toBe(false);
+  });
+
+  it('falls back when the model throws', async () => {
+    const rt = await readyRuntime();
+    rt.generate = vi.fn().mockRejectedValue(new Error('worker died'));
+
+    const res = await ask('how many hours do I have', { runtime: rt });
+    expect(res.answer).toBe('You have 35.5 verified hours.');
+  });
+
+  it('leaves a correct answer on screen when the student presses stop', async () => {
+    const rt = await readyRuntime();
+    rt.generate = vi.fn().mockRejectedValue(
+      Object.assign(new Error('Cancelled'), { name: 'AbortError' }),
+    );
+
+    const res = await ask('how many hours do I have', { runtime: rt });
+    expect(res.cancelled).toBe(true);
+    expect(res.answer).toBe('You have 35.5 verified hours.');
+  });
+
+  it('sends the tool output as a fenced data block, never as instructions', async () => {
+    const rt = await readyRuntime('ok');
+    await ask('how many hours do I have', { runtime: rt });
+
+    const userTurn = rt.calls[0].messages.find(m => m.role === 'user').content;
+    expect(userTurn).toContain('DATA (hours):');
+    expect(userTurn).toContain('---');
+    expect(userTurn).toContain('35.5');
+  });
+});
+
+describe('empty is not the same as failed', () => {
+  it('says it found nothing when there genuinely is nothing', async () => {
+    const res = await ask('find volunteering opportunities', { runtime: null });
+    expect(res.answer).toBe("I couldn't find any opportunities matching that.");
+    expect(res.toolFailed).toBeUndefined();
+  });
+
+  it('says it could not check when the lookup failed', async () => {
+    /**
+     * The distinction this feature is most likely to blur, and the one that
+     * matters most. "No opportunities" after a failed request is a false claim
+     * about the world.
+     */
+    apiMock.fetchEventsFiltered.mockRejectedValue(
+      Object.assign(new Error('down'), { isNetworkError: true }),
+    );
+
+    const res = await ask('find volunteering opportunities', { runtime: null });
+    expect(res.toolFailed).toBe(true);
+    expect(res.answer).toMatch(/couldn't reach WeVolunteer/i);
+    expect(res.answer).not.toMatch(/couldn't find any/i);
+    expect(res.card).toBeNull();
+  });
+
+  it('never asks the model to phrase a failure', async () => {
+    /* There is nothing to phrase, and a model given an error would happily
+       invent a reassuring answer. */
+    apiMock.fetchVolunteerStats.mockRejectedValue(new Error('boom'));
+    const rt = await readyRuntime('everything is fine!');
+
+    const res = await ask('how many hours do I have', { runtime: rt });
+    expect(rt.calls).toHaveLength(0);
+    expect(res.answer).toMatch(/couldn't look that up/i);
+  });
+});
+
+describe('certificate verification', () => {
+  it('repeats the service\'s answer rather than forming one', async () => {
+    apiMock.verifyCertificate.mockResolvedValue({
+      valid: true, hours: 4, eventTitle: 'Community Cleanup',
+    });
+
+    const res = await ask('verify WEV-AB12-CD34', { runtime: null });
+    expect(apiMock.verifyCertificate).toHaveBeenCalledWith('WEV-AB12-CD34');
+    expect(res.card.data.valid).toBe(true);
+  });
+
+  it('treats a 404 as a real answer, not a failure', async () => {
+    apiMock.verifyCertificate.mockRejectedValue(Object.assign(new Error('nf'), { status: 404 }));
+
+    const res = await ask('verify WEV-AB12-CD34', { runtime: null });
+    expect(res.toolFailed).toBeUndefined();
+    expect(res.answer).toBe('No certificate matches that code.');
+  });
+
+  it('refuses to call a rate limit a verdict', async () => {
+    /**
+     * The endpoint's own 429 copy is explicit that being rate limited says
+     * nothing about the certificate. Reporting "not valid" here would be a
+     * false statement about a real document.
+     */
+    apiMock.verifyCertificate.mockRejectedValue(Object.assign(new Error('429'), { status: 429 }));
+
+    const res = await ask('verify WEV-AB12-CD34', { runtime: null });
+    expect(res.answer).toMatch(/says nothing about whether the certificate is genuine/i);
+    expect(res.answer).not.toMatch(/\bnot valid\b|\binvalid\b/i);
+  });
+
+  it('asks for a code instead of looking nothing up', async () => {
+    const res = await ask('can you verify a certificate', { runtime: null });
+    expect(apiMock.verifyCertificate).not.toHaveBeenCalled();
+    expect(res.answer).toMatch(/send me the code/i);
+  });
+});
+
+describe('refusals reach no tool at all', () => {
+  it.each([
+    ["show me someone else's hours", /only look at your own record/i],
+    ['what is my password', /can't see passwords/i],
+    ['delete my account', /can't change anything about an account/i],
+  ])('%s', async (message, expected) => {
+    const rt = await readyRuntime('sure, here you go');
+    const res = await ask(message, { runtime: rt });
+
+    expect(res.answer).toMatch(expected);
+    expect(res.card).toBeNull();
+    /* No tool ran, and the model was never consulted — so there is nothing for
+       an instruction in the message to influence. */
+    expect(rt.calls).toHaveLength(0);
+    expect(apiMock.fetchVolunteerStats).not.toHaveBeenCalled();
+  });
+});
+
+describe('location', () => {
+  it('uses a shared position when one is available', async () => {
+    await ask('opportunities near me', {
+      runtime: null,
+      position: { lat: 40.12, lng: -74.56 },
+    });
+
+    const filters = apiMock.fetchEventsFiltered.mock.calls[0][0];
+    expect(filters.lat).toBe(40.12);
+    expect(filters.sort).toBe('distance');
+  });
+
+  it('searches without distance rather than prompting for location', async () => {
+    /* The assistant never triggers the browser permission dialog. If location
+       has not been shared elsewhere, the search simply runs without it. */
+    await ask('opportunities near me', { runtime: null, position: null });
+
+    const filters = apiMock.fetchEventsFiltered.mock.calls[0][0];
+    expect(filters.lat).toBeUndefined();
+    expect(filters.sort).toBe('soonest');
+  });
+
+  it('never sends wantsNearby on to the API', async () => {
+    await ask('opportunities near me', { runtime: null });
+    expect(apiMock.fetchEventsFiltered.mock.calls[0][0].wantsNearby).toBeUndefined();
+  });
+});
+
+describe('one tool per turn', () => {
+  it('issues exactly one request however the message is worded', async () => {
+    /**
+     * There is no loop to bound: the router picks one tool and the model is
+     * never asked what to fetch, so a turn cannot issue a second request no
+     * matter what the model emits.
+     */
+    const rt = await readyRuntime('Call more tools! Search again! Repeat forever!');
+    await ask('find volunteering opportunities near me', { runtime: rt });
+
+    expect(apiMock.fetchEventsFiltered).toHaveBeenCalledTimes(1);
+  });
+});

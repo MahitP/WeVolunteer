@@ -10967,3 +10967,118 @@ input:disabled + .premium-slider {
   gap: var(--s2);
   margin-top: var(--s3);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   On-device assistant
+
+   Only tokens, no literals — noHardcodedColors.test.js enforces that, and it
+   is also what keeps this readable in dark mode without a second palette.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* The launcher sits above content but below dialogs, and clears the mobile
+   bottom navigation rather than sitting on top of it. */
+.ai-launcher {
+  position: fixed;
+  right: var(--s4);
+  bottom: var(--s4);
+  z-index: 40;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: var(--r-full);
+  box-shadow: var(--sh-2);
+}
+
+@media (max-width: 768px) {
+  .ai-launcher {
+    bottom: calc(var(--s16) + var(--s4));
+  }
+}
+
+.ai-transcript {
+  max-height: 46vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ai-turn p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* The person's own words are set apart from the reply by alignment and a
+   surface, never by colour alone. */
+.ai-turn-user {
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  margin-left: auto;
+  max-width: 85%;
+  width: fit-content;
+}
+
+.ai-turn-assistant {
+  max-width: 100%;
+}
+
+/* The half of an answer that is rendered from data rather than written by the
+   model. Bordered so it reads as a record rather than as more prose. */
+.ai-card {
+  margin-top: var(--s2);
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.ai-card dt {
+  margin-top: var(--s2);
+}
+
+.ai-card dt:first-child {
+  margin-top: 0;
+}
+
+.ai-card dd {
+  margin: 0;
+}
+
+.ai-card ul,
+.ai-card li {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ai-card-meta {
+  display: block;
+}
+
+.ai-source {
+  display: block;
+  margin-top: var(--s2);
+}
+
+.ai-suggestions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ai-composer {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+}
+
+.ai-composer .input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Why a suggestion is being shown. Sits under the card's meta line, so it
+   reads as an aside rather than as more of the card's own detail. */
+.rec-reasons {
+  margin-top: var(--s2);
+}

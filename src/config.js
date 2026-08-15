@@ -18,6 +18,31 @@ export const SCHOOL_NAME = import.meta.env.VITE_SCHOOL_NAME || 'WeVolunteer Comm
 export const ENABLE_LEADERBOARD = import.meta.env.VITE_ENABLE_LEADERBOARD !== 'false';
 
 /**
+ * On-device AI. Opt-in, never opt-out — the same rule as DEMO_MODE, for a
+ * different reason.
+ *
+ * ── Why a build-time flag and not a runtime setting ──
+ *
+ * The inference runtime is a WebAssembly module and the models are hundreds of
+ * megabytes. A build that has not deliberately enabled this must not pay for it,
+ * and the only way to guarantee that is to keep the import out of the bundle
+ * entirely rather than behind a branch the bundler cannot prove is dead.
+ *
+ * So this flag gates the dynamic `import()` boundary in `src/ai/`, not merely the
+ * UI. `src/ai/bundleCost.test.js` asserts the built output is unchanged when it is
+ * unset; that test is the whole point of the flag and is why the runtime is never
+ * imported at module scope anywhere.
+ *
+ * ── What it does NOT do ──
+ *
+ * Turning it on switches on the *offer*, not the download. Nothing is fetched
+ * until somebody opens the AI settings and chooses a model, and a device that
+ * cannot run one is never offered one (see `src/ai/capability.js`). A student who
+ * never touches the feature downloads nothing beyond the ordinary application.
+ */
+export const LOCAL_AI = import.meta.env.VITE_LOCAL_AI === 'true';
+
+/**
  * Who signs a service transcript, and in what capacity.
  *
  * ── Why this is configuration and not profile data ──
