@@ -44,7 +44,7 @@ granting super-only capabilities (`userCapabilities.js`).
 
 # Administrator responsibilities
 
-**Version 1.1 · Last updated 2026-08-06**
+**Version 1.0 · Last updated 2026-08-06**
 
 You have been given an administrator account on WeVolunteer. You can see almost everything in
 it, including information about children.

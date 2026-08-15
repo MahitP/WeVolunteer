@@ -238,7 +238,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What we collect, why, who can see it, how long we keep it, and how to get it back or have it deleted.',
     effectiveAt: '2026-08-06',
     file: '01-privacy-policy.md',
-    contentHash: '962b76fc1dcd7559d669823bf5cc4f09bfc5a0922a17a19b4138798a84083760',
+    contentHash: '90c09ee6e52c3ff5aa3b920b6495e627a92e3830e77d1a6d6aef79369a6b4504',
     bundledWith: null,
   },
   {
@@ -274,7 +274,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'How to stay safe volunteering, what an adult here should never ask you for, and how to report it when they do.',
     effectiveAt: '2026-08-06',
     file: '08-youth-safety-guidelines.md',
-    contentHash: '461b77bb82a59ed360804ede52d61e9accf1f4ec9dfe37c2aa424f283d53a9b3',
+    contentHash: '68c860b21099c600a0a381fdeaa8ef167cc5fad9735a3cd2ebf6413895e8eff8',
     bundledWith: null,
   },
   {
@@ -286,7 +286,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What a WeVolunteer certificate proves, what it does not, and how anyone can check whether one is real.',
     effectiveAt: '2026-08-06',
     file: '06-certificate-verification-policy.md',
-    contentHash: 'c88c804ffdb4cad6d86f0c54affa11e61d399b213924d48118c00f12dad9a591',
+    contentHash: 'd02414f03a876749d4c57e90f98284feab4dedc112e9626a8208d9f290889f68',
     bundledWith: null,
   },
   {
@@ -304,7 +304,7 @@ export const LEGAL_DOCUMENTS = [
        `notice` (no acceptance is collected) and nothing here has been published
        to a reader yet, so this is a correction before first publication rather
        than a revision of something somebody read. */
-    contentHash: '4b1ae425c8fba83ada948b65c39bf7c84c53f7aef15ea7ef1174a7ad4ef31b0f',
+    contentHash: '1abd5562b9752eb2553e9865aa8d563d5307f5f805eb0455ce2dba37327fd23f',
     bundledWith: null,
   },
   {
@@ -328,7 +328,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'The cookies this site sets, all of which are needed to keep you signed in. No advertising or analytics trackers.',
     effectiveAt: '2026-08-06',
     file: '05-cookie-and-tracking-notice.md',
-    contentHash: 'e3d486e82cf911d56821b70a08690b90ae0974adbf00e7bcd09bd591a750dbd1',
+    contentHash: '2a1d059a5d26e4aef5975749bcb12ee155fffba6eff16deddfb4d74209350f71',
     bundledWith: null,
   },
   {
@@ -340,7 +340,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What administrators may do, what is logged when they do it, and the limits on looking at a student\'s record.',
     effectiveAt: '2026-08-06',
     file: '10-admin-responsibilities-policy.md',
-    contentHash: 'db0de9026d9b1ea2aa00d0b3c3504bb02e729f8106ca78b3245391e9cc35a6f3',
+    contentHash: '63d42b5c1d4e41a0ffd3c8aa81c6b2972ad92b6351407ef058c390f79fb5e458',
     bundledWith: null,
   },
 ];
