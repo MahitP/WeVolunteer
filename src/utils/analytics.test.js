@@ -55,7 +55,7 @@ afterEach(() => {
 describe('when the key is configured', () => {
   it('initialises with initAll, autocapture on and full replay sampling', async () => {
     const a = await loadWithKey('test-key-not-the-real-one');
-    expect(a.initializeAmplitude()).toBe(true);
+    expect(await a.initializeAmplitude()).toBe(true);
 
     expect(initAll).toHaveBeenCalledTimes(1);
     const [key, options] = initAll.mock.calls[0];
@@ -78,7 +78,7 @@ describe('when the key is configured', () => {
      * secret and recovery codes. Under `medium` all of it is uploaded verbatim.
      */
     const a = await loadWithKey('test-key-not-the-real-one');
-    a.initializeAmplitude();
+    await a.initializeAmplitude();
     const { privacyConfig } = initAll.mock.calls[0][1].sessionReplay;
 
     expect(
@@ -92,7 +92,7 @@ describe('when the key is configured', () => {
     /* Masking replaces visible characters. It does nothing to an <img src>,
        and the 2FA QR is a data URL containing the shared secret. */
     const a = await loadWithKey('test-key-not-the-real-one');
-    a.initializeAmplitude();
+    await a.initializeAmplitude();
     const { privacyConfig } = initAll.mock.calls[0][1].sessionReplay;
 
     expect(privacyConfig?.blockSelector).toContain(`[${a.REPLAY_BLOCK_ATTRIBUTE}]`);
@@ -106,7 +106,7 @@ describe('when the key is configured', () => {
      * the link out of the email.
      */
     const a = await loadWithKey('test-key-not-the-real-one');
-    a.initializeAmplitude();
+    await a.initializeAmplitude();
     const { interactionConfig } = initAll.mock.calls[0][1].sessionReplay;
 
     expect(interactionConfig?.enabled).toBe(true);
@@ -116,15 +116,15 @@ describe('when the key is configured', () => {
   it('initialises only once, however many times it is called', async () => {
     /* `<StrictMode>` mounts everything twice in development. */
     const a = await loadWithKey('test-key-not-the-real-one');
-    a.initializeAmplitude();
-    a.initializeAmplitude();
-    a.initializeAmplitude();
+    await a.initializeAmplitude();
+    await a.initializeAmplitude();
+    await a.initializeAmplitude();
     expect(initAll).toHaveBeenCalledTimes(1);
   });
 
   it('sends an event with the properties it was given', async () => {
     const a = await loadWithKey('test-key-not-the-real-one');
-    a.initializeAmplitude();
+    await a.initializeAmplitude();
     a.trackAmplitudeEvent('Viewed Home Page', { prompt_version: 'BA400.4' });
 
     expect(track).toHaveBeenCalledTimes(1);
@@ -137,7 +137,7 @@ describe('when the key is configured', () => {
     /* A plain event property, not an SDK option — inventing a configuration
        key that does not exist is how an install silently stops reporting. */
     const a = await loadWithKey('test-key-not-the-real-one');
-    a.initializeAmplitude();
+    await a.initializeAmplitude();
     a.trackAmplitudeEvent('Viewed Home Page', { prompt_version: 'BA400.4' });
     expect(track.mock.calls[0][1].environment).toBeTruthy();
   });
@@ -149,7 +149,7 @@ describe('when the key is configured', () => {
      * group, no token, and nothing a user typed.
      */
     const a = await loadWithKey('test-key-not-the-real-one');
-    a.initializeAmplitude();
+    await a.initializeAmplitude();
     a.trackAmplitudeEvent('Viewed Home Page', { prompt_version: 'BA400.4' });
 
     const props = track.mock.calls[0][1];
@@ -167,14 +167,14 @@ describe('when the key is absent', () => {
     const a = await loadWithKey('');
 
     expect(a.isAnalyticsConfigured()).toBe(false);
-    expect(a.initializeAmplitude()).toBe(false);
+    expect(await a.initializeAmplitude()).toBe(false);
     expect(warn).toHaveBeenCalledWith('Amplitude API key missing — analytics disabled');
   });
 
   it('does not touch the SDK at all', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const a = await loadWithKey('');
-    a.initializeAmplitude();
+    await a.initializeAmplitude();
     expect(initAll).not.toHaveBeenCalled();
   });
 
@@ -183,7 +183,7 @@ describe('when the key is absent', () => {
        the DEFAULT, since .env.example ships the variable empty. */
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const a = await loadWithKey('');
-    a.initializeAmplitude();
+    await a.initializeAmplitude();
 
     expect(() => a.trackAmplitudeEvent('Viewed Home Page', { prompt_version: 'BA400.4' })).not.toThrow();
     expect(track).not.toHaveBeenCalled();
@@ -205,8 +205,8 @@ describe('when the SDK itself misbehaves', () => {
     initAll.mockImplementation(() => { throw new Error('blocked by CSP'); });
 
     const a = await loadWithKey('test-key-not-the-real-one');
-    expect(() => a.initializeAmplitude()).not.toThrow();
-    expect(a.initializeAmplitude()).toBe(false);
+    await expect(a.initializeAmplitude()).resolves.toBe(false);
+    expect(await a.initializeAmplitude()).toBe(false);
     initAll.mockReset();
   });
 
@@ -215,7 +215,7 @@ describe('when the SDK itself misbehaves', () => {
     initAll.mockImplementation(() => { throw new Error('blocked by CSP'); });
 
     const a = await loadWithKey('test-key-not-the-real-one');
-    a.initializeAmplitude();
+    await a.initializeAmplitude();
     initAll.mockReset();
     a.trackAmplitudeEvent('Viewed Home Page', { prompt_version: 'BA400.4' });
     expect(track).not.toHaveBeenCalled();
@@ -224,7 +224,7 @@ describe('when the SDK itself misbehaves', () => {
   it('does not let a failing track reach the caller', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const a = await loadWithKey('test-key-not-the-real-one');
-    a.initializeAmplitude();
+    await a.initializeAmplitude();
     track.mockImplementationOnce(() => { throw new Error('transport gone'); });
 
     expect(() => a.trackAmplitudeEvent('Viewed Home Page')).not.toThrow();
@@ -315,6 +315,36 @@ describe('the verification event is declared exactly once', () => {
   });
 });
 
+describe('the SDK is not in the initial download', () => {
+  const src = fs.readFileSync(path.join(process.cwd(), 'src', 'utils', 'analytics.js'), 'utf8');
+
+  it('is imported dynamically, not statically', () => {
+    /**
+     * A source check because the property is about the BUILD, and asserting it
+     * against `dist/` would make this test depend on somebody having run
+     * `npm run build` first — green on a clean checkout for the wrong reason.
+     *
+     * The measurement that motivated it, for the record: a static
+     * `import * as amplitude from '@amplitude/unified'` put the package in the
+     * main chunk, which was 841 kB (249 kB gzip) and tripped Vite's own size
+     * warning. Making it dynamic took the main chunk to 428 kB (132 kB gzip)
+     * and the warning went away — because the common case is a student who
+     * never consents, and they should not download a session recorder that will
+     * never start.
+     */
+    expect(
+      /^\s*import\s[^\n]*from\s+'@amplitude\/unified'/m.test(src),
+      'analytics.js statically imports the Amplitude SDK again — that puts ~300 kB '
+      + 'of session-replay code into the initial download for every visitor, '
+      + 'including everyone who has not consented and never will'
+    ).toBe(false);
+  });
+
+  it('fetches it at the point consent is granted', () => {
+    expect(src).toMatch(/await import\('@amplitude\/unified'\)/);
+  });
+});
+
 describe('nothing is recorded without consent', () => {
   /**
    * The property the whole consent mechanism exists for, asserted at the seam
@@ -332,13 +362,13 @@ describe('nothing is recorded without consent', () => {
     ['the number 1', 1],
   ])('does not start Amplitude for %s', async (_label, value) => {
     const a = await loadWithKey('test-key-not-the-real-one');
-    expect(a.applyAnalyticsConsent(value)).toBe(false);
+    expect(await a.applyAnalyticsConsent(value)).toBe(false);
     expect(initAll, 'Amplitude was initialised without consent').not.toHaveBeenCalled();
   });
 
   it('starts it for an explicit yes', async () => {
     const a = await loadWithKey('test-key-not-the-real-one');
-    expect(a.applyAnalyticsConsent(true)).toBe(true);
+    expect(await a.applyAnalyticsConsent(true)).toBe(true);
     expect(initAll).toHaveBeenCalledTimes(1);
   });
 
@@ -350,20 +380,20 @@ describe('nothing is recorded without consent', () => {
      * cannot be un-initialised, and `setOptOut` is its own answer to this.
      */
     const a = await loadWithKey('test-key-not-the-real-one');
-    a.applyAnalyticsConsent(true);
+    await a.applyAnalyticsConsent(true);
     expect(setOptOut).not.toHaveBeenCalled();
 
-    expect(a.applyAnalyticsConsent(false)).toBe(false);
+    expect(await a.applyAnalyticsConsent(false)).toBe(false);
     expect(setOptOut).toHaveBeenCalledWith(true);
   });
 
   it('resumes when consent is given back in the same tab', async () => {
     const a = await loadWithKey('test-key-not-the-real-one');
-    a.applyAnalyticsConsent(true);
-    a.applyAnalyticsConsent(false);
+    await a.applyAnalyticsConsent(true);
+    await a.applyAnalyticsConsent(false);
     setOptOut.mockClear();
 
-    expect(a.applyAnalyticsConsent(true)).toBe(true);
+    expect(await a.applyAnalyticsConsent(true)).toBe(true);
     expect(setOptOut).toHaveBeenCalledWith(false);
     /* Not initialised a second time — the SDK is already running. */
     expect(initAll).toHaveBeenCalledTimes(1);
@@ -372,10 +402,10 @@ describe('nothing is recorded without consent', () => {
   it('does not throw when the SDK refuses to switch off', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const a = await loadWithKey('test-key-not-the-real-one');
-    a.applyAnalyticsConsent(true);
+    await a.applyAnalyticsConsent(true);
     setOptOut.mockImplementationOnce(() => { throw new Error('gone'); });
 
-    expect(() => a.applyAnalyticsConsent(false)).not.toThrow();
+    await expect(a.applyAnalyticsConsent(false)).resolves.toBe(false);
   });
 });
 
