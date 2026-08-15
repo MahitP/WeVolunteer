@@ -61,6 +61,8 @@ import serviceVisibility from './049_service_visibility.js';
 import deliveryEvents from './050_delivery_events.js';
 import issueReports from './051_issue_reports.js';
 import analyticsConsent from './052_analytics_consent.js';
+import ledgerDuplicateBackfill from './053_ledger_duplicate_backfill.js';
+import resyncUnacceptedLegalHashes from './054_resync_unaccepted_legal_hashes.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -316,7 +318,21 @@ export const MIGRATIONS = [
    * The only privacy column in the schema that does NOT carry forward the
    * behaviour already in place, and the header says why.
    */
-  analyticsConsent
+  analyticsConsent,
+  /**
+   * 053 — removes the duplicate rows the ledger backfill wrote while it was
+   * idempotent against its own entries and blind to everybody else's. Deletes
+   * only the migration-sourced copy, only where a real one survives for the
+   * same (slot, user).
+   */
+  ledgerDuplicateBackfill,
+  /**
+   * 054 — lets hash enforcement start on a database that predates it, by
+   * re-syncing only the published versions nobody has ever accepted. A version
+   * with an acceptance row keeps its hash and keeps refusing the boot, which is
+   * the invariant working rather than an obstacle to it.
+   */
+  resyncUnacceptedLegalHashes
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

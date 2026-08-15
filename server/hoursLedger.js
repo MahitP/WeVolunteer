@@ -177,11 +177,43 @@ export function backfillHoursLedger(db, { now = new Date().toISOString() } = {})
     LEFT JOIN slots s ON s.id = a.slot_id
   `).all();
 
-  // One query for everything already migrated, rather than one per attendance
-  // row. This runs on every boot, so an N+1 here would mean tens of thousands
-  // of round-trips at startup once the platform has a year of records.
-  const alreadyMigrated = new Set(
-    db.prepare("SELECT id FROM hours_ledger WHERE source = 'migration'").all().map(r => r.id)
+  /**
+   * Every (slot, user) the ledger ALREADY knows about, from any source.
+   *
+   * ── The bug this replaces ──
+   *
+   * This was `SELECT id FROM hours_ledger WHERE source = 'migration'`, which
+   * made the backfill idempotent against its own rows and blind to everybody
+   * else's. A slot credited through the attendance screen wrote a real entry;
+   * this function then ran on the next boot, found no `migrate:<slot>:<user>`
+   * id, and wrote a second entry for the same credited hours.
+   *
+   * `INSERT OR IGNORE` did not help — the two rows have different primary keys,
+   * which is precisely why they both survived.
+   *
+   * Found on the pilot database: one student with fourteen attendance rows and
+   * twenty-eight ledger rows, a ledger total of 419.44 against 209.72 credited.
+   * Exactly double, which is what a duplicate of every row looks like.
+   *
+   * Credited hours were never affected — `attendance` is the source of truth and
+   * nothing reads the ledger to compute them — but `verifyLedgerParity` reported
+   * the mismatch on every boot and the admin dashboard showed it, which is
+   * exactly what it is for.
+   *
+   * ── Why the key is the attendance row, not the id ──
+   *
+   * The question this needs to answer is "has this credit already been
+   * recorded", and the answer belongs to the (slot, user) pair — that is the
+   * primary key of `attendance`. Any id-based test is a test of who wrote the
+   * row rather than of whether the fact is already there.
+   *
+   * One query rather than one per attendance row: this runs on every boot, so
+   * an N+1 would be tens of thousands of round-trips at startup once the
+   * platform has a year of records.
+   */
+  const alreadyRecorded = new Set(
+    db.prepare('SELECT slot_id, user_id FROM hours_ledger')
+      .all().map(r => `${r.slot_id}:${r.user_id}`)
   );
 
   let inserted = 0;
@@ -189,7 +221,7 @@ export function backfillHoursLedger(db, { now = new Date().toISOString() } = {})
 
   for (const r of rows) {
     const id = `migrate:${r.slot_id}:${r.user_id}`;
-    if (alreadyMigrated.has(id)) { skipped++; continue; }
+    if (alreadyRecorded.has(`${r.slot_id}:${r.user_id}`)) { skipped++; continue; }
 
     recordHoursChange(db, {
       id,
