@@ -45,7 +45,7 @@ function longestOctetLine(ics) {
 }
 
 const SHIFT = {
-  uid: 'slot-1@wevolunteer.org',
+  uid: 'slot-1@wevolunteers.org',
   start: '2026-08-11T07:30:00.000Z',
   end: '2026-08-11T09:30:00.000Z',
   summary: 'Softball Snack Shack (Adult)',
@@ -80,7 +80,7 @@ describe('ICS structure (§3.1, §3.4)', () => {
     const { props } = parse(buildShiftIcs(SHIFT));
     expect(props['BEGIN']).toBeDefined();
     expect(props['VERSION']).toBe('2.0');
-    expect(props['UID']).toBe('slot-1@wevolunteer.org');
+    expect(props['UID']).toBe('slot-1@wevolunteers.org');
     expect(props['DTSTART']).toBe('20260811T073000Z');
     expect(props['DTEND']).toBe('20260811T093000Z');
     expect(props['DTSTAMP']).toBe('20260730T120000Z');
@@ -194,7 +194,7 @@ describe('ICS dates', () => {
  */
 describe('ICS location and alarms', () => {
   const base = {
-    uid: 'slot-1@wevolunteer.org',
+    uid: 'slot-1@wevolunteers.org',
     start: '2026-08-20T14:00:00.000Z',
     end: '2026-08-20T17:00:00.000Z',
     summary: 'Park Cleanup (Morning)',

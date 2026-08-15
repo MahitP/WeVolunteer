@@ -114,3 +114,41 @@ describe('every shell route is titled for itself', () => {
     }
   });
 });
+
+describe('the table is actually applied', () => {
+  /**
+   * Every case above checks that PAGE_META HAS a title for each route. None of
+   * them checked that anything ever used one — and for several releases nothing
+   * did: `document.title` was never assigned, so every browser tab said
+   * "WeVolunteer" while this file passed, because a complete table and a wrong
+   * title are not the same claim.
+   *
+   * That is the failure mode this whole suite is meant to guard against, so it
+   * is worth naming: a test of the DATA is not a test of the EFFECT, and the
+   * gap between them is invisible from inside the data.
+   *
+   * Asserted against the source rather than by rendering, because reaching this
+   * through a mount needs a router, a session and a dozen mocks — and the thing
+   * in doubt is whether the assignment exists at all, which the source answers
+   * directly.
+   */
+  const APP_SRC = fs.readFileSync(path.join(process.cwd(), 'src/App.jsx'), 'utf8');
+
+  it('writes the page title to document.title', () => {
+    expect(
+      /document\.title\s*=/.test(APP_SRC),
+      'nothing assigns document.title — every browser tab shows the same name, '
+      + 'and a screen reader announces the same name on every navigation'
+    ).toBe(true);
+  });
+
+  it('takes it from PAGE_META rather than a second hardcoded list', () => {
+    /* A literal string here would drift from the table these cases check. */
+    expect(APP_SRC).toMatch(/const documentTitle = pageMetaFor\(/);
+  });
+
+  it('keeps the product name in the tab', () => {
+    /* "Settings" alone identifies nothing among a dozen open tabs. */
+    expect(APP_SRC).toMatch(/\$\{documentTitle\} · \$\{APP_NAME\}/);
+  });
+});
