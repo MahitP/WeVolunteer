@@ -9110,6 +9110,8 @@ input:disabled + .premium-slider {
   min-width: 0;
 }
 
+/* Sized by this rule rather than by its tag, so it reads the same as an h2
+   (the shell owns the page h1) as it did as an h1. */
 .profile-name {
   margin: 0;
   font-family: var(--font-display);
@@ -9421,6 +9423,31 @@ input:disabled + .premium-slider {
   margin-left: auto;
   font-size: 0.8125rem;
   white-space: nowrap;
+}
+
+/**
+ * A member's hours for one organization, on their profile's club list.
+ *
+ * Same treatment as `.org-member-hours` on the organization roster, because it
+ * is the same figure seen from the other side — and a number that looked
+ * different in the two places would read as two different numbers.
+ */
+.profile-org-hours {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/**
+ * The row of links under a member's service with one organization: show
+ * more/fewer, the transcript, the certificates.
+ *
+ * Wraps rather than scrolls, because at 320px three controls do not fit on one
+ * line and a horizontally scrolling row of buttons is a row of buttons somebody
+ * will not find.
+ */
+.org-service-actions {
+  gap: var(--s2);
+  margin-top: var(--s4);
 }
 
 /**

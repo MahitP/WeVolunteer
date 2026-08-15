@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock, UserMinus,
+  FileText, Award,
   UserPlus2, UserMinus2, Ban,
 } from 'lucide-react';
 import { api } from '../utils/api';
@@ -498,16 +499,41 @@ function OrganizationService({ org, viewer, totals }) {
               ))}
             </ul>
 
-            {history.length > SHOWN && (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setExpanded(v => !v)}
-                aria-expanded={expanded}
-              >
-                {expanded ? 'Show fewer' : `Show all ${history.length} events`}
-              </button>
-            )}
+            <div className="row row-wrap org-service-actions">
+              {history.length > SHOWN && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setExpanded(v => !v)}
+                  aria-expanded={expanded}
+                >
+                  {expanded ? 'Show fewer' : `Show all ${history.length} events`}
+                </button>
+              )}
+
+              {/**
+                * The organization transcript, and the certificates earned here.
+                *
+                * Both are LINKS into systems that already exist, carrying an
+                * organization filter — not new pages. `/portfolio` is the
+                * printable record of verified service and `/certificates` is the
+                * certificate list; each already knows how to render itself, and a
+                * second copy scoped to one club would be two things to keep in
+                * step about the same student's hours.
+                *
+                * They live at the foot of this block rather than in the
+                * navigation because that is where somebody already is when the
+                * question "what have I done for this club" occurs to them.
+                */}
+              <Link className="btn btn-ghost btn-sm" to={`/portfolio?organization=${encodeURIComponent(org.slug)}`}>
+                <FileText size={15} aria-hidden="true" />
+                Transcript for {org.name}
+              </Link>
+              <Link className="btn btn-ghost btn-sm" to={`/certificates?organization=${encodeURIComponent(org.slug)}`}>
+                <Award size={15} aria-hidden="true" />
+                Certificates
+              </Link>
+            </div>
           </>
         )}
 

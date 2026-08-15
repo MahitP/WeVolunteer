@@ -161,12 +161,26 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
     // Completed service, newest first
     const completed = db.prepare(`
       SELECT e.id as event_id, e.title, e.category, e.location, u.name as organizer_name,
-             s.name as slot_name, s.start_datetime, s.end_datetime, at.hours_awarded
+             s.name as slot_name, s.start_datetime, s.end_datetime, at.hours_awarded,
+             /* Which organization ran it, so the transcript can be filtered to one
+                club without a second endpoint. LEFT JOIN: most events have no
+                owning organization and those rows must still appear. */
+             e.organization_id as organization_id, o.name as organization_name,
+             o.slug as organization_slug
       FROM attendance at
       JOIN slots s ON at.slot_id = s.id
       JOIN events e ON at.event_id = e.id
       JOIN users u ON e.organizer_id = u.id
-      WHERE at.user_id = ? AND at.present = 1
+      LEFT JOIN organizations o ON o.id = e.organization_id
+      /* A cancelled event is not completed service. It carries attendance -
+         PUT /api/events/:id refuses to delete those rows - but the transcript
+         built from this list is a record of what somebody DID, and a called-off
+         event printed as a verified row under their name is a claim the platform
+         cannot support. Same rule as volunteerStats.hoursCredited and every
+         figure in organizationHours.js.
+         No backticks in here: this comment sits inside a template literal and
+         one would end the string mid-SQL. */
+      WHERE at.user_id = ? AND at.present = 1 AND e.status <> 'cancelled'
       ORDER BY s.start_datetime DESC
     `).all(req.params.id);
 
@@ -296,7 +310,11 @@ function formatServiceRow(r) {
     slotName: r.slot_name,
     startDatetime: r.start_datetime,
     endDatetime: r.end_datetime,
-    hours: Number(r.hours_awarded)
+    hours: Number(r.hours_awarded),
+    /* Null for an event no organization ran, which is most of them. */
+    organizationId: r.organization_id ?? null,
+    organizationName: r.organization_name ?? null,
+    organizationSlug: r.organization_slug ?? null
   };
 }
 

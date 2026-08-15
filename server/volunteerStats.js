@@ -124,9 +124,33 @@ export function volunteerStats(db, userId, { now = new Date().toISOString() } = 
    */
   const eventsAwaitingRecord = Math.max(0, signedUp - eventsAttended - eventsAbsent);
 
+  /**
+   * Credited hours.
+   *
+   * ── Why the join is here now ──
+   *
+   * This was `FROM attendance WHERE user_id = ? AND present = 1` with no
+   * reference to the event at all, which meant a CANCELLED event's hours
+   * counted toward a student's total while `eventsAttended` two queries above
+   * excluded that same event from their count. One number said the work
+   * happened and the other said it did not.
+   *
+   * The transcript is the surface where that became untenable: it is a record
+   * of completed service, and printing a called-off event as a verified row
+   * under somebody's name is a claim the platform cannot support. So cancelled
+   * events are excluded here, in the itemised `completed` list, and in the
+   * organization figures — one rule, applied everywhere hours are presented as
+   * credited service.
+   *
+   * Measured before changing it: zero attendance rows on cancelled events exist
+   * in the pilot database, so no student's displayed total moves. This corrects
+   * an edge case rather than restating anybody's record.
+   */
   const hours = db.prepare(`
-    SELECT COALESCE(SUM(hours_awarded), 0) AS h
-    FROM attendance WHERE user_id = ? AND present = 1
+    SELECT COALESCE(SUM(a.hours_awarded), 0) AS h
+    FROM attendance a
+    JOIN events e ON e.id = a.event_id
+    WHERE a.user_id = ? AND a.present = 1 AND e.status <> 'cancelled'
   `).get(userId)?.h ?? 0;
 
   return {

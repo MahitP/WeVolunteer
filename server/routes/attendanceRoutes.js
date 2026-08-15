@@ -308,11 +308,17 @@ router.get('/api/certificates', authenticateToken, (req, res) => {
              COALESCE(SUM(at.hours_awarded), 0) as hours,
              COUNT(*) as shifts,
              MIN(s.start_datetime) as first_start,
-             MAX(s.end_datetime) as last_end
+             MAX(s.end_datetime) as last_end,
+             /* So a certificate can be shown in its organization's context
+                without a second certificate system. See §11 of the brief:
+                certificates stay their own feature and are merely associated. */
+             e.organization_id as organization_id, o.name as organization_name,
+             o.slug as organization_slug
       FROM attendance at
       JOIN slots s ON at.slot_id = s.id
       JOIN events e ON at.event_id = e.id
       JOIN users u ON e.organizer_id = u.id
+      LEFT JOIN organizations o ON o.id = e.organization_id
       WHERE at.user_id = ? AND at.present = 1
       GROUP BY e.id
       ORDER BY last_end DESC
@@ -329,6 +335,9 @@ router.get('/api/certificates', authenticateToken, (req, res) => {
       shifts: r.shifts,
       startDatetime: r.first_start,
       endDatetime: r.last_end,
+      organizationId: r.organization_id ?? null,
+      organizationName: r.organization_name ?? null,
+      organizationSlug: r.organization_slug ?? null,
       code: getOrCreateCertificateCode(db, req.user.id, r.event_id)
     })));
   } catch (err) {

@@ -42,6 +42,26 @@
  * club's events and later left still performed those hours for it, and a figure
  * that silently dropped them on the day they left would be a record of
  * membership rather than of service.
+ *
+ * ── Cancelled events count for nothing ──
+ *
+ * A cancelled event can still carry attendance: `PUT /api/events/:id`
+ * deliberately refuses to touch attendance rows, so an event called off after an
+ * organizer confirmed who turned up keeps that confirmation.
+ *
+ * None of it counts. Not the hours, not the event, not a row in the history.
+ *
+ * This used to be split — hours counted a cancelled event and the event count
+ * did not, each matching a different platform-wide query that disagreed with the
+ * other. The transcript is where that became untenable: it is a record of
+ * COMPLETED service, and printing a called-off event as a verified row under a
+ * student's name is a claim this platform cannot support. A college reading it
+ * would be reading a false statement.
+ *
+ * So there is now one rule, applied in `volunteerStats.hoursCredited`, in the
+ * itemised `completed` list behind the transcript, and in every figure here.
+ * Measured before changing it: zero attendance rows on cancelled events exist in
+ * the pilot database, so no student's record moves.
  */
 
 /**
@@ -57,6 +77,7 @@ export function organizationHoursForUser(db, organizationId, userId) {
     FROM attendance a
     JOIN events e ON e.id = a.event_id
     WHERE e.organization_id = ? AND a.user_id = ? AND a.present = 1
+      AND e.status <> 'cancelled'
   `).get(organizationId, userId);
 
   return { hours: Number(row?.hours ?? 0), events: Number(row?.events ?? 0) };
@@ -82,6 +103,7 @@ export function organizationHoursByUser(db, organizationId) {
     FROM attendance a
     JOIN events e ON e.id = a.event_id
     WHERE e.organization_id = ? AND a.present = 1
+      AND e.status <> 'cancelled'
     GROUP BY a.user_id
   `).all(organizationId);
 
@@ -103,6 +125,7 @@ export function organizationHoursTotal(db, organizationId) {
     FROM attendance a
     JOIN events e ON e.id = a.event_id
     WHERE e.organization_id = ? AND a.present = 1
+      AND e.status <> 'cancelled'
   `).get(organizationId);
 
   return {
@@ -134,6 +157,7 @@ export function organizationHistoryForUser(db, organizationId, userId, { limit =
     FROM attendance a
     JOIN events e ON e.id = a.event_id
     WHERE e.organization_id = ? AND a.user_id = ? AND a.present = 1
+      AND e.status <> 'cancelled'
     GROUP BY e.id
     ORDER BY startsAt DESC
     LIMIT ?

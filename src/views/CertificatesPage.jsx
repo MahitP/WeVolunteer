@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Award, FileText } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
@@ -32,6 +32,28 @@ export default function CertificatesPage({ currentUser, addToast }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [certificate, setCertificate] = useState(null);
+  const [searchParams] = useSearchParams();
+
+  /**
+   * An optional organization filter, as `?organization=<slug>`.
+   *
+   * Reached from the "Your service with …" block on an organization's page, so
+   * a student looking at one club can see the certificates that came from it
+   * without a certificate system scoped to organizations. Certificates stay
+   * exactly what they were; this is a view of them.
+   *
+   * A display filter over the caller's OWN certificates — this endpoint has
+   * never returned anybody else's — so narrowing it can only show less.
+   */
+  const organizationSlug = searchParams.get('organization');
+  const shown = organizationSlug
+    ? certificates.filter(c => c.organizationSlug === organizationSlug)
+    : certificates;
+  /* From the rows, so a slug matching nothing yields no name and the empty
+     state below can say so rather than naming a club that is not there. */
+  const organizationName = organizationSlug
+    ? certificates.find(c => c.organizationSlug === organizationSlug)?.organizationName ?? null
+    : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -56,9 +78,17 @@ export default function CertificatesPage({ currentUser, addToast }) {
         <h2 className="row page-title" style={{ gap: 8 }}>
           <Award size={20} style={{ color: 'var(--brand)' }} aria-hidden="true" /> Your certificates
         </h2>
-        {!loading && !error && certificates.length > 0 && (
+        {organizationSlug && (
           <p className="dim small">
-            {certificates.length} {certificates.length === 1 ? 'certificate' : 'certificates'}.
+            {organizationName
+              ? `Earned with ${organizationName}.`
+              : 'Filtered to one organization.'}{' '}
+            <Link to="/certificates">Show all certificates</Link>
+          </p>
+        )}
+        {!loading && !error && shown.length > 0 && (
+          <p className="dim small">
+            {shown.length} {shown.length === 1 ? 'certificate' : 'certificates'}.
             One for each event you have completed.
           </p>
         )}
@@ -68,17 +98,22 @@ export default function CertificatesPage({ currentUser, addToast }) {
 
       {!loading && error && <p className="small dim" role="status">{error}</p>}
 
-      {!loading && !error && certificates.length === 0 && (
+      {!loading && !error && shown.length === 0 && (
         <EmptyState
           icon={FileText}
-          title="No certificates yet"
-          message="You earn one for each event you complete."
+          title={organizationSlug ? 'No certificates from this organization' : 'No certificates yet'}
+          message={organizationSlug
+            ? 'You earn one for each event you complete with them.'
+            : 'You earn one for each event you complete.'}
+          action={organizationSlug
+            ? <Link className="btn btn-secondary" to="/certificates">Show all certificates</Link>
+            : undefined}
         />
       )}
 
-      {!loading && !error && certificates.length > 0 && (
+      {!loading && !error && shown.length > 0 && (
         <div className="list">
-          {certificates.map(c => (
+          {shown.map(c => (
             <button
               key={c.eventId}
               className="list-row"

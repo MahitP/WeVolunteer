@@ -30,6 +30,7 @@ import {
   Flag, Link2, MapPin, CalendarDays, Clock, Users, Sparkles, Lock, Check, Ban, Pencil,
 } from 'lucide-react';
 import { api } from '../utils/api';
+import { formatHours } from '../utils/helpers';
 import { can } from '../authz';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
@@ -231,7 +232,7 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
                 : (profile.avatar || '🙂')}
             </span>
             <div className="stack-xs">
-              <h1 className="profile-name">{profile.name}</h1>
+              <h2 className="profile-name">{profile.name}</h2>
               {/* Beside the handle rather than in place of it: this account has
                   a name and a username like everybody else, and the pill says
                   what KIND of account it is. */}
@@ -457,15 +458,54 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
           <div className="card-head"><h2>Organizations</h2></div>
           <div className="card-body">
             <ul className="list profile-orgs">
-              {profile.organizations.map(org => (
-                <li key={org.id} className="list-row">
-                  <Link to={`/organizations/${org.slug}`} className="card-link row">
+              {profile.organizations.map(org => {
+                /* Built once and placed in whichever wrapper is right, so the
+                   two branches cannot drift apart on layout or content. */
+                const body = (
+                  <>
                     <OrgAvatar organization={org} size={15} className="sm" />
                     <span>{org.name}</span>
                     {org.memberRole === 'manager' && <span className="tag tag-brand">Manager</span>}
-                  </Link>
-                </li>
-              ))}
+                    {/**
+                      * An archived club still counts.
+                      *
+                      * The membership used to vanish from this list the moment
+                      * an organization was archived, taking the student's
+                      * history with it. Somebody who put thirty hours into a
+                      * club that wound up at the end of the year should still
+                      * be able to show that.
+                      */}
+                    {org.archived && (
+                      <span className="tag" title="This organization is no longer active">Archived</span>
+                    )}
+                    {/* Present only when the viewer may see this person's
+                        service record at all — the server omits it otherwise,
+                        so there is nothing here to hide. */}
+                    {typeof org.hours === 'number' && (
+                      <span className="tnum muted small profile-org-hours">
+                        {formatHours(org.hours)}
+                      </span>
+                    )}
+                  </>
+                );
+
+                /**
+                 * An archived organization is deliberately NOT a link.
+                 *
+                 * Its page answers 404 to anybody who cannot manage it — the
+                 * rule that keeps a wound-up club out of browsing, which this
+                 * feature does not change. Linking it anyway would hand
+                 * somebody a row that looks clickable and refuses, which is a
+                 * worse experience than a row that plainly is not.
+                 */
+                return (
+                  <li key={org.id} className="list-row">
+                    {org.archived
+                      ? <div className="row">{body}</div>
+                      : <Link to={`/organizations/${org.slug}`} className="card-link row">{body}</Link>}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </section>
