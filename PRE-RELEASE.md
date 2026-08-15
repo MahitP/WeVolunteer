@@ -129,7 +129,7 @@ variable turns into a leaked authorization code. The runbook calls this out at
 - [ ] `ALERT_EMAIL` set, or operator alerting is silently off
 - [ ] `RESEND_API_KEY` set; SMTP set as fallback, or accept the "no fallback"
       warning at boot as a decision
-- [ ] `WEV_BACKUP_PUBKEY` points at the backup certificate — see §8
+- [ ] `WEV_BACKUP_PUBKEY` points at the backup certificate — see §9
 
 ### Bootstrap an owner — the platform has none until you do
 
@@ -250,7 +250,7 @@ observed once, not as current behaviour.
 
 ---
 
-## 7. Email testing
+## 8. Email testing
 
 - [ ] Sign up as a real student on the real domain; confirm the verification
       email arrives **in the inbox, not spam**
@@ -263,7 +263,7 @@ observed once, not as current behaviour.
 
 ---
 
-## 8. Database and migrations
+## 9. Database and migrations
 
 - [ ] Back up the production database before the first deploy
 - [ ] Deploy and confirm migrations reach head **52**
@@ -318,7 +318,7 @@ fail is usually otherwise healthy and generates no errors at all.
 
 ---
 
-## 9. Browser QA
+## 10. Browser QA
 
 - [ ] Sign-up, login, verification, reset, 2FA on the production domain
 - [ ] Public profile, event, certificate and organization links all resolve to
@@ -330,7 +330,7 @@ fail is usually otherwise healthy and generates no errors at all.
 
 ---
 
-## 10. Final launch verification
+## 11. Final launch verification
 
 - [ ] `npm test`, `npm run lint`, `npm run build`, `npm audit --omit=dev`
 - [ ] `/api/admin/system/status` shows both providers configured, an empty
