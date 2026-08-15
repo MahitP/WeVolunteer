@@ -28,6 +28,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
+/* Read rather than assumed: the case below is only true while enforcement is
+   off, and hardcoding either answer here is how a mode switch stops working. */
+import { LEGAL_HASHES_ENFORCED } from './legalDocuments.js';
 
 let dir;
 
@@ -169,7 +172,9 @@ describe('booting a second time against the same database', () => {
    * hash, and flipping enforcement on at launch would then fail against a
    * database nobody could reconcile.
    */
-  it('absorbs an edited published version before launch, moving the recorded hash', async () => {
+  /* `runIf`, not deletion — enforcement is now on, and this documents the other
+     mode. See the same idiom in consent.test.js. */
+  it.runIf(!LEGAL_HASHES_ENFORCED)('absorbs an edited published version before launch, moving the recorded hash', async () => {
     let db = await boot();
     expect(
       db.prepare('SELECT COUNT(*) AS c FROM schema_migrations WHERE version = 16').get().c,
