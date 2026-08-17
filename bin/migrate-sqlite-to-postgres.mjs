@@ -43,11 +43,26 @@ const arg = (name) => {
 };
 const APPLY = args.includes('--apply');
 const FORCE = args.includes('--force');
-const SOURCE = arg('source');
+/**
+ * `--source` falls back to `WEV_DB_PATH`, like every other tool in `bin/`.
+ *
+ * The variable is what the rest of the system uses to name "the database this
+ * deployment means", and a migration tool that ignored it would be the one
+ * command able to read a different database from everything around it —
+ * precisely the bug `docs/audits/04-PRIVILEGED-CLI-DATABASE-TARGET.md` records.
+ * Defaulting to it is safe here in a way it would not be for a writer: the
+ * source is opened READ-ONLY below, so the worst case is reading the wrong
+ * database, never damaging one.
+ *
+ * `--target` has no default on purpose. There is no "the PostgreSQL database
+ * this deployment means" yet, and guessing one is how a dry run lands somewhere
+ * real.
+ */
+const SOURCE = arg('source') ?? process.env.WEV_DB_PATH;
 const TARGET = arg('target');
 
 if (!SOURCE || !TARGET) {
-  console.error('usage: --source <sqlite.db> --target <postgres-url> [--apply] [--force]');
+  console.error('usage: --source <sqlite.db|$WEV_DB_PATH> --target <postgres-url> [--apply] [--force]');
   process.exit(2);
 }
 
