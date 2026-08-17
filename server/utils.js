@@ -13,6 +13,7 @@ import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
 import { sweepCheckinTokens } from './checkinTokens.js';
 import { sweepErrors } from './errorReporter.js';
 import { sendErrorAlerts, sendBackupAlert } from './alerting.js';
+import { forUpdate } from './db/dialectSql.js';
 /* Read here rather than inside alerting.js — that module imports nothing on
    purpose, so everything it needs arrives as an argument. */
 import { backupStatus } from './backupStatus.js';
@@ -1274,13 +1275,30 @@ export async function assignWaitlistOrder(applicationId, slotId) {
  * with it, and a socket emit cannot be un-sent.
  */
 export async function promoteFromWaitlist(slotId) {
+  /**
+   * The slot row is LOCKED before anything is counted.
+   *
+   * This function reads the accepted count, computes `free = max_spots -
+   * accepted`, and promotes that many from the head of the queue. Two spots
+   * released at the same moment each run this, and without the lock both read
+   * the same queue and promote the SAME person — the second UPDATE lands on a
+   * row that is already accepted, so one promotion is silently lost and a
+   * volunteer keeps waiting for a spot that is free.
+   *
+   * Measured before the lock existed: two spots released together with three
+   * people waiting promoted ONE person, not two.
+   *
+   * `FOR UPDATE` is applied to the slot only, so the join to `events` still
+   * reads normally — PostgreSQL would otherwise try to lock the event row too,
+   * and nothing here modifies it.
+   */
   const slot = await db.prepare(`
     SELECT s.id, s.name, s.max_spots, s.event_id,
            e.title AS event_title, e.organizer_id, e.status AS event_status,
            e.organization_id, e.audience
     FROM slots s JOIN events e ON e.id = s.event_id
     WHERE s.id = ?
-  `).get(slotId);
+  ${forUpdate(db) ? 'FOR UPDATE OF s' : ''}`).get(slotId);
   if (!slot) return [];
 
   // Pulling someone into a called-off event would be worse than leaving them

@@ -281,6 +281,89 @@ describe.skipIf(!RUNNING_ON_POSTGRES)('the application under real PostgreSQL con
     }
   });
 
+
+  /**
+   * Waitlist promotion is the same read-then-write, one layer down.
+   *
+   * `promoteFromWaitlist` counts accepted rows, computes
+   * `free = max_spots - accepted`, and promotes that many. Two spots released at
+   * the same moment each compute a free count from a slot the other is also
+   * changing, so the same waitlisted person can be promoted twice — or two
+   * people can be promoted into one freed spot.
+   *
+   * It runs inside the caller's transaction (`AsyncLocalStorage` binds the
+   * module-level handle to the transaction's connection, so this is not a
+   * cross-connection bug), which means the lock has to be taken on the slot for
+   * the same reason it is in the accept path.
+   */
+  describe('waitlist promotion', () => {
+    const ORGANIZER = 'jordan.whitfield@example.org';
+
+    it('never promotes more people than the spots actually released', async () => {
+      for (let round = 0; round < 3; round += 1) {
+        const tag = `wl${round}-${Math.random().toString(36).slice(2, 7)}`;
+        const organizer = await srv.login(ORGANIZER);
+        const start = new Date(Date.now() + 45 * 864e5).toISOString();
+        const made = await srv.call('POST', '/api/events', {
+          title: `Waitlist race ${tag}`, description: 'd', category: 'Other', location: 'Somewhere',
+          applicationDeadline: new Date(Date.now() + 30 * 864e5).toISOString(),
+          slots: [{
+            name: 'S', description: 'd', startDatetime: start,
+            endDatetime: new Date(Date.now() + 45 * 864e5 + 108e5).toISOString(), maxSpots: 2,
+          }],
+        }, organizer);
+        expect(made.status, `fixture: event (${JSON.stringify(made.body)})`).toBe(201);
+        const slot = await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(made.body.id);
+
+        const students = await db.prepare(
+          "SELECT id FROM users WHERE role = 'student' AND account_status = 'active' ORDER BY id LIMIT 5"
+        ).all();
+        expect(students.length, 'fixture: needs five students').toBe(5);
+
+        /* Two accepted (filling the slot), three waitlisted behind them. */
+        const accepted = [], now = new Date().toISOString();
+        for (const [i, u] of students.entries()) {
+          const id = `app-${tag}-${i}`;
+          const status = i < 2 ? 'accepted' : 'waitlisted';
+          await db.prepare(`
+            INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at, waitlist_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run(id, u.id, made.body.id, slot.id, status, now, i < 2 ? null : i);
+          if (i < 2) accepted.push(id);
+        }
+
+        /* Release BOTH accepted spots at the same instant. Exactly two of the
+           three waitlisted people may be promoted — never three, never the same
+           person twice. */
+        await Promise.all(accepted.map(id =>
+          srv.call('PATCH', `/api/applications/${id}`, { status: 'rejected' }, organizer)
+            .catch(err => ({ status: 0, body: { error: String(err?.message ?? err) } }))));
+
+        const rows = await db.prepare(
+          'SELECT user_id, status FROM applications WHERE slot_id = ?'
+        ).all(slot.id);
+        const nowAccepted = rows.filter(r => r.status === 'accepted');
+
+        expect(
+          nowAccepted.length,
+          `promoted ${nowAccepted.length} into 2 released spots: ${rows.map(r => r.status).join(',')}`,
+        ).toBeLessThanOrEqual(2);
+
+        const distinct = new Set(nowAccepted.map(r => r.user_id));
+        expect(distinct.size, 'the same person was promoted more than once').toBe(nowAccepted.length);
+
+        /* The other bound. Promoting NOBODY satisfies "never more than two" and
+           breaks the product — two spots were released and three people were
+           waiting, so two must move up. Without this the test passes on a
+           promotion path that silently does nothing. */
+        expect(
+          nowAccepted.length,
+          `two spots were released with three people waiting, but ${nowAccepted.length} were promoted`,
+        ).toBe(2);
+      }
+    }, 120_000);
+  });
+
   /**
    * A check-in token is single-use by contract: it is how attendance is claimed,
    * and a token that can be redeemed twice is a double attendance record.
