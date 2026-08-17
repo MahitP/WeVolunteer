@@ -248,6 +248,22 @@ const CONSTRUCTS = [
     postgres: 'strpos(haystack, needle) — same argument order, same 1-based-or-0 result' },
   { name: 'scalar min/max',  count: scalarMinMax,                           runtime: 0, boot: 0,
     postgres: 'LEAST(…) / GREATEST(…) — PostgreSQL reads the 2-arg form as its aggregate and refuses' },
+  /**
+   * `AS userId` without quotes.
+   *
+   * PostgreSQL folds an unquoted identifier to lower case, so the column comes
+   * back as `userid` and `row.userId` is `undefined`. SQLite preserves the case
+   * either way, so this is invisible on the authoritative engine.
+   *
+   * The reason it is worth a ratchet rather than a one-time fix: it does not
+   * throw. 36 of these were live across nine files, and every one of them would
+   * have rendered a blank member count or an `undefined` hours figure instead of
+   * failing. Quoting the alias is portable — SQLite keeps the case with or
+   * without quotes — so the rule is simply "quote any alias that is not already
+   * all-lower-case".
+   */
+  { name: 'unquoted camelCase alias', pattern: /\bAS\s+[a-z_]\w*[A-Z]\w*/g,  runtime: 0, boot: 0,
+    postgres: 'AS "userId" — quote it, or PostgreSQL returns `userid` and the property read yields undefined' },
 ];
 
 /* Rebuilt per call because `String.match` with a /g/ regex is stateful, and
