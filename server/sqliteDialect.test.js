@@ -389,9 +389,25 @@ describe('SQLite-only SQL still in the codebase', () => {
     /* `FILES` deliberately excludes test files — it measures shipped SQL — so
        the test tree is read directly here. This file names the flag in order to
        police it and would otherwise appear in its own list. */
+    /**
+     * Only the EXCLUDING direction is policed.
+     *
+     * `skipIf(RUNNING_ON_POSTGRES)` removes coverage from PostgreSQL, and that
+     * is the thing worth a list. `skipIf(!RUNNING_ON_POSTGRES)` is its inverse:
+     * a suite that runs ONLY on PostgreSQL, because what it asserts — real
+     * connection-pool concurrency — has no meaning on SQLite, where a
+     * process-wide write queue holds the same invariants by a different
+     * mechanism. That direction adds PostgreSQL coverage rather than removing
+     * it, so requiring it to be listed here would be asking permission to test
+     * more.
+     */
     const users = readdirSync(SERVER)
       .filter(n => n.includes('.test.') && n !== 'sqliteDialect.test.js')
-      .filter(n => readFileSync(path.join(SERVER, n), 'utf8').includes('RUNNING_ON_POSTGRES'))
+      .filter((n) => {
+        const src = readFileSync(path.join(SERVER, n), 'utf8');
+        return /skipIf\(\s*RUNNING_ON_POSTGRES/.test(src)
+          || /it\.skipIf\(RUNNING_ON_POSTGRES\)/.test(src);
+      })
       .sort();
     expect(
       users,
