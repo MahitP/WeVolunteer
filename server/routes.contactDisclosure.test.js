@@ -84,7 +84,11 @@ describe('privileged profile fields are gated on every route that can reach them
       for (const uid of ['user-student-1', 'user-student-2']) {
         await db.prepare(`INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
           VALUES (?, ?, ?, ?, 'accepted', ?)
-      ON CONFLICT (id) DO UPDATE SET user_id = excluded.user_id, event_id = excluded.event_id, slot_id = excluded.slot_id, status = excluded.status, applied_at = excluded.applied_at`).run(`app-roster-${uid}`, uid, ev, slot.id, new Date().toISOString());
+      /* Conflicts on (user_id, slot_id), the constraint that actually fires,
+         and the id is derived from the same pair so the primary key can never
+         disagree with it. Targeting (id) alone meant a re-run hit the other
+         unique index; targeting the pair alone meant it hit the primary key. */
+      ON CONFLICT (user_id, slot_id) DO UPDATE SET status = excluded.status, applied_at = excluded.applied_at`).run(`app-roster-${uid}-${slot.id}`, uid, ev, slot.id, new Date().toISOString());
       }
       return ev;
     };
