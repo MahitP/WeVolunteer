@@ -55,8 +55,32 @@ async function newProblem(fingerprint, source = 'server') {
 const alertedAt = async (fp) =>
   (await db.prepare('SELECT alerted_at FROM error_groups WHERE fingerprint = ?').get(fp))?.alerted_at;
 
-/** Waits for the sweep's un-awaited alert promise to settle. */
-const settle = () => new Promise(r => setImmediate(r));
+/**
+ * Waits for the sweep's un-awaited alert promise to settle.
+ *
+ * One `setImmediate` was enough while every statement inside `sendErrorAlerts`
+ * resolved synchronously — on SQLite the whole claim-then-send ran to
+ * completion in a single microtask drain. On PostgreSQL each statement is a
+ * round trip, so the sweep returns with the alert still in flight and a single
+ * tick lands before the mail is sent.
+ *
+ * `alerted_at` is the signal to wait on rather than the mock: the claim happens
+ * BEFORE the send by design, so once a fingerprint is stamped the send has
+ * either happened or is one await away. `settled()` then drains the remaining
+ * microtasks. A fingerprint that is never claimed times out loudly instead of
+ * the assertion reporting "sendMail was not called", which is the same symptom
+ * with none of the cause.
+ */
+const settle = async (fingerprint) => {
+  if (fingerprint) {
+    for (let i = 0; i < 300; i += 1) {
+      if (await alertedAt(fingerprint)) break;
+      await new Promise(r => setTimeout(r, 10));
+    }
+  }
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setTimeout(r, 20));
+};
 
 describe('the maintenance sweep actually sends alerts', () => {
   it('mails a new server problem when runNotificationSweep runs', async () => {
@@ -65,7 +89,7 @@ describe('the maintenance sweep actually sends alerts', () => {
 
     // The real entry point the 15-minute interval calls — not sendErrorAlerts.
     await utils.runNotificationSweep();
-    await settle();
+    await settle('fp-alert-wiring');
 
     expect(sendMail, 'runNotificationSweep never reached sendErrorAlerts').toHaveBeenCalled();
     expect(await alertedAt('fp-alert-wiring')).not.toBeNull();
@@ -82,7 +106,7 @@ describe('the maintenance sweep actually sends alerts', () => {
     await newProblem('fp-alert-privacy');
 
     await utils.runNotificationSweep();
-    await settle();
+    await settle('fp-alert-privacy');
 
     const body = `${sendMail.mock.calls[0][0].subject}\n${sendMail.mock.calls[0][0].text}`;
     expect(body).not.toContain('a message that must not be mailed');

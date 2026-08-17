@@ -1133,8 +1133,16 @@ export async function runNotificationSweep() {
      * Deliberately NOT awaited. This sweep is synchronous and its callers do
      * not await it, so awaiting an SMTP round trip would either block the tick
      * behind a slow mail server or, worse, make the sweep's timing depend on
-     * one. `sendErrorAlerts` marks the groups synchronously before it sends, so
-     * the next tick cannot double-send even if this one is still in flight. The
+     * one.
+     *
+     * What stops the next tick double-sending is NOT that this one finished:
+     * on PostgreSQL every statement inside `sendErrorAlerts` is a round trip and
+     * this call is not awaited, so two sweeps really can overlap. It is that
+     * `sendErrorAlerts` CLAIMS its groups with a single conditional
+     * `UPDATE … WHERE alerted_at IS NULL … RETURNING`, so only one caller can
+     * ever own a given row and a loser sends nothing. The earlier wording said
+     * the marking was synchronous, which was true on SQLite and is what would
+     * have made this call unsafe here. The
      * `.catch` is belt and braces — the function does not reject — but an
      * unhandled rejection here would be reported by our own error capture,
      * which is the loop worth refusing outright.

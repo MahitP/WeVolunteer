@@ -283,7 +283,7 @@ export async function sendErrorAlerts(db, { send, now = new Date(), appUrl } = {
     if (to.length === 0) return { sent: 0, reason: 'not_configured' };
     if (typeof send !== 'function') return { sent: 0, reason: 'no_sender' };
 
-    const groups = await pendingAlerts(db);
+    let groups = await pendingAlerts(db);
     if (groups.length === 0) return { sent: 0, reason: 'nothing_new' };
 
     /**
@@ -313,8 +313,39 @@ export async function sendErrorAlerts(db, { send, now = new Date(), appUrl } = {
      * A lost notification is recoverable by looking. An alert loop is how a
      * channel gets muted, and a muted channel loses every future alert.
      */
-    const mark = await db.prepare('UPDATE error_groups SET alerted_at = ? WHERE fingerprint = ?');
-    for (const g of groups) await mark.run(stamp, g.fingerprint);
+    /**
+     * ── The groups are CLAIMED atomically, not marked one by one ──
+     *
+     * The read above and this write used to be separate, which was safe only
+     * because `runNotificationSweep` calls this without awaiting it and the
+     * marking was synchronous — so a second tick could not start before the
+     * first had marked. That reasoning was true on SQLite and is false on
+     * PostgreSQL, where every one of these statements is a round trip and the
+     * caller is not waiting. Two overlapping sweeps would both read
+     * `alerted_at IS NULL`, both mark, and both send the same digest.
+     *
+     * That is the exact failure the comment above refuses: an alert loop is how
+     * a channel gets muted, and a muted channel loses every future alert.
+     *
+     * One conditional UPDATE … RETURNING closes it. `alerted_at IS NULL` in the
+     * WHERE clause means only one caller can ever claim a given row, and the
+     * rows it returns are precisely the ones it won — so a loser sends nothing
+     * rather than sending a duplicate. Understood by both engines (SQLite has
+     * RETURNING since 3.35; this runs 3.51).
+     */
+    const placeholders = ALERTED_SOURCES.map(() => '?').join(', ');
+    const claimed = await db.prepare(`
+      UPDATE error_groups SET alerted_at = ?
+       WHERE alerted_at IS NULL
+         AND status = 'open'
+         AND source IN (${placeholders})
+      RETURNING fingerprint, kind, source, occurrences, first_seen_at
+    `).all(stamp, ...ALERTED_SOURCES);
+
+    if (claimed.length === 0) return { sent: 0, reason: 'nothing_new' };
+    /* Ordered here rather than in SQL: UPDATE … RETURNING has no ORDER BY, and
+       the digest reads oldest-problem-first. */
+    groups = claimed.sort((a, b) => String(a.first_seen_at).localeCompare(String(b.first_seen_at)));
 
     const subject = groups.length === 1
       ? `[WeVolunteer] New ${groups[0].source} error: ${groups[0].kind}`
