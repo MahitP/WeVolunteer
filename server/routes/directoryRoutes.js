@@ -267,6 +267,8 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
    * the server treats specially. Removing it makes the search mean what the
    * visible characters say.
    */
+  // eslint-disable-next-line no-control-regex -- matching NUL is the entire point:
+  // PostgreSQL refuses the byte and the driver turns it into a 500.
   const raw = String(req.query.q ?? '').replace(/\u0000/gu, '').trim();
 
   /**
