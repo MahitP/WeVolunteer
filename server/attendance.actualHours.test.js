@@ -53,7 +53,7 @@ describe('actual hours, and events that credit none', () => {
   ).get(slotId, studentId);
 
   const ledger = async (slotId) => await db.prepare(
-    'SELECT * FROM hours_ledger WHERE slot_id = ? ORDER BY rowid'
+    'SELECT * FROM hours_ledger WHERE slot_id = ? ORDER BY created_at, id'
   ).all(slotId);
 
   beforeAll(async () => {

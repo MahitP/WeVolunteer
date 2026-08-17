@@ -585,7 +585,7 @@ describe('timed suspension', () => {
     const notice = await db.prepare(`
       SELECT body FROM notifications
        WHERE user_id = 'user-student-2' AND title LIKE '%suspended%'
-       ORDER BY rowid DESC LIMIT 1
+       ORDER BY created_at DESC, id DESC LIMIT 1
     `).get();
 
     expect(notice, 'a suspension with no notice is a lockout with no explanation').toBeTruthy();
@@ -652,7 +652,7 @@ describe('timed suspension', () => {
 
     const row = await db.prepare(`SELECT details FROM admin_audit_logs
                              WHERE action = 'ACCOUNT_SUSPENDED' AND target_user_id = ?
-                             ORDER BY rowid DESC LIMIT 1`).get('user-student-2');
+                             ORDER BY created_at DESC, id DESC LIMIT 1`).get('user-student-2');
     expect(row.details).toContain(until);
   });
 });

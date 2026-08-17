@@ -39,7 +39,7 @@ const adminToken = () => srv.login('admin@example.gov');
  * would pass while asserting the absence of rows it never looked for.
  */
 const notices = async (userId) => await db.prepare(
-  "SELECT * FROM notifications WHERE user_id = ? AND title LIKE '%note about your%' ORDER BY rowid DESC"
+  "SELECT * FROM notifications WHERE user_id = ? AND title LIKE '%note about your%' ORDER BY created_at DESC, id DESC"
 ).all(userId);
 
 const audits = async (userId) => await db.prepare(

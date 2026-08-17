@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -148,7 +149,21 @@ function readState(dbFile) {
   return { users, attendance, indexes };
 }
 
-describe('email dedupe migration (F-11, defensive/no data loss)', () => {
+/**
+ * The dedupe itself is SQLite-only machinery.
+ *
+ * `dedupeCaseInsensitiveEmails` runs inside `initDatabase()`, which returns
+ * before reaching it when the engine is PostgreSQL — the generated schema is
+ * applied whole instead. These two cases assert what that pass DID to an
+ * existing SQLite file, so on PostgreSQL they are asking about work that never
+ * happened.
+ *
+ * The behaviour it exists to protect is NOT skipped: the API describe above —
+ * case-variant signups refused, any casing able to sign in, addresses
+ * normalised on write — runs on both engines, and `db.postgresSchema.test.js`
+ * proves the case-insensitive email index enforces there too.
+ */
+describe.skipIf(RUNNING_ON_POSTGRES)('email dedupe migration (F-11, defensive/no data loss)', () => {
   it('keeps the higher-hours account unchanged, renames the other, bumps its token_version, adds the index, and touches no attendance row', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'wev-email-dedupe-'));
     const dbFile = makeDuplicateDb(dir);

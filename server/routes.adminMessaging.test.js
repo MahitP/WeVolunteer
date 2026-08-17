@@ -97,7 +97,7 @@ describe('opening a thread', () => {
     const row = await db.prepare(`
       SELECT admin_id, target_user_id, details FROM admin_audit_logs
        WHERE action = 'ADMIN_CONVERSATION_OPENED' AND target_user_id = ?
-       ORDER BY rowid DESC LIMIT 1
+       ORDER BY created_at DESC, id DESC LIMIT 1
     `).get(STUDENT);
 
     expect(row, 'opening a line to a student must be on the record').toBeTruthy();
