@@ -297,6 +297,27 @@ export function caseInsensitiveLike(db) {
   return isPostgres(db) ? 'ILIKE' : 'LIKE';
 }
 
+/**
+ * Runs `fn` with foreign-key enforcement suspended, then restores it.
+ *
+ * Only fixtures need this, and only to construct a state the schema forbids but
+ * real data can reach — a retention test needs an application whose slot is
+ * gone, which a live database arrives at by never having had one.
+ *
+ * The engines spell it completely differently: SQLite has a pragma, PostgreSQL
+ * has `session_replication_role`, which suspends the FK triggers for the
+ * session. Restoring is in a `finally` on both, because leaving enforcement off
+ * would let every later test in the file write rows the schema forbids and pass.
+ */
+export async function withForeignKeysOff(db, fn) {
+  if (isPostgres(db)) {
+    await db.exec("SET session_replication_role = 'replica'");
+    try { return await fn(); } finally { await db.exec("SET session_replication_role = 'origin'"); }
+  }
+  await db.exec('PRAGMA foreign_keys = OFF');
+  try { return await fn(); } finally { await db.exec('PRAGMA foreign_keys = ON'); }
+}
+
 export function forUpdate(db) {
   return isPostgres(db) ? ' FOR UPDATE' : '';
 }

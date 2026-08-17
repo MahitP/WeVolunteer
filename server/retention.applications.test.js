@@ -50,6 +50,7 @@
  * the cascade into a RESTRICT fails here rather than aborting the nightly sweep.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { withForeignKeysOff } from './db/dialectSql.js';
 import { startTestServer } from './testServer.js';
 
 let srv, db;
@@ -224,9 +225,9 @@ describe('the event decides the clock, not the application', () => {
     // Detach the slot without cascading the application away, so the fallback path
     // is what decides. (A real slotless event reaches this state by never having had
     // one; this is the only way to construct it against the FK.)
-    await db.prepare('PRAGMA foreign_keys = OFF').run();
-    await db.prepare('DELETE FROM slots WHERE id = ?').run(slotId);
-    await db.prepare('PRAGMA foreign_keys = ON').run();
+    await withForeignKeysOff(db, async () => {
+      await db.prepare('DELETE FROM slots WHERE id = ?').run(slotId);
+    });
 
     expect(await appExists(appId)).toBe(true);
     await sweep(db);

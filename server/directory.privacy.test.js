@@ -319,9 +319,16 @@ describe('the member directory: what one member may learn about another', () => 
       /* There is no latitude/longitude on `users` and there must not be one:
          an event's coordinates are a meeting point an organizer published; a
          student's would be a child's whereabouts. */
-      const columns = (await db.prepare('PRAGMA table_info(users)').all()).map(c => c.name);
-      expect(columns).not.toContain('latitude');
-      expect(columns).not.toContain('longitude');
+      /* Asked of the table rather than of the catalogue: `PRAGMA table_info`
+         does not exist on PostgreSQL, and the claim — users carry no
+         coordinates — is engine-independent. Selecting a column that is not
+         there raises on both engines, so the raise IS the passing case. */
+      for (const column of ['latitude', 'longitude']) {
+        let present = true;
+        try { await db.prepare(`SELECT ${column} FROM users LIMIT 0`).all(); }
+        catch { present = false; }
+        expect(present, `users gained a ${column} column — that is a child's whereabouts`).toBe(false);
+      }
     });
   });
 });
