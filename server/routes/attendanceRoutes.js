@@ -476,7 +476,13 @@ router.get('/api/certificates/verify/:code', async (req, res) => {
       JOIN users u ON at.user_id = u.id
       JOIN users org ON e.organizer_id = org.id
       WHERE at.user_id = ? AND at.event_id = ? AND at.present = 1
-      GROUP BY at.user_id, e.id
+      /* The joined tables' keys are grouped too. PostgreSQL allows an ungrouped
+         column only when it is functionally dependent on a grouped PRIMARY KEY,
+         and that holds per table, so u.name and org.name need u.id and org.id
+         here, exactly as the certificate list above does. Without them this
+         endpoint answered 500. (No backticks: this comment lives inside a
+         template literal.) */
+      GROUP BY at.user_id, e.id, u.id, org.id
     `).get(cert.user_id, cert.event_id);
     if (!row) return res.status(404).json({ valid: false, error: 'No certificate matches that code' });
 

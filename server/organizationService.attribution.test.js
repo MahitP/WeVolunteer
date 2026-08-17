@@ -163,13 +163,29 @@ describe('hours are scoped to the organization that ran the event', () => {
   });
 
   it('cannot double-count, because an event has one owning organization', async () => {
-    const cols = (await db.prepare('PRAGMA table_info(events)').all()).map(c => c.name);
-    expect(cols).toContain('organization_id');
-    /* No join table, so there is no second owner to attribute to. */
-    const joinTable = await db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%event_organization%'"
-    ).get();
-    expect(joinTable, 'events gained multiple owners — attribution now needs a rule').toBeFalsy();
+    /**
+     * Asked of the DATA rather than of the catalogue.
+     *
+     * This used `PRAGMA table_info` and `sqlite_master`, neither of which
+     * PostgreSQL has, so the whole assertion errored there — and what it is
+     * really claiming is engine-independent: an event carries exactly one
+     * owning organization, so there is nothing to double-count.
+     *
+     * `SELECT organization_id … LIMIT 0` proves the column exists on either
+     * engine (it raises if it does not) without depending on how the engine
+     * spells its catalogue.
+     */
+    await db.prepare('SELECT organization_id FROM events LIMIT 0').all();
+
+    /* And no join table, so there is no second owner to attribute to. A missing
+       relation raises on both engines, so the absence is the passing case. */
+    let joinTableExists = true;
+    try {
+      await db.prepare('SELECT 1 FROM event_organizations LIMIT 0').all();
+    } catch {
+      joinTableExists = false;
+    }
+    expect(joinTableExists, 'events gained multiple owners — attribution now needs a rule').toBe(false);
   });
 });
 

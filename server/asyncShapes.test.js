@@ -110,6 +110,36 @@ const unambiguousAsyncNames = (() => {
   return [...asyncNames].filter(n => !sync.has(n));
 })();
 
+/**
+ * Every source file parses.
+ *
+ * This exists because a syntax error does NOT show up as a failure. Vitest
+ * cannot load a file whose imports fail to parse, so it reports every test in
+ * it as *skipped* — the suite gets quieter and the failure count improves.
+ * Twice in this migration a stray backtick inside a SQL template literal (the
+ * comment above the SQL closed the string) took a whole file out of the run
+ * that way, and both times the numbers looked better for it.
+ *
+ * A parse error should be loud. This makes it a failure with a filename.
+ */
+describe('the source parses', () => {
+  it('has no file that vitest would silently skip', async () => {
+    const { parseAst } = await import('vite');
+    const broken = [];
+    for (const f of sourceFiles(SERVER)) {
+      try { parseAst(readFileSync(f, 'utf8')); }
+      catch (err) {
+        broken.push(`${path.relative(SERVER, f)}: ${String(err.message).split('\n')[1] ?? err.message}`);
+      }
+    }
+    expect(
+      broken,
+      'a file that does not parse is reported as SKIPPED, not failed — the suite '
+      + 'goes quiet instead of red.',
+    ).toEqual([]);
+  });
+});
+
 describe('await is written where the value is, not where the call is', () => {
   it('knows which functions are async, so every scan below has something to find', () => {
     expect(asyncNames.size, 'no async declarations found — these guards would all pass vacuously')
