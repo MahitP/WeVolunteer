@@ -69,7 +69,7 @@ describe('TOTP tolerance and single use', () => {
    */
   const clearMark = async () => {
     const { db } = await import('./db.js');
-    db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE email = ?').run(ADMIN);
+    await db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE email = ?').run(ADMIN);
   };
 
   /**

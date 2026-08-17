@@ -82,13 +82,24 @@ describe('no request path uses synchronous bcrypt', () => {
 });
 
 describe('no await sits inside a synchronous transaction', () => {
+  /**
+   * The SYNCHRONOUS transaction helper only. `runInTransaction` is deliberately
+   * excluded and has its own guard below.
+   *
+   * `\binTransaction\(` rather than `inTransaction\(`: the old pattern was
+   * case-sensitive and `runInTransaction(` contains `InTransaction(` with a
+   * capital I, so it never matched — which meant the async transactions
+   * introduced by the PostgreSQL migration were silently uncovered by ANY guard
+   * for a while. The word boundary makes the exclusion deliberate rather than
+   * accidental, and the companion guard below covers the other form.
+   */
   it('has no await between inTransaction( and its closing brace', () => {
     const offenders = [];
     for (const { file, code } of routeSources()) {
       const lines = code.split('\n');
       let inTx = false, depth = 0, opened = 0;
       lines.forEach((line, idx) => {
-        if (!inTx && /inTransaction\(/.test(line)) {
+        if (!inTx && /\binTransaction\(/.test(line)) {
           inTx = true; opened = idx + 1;
           depth = (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
           return;
@@ -110,6 +121,66 @@ describe('no await sits inside a synchronous transaction', () => {
   });
 });
 
+/**
+ * The companion guard: nothing inside an async transaction may use the ambient handle.
+ *
+ * ── What this protects, and why an await is fine here ──
+ *
+ * `runInTransaction(handle, async (tx) => …)` is the PostgreSQL-native form. An
+ * `await` inside it is not merely allowed but required — the transaction owns a
+ * pinned pooled client on PostgreSQL and its own connection on SQLite, so
+ * yielding cannot let anything else in. That is the opposite of the synchronous
+ * helper above, which is why the two need opposite guards.
+ *
+ * What must NOT appear inside is a statement on the ambient `db`. `db` is the
+ * async-context proxy, so inside a transaction it happens to resolve to `tx`
+ * anyway — today. The moment a statement is issued somewhere the context does not
+ * reach (a callback, a `setImmediate`, a helper that captured `db` earlier) it
+ * silently runs OUTSIDE the transaction: committed independently, unaffected by
+ * the rollback, with nothing raised.
+ *
+ * Writing `tx` explicitly makes the intent checkable, which is what this does.
+ * It has been verified by hand after each conversion so far; a guard is cheaper
+ * and does not forget.
+ */
+describe('async transactions keep every statement on the transaction handle', () => {
+  it('has no ambient db.prepare/db.exec between runInTransaction( and its close', () => {
+    const offenders = [];
+    for (const { file, code } of routeSources()) {
+      const lines = code.split('\n');
+      let inTx = false, depth = 0, opened = 0;
+      lines.forEach((line, idx) => {
+        if (!inTx && /runInTransaction\(/.test(line)) {
+          inTx = true; opened = idx + 1;
+          depth = (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+          return;
+        }
+        if (inTx) {
+          if (/\bdb\.(prepare|exec)\s*\(/.test(line)) {
+            offenders.push(`${file}:${idx + 1} (transaction opened at ${opened}) — ${line.trim()}`);
+          }
+          depth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+          if (depth <= 0) inTx = false;
+        }
+      });
+    }
+    expect(
+      offenders,
+      'a statement on the ambient `db` inside an async transaction can escape it — '
+      + 'use the `tx` handle the callback is given'
+    ).toEqual([]);
+  });
+
+  it('actually finds runInTransaction blocks, so it cannot pass vacuously', () => {
+    /* The sibling guard above spent a while matching nothing because of a
+       capital letter. This asserts the scan sees real blocks before believing
+       that it found no offenders in them. */
+    const opens = routeSources()
+      .reduce((n, { code }) => n + (code.match(/runInTransaction\(/g) || []).length, 0);
+    expect(opens, 'no runInTransaction blocks found in server/routes').toBeGreaterThan(0);
+  });
+});
+
 describe('every handler that awaits is declared async', () => {
   it('has no await in a non-async route handler', () => {
     // A missing `async` is a parse error at import, so this would normally surface
@@ -118,16 +189,34 @@ describe('every handler that awaits is declared async', () => {
     const offenders = [];
     for (const { file, code } of routeSources()) {
       const lines = code.split('\n');
-      let handler = null, isAsync = false, depth = 0;
+      let handler = null, isAsync = false, depth = 0, sigOpen = false;
       lines.forEach((line, idx) => {
         const m = /router\.(get|post|patch|put|delete)\('([^']+)'/.exec(line);
         if (m) {
           handler = `${m[1].toUpperCase()} ${m[2]}`;
           isAsync = /async/.test(line);
+          /**
+           * A handler signature may span several lines, with the middleware on
+           * one and the callback on the next:
+           *
+           *   router.post('/api/admin/invitations', authenticateToken, requireCap(…),
+           *     requireAAL2('admin.invite'), async (req, res) => {
+           *
+           * Reading `async` from the `router.post(` line alone reports that as a
+           * non-async handler that awaits — which it is not. The signature is
+           * whatever precedes the `=> {`, so keep looking until the callback is
+           * found. Wave 7 of the PostgreSQL migration produced exactly this
+           * false positive on a correctly-converted handler.
+           */
+          sigOpen = !/=>\s*\{/.test(line);
           depth = (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
           return;
         }
         if (handler) {
+          if (sigOpen) {
+            if (/async\s*\(/.test(line)) isAsync = true;
+            if (/=>\s*\{/.test(line)) sigOpen = false;
+          }
           depth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
           if (/\bawait\b/.test(line) && !isAsync) {
             offenders.push(`${file}:${idx + 1} — ${handler} awaits but is not async`);

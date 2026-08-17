@@ -46,17 +46,17 @@ let PASSWORD_HASH;
 let seq = 0;
 
 /** A user row straight in the database, optionally with linked providers. */
-function makeUser({ passwordHash, providers = [] } = {}) {
+async function makeUser({ passwordHash, providers = [] } = {}) {
   const id = `reauth-route-${++seq}`;
   const now = new Date().toISOString();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, name, email, username, password_hash, grade, role,
                        verified, email_verified, created_at)
     VALUES (?, ?, ?, ?, ?, 'Adult', 'student', 1, 1, ?)
   `).run(id, 'Route Person', `${id}@example.org`, id, passwordHash ?? PASSWORD_HASH, now);
 
   for (const [provider, sub] of providers) {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(`oauth-${id}-${provider}`, id, provider, sub, `${id}@example.org`, now, now);
@@ -73,8 +73,8 @@ function makeUser({ passwordHash, providers = [] } = {}) {
  * a second, permanent source of them until Task 6 gave oauthRoutes.js the shared
  * `issueSession`.) That case has to be a clean 401, never a 500.
  */
-function sessionFor(userId, { jti = crypto.randomUUID() } = {}) {
-  const u = db.prepare('SELECT id, role, email, name, token_version FROM users WHERE id = ?').get(userId);
+async function sessionFor(userId, { jti = crypto.randomUUID() } = {}) {
+  const u = await db.prepare('SELECT id, role, email, name, token_version FROM users WHERE id = ?').get(userId);
   const payload = { id: u.id, email: u.email, name: u.name, tokenVersion: u.token_version ?? 0 };
   // Written through a computed key so this fixture never spells out a role
   // comparison; Guard 1 does not scan tests, but the habit is the point.
@@ -100,13 +100,13 @@ async function api(method, path, { body, session, challengeId, redirect = 'follo
   return { status: res.status, body: parsed, location: res.headers.get('location') };
 }
 
-const challenge = (session, action, params) =>
-  api('POST', '/api/auth/reauth/challenge', { session, body: { action, params } });
+const challenge = async (session, action, params) =>
+  await api('POST', '/api/auth/reauth/challenge', { session, body: { action, params } });
 
-const verifyPassword = (session, challengeId, password) =>
-  api('POST', '/api/auth/reauth/password', { session, body: { challengeId, password } });
+const verifyPassword = async (session, challengeId, password) =>
+  await api('POST', '/api/auth/reauth/password', { session, body: { challengeId, password } });
 
-const row = (id) => db.prepare('SELECT * FROM reauth_challenges WHERE id = ?').get(id);
+const row = async (id) => await db.prepare('SELECT * FROM reauth_challenges WHERE id = ?').get(id);
 
 /** The mock provider transport reads its claims straight out of `code`. */
 const providerCode = (over = {}) => JSON.stringify({
@@ -176,7 +176,7 @@ async function hitProbe(path, { session, challengeId }) {
 
 describe('POST /api/auth/reauth/challenge', () => {
   it('refuses an action that is not in the registry, with 400', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     // One character off a real action. A typo must be a build-time-visible 400,
     // never a challenge that can be opened and never spent.
     const res = await challenge(session, 'account.delet', {});
@@ -185,15 +185,15 @@ describe('POST /api/auth/reauth/challenge', () => {
   });
 
   it('refuses a missing action with 400 rather than throwing', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     const res = await challenge(session, undefined, {});
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('unknown_action');
   });
 
   it('opens a bound challenge and reports the methods this account can answer', async () => {
-    const userId = makeUser();
-    const session = sessionFor(userId);
+    const userId = await makeUser();
+    const session = await sessionFor(userId);
     const before = Date.now();
     const res = await challenge(session, 'email.change', { newEmail: 'new@example.org' });
 
@@ -206,7 +206,7 @@ describe('POST /api/auth/reauth/challenge', () => {
     expect(ttl).toBeGreaterThan(4 * 60 * 1000);
     expect(ttl).toBeLessThanOrEqual(5 * 60 * 1000 + 5000);
 
-    const r = row(res.body.challengeId);
+    const r = await row(res.body.challengeId);
     expect(r.user_id).toBe(userId);
     expect(r.action).toBe('email.change');
     expect(r.session_jti).toBe(session.jti);
@@ -220,8 +220,8 @@ describe('POST /api/auth/reauth/challenge', () => {
   });
 
   it('does NOT offer password to a provider-only account', async () => {
-    const userId = makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-po-1']] });
-    const res = await challenge(sessionFor(userId), 'account.delete', {});
+    const userId = await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-po-1']] });
+    const res = await challenge(await sessionFor(userId), 'account.delete', {});
 
     expect(res.status).toBe(201);
     expect(res.body.methods).not.toContain('password');
@@ -229,20 +229,20 @@ describe('POST /api/auth/reauth/challenge', () => {
   });
 
   it('offers both methods to an account that has a password AND a provider', async () => {
-    const userId = makeUser({ providers: [['microsoft', 'sub-both-1']] });
-    const res = await challenge(sessionFor(userId), 'account.delete', {});
+    const userId = await makeUser({ providers: [['microsoft', 'sub-both-1']] });
+    const res = await challenge(await sessionFor(userId), 'account.delete', {});
     expect(res.body.methods.sort()).toEqual(['oauth', 'password']);
   });
 
   it('refuses, rather than opening an unanswerable challenge, when the account can prove nothing', async () => {
-    const userId = makeUser({ passwordHash: '!OAUTH_ONLY!' }); // no providers either
-    const res = await challenge(sessionFor(userId), 'account.delete', {});
+    const userId = await makeUser({ passwordHash: '!OAUTH_ONLY!' }); // no providers either
+    const res = await challenge(await sessionFor(userId), 'account.delete', {});
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('no_verification_method');
   });
 
   it('answers 401 with a distinguishable code — never 500 — for a session with no jti', async () => {
-    const session = sessionFor(makeUser(), { jti: null });
+    const session = await sessionFor(await makeUser(), { jti: null });
     const res = await challenge(session, 'account.delete', {});
 
     /**
@@ -270,13 +270,13 @@ describe('POST /api/auth/reauth/challenge', () => {
 
 describe('POST /api/auth/reauth/password', () => {
   it('grants on the correct password', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     const opened = await challenge(session, 'account.delete', {});
     const res = await verifyPassword(session, opened.body.challengeId, PASSWORD);
 
     expect(res.status).toBe(200);
     expect(res.body.granted).toBe(true);
-    const r = row(opened.body.challengeId);
+    const r = await row(opened.body.challengeId);
     expect(r.granted_at).toBeTruthy();
     expect(r.method).toBe('password');
     // Granting is not spending. Consumption belongs in the handler's own
@@ -285,19 +285,19 @@ describe('POST /api/auth/reauth/password', () => {
   });
 
   it('rejects the wrong password with a countdown, without granting', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     const opened = await challenge(session, 'account.delete', {});
     const res = await verifyPassword(session, opened.body.challengeId, 'not-the-password');
 
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('invalid_password');
     expect(res.body.attemptsRemaining).toBe(4);
-    expect(row(opened.body.challengeId).granted_at).toBe(null);
+    expect((await row(opened.body.challengeId)).granted_at).toBe(null);
   });
 
   it("tells a provider-only account why, instead of 'wrong password'", async () => {
-    const userId = makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-po-2']] });
-    const session = sessionFor(userId);
+    const userId = await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-po-2']] });
+    const session = await sessionFor(userId);
     // The client should have read `methods` and never shown the prompt — but a
     // stale tab will, and '!OAUTH_ONLY!' is not a bcrypt hash, so a naive
     // compare returns false and reads as "wrong password" to someone who has no
@@ -312,31 +312,31 @@ describe('POST /api/auth/reauth/password', () => {
     expect(res.body.error).toMatch(/provider/i);
     // And it must not have cost the user one of five guesses at a question they
     // were never able to answer.
-    expect(row(opened.body.challengeId).attempts).toBe(0);
+    expect((await row(opened.body.challengeId)).attempts).toBe(0);
   });
 
   it("does not treat the sentinel itself as the password", async () => {
-    const userId = makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-po-3']] });
-    const session = sessionFor(userId);
+    const userId = await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-po-3']] });
+    const session = await sessionFor(userId);
     const opened = await challenge(session, 'account.delete', {});
     const res = await verifyPassword(session, opened.body.challengeId, '!OAUTH_ONLY!');
 
     expect(res.status).toBe(409);
-    expect(row(opened.body.challengeId).granted_at).toBe(null);
+    expect((await row(opened.body.challengeId)).granted_at).toBe(null);
   });
 
   it("cannot be pointed at somebody else's challenge", async () => {
-    const owner = sessionFor(makeUser());
-    const stranger = sessionFor(makeUser());
+    const owner = await sessionFor(await makeUser());
+    const stranger = await sessionFor(await makeUser());
     const opened = await challenge(owner, 'account.delete', {});
 
     const res = await verifyPassword(stranger, opened.body.challengeId, PASSWORD);
     expect(res.status).toBe(404);
-    expect(row(opened.body.challengeId).granted_at).toBe(null);
+    expect((await row(opened.body.challengeId)).granted_at).toBe(null);
   });
 
   it('locks the challenge after five wrong guesses', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     const opened = await challenge(session, 'account.delete', {});
     for (let i = 0; i < 5; i++) {
       await verifyPassword(session, opened.body.challengeId, `wrong-${i}`);
@@ -347,11 +347,11 @@ describe('POST /api/auth/reauth/password', () => {
     const locked = await verifyPassword(session, opened.body.challengeId, PASSWORD);
     expect(locked.status).toBe(429);
     expect(locked.body.code).toBe('account_locked');
-    expect(row(opened.body.challengeId).granted_at).toBe(null);
+    expect((await row(opened.body.challengeId)).granted_at).toBe(null);
   });
 
   it('400s a missing challenge id rather than reaching the lifecycle', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     const res = await verifyPassword(session, undefined, PASSWORD);
     expect(res.status).toBe(400);
   });
@@ -361,7 +361,7 @@ describe('POST /api/auth/reauth/password', () => {
 
 describe('a grant is spendable only for the action it was opened for', () => {
   it('satisfies requireAAL2 for its own action and refuses another, over HTTP', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
 
     const opened = await challenge(session, 'email.change', { newEmail: 'a@x.com' });
     const granted = await verifyPassword(session, opened.body.challengeId, PASSWORD);
@@ -385,9 +385,9 @@ describe('a grant is spendable only for the action it was opened for', () => {
   });
 
   it('does not raise assurance for a grant belonging to a different session', async () => {
-    const userId = makeUser();
-    const here = sessionFor(userId);
-    const elsewhere = sessionFor(userId);
+    const userId = await makeUser();
+    const here = await sessionFor(userId);
+    const elsewhere = await sessionFor(userId);
 
     const opened = await challenge(here, 'email.change', { newEmail: 'a@x.com' });
     await verifyPassword(here, opened.body.challengeId, PASSWORD);
@@ -402,14 +402,14 @@ describe('a grant is spendable only for the action it was opened for', () => {
 
 describe('GET /api/auth/reauth/oauth/:provider', () => {
   async function redirectFor(provider, { session, challengeId }) {
-    return api('GET', `/api/auth/reauth/oauth/${provider}?challengeId=${encodeURIComponent(challengeId)}`, {
+    return await api('GET', `/api/auth/reauth/oauth/${provider}?challengeId=${encodeURIComponent(challengeId)}`, {
       session, redirect: 'manual'
     });
   }
 
   async function openFor(providerName, sub = `sub-${crypto.randomUUID()}`) {
-    const userId = makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [[providerName, sub]] });
-    const session = sessionFor(userId);
+    const userId = await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [[providerName, sub]] });
+    const session = await sessionFor(userId);
     const opened = await challenge(session, 'account.delete', {});
     expect(opened.status).toBe(201);
     return { userId, session, sub, challengeId: opened.body.challengeId };
@@ -468,13 +468,13 @@ describe('GET /api/auth/reauth/oauth/:provider', () => {
 
   it('writes nothing — the redirect is a pure function of the challenge', async () => {
     const { session, challengeId } = await openFor('google');
-    const before = row(challengeId);
+    const before = await row(challengeId);
     await redirectFor('google', { session, challengeId });
-    expect(row(challengeId)).toEqual(before);
+    expect(await row(challengeId)).toEqual(before);
   });
 
   it('404s an unknown challenge instead of sending the user to the provider', async () => {
-    const session = sessionFor(makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-x1']] }));
+    const session = await sessionFor(await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-x1']] }));
     const res = await redirectFor('google', { session, challengeId: 'reauth-does-not-exist' });
     expect(res.status).toBe(404);
     expect(res.location).toBe(null);
@@ -482,7 +482,7 @@ describe('GET /api/auth/reauth/oauth/:provider', () => {
 
   it("404s another user's challenge", async () => {
     const { challengeId } = await openFor('google');
-    const stranger = sessionFor(makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-x2']] }));
+    const stranger = await sessionFor(await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-x2']] }));
     const res = await redirectFor('google', { session: stranger, challengeId });
     expect(res.status).toBe(404);
   });
@@ -494,10 +494,10 @@ describe('GET /api/auth/reauth/oauth/:provider', () => {
   });
 
   it('401s a jti-less session rather than minting an unbindable state', async () => {
-    const userId = makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-x3']] });
-    const bound = sessionFor(userId);
+    const userId = await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-x3']] });
+    const bound = await sessionFor(userId);
     const opened = await challenge(bound, 'account.delete', {});
-    const jtiless = sessionFor(userId, { jti: null });
+    const jtiless = await sessionFor(userId, { jti: null });
 
     const res = await redirectFor('google', { session: jtiless, challengeId: opened.body.challengeId });
     expect(res.status).not.toBe(500);
@@ -510,8 +510,8 @@ describe('GET /api/auth/reauth/oauth/:provider', () => {
 
 describe('POST /api/auth/reauth/oauth/:provider/callback', () => {
   async function beginOAuth(providerName = 'google', sub = `sub-${crypto.randomUUID()}`) {
-    const userId = makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [[providerName, sub]] });
-    const session = sessionFor(userId);
+    const userId = await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [[providerName, sub]] });
+    const session = await sessionFor(userId);
     const opened = await challenge(session, 'account.delete', {});
     const redirected = await api(
       'GET',
@@ -522,8 +522,8 @@ describe('POST /api/auth/reauth/oauth/:provider/callback', () => {
     return { userId, session, sub, challengeId: opened.body.challengeId, state };
   }
 
-  const complete = (providerName, { session, code, state }) =>
-    api('POST', `/api/auth/reauth/oauth/${providerName}/callback`, { session, body: { code, state } });
+  const complete = async (providerName, { session, code, state }) =>
+    await api('POST', `/api/auth/reauth/oauth/${providerName}/callback`, { session, body: { code, state } });
 
   it('grants when the returned sub matches the linked account', async () => {
     const { session, sub, challengeId, state } = await beginOAuth('google');
@@ -531,7 +531,7 @@ describe('POST /api/auth/reauth/oauth/:provider/callback', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.granted).toBe(true);
-    const r = row(challengeId);
+    const r = await row(challengeId);
     expect(r.granted_at).toBeTruthy();
     expect(r.method).toBe('oauth');
     expect(r.consumed_at).toBe(null);
@@ -550,27 +550,27 @@ describe('POST /api/auth/reauth/oauth/:provider/callback', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('provider_mismatch');
-    expect(row(challengeId).granted_at).toBe(null);
+    expect((await row(challengeId)).granted_at).toBe(null);
     // A mismatch is a guessable wrong answer, so it costs an attempt.
-    expect(row(challengeId).attempts).toBe(1);
+    expect((await row(challengeId)).attempts).toBe(1);
   });
 
   it('refuses a state minted for a different session', async () => {
     const a = await beginOAuth('google');
-    const other = sessionFor(a.userId); // same user, different session
+    const other = await sessionFor(a.userId); // same user, different session
     const res = await complete('google', { session: other, state: a.state, code: providerCode({ sub: a.sub }) });
 
     expect(res.status).toBe(400);
-    expect(row(a.challengeId).granted_at).toBe(null);
+    expect((await row(a.challengeId)).granted_at).toBe(null);
   });
 
   it('refuses a state minted for a different user', async () => {
     const a = await beginOAuth('google');
-    const stranger = sessionFor(makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-s1']] }));
+    const stranger = await sessionFor(await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-s1']] }));
     const res = await complete('google', { session: stranger, state: a.state, code: providerCode({ sub: a.sub }) });
 
     expect(res.status).toBe(400);
-    expect(row(a.challengeId).granted_at).toBe(null);
+    expect((await row(a.challengeId)).granted_at).toBe(null);
   });
 
   it('refuses a state naming a different user even when the session binding matches', async () => {
@@ -601,14 +601,14 @@ describe('POST /api/auth/reauth/oauth/:provider/callback', () => {
     const res = await complete('google', { session: a.session, state: crossed, code: providerCode({ sub: victim.sub }) });
 
     expect(res.status).toBe(400);
-    expect(row(victim.challengeId).granted_at).toBe(null);
+    expect((await row(victim.challengeId)).granted_at).toBe(null);
   });
 
   it('refuses a state replayed at a different provider', async () => {
     const a = await beginOAuth('google');
     const res = await complete('microsoft', { session: a.session, state: a.state, code: providerCode({ sub: a.sub }) });
     expect(res.status).toBe(400);
-    expect(row(a.challengeId).granted_at).toBe(null);
+    expect((await row(a.challengeId)).granted_at).toBe(null);
   });
 
   it('refuses a forged state', async () => {
@@ -620,7 +620,7 @@ describe('POST /api/auth/reauth/oauth/:provider/callback', () => {
     );
     const res = await complete('google', { session: a.session, state: forged, code: providerCode({ sub: a.sub }) });
     expect(res.status).toBe(400);
-    expect(row(a.challengeId).granted_at).toBe(null);
+    expect((await row(a.challengeId)).granted_at).toBe(null);
   });
 
   it('refuses a state whose purpose is not reauth', async () => {
@@ -635,20 +635,20 @@ describe('POST /api/auth/reauth/oauth/:provider/callback', () => {
     );
     const res = await complete('google', { session: a.session, state: wrongPurpose, code: providerCode({ sub: a.sub }) });
     expect(res.status).toBe(400);
-    expect(row(a.challengeId).granted_at).toBe(null);
+    expect((await row(a.challengeId)).granted_at).toBe(null);
   });
 
   it('refuses when the provider is not linked to this account at all', async () => {
     const { session, challengeId, state } = await beginOAuth('google');
-    db.prepare('DELETE FROM oauth_accounts WHERE user_id = ?').run(
-      db.prepare('SELECT user_id FROM reauth_challenges WHERE id = ?').get(challengeId).user_id
+    await db.prepare('DELETE FROM oauth_accounts WHERE user_id = ?').run(
+      (await db.prepare('SELECT user_id FROM reauth_challenges WHERE id = ?').get(challengeId)).user_id
     );
     const res = await complete('google', { session, state, code: providerCode({ sub: 'anything' }) });
 
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('provider_not_linked');
     // No amount of guessing makes an unlinked provider linked, so nothing is spent.
-    expect(row(challengeId).attempts).toBe(0);
+    expect((await row(challengeId)).attempts).toBe(0);
   });
 
   it('400s a missing code', async () => {

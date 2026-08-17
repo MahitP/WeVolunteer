@@ -52,6 +52,7 @@ async function boot() {
   vi.resetModules();
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   return dbMod.db;
 }
 
@@ -217,8 +218,19 @@ describe('booting a second time against the same database', () => {
 
     try {
       const dbMod = await import('./db.js');
-      expect(() => dbMod.initDatabase())
-        .toThrow(/already published with a different content hash/i);
+      /**
+       * The refusal moved, and the property did not.
+       *
+       * `syncLegalDocuments` is what raises this, and it reads and writes rows
+       * through `legalStore` — so it is async, and it now runs in
+       * `completeDatabaseInit()` rather than inside the synchronous
+       * `initDatabase()`. Boot still dies on a changed hash, because
+       * `server.js` awaits that call at module top level with no catch, which
+       * is the same "process does not start" this test was written to pin.
+       */
+      dbMod.initDatabase();
+      await expect(dbMod.completeDatabaseInit())
+        .rejects.toThrow(/already published with a different content hash/i);
     } finally {
       vi.doUnmock('./legalDocuments.js');
       vi.resetModules();

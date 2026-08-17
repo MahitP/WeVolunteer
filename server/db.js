@@ -1,4 +1,9 @@
 import { DatabaseSync } from 'node:sqlite';
+import { setDefaultConnection, createConnectionProxy } from './db/connectionContext.js';
+import { resolveEngine, postgresConfig, SQLITE, POSTGRES } from './db/engine.js';
+import { PostgresDatabase } from './db/postgresConnection.js';
+import { translatePlaceholders } from './db/sqlPlaceholders.js';
+import { applyPostgresSchema } from './db/postgresSchema.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -21,7 +26,7 @@ import { acceptOrganizerAgreement } from './organizerAgreement.js';
 // Safe to import here despite this module opening the database at module scope:
 // auditLog.js imports `node:crypto` and nothing else, and takes `db` as an
 // argument, so there is no cycle back into this file.
-import { recordAudit } from './auditLog.js';
+import { recordAuditSync } from './auditLog.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -121,7 +126,68 @@ console.log(`[db] using ${dbPath}`);
  * simply stop firing and orphans accumulate. A setting whose absence is
  * undetectable is worth one line to make explicit.
  */
-const db = new DatabaseSync(dbPath, { enableForeignKeyConstraints: true });
+/**
+ * Which engine this process runs on, decided once, here.
+ *
+ * `resolveEngine()` had no caller until now — the constant existed so that the
+ * contract was fixed while the async port proceeded, and `db.js` opened SQLite
+ * unconditionally. That absence was the first of the three things standing
+ * between "every query awaits" and "PostgreSQL runs this application", and this
+ * is it closed.
+ *
+ * The gate in `engine.js` still refuses `postgres` while `POSTGRES_READY` is
+ * false, so selecting it is a startup error rather than a half-working server.
+ * `openConnection` is exported below so the PostgreSQL path can be exercised by
+ * its tests without that gate having to be opened first — a test may build the
+ * connection it wants; a deployment may not.
+ */
+export const ENGINE = resolveEngine();
+
+/**
+ * Builds a connection for one engine.
+ *
+ * Split out from the module body for two reasons: the PostgreSQL tests need to
+ * construct that side without `resolveEngine()` agreeing to it yet, and a
+ * factory makes the two paths sit beside each other where they can be compared,
+ * rather than one being the code and the other a branch inside it.
+ */
+export function openConnection(engine, options = {}) {
+  if (engine === POSTGRES) {
+    /* `max` and TLS come from `postgresConfig`, which reads DATABASE_URL and
+       refuses to guess. `translate` is what turns this codebase's `?`
+       placeholders into `$1` — without it every statement fails at bind time. */
+    return new PostgresDatabase({
+      ...postgresConfig(options.env ?? process.env),
+      translate: translatePlaceholders,
+    });
+  }
+  return new DatabaseSync(options.path ?? dbPath, { enableForeignKeyConstraints: true });
+}
+
+const connection = openConnection(ENGINE);
+
+/**
+ * `db` is a proxy onto `connection`, not `connection` itself.
+ *
+ * Today those are the same object at every access: there is one connection, no
+ * context is ever bound, and the proxy resolves to `connection` unconditionally.
+ * The indirection buys nothing yet and costs ~1.4% on a `prepare().get()`.
+ *
+ * It is here because `inTransaction()` cannot survive a connection pool
+ * otherwise. `BEGIN` on a module-global handle stops being a transaction the
+ * moment queries inside it can borrow a different client — silently, with no
+ * error and no rollback failure. Binding the transaction's connection to the
+ * async context lets all 656 `db.prepare` sites in the route layer join the
+ * enclosing transaction without any of them being edited.
+ *
+ * See `server/db/connectionContext.js` for the full reasoning. Nothing about the
+ * SQLite behaviour changes; `server/db.connectionContext.test.js` pins that.
+ */
+/* The path travels with the connection so an async transaction can open its own
+   connection to the SAME database — which is what makes `await` inside a SQLite
+   transaction safe. See server/db/sqliteTransaction.js. */
+setDefaultConnection(connection, dbPath);
+const db = createConnectionProxy();
 
 // Connection durability/concurrency settings, applied before any statement runs.
 //
@@ -136,8 +202,14 @@ const db = new DatabaseSync(dbPath, { enableForeignKeyConstraints: true });
 // WAL is written into the database header and persists; it also creates -wal
 // and -shm sidecar files, which any backup must copy alongside the .db (see
 // the runbook in README.md).
-db.exec('PRAGMA journal_mode = WAL');
-db.exec('PRAGMA busy_timeout = 5000');
+/* Both are SQLite file-locking settings with no PostgreSQL counterpart — WAL is
+   a journal mode, and concurrency there is the pool's business, not a pragma's.
+   Guarded rather than translated: PostgreSQL would answer `syntax error at or
+   near "PRAGMA"` and take the boot down. */
+if (ENGINE === SQLITE) {
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA busy_timeout = 5000');
+}
 
 /**
  * Adds a column only if it isn't already present. `ALTER TABLE ... ADD COLUMN`
@@ -231,7 +303,7 @@ function dedupeCaseInsensitiveEmails(db) {
  * are both case-SENSITIVE, while every application-level check runs
  * `COLLATE NOCASE`. Two concurrent signups for `Alice` and `alice` therefore
  * both pass their SELECT and both INSERT — and login's
- * `WHERE ... OR username = ? COLLATE NOCASE` uses `.get()`, so it returns one
+ * `WHERE ... OR username = ? COLLATE nocase` uses `.get()`, so it returns one
  * arbitrary row of the two and the other person can never sign in with their
  * username again.
  *
@@ -254,7 +326,7 @@ function dedupeCaseInsensitiveUsernames(db) {
 
   db.exec('BEGIN TRANSACTION');
   try {
-    const isTaken = db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE');
+    const isTaken = db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE nocase');
     const renameStmt = db.prepare('UPDATE users SET username = ? WHERE rowid = ?');
     const notifyStmt = db.prepare(`
       INSERT INTO notifications (id, user_id, kind, title, body, link, read, created_at)
@@ -299,7 +371,7 @@ function dedupeCaseInsensitiveUsernames(db) {
         // performed this — the migration did. Attribute it to the affected
         // account, which is what the self-deletion audit row already does for
         // the same reason, so the row is traceable without inventing a user.
-        recordAudit(db, {
+        recordAuditSync(db, {
           adminId: member.id,
           action: 'USERNAME_DEDUPED',
           targetUserId: member.id,
@@ -431,7 +503,45 @@ export function rebuildApplicationsForWithdrawn(db) {
   }
 }
 
+/**
+ * ── This does NOT finish the job: pair it with `completeDatabaseInit()` ──
+ *
+ * Everything here is synchronous — schema, migrations, column backfills. The
+ * steps that read and write ROWS (the hours-ledger backfill, its parity check,
+ * the DEMO_MODE organizer seed) became async with the PostgreSQL port and live
+ * in `completeDatabaseInit()` instead.
+ *
+ * A caller that only wants the schema can stop here. A caller that wants a
+ * database in the state a running server would have MUST await the other half —
+ * `server.js`, `testServer.js`, `bin/reset-dev-db`, `bin/seed-pilot` and
+ * `bin/simulate-pilot` all do. Skipping it was caught by
+ * `tooling.dbPath.test.js`, which seeded a database this way and then failed the
+ * ledger parity gate, so the omission is not theoretical.
+ */
 export function initDatabase() {
+  /**
+   * Under PostgreSQL this function has nothing it can do, and says so.
+   *
+   * Everything below is synchronous DDL — `db.exec`, `addColumnIfMissing`
+   * reading `PRAGMA table_info`, and 55 migrations, all of which return
+   * promises on an async engine that nobody here can await. `initDatabase` must
+   * stay synchronous (some forty callers do not await it, and
+   * `asyncShapes.test.js` fails the build on a change), so the PostgreSQL schema
+   * is applied by `completeDatabaseInit()` instead, from the generated
+   * `postgresSchema.js`.
+   *
+   * Returning quietly would be the dangerous version — a boot that creates no
+   * tables and reports success. So the state is recorded, and
+   * `completeDatabaseInit` clears it; `assertSchemaReady()` below turns a
+   * forgotten call into an error at the point of use rather than a
+   * "relation does not exist" from whichever query ran first.
+   */
+  if (ENGINE === POSTGRES) {
+    postgresSchemaPending = true;
+    console.log('[db] postgres: schema deferred to completeDatabaseInit()');
+    return;
+  }
+
   // Safe for restarts — only creates tables if they don't exist
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -959,7 +1069,7 @@ export function initDatabase() {
   dedupeCaseInsensitiveUsernames(db);
   db.exec(
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase '
-    + 'ON users(username COLLATE NOCASE) WHERE username IS NOT NULL'
+    + 'ON users(username COLLATE nocase) WHERE username IS NOT NULL'
   );
   addColumnIfMissing('users', 'profile_visibility', "TEXT CHECK(profile_visibility IN ('private', 'friends', 'public')) DEFAULT 'private'");
 
@@ -1090,8 +1200,13 @@ export function initDatabase() {
     console.warn('  *  and NODE_ENV=production.                                     *');
     console.warn('  ****************************************************************');
     console.warn('');
-    seedDatabase();
-    console.log('Seeding complete.');
+    /* Deferred to `completeDatabaseInit()`, not run here.
+       `seedDatabase` writes rows, and on PostgreSQL every one of those writes is
+       a promise this synchronous function cannot await — so a PostgreSQL boot
+       seeded nothing, and the first thing that noticed was a sign-in answering
+       "No account found with that email address." Moving the call rather than
+       duplicating it keeps one definition of what a demo database contains. */
+    demoSeedPending = true;
   } else {
     console.log('Empty database initialized. DEMO_MODE is off, so no demo accounts were created.');
   }
@@ -1107,7 +1222,9 @@ export function initDatabase() {
      * suite 403s. This is scoped to DEMO_MODE, so it can never quietly confirm
      * a real person's address in a live deployment.
      */
-    db.exec('UPDATE users SET email_verified = 1 WHERE email_verified = 0');
+    /* Also deferred: it exists to confirm the rows `seedDatabase` writes, and
+       running before them confirms nothing. `completeDatabaseInit` runs the two
+       in order. */
   } else if (!REQUIRE_EMAIL_VERIFICATION) {
     // Verification switched off deliberately: a stale 0 would put an otherwise
     // fine account behind a wall it cannot get past. Idempotent, and it stops
@@ -1123,8 +1240,12 @@ export function initDatabase() {
   // other table, rather than appearing the first time something takes the lock.
   createInstanceLockTable(db);
 
-  initHoursLedger();
-  initCertificates();
+  /* DDL only. The backfill and the parity check read and write rows, so they
+     are async now and live in `completeDatabaseInit()` below. */
+  createHoursLedgerTable(db);
+  /* DDL only. The certificate backfill reads and writes rows, so it is async
+     and lives in `completeDatabaseInit()` beside the ledger backfill. */
+  createCertificatesTable(db);
 
   addColumnIfMissing('certificates', 'volunteer_name_snapshot', 'TEXT');
   addColumnIfMissing('certificates', 'event_name_snapshot', 'TEXT');
@@ -1179,7 +1300,10 @@ export function initDatabase() {
    * changed, because that means acceptance rows now point at text nobody
    * actually agreed to.
    */
-  syncLegalDocuments(db);
+  /* Moved to `completeDatabaseInit()`: `syncLegalDocuments` reads and writes
+     `legal_documents` rows through `legalStore`, so it is async and this
+     function is not. Every caller that needs a fully-initialised database
+     awaits the other half — see this function's header. */
 
   /**
    * Reconcile the badge catalogue, for the same reason and in the same way.
@@ -1211,7 +1335,15 @@ export function initDatabase() {
    * their history, and a catalogue clean-up is not a reason to take it.
    */
   reconcileBadgeCatalogue(db);
-  seedOrganizerAcceptance();
+  /**
+   * `seedOrganizerAcceptance` is NOT called here. It writes through
+   * `acceptOrganizerAgreement`, which owns a transaction and is therefore async,
+   * and `initDatabase` is synchronous — called synchronously from `server.js`,
+   * `testServer.js`, the `bin/` scripts and some forty test files.
+   *
+   * Rather than make all of those async for one DEMO_MODE-only seed, the seed is
+   * exported and awaited by the two real boot paths. See its own header.
+   */
   assertNoDemoOwner();
 }
 
@@ -1248,13 +1380,113 @@ export function initDatabase() {
  * is already accepted, so this converges on every boot rather than accumulating a
  * row per restart.
  */
-function seedOrganizerAcceptance() {
+/**
+ * Everything boot must do that cannot be done synchronously.
+ *
+ * `initDatabase()` is synchronous and stays that way: it is called
+ * synchronously from `server.js`, `testServer.js`, four `bin/` scripts and some
+ * forty test files, and on PostgreSQL its schema-building half does not run at
+ * all — the schema comes from `supabase/migrations/`. Making it async would
+ * convert every one of those call sites for the benefit of a path that is being
+ * retired.
+ *
+ * So the async work is collected here instead and awaited once, by the two real
+ * boot paths. Each step is idempotent, so a caller that runs it twice converges
+ * rather than accumulating.
+ *
+ * Order matters and matches the order these used to run inside `initDatabase`:
+ * the ledger backfill before the demo seed.
+ */
+/**
+ * Whether a PostgreSQL boot has created its schema yet.
+ *
+ * Module state rather than a return value because the caller that would have to
+ * check it — `initDatabase()`'s ~40 call sites — is exactly the set that does
+ * not look at what it returns.
+ */
+let postgresSchemaPending = false;
+
+/**
+ * Whether an empty DEMO_MODE database still owes its demo accounts.
+ *
+ * Set by `initDatabase()` when it finds the database empty, cleared by
+ * `completeDatabaseInit()` once the rows are in. Module state for the same
+ * reason as `postgresSchemaPending`: the callers that would have to check a
+ * return value are exactly the ones that ignore it.
+ */
+let demoSeedPending = false;
+
+/**
+ * Throws if the schema was deferred and never applied.
+ *
+ * The failure this exists to prevent is a PostgreSQL process that called
+ * `initDatabase()`, skipped `completeDatabaseInit()`, and started serving
+ * against an empty database — every read answering "relation does not exist"
+ * from somewhere deep in a route, with nothing naming the boot step that was
+ * missed. Called by `app.js` once the routes are mounted.
+ */
+export function assertSchemaReady() {
+  if (!postgresSchemaPending) return;
+  throw new Error(
+    'FATAL: the PostgreSQL schema was never created.\n'
+    + '  initDatabase() defers it on this engine, and completeDatabaseInit() —\n'
+    + '  which applies it — was not awaited. Every query would fail with\n'
+    + '  "relation does not exist". See server/db/postgresSchema.js.'
+  );
+}
+
+export async function completeDatabaseInit() {
+  /* Before anything reads or writes a row: on PostgreSQL there are no tables
+     yet, because `initDatabase` could not create them. The generated schema is
+     idempotent, so a restart re-runs it as a no-op. */
+  if (ENGINE === POSTGRES) {
+    await applyPostgresSchema(db);
+    postgresSchemaPending = false;
+    console.log('[db] postgres: schema applied');
+
+    /**
+     * The emptiness test `initDatabase()` makes for SQLite, made here instead.
+     *
+     * It cannot be made there: on PostgreSQL the tables do not exist yet when
+     * `initDatabase()` runs, so "is this database empty" has no answer. The
+     * decision is the same one — DEMO_MODE, and no accounts — and it produces
+     * the same `demoSeedPending`, so the seeding itself stays in one place.
+     */
+    if (DEMO_MODE) {
+      const { count } = await db.prepare('SELECT COUNT(*) AS count FROM users').get();
+      if (Number(count) === 0) demoSeedPending = true;
+    }
+  }
+
+  /* Before everything else that reads a row: the demo accounts.
+     `seedOrganizerAcceptance` looks up `user-org-1`, and the certificate and
+     ledger backfills walk attendance — all of which this creates. */
+  if (demoSeedPending) {
+    await seedDatabase();
+    /* Seeded addresses are invented, so no confirmation mail can ever reach
+       them; leaving them unconfirmed puts every demo account behind a wall with
+       nothing behind it. Scoped to the seed, so it can never quietly confirm a
+       real person's address. */
+    await db.exec('UPDATE users SET email_verified = 1 WHERE email_verified = 0');
+    demoSeedPending = false;
+    console.log('Seeding complete.');
+  }
+
+  /* Then: the organizer-agreement seed below accepts legal documents, so they
+     have to exist. This is the order `initDatabase` used when it was sync. */
+  await syncLegalDocuments(db);
+  await initHoursLedger();
+  await initCertificates();
+  await seedOrganizerAcceptance();
+}
+
+export async function seedOrganizerAcceptance() {
   if (!DEMO_MODE) return;
 
-  const organizer = db.prepare("SELECT id, role FROM users WHERE id = 'user-org-1'").get();
+  const organizer = await db.prepare("SELECT id, role FROM users WHERE id = 'user-org-1'").get();
   if (!organizer) return;
 
-  acceptOrganizerAgreement(db, { userId: organizer.id, now: new Date().toISOString() });
+  await acceptOrganizerAgreement(db, { userId: organizer.id, now: new Date().toISOString() });
 }
 
 /**
@@ -1338,15 +1570,13 @@ function assertNoDemoOwner() {
  * not a reason to take the platform down for every user. `npm run verify:hours`
  * is the blocking gate for operators and CI.
  */
-function initHoursLedger() {
-  createHoursLedgerTable(db);
-
-  const { inserted, skipped, total } = backfillHoursLedger(db);
+async function initHoursLedger() {
+  const { inserted, skipped, total } = await backfillHoursLedger(db);
   if (inserted > 0) {
     console.log(`[Hours ledger] Backfilled ${inserted} entr${inserted === 1 ? 'y' : 'ies'} from ${total} attendance record(s).`);
   }
 
-  const parity = verifyLedgerParity(db);
+  const parity = await verifyLedgerParity(db);
   if (parity.ok) {
     if (inserted > 0 || skipped > 0) {
       console.log(`[Hours ledger] Parity verified against attendance for ${parity.usersChecked} volunteer(s).`);
@@ -1368,16 +1598,14 @@ function initHoursLedger() {
  * idempotent (skips any (user, event) pair that already has a stored code).
  * Never writes to `attendance`.
  */
-function initCertificates() {
-  createCertificatesTable(db);
-
-  const { inserted } = backfillCertificates(db);
+async function initCertificates() {
+  const { inserted } = await backfillCertificates(db);
   if (inserted > 0) {
     console.log(`[Certificates] Issued ${inserted} code(s).`);
   }
 }
 
-function seedDatabase() {
+async function seedDatabase() {
   const salt = bcrypt.genSaltSync(10);
   const passwordHash = bcrypt.hashSync('password123', salt);
   const nowStr = new Date().toISOString();
@@ -1397,25 +1625,25 @@ function seedDatabase() {
   `);
 
   // Admins & Organizers
-  insertUser.run('user-admin', 'System Admin', 'admin@example.gov', 'sysadmin', passwordHash, 'N/A', 'admin', 1, '🛠️', 'Platform administrator.', 'Example Valley', JSON.stringify(['Moderation']), nowStr);
-  insertUser.run('user-org-1', 'Jordan Whitfield', 'jordan.whitfield@example.org', 'jwhitfield', passwordHash, 'Adult', 'organizer', 1, '👩‍💼', 'Coordinator for Falcons Softball.', 'Falcons Softball', JSON.stringify(['Coordination']), nowStr);
-  insertUser.run('user-org-pending', 'Robin Ellery', 'robin.ellery@example.org', 'rellery', passwordHash, 'Adult', 'organizer', 0, '👨‍🏫', 'Library Director. Pending admin approval.', 'EVPL', JSON.stringify(['Events']), nowStr);
+  await insertUser.run('user-admin', 'System Admin', 'admin@example.gov', 'sysadmin', passwordHash, 'N/A', 'admin', 1, '🛠️', 'Platform administrator.', 'Example Valley', JSON.stringify(['Moderation']), nowStr);
+  await insertUser.run('user-org-1', 'Jordan Whitfield', 'jordan.whitfield@example.org', 'jwhitfield', passwordHash, 'Adult', 'organizer', 1, '👩‍💼', 'Coordinator for Falcons Softball.', 'Falcons Softball', JSON.stringify(['Coordination']), nowStr);
+  await insertUser.run('user-org-pending', 'Robin Ellery', 'robin.ellery@example.org', 'rellery', passwordHash, 'Adult', 'organizer', 0, '👨‍🏫', 'Library Director. Pending admin approval.', 'EVPL', JSON.stringify(['Events']), nowStr);
 
 
   // Softball volunteers
-  insertUser.run('user-diana', 'Dana Sorensen', 'dana.sorensen@example.com', 'dsorensen', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'EV Softball Booster', JSON.stringify(['Cooking']), nowStr);
-  insertUser.run('user-matthew', 'Marcus Pelletier', 'marcus.pelletier@example.com', 'mpelletier', passwordHash, 'Adult', 'student', 1, '👨', 'Parent volunteer.', 'EV Softball Booster', JSON.stringify(['Grilling']), nowStr);
-  insertUser.run('user-norma', 'Nora Caldwell', 'nora.caldwell@example.com', 'ncaldwell', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer, glad to restock and reset.', 'EV Softball Booster', JSON.stringify(['Restocking']), nowStr);
-  insertUser.run('user-colin', 'Cameron Caldwell', 'cameron.caldwell@example.com', 'ccaldwell', passwordHash, '11', 'student', 1, '🧑', 'High school volunteer.', 'Example Valley HS', JSON.stringify(['Cashier']), nowStr);
-  insertUser.run('user-alexia', 'Alexis Brennan', 'alexis.brennan@example.com', 'abrennan', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'EV Softball Booster', JSON.stringify(['Cooking']), nowStr);
-  insertUser.run('user-advait', 'Arjun Gopal', 'arjun.gopal@example.com', 'agopal', passwordHash, '10', 'student', 1, '🧑', 'High school volunteer.', 'Example Valley HS', JSON.stringify(['Food Prep']), nowStr);
-  insertUser.run('user-david', 'Derek Sorensen', 'derek.sorensen@example.com', 'dsorensen2', passwordHash, 'Adult', 'student', 1, '👨', 'Parent volunteer, usually on clean-up.', 'EV Softball Booster', JSON.stringify(['Cleanup']), nowStr);
-  insertUser.run('user-pranathi', 'Priyanka Shah', 'priyanka.shah@example.com', 'pshah', passwordHash, '11', 'student', 1, '👩', 'Interested in environmental clean-ups.', 'Example Valley HS', JSON.stringify(['Litter cleanup']), nowStr);
+  await insertUser.run('user-diana', 'Dana Sorensen', 'dana.sorensen@example.com', 'dsorensen', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'EV Softball Booster', JSON.stringify(['Cooking']), nowStr);
+  await insertUser.run('user-matthew', 'Marcus Pelletier', 'marcus.pelletier@example.com', 'mpelletier', passwordHash, 'Adult', 'student', 1, '👨', 'Parent volunteer.', 'EV Softball Booster', JSON.stringify(['Grilling']), nowStr);
+  await insertUser.run('user-norma', 'Nora Caldwell', 'nora.caldwell@example.com', 'ncaldwell', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer, glad to restock and reset.', 'EV Softball Booster', JSON.stringify(['Restocking']), nowStr);
+  await insertUser.run('user-colin', 'Cameron Caldwell', 'cameron.caldwell@example.com', 'ccaldwell', passwordHash, '11', 'student', 1, '🧑', 'High school volunteer.', 'Example Valley HS', JSON.stringify(['Cashier']), nowStr);
+  await insertUser.run('user-alexia', 'Alexis Brennan', 'alexis.brennan@example.com', 'abrennan', passwordHash, 'Adult', 'student', 1, '👩', 'Parent volunteer.', 'EV Softball Booster', JSON.stringify(['Cooking']), nowStr);
+  await insertUser.run('user-advait', 'Arjun Gopal', 'arjun.gopal@example.com', 'agopal', passwordHash, '10', 'student', 1, '🧑', 'High school volunteer.', 'Example Valley HS', JSON.stringify(['Food Prep']), nowStr);
+  await insertUser.run('user-david', 'Derek Sorensen', 'derek.sorensen@example.com', 'dsorensen2', passwordHash, 'Adult', 'student', 1, '👨', 'Parent volunteer, usually on clean-up.', 'EV Softball Booster', JSON.stringify(['Cleanup']), nowStr);
+  await insertUser.run('user-pranathi', 'Priyanka Shah', 'priyanka.shah@example.com', 'pshah', passwordHash, '11', 'student', 1, '👩', 'Interested in environmental clean-ups.', 'Example Valley HS', JSON.stringify(['Litter cleanup']), nowStr);
 
   // Core simulated students
-  insertUser.run('user-student-1', 'Leo Chen', 'leo.chen@example.com', 'leochen', passwordHash, '10', 'student', 1, '🧑‍💻', 'First year volunteering — keen to try everything.', 'Example Valley HS', JSON.stringify(['Setup', 'Math']), nowStr);
-  insertUser.run('user-student-2', 'Priya Patel', 'priya.patel@example.com', 'priyapatel', passwordHash, '11', 'student', 1, '👩‍⚕️', 'Happy to help with anything hands-on.', 'Example Valley HS', JSON.stringify(['First Aid']), nowStr);
-  insertUser.run('user-student-3', 'Ethan Ellery', 'ethan.miller@example.com', 'ethanmiller', passwordHash, '12', 'student', 1, '🧑‍🎨', 'Enjoys set-up and anything creative.', 'Example Valley HS', JSON.stringify(['Art']), nowStr);
+  await insertUser.run('user-student-1', 'Leo Chen', 'leo.chen@example.com', 'leochen', passwordHash, '10', 'student', 1, '🧑‍💻', 'First year volunteering — keen to try everything.', 'Example Valley HS', JSON.stringify(['Setup', 'Math']), nowStr);
+  await insertUser.run('user-student-2', 'Priya Patel', 'priya.patel@example.com', 'priyapatel', passwordHash, '11', 'student', 1, '👩‍⚕️', 'Happy to help with anything hands-on.', 'Example Valley HS', JSON.stringify(['First Aid']), nowStr);
+  await insertUser.run('user-student-3', 'Ethan Ellery', 'ethan.miller@example.com', 'ethanmiller', passwordHash, '12', 'student', 1, '🧑‍🎨', 'Enjoys set-up and anything creative.', 'Example Valley HS', JSON.stringify(['Art']), nowStr);
 
   /**
    * Seed dates are relative to seeding time, never absolute.
@@ -1455,7 +1683,7 @@ function seedDatabase() {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  insertEvent.run(
+  await insertEvent.run(
     'event-softball',
     'Softball Tournament Snack Shack',
     'Every shift must have an adult volunteer due to cooking/grilling. The remaining slots can be taken by either high school volunteers, or additional parents. We are requesting that each family signs up for at least one time slot. Thank you!',
@@ -1480,7 +1708,7 @@ function seedDatabase() {
    * to the text address. That path is the one most likely to regress, and a
    * seed where every event has a pin is a seed where nobody ever sees it.
    */
-  insertEvent.run(
+  await insertEvent.run(
     'event-pantry-past',
     'Food Pantry Boxing & Distribution',
     'Load delivery boxes and sort food cans for Example Valley families.',
@@ -1503,16 +1731,16 @@ function seedDatabase() {
   `);
 
   // Softball slots
-  insertSlot.run('slot-softball-1', 'event-softball', 'Adult', 'Grilling & cooking helper (Adult volunteer).', atDay(12, 7, 30), atDay(12, 9, 30), 1);
-  insertSlot.run('slot-softball-2', 'event-softball', 'Volunteer (any age)', 'High school volunteer or additional parent help.', atDay(12, 7, 30), atDay(12, 9, 30), 2);
-  insertSlot.run('slot-softball-3', 'event-softball', 'Adult', 'Grilling & cooking helper (Adult volunteer).', atDay(12, 9, 30), atDay(12, 11, 30), 1);
-  insertSlot.run('slot-softball-4', 'event-softball', 'Volunteer (any age)', 'High school volunteer or additional parent help.', atDay(12, 9, 30), atDay(12, 11, 30), 2);
-  insertSlot.run('slot-softball-5', 'event-softball', 'Adult', 'Grilling & cooking helper (Adult volunteer).', atDay(12, 11, 30), atDay(12, 13, 30), 1);
-  insertSlot.run('slot-softball-6', 'event-softball', 'Volunteer (any age)', 'High school volunteer or additional parent help.', atDay(12, 11, 30), atDay(12, 13, 30), 2);
-  insertSlot.run('slot-softball-7', 'event-softball', 'Check park for litter', 'Walk around entire softball area. Pick up and throw away any litter.', atDay(12, 11, 30), atDay(12, 13, 30), 2);
+  await insertSlot.run('slot-softball-1', 'event-softball', 'Adult', 'Grilling & cooking helper (Adult volunteer).', atDay(12, 7, 30), atDay(12, 9, 30), 1);
+  await insertSlot.run('slot-softball-2', 'event-softball', 'Volunteer (any age)', 'High school volunteer or additional parent help.', atDay(12, 7, 30), atDay(12, 9, 30), 2);
+  await insertSlot.run('slot-softball-3', 'event-softball', 'Adult', 'Grilling & cooking helper (Adult volunteer).', atDay(12, 9, 30), atDay(12, 11, 30), 1);
+  await insertSlot.run('slot-softball-4', 'event-softball', 'Volunteer (any age)', 'High school volunteer or additional parent help.', atDay(12, 9, 30), atDay(12, 11, 30), 2);
+  await insertSlot.run('slot-softball-5', 'event-softball', 'Adult', 'Grilling & cooking helper (Adult volunteer).', atDay(12, 11, 30), atDay(12, 13, 30), 1);
+  await insertSlot.run('slot-softball-6', 'event-softball', 'Volunteer (any age)', 'High school volunteer or additional parent help.', atDay(12, 11, 30), atDay(12, 13, 30), 2);
+  await insertSlot.run('slot-softball-7', 'event-softball', 'Check park for litter', 'Walk around entire softball area. Pick up and throw away any litter.', atDay(12, 11, 30), atDay(12, 13, 30), 2);
 
   // Past event slots
-  insertSlot.run('slot-pantry-1', 'event-pantry-past', 'Box Packer', 'Sort and pack grocery boxes.', atDay(-25, 9), atDay(-25, 12), 2);
+  await insertSlot.run('slot-pantry-1', 'event-pantry-past', 'Box Packer', 'Sort and pack grocery boxes.', atDay(-25, 9), atDay(-25, 12), 2);
 
   // Seed Applications
   const insertApp = db.prepare(`
@@ -1520,19 +1748,19 @@ function seedDatabase() {
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
-  insertApp.run('app-sb-1', 'user-diana',    'event-softball', 'slot-softball-1', 'accepted', nowStr);
-  insertApp.run('app-sb-2', 'user-matthew',  'event-softball', 'slot-softball-3', 'accepted', nowStr);
-  insertApp.run('app-sb-3', 'user-norma',    'event-softball', 'slot-softball-4', 'accepted', nowStr);
-  insertApp.run('app-sb-4', 'user-colin',    'event-softball', 'slot-softball-4', 'accepted', nowStr);
-  insertApp.run('app-sb-5', 'user-alexia',   'event-softball', 'slot-softball-5', 'accepted', nowStr);
-  insertApp.run('app-sb-6', 'user-student-1','event-softball', 'slot-softball-6', 'accepted', nowStr);
-  insertApp.run('app-sb-7', 'user-advait',   'event-softball', 'slot-softball-6', 'accepted', nowStr);
-  insertApp.run('app-sb-8', 'user-david',    'event-softball', 'slot-softball-7', 'accepted', nowStr);
-  insertApp.run('app-sb-9', 'user-pranathi', 'event-softball', 'slot-softball-7', 'accepted', nowStr);
-  insertApp.run('app-sb-10','user-student-2','event-softball', 'slot-softball-2', 'pending',  nowStr);
+  await insertApp.run('app-sb-1', 'user-diana',    'event-softball', 'slot-softball-1', 'accepted', nowStr);
+  await insertApp.run('app-sb-2', 'user-matthew',  'event-softball', 'slot-softball-3', 'accepted', nowStr);
+  await insertApp.run('app-sb-3', 'user-norma',    'event-softball', 'slot-softball-4', 'accepted', nowStr);
+  await insertApp.run('app-sb-4', 'user-colin',    'event-softball', 'slot-softball-4', 'accepted', nowStr);
+  await insertApp.run('app-sb-5', 'user-alexia',   'event-softball', 'slot-softball-5', 'accepted', nowStr);
+  await insertApp.run('app-sb-6', 'user-student-1','event-softball', 'slot-softball-6', 'accepted', nowStr);
+  await insertApp.run('app-sb-7', 'user-advait',   'event-softball', 'slot-softball-6', 'accepted', nowStr);
+  await insertApp.run('app-sb-8', 'user-david',    'event-softball', 'slot-softball-7', 'accepted', nowStr);
+  await insertApp.run('app-sb-9', 'user-pranathi', 'event-softball', 'slot-softball-7', 'accepted', nowStr);
+  await insertApp.run('app-sb-10','user-student-2','event-softball', 'slot-softball-2', 'pending',  nowStr);
 
-  insertApp.run('app-past-p1', 'user-student-2', 'event-pantry-past', 'slot-pantry-1', 'accepted', nowStr);
-  insertApp.run('app-past-p2', 'user-student-3', 'event-pantry-past', 'slot-pantry-1', 'accepted', nowStr);
+  await insertApp.run('app-past-p1', 'user-student-2', 'event-pantry-past', 'slot-pantry-1', 'accepted', nowStr);
+  await insertApp.run('app-past-p2', 'user-student-3', 'event-pantry-past', 'slot-pantry-1', 'accepted', nowStr);
 
   // Seed Attendance
   const insertAttendance = db.prepare(`
@@ -1540,8 +1768,8 @@ function seedDatabase() {
     VALUES (?, ?, ?, ?, ?)
   `);
 
-  insertAttendance.run('event-pantry-past', 'slot-pantry-1', 'user-student-2', 1, 3.0);
-  insertAttendance.run('event-pantry-past', 'slot-pantry-1', 'user-student-3', 0, 3.0);
+  await insertAttendance.run('event-pantry-past', 'slot-pantry-1', 'user-student-2', 1, 3.0);
+  await insertAttendance.run('event-pantry-past', 'slot-pantry-1', 'user-student-3', 0, 3.0);
 
   // ── Seed a few notifications and a sample comment so the new features
   // don't look empty on first run ──
@@ -1549,13 +1777,13 @@ function seedDatabase() {
     INSERT INTO notifications (id, user_id, kind, title, body, link, read, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  insertNotif.run('notif-1', 'user-student-1', 'reminder', 'Upcoming shift tomorrow',
+  await insertNotif.run('notif-1', 'user-student-1', 'reminder', 'Upcoming shift tomorrow',
     'Softball Tournament Snack Shack — Adult shift at 7:30 AM. Don\'t forget!',
     null, 0, nowStr);
-  insertNotif.run('notif-2', 'user-student-1', 'hours', 'New hours credited',
+  await insertNotif.run('notif-2', 'user-student-1', 'hours', 'New hours credited',
     'You earned 2.0 hrs from Softball Tournament Snack Shack.',
     null, 0, nowStr);
-  insertNotif.run('notif-3', 'user-org-1', 'application', 'New volunteer application',
+  await insertNotif.run('notif-3', 'user-org-1', 'application', 'New volunteer application',
     'A student applied to your Softball Tournament — General Shift.',
     null, 0, nowStr);
 
@@ -1563,16 +1791,16 @@ function seedDatabase() {
     INSERT INTO event_comments (id, event_id, user_id, body, created_at)
     VALUES (?, ?, ?, ?, ?)
   `);
-  insertComment.run('cmt-1', 'event-softball', 'user-org-1',
+  await insertComment.run('cmt-1', 'event-softball', 'user-org-1',
     'Please arrive 15 minutes before your shift for setup. Wear closed-toe shoes!', nowStr);
-  insertComment.run('cmt-2', 'event-softball', 'user-diana',
+  await insertComment.run('cmt-2', 'event-softball', 'user-diana',
     'Thanks for organizing this! Looking forward to helping out.', nowStr);
 
   const insertAnnouncement = db.prepare(`
     INSERT INTO event_announcements (id, event_id, author_id, body, created_at)
     VALUES (?, ?, ?, ?, ?)
   `);
-  insertAnnouncement.run('ann-1', 'event-softball', 'user-org-1',
+  await insertAnnouncement.run('ann-1', 'event-softball', 'user-org-1',
     'Park at the Reichler Park south lot and check in at the snack shack window. ' +
     'Wear closed-toe shoes — anyone on the grill also needs long sleeves.', nowStr);
 }

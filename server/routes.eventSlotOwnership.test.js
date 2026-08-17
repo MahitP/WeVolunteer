@@ -89,8 +89,8 @@ describe('PUT /api/events/:id cannot reach another event\'s shifts', () => {
     expect(mine, 'fixture: this organizer owns no event').toBeTruthy();
     expect(foreignSlot, 'fixture: no slot exists on another event').toBeTruthy();
 
-    const before = db.prepare('SELECT * FROM slots WHERE id = ?').get(foreignSlot.id);
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(mine.id);
+    const before = await db.prepare('SELECT * FROM slots WHERE id = ?').get(foreignSlot.id);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(mine.id);
 
     const res = await srv.call('PUT', `/api/events/${mine.id}`, {
       title: event.title,
@@ -113,7 +113,7 @@ describe('PUT /api/events/:id cannot reach another event\'s shifts', () => {
     expect(res.status).toBe(400);
     expect(res.body?.code).toBe('slot_not_on_event');
 
-    const after = db.prepare('SELECT * FROM slots WHERE id = ?').get(foreignSlot.id);
+    const after = await db.prepare('SELECT * FROM slots WHERE id = ?').get(foreignSlot.id);
     expect(after, 'the other organizer\'s shift was modified').toEqual(before);
   });
 
@@ -126,7 +126,7 @@ describe('PUT /api/events/:id cannot reach another event\'s shifts', () => {
    */
   it('refuses an edit naming a slot that does not exist', async () => {
     const { mine } = fixture();
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(mine.id);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(mine.id);
 
     const res = await srv.call('PUT', `/api/events/${mine.id}`, {
       title: event.title,
@@ -155,8 +155,8 @@ describe('PUT /api/events/:id cannot reach another event\'s shifts', () => {
    */
   it('still lets an organizer edit their own shifts', async () => {
     const { mine } = fixture();
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(mine.id);
-    const ownSlot = db.prepare('SELECT * FROM slots WHERE event_id = ? LIMIT 1').get(mine.id);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(mine.id);
+    const ownSlot = await db.prepare('SELECT * FROM slots WHERE event_id = ? LIMIT 1').get(mine.id);
     expect(ownSlot, 'fixture: this event has no slots').toBeTruthy();
 
     const res = await srv.call('PUT', `/api/events/${mine.id}`, {
@@ -176,7 +176,7 @@ describe('PUT /api/events/:id cannot reach another event\'s shifts', () => {
     }, organizer);
 
     expect(res.status).toBeLessThan(400);
-    expect(db.prepare('SELECT name FROM slots WHERE id = ?').get(ownSlot.id).name)
+    expect((await db.prepare('SELECT name FROM slots WHERE id = ?').get(ownSlot.id)).name)
       .toBe('Renamed by its own organizer');
   });
 });

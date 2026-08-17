@@ -152,9 +152,9 @@ describe('signature verification', () => {
 /* ─────────────────────────── applying events ─────────────────────────── */
 
 describe('applying a verified event', () => {
-  it('records the outcome against the matching outbox row', () => {
+  it('records the outcome against the matching outbox row', async () => {
     seedJob('re_msg_abc');
-    const r = applyEvent(JSON.parse(event('email.delivered')), { handle: db });
+    const r = await applyEvent(JSON.parse(event('email.delivered')), { handle: db });
     expect(r.applied).toBe(true);
 
     const job = db.prepare('SELECT * FROM notification_jobs WHERE id = ?').get('job-1');
@@ -162,78 +162,78 @@ describe('applying a verified event', () => {
     expect(job.delivery_updated_at).toBeTruthy();
   });
 
-  it('is idempotent — a replayed event changes nothing a second time', () => {
+  it('is idempotent — a replayed event changes nothing a second time', async () => {
     seedJob('re_msg_abc');
     const payload = JSON.parse(event('email.bounced'));
-    expect(applyEvent(payload, { handle: db }).applied).toBe(true);
-    const second = applyEvent(payload, { handle: db });
+    expect((await applyEvent(payload, { handle: db })).applied).toBe(true);
+    const second = await applyEvent(payload, { handle: db });
     expect(second.applied).toBe(false);
     expect(second.reason).toBe('duplicate');
     expect(db.prepare('SELECT COUNT(*) c FROM resend_webhook_events').get().c).toBe(1);
   });
 
-  it('does not let a late "delivered" erase a bounce', () => {
+  it('does not let a late "delivered" erase a bounce', async () => {
     /**
      * Events are not ordered. A message that bounced at one recipient and was
      * delivered at another can produce both, in either order, and the
      * later-arriving good news would overwrite the outcome an operator needs.
      */
     seedJob('re_msg_abc');
-    applyEvent(JSON.parse(event('email.bounced')), { handle: db });
-    applyEvent(JSON.parse(event('email.delivered', { id: 'evt_later' })), { handle: db });
+    await applyEvent(JSON.parse(event('email.bounced')), { handle: db });
+    await applyEvent(JSON.parse(event('email.delivered', { id: 'evt_later' })), { handle: db });
 
     const job = db.prepare('SELECT delivery_state FROM notification_jobs WHERE id = ?').get('job-1');
     expect(job.delivery_state, 'a bounce was overwritten by a later delivery').toBe('bounced');
   });
 
-  it('records an event for a message the outbox no longer has', () => {
+  it('records an event for a message the outbox no longer has', async () => {
     /* A `sent` row is swept after a day; a bounce can arrive later. The event
        still has to be visible, so this is not an error. */
-    const r = applyEvent(JSON.parse(event('email.bounced')), { handle: db });
+    const r = await applyEvent(JSON.parse(event('email.bounced')), { handle: db });
     expect(r.applied).toBe(true);
     expect(r.reason).toBe('no_matching_job');
     expect(db.prepare('SELECT COUNT(*) c FROM resend_webhook_events').get().c).toBe(1);
   });
 
-  it('ignores an event type it does not handle', () => {
+  it('ignores an event type it does not handle', async () => {
     /* `email.opened` is deliberately unhandled — see the note in
        resendWebhook.js on why open tracking is not wanted here. */
-    const r = applyEvent(JSON.parse(event('email.opened')), { handle: db });
+    const r = await applyEvent(JSON.parse(event('email.opened')), { handle: db });
     expect(r.applied).toBe(false);
     expect(r.reason).toBe('unhandled_event');
     expect(HANDLED_EVENTS['email.opened']).toBeUndefined();
   });
 
-  it('stores the recipient domain and never the local part', () => {
+  it('stores the recipient domain and never the local part', async () => {
     /* The domain diagnoses a relay or reputation problem; the local part
        identifies a specific child and diagnoses nothing. */
-    applyEvent(JSON.parse(event('email.bounced')), { handle: db });
+    await applyEvent(JSON.parse(event('email.bounced')), { handle: db });
     const row = db.prepare('SELECT * FROM resend_webhook_events').get();
     expect(row.recipient_domain).toBe('school.example.org');
     expect(JSON.stringify(row)).not.toMatch(/student@/);
   });
 
-  it('stores no message body or subject', () => {
-    applyEvent(JSON.parse(event('email.delivered', { subject: 'Reset your password' })), { handle: db });
+  it('stores no message body or subject', async () => {
+    await applyEvent(JSON.parse(event('email.delivered', { subject: 'Reset your password' })), { handle: db });
     const row = db.prepare('SELECT * FROM resend_webhook_events').get();
     expect(JSON.stringify(row)).not.toMatch(/Reset your password/);
   });
 });
 
 describe('the health view', () => {
-  it('counts by outcome without exposing addresses', () => {
-    applyEvent(JSON.parse(event('email.delivered')), { handle: db });
-    applyEvent(JSON.parse(event('email.bounced', { id: 'evt_b' })), { handle: db });
-    applyEvent(JSON.parse(event('email.complained', { id: 'evt_c' })), { handle: db });
+  it('counts by outcome without exposing addresses', async () => {
+    await applyEvent(JSON.parse(event('email.delivered')), { handle: db });
+    await applyEvent(JSON.parse(event('email.bounced', { id: 'evt_b' })), { handle: db });
+    await applyEvent(JSON.parse(event('email.complained', { id: 'evt_c' })), { handle: db });
 
-    const h = deliveryHealth({ handle: db });
+    const h = await deliveryHealth({ handle: db });
     expect(h).toMatchObject({ configured: true, delivered: 1, bounced: 1, complained: 1 });
     expect(JSON.stringify(h)).not.toMatch(/@/);
   });
 
-  it('reports unavailable rather than throwing before the migration has run', () => {
+  it('reports unavailable rather than throwing before the migration has run', async () => {
     const bare = new DatabaseSync(':memory:');
-    expect(deliveryHealth({ handle: bare }).unavailable).toBe(true);
+    expect((await deliveryHealth({ handle: bare })).unavailable).toBe(true);
     bare.close();
   });
 });

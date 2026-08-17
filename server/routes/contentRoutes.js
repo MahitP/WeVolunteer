@@ -1,7 +1,8 @@
 import express from 'express';
 import crypto from 'crypto';
 
-import { authenticateToken, inTransaction } from '../utils.js';
+import { authenticateToken } from '../utils.js';
+import { runInTransaction } from '../db/connectionContext.js';
 import { can, requireCap } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
@@ -18,17 +19,17 @@ import { commentHasLiveReport, COMMENT_HELD_MESSAGE } from '../evidenceHolds.js'
 
 const router = express.Router();
 
-router.get('/api/notifications', authenticateToken, (req, res) => {
+router.get('/api/notifications', authenticateToken, async (req, res) => {
   try {
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
     const offset = Math.max(0, Number(req.query.offset) || 0);
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT * FROM notifications WHERE user_id = ?
       ORDER BY created_at DESC LIMIT ? OFFSET ?
     `).all(req.user.id, limit, offset);
-    const unread = db.prepare(`
+    const unread = (await db.prepare(`
       SELECT COUNT(*) as c FROM notifications WHERE user_id = ? AND read = 0
-    `).get(req.user.id).c;
+    `).get(req.user.id)).c;
     res.json({
       notifications: rows.map(r => ({
         id: r.id, kind: r.kind, priority: r.priority, title: r.title, body: r.body,
@@ -44,15 +45,15 @@ router.get('/api/notifications', authenticateToken, (req, res) => {
 });
 
 // 16. Mark notifications as read
-router.patch('/api/notifications', authenticateToken, (req, res) => {
+router.patch('/api/notifications', authenticateToken, async (req, res) => {
   try {
     const { ids, all } = req.body;
     if (all) {
-      db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?').run(req.user.id);
+      await db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?').run(req.user.id);
       emitToUser(req.user.id, 'notification.read', null, { all: true });
     } else if (Array.isArray(ids) && ids.length > 0) {
       const placeholders = ids.map(() => '?').join(',');
-      db.prepare(`UPDATE notifications SET read = 1 WHERE id IN (${placeholders}) AND user_id = ?`)
+      await db.prepare(`UPDATE notifications SET read = 1 WHERE id IN (${placeholders}) AND user_id = ?`)
         .run(...ids, req.user.id);
       emitToUser(req.user.id, 'notification.read', null, { ids });
     }
@@ -65,9 +66,9 @@ router.patch('/api/notifications', authenticateToken, (req, res) => {
 
 // 17. Comments on an event
 
-router.get('/api/events/:id/comments', authenticateToken, (req, res) => {
+router.get('/api/events/:id/comments', authenticateToken, async (req, res) => {
   try {
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT c.*, u.name as author_name, u.avatar as author_avatar, u.role as author_role
       FROM event_comments c
       JOIN users u ON c.user_id = u.id
@@ -86,41 +87,41 @@ router.get('/api/events/:id/comments', authenticateToken, (req, res) => {
   }
 });
 
-router.post('/api/events/:id/comments', authenticateToken, (req, res) => {
+router.post('/api/events/:id/comments', authenticateToken, async (req, res) => {
   try {
     const { body } = req.body;
     if (!body || !body.trim()) return res.status(400).json({ error: 'Comment cannot be empty' });
     if (body.length > 1000) return res.status(400).json({ error: 'Comment is too long (max 1000 chars)' });
 
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     const id = `cmt-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO event_comments (id, event_id, user_id, body, created_at)
       VALUES (?, ?, ?, ?, ?)
     `).run(id, req.params.id, req.user.id, body.trim(), new Date().toISOString());
 
     // Notify the organizer of the new comment (if not the commenter)
     if (event.organizer_id !== req.user.id) {
-      const commenterRow = db.prepare('SELECT name FROM users WHERE id = ?').get(req.user.id);
+      const commenterRow = await db.prepare('SELECT name FROM users WHERE id = ?').get(req.user.id);
       const commenterName = commenterRow ? commenterRow.name : 'Someone';
-      notificationService.dispatch('EVENT_COMMENT', { eventId: event.id, eventTitle: event.title }, event.organizer_id);
+      await notificationService.dispatch('EVENT_COMMENT', { eventId: event.id, eventTitle: event.title }, event.organizer_id);
     } else {
       // The organizer is the commenter. Notify all pending or accepted applicants.
-      const applicants = db.prepare(`
+      const applicants = await db.prepare(`
         SELECT DISTINCT user_id FROM applications
         WHERE event_id = ? AND status IN ('accepted', 'pending')
       `).all(req.params.id);
 
       for (const app of applicants) {
         if (app.user_id !== req.user.id) {
-          notificationService.dispatch('EVENT_COMMENT', { eventId: event.id, eventTitle: event.title }, app.user_id);
+          await notificationService.dispatch('EVENT_COMMENT', { eventId: event.id, eventTitle: event.title }, app.user_id);
         }
       }
     }
 
-    const created = db.prepare(`
+    const created = await db.prepare(`
       SELECT c.*, u.name as author_name, u.avatar as author_avatar, u.role as author_role
       FROM event_comments c JOIN users u ON c.user_id = u.id
       WHERE c.id = ?
@@ -136,9 +137,9 @@ router.post('/api/events/:id/comments', authenticateToken, (req, res) => {
   }
 });
 
-router.delete('/api/comments/:id', authenticateToken, (req, res) => {
+router.delete('/api/comments/:id', authenticateToken, async (req, res) => {
   try {
-    const cmt = db.prepare('SELECT * FROM event_comments WHERE id = ?').get(req.params.id);
+    const cmt = await db.prepare('SELECT * FROM event_comments WHERE id = ?').get(req.params.id);
     if (!cmt) return res.status(404).json({ error: 'Comment not found' });
     // Own comment, or moderation reach — never an unscoped `else`.
     if (cmt.user_id !== req.principal.userId && !can(req.principal, 'event.moderate')) {
@@ -151,7 +152,7 @@ router.delete('/api/comments/:id', authenticateToken, (req, res) => {
      * too, for the reason the event hold is: the refusal is about the evidence,
      * not about who is asking.
      */
-    if (commentHasLiveReport(db, req.params.id)) {
+    if (await commentHasLiveReport(db, req.params.id)) {
       return res.status(409).json({ error: COMMENT_HELD_MESSAGE, code: 'under_review' });
     }
     /**
@@ -176,11 +177,11 @@ router.delete('/api/comments/:id', authenticateToken, (req, res) => {
      */
     const moderating = cmt.user_id !== req.principal.userId;
 
-    inTransaction(() => {
-      db.prepare('DELETE FROM event_comments WHERE id = ?').run(req.params.id);
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare('DELETE FROM event_comments WHERE id = ?').run(req.params.id);
 
       if (moderating) {
-        recordAudit(db, {
+        await recordAudit(tx, {
           adminId: req.principal.userId,
           action: 'COMMENT_DELETED',
           targetUserId: cmt.user_id,
@@ -201,16 +202,16 @@ router.delete('/api/comments/:id', authenticateToken, (req, res) => {
 //   • a student sees it only once they are accepted for the event, and only
 //     if the organizer left attendee visibility public
 
-router.get('/api/events/:id/attendees', authenticateToken, (req, res) => {
+router.get('/api/events/:id/attendees', authenticateToken, async (req, res) => {
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     const isStaff = EVENT_STAFF_CAPABILITIES.some(c => can(req.principal, c))
-      && canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') });
+      && await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') });
 
     if (!isStaff) {
-      const mine = db.prepare(`
+      const mine = await db.prepare(`
         SELECT 1 FROM applications
         WHERE event_id = ? AND user_id = ? AND status = 'accepted'
       `).get(req.params.id, req.user.id);
@@ -223,7 +224,7 @@ router.get('/api/events/:id/attendees', authenticateToken, (req, res) => {
       }
     }
 
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT DISTINCT u.id, u.name, u.avatar, u.grade, u.school
       FROM applications a
       JOIN users u ON a.user_id = u.id
@@ -264,16 +265,16 @@ router.get('/api/events/:id/attendees', authenticateToken, (req, res) => {
 // One-way updates from the organizer. Not a messaging system: no replies,
 // no direct messages. Questions go to the event discussion instead.
 
-router.get('/api/events/:id/announcements', authenticateToken, (req, res) => {
+router.get('/api/events/:id/announcements', authenticateToken, async (req, res) => {
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     const isStaff = EVENT_STAFF_CAPABILITIES.some(c => can(req.principal, c))
-      && canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') });
+      && await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') });
 
     if (!isStaff) {
-      const mine = db.prepare(`
+      const mine = await db.prepare(`
         SELECT 1 FROM applications
         WHERE event_id = ? AND user_id = ? AND status = 'accepted'
       `).get(req.params.id, req.user.id);
@@ -281,7 +282,7 @@ router.get('/api/events/:id/announcements', authenticateToken, (req, res) => {
       if (!mine) return res.json([]);
     }
 
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT n.*, u.name as author_name, u.avatar as author_avatar, u.role as author_role
       FROM event_announcements n
       JOIN users u ON n.author_id = u.id
@@ -303,13 +304,13 @@ router.get('/api/events/:id/announcements', authenticateToken, (req, res) => {
   }
 });
 
-router.post('/api/events/:id/announcements', authenticateToken, (req, res) => {
+router.post('/api/events/:id/announcements', authenticateToken, async (req, res) => {
   try {
     const { body } = req.body;
     if (!body || !body.trim()) return res.status(400).json({ error: 'Announcement cannot be empty' });
     if (body.length > 2000) return res.status(400).json({ error: 'Announcement is too long (max 2000 characters)' });
 
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
     /**
      * `announcement.post` is the kind-of-actor check (organizer, and super_admin
@@ -326,27 +327,27 @@ router.post('/api/events/:id/announcements', authenticateToken, (req, res) => {
         && !can(req.principal, 'organization.event.manage.own')) {
       return res.status(403).json({ error: 'Only the event organizer can post announcements' });
     }
-    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+    if (!await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Only the event organizer can post announcements' });
     }
 
     const id = `ann-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO event_announcements (id, event_id, author_id, body, created_at)
       VALUES (?, ?, ?, ?, ?)
     `).run(id, req.params.id, req.user.id, body.trim(), new Date().toISOString());
 
     // Tell everyone who is actually going
-    const recipients = db.prepare(`
+    const recipients = await db.prepare(`
       SELECT DISTINCT user_id FROM applications
       WHERE event_id = ? AND status = 'accepted'
     `).all(req.params.id);
 
     for (const r of recipients) {
-      notificationService.dispatch('IMPORTANT_ANNOUNCEMENT', { eventId: event.id, eventTitle: event.title, body: body.trim().slice(0, 140) }, r.user_id);
+      await notificationService.dispatch('IMPORTANT_ANNOUNCEMENT', { eventId: event.id, eventTitle: event.title, body: body.trim().slice(0, 140) }, r.user_id);
     }
 
-    const created = db.prepare(`
+    const created = await db.prepare(`
       SELECT n.*, u.name as author_name, u.avatar as author_avatar, u.role as author_role
       FROM event_announcements n JOIN users u ON n.author_id = u.id WHERE n.id = ?
     `).get(id);
@@ -366,12 +367,12 @@ router.post('/api/events/:id/announcements', authenticateToken, (req, res) => {
   }
 });
 
-router.patch('/api/announcements/:id', authenticateToken, (req, res) => {
+router.patch('/api/announcements/:id', authenticateToken, async (req, res) => {
   try {
     const { body } = req.body;
     if (!body || !body.trim()) return res.status(400).json({ error: 'Announcement cannot be empty' });
 
-    const ann = db.prepare('SELECT * FROM event_announcements WHERE id = ?').get(req.params.id);
+    const ann = await db.prepare('SELECT * FROM event_announcements WHERE id = ?').get(req.params.id);
     if (!ann) return res.status(404).json({ error: 'Announcement not found' });
     if (!can(req.principal, 'announcement.post') && !can(req.principal, 'event.moderate')) {
       return res.status(403).json({ error: 'Access denied' });
@@ -380,7 +381,7 @@ router.patch('/api/announcements/:id', authenticateToken, (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    db.prepare('UPDATE event_announcements SET body = ?, updated_at = ? WHERE id = ?')
+    await db.prepare('UPDATE event_announcements SET body = ?, updated_at = ? WHERE id = ?')
       .run(body.trim(), new Date().toISOString(), req.params.id);
 
     res.json({ success: true });
@@ -390,9 +391,9 @@ router.patch('/api/announcements/:id', authenticateToken, (req, res) => {
   }
 });
 
-router.delete('/api/announcements/:id', authenticateToken, (req, res) => {
+router.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
   try {
-    const ann = db.prepare('SELECT * FROM event_announcements WHERE id = ?').get(req.params.id);
+    const ann = await db.prepare('SELECT * FROM event_announcements WHERE id = ?').get(req.params.id);
     if (!ann) return res.status(404).json({ error: 'Announcement not found' });
     if (!can(req.principal, 'announcement.post') && !can(req.principal, 'event.moderate')) {
       return res.status(403).json({ error: 'Access denied' });
@@ -400,7 +401,7 @@ router.delete('/api/announcements/:id', authenticateToken, (req, res) => {
     if (ann.author_id !== req.principal.userId && !can(req.principal, 'event.moderate')) {
       return res.status(403).json({ error: 'Access denied' });
     }
-    db.prepare('DELETE FROM event_announcements WHERE id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM event_announcements WHERE id = ?').run(req.params.id);
     res.json({ success: true });
   } catch (err) {
     console.error('Announcement delete error:', err);
@@ -412,9 +413,9 @@ router.delete('/api/announcements/:id', authenticateToken, (req, res) => {
 // A record of service, not a social page. Anyone signed in can view it:
 // organizers need it to judge applications, and students see their own.
 
-router.get('/api/favorites', authenticateToken, (req, res) => {
+router.get('/api/favorites', authenticateToken, async (req, res) => {
   try {
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT event_id, created_at FROM user_favorites WHERE user_id = ?
       ORDER BY created_at DESC
     `).all(req.user.id);
@@ -424,20 +425,20 @@ router.get('/api/favorites', authenticateToken, (req, res) => {
   }
 });
 
-router.post('/api/favorites/:eventId', authenticateToken, (req, res) => {
+router.post('/api/favorites/:eventId', authenticateToken, async (req, res) => {
   try {
     const eventId = req.params.eventId;
-    const event = db.prepare('SELECT id FROM events WHERE id = ?').get(eventId);
+    const event = await db.prepare('SELECT id FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const existing = db.prepare(`
+    const existing = await db.prepare(`
       SELECT 1 FROM user_favorites WHERE user_id = ? AND event_id = ?
     `).get(req.user.id, eventId);
     if (existing) {
-      db.prepare('DELETE FROM user_favorites WHERE user_id = ? AND event_id = ?').run(req.user.id, eventId);
+      await db.prepare('DELETE FROM user_favorites WHERE user_id = ? AND event_id = ?').run(req.user.id, eventId);
       return res.json({ favorited: false });
     }
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO user_favorites (user_id, event_id, created_at) VALUES (?, ?, ?)
     `).run(req.user.id, eventId, new Date().toISOString());
     res.json({ favorited: true });
@@ -473,9 +474,9 @@ router.post('/api/favorites/:eventId', authenticateToken, (req, res) => {
  * hardcoded copies in two client views that could disagree with the milestone
  * rendered beside them.
  */
-router.get('/api/stats/volunteer', authenticateToken, requireCap('stats.self'), (req, res) => {
+router.get('/api/stats/volunteer', authenticateToken, requireCap('stats.self'), async (req, res) => {
   try {
-    res.json(volunteerInsights(db, req.user.id));
+    res.json(await volunteerInsights(db, req.user.id));
   } catch (err) {
     console.error('Volunteer stats error:', err);
     res.status(500).json({ error: 'Failed to fetch stats' });
@@ -483,38 +484,38 @@ router.get('/api/stats/volunteer', authenticateToken, requireCap('stats.self'), 
 });
 
 // 21. Statistics endpoint for an organizer
-router.get('/api/stats/organizer', authenticateToken, requireCap('analytics.own_events'), (req, res) => {
+router.get('/api/stats/organizer', authenticateToken, requireCap('analytics.own_events'), async (req, res) => {
   try {
-    const eventCount = db.prepare(`
+    const eventCount = (await db.prepare(`
       SELECT COUNT(*) as c FROM events WHERE organizer_id = ?
-    `).get(req.user.id).c;
-    const totalAccepted = db.prepare(`
+    `).get(req.user.id)).c;
+    const totalAccepted = (await db.prepare(`
       SELECT COUNT(*) as c FROM applications a
       JOIN events e ON a.event_id = e.id
       WHERE e.organizer_id = ? AND a.status = 'accepted'
-    `).get(req.user.id).c;
-    const totalPending = db.prepare(`
+    `).get(req.user.id)).c;
+    const totalPending = (await db.prepare(`
       SELECT COUNT(*) as c FROM applications a
       JOIN events e ON a.event_id = e.id
       WHERE e.organizer_id = ? AND a.status = 'pending'
-    `).get(req.user.id).c;
-    const hoursAwarded = db.prepare(`
+    `).get(req.user.id)).c;
+    const hoursAwarded = (await db.prepare(`
       SELECT COALESCE(SUM(a.hours_awarded), 0) as h
       FROM attendance a
       JOIN events e ON a.event_id = e.id
       WHERE e.organizer_id = ? AND a.present = 1
-    `).get(req.user.id).h;
+    `).get(req.user.id)).h;
 
     // Per-event roster counts. Capacity is the sum of the event's slots —
     // there is no max_spots column on events.
-    const perEvent = db.prepare(`
+    const perEvent = (await db.prepare(`
       SELECT e.id, e.title, e.status,
         (SELECT COUNT(*) FROM applications a WHERE a.event_id = e.id AND a.status = 'accepted') as accepted,
         (SELECT COUNT(*) FROM applications a WHERE a.event_id = e.id AND a.status = 'pending') as pending,
         (SELECT COALESCE(SUM(s.max_spots), 0) FROM slots s WHERE s.event_id = e.id) as maxSpots
       FROM events e WHERE e.organizer_id = ?
       ORDER BY e.created_at DESC
-    `).all(req.user.id).map(r => ({
+    `).all(req.user.id)).map(r => ({
       id: r.id,
       title: r.title,
       status: r.status,
@@ -535,7 +536,7 @@ router.get('/api/stats/organizer', authenticateToken, requireCap('analytics.own_
 });
 
 // 22. Leaderboard (requires login — prevents public student data exposure)
-router.get('/api/leaderboard', authenticateToken, (req, res) => {
+router.get('/api/leaderboard', authenticateToken, async (req, res) => {
   try {
     /**
      * The deleted-account clause is part of the identity check, not a filter.
@@ -545,7 +546,7 @@ router.get('/api/leaderboard', authenticateToken, (req, res) => {
      * under their anonymised name, with their hours intact, on a board they can
      * no longer ask to be removed from because the account is gone.
      */
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT u.id, u.name, u.avatar,
              COALESCE(SUM(a.hours_awarded), 0) as hours,
              COUNT(DISTINCT a.slot_id) as shifts
@@ -642,7 +643,7 @@ function interestKeys(userRow) {
 }
 
 // 23. Skill-based recommendations
-router.get('/api/recommendations', authenticateToken, (req, res) => {
+router.get('/api/recommendations', authenticateToken, async (req, res) => {
   // Not a gate: recommendations are a student-only feature, but a non-student
   // caller gets an empty list, never a 403 — that is intentional, existing
   // behaviour (capability-mapping.md's Task 7d note), not an oversight to fix.
@@ -677,7 +678,7 @@ router.get('/api/recommendations', authenticateToken, (req, res) => {
   }
 
   try {
-    const userRow = db.prepare('SELECT skills, hobbies FROM users WHERE id = ?').get(req.user.id);
+    const userRow = await db.prepare('SELECT skills, hobbies FROM users WHERE id = ?').get(req.user.id);
     const userSkills = (() => {
       try {
         const parsed = userRow?.skills ? JSON.parse(userRow.skills) : [];
@@ -689,12 +690,12 @@ router.get('/api/recommendations', authenticateToken, (req, res) => {
     const interests = interestKeys(userRow);
 
     // Get past categories the user has volunteered in
-    const pastCategories = db.prepare(`
+    const pastCategories = (await db.prepare(`
       SELECT DISTINCT e.category
       FROM applications a
       JOIN events e ON a.event_id = e.id
       WHERE a.user_id = ? AND a.status = 'accepted'
-    `).all(req.user.id).map(r => r.category);
+    `).all(req.user.id)).map(r => r.category);
 
     /**
      * Events a student could actually still apply to.
@@ -732,11 +733,11 @@ router.get('/api/recommendations', authenticateToken, (req, res) => {
      * distance expression comes from `eventQueryFragments`, so there is one
      * haversine in this codebase rather than two that can disagree.
      */
-    const { distanceSelect } = eventQueryFragments({ lat, lng });
+    const { distanceSelect } = eventQueryFragments({ lat, lng, db });
     const params = { now: new Date().toISOString(), userId: req.user.id, limit: RECOMMENDATION_CANDIDATES };
     if (lat != null) { params.lat = lat; params.lng = lng; }
 
-    const events = db.prepare(`
+    const events = await db.prepare(`
       SELECT e.*, u.name as organizer_name, ${distanceSelect}
       FROM events e
       JOIN users u ON e.organizer_id = u.id
@@ -760,7 +761,7 @@ router.get('/api/recommendations', authenticateToken, (req, res) => {
     `).all(params);
 
     /* Batched, so adding tag scoring does not add a query per candidate. */
-    const tagsByEvent = tagsForEvents(db, events.map(e => e.id));
+    const tagsByEvent = await tagsForEvents(db, events.map(e => e.id));
 
     /**
      * Score, and record why.

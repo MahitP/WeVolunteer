@@ -240,8 +240,8 @@ router.post('/api/users/me/profile-picture', authenticateToken, receiveAvatar, a
 
   try {
     // Read before the write, so the replaced file can be unlinked afterwards.
-    const previousUrl = db.prepare('SELECT profile_picture_url FROM users WHERE id = ?')
-      .get(req.user.id)?.profile_picture_url;
+    const previousUrl = (await db.prepare('SELECT profile_picture_url FROM users WHERE id = ?')
+      .get(req.user.id))?.profile_picture_url;
 
     const filename = `${req.user.id}-${Date.now()}.webp`;
     const filepath = path.join(UPLOADS_DIR, filename);
@@ -260,7 +260,7 @@ router.post('/api/users/me/profile-picture', authenticateToken, receiveAvatar, a
     const now = new Date().toISOString();
 
     // Update user in DB
-    db.prepare('UPDATE users SET profile_picture_url = ?, profile_picture_uploaded_at = ? WHERE id = ?')
+    await db.prepare('UPDATE users SET profile_picture_url = ?, profile_picture_uploaded_at = ? WHERE id = ?')
       .run(relativeUrl, now, req.user.id);
 
     /**
@@ -284,21 +284,21 @@ router.post('/api/users/me/profile-picture', authenticateToken, receiveAvatar, a
       deleteUploadedFile(previousUrl);
     }
 
-    const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const fresh = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
 
-    res.json({ success: true, user: formatUserResponse(fresh) });
+    res.json({ success: true, user: await formatUserResponse(fresh) });
   } catch (err) {
     console.error('Profile picture upload error:', err);
     res.status(500).json({ error: 'Failed to process image' });
   }
 });
 
-router.delete('/api/users/me/profile-picture', authenticateToken, (req, res) => {
+router.delete('/api/users/me/profile-picture', authenticateToken, async (req, res) => {
   try {
-    const userRow = db.prepare('SELECT profile_picture_url FROM users WHERE id = ?').get(req.user.id);
+    const userRow = await db.prepare('SELECT profile_picture_url FROM users WHERE id = ?').get(req.user.id);
     if (!userRow) return res.status(404).json({ error: 'User not found' });
 
-    db.prepare('UPDATE users SET profile_picture_url = NULL, profile_picture_uploaded_at = NULL WHERE id = ?')
+    await db.prepare('UPDATE users SET profile_picture_url = NULL, profile_picture_uploaded_at = NULL WHERE id = ?')
       .run(req.user.id);
 
     // Clearing the column is what the caller asked for and must happen whether
@@ -307,8 +307,8 @@ router.delete('/api/users/me/profile-picture', authenticateToken, (req, res) => 
     // directory costs the caller nothing and destroys nothing.
     deleteUploadedFile(userRow.profile_picture_url);
 
-    const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-    res.json({ success: true, user: formatUserResponse(fresh) });
+    const fresh = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    res.json({ success: true, user: await formatUserResponse(fresh) });
   } catch (err) {
     console.error('Profile picture delete error:', err);
     res.status(500).json({ error: 'Failed to delete profile picture' });

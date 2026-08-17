@@ -372,17 +372,64 @@ describe('development usage still works', () => {
 });
 
 describe('the safety gate cannot be skipped by a new tool', () => {
+  /**
+   * A script's code, with comments removed.
+   *
+   * Both checks below decide "does this file delete something" by looking for
+   * `unlinkSync` and friends, and both used to look at the raw source. The
+   * second check already stripped comments before deciding whether the gate was
+   * *called*, for a reason its own note gives: "these files document the gate at
+   * length, and the prose names the very functions being searched for."
+   *
+   * The detection half had the same flaw and it bit. `bin/migration-baseline.mjs`
+   * contains no deletion at all — it restores a dump into `:memory:` precisely so
+   * that nothing has to be deleted — but it *explains* that choice in a comment,
+   * and naming `unlinkSync` there was enough to be reported as an ungated
+   * destructive tool.
+   *
+   * That false positive is not harmless. The obvious way to silence it is to add
+   * a `guardDestructive()` call to a script that destroys nothing, which is a
+   * meaningless gate on a no-op and teaches the next author that the gate is a
+   * formality to be satisfied rather than a check that means something. (It was
+   * also the first fix attempted, and it was wrong.)
+   *
+   * Stripping comments cannot hide a real deletion: a call inside a comment is
+   * not a call.
+   */
+  const codeOf = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+
+  const DELETES = /unlinkSync|rmSync|rimraf|DROP TABLE/i;
+
   // A static guard. The F-1 lesson is that hand-maintained parallel lists drift;
   // this makes the drift a test failure instead of a production incident.
   it('every bin/ script that deletes a file imports the shared gate', () => {
     const offenders = [];
     for (const name of readdirSync(path.join(ROOT, 'bin'))) {
       if (!/\.(mjs|js)$/.test(name)) continue;
-      const src = readFileSync(path.join(ROOT, 'bin', name), 'utf8');
-      const deletes = /unlinkSync|rmSync|rimraf|DROP TABLE/i.test(src);
-      if (deletes && !/db-safety\.mjs/.test(src)) offenders.push(name);
+      const code = codeOf(readFileSync(path.join(ROOT, 'bin', name), 'utf8'));
+      if (DELETES.test(code) && !/db-safety\.mjs/.test(code)) offenders.push(name);
     }
     expect(offenders, 'these delete data without the shared safety gate').toEqual([]);
+  });
+
+  /**
+   * The detection itself still works — asserted, not assumed.
+   *
+   * Loosening what a security guard looks at is the kind of change that can
+   * quietly turn it into a test that passes because it inspects nothing. This
+   * checks both directions on synthetic sources: a real call is still caught
+   * after comment-stripping, and a mention in prose is not.
+   */
+  it('still detects a real deletion, and still ignores one described in a comment', () => {
+    const realCall = "import fs from 'fs';\nfs.unlinkSync(target);\n";
+    const inBlockComment = '/**\n * We deliberately avoid unlinkSync here.\n */\nconst x = 1;\n';
+    const inLineComment = '// no unlinkSync in this file\nconst x = 1;\n';
+
+    expect(DELETES.test(codeOf(realCall)), 'a real unlinkSync call must still be detected').toBe(true);
+    expect(DELETES.test(codeOf(inBlockComment)), 'a block comment must not count').toBe(false);
+    expect(DELETES.test(codeOf(inLineComment)), 'a line comment must not count').toBe(false);
   });
 
   /**
@@ -407,16 +454,15 @@ describe('the safety gate cannot be skipped by a new tool', () => {
 
     for (const name of readdirSync(path.join(ROOT, 'bin'))) {
       if (!/\.(mjs|js)$/.test(name)) continue;
-      const src = readFileSync(path.join(ROOT, 'bin', name), 'utf8');
-      if (!/unlinkSync|rmSync|rimraf|DROP TABLE/i.test(src)) continue;
+      /* Comments are stripped before BOTH questions — "does this delete
+         anything" and "does it run the check" — because these files document the
+         gate at length and the prose names the very functions being searched
+         for. Detecting on the raw source reported a script that deletes nothing
+         and merely explains why. */
+      const code = codeOf(readFileSync(path.join(ROOT, 'bin', name), 'utf8'));
+      if (!DELETES.test(code)) continue;
 
       scanned++;
-      // Comments are stripped: these files document the gate at length, and the
-      // prose names the very functions being searched for.
-      const code = src
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/^\s*\/\/.*$/gm, '');
-
       const runsCheck = /guardDestructive\s*\(/.test(code)
         || /refuseNonDisposableDatabase\s*\(/.test(code);
       if (!runsCheck) offenders.push(name);

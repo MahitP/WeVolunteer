@@ -65,7 +65,7 @@ describe('the publicly named platform owner', () => {
       INSERT INTO users (id, email, name, username, grade, password_hash, role, account_status, created_at)
       VALUES (?, ?, ?, ?, 'Adult', 'x', 'super_admin', 'active', ?)
     `);
-    for (const a of [SERVICE, PERSON]) insert.run(a.id, a.email, a.name, a.username, a.created);
+    for (const a of [SERVICE, PERSON]) await insert.run(a.id, a.email, a.name, a.username, a.created);
   }, 60000);
 
   afterAll(async () => {
@@ -81,9 +81,9 @@ describe('the publicly named platform owner', () => {
      * account stopped sorting earlier, the fallback and the configured answer
      * would agree and every test below would pass without distinguishing them.
      */
-    const rows = db.prepare(
+    const rows = (await db.prepare(
       "SELECT username FROM users WHERE role = 'super_admin' AND account_status = 'active' ORDER BY created_at ASC, id ASC"
-    ).all().map(r => r.username);
+    ).all()).map(r => r.username);
 
     expect(rows).toContain(SERVICE.username);
     expect(rows).toContain(PERSON.username);
@@ -117,13 +117,13 @@ describe('the publicly named platform owner', () => {
      * not change who is selected — only their role and the configured username
      * may decide it. A serializer that matched "Mahit" would break here.
      */
-    db.prepare('UPDATE users SET name = ? WHERE id = ?').run('Someone Else Entirely', PERSON.id);
+    await db.prepare('UPDATE users SET name = ? WHERE id = ?').run('Someone Else Entirely', PERSON.id);
     try {
       const o = await owner();
       expect(o?.username).toBe(PERSON.username);
       expect(o?.name).toBe('Someone Else Entirely');
     } finally {
-      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(PERSON.name, PERSON.id);
+      await db.prepare('UPDATE users SET name = ? WHERE id = ?').run(PERSON.name, PERSON.id);
     }
   });
 
@@ -134,33 +134,33 @@ describe('the publicly named platform owner', () => {
      * account sorted first — the service account — on a public page, with
      * nothing anywhere reporting a fault.
      */
-    db.prepare('UPDATE users SET username = ? WHERE id = ?').run('renamed-away', PERSON.id);
+    await db.prepare('UPDATE users SET username = ? WHERE id = ?').run('renamed-away', PERSON.id);
     try {
       expect(await owner(), 'a missed configured username must not fall back').toBeNull();
     } finally {
-      db.prepare('UPDATE users SET username = ? WHERE id = ?').run(PERSON.username, PERSON.id);
+      await db.prepare('UPDATE users SET username = ? WHERE id = ?').run(PERSON.username, PERSON.id);
     }
   });
 
   it('cannot be pointed at an account that does not hold the role', async () => {
     /* Configuration chooses BETWEEN owners; it cannot create one. */
-    db.prepare("UPDATE users SET role = 'student' WHERE id = ?").run(PERSON.id);
+    await db.prepare("UPDATE users SET role = 'student' WHERE id = ?").run(PERSON.id);
     try {
       const o = await owner();
       expect(o?.username, 'a non-owner was named because configuration pointed at them')
         .not.toBe(PERSON.username);
       expect(o, 'and it must not silently fall back to the service account either').toBeNull();
     } finally {
-      db.prepare("UPDATE users SET role = 'super_admin' WHERE id = ?").run(PERSON.id);
+      await db.prepare("UPDATE users SET role = 'super_admin' WHERE id = ?").run(PERSON.id);
     }
   });
 
   it('stops naming an owner whose account is closed', async () => {
-    db.prepare("UPDATE users SET account_status = 'deleted' WHERE id = ?").run(PERSON.id);
+    await db.prepare("UPDATE users SET account_status = 'deleted' WHERE id = ?").run(PERSON.id);
     try {
       expect(await owner()).toBeNull();
     } finally {
-      db.prepare("UPDATE users SET account_status = 'active' WHERE id = ?").run(PERSON.id);
+      await db.prepare("UPDATE users SET account_status = 'active' WHERE id = ?").run(PERSON.id);
     }
   });
 });

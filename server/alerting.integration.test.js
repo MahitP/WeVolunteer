@@ -64,7 +64,7 @@ describe('the maintenance sweep actually sends alerts', () => {
     newProblem('fp-alert-wiring');
 
     // The real entry point the 15-minute interval calls — not sendErrorAlerts.
-    utils.runNotificationSweep();
+    await utils.runNotificationSweep();
     await settle();
 
     expect(sendMail, 'runNotificationSweep never reached sendErrorAlerts').toHaveBeenCalled();
@@ -81,7 +81,7 @@ describe('the maintenance sweep actually sends alerts', () => {
     const sendMail = vi.spyOn(email, 'sendMail').mockResolvedValue({ ok: true });
     newProblem('fp-alert-privacy');
 
-    utils.runNotificationSweep();
+    await utils.runNotificationSweep();
     await settle();
 
     const body = `${sendMail.mock.calls[0][0].subject}\n${sendMail.mock.calls[0][0].text}`;
@@ -95,7 +95,7 @@ describe('the maintenance sweep actually sends alerts', () => {
     const sendMail = vi.spyOn(email, 'sendMail').mockResolvedValue({ ok: true });
     newProblem('fp-alert-client', 'client');
 
-    utils.runNotificationSweep();
+    await utils.runNotificationSweep();
     await settle();
 
     expect(sendMail).not.toHaveBeenCalled();
@@ -115,8 +115,8 @@ describe('the maintenance sweep actually sends alerts', () => {
     const sendMail = vi.spyOn(email, 'sendMail').mockRejectedValue(new Error('SMTP is down'));
     newProblem('fp-alert-smtp-down');
 
-    expect(() => utils.runNotificationSweep()).not.toThrow();
-    expect(typeof utils.runNotificationSweep()).toBe('number');
+    await expect(utils.runNotificationSweep()).resolves.toBeTypeOf('number');
+    expect(typeof await utils.runNotificationSweep()).toBe('number');
     await settle();
 
     sendMail.mockRestore();
@@ -148,7 +148,7 @@ describe('alerting introduced no new scheduling machinery', () => {
     expect(
       src.indexOf('sendErrorAlerts(db, {'),
       'alerting must run after the error sweep, in the same try block'
-    ).toBeGreaterThan(src.indexOf('sweepErrors(db, now)'));
+    ).toBeGreaterThan(src.indexOf('await sweepErrors(db, now)'));
   });
 
   /**

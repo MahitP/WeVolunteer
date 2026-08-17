@@ -59,8 +59,9 @@ function seedDb(file) {
     process.env.WEV_DB_PATH = ${JSON.stringify(file)};
     process.env.JWT_SECRET = ${JSON.stringify('x'.repeat(48))};
     process.env.DEMO_MODE = 'true';
-    const { initDatabase } = await import('${ROOT.replace(/\\/g, '/')}/server/db.js');
+    const { initDatabase, completeDatabaseInit } = await import('${ROOT.replace(/\\/g, '/')}/server/db.js');
     initDatabase();
+    await completeDatabaseInit();
   `], { cwd: ROOT, stdio: 'pipe' });
 }
 

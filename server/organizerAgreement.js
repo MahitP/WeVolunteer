@@ -1,4 +1,5 @@
 import { ROLE } from './authz.js';
+import { runInTransaction } from './db/connectionContext.js';
 import { ORGANIZER_DOCUMENTS } from './legalDocuments.js';
 import { recordAcceptances } from './consent.js';
 import { resolveDocument } from './legalStore.js';
@@ -125,12 +126,12 @@ export const ORGANIZER_GATED_CAPABILITIES = Object.freeze([
  * Takes `db` rather than importing it, so this is testable against a throwaway
  * handle and so the module stays importable without opening a database.
  */
-export function hasAcceptedOrganizerAgreement(db, userId) {
+export async function hasAcceptedOrganizerAgreement(db, userId) {
   if (ORGANIZER_DOCUMENTS.length === 0) return true;
 
   const accepted = new Set(
-    db.prepare('SELECT document_slug, version FROM legal_acceptances WHERE user_id = ?')
-      .all(userId)
+    (await db.prepare('SELECT document_slug, version FROM legal_acceptances WHERE user_id = ?')
+      .all(userId))
       .map(r => `${r.document_slug}@${r.version}`)
   );
 
@@ -150,10 +151,14 @@ export function hasAcceptedOrganizerAgreement(db, userId) {
    * and it is why the editor warns before saving this particular document rather
    * than letting a typo fix log everybody out of their own events.
    */
-  return ORGANIZER_DOCUMENTS.every((registered) => {
-    const doc = resolveDocument(db, registered) ?? registered;
-    return accepted.has(`${doc.slug}@${doc.version}`);
-  });
+  /* A loop, not `.every`: the resolver is async, and `.every` does not await —
+     it would see a truthy promise for every document and report the agreement
+     as accepted by someone who never accepted it. */
+  for (const registered of ORGANIZER_DOCUMENTS) {
+    const doc = await resolveDocument(db, registered) ?? registered;
+    if (!accepted.has(`${doc.slug}@${doc.version}`)) return false;
+  }
+  return true;
 }
 
 /**
@@ -173,7 +178,7 @@ export function hasAcceptedOrganizerAgreement(db, userId) {
  * and must not be gated by that organizer's missing acceptance either. The
  * question is about the person acting, which is `actualRole`.
  */
-export function withheldCapabilitiesFor(db, userRow) {
+export async function withheldCapabilitiesFor(db, userRow) {
   /**
    * The UNION of every agreement gate, because there is now more than one.
    *
@@ -184,8 +189,8 @@ export function withheldCapabilitiesFor(db, userRow) {
    * been withheld.
    */
   return [
-    ...organizerAgreementWithholdings(db, userRow),
-    ...studentOrganizerWithholdingsFor(db, userRow),
+    ...await organizerAgreementWithholdings(db, userRow),
+    ...await studentOrganizerWithholdingsFor(db, userRow),
   ];
 }
 
@@ -207,9 +212,9 @@ export function withheldCapabilitiesFor(db, userRow) {
  * that organizer's missing acceptance either. The question is about the person
  * acting.
  */
-function organizerAgreementWithholdings(db, userRow) {
+async function organizerAgreementWithholdings(db, userRow) {
   if (!userRow || userRow.role !== ROLE.ORGANIZER) return [];
-  if (hasAcceptedOrganizerAgreement(db, userRow.id)) return [];
+  if (await hasAcceptedOrganizerAgreement(db, userRow.id)) return [];
   return [...ORGANIZER_GATED_CAPABILITIES];
 }
 
@@ -227,8 +232,8 @@ function organizerAgreementWithholdings(db, userRow) {
  * records at the same version: the question "when did they accept v1.0" must
  * have one answer.
  */
-export function acceptOrganizerAgreement(db, { userId, req = null, now = null }) {
-  if (hasAcceptedOrganizerAgreement(db, userId)) {
+export async function acceptOrganizerAgreement(db, { userId, req = null, now = null }) {
+  if (await hasAcceptedOrganizerAgreement(db, userId)) {
     return { recorded: 0, already: true };
   }
 
@@ -244,10 +249,22 @@ export function acceptOrganizerAgreement(db, { userId, req = null, now = null })
    *
    * `node:sqlite` has no `db.transaction(fn)` wrapper — that is better-sqlite3's
    * API, and reaching for it here failed on every boot.
+   *
+   * ── Why `transactionOn` and not a bare `db.exec('BEGIN')` ──
+   *
+   * This used to drive BEGIN/COMMIT on `db` directly. That is correct on SQLite,
+   * where there is one connection and the writes inside necessarily land on it,
+   * and silently wrong against a connection pool: `BEGIN` would go to one
+   * borrowed client and `recordAcceptances`'s inserts to others, so the
+   * acceptance rows would not be atomic with each other and a rollback would
+   * discard nothing. Nothing would error.
+   *
+   * `transactionOn` takes the handle as its first argument for the reason spelled
+   * out above — so this module keeps taking `db` as a parameter and stays
+   * drivable against a throwaway database in a test.
    */
-  db.exec('BEGIN');
-  try {
-    const recorded = recordAcceptances(db, {
+  return runInTransaction(db, async (tx) => {
+    const recorded = await recordAcceptances(tx, {
       userId,
       method: 'organizer_agreement',
       context: 'organizer-onboarding',
@@ -255,12 +272,8 @@ export function acceptOrganizerAgreement(db, { userId, req = null, now = null })
       req,
       now,
     });
-    db.exec('COMMIT');
     return { recorded, already: false };
-  } catch (err) {
-    try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
-    throw err;
-  }
+  });
 }
 
 /**
@@ -273,8 +286,8 @@ export function acceptOrganizerAgreement(db, { userId, req = null, now = null })
  * was actually being withheld from them. One function answering "what is withheld
  * from this person" means the status endpoint cannot disagree with `can()`.
  */
-export function organizerAgreementStatus(db, userRow) {
-  const accepted = hasAcceptedOrganizerAgreement(db, userRow.id);
+export async function organizerAgreementStatus(db, userRow) {
+  const accepted = await hasAcceptedOrganizerAgreement(db, userRow.id);
   return {
     required: userRow.role === ROLE.ORGANIZER,
     accepted,
@@ -282,15 +295,15 @@ export function organizerAgreementStatus(db, userRow) {
        the version the acceptance screen prints and the version the gate above
        measures against, and those two disagreeing is how an organizer ends up
        accepting a document that does not clear their block. */
-    documents: ORGANIZER_DOCUMENTS.map((registered) => {
-      const d = resolveDocument(db, registered) ?? registered;
+    documents: await Promise.all(ORGANIZER_DOCUMENTS.map(async (registered) => {
+      const d = await resolveDocument(db, registered) ?? registered;
       return {
         slug: d.slug,
         title: d.title,
         version: d.version,
         effectiveAt: d.effectiveAt,
       };
-    }),
-    withheld: withheldCapabilitiesFor(db, userRow),
+    })),
+    withheld: await withheldCapabilitiesFor(db, userRow),
   };
 }

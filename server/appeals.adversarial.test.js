@@ -39,17 +39,17 @@ beforeAll(async () => {
   srv = await startTestServer();
   db = (await import('./db.js')).db;
 
-  const seeded = db.prepare("SELECT password_hash FROM users WHERE id = 'user-admin'").get();
+  const seeded = await db.prepare("SELECT password_hash FROM users WHERE id = 'user-admin'").get();
 
   // An administrator who has issued nothing, so they are eligible to decide.
   reviewerEmail = 'adv.reviewer@example.gov';
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, email, password_hash, name, role, grade, username, email_verified,
                        account_status, created_at)
     VALUES ('adv-reviewer', ?, ?, 'Adversarial Reviewer', 'admin', 'N/A', 'adv_reviewer', 1,
-            'active', datetime('now'))
+            'active', ?)
     ON CONFLICT DO NOTHING
-  `).run(reviewerEmail, seeded.password_hash);
+  `).run(reviewerEmail, seeded.password_hash, new Date().toISOString());
 
   /**
    * A super administrator, who does not exist in the demo seed.
@@ -60,13 +60,13 @@ beforeAll(async () => {
    * would swallow them for is the one with no oversight above it.
    */
   superEmail = 'adv.super@example.gov';
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, email, password_hash, name, role, grade, username, email_verified,
                        account_status, created_at)
     VALUES ('adv-super', ?, ?, 'Adversarial Super', 'super_admin', 'N/A', 'adv_super', 1,
-            'active', datetime('now'))
+            'active', ?)
     ON CONFLICT DO NOTHING
-  `).run(superEmail, seeded.password_hash);
+  `).run(superEmail, seeded.password_hash, new Date().toISOString());
 });
 
 afterAll(async () => { await srv.close(); });
@@ -77,13 +77,14 @@ const jf = (p, o = {}) => fetch(srv.base + p, {
 const asUser = (t) => ({ Cookie: `wev_session=${t}` });
 
 let seq = 0;
-function makeUser(optOut = 0) {
+async function makeUser(optOut = 0) {
   const id = `adv-user-${++seq}`;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, email, password_hash, name, role, grade, username,
                        email_verified, account_status, email_opt_out, created_at)
-    VALUES (?, ?, 'h', ?, 'student', '9', ?, 1, 'active', ?, datetime('now'))
-  `).run(id, `${id}@example.com`, `Adv Student ${seq}`, id.replace(/-/g, '_'), optOut);
+    VALUES (?, ?, 'h', ?, 'student', '9', ?, 1, 'active', ?, ?)
+  `).run(id, `${id}@example.com`, `Adv Student ${seq}`, id.replace(/-/g, '_'), optOut,
+         new Date().toISOString());
   return id;
 }
 
@@ -92,9 +93,9 @@ async function suspendAs(sessionToken, uid, reason = 'Messaged a student off-pla
   const res = await jf(`/api/admin/users/${uid}/suspend`, {
     method: 'POST', headers: asUser(sessionToken), body: JSON.stringify({ reason }),
   });
-  const token = db.prepare(
+  const token = (await db.prepare(
     'SELECT token FROM appeal_tokens WHERE user_id = ? AND used_at IS NULL ORDER BY expires_at DESC'
-  ).get(uid)?.token;
+  ).get(uid))?.token;
   return { res, token };
 }
 
@@ -107,7 +108,7 @@ describe('an appellant\'s own words survive the decision', () => {
   it('leaves the statement byte-identical after a decision is recorded', async () => {
     const adminT = await srv.login('admin@example.gov');
     const reviewerT = await srv.login(reviewerEmail);
-    const uid = makeUser();
+    const uid = await makeUser();
 
     /**
      * Deliberately awkward text. The original defect overwrote the statement
@@ -121,10 +122,10 @@ describe('an appellant\'s own words survive the decision', () => {
     const { token } = await suspendAs(adminT, uid);
     expect(token, 'fixture: suspension minted no appeal token').toBeTruthy();
     const filed = await fileAppeal(token, STATEMENT);
-    expect(filed.status, `fixture: appeal not filed (${await filed.clone().text()})`).toBeLessThan(300);
+    expect(filed.status, `fixture: appeal not filed (${(await filed.clone()).text()})`).toBeLessThan(300);
 
-    const appealId = db.prepare('SELECT id FROM appeals WHERE user_id = ?').get(uid).id;
-    const before = db.prepare('SELECT statement FROM appeals WHERE id = ?').get(appealId).statement;
+    const appealId = (await db.prepare('SELECT id FROM appeals WHERE user_id = ?').get(uid)).id;
+    const before = (await db.prepare('SELECT statement FROM appeals WHERE id = ?').get(appealId)).statement;
     expect(before).toBe(STATEMENT);
 
     const decided = await jf(`/api/admin/appeals/${appealId}`, {
@@ -134,9 +135,9 @@ describe('an appellant\'s own words survive the decision', () => {
         reasoning: 'The message came from this account while it was signed in on two devices.',
       }),
     });
-    expect(decided.status, `decision was refused (${await decided.clone().text()})`).toBe(200);
+    expect(decided.status, `decision was refused (${(await decided.clone()).text()})`).toBe(200);
 
-    const after = db.prepare('SELECT statement, decision, reasoning FROM appeals WHERE id = ?')
+    const after = await db.prepare('SELECT statement, decision, reasoning FROM appeals WHERE id = ?')
       .get(appealId);
     expect(after.decision, 'fixture: the decision did not record').toBe('stands');
     expect(
@@ -146,14 +147,14 @@ describe('an appellant\'s own words survive the decision', () => {
     expect(after.reasoning).not.toBe(after.statement);
   });
 
-  it('refuses to overwrite a statement even from raw SQL', () => {
-    const row = db.prepare("SELECT id, statement FROM appeals WHERE statement IS NOT NULL LIMIT 1").get();
+  it('refuses to overwrite a statement even from raw SQL', async () => {
+    const row = await db.prepare("SELECT id, statement FROM appeals WHERE statement IS NOT NULL LIMIT 1").get();
     expect(row, 'fixture: no appeal with a statement to attack').toBeTruthy();
 
-    expect(() => db.prepare('UPDATE appeals SET statement = ? WHERE id = ?')
-      .run('I admit everything.', row.id)).toThrow(/never overwritten/);
+    await expect(async () => await db.prepare('UPDATE appeals SET statement = ? WHERE id = ?')
+      .run('I admit everything.', row.id)).rejects.toThrow(/never overwritten/);
 
-    expect(db.prepare('SELECT statement FROM appeals WHERE id = ?').get(row.id).statement)
+    expect((await db.prepare('SELECT statement FROM appeals WHERE id = ?').get(row.id)).statement)
       .toBe(row.statement);
   });
 });
@@ -161,20 +162,19 @@ describe('an appellant\'s own words survive the decision', () => {
 /* ── 2. The record cannot be rewritten or removed ─────────────────────────── */
 
 describe('appeal and moderation records are append-only at the database', () => {
-  it('refuses DELETE FROM appeals', () => {
-    const row = db.prepare('SELECT id FROM appeals LIMIT 1').get();
+  it('refuses DELETE FROM appeals', async () => {
+    const row = await db.prepare('SELECT id FROM appeals LIMIT 1').get();
     expect(row, 'fixture: no appeal to attack').toBeTruthy();
-    expect(() => db.prepare('DELETE FROM appeals WHERE id = ?').run(row.id))
-      .toThrow(/never deleted/);
-    expect(db.prepare('SELECT 1 FROM appeals WHERE id = ?').get(row.id)).toBeTruthy();
+    await expect(async () => await db.prepare('DELETE FROM appeals WHERE id = ?').run(row.id)).rejects.toThrow(/never deleted/);
+    expect(await db.prepare('SELECT 1 FROM appeals WHERE id = ?').get(row.id)).toBeTruthy();
   });
 
-  it('refuses to re-point an appeal at a different account', () => {
+  it('refuses to re-point an appeal at a different account', async () => {
     // The laundering attack: move somebody's defence onto another person's record.
-    const row = db.prepare('SELECT id, user_id FROM appeals LIMIT 1').get();
-    expect(() => db.prepare('UPDATE appeals SET user_id = ? WHERE id = ?')
-      .run('user-admin', row.id)).toThrow(/only the review workflow may change/);
-    expect(db.prepare('SELECT user_id FROM appeals WHERE id = ?').get(row.id).user_id)
+    const row = await db.prepare('SELECT id, user_id FROM appeals LIMIT 1').get();
+    await expect(async () => await db.prepare('UPDATE appeals SET user_id = ? WHERE id = ?')
+      .run('user-admin', row.id)).rejects.toThrow(/only the review workflow may change/);
+    expect((await db.prepare('SELECT user_id FROM appeals WHERE id = ?').get(row.id)).user_id)
       .toBe(row.user_id);
   });
 
@@ -186,7 +186,7 @@ describe('appeal and moderation records are append-only at the database', () => 
      */
     const studentT = await srv.login('cameron.caldwell@example.com');
     const now = new Date().toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO reports (id, reporter_id, reporter_name_snapshot, target_type, target_id,
                            target_author_id, category, description, status, priority,
                            created_at, updated_at)
@@ -201,20 +201,19 @@ describe('appeal and moderation records are append-only at the database', () => 
         reportId: 'adv-rep-own',
       }),
     });
-    expect(filed.status, `fixture: own-report appeal refused (${await filed.clone().text()})`)
+    expect(filed.status, `fixture: own-report appeal refused (${(await filed.clone()).text()})`)
       .toBeLessThan(300);
 
-    const row = db.prepare(
+    const row = await db.prepare(
       "SELECT id, action FROM moderation_actions WHERE report_id = 'adv-rep-own' LIMIT 1"
     ).get();
     expect(row, 'filing an appeal against your own report wrote no history row').toBeTruthy();
 
-    expect(() => db.prepare('UPDATE moderation_actions SET action = ? WHERE id = ?')
-      .run('tampered', row.id)).toThrow(/append-only/);
-    expect(() => db.prepare('DELETE FROM moderation_actions WHERE id = ?').run(row.id))
-      .toThrow(/append-only/);
+    await expect(async () => await db.prepare('UPDATE moderation_actions SET action = ? WHERE id = ?')
+      .run('tampered', row.id)).rejects.toThrow(/append-only/);
+    await expect(async () => await db.prepare('DELETE FROM moderation_actions WHERE id = ?').run(row.id)).rejects.toThrow(/append-only/);
 
-    expect(db.prepare('SELECT action FROM moderation_actions WHERE id = ?').get(row.id).action)
+    expect((await db.prepare('SELECT action FROM moderation_actions WHERE id = ?').get(row.id)).action)
       .toBe(row.action);
   });
 });
@@ -224,10 +223,10 @@ describe('appeal and moderation records are append-only at the database', () => 
 describe('conflict of interest cannot be bypassed', () => {
   it('refuses the administrator who issued the suspension', async () => {
     const adminT = await srv.login('admin@example.gov');
-    const uid = makeUser();
+    const uid = await makeUser();
     const { token } = await suspendAs(adminT, uid);
     await fileAppeal(token, 'I was not even online that evening, and I can show you.');
-    const appealId = db.prepare('SELECT id FROM appeals WHERE user_id = ?').get(uid).id;
+    const appealId = (await db.prepare('SELECT id FROM appeals WHERE user_id = ?').get(uid)).id;
 
     const res = await jf(`/api/admin/appeals/${appealId}`, {
       method: 'PATCH', headers: asUser(adminT),
@@ -237,7 +236,7 @@ describe('conflict of interest cannot be bypassed', () => {
     expect(res.status).toBe(403);
     expect((await res.json()).code).toBe('conflict_of_interest');
     expect(
-      db.prepare('SELECT decision FROM appeals WHERE id = ?').get(appealId).decision,
+      (await db.prepare('SELECT decision FROM appeals WHERE id = ?').get(appealId)).decision,
       'the conflicted decision was written anyway'
     ).toBeNull();
   });
@@ -253,11 +252,11 @@ describe('conflict of interest cannot be bypassed', () => {
      * prevent.
      */
     const superT = await srv.login(superEmail);
-    const uid = makeUser();
+    const uid = await makeUser();
     const { res: susRes, token } = await suspendAs(superT, uid);
     expect(susRes.status, 'fixture: super admin could not suspend').toBeLessThan(300);
     await fileAppeal(token, 'The account was suspended by the same person I am appealing to.');
-    const appealId = db.prepare('SELECT id FROM appeals WHERE user_id = ?').get(uid).id;
+    const appealId = (await db.prepare('SELECT id FROM appeals WHERE user_id = ?').get(uid)).id;
 
     const claim = await jf(`/api/admin/appeals/${appealId}/claim`, {
       method: 'POST', headers: asUser(superT),
@@ -270,7 +269,7 @@ describe('conflict of interest cannot be bypassed', () => {
     });
     expect(res.status, 'a super admin decided an appeal against their own suspension').toBe(403);
     expect((await res.json()).code).toBe('conflict_of_interest');
-    expect(db.prepare('SELECT decision FROM appeals WHERE id = ?').get(appealId).decision).toBeNull();
+    expect((await db.prepare('SELECT decision FROM appeals WHERE id = ?').get(appealId)).decision).toBeNull();
   });
 
   it('still lets an uninvolved administrator decide, so the refusal is not universal', async () => {
@@ -278,16 +277,16 @@ describe('conflict of interest cannot be bypassed', () => {
     // tests above meaningful.
     const adminT = await srv.login('admin@example.gov');
     const reviewerT = await srv.login(reviewerEmail);
-    const uid = makeUser();
+    const uid = await makeUser();
     const { token } = await suspendAs(adminT, uid);
     await fileAppeal(token, 'Nobody involved in my suspension should be reading this appeal.');
-    const appealId = db.prepare('SELECT id FROM appeals WHERE user_id = ?').get(uid).id;
+    const appealId = (await db.prepare('SELECT id FROM appeals WHERE user_id = ?').get(uid)).id;
 
     const res = await jf(`/api/admin/appeals/${appealId}`, {
       method: 'PATCH', headers: asUser(reviewerT),
       body: JSON.stringify({ decision: 'reversed', reasoning: 'The evidence does not support this.' }),
     });
-    expect(res.status, await res.clone().text()).toBe(200);
+    expect(res.status, (await res.clone()).text()).toBe(200);
   });
 });
 
@@ -295,12 +294,12 @@ describe('conflict of interest cannot be bypassed', () => {
 
 describe('reportId ownership', () => {
   it('refuses a report the caller has nothing to do with, without revealing it exists', async () => {
-    const victim = makeUser();
-    const attacker = makeUser();
+    const victim = await makeUser();
+    const attacker = await makeUser();
 
     // A real report about somebody else entirely.
     const now = new Date().toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO reports (id, reporter_id, reporter_name_snapshot, target_type, target_id,
                            target_author_id, category, description, status, priority,
                            created_at, updated_at)
@@ -325,7 +324,7 @@ describe('reportId ownership', () => {
     expect(res.status).toBe(404);
     expect((await res.json()).code).toBe('subject_not_found');
     expect(
-      db.prepare("SELECT 1 FROM appeals WHERE subject_ref = 'adv-rep-1'").get(),
+      await db.prepare("SELECT 1 FROM appeals WHERE subject_ref = 'adv-rep-1'").get(),
       'an appeal was attached to a stranger\'s report'
     ).toBeFalsy();
   });
@@ -351,7 +350,7 @@ describe('reportId ownership', () => {
 describe('the suspension notice reaches a usable appeal page', () => {
   it('points at a token the public route actually accepts', async () => {
     const adminT = await srv.login('admin@example.gov');
-    const uid = makeUser();
+    const uid = await makeUser();
     const { token } = await suspendAs(adminT, uid);
     expect(token, 'suspension minted no appeal token').toBeTruthy();
 
@@ -361,7 +360,7 @@ describe('the suspension notice reaches a usable appeal page', () => {
      * compares segment for segment — so the link fell through to the signed-out
      * catch-all and every appeal link in every suspension email was dead.
      */
-    const notice = db.prepare(`
+    const notice = await db.prepare(`
       SELECT link FROM notifications
        WHERE user_id = ? AND link IS NOT NULL
        ORDER BY created_at DESC LIMIT 1
@@ -389,11 +388,11 @@ describe('the suspension notice reaches a usable appeal page', () => {
      * it turns an opt-out into a permanent lockout with no appeal channel.
      */
     const adminT = await srv.login('admin@example.gov');
-    const uid = makeUser(1);
+    const uid = await makeUser(1);
     const { token } = await suspendAs(adminT, uid);
 
     expect(token, 'an opted-out user got no appeal token').toBeTruthy();
-    const notice = db.prepare(
+    const notice = await db.prepare(
       'SELECT link FROM notifications WHERE user_id = ? AND link IS NOT NULL LIMIT 1'
     ).get(uid);
     expect(notice, 'an opted-out user got no appeal notice at all').toBeTruthy();

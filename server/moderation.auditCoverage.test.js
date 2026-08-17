@@ -66,8 +66,8 @@ describe('administrative deletions are recorded', () => {
 
     /* Against the AUTHOR, not the moderator — the trail answers "what was done to
        this person", and the subject is who was affected. */
-    const studentId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('leo.chen@example.com').id;
+    const studentId = (await db.prepare('SELECT id FROM users WHERE email = ?')
+      .get('leo.chen@example.com')).id;
     expect(rows[0].target_user_id).toBe(studentId);
     expect(rows[0].admin_id).toBe('user-admin');
 
@@ -101,8 +101,8 @@ describe('administrative deletions are recorded', () => {
   };
 
   it('records an administrator deleting another organizer\'s event', async () => {
-    const organizerId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('jordan.whitfield@example.org').id;
+    const organizerId = (await db.prepare('SELECT id FROM users WHERE email = ?')
+      .get('jordan.whitfield@example.org')).id;
     const id = makeEvent('event-audit-probe-1', organizerId);
     const before = auditRows('EVENT_DELETED').length;
 
@@ -116,8 +116,8 @@ describe('administrative deletions are recorded', () => {
   });
 
   it('records nothing when an organizer deletes their own event', async () => {
-    const organizerId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('jordan.whitfield@example.org').id;
+    const organizerId = (await db.prepare('SELECT id FROM users WHERE email = ?')
+      .get('jordan.whitfield@example.org')).id;
     const id = makeEvent('event-audit-probe-2', organizerId);
     const before = auditRows('EVENT_DELETED').length;
 

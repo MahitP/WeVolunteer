@@ -234,7 +234,7 @@ describe('a refresh does not restore spent attempts', () => {
     expect(res.body.code).toBe('account_locked');
 
     /* And nothing was granted — the refusal is not cosmetic. */
-    const row = db.prepare('SELECT granted_at FROM reauth_challenges WHERE id = ?')
+    const row = await db.prepare('SELECT granted_at FROM reauth_challenges WHERE id = ?')
       .get(opened.body.challengeId);
     expect(row.granted_at).toBeNull();
   });

@@ -100,7 +100,7 @@ describe('QR check-in', () => {
       const res = await mint();
       const raw = res.body.token.slice('wev1:'.length);
 
-      const rows = db.prepare('SELECT * FROM checkin_tokens').all();
+      const rows = await db.prepare('SELECT * FROM checkin_tokens').all();
       expect(rows).toHaveLength(1);
       /* A stolen database must not yield working codes. */
       expect(JSON.stringify(rows[0])).not.toContain(raw);
@@ -125,7 +125,7 @@ describe('QR check-in', () => {
     });
 
     it('refuses for a cancelled event', async () => {
-      db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(eventId);
+      await db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(eventId);
       const res = await mint();
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('event_cancelled');
@@ -165,7 +165,7 @@ describe('QR check-in', () => {
       await mint();
       await mint();
       await mint();
-      const live = db.prepare("SELECT COUNT(*) AS c FROM checkin_tokens WHERE status = 'pending'").get().c;
+      const live = (await db.prepare("SELECT COUNT(*) AS c FROM checkin_tokens WHERE status = 'pending'").get()).c;
       expect(live).toBe(1);
     });
   });
@@ -198,7 +198,7 @@ describe('QR check-in', () => {
       const { body } = await mint();
       await scan(body.token);
 
-      const row = db.prepare('SELECT method FROM attendance_checkin WHERE event_id = ?').get(eventId);
+      const row = await db.prepare('SELECT method FROM attendance_checkin WHERE event_id = ?').get(eventId);
       expect(row.method).toBe('qr');
     });
 
@@ -206,7 +206,7 @@ describe('QR check-in', () => {
       const { body } = await mint();
       await scan(body.token);
 
-      const attendance = db.prepare('SELECT COUNT(*) AS c FROM attendance WHERE event_id = ?').get(eventId).c;
+      const attendance = (await db.prepare('SELECT COUNT(*) AS c FROM attendance WHERE event_id = ?').get(eventId)).c;
       expect(attendance).toBe(0);
     });
   });
@@ -227,10 +227,10 @@ describe('QR check-in', () => {
     it('leaves the first check-in intact when the replay is refused', async () => {
       const { body } = await mint();
       await scan(body.token);
-      const before = db.prepare('SELECT marked_at FROM attendance_checkin WHERE event_id = ?').get(eventId);
+      const before = await db.prepare('SELECT marked_at FROM attendance_checkin WHERE event_id = ?').get(eventId);
 
       await scan(body.token);
-      const after = db.prepare('SELECT marked_at FROM attendance_checkin WHERE event_id = ?').get(eventId);
+      const after = await db.prepare('SELECT marked_at FROM attendance_checkin WHERE event_id = ?').get(eventId);
 
       expect(after.marked_at).toBe(before.marked_at);
     });
@@ -256,12 +256,12 @@ describe('QR check-in', () => {
        */
       const { body } = await mint();
 
-      const results = await Promise.all([scan(body.token), scan(body.token)]);
+      const results = await Promise.all([await scan(body.token), await scan(body.token)]);
       const statuses = results.map(r => r.status).sort();
 
       expect(statuses).toEqual([200, 422]);
 
-      const spent = db.prepare("SELECT COUNT(*) AS c FROM checkin_tokens WHERE status = 'used'").get().c;
+      const spent = (await db.prepare("SELECT COUNT(*) AS c FROM checkin_tokens WHERE status = 'used'").get()).c;
       expect(spent).toBe(1);
     });
 
@@ -280,7 +280,7 @@ describe('QR check-in', () => {
   describe('expiry', () => {
     it('refuses a code past its five minutes', async () => {
       const { body } = await mint();
-      db.prepare("UPDATE checkin_tokens SET expires_at = ? WHERE status = 'pending'")
+      await db.prepare("UPDATE checkin_tokens SET expires_at = ? WHERE status = 'pending'")
         .run(new Date(Date.now() - 1000).toISOString());
 
       const res = await scan(body.token);
@@ -290,11 +290,11 @@ describe('QR check-in', () => {
 
     it('expires server-side, whatever the client believes', async () => {
       const { body } = await mint();
-      db.prepare("UPDATE checkin_tokens SET expires_at = ? WHERE status = 'pending'")
+      await db.prepare("UPDATE checkin_tokens SET expires_at = ? WHERE status = 'pending'")
         .run(new Date(Date.now() - 1000).toISOString());
 
       await scan(body.token);
-      const marks = db.prepare('SELECT COUNT(*) AS c FROM attendance_checkin WHERE event_id = ?').get(eventId).c;
+      const marks = (await db.prepare('SELECT COUNT(*) AS c FROM attendance_checkin WHERE event_id = ?').get(eventId)).c;
       expect(marks).toBe(0);
     });
   });
@@ -303,13 +303,13 @@ describe('QR check-in', () => {
     it('refuses a code minted for a different event', async () => {
       const { body } = await mint();
 
-      const otherEvent = db.prepare('SELECT id FROM events WHERE id <> ?').get(eventId);
+      const otherEvent = await db.prepare('SELECT id FROM events WHERE id <> ?').get(eventId);
       const res = await scan(body.token, organizer, otherEvent.id);
 
       /* Either the host check or the binding check refuses it; both are
          correct refusals and neither checks the volunteer in. */
       expect([403, 404, 409]).toContain(res.status);
-      const marks = db.prepare('SELECT COUNT(*) AS c FROM attendance_checkin WHERE event_id = ?').get(eventId).c;
+      const marks = (await db.prepare('SELECT COUNT(*) AS c FROM attendance_checkin WHERE event_id = ?').get(eventId)).c;
       expect(marks).toBe(0);
     });
 
@@ -328,12 +328,12 @@ describe('QR check-in', () => {
 
     it('refuses a code once the volunteer is no longer accepted', async () => {
       const { body } = await mint();
-      db.prepare("UPDATE applications SET status = 'withdrawn' WHERE id = ?").run(application.id);
+      await db.prepare("UPDATE applications SET status = 'withdrawn' WHERE id = ?").run(application.id);
 
       const res = await scan(body.token);
       expect(res.status).toBe(422);
 
-      db.prepare("UPDATE applications SET status = 'accepted' WHERE id = ?").run(application.id);
+      await db.prepare("UPDATE applications SET status = 'accepted' WHERE id = ?").run(application.id);
     });
   });
 
@@ -350,7 +350,7 @@ describe('QR check-in', () => {
       const { body } = await mint();
       await scan(body.token, student);
 
-      const row = db.prepare('SELECT status FROM checkin_tokens WHERE status IS NOT NULL').get();
+      const row = await db.prepare('SELECT status FROM checkin_tokens WHERE status IS NOT NULL').get();
       expect(row.status).toBe('pending');
 
       expect((await scan(body.token, organizer)).status).toBe(200);
@@ -367,22 +367,22 @@ describe('QR check-in', () => {
        */
       const { body } = await mint();
 
-      const outsider = db.prepare(
+      const outsider = await db.prepare(
         "SELECT id FROM users WHERE role = 'organizer' AND id <> (SELECT organizer_id FROM events WHERE id = ?)"
       ).get(eventId);
       expect(outsider, 'the seed has only one organizer').toBeTruthy();
 
-      const originalHost = db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(eventId).organizer_id;
-      db.prepare('UPDATE events SET organizer_id = ? WHERE id = ?').run(outsider.id, eventId);
+      const originalHost = (await db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(eventId)).organizer_id;
+      await db.prepare('UPDATE events SET organizer_id = ? WHERE id = ?').run(outsider.id, eventId);
 
       const res = await scan(body.token, organizer);
       expect(res.status).toBe(403);
 
       /* And the code they could not use is still live for the real host. */
-      const row = db.prepare("SELECT status FROM checkin_tokens WHERE status = 'pending'").get();
+      const row = await db.prepare("SELECT status FROM checkin_tokens WHERE status = 'pending'").get();
       expect(row).toBeTruthy();
 
-      db.prepare('UPDATE events SET organizer_id = ? WHERE id = ?').run(originalHost, eventId);
+      await db.prepare('UPDATE events SET organizer_id = ? WHERE id = ?').run(originalHost, eventId);
     });
 
     it('refuses an unauthenticated scan', async () => {
@@ -393,7 +393,7 @@ describe('QR check-in', () => {
 
     it('refuses to scan for a cancelled event', async () => {
       const { body } = await mint();
-      db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(eventId);
+      await db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(eventId);
 
       const res = await scan(body.token);
       expect(res.status).toBe(409);
@@ -404,7 +404,7 @@ describe('QR check-in', () => {
   describe('what the organizer is told', () => {
     it('never returns the code or its hash in an error', async () => {
       const { body } = await mint();
-      db.prepare("UPDATE checkin_tokens SET expires_at = ? WHERE status = 'pending'")
+      await db.prepare("UPDATE checkin_tokens SET expires_at = ? WHERE status = 'pending'")
         .run(new Date(Date.now() - 1000).toISOString());
 
       const res = await scan(body.token);
@@ -444,7 +444,7 @@ describe('QR check-in', () => {
       await srv.call('POST', `/api/events/${eventId}/checkin`,
         { checkinMap: { [application.id]: true } }, organizer);
 
-      const row = db.prepare('SELECT method FROM attendance_checkin WHERE event_id = ?').get(eventId);
+      const row = await db.prepare('SELECT method FROM attendance_checkin WHERE event_id = ?').get(eventId);
       expect(row.method).toBe('manual');
     });
 
@@ -452,7 +452,7 @@ describe('QR check-in', () => {
       /* Check-in has an opening time and deliberately no closing time, because
          organizers reconcile after the fact. QR must not have invented one. */
       const now = Date.now();
-      db.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE event_id = ?').run(
+      await db.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE event_id = ?').run(
         new Date(now - 6 * 3600 * 1000).toISOString(),
         new Date(now - 3 * 3600 * 1000).toISOString(),
         eventId,

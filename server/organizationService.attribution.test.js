@@ -41,8 +41,9 @@ function makeOrg(name, slug, status = 'active') {
 
 const join = (orgId, userId, role = 'member') =>
   db.prepare(`
-    INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
+    INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
     VALUES (?, ?, ?, ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
   `).run(orgId, userId, role, new Date().toISOString());
 
 /** An event owned by `orgId` (or by nobody), with one shift somebody attended. */
@@ -108,7 +109,7 @@ beforeAll(async () => {
   attendedEvent({ orgId: orgA, title: 'A Cancelled', hours: 4, userId: studentId, status: 'cancelled' });
 
   /* Self-logged, and therefore never anybody's organization hours. */
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO external_hours (id, user_id, organization_name, activity_name, description,
                                 occurred_on, hours, created_at, updated_at)
     VALUES ('ext-1', ?, 'Alpha Club', 'Food bank', '', '2026-01-02', 40, ?, ?)
@@ -162,10 +163,10 @@ describe('hours are scoped to the organization that ran the event', () => {
   });
 
   it('cannot double-count, because an event has one owning organization', async () => {
-    const cols = db.prepare('PRAGMA table_info(events)').all().map(c => c.name);
+    const cols = (await db.prepare('PRAGMA table_info(events)').all()).map(c => c.name);
     expect(cols).toContain('organization_id');
     /* No join table, so there is no second owner to attribute to. */
-    const joinTable = db.prepare(
+    const joinTable = await db.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%event_organization%'"
     ).get();
     expect(joinTable, 'events gained multiple owners — attribution now needs a rule').toBeFalsy();
@@ -287,7 +288,7 @@ describe('an archived organization', () => {
      * a volunteer's hours after they LEAVE a club — an organization closing is
      * even less their doing.
      */
-    db.prepare("UPDATE organizations SET status = 'archived' WHERE id = ?").run(orgA);
+    await db.prepare("UPDATE organizations SET status = 'archived' WHERE id = ?").run(orgA);
 
     const res = await srv.call('GET', `/api/users/${studentId}/public-profile`, undefined, student);
     const alpha = res.body.profile.organizations.find(o => o.slug === 'alpha-club');
@@ -296,7 +297,7 @@ describe('an archived organization', () => {
     expect(alpha.archived).toBe(true);
     expect(alpha.hours).toBe(5);
 
-    db.prepare("UPDATE organizations SET status = 'active' WHERE id = ?").run(orgA);
+    await db.prepare("UPDATE organizations SET status = 'active' WHERE id = ?").run(orgA);
   });
 
   it('marks only the archived one', async () => {

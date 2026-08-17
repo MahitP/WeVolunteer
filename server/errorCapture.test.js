@@ -40,7 +40,7 @@ describe('the Express error handler records a 500', () => {
     // No such route: the app answers its /api 404 JSON, and NOTHING is recorded,
     // because a 404 is not an unhandled error.
     expect(res.status).toBe(404);
-    expect(db.prepare('SELECT COUNT(*) c FROM error_groups').get().c).toBe(0);
+    expect((await db.prepare('SELECT COUNT(*) c FROM error_groups').get()).c).toBe(0);
   });
 
   it('records nothing for a malformed JSON body — that is the caller\'s mistake', async () => {
@@ -52,7 +52,7 @@ describe('the Express error handler records a 500', () => {
     });
     expect(response.status).toBe(400);
     expect(
-      db.prepare('SELECT COUNT(*) c FROM error_groups').get().c,
+      (await db.prepare('SELECT COUNT(*) c FROM error_groups').get()).c,
       'a rejected body was filed as a server defect — exactly what moving 413/400 out of the 500 branch avoided'
     ).toBe(0);
   });
@@ -65,7 +65,7 @@ describe('the Express error handler records a 500', () => {
       body: JSON.stringify({ email: 'a@b.co', password: 'x'.repeat(200_000) }),
     });
     expect(response.status).toBe(413);
-    expect(db.prepare('SELECT COUNT(*) c FROM error_groups').get().c).toBe(0);
+    expect((await db.prepare('SELECT COUNT(*) c FROM error_groups').get()).c).toBe(0);
   });
 });
 
@@ -116,7 +116,7 @@ describe('the error handler, driven directly', () => {
     clearErrors();
     const err = new TypeError('capture-pattern-probe failed');
     const res = fakeRes();
-    (await handler())(err, fakeReq(), res, () => {});
+    await (await handler())(err, fakeReq(), res, () => {});
 
     expect(res.statusCode).toBe(500);
     expect(res.body).toEqual({ error: 'Internal server error' });
@@ -128,14 +128,14 @@ describe('the error handler, driven directly', () => {
     expect(g.route).toBe('/api/events/:id');
     expect(g.route).not.toContain('?');
     expect(g.route).not.toContain('secret');
-    expect(db.prepare('SELECT COUNT(*) c FROM error_events WHERE fingerprint = ?').get(g.fingerprint).c).toBe(1);
+    expect((await db.prepare('SELECT COUNT(*) c FROM error_events WHERE fingerprint = ?').get(g.fingerprint)).c).toBe(1);
   });
 
   it('stores a hash of the user, never the id', async () => {
     clearErrors();
-    (await handler())(new Error('capture-hash-probe'), fakeReq(), fakeRes(), () => {});
+    await (await handler())(new Error('capture-hash-probe'), fakeReq(), fakeRes(), () => {});
     const [g] = groupsFor('capture-hash-probe');
-    const ev = db.prepare('SELECT * FROM error_events WHERE fingerprint = ?').get(g.fingerprint);
+    const ev = await db.prepare('SELECT * FROM error_events WHERE fingerprint = ?').get(g.fingerprint);
     expect(ev.user_hash).toMatch(/^[0-9a-f]{32}$/);
     expect(ev.user_hash).not.toBe('user-student-1');
     expect(JSON.stringify(ev)).not.toContain('user-student-1');
@@ -156,7 +156,10 @@ describe('the error handler, driven directly', () => {
     const res = fakeRes();
     let threw = null;
     const h = await handler();
-    try { h(new Error('capture-resilience-probe'), fakeReq(), res, () => {}); }
+    /* Awaited: the handler is async, so the reporter's throw arrives as a
+       rejection and an un-awaited call would leave `threw` null while the
+       rejection escaped the test entirely. */
+    try { await h(new Error('capture-resilience-probe'), fakeReq(), res, () => {}); }
     catch (e) { threw = e; }
 
     const wasCalled = spy.mock.calls.length;
@@ -186,9 +189,13 @@ describe('the error handler, driven directly', () => {
     clearErrors();
     const res = fakeRes();
     const bare = await handler();
-    expect(() =>
+    /* `.resolves`, not `.not.toThrow()`: the handler is async, so "does not
+       throw" is now "does not reject", and the synchronous form would pass
+       without ever observing the outcome. Awaited so the record below exists by
+       the time it is read. */
+    await expect(
       bare({ message: 'capture-bare-probe' }, { method: 'POST' }, res, () => {})
-    ).not.toThrow();
+    ).resolves.not.toThrow();
     expect(res.statusCode).toBe(500);
     expect(groupsFor('capture-bare-probe').length).toBe(1);
   });

@@ -58,9 +58,10 @@ const NOW = '2026-03-01T10:00:00.000Z';
 /** Organizers are real rows: `events.organizer_id` is a foreign key. */
 const addOrganizer = (id) => {
   db.prepare(`
-    INSERT OR IGNORE INTO users (id, name, email, username, password_hash, grade, role, verified,
+    INSERT INTO users (id, name, email, username, password_hash, grade, role, verified,
                        email_verified, account_status, created_at, token_version)
     VALUES (?, ?, ?, ?, 'x', 'N/A', 'organizer', 1, 1, 'active', ?, 0)
+    ON CONFLICT DO NOTHING
   `).run(id, `Org ${id}`, `${id}@example.invalid`, id, NOW);
 };
 
@@ -82,6 +83,7 @@ const addVolunteer = (id) => {
     INSERT INTO users (id, name, email, username, password_hash, grade, role, verified,
                        email_verified, account_status, created_at, token_version)
     VALUES (?, ?, ?, ?, 'x', '11', 'student', 1, 1, 'active', ?, 0)
+    ON CONFLICT DO NOTHING
   `).run(id, `Volunteer ${id}`, `${id}@example.invalid`, id, NOW);
 };
 
@@ -135,29 +137,29 @@ describe('community totals', () => {
    * Conflating them is the most common way a dashboard like this stops being
    * believed, and it is invisible until somebody checks.
    */
-  it('counts people who turned up, not people who signed up', () => {
+  it('counts people who turned up, not people who signed up', async () => {
     addEvent('i-e1', 'Food Pantry', 'org-1');
     addVolunteer('iv-1');
     addVolunteer('iv-2');
     attend('iv-1', 'i-e1', 3);
     attend('iv-2', 'i-e1', 0, /* present */ 0);
 
-    const { community } = buildImpact(db);
+    const { community } = await buildImpact(db);
     expect(community.totalVolunteers).toBe(1);
     expect(community.totalHours).toBe(3);
   });
 
-  it('counts an event as completed only once somebody attended it', () => {
+  it('counts an event as completed only once somebody attended it', async () => {
     addEvent('i-e1', 'School', 'org-1');
     addEvent('i-e2', 'School', 'org-1');
     addVolunteer('iv-1');
     attend('iv-1', 'i-e1', 2);
 
-    const { community } = buildImpact(db);
+    const { community } = await buildImpact(db);
     expect(community.eventsCompleted).toBe(1);
   });
 
-  it('counts an organization once however many events it ran', () => {
+  it('counts an organization once however many events it ran', async () => {
     addEvent('i-e1', 'School', 'org-1');
     addEvent('i-e2', 'School', 'org-1');
     addEvent('i-e3', '5K', 'org-2');
@@ -166,11 +168,11 @@ describe('community totals', () => {
     attend('iv-1', 'i-e2', 1);
     attend('iv-1', 'i-e3', 1);
 
-    expect(buildImpact(db).community.organizationsSupported).toBe(2);
+    expect((await buildImpact(db)).community.organizationsSupported).toBe(2);
   });
 
-  it('reports zeros rather than nulls for an empty platform', () => {
-    const { community } = buildImpact(db);
+  it('reports zeros rather than nulls for an empty platform', async () => {
+    const { community } = await buildImpact(db);
     expect(community).toEqual({
       totalVolunteers: 0, totalHours: 0, eventsCompleted: 0, organizationsSupported: 0,
     });
@@ -183,7 +185,7 @@ describe('volunteer insights', () => {
    * turns a retention metric into an attendance metric — and retention is the
    * figure a grant reader weighs most heavily.
    */
-  it('counts a returning volunteer by distinct events, not by shifts', () => {
+  it('counts a returning volunteer by distinct events, not by shifts', async () => {
     addEvent('i-e1', 'School', 'org-1');
     addEvent('i-e2', 'School', 'org-1');
     addVolunteer('iv-1');
@@ -194,7 +196,7 @@ describe('volunteer insights', () => {
     attend('iv-2', 'i-e1', 1);
     attend('iv-2', 'i-e2', 1);
 
-    expect(buildImpact(db).volunteers.returningRate).toBe(50);
+    expect((await buildImpact(db)).volunteers.returningRate).toBe(50);
   });
 
   /**
@@ -202,21 +204,21 @@ describe('volunteer insights', () => {
    * a narrow one with a star. One volunteer with 200 hours drags an average
    * nobody in the room would recognise.
    */
-  it('reports a median alongside the average', () => {
+  it('reports a median alongside the average', async () => {
     addEvent('i-e1', 'School', 'org-1');
     ['iv-1', 'iv-2', 'iv-3'].forEach(addVolunteer);
     attend('iv-1', 'i-e1', 1);
     attend('iv-2', 'i-e1', 2);
     attend('iv-3', 'i-e1', 60);
 
-    const { volunteers } = buildImpact(db);
+    const { volunteers } = await buildImpact(db);
     expect(volunteers.averageHours).toBe(21);
     expect(volunteers.medianHours).toBe(2);
   });
 
   /** Zero is a claim — "nobody came back". An empty programme has not made it. */
-  it('is null rather than zero when there is nobody to average', () => {
-    const { volunteers } = buildImpact(db);
+  it('is null rather than zero when there is nobody to average', async () => {
+    const { volunteers } = await buildImpact(db);
     expect(volunteers.averageHours).toBeNull();
     expect(volunteers.returningRate).toBeNull();
   });
@@ -230,13 +232,13 @@ describe('the privacy threshold', () => {
    * A category with two volunteers is two identifiable students, and "who did
    * the Healthcare shifts" is answerable by anybody at a small school.
    */
-  it('suppresses a category smaller than the threshold', () => {
+  it('suppresses a category smaller than the threshold', async () => {
     addEvent('i-big', 'Food Pantry', 'org-1');
     addEvent('i-small', 'Fundraiser', 'org-2');
     fill(MIN_BUCKET, 'i-big');
     fill(MIN_BUCKET - 1, 'i-small');
 
-    const { categories } = buildImpact(db);
+    const { categories } = await buildImpact(db);
     const big = categories.find(c => c.label === 'Food Pantry');
     const small = categories.find(c => c.label === 'Fundraiser');
 
@@ -255,20 +257,20 @@ describe('the privacy threshold', () => {
    * which is a quieter kind of lie — and it would let somebody infer the missing
    * categories by comparing the total against the visible parts.
    */
-  it('still lists a suppressed bucket, so nothing looks like it never happened', () => {
+  it('still lists a suppressed bucket, so nothing looks like it never happened', async () => {
     addEvent('i-small', 'Fundraiser', 'org-1');
     fill(2, 'i-small');
 
-    const { categories } = buildImpact(db);
+    const { categories } = await buildImpact(db);
     expect(categories.map(c => c.label)).toContain('Fundraiser');
     expect(categories[0].count).toBeNull();
   });
 
-  it('suppresses a thin month the same way', () => {
+  it('suppresses a thin month the same way', async () => {
     addEvent('i-e1', 'School', 'org-1');
     fill(2, 'i-e1');
 
-    const { growth } = buildImpact(db);
+    const { growth } = await buildImpact(db);
     expect(growth).toHaveLength(1);
     expect(growth[0].suppressed).toBe(true);
     expect(growth[0].count).toBeNull();
@@ -280,11 +282,11 @@ describe('the privacy threshold', () => {
    * useless for the smallest programmes — which are the ones that most need to
    * show they exist.
    */
-  it('never suppresses the platform-wide totals', () => {
+  it('never suppresses the platform-wide totals', async () => {
     addEvent('i-e1', 'School', 'org-1');
     fill(1, 'i-e1');
 
-    const { community } = buildImpact(db);
+    const { community } = await buildImpact(db);
     expect(community.totalVolunteers).toBe(1);
     expect(community.totalHours).toBe(1);
   });
@@ -296,12 +298,12 @@ describe('the privacy threshold', () => {
    * risk is a field somebody ADDS later — a "top volunteer", an organizer name,
    * a location label — and a per-field test would not be looking at it.
    */
-  it('leaks no identifier anywhere in the payload', () => {
+  it('leaks no identifier anywhere in the payload', async () => {
     addEvent('i-e1', 'School', 'org-1', '221B Baker Street');
     addVolunteer('iv-1');
     attend('iv-1', 'i-e1', 4);
 
-    const json = JSON.stringify(buildImpact(db));
+    const json = JSON.stringify(await buildImpact(db));
     expect(json).not.toContain('iv-1');
     expect(json).not.toContain('Volunteer iv-1');
     expect(json).not.toContain('@example.invalid');
@@ -311,14 +313,14 @@ describe('the privacy threshold', () => {
   });
 
   /** Geography is a count and nothing else until there is a real region model. */
-  it('publishes a count of places and never the places themselves', () => {
+  it('publishes a count of places and never the places themselves', async () => {
     addEvent('i-e1', 'School', 'org-1', 'Lincoln High School');
     addEvent('i-e2', 'School', 'org-1', 'Riverside Park');
     addVolunteer('iv-1');
     attend('iv-1', 'i-e1', 1);
     attend('iv-1', 'i-e2', 1);
 
-    const { geography } = buildImpact(db);
+    const { geography } = await buildImpact(db);
     expect(geography.distinctLocations).toBe(2);
     expect(geography.breakdown).toEqual([]);
     expect(JSON.stringify(geography)).not.toContain('Lincoln');
@@ -333,13 +335,13 @@ describe('the tag breakdown', () => {
    * was FOR. Tags are the organizer's own words, so they carry that — which is the
    * whole reason Q-2 asked for them.
    */
-  it('reports hours and events under each tag an organizer used', () => {
+  it('reports hours and events under each tag an organizer used', async () => {
     addEvent('i-a', 'School', 'org-1');
     addTag('i-a', 'Environment');
     addTag('i-a', 'Education');
     fill(MIN_BUCKET, 'i-a');
 
-    const { tags } = buildImpact(db);
+    const { tags } = await buildImpact(db);
     const env = tags.breakdown.find(t => t.tag === 'environment');
 
     expect(env.label).toBe('Environment');
@@ -357,7 +359,7 @@ describe('the tag breakdown', () => {
    * identifying than a category of two. This is the privacy hazard Q-2 flagged
    * before tags existed, which is why the floor is not optional on this section.
    */
-  it('suppresses a tag used by fewer volunteers than the threshold', () => {
+  it('suppresses a tag used by fewer volunteers than the threshold', async () => {
     addEvent('i-big', 'School', 'org-1');
     addEvent('i-small', 'School', 'org-2');
     addTag('i-big', 'Popular');
@@ -365,7 +367,7 @@ describe('the tag breakdown', () => {
     fill(MIN_BUCKET, 'i-big');
     fill(MIN_BUCKET - 1, 'i-small');
 
-    const { tags } = buildImpact(db);
+    const { tags } = await buildImpact(db);
     const big = tags.breakdown.find(t => t.tag === 'popular');
     const small = tags.breakdown.find(t => t.tag === 'specific');
 
@@ -385,13 +387,13 @@ describe('the tag breakdown', () => {
    * one way this section can badly mislead — so the flag travels in the payload
    * for the screen to say it beside the numbers.
    */
-  it('declares that its hours overlap, and they really do', () => {
+  it('declares that its hours overlap, and they really do', async () => {
     addEvent('i-multi', 'School', 'org-1');
     addTag('i-multi', 'One');
     addTag('i-multi', 'Two');
     fill(MIN_BUCKET, 'i-multi');
 
-    const out = buildImpact(db);
+    const out = await buildImpact(db);
     expect(out.tags.overlapping).toBe(true);
 
     const summed = out.tags.breakdown.reduce((total, t) => total + t.hours, 0);
@@ -400,19 +402,19 @@ describe('the tag breakdown', () => {
     expect(summed).toBeCloseTo(out.community.totalHours * 2, 5);
   });
 
-  it('counts nothing for a tag on an event nobody attended', () => {
+  it('counts nothing for a tag on an event nobody attended', async () => {
     addEvent('i-empty', 'School', 'org-1');
     addTag('i-empty', 'Ghost');
 
-    expect(buildImpact(db).tags.breakdown).toEqual([]);
+    expect((await buildImpact(db)).tags.breakdown).toEqual([]);
   });
 
   /** Absence is not zero: an untagged programme gets an empty section, not a gap. */
-  it('returns an empty breakdown when nobody tags anything', () => {
+  it('returns an empty breakdown when nobody tags anything', async () => {
     addEvent('i-plain', 'School', 'org-1');
     fill(MIN_BUCKET, 'i-plain');
 
-    const { tags, categories } = buildImpact(db);
+    const { tags, categories } = await buildImpact(db);
     expect(tags.breakdown).toEqual([]);
     /* And the category section still reports it — which is why both sections
        exist: a tag-only breakdown would silently omit every untagged event. */
@@ -422,8 +424,8 @@ describe('the tag breakdown', () => {
 
 describe('shape', () => {
   /** Sections are always present, so a client never distinguishes missing from none. */
-  it('returns every section even with no data at all', () => {
-    const out = buildImpact(db);
+  it('returns every section even with no data at all', async () => {
+    const out = await buildImpact(db);
     expect(Object.keys(out).sort()).toEqual(
       ['categories', 'community', 'generatedAt', 'geography', 'growth', 'minBucket', 'tags', 'volunteers']
     );
@@ -437,7 +439,7 @@ describe('shape', () => {
   });
 
   /** The client renders the threshold in its own footnote; it should not hardcode it. */
-  it('tells the client what the threshold is', () => {
-    expect(buildImpact(db).minBucket).toBe(MIN_BUCKET);
+  it('tells the client what the threshold is', async () => {
+    expect((await buildImpact(db)).minBucket).toBe(MIN_BUCKET);
   });
 });

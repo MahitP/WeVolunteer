@@ -52,8 +52,8 @@ const SIGNUP_SCOPES = new Set(['signup']);
  * fallback the very first change of every document would produce no excerpt,
  * which is the one time users most need to see what moved.
  */
-function previousBody(db, slug, currentVersion) {
-  const rows = db.prepare(`
+async function previousBody(db, slug, currentVersion) {
+  const rows = await db.prepare(`
     SELECT version, body FROM legal_document_revisions
     WHERE slug = ? ORDER BY id DESC LIMIT 2
   `).all(slug);
@@ -89,25 +89,25 @@ function fileBody(slug) {
  *
  * @returns {Array<{slug, title, version, effectiveAt, excerpt, changeCount, isSample}>}
  */
-export function pendingNoticesFor(db, userId) {
+export async function pendingNoticesFor(db, userId) {
   if (!userId) return [];
 
   const acknowledged = new Map();
-  for (const r of db.prepare(
+  for (const r of await db.prepare(
     'SELECT slug, version FROM legal_change_notices WHERE user_id = ? AND acknowledged_at IS NOT NULL'
   ).all(userId)) {
     acknowledged.set(r.slug, r.version);
   }
 
   const accepted = new Map();
-  for (const r of db.prepare(
+  for (const r of await db.prepare(
     'SELECT document_slug AS slug, version FROM legal_acceptances WHERE user_id = ?'
   ).all(userId)) {
     accepted.set(r.slug, r.version);
   }
 
   const pending = [];
-  for (const doc of effectiveDocuments(db)) {
+  for (const doc of await effectiveDocuments(db)) {
     const seen = acknowledged.get(doc.slug) ?? accepted.get(doc.slug);
 
     /**
@@ -123,11 +123,11 @@ export function pendingNoticesFor(db, userId) {
     if (!seen) continue;
     if (seen === doc.version) continue;
 
-    const current = currentRevision(db, doc.slug, { withBody: true });
+    const current = await currentRevision(db, doc.slug, { withBody: true });
     const newBody = current?.body ?? fileBody(doc.slug);
 
     const excerpt = newBody
-      ? buildExcerpt(previousBody(db, doc.slug, doc.version), newBody)
+      ? buildExcerpt(await previousBody(db, doc.slug, doc.version), newBody)
       : { text: null, changeCount: 0, isSample: false };
 
     pending.push({
@@ -153,8 +153,8 @@ export function pendingNoticesFor(db, userId) {
  * and a second tab all converge on one row instead of racing to a constraint
  * error the caller has to interpret.
  */
-export function acknowledgeNotice(db, userId, slug, version, { now = new Date() } = {}) {
-  db.prepare(`
+export async function acknowledgeNotice(db, userId, slug, version, { now = new Date() } = {}) {
+  await db.prepare(`
     INSERT INTO legal_change_notices (user_id, slug, version, acknowledged_at)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(user_id, slug, version)
@@ -170,8 +170,8 @@ export function acknowledgeNotice(db, userId, slug, version, { now = new Date() 
  * "they read it" indistinguishable in exactly the record that exists to tell
  * them apart.
  */
-export function recordNotified(db, userId, slug, version, { now = new Date() } = {}) {
-  db.prepare(`
+export async function recordNotified(db, userId, slug, version, { now = new Date() } = {}) {
+  await db.prepare(`
     INSERT INTO legal_change_notices (user_id, slug, version, notified_at)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(user_id, slug, version)

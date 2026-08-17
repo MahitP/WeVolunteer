@@ -50,12 +50,12 @@ describe('viewerBan on an event', () => {
     orgId = created.body.organization.id;
 
     /* An event belonging to that organization — the link the notice depends on. */
-    const template = db.prepare('SELECT * FROM events LIMIT 1').get();
+    const template = await db.prepare('SELECT * FROM events LIMIT 1').get();
     expect(template, 'no event to clone').toBeTruthy();
     eventId = 'evt-ban-notice';
     const row = { ...template, id: eventId, title: 'Ban notice fixture', status: 'open', organization_id: orgId, organizer_id: organizerId };
     const cols = Object.keys(row);
-    db.prepare(`INSERT OR REPLACE INTO events (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
+    await db.prepare(`INSERT INTO events (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
       .run(...cols.map(c => row[c]));
   }, 60000);
 
@@ -67,7 +67,7 @@ describe('viewerBan on an event', () => {
   });
 
   const ban = () => {
-    db.prepare(`INSERT OR REPLACE INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+    db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
                 VALUES ('ban-notice-1', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
       .run(orgId, bannedId, organizerId, new Date().toISOString());
   };
@@ -123,7 +123,7 @@ describe('viewerBan on an event', () => {
 
   it('stops mentioning it once the ban is lifted', async () => {
     ban();
-    db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
+    await db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
       .run(new Date().toISOString(), orgId, bannedId);
     const res = await fetchEvent(banned);
     expect(res.body.event.viewerBan).toBeNull();
@@ -168,13 +168,13 @@ describe('viewerBan on an event', () => {
   it('says nothing on an event that belongs to no organization', async () => {
     /* There is no ban to speak of, and the absence must not be an error. */
     ban();
-    db.prepare('UPDATE events SET organization_id = NULL WHERE id = ?').run(eventId);
+    await db.prepare('UPDATE events SET organization_id = NULL WHERE id = ?').run(eventId);
     try {
       const res = await fetchEvent(banned);
       expect(res.status).toBe(200);
       expect(res.body.event.viewerBan).toBeNull();
     } finally {
-      db.prepare('UPDATE events SET organization_id = ? WHERE id = ?').run(orgId, eventId);
+      await db.prepare('UPDATE events SET organization_id = ? WHERE id = ?').run(orgId, eventId);
     }
   });
 });

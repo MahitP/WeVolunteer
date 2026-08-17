@@ -24,7 +24,7 @@ const router = express.Router();
  * The refusals are the other way round: an unverified request gets 401 and is
  * not retried into a state change, because nothing about it is trustworthy.
  */
-router.post('/api/webhooks/resend', (req, res) => {
+router.post('/api/webhooks/resend', async (req, res) => {
   /**
    * `req.body` is a Buffer here — see the `express.raw` mount in app.js.
    *
@@ -53,7 +53,7 @@ router.post('/api/webhooks/resend', (req, res) => {
   }
 
   try {
-    const result = applyEvent(payload);
+    const result = await applyEvent(payload);
     return res.status(200).json({ received: true, applied: result.applied, reason: result.reason });
   } catch (err) {
     /* A database problem is genuinely transient, so this one SHOULD be retried

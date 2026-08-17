@@ -24,8 +24,9 @@ function bootProdAndProbe() {
   const root = process.cwd().replace(/\\/g, '/');
   try {
     const out = execFileSync(process.execPath, ['--input-type=module', '-e', `
-      const { initDatabase } = await import('${root}/server/db.js');
+      const { initDatabase, completeDatabaseInit } = await import('${root}/server/db.js');
       initDatabase();
+      await completeDatabaseInit();
       const { app } = await import('${root}/server/app.js');
       const server = app.listen(0);
       await new Promise(r => server.once('listening', r));

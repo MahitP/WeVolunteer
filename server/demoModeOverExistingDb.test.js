@@ -31,12 +31,21 @@ import { join } from 'node:path';
 
 /** Boots db.js once against `dbPath` with the given environment. */
 function boot(dbPath, env) {
-  /* `initDatabase()` explicitly: importing db.js opens the connection but does
-     not run the init pass, which is where this branch lives. `server.js` is what
-     normally calls it, and booting the whole server here would drag in a
-     listener, the workers and the instance lock for a console assertion. */
+  /* Both halves of the boot, explicitly: importing db.js opens the connection
+     but runs neither. `initDatabase()` is where the warning under test lives;
+     `completeDatabaseInit()` is where the demo seed lives, and the fixture below
+     needs a seeded database to have something for the second boot to warn
+     about. (The seed moved there when PostgreSQL arrived — it writes rows, and
+     rows cannot be written from a synchronous function on an async engine.)
+     `server.js` is what normally calls both, and booting the whole server here
+     would drag in a listener, the workers and the instance lock for a console
+     assertion. */
   const res = spawnSync(process.execPath, ['-e', `
-    import('./server/db.js').then((m) => { m.initDatabase(); process.exit(0); }).catch(e => {
+    import('./server/db.js').then(async (m) => {
+      m.initDatabase();
+      await m.completeDatabaseInit();
+      process.exit(0);
+    }).catch(e => {
       console.error('IMPORT_FAILED: ' + e.message);
       process.exit(1);
     });

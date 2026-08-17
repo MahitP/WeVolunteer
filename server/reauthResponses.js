@@ -137,8 +137,8 @@ export class ChallengeNotSpent extends Error {
  * fewer, since a missing key hashes as absent and will not match a grant that
  * had it.
  */
-export function spendChallenge(db, req, action, params = {}) {
-  const result = consumeChallenge({
+export async function spendChallenge(db, req, action, params = {}) {
+  const result = await consumeChallenge({
     db,
     challengeId: req.reauthChallengeId,
     userId: req.user.id,

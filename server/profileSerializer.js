@@ -245,13 +245,13 @@ const parseList = (raw) => {
  *   `hours_visibility` — the same setting that gates `stats` and the service
  *   history. Organization hours are service hours; they get the same answer.
  */
-function organizationsFor(db, userId, { withHours = false } = {}) {
-  const rows = db.prepare(`
+async function organizationsFor(db, userId, { withHours = false } = {}) {
+  const rows = await db.prepare(`
     SELECT o.id, o.slug, o.name, o.status, m.member_role AS memberRole
     FROM organization_members m
     JOIN organizations o ON o.id = m.organization_id
     WHERE m.user_id = ?
-    ORDER BY o.name COLLATE NOCASE
+    ORDER BY o.name COLLATE nocase
   `).all(userId);
 
   const shaped = rows.map(r => ({
@@ -267,7 +267,7 @@ function organizationsFor(db, userId, { withHours = false } = {}) {
   if (!withHours || shaped.length === 0) return shaped;
 
   const totals = new Map();
-  for (const t of db.prepare(`
+  for (const t of await db.prepare(`
     SELECT e.organization_id                 AS organizationId,
            COALESCE(SUM(a.hours_awarded), 0) AS hours,
            COUNT(DISTINCT a.event_id)        AS events
@@ -301,7 +301,7 @@ function organizationsFor(db, userId, { withHours = false } = {}) {
  * @param {boolean} opts.canSeeContact  viewer holds `user.contact.read`
  * @param {boolean} opts.isFriend       an ACCEPTED friendship exists both ways
  */
-export function publicProfile(db, row, { viewerId = null, canSeeContact = false, isFriend = false } = {}) {
+export async function publicProfile(db, row, { viewerId = null, canSeeContact = false, isFriend = false } = {}) {
   const isSelf = Boolean(viewerId) && viewerId === row.id;
 
   /**
@@ -316,7 +316,7 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
     || stated === 'public'
     || (stated === 'friends' && isFriend);
 
-  const stats = volunteerStats(db, row.id);
+  const stats = await volunteerStats(db, row.id);
 
   /**
    * Whether this reader may see the service figures at all.
@@ -381,7 +381,7 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
      * exactly that: withholding the platform total while publishing twelve
      * numbers that add up to most of it would make the setting decorative.
      */
-    organizations: organizationsFor(db, row.id, { withHours: hoursVisible }),
+    organizations: await organizationsFor(db, row.id, { withHours: hoursVisible }),
     /**
      * How the account is INTRODUCED, for every reader.
      *
@@ -458,7 +458,7 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
    * subject so their own profile can link there with a count.
    */
   if (isSelf) {
-    profile.externalService = externalHoursSummary(db, row.id);
+    profile.externalService = await externalHoursSummary(db, row.id);
   }
 
   if (sensitiveVisible) {

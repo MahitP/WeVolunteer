@@ -49,12 +49,12 @@ describe('GET /api/admin/roster', () => {
   it('allows owner (super_admin) requests and returns proper roster data', async () => {
     const ownerToken = await srv.loginAsOwner(OWNER_EMAIL);
     
-    const adminUser = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get();
-    const studentUser = db.prepare("SELECT id FROM users WHERE email = 'leo.chen@example.com'").get();
+    const adminUser = await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get();
+    const studentUser = await db.prepare("SELECT id FROM users WHERE email = 'leo.chen@example.com'").get();
 
     // Let's create an audit log for an admin to test decision counts
     if (adminUser && studentUser) {
-      recordAudit(db, {
+      await recordAudit(db, {
         adminId: adminUser.id,
         action: 'APPROVE_ORGANIZER',
         details: 'Test approve',

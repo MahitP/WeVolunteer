@@ -13,7 +13,7 @@ import { app } from './app.js';
 import { PORT, IS_PRODUCTION, DEMO_MODE } from './config.js';
 import { createServer } from 'http';
 import { initSocketServer } from './realtime/socketServer.js';
-import { initDatabase, db } from './db.js';
+import { initDatabase, completeDatabaseInit, assertSchemaReady, db } from './db.js';
 import { runNotificationSweep } from './utils.js';
 
 // The JWT_SECRET guard that used to sit here has been removed as dead code.
@@ -37,9 +37,16 @@ import {
 import { verifyPolicyFiles } from './legalContent.js';
 
 initDatabase();
+/* Async because it writes through a transaction; see db.js. No-op outside DEMO_MODE. */
+await completeDatabaseInit();
+/* On PostgreSQL `initDatabase()` cannot build the schema and defers it to the
+   call above. This is the check that the deferral was honoured — a no-op on
+   SQLite, and the difference between a named boot error and a server answering
+   "relation does not exist" from inside a route. */
+assertSchemaReady();
 
 try {
-  const { count } = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'super_admin'").get();
+  const { count } = await db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'super_admin'").get();
   if (count === 0) {
     console.warn('[ownership] WARNING: Platform has ZERO owners. Super admin access is completely lost.');
     console.warn('[ownership] Use `node bin/grant-ownership.mjs` to bootstrap an owner.');
@@ -67,9 +74,24 @@ try {
  * make the drift harder to fix rather than easier — the warning names the
  * problem and `npm test` fails on it regardless.
  */
+/* Logged in production as well, deliberately.
+ *
+ * The success line used to be development-only, on the reasonable-sounding
+ * ground that a production boot should be quiet about things that went right.
+ * That was wrong here for one specific reason: PRE-RELEASE §6 instructs the
+ * operator to "boot once and confirm `[legal] 11 published documents verified
+ * against their pinned hashes`" — a line that, in production, was never printed.
+ * The one person who most needs the confirmation was the only one who could not
+ * get it, and its absence reads as enforcement being broken rather than as
+ * enforcement being silent.
+ *
+ * The count is the part worth having. A boot that verifies 11 and a boot that
+ * verifies 3 because `docs/` was partially deployed both raise no error — the
+ * failure this guards against is a document that is missing rather than
+ * drifted, and only the number distinguishes them. */
 try {
   const verified = verifyPolicyFiles();
-  if (!IS_PRODUCTION) console.log(`[legal] ${verified} published documents verified against their pinned hashes.`);
+  console.log(`[legal] ${verified} published documents verified against their pinned hashes.`);
 } catch (err) {
   if (IS_PRODUCTION) {
     console.error('FATAL: published legal documents failed verification.');
@@ -94,7 +116,7 @@ try {
  * database is an ordinary local situation. A crashed predecessor never blocks a
  * restart: see instanceLock.js for how a dead pid and a stale heartbeat are handled.
  */
-const lockResult = acquireInstanceLock(db);
+const lockResult = await acquireInstanceLock(db);
 if (shouldRefuseBoot(lockResult, IS_PRODUCTION)) {
   console.error('FATAL: refusing to start a second instance.');
   console.error('');
@@ -106,9 +128,9 @@ if (!lockResult.acquired) {
   console.warn(describeConflict(lockResult.conflict));
   console.warn('[InstanceLock] Continuing because this is not a production process.');
 }
-const lockHeartbeat = startInstanceLockHeartbeat(db);
+const lockHeartbeat = await startInstanceLockHeartbeat(db);
 
-runNotificationSweep();
+await runNotificationSweep();
 
 // The handle is kept so shutdown can clear it. Previously discarded, which meant
 // the interval held the event loop open forever — a graceful stop could close the
@@ -116,8 +138,12 @@ runNotificationSweep();
 // SIGKILL the process, discarding the cleanup entirely.
 const sweepInterval = setInterval(runNotificationSweep, 15 * 60 * 1000);
 
-startNotificationWorker();
-startExportWorker();
+/* Awaited: `startExportWorker` recovers exports its predecessor abandoned
+   before it begins polling, and starting to serve traffic while that is still
+   running is how a student's stuck export stays stuck. Both are cheap, and an
+   unawaited rejection here would be silent. */
+await startNotificationWorker();
+await startExportWorker();
 
 /**
  * Auto Select safety net.

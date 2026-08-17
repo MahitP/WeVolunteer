@@ -32,9 +32,10 @@ const INVITED = 'invited@example.invalid';
 
 const addUser = (id, email, role, emailVerified = 1) => {
   db.prepare(`
-    INSERT OR REPLACE INTO users (id, name, email, username, password_hash, grade, role,
+    INSERT INTO users (id, name, email, username, password_hash, grade, role,
                        verified, email_verified, account_status, created_at, token_version)
     VALUES (?, ?, ?, ?, 'x', '11', ?, 1, ?, 'active', ?, 0)
+      ON CONFLICT (id) DO UPDATE SET name = excluded.name, email = excluded.email, username = excluded.username, password_hash = excluded.password_hash, grade = excluded.grade, role = excluded.role, verified = excluded.verified, email_verified = excluded.email_verified, account_status = excluded.account_status, created_at = excluded.created_at, token_version = excluded.token_version
   `).run(id, `P ${id}`, email, id, role, emailVerified, NOW.toISOString());
 };
 
@@ -42,22 +43,22 @@ const userRow = (id) => db.prepare(
   'SELECT id, email, email_verified FROM users WHERE id = ?'
 ).get(id);
 
-beforeEach(() => {
-  db.prepare('DELETE FROM admin_invitations').run();
-  db.prepare("DELETE FROM users WHERE id LIKE 'inv-%'").run();
+beforeEach(async () => {
+  await db.prepare('DELETE FROM admin_invitations').run();
+  await db.prepare("DELETE FROM users WHERE id LIKE 'inv-%'").run();
   addUser(OWNER, 'inv-owner@example.invalid', 'super_admin');
   addUser('inv-target', INVITED, 'student');
 });
 
-const makeInvite = (over = {}) => mod.createInvitation(db, {
+const makeInvite = async (over = {}) => mod.createInvitation(db, {
   email: INVITED, role: 'admin', reason: 'Elected to the board for 2026',
   invitedBy: OWNER, now: NOW, ...over,
 });
 
 describe('resolveInvitation', () => {
-  it('accepts a live token from the verified invited address', () => {
-    const { token } = makeInvite();
-    const res = mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: NOW });
+  it('accepts a live token from the verified invited address', async () => {
+    const { token } = await makeInvite();
+    const res = await mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: NOW });
     expect(res.ok).toBe(true);
     expect(res.invitation.email).toBe(INVITED);
   });
@@ -67,11 +68,11 @@ describe('resolveInvitation', () => {
    * to the token alone would mean a forwarded or intercepted message confers
    * administrator authority.
    */
-  it('refuses a different signed-in address holding the same token', () => {
-    const { token } = makeInvite();
+  it('refuses a different signed-in address holding the same token', async () => {
+    const { token } = await makeInvite();
     addUser('inv-other', 'somebody-else@example.invalid', 'student');
 
-    const res = mod.resolveInvitation(db, { token, user: userRow('inv-other'), now: NOW });
+    const res = await mod.resolveInvitation(db, { token, user: userRow('inv-other'), now: NOW });
     expect(res.ok).toBe(false);
     expect(res.logReason).toMatch(/does not match/);
   });
@@ -81,39 +82,39 @@ describe('resolveInvitation', () => {
    * address without ever proving control of it — which is the whole guarantee
    * IV-7 rests on.
    */
-  it('refuses an unverified address, even the right one', () => {
-    const { token } = makeInvite();
-    db.prepare("UPDATE users SET email_verified = 0 WHERE id = 'inv-target'").run();
+  it('refuses an unverified address, even the right one', async () => {
+    const { token } = await makeInvite();
+    await db.prepare("UPDATE users SET email_verified = 0 WHERE id = 'inv-target'").run();
 
-    const res = mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: NOW });
+    const res = await mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: NOW });
     expect(res.ok).toBe(false);
     expect(res.logReason).toMatch(/not verified/);
   });
 
   /** IV-10: expiry is terminal, and there is deliberately no renewal path. */
-  it('refuses an expired token', () => {
-    const { token } = makeInvite();
+  it('refuses an expired token', async () => {
+    const { token } = await makeInvite();
     const later = new Date(NOW.getTime() + mod.INVITE_TTL_MS + 1000);
 
-    const res = mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: later });
+    const res = await mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: later });
     expect(res.ok).toBe(false);
     expect(res.logReason).toBe('expired');
   });
 
-  it('refuses a revoked token', () => {
-    const { token, id } = makeInvite();
-    mod.revokeInvitation(db, { id, now: NOW });
+  it('refuses a revoked token', async () => {
+    const { token, id } = await makeInvite();
+    await mod.revokeInvitation(db, { id, now: NOW });
 
-    const res = mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: NOW });
+    const res = await mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: NOW });
     expect(res.ok).toBe(false);
     expect(res.logReason).toMatch(/status is revoked/);
   });
 
-  it('refuses a token that was replaced by a newer invitation', () => {
-    const first = makeInvite();
-    makeInvite({ reason: 'Re-sent because the first bounced' });
+  it('refuses a token that was replaced by a newer invitation', async () => {
+    const first = await makeInvite();
+    await makeInvite({ reason: 'Re-sent because the first bounced' });
 
-    const res = mod.resolveInvitation(db, { token: first.token, user: userRow('inv-target'), now: NOW });
+    const res = await mod.resolveInvitation(db, { token: first.token, user: userRow('inv-target'), now: NOW });
     expect(res.ok).toBe(false);
     expect(res.logReason).toMatch(/status is replaced/);
   });
@@ -123,11 +124,11 @@ describe('resolveInvitation', () => {
    * and checked anyway so the property survives a future change rather than
    * becoming a comment nobody re-reads.
    */
-  it("refuses when the inviting owner no longer holds ownership", () => {
-    const { token } = makeInvite();
-    db.prepare("UPDATE users SET role = 'student' WHERE id = ?").run(OWNER);
+  it("refuses when the inviting owner no longer holds ownership", async () => {
+    const { token } = await makeInvite();
+    await db.prepare("UPDATE users SET role = 'student' WHERE id = ?").run(OWNER);
 
-    const res = mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: NOW });
+    const res = await mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: NOW });
     expect(res.ok).toBe(false);
     expect(res.logReason).toMatch(/no longer holds ownership/);
   });
@@ -138,8 +139,8 @@ describe('resolveInvitation', () => {
    * code and one sentence, because distinguishing them is a probe for a live
    * invitation.
    */
-  it('gives every refusal an identical caller-facing shape', () => {
-    const { token } = makeInvite();
+  it('gives every refusal an identical caller-facing shape', async () => {
+    const { token } = await makeInvite();
     const target = userRow('inv-target');
     addUser('inv-other', 'somebody-else@example.invalid', 'student');
 
@@ -153,10 +154,10 @@ describe('resolveInvitation', () => {
      * and expired paths are covered in their own tests above.
      */
     const refusals = [
-      mod.resolveInvitation(db, { token: 'nope', user: target, now: NOW }),
-      mod.resolveInvitation(db, { token: null, user: target, now: NOW }),
-      mod.resolveInvitation(db, { token, user: userRow('inv-other'), now: NOW }),
-      mod.resolveInvitation(db, { token, user: null, now: NOW }),
+      await mod.resolveInvitation(db, { token: 'nope', user: target, now: NOW }),
+      await mod.resolveInvitation(db, { token: null, user: target, now: NOW }),
+      await mod.resolveInvitation(db, { token, user: userRow('inv-other'), now: NOW }),
+      await mod.resolveInvitation(db, { token, user: null, now: NOW }),
     ];
 
     const shapes = new Set(refusals.map(r => `${r.ok}|${r.code}|${r.error}`));
@@ -170,24 +171,24 @@ describe('resolveInvitation', () => {
   });
 
   /** The token is never recoverable from storage. */
-  it('stores no form of the token that can be replayed', () => {
-    const { token } = makeInvite();
-    const row = db.prepare('SELECT * FROM admin_invitations WHERE email = ?').get(INVITED);
+  it('stores no form of the token that can be replayed', async () => {
+    const { token } = await makeInvite();
+    const row = await db.prepare('SELECT * FROM admin_invitations WHERE email = ?').get(INVITED);
     expect(JSON.stringify(row)).not.toContain(token);
     expect(row.token_hash).toBe(mod.__hashToken(token));
   });
 });
 
 describe('invitationRefusal', () => {
-  it('allows an ordinary address', () => {
-    expect(mod.invitationRefusal(db, {
+  it('allows an ordinary address', async () => {
+    expect(await mod.invitationRefusal(db, {
       email: INVITED, role: 'admin', reason: 'Elected to the board for 2026',
     })).toBeNull();
   });
 
-  it('normalises the address before deciding', () => {
+  it('normalises the address before deciding', async () => {
     /* An owner invited as `INV-OWNER@Example.INVALID` must still be refused. */
-    const res = mod.invitationRefusal(db, {
+    const res = await mod.invitationRefusal(db, {
       email: '  INV-OWNER@Example.INVALID ', role: 'admin', reason: 'Elected to the board',
     });
     expect(res?.code).toBe('already_owner');

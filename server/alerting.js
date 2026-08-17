@@ -105,9 +105,9 @@ const MAX_LISTED = 10;
  * generate an alert if it was resolved before the next tick — which is the
  * ordinary case for something noticed and fixed quickly.
  */
-export function pendingAlerts(db) {
+export async function pendingAlerts(db) {
   const placeholders = ALERTED_SOURCES.map(() => '?').join(', ');
-  return db.prepare(`
+  return await db.prepare(`
     SELECT fingerprint, kind, source, occurrences, first_seen_at
       FROM error_groups
      WHERE alerted_at IS NULL
@@ -118,8 +118,8 @@ export function pendingAlerts(db) {
 }
 
 /** The most recent alert we sent, or null if we never have. */
-function lastAlertAt(db) {
-  const row = db.prepare(
+async function lastAlertAt(db) {
+  const row = await db.prepare(
     'SELECT MAX(alerted_at) AS at FROM error_groups WHERE alerted_at IS NOT NULL'
   ).get();
   return row?.at ? Date.parse(row.at) : null;
@@ -283,7 +283,7 @@ export async function sendErrorAlerts(db, { send, now = new Date(), appUrl } = {
     if (to.length === 0) return { sent: 0, reason: 'not_configured' };
     if (typeof send !== 'function') return { sent: 0, reason: 'no_sender' };
 
-    const groups = pendingAlerts(db);
+    const groups = await pendingAlerts(db);
     if (groups.length === 0) return { sent: 0, reason: 'nothing_new' };
 
     /**
@@ -292,7 +292,7 @@ export async function sendErrorAlerts(db, { send, now = new Date(), appUrl } = {
      * alert that arrives one minute after an unrelated one waits a full hour
      * for no reason.
      */
-    const last = lastAlertAt(db);
+    const last = await lastAlertAt(db);
     if (last !== null && now.getTime() - last < minIntervalMs()) {
       return { sent: 0, reason: 'throttled', pending: groups.length };
     }
@@ -313,8 +313,8 @@ export async function sendErrorAlerts(db, { send, now = new Date(), appUrl } = {
      * A lost notification is recoverable by looking. An alert loop is how a
      * channel gets muted, and a muted channel loses every future alert.
      */
-    const mark = db.prepare('UPDATE error_groups SET alerted_at = ? WHERE fingerprint = ?');
-    for (const g of groups) mark.run(stamp, g.fingerprint);
+    const mark = await db.prepare('UPDATE error_groups SET alerted_at = ? WHERE fingerprint = ?');
+    for (const g of groups) await mark.run(stamp, g.fingerprint);
 
     const subject = groups.length === 1
       ? `[WeVolunteer] New ${groups[0].source} error: ${groups[0].kind}`

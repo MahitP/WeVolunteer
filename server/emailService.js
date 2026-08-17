@@ -244,7 +244,7 @@ const now = () => new Date().toISOString();
  * message twice — which is exactly what a retried request does — is one row and
  * one delivery rather than two of each.
  */
-export function enqueueMessage(message, { flow = 'unknown', handle = outboxHandle } = {}) {
+export async function enqueueMessage(message, { flow = 'unknown', handle = outboxHandle } = {}) {
   const key = message.idempotencyKey || crypto.randomUUID();
   const stamp = now();
 
@@ -258,11 +258,12 @@ export function enqueueMessage(message, { flow = 'unknown', handle = outboxHandl
     headers: message.headers || null,
   });
 
-  const info = handle.prepare(`
-    INSERT OR IGNORE INTO notification_jobs
+  const info = await handle.prepare(`
+    INSERT INTO notification_jobs
       (id, channel, payload, status, attempts, next_attempt_at, created_at, updated_at,
        idempotency_key, recipient, subject)
     VALUES (?, ?, ?, 'pending', 0, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
   `).run(
     `mail-${crypto.randomUUID()}`,
     MESSAGE_CHANNEL,
@@ -285,11 +286,11 @@ export function enqueueMessage(message, { flow = 'unknown', handle = outboxHandl
  * queued password-reset body contains a live single-use link; there is no
  * reason for it to outlive the last attempt that might have used it.
  */
-export function recordQueueOutcome(jobId, outcome, { handle = outboxHandle } = {}) {
+export async function recordQueueOutcome(jobId, outcome, { handle = outboxHandle } = {}) {
   const stamp = now();
 
   if (outcome.ok) {
-    const row = handle.prepare('SELECT payload FROM notification_jobs WHERE id = ?').get(jobId);
+    const row = await handle.prepare('SELECT payload FROM notification_jobs WHERE id = ?').get(jobId);
     let scrubbed = row?.payload || '{}';
     try {
       const parsed = JSON.parse(scrubbed);
@@ -298,7 +299,7 @@ export function recordQueueOutcome(jobId, outcome, { handle = outboxHandle } = {
       scrubbed = JSON.stringify(parsed);
     } catch { /* leave it; the sweep will remove the row regardless */ }
 
-    handle.prepare(`
+    await handle.prepare(`
       UPDATE notification_jobs
          SET status = 'sent', sent_at = ?, updated_at = ?, payload = ?,
              provider_message_id = ?, sent_by_provider = ?, provider_attempts = ?,
@@ -316,7 +317,7 @@ export function recordQueueOutcome(jobId, outcome, { handle = outboxHandle } = {
   const terminal = TERMINAL.has(outcome.category) || attempts >= QUEUE_MAX_ATTEMPTS;
 
   if (terminal) {
-    const row = handle.prepare('SELECT payload FROM notification_jobs WHERE id = ?').get(jobId);
+    const row = await handle.prepare('SELECT payload FROM notification_jobs WHERE id = ?').get(jobId);
     let scrubbed = row?.payload || '{}';
     try {
       const parsed = JSON.parse(scrubbed);
@@ -325,7 +326,7 @@ export function recordQueueOutcome(jobId, outcome, { handle = outboxHandle } = {
       scrubbed = JSON.stringify(parsed);
     } catch { /* as above */ }
 
-    handle.prepare(`
+    await handle.prepare(`
       UPDATE notification_jobs
          SET status = 'failed', attempts = ?, updated_at = ?, payload = ?,
              last_error_category = ?, error_log = ?, provider_attempts = ?
@@ -339,7 +340,7 @@ export function recordQueueOutcome(jobId, outcome, { handle = outboxHandle } = {
   }
 
   const due = new Date(Date.now() + nextAttemptDelay(attempts, outcome.category)).toISOString();
-  handle.prepare(`
+  await handle.prepare(`
     UPDATE notification_jobs
        SET status = 'pending', attempts = ?, next_attempt_at = ?, updated_at = ?,
            last_error_category = ?, error_log = ?, provider_attempts = ?
@@ -353,9 +354,9 @@ export function recordQueueOutcome(jobId, outcome, { handle = outboxHandle } = {
 }
 
 /** Drop delivered rows once they are older than the retention window. */
-export function sweepSentMessages({ handle = outboxHandle, olderThanMs = SENT_RETENTION_MS } = {}) {
+export async function sweepSentMessages({ handle = outboxHandle, olderThanMs = SENT_RETENTION_MS } = {}) {
   const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-  const { changes } = handle.prepare(
+  const { changes } = await handle.prepare(
     "DELETE FROM notification_jobs WHERE status = 'sent' AND sent_at IS NOT NULL AND sent_at < ?"
   ).run(cutoff);
   return changes;
@@ -427,7 +428,7 @@ export async function sendEmail(message, opts = {}) {
    */
   let queued = false;
   try {
-    ({ queued } = enqueueMessage(prepared, { flow, handle: await outbox() }));
+    ({ queued } = await enqueueMessage(prepared, { flow, handle: await outbox() }));
   } catch (err) {
     console.error(
       `[Email] ${flow} failed to deliver (${outcome.category}) AND could not be queued: `

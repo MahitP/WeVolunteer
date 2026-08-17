@@ -1,5 +1,6 @@
 import express from 'express';
-import { authenticateToken, inTransaction } from '../utils.js';
+import { authenticateToken } from '../utils.js';
+import { runInTransaction } from '../db/connectionContext.js';
 import { reportLimiter } from '../reportLimiter.js';
 import { createReport } from '../reportService.js';
 import { can, requireCap, principalFor } from '../authz.js';
@@ -66,14 +67,14 @@ function checkMessageRateLimit(userId) {
   return true;
 }
 
-function participantIds(conversationId) {
-  return db.prepare('SELECT user_id FROM conversation_participants WHERE conversation_id = ?')
-    .all(conversationId).map(r => r.user_id);
+async function participantIds(conversationId) {
+  return (await db.prepare('SELECT user_id FROM conversation_participants WHERE conversation_id = ?')
+    .all(conversationId)).map(r => r.user_id);
 }
 
-router.get('/api/messages/conversations', authenticateToken, (req, res) => {
+router.get('/api/messages/conversations', authenticateToken, async (req, res) => {
   try {
-    const conversations = listConversationsForUser(req.user.id);
+    const conversations = await listConversationsForUser(req.user.id);
     const unreadTotal = conversations.reduce((sum, c) => sum + c.unreadCount, 0);
     res.json({ conversations, unreadTotal });
   } catch (err) {
@@ -82,12 +83,12 @@ router.get('/api/messages/conversations', authenticateToken, (req, res) => {
   }
 });
 
-router.post('/api/messages/conversations/resolve', authenticateToken, (req, res) => {
+router.post('/api/messages/conversations/resolve', authenticateToken, async (req, res) => {
   try {
     const { eventId, studentId } = req.body;
     if (!eventId) return res.status(400).json({ error: 'eventId is required' });
 
-    const result = resolveConversation({ eventId, studentId, actor: req.user, principal: req.principal });
+    const result = await resolveConversation({ eventId, studentId, actor: req.user, principal: req.principal });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
 
     res.status(200).json({ conversation: result.conversation });
@@ -130,10 +131,10 @@ router.post('/api/messages/conversations/resolve', authenticateToken, (req, res)
  * audience than the conversation has.
  */
 router.post('/api/messages/conversations/peer/resolve', authenticateToken,
-  requireCap('message.send'), (req, res) => {
+  requireCap('message.send'), async (req, res) => {
     try {
       const { userId } = req.body || {};
-      const result = resolvePeerConversation({ actor: req.user, friendId: userId });
+      const result = await resolvePeerConversation({ actor: req.user, friendId: userId });
       if (!result.ok) return res.status(result.status).json({ error: result.error });
       res.status(200).json({ conversation: result.conversation });
     } catch (err) {
@@ -162,7 +163,7 @@ router.post('/api/messages/conversations/peer/resolve', authenticateToken,
  * arbitrary student through it.
  */
 router.post('/api/messages/admin/conversations/resolve', authenticateToken,
-  requireCap('report.resolve'), (req, res) => {
+  requireCap('report.resolve'), async (req, res) => {
     try {
       const { userId } = req.body || {};
       if (!userId || typeof userId !== 'string') {
@@ -175,14 +176,14 @@ router.post('/api/messages/admin/conversations/resolve', authenticateToken,
        * a student granted `event.create` is an organizer for the purpose of which
        * thread shape applies to them.
        */
-      const target = db.prepare(
+      const target = await db.prepare(
         "SELECT id, role FROM users WHERE id = ? AND account_status != 'deleted'"
       ).get(userId);
       if (!target) return res.status(404).json({ error: 'Person not found' });
 
-      const counterpartyPrincipal = principalFor(target, { grants: grantsFor(db, target.id) });
+      const counterpartyPrincipal = principalFor(target, { grants: await grantsFor(db, target.id) });
 
-      const result = resolveAdminConversation({
+      const result = await resolveAdminConversation({
         actor: req.user, counterpartyId: userId, counterpartyPrincipal,
       });
       if (!result.ok) return res.status(result.status).json({ error: result.error });
@@ -202,7 +203,7 @@ router.post('/api/messages/admin/conversations/resolve', authenticateToken,
       // the sort of thing that makes a record look machine-generated and unread.
       const who = result.conversation.kind === 'admin_organizer' ? 'organizer' : 'student';
 
-      recordAudit(db, {
+      await recordAudit(db, {
         adminId: req.user.id,
         action: 'ADMIN_CONVERSATION_OPENED',
         targetUserId: userId,
@@ -216,11 +217,11 @@ router.post('/api/messages/admin/conversations/resolve', authenticateToken,
     }
   });
 
-router.get('/api/messages/conversations/:id/messages', authenticateToken, (req, res) => {
+router.get('/api/messages/conversations/:id/messages', authenticateToken, async (req, res) => {
   try {
-    const conversation = getConversation(req.params.id);
+    const conversation = await getConversation(req.params.id);
     if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
-    if (!isConversationParticipant(conversation.id, req.user.id)) {
+    if (!await isConversationParticipant(conversation.id, req.user.id)) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
@@ -228,16 +229,16 @@ router.get('/api/messages/conversations/:id/messages', authenticateToken, (req, 
     const before = req.query.before;
     let rows;
     if (before) {
-      const cursor = db.prepare('SELECT created_at FROM messages WHERE id = ? AND conversation_id = ?')
+      const cursor = await db.prepare('SELECT created_at FROM messages WHERE id = ? AND conversation_id = ?')
         .get(before, conversation.id);
       if (!cursor) return res.status(400).json({ error: 'Invalid pagination cursor' });
-      rows = db.prepare(`
+      rows = await db.prepare(`
         SELECT * FROM messages
         WHERE conversation_id = ? AND created_at < ?
         ORDER BY created_at DESC LIMIT ?
       `).all(conversation.id, cursor.created_at, limit);
     } else {
-      rows = db.prepare(`
+      rows = await db.prepare(`
         SELECT * FROM messages
         WHERE conversation_id = ?
         ORDER BY created_at DESC LIMIT ?
@@ -246,7 +247,7 @@ router.get('/api/messages/conversations/:id/messages', authenticateToken, (req, 
 
     rows.reverse();
     res.json({
-      conversation: decorateConversation(conversation, req.user.id),
+      conversation: await decorateConversation(conversation, req.user.id),
       messages: rows.map(formatMessage),
       hasMore: rows.length === limit
     });
@@ -256,7 +257,7 @@ router.get('/api/messages/conversations/:id/messages', authenticateToken, (req, 
   }
 });
 
-router.post('/api/messages/conversations/:id/messages', authenticateToken, (req, res) => {
+router.post('/api/messages/conversations/:id/messages', authenticateToken, async (req, res) => {
   try {
     if (!checkMessageRateLimit(req.user.id)) {
       return res.status(429).json({
@@ -265,9 +266,9 @@ router.post('/api/messages/conversations/:id/messages', authenticateToken, (req,
       });
     }
 
-    const conversation = getConversation(req.params.id);
+    const conversation = await getConversation(req.params.id);
     if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
-    if (!isConversationParticipant(conversation.id, req.user.id)) {
+    if (!await isConversationParticipant(conversation.id, req.user.id)) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
@@ -285,15 +286,15 @@ router.post('/api/messages/conversations/:id/messages', authenticateToken, (req,
      * generic read-only refusal so the block is not announced back to the
      * blocked party.
      */
-    const other = otherParticipant(conversation.id, req.user.id);
-    if (other && !can(req.principal, 'event.moderate') && isBlockedBetween(db, req.user.id, other.id)) {
+    const other = await otherParticipant(conversation.id, req.user.id);
+    if (other && !can(req.principal, 'event.moderate') && await isBlockedBetween(db, req.user.id, other.id)) {
       return res.status(409).json({
         error: 'This conversation is read-only.',
         code: 'conversation_read_only'
       });
     }
 
-    const lifecycle = computeConversationLifecycle(conversation, new Date());
+    const lifecycle = await computeConversationLifecycle(conversation, new Date());
     if (!lifecycle.writable) {
       return res.status(409).json({
         error: 'This conversation is read-only.',
@@ -312,31 +313,31 @@ router.post('/api/messages/conversations/:id/messages', authenticateToken, (req,
     const now = new Date().toISOString();
     let message;
 
-    inTransaction(() => {
-      db.prepare(`
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare(`
         INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
         VALUES (?, ?, ?, ?, ?)
       `).run(messageId, conversation.id, req.user.id, body, now);
-      db.prepare(`
+      await tx.prepare(`
         UPDATE conversations
         SET last_message_id = ?, last_message_at = ?, lifecycle_state = ?, read_only_reason = ?, read_only_at = ?
         WHERE id = ?
       `).run(messageId, now, lifecycle.state, lifecycle.reason, lifecycle.readOnlyAt || null, conversation.id);
-      db.prepare(`
+      await tx.prepare(`
         UPDATE conversation_participants
         SET last_read_message_id = ?, last_read_at = ?
         WHERE conversation_id = ? AND user_id = ?
       `).run(messageId, now, conversation.id, req.user.id);
-      message = db.prepare('SELECT * FROM messages WHERE id = ?').get(messageId);
+      message = await tx.prepare('SELECT * FROM messages WHERE id = ?').get(messageId);
     });
 
-    const recipients = participantIds(conversation.id).filter(id => id !== req.user.id);
-    const sender = db.prepare('SELECT name FROM users WHERE id = ?').get(req.user.id);
-    const decorated = decorateConversation(getConversation(conversation.id), req.user.id);
+    const recipients = (await participantIds(conversation.id)).filter(id => id !== req.user.id);
+    const sender = await db.prepare('SELECT name FROM users WHERE id = ?').get(req.user.id);
+    const decorated = await decorateConversation(await getConversation(conversation.id), req.user.id);
     const payload = { message: formatMessage(message), conversation: decorated };
 
     for (const userId of recipients) {
-      const participant = getParticipant(conversation.id, userId);
+      const participant = await getParticipant(conversation.id, userId);
       const muted = participant?.muted_until && new Date(participant.muted_until) > new Date();
       if (!muted) {
         /**
@@ -366,7 +367,7 @@ router.post('/api/messages/conversations/:id/messages', authenticateToken, (req,
         const context = CONTEXT_BY_KIND[decorated.kind]
           ?? 'Message from a WeVolunteer administrator';
 
-        notificationService.dispatch('DIRECT_MESSAGE', {
+        await notificationService.dispatch('DIRECT_MESSAGE', {
           title: `New message from ${sender?.name || 'Someone'}`,
           body: `${context}: ${body.slice(0, 120)}`,
           link: `/messages?conversation=${conversation.id}`
@@ -383,21 +384,21 @@ router.post('/api/messages/conversations/:id/messages', authenticateToken, (req,
   }
 });
 
-router.post('/api/messages/conversations/:id/read', authenticateToken, (req, res) => {
+router.post('/api/messages/conversations/:id/read', authenticateToken, async (req, res) => {
   try {
-    const conversation = getConversation(req.params.id);
+    const conversation = await getConversation(req.params.id);
     if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
-    if (!isConversationParticipant(conversation.id, req.user.id)) {
+    if (!await isConversationParticipant(conversation.id, req.user.id)) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
     const messageId = req.body.messageId || conversation.last_message_id;
     if (!messageId) return res.json({ success: true });
-    const message = db.prepare('SELECT id, created_at FROM messages WHERE id = ? AND conversation_id = ?')
+    const message = await db.prepare('SELECT id, created_at FROM messages WHERE id = ? AND conversation_id = ?')
       .get(messageId, conversation.id);
     if (!message) return res.status(400).json({ error: 'Message not found in this conversation' });
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE conversation_participants
       SET last_read_message_id = ?, last_read_at = ?
       WHERE conversation_id = ? AND user_id = ?
@@ -409,7 +410,7 @@ router.post('/api/messages/conversations/:id/read', authenticateToken, (req, res
       lastReadMessageId: message.id,
       lastReadAt: message.created_at
     };
-    for (const userId of participantIds(conversation.id).filter(id => id !== req.user.id)) {
+    for (const userId of (await participantIds(conversation.id)).filter(id => id !== req.user.id)) {
       emitToUser(userId, 'conversation.read', conversation.id, payload);
     }
     emitToUser(req.user.id, 'conversation.read', conversation.id, payload);
@@ -420,11 +421,11 @@ router.post('/api/messages/conversations/:id/read', authenticateToken, (req, res
   }
 });
 
-router.patch('/api/messages/conversations/:id/preferences', authenticateToken, (req, res) => {
+router.patch('/api/messages/conversations/:id/preferences', authenticateToken, async (req, res) => {
   try {
-    const conversation = getConversation(req.params.id);
+    const conversation = await getConversation(req.params.id);
     if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
-    if (!isConversationParticipant(conversation.id, req.user.id)) {
+    if (!await isConversationParticipant(conversation.id, req.user.id)) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
     const updates = [];
@@ -440,18 +441,18 @@ router.patch('/api/messages/conversations/:id/preferences', authenticateToken, (
     }
     if (updates.length === 0) return res.status(400).json({ error: 'No preferences to update' });
     values.push(conversation.id, req.user.id);
-    db.prepare(`
+    await db.prepare(`
       UPDATE conversation_participants SET ${updates.join(', ')}
       WHERE conversation_id = ? AND user_id = ?
     `).run(...values);
-    res.json({ conversation: decorateConversation(getConversation(conversation.id), req.user.id) });
+    res.json({ conversation: await decorateConversation(await getConversation(conversation.id), req.user.id) });
   } catch (err) {
     console.error('Conversation preferences error:', err);
     res.status(500).json({ error: 'Failed to update conversation preferences' });
   }
 });
 
-router.get('/api/messages/search', authenticateToken, (req, res) => {
+router.get('/api/messages/search', authenticateToken, async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
     if (q.length < 2) return res.json({ results: [] });
@@ -469,7 +470,7 @@ router.get('/api/messages/search', authenticateToken, (req, res) => {
      * `event_title` is therefore NULL for those rows, which is what it should be
      * — the client already renders a thread with no event.
      */
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT m.*, c.event_id, e.title AS event_title, u.name AS sender_name
       FROM messages m
       JOIN conversations c ON c.id = m.conversation_id
@@ -494,7 +495,7 @@ router.get('/api/messages/search', authenticateToken, (req, res) => {
   }
 });
 
-router.post('/api/messages/conversations/:id/report', authenticateToken, reportLimiter, (req, res) => {
+router.post('/api/messages/conversations/:id/report', authenticateToken, reportLimiter, async (req, res) => {
   const reason = String(req.body.reason || '');
   const details = String(req.body.details || '').trim();
 
@@ -506,7 +507,7 @@ router.post('/api/messages/conversations/:id/report', authenticateToken, reportL
   };
   const category = legacyToCategory[reason] || reason;
 
-  const result = createReport({
+  const result = await createReport({
     reporter: req.user,
     targetType: 'conversation',
     targetId: req.params.id,
@@ -521,7 +522,7 @@ router.post('/api/messages/conversations/:id/report', authenticateToken, reportL
   res.status(201).json({ success: true, reportId: result.reportId, duplicate: result.duplicate });
 });
 
-router.post('/api/messages/:id/report', authenticateToken, reportLimiter, (req, res) => {
+router.post('/api/messages/:id/report', authenticateToken, reportLimiter, async (req, res) => {
   const reason = String(req.body.reason || '');
   const details = String(req.body.details || '').trim();
 
@@ -533,7 +534,7 @@ router.post('/api/messages/:id/report', authenticateToken, reportLimiter, (req, 
   };
   const category = legacyToCategory[reason] || reason;
 
-  const result = createReport({
+  const result = await createReport({
     reporter: req.user,
     targetType: 'message',
     targetId: req.params.id,
@@ -548,7 +549,7 @@ router.post('/api/messages/:id/report', authenticateToken, reportLimiter, (req, 
   res.status(201).json({ success: true, reportId: result.reportId, duplicate: result.duplicate });
 });
 
-router.get('/api/messages/users/search', authenticateToken, (req, res) => {
+router.get('/api/messages/users/search', authenticateToken, async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
     if (q.length < 2) return res.json({ users: [] });
@@ -574,7 +575,7 @@ router.get('/api/messages/users/search', authenticateToken, (req, res) => {
     // today) falls through to the empty `rows = []` above — never an
     // unscoped `else` that would search every user on the platform.
     if (can(req.principal, 'applicant.review') || can(req.principal, 'event.moderate')) {
-      rows = db.prepare(`
+      rows = await db.prepare(`
         SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role,
                'applicant' AS kind, e.id AS eventId, e.title AS eventTitle
         FROM users u
@@ -585,7 +586,7 @@ router.get('/api/messages/users/search', authenticateToken, (req, res) => {
         LIMIT 20
       `).all(req.principal.userId, like, like);
     } else if (can(req.principal, 'application.withdraw')) {
-      rows = db.prepare(`
+      rows = await db.prepare(`
         SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role,
                'organizer' AS kind, e.id AS eventId, e.title AS eventTitle
         FROM users u
@@ -622,7 +623,7 @@ router.get('/api/messages/users/search', authenticateToken, (req, res) => {
        * would have to infer it from `eventId` being absent, which is the same
        * shape of guess `decorateConversation` refuses to make about `event`.
        */
-      const friendCandidates = db.prepare(`
+      const friendCandidates = await db.prepare(`
         SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role
         FROM users u
         JOIN user_relationships r
@@ -634,11 +635,15 @@ router.get('/api/messages/users/search', authenticateToken, (req, res) => {
         LIMIT 20
       `).all(req.principal.userId, req.principal.userId, like, like);
 
-      rows = rows.concat(
-        friendCandidates
-          .filter(u => areFriends(db, req.principal.userId, u.id))
-          .map(u => ({ ...u, kind: 'friend', eventId: null, eventTitle: null }))
-      );
+      /* A loop, not `.filter`: `areFriends` is async now, and `Array.filter`
+         does not await — every candidate would have passed the check and the
+         search would have returned strangers as friends, which is what opens
+         the friends-only tier of a profile. */
+      for (const u of friendCandidates) {
+        if (await areFriends(db, req.principal.userId, u.id)) {
+          rows.push({ ...u, kind: 'friend', eventId: null, eventTitle: null });
+        }
+      }
     }
 
     res.json({ users: rows });
@@ -658,8 +663,8 @@ router.get('/api/messages/users/search', authenticateToken, (req, res) => {
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /** Who the caller has blocked. */
-router.get('/api/blocks', authenticateToken, (req, res) => {
-  const rows = db.prepare(`
+router.get('/api/blocks', authenticateToken, async (req, res) => {
+  const rows = await db.prepare(`
     SELECT b.blocked_id AS id, u.name, u.avatar, b.created_at
     FROM user_blocks b
     JOIN users u ON u.id = b.blocked_id
@@ -681,20 +686,20 @@ router.get('/api/blocks', authenticateToken, (req, res) => {
  * report queue, administrators, and suspension, all of which involve a second
  * person. Expressed as a capability, never a role comparison.
  */
-router.post('/api/blocks/:userId', authenticateToken, requireCap('event.apply'), (req, res) => {
+router.post('/api/blocks/:userId', authenticateToken, requireCap('event.apply'), async (req, res) => {
   const targetId = req.params.userId;
 
   if (targetId === req.user.id) {
     return res.status(400).json({ error: 'You cannot block yourself.' });
   }
 
-  const target = db.prepare("SELECT id FROM users WHERE id = ? AND account_status != 'deleted'").get(targetId);
+  const target = await db.prepare("SELECT id FROM users WHERE id = ? AND account_status != 'deleted'").get(targetId);
   if (!target) return res.status(404).json({ error: 'User not found' });
 
   let created = false;
   try {
-    inTransaction(() => {
-      created = block(db, { blockerId: req.user.id, blockedId: targetId });
+    await runInTransaction(db, async (tx) => {
+      created = await block(tx, { blockerId: req.user.id, blockedId: targetId });
 
       /**
        * Blocking also withdraws any friendship between the two.
@@ -712,7 +717,7 @@ router.post('/api/blocks/:userId', authenticateToken, requireCap('event.apply'),
        * moment this platform gets to repair that row. `removeFriend` is a
        * no-op when there is nothing to remove.
        */
-      removeFriend(db, req.user.id, targetId);
+      await removeFriend(tx, req.user.id, targetId);
 
       /**
        * A block against an adult is a safety signal, not a preference.
@@ -726,7 +731,7 @@ router.post('/api/blocks/:userId', authenticateToken, requireCap('event.apply'),
        * Only on creation: a repeat tap is not new information.
        */
       if (created) {
-        recordAudit(db, {
+        await recordAudit(tx, {
           adminId: req.user.id,
           action: 'USER_BLOCKED',
           targetUserId: targetId,
@@ -744,10 +749,10 @@ router.post('/api/blocks/:userId', authenticateToken, requireCap('event.apply'),
 });
 
 /** Removes a block. */
-router.delete('/api/blocks/:userId', authenticateToken, requireCap('event.apply'), (req, res) => {
-  const removed = unblock(db, { blockerId: req.user.id, blockedId: req.params.userId });
+router.delete('/api/blocks/:userId', authenticateToken, requireCap('event.apply'), async (req, res) => {
+  const removed = await unblock(db, { blockerId: req.user.id, blockedId: req.params.userId });
   if (removed) {
-    recordAudit(db, {
+    await recordAudit(db, {
       adminId: req.user.id,
       action: 'USER_UNBLOCKED',
       targetUserId: req.params.userId,

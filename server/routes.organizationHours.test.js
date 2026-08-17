@@ -48,14 +48,16 @@ describe('organization hours', () => {
     db.prepare(`
       INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
       VALUES (?, ?, 'manager', ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
     `).run(id, managerId, now);
     return { id, slug };
   };
 
   const join = (orgId, userId, role = 'member') => {
     db.prepare(`
-      INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
+      INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
       VALUES (?, ?, ?, ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
     `).run(orgId, userId, role, new Date().toISOString());
   };
 
@@ -109,9 +111,9 @@ describe('organization hours', () => {
     manager = await srv.login(ORGANIZER);
     student = await srv.login(STUDENT);
     other = await srv.login(OTHER_STUDENT);
-    managerId = db.prepare('SELECT id FROM users WHERE email = ?').get(ORGANIZER).id;
-    studentId = db.prepare('SELECT id FROM users WHERE email = ?').get(STUDENT).id;
-    otherId = db.prepare('SELECT id FROM users WHERE email = ?').get(OTHER_STUDENT).id;
+    managerId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(ORGANIZER)).id;
+    studentId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(STUDENT)).id;
+    otherId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(OTHER_STUDENT)).id;
   }, 60000);
 
   afterAll(async () => { await srv?.close(); });
@@ -165,7 +167,7 @@ describe('organization hours', () => {
     const nhs = makeOrg('NHS');
     join(nhs.id, studentId);
     const eventId = credit(nhs.id, studentId, 8);
-    db.prepare('UPDATE attendance SET present = 0 WHERE event_id = ?').run(eventId);
+    await db.prepare('UPDATE attendance SET present = 0 WHERE event_id = ?').run(eventId);
 
     expect((await fetchOrg(nhs.slug, student)).body.viewer.hours).toBe(0);
   });
@@ -187,7 +189,7 @@ describe('organization hours', () => {
     const nhs = makeOrg('NHS');
     join(nhs.id, studentId);
     credit(nhs.id, studentId, 12);
-    db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+    await db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
       .run(nhs.id, studentId);
 
     const res = await fetchOrg(nhs.slug, student);

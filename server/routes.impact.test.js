@@ -35,7 +35,7 @@ describe('GET /api/impact', () => {
       password: 'Password123!', grade: 'Adult', role: 'student',
     });
     const { db } = await import('./db.js');
-    db.prepare("UPDATE users SET role = 'partner', verified = 1 WHERE email = ?").run(PARTNER_EMAIL);
+    await db.prepare("UPDATE users SET role = 'partner', verified = 1 WHERE email = ?").run(PARTNER_EMAIL);
     partner = signed.cookie;
   }, 60000);
 
@@ -107,7 +107,7 @@ describe('GET /api/impact', () => {
    */
   it('puts no name, address or identifier on the wire', async () => {
     const { db } = await import('./db.js');
-    const person = db.prepare(
+    const person = await db.prepare(
       "SELECT name, email, id FROM users WHERE role = 'student' LIMIT 1"
     ).get();
 
@@ -118,7 +118,7 @@ describe('GET /api/impact', () => {
     expect(body).not.toContain(person.email);
     expect(body).not.toContain(person.id);
     // Nor an event's free-text location, which routinely names a building.
-    const place = db.prepare("SELECT location FROM events WHERE location IS NOT NULL LIMIT 1").get();
+    const place = await db.prepare("SELECT location FROM events WHERE location IS NOT NULL LIMIT 1").get();
     if (place?.location) expect(body).not.toContain(place.location);
   });
 

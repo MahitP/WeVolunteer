@@ -54,6 +54,7 @@ async function freshLock() {
   vi.resetModules();
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const lock = await import('./instanceLock.js');
   return { db: dbMod.db, lock };
 }
@@ -68,12 +69,12 @@ describe('acquiring the lock on a free database', () => {
   it('succeeds and records this process as the holder', async () => {
     const { db, lock } = await freshLock();
 
-    const result = lock.acquireInstanceLock(db);
+    const result = await lock.acquireInstanceLock(db);
 
     expect(result.acquired).toBe(true);
     expect(result.conflict).toBeNull();
 
-    const row = db.prepare('SELECT * FROM instance_lock WHERE id = 1').get();
+    const row = await db.prepare('SELECT * FROM instance_lock WHERE id = 1').get();
     expect(row.pid).toBe(process.pid);
     expect(row.hostname).toBe(os.hostname());
     expect(row.heartbeat_at).toBeTruthy();
@@ -82,10 +83,10 @@ describe('acquiring the lock on a free database', () => {
   it('is idempotent for the same process', async () => {
     const { db, lock } = await freshLock();
 
-    expect(lock.acquireInstanceLock(db).acquired).toBe(true);
+    expect((await lock.acquireInstanceLock(db)).acquired).toBe(true);
     // A re-entrant call (e.g. a boot path that runs twice) must not deadlock the
     // process against its own lock.
-    expect(lock.acquireInstanceLock(db).acquired).toBe(true);
+    expect((await lock.acquireInstanceLock(db)).acquired).toBe(true);
   });
 });
 
@@ -96,12 +97,12 @@ describe('a second LIVE instance is detected', () => {
     // A holder on a different host, heartbeating now. The pid-liveness check cannot
     // apply across hosts, so recency is the only signal — which is why the
     // heartbeat exists.
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO instance_lock (id, hostname, pid, acquired_at, heartbeat_at)
       VALUES (1, 'other-host.example', 4242, ?, ?)
     `).run(new Date().toISOString(), new Date().toISOString());
 
-    const result = lock.acquireInstanceLock(db);
+    const result = await lock.acquireInstanceLock(db);
 
     expect(result.acquired).toBe(false);
     expect(result.conflict).toBeTruthy();
@@ -113,12 +114,12 @@ describe('a second LIVE instance is detected', () => {
 
     // process.ppid is a real, live pid that is not us — the closest honest stand-in
     // for a genuine second instance on the same machine.
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO instance_lock (id, hostname, pid, acquired_at, heartbeat_at)
       VALUES (1, ?, ?, ?, ?)
     `).run(os.hostname(), process.ppid, new Date().toISOString(), new Date().toISOString());
 
-    const result = lock.acquireInstanceLock(db);
+    const result = await lock.acquireInstanceLock(db);
 
     expect(result.acquired).toBe(false);
     expect(result.conflict.pid).toBe(process.ppid);
@@ -141,15 +142,15 @@ describe('a dead or stale holder does not block recovery', () => {
      * pid 999999 is above the default pid_max on Linux and macOS, so it is reliably
      * absent rather than merely probably absent.
      */
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO instance_lock (id, hostname, pid, acquired_at, heartbeat_at)
       VALUES (1, ?, 999999, ?, ?)
     `).run(os.hostname(), new Date().toISOString(), new Date().toISOString());
 
-    const result = lock.acquireInstanceLock(db);
+    const result = await lock.acquireInstanceLock(db);
 
     expect(result.acquired, 'a dead holder blocked restart').toBe(true);
-    expect(db.prepare('SELECT pid FROM instance_lock WHERE id = 1').get().pid).toBe(process.pid);
+    expect((await db.prepare('SELECT pid FROM instance_lock WHERE id = 1').get()).pid).toBe(process.pid);
   });
 
   it('reclaims the lock when the heartbeat has gone stale', async () => {
@@ -158,61 +159,61 @@ describe('a dead or stale holder does not block recovery', () => {
     // A holder on another host that stopped heartbeating — the host was powered off,
     // or the network partitioned. Recency is the only available signal.
     const old = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO instance_lock (id, hostname, pid, acquired_at, heartbeat_at)
       VALUES (1, 'other-host.example', 4242, ?, ?)
     `).run(old, old);
 
-    expect(lock.acquireInstanceLock(db).acquired).toBe(true);
+    expect((await lock.acquireInstanceLock(db)).acquired).toBe(true);
   });
 });
 
 describe('the heartbeat keeps the lock fresh', () => {
   it('advances heartbeat_at', async () => {
     const { db, lock } = await freshLock();
-    lock.acquireInstanceLock(db);
+    await lock.acquireInstanceLock(db);
 
-    const before = db.prepare('SELECT heartbeat_at FROM instance_lock WHERE id = 1').get().heartbeat_at;
+    const before = (await db.prepare('SELECT heartbeat_at FROM instance_lock WHERE id = 1').get()).heartbeat_at;
     // Force a distinct timestamp; ISO strings have millisecond resolution.
     await new Promise(r => setTimeout(r, 5));
-    lock.heartbeatInstanceLock(db);
-    const after = db.prepare('SELECT heartbeat_at FROM instance_lock WHERE id = 1').get().heartbeat_at;
+    await lock.heartbeatInstanceLock(db);
+    const after = (await db.prepare('SELECT heartbeat_at FROM instance_lock WHERE id = 1').get()).heartbeat_at;
 
     expect(after >= before).toBe(true);
   });
 
   it('does not throw when the row has been removed underneath it', async () => {
     const { db, lock } = await freshLock();
-    lock.acquireInstanceLock(db);
-    db.prepare('DELETE FROM instance_lock WHERE id = 1').run();
+    await lock.acquireInstanceLock(db);
+    await db.prepare('DELETE FROM instance_lock WHERE id = 1').run();
 
     // A heartbeat failure must never take the process down — it is bookkeeping.
-    expect(() => lock.heartbeatInstanceLock(db)).not.toThrow();
+    await expect(lock.heartbeatInstanceLock(db)).resolves.not.toThrow();
   });
 });
 
 describe('releasing the lock', () => {
   it('clears the row so the next instance starts cleanly', async () => {
     const { db, lock } = await freshLock();
-    lock.acquireInstanceLock(db);
+    await lock.acquireInstanceLock(db);
 
-    lock.releaseInstanceLock(db);
+    await lock.releaseInstanceLock(db);
 
-    const row = db.prepare('SELECT * FROM instance_lock WHERE id = 1').get();
+    const row = await db.prepare('SELECT * FROM instance_lock WHERE id = 1').get();
     expect(row).toBeUndefined();
   });
 
   it('does not release a lock held by someone else', async () => {
     const { db, lock } = await freshLock();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO instance_lock (id, hostname, pid, acquired_at, heartbeat_at)
       VALUES (1, 'other-host.example', 4242, ?, ?)
     `).run(new Date().toISOString(), new Date().toISOString());
 
-    lock.releaseInstanceLock(db);
+    await lock.releaseInstanceLock(db);
 
     // Shutting down must not hand another running instance's lock away.
-    const row = db.prepare('SELECT hostname FROM instance_lock WHERE id = 1').get();
+    const row = await db.prepare('SELECT hostname FROM instance_lock WHERE id = 1').get();
     expect(row?.hostname).toBe('other-host.example');
   });
 });
@@ -220,26 +221,26 @@ describe('releasing the lock', () => {
 describe('enforcement is fatal in production and advisory in development', () => {
   it('reports that it should be fatal in production', async () => {
     const { db, lock } = await freshLock();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO instance_lock (id, hostname, pid, acquired_at, heartbeat_at)
       VALUES (1, 'other-host.example', 4242, ?, ?)
     `).run(new Date().toISOString(), new Date().toISOString());
 
     // The decision is returned rather than acted on inside the module, so the
     // behaviour is testable without spawning a process that exits.
-    const result = lock.acquireInstanceLock(db);
+    const result = await lock.acquireInstanceLock(db);
     expect(result.acquired).toBe(false);
     expect(lock.shouldRefuseBoot(result, true)).toBe(true);
   });
 
   it('does not refuse boot outside production', async () => {
     const { db, lock } = await freshLock();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO instance_lock (id, hostname, pid, acquired_at, heartbeat_at)
       VALUES (1, 'other-host.example', 4242, ?, ?)
     `).run(new Date().toISOString(), new Date().toISOString());
 
-    const result = lock.acquireInstanceLock(db);
+    const result = await lock.acquireInstanceLock(db);
     // Two dev servers on one database is an ordinary local situation and must stay
     // possible; refusing would push people into deleting their dev database.
     expect(lock.shouldRefuseBoot(result, false)).toBe(false);

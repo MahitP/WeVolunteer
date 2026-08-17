@@ -1,9 +1,10 @@
 import express from 'express';
+import { runInTransaction } from '../db/connectionContext.js';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'node:crypto';
 
-import { authenticateToken, formatUserResponse, inTransaction } from '../utils.js';
+import { authenticateToken, formatUserResponse } from '../utils.js';
 import { db } from '../db.js';
 import { notificationService } from '../services/notificationService.js';
 import { getMailHealth } from '../email.js';
@@ -18,6 +19,7 @@ import { syncOrganizerCapabilities } from '../organizationRoles.js';
 import { recordAudit } from '../auditLog.js';
 import { deleteUploadedFile } from './profilePictureRoutes.js';
 import { deliveryHealth } from '../resendWebhook.js';
+import { insertionTiebreak } from '../db/dialectSql.js';
 import {
   REPORT_PRIORITIES, REPORT_RESOLUTIONS, REPORT_STATUSES, REPORT_TARGET_TYPES,
   LIVE_REPORT_STATUSES, CATEGORY_VALUES, isValidCategory, normalizeTargetType,
@@ -25,10 +27,10 @@ import {
 
 const router = express.Router();
 
-router.get('/api/admin/organizers/pending', authenticateToken, requireCap('organizer.approve'), (req, res) => {
+router.get('/api/admin/organizers/pending', authenticateToken, requireCap('organizer.approve'), async (req, res) => {
   try {
-    const rows = db.prepare("SELECT * FROM users WHERE role = 'organizer' AND verified = 0").all();
-    const formatted = rows.map(r => formatUserResponse(r));
+    const rows = await db.prepare("SELECT * FROM users WHERE role = 'organizer' AND verified = 0").all();
+    const formatted = await Promise.all(rows.map(r => formatUserResponse(r)));
     res.json(formatted);
   } catch (error) {
     console.error('Pending organizers error:', error);
@@ -37,7 +39,7 @@ router.get('/api/admin/organizers/pending', authenticateToken, requireCap('organ
 });
 
 // A2. Verify Organizer account
-router.post('/api/admin/organizers/:id/approve', authenticateToken, requireCap('organizer.approve'), (req, res) => {
+router.post('/api/admin/organizers/:id/approve', authenticateToken, requireCap('organizer.approve'), async (req, res) => {
   const orgId = req.params.id;
 
   try {
@@ -62,7 +64,7 @@ router.post('/api/admin/organizers/:id/approve', authenticateToken, requireCap('
      * Already-approved is a 404 rather than a silent success, matching `deny`:
      * "there is no pending request here" is the true answer to both.
      */
-    const target = db.prepare(
+    const target = await db.prepare(
       "SELECT id FROM users WHERE id = ? AND role = 'organizer' AND verified = 0"
     ).get(orgId);
 
@@ -72,10 +74,10 @@ router.post('/api/admin/organizers/:id/approve', authenticateToken, requireCap('
       });
     }
 
-    inTransaction(() => {
-      db.prepare('UPDATE users SET verified = 1 WHERE id = ?').run(target.id);
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare('UPDATE users SET verified = 1 WHERE id = ?').run(target.id);
 
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'APPROVE_ORGANIZER',
         targetUserId: target.id,
@@ -85,7 +87,7 @@ router.post('/api/admin/organizers/:id/approve', authenticateToken, requireCap('
 
     /* After the commit, deliberately. A notification sent from inside the
        transaction would go out even if the approval rolled back. */
-    notificationService.dispatch('ORGANIZER_APPROVED', {}, target.id);
+    await notificationService.dispatch('ORGANIZER_APPROVED', {}, target.id);
     res.json({ success: true });
   } catch (error) {
     console.error('Verify organizer error:', error);
@@ -94,7 +96,7 @@ router.post('/api/admin/organizers/:id/approve', authenticateToken, requireCap('
 });
 
 // A3. Deny Organizer account
-router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('organizer.approve'), (req, res) => {
+router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('organizer.approve'), async (req, res) => {
   const orgId = req.params.id;
 
   try {
@@ -106,7 +108,7 @@ router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('org
     // `profile_picture_url` is read here because the row is about to be hard
     // deleted, and the file it names lives on disk outside the database. Once
     // the row is gone there is no pointer left to ever find that file again.
-    const target = db.prepare(
+    const target = await db.prepare(
       "SELECT id, profile_picture_url FROM users WHERE id = ? AND role = 'organizer' AND verified = 0"
     ).get(orgId);
 
@@ -116,7 +118,7 @@ router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('org
       });
     }
 
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       /**
        * Consent rows go with the denied registration, and only here.
        *
@@ -138,11 +140,11 @@ router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('org
        * destroying real users' consent evidence, and that guard is worth more
        * than the two lines it costs here.
        */
-      db.prepare('DELETE FROM legal_acceptances WHERE user_id = ?').run(orgId);
-      db.prepare("DELETE FROM users WHERE id = ? AND role = 'organizer' AND verified = 0").run(orgId);
+      await tx.prepare('DELETE FROM legal_acceptances WHERE user_id = ?').run(orgId);
+      await tx.prepare("DELETE FROM users WHERE id = ? AND role = 'organizer' AND verified = 0").run(orgId);
 
       // Log the audit event
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'DENY_ORGANIZER',
         targetUserId: orgId,
@@ -179,7 +181,7 @@ router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('org
 
 // A4. Remove Event Listing
 
-router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school'), (req, res) => {
+router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school'), async (req, res) => {
   try {
     /**
      * Deleted accounts are excluded from the role counts, and only from those.
@@ -193,41 +195,45 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
      * `users` is left as a raw count of rows on purpose: it is the size of the
      * table, not a population, and the two tombstone rows belong in it.
      */
+    /* Each row is parenthesised before its column is read: `await q.get().c`
+       would take `.c` off the pending promise and report every total as
+       `undefined`, which the dashboard would render as a blank rather than an
+       error. */
     const totals = {
-      users: db.prepare('SELECT COUNT(*) as c FROM users').get().c,
-      students: db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'student' AND account_status <> 'deleted'").get().c,
-      organizers: db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'organizer' AND account_status <> 'deleted'").get().c,
-      events: db.prepare('SELECT COUNT(*) as c FROM events').get().c,
-      applications: db.prepare('SELECT COUNT(*) as c FROM applications').get().c,
-      hours: db.prepare('SELECT COALESCE(SUM(hours_awarded),0) as h FROM attendance WHERE present = 1').get().h,
-      pendingOrganizers: db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'organizer' AND verified = 0").get().c
+      users: (await db.prepare('SELECT COUNT(*) as c FROM users').get()).c,
+      students: (await db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'student' AND account_status <> 'deleted'").get()).c,
+      organizers: (await db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'organizer' AND account_status <> 'deleted'").get()).c,
+      events: (await db.prepare('SELECT COUNT(*) as c FROM events').get()).c,
+      applications: (await db.prepare('SELECT COUNT(*) as c FROM applications').get()).c,
+      hours: (await db.prepare('SELECT COALESCE(SUM(hours_awarded),0) as h FROM attendance WHERE present = 1').get()).h,
+      pendingOrganizers: (await db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'organizer' AND verified = 0").get()).c
     };
 
     // ── Rates that tell staff whether the programme is healthy ──
-    const attendance = db.prepare(`
+    const attendance = await db.prepare(`
       SELECT COUNT(*) as total, SUM(CASE WHEN present = 1 THEN 1 ELSE 0 END) as present
       FROM attendance
     `).get();
     const attendanceRate = attendance.total > 0
       ? Math.round((attendance.present / attendance.total) * 100) : null;
 
-    const eventStatus = db.prepare(`
+    const eventStatus = (await db.prepare(`
       SELECT status, COUNT(*) as c FROM events GROUP BY status
-    `).all().reduce((acc, r) => ({ ...acc, [r.status]: r.c }), {});
+    `).all()).reduce((acc, r) => ({ ...acc, [r.status]: r.c }), {});
     const finishedEvents = (eventStatus.completed || 0) + (eventStatus.cancelled || 0);
     const completionRate = finishedEvents > 0
       ? Math.round(((eventStatus.completed || 0) / finishedEvents) * 100) : null;
 
     // How many students actually volunteered vs merely registered
-    const activeVolunteers = db.prepare(`
+    const activeVolunteers = (await db.prepare(`
       SELECT COUNT(DISTINCT user_id) as c FROM attendance WHERE present = 1
-    `).get().c;
+    `).get()).c;
     const participationRate = totals.students > 0
       ? Math.round((activeVolunteers / totals.students) * 100) : null;
 
     // Hours per month, last 6 months
-    const monthlyHours = db.prepare(`
-      SELECT strftime('%Y-%m', s.end_datetime) as month,
+    const monthlyHours = await db.prepare(`
+      SELECT substr(s.end_datetime, 1, 7) as month,
              COALESCE(SUM(at.hours_awarded), 0) as hours,
              COUNT(DISTINCT at.user_id) as volunteers
       FROM attendance at
@@ -237,15 +243,15 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
     `).all();
 
     // Volunteers joining over time
-    const signupsByMonth = db.prepare(`
-      SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as c
+    const signupsByMonth = await db.prepare(`
+      SELECT substr(created_at, 1, 7) as month, COUNT(*) as c
       FROM users
       WHERE role = 'student' AND account_status <> 'deleted'
         AND created_at >= date('now', '-6 months')
       GROUP BY month ORDER BY month ASC
     `).all();
 
-    const topOrganizers = db.prepare(`
+    const topOrganizers = await db.prepare(`
       SELECT u.id, u.name, u.avatar, u.verified,
              COUNT(DISTINCT e.id) as events,
              COALESCE(SUM(at.hours_awarded), 0) as hours
@@ -258,10 +264,10 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
       LIMIT 5
     `).all();
 
-    const selectionSplit = db.prepare(`
+    const selectionSplit = (await db.prepare(`
       SELECT COALESCE(auto_approve, 0) as auto, COUNT(*) as c
       FROM events GROUP BY auto
-    `).all().reduce((acc, r) => ({ ...acc, [r.auto === 1 ? 'autoSelect' : 'manual']: r.c }), {});
+    `).all()).reduce((acc, r) => ({ ...acc, [r.auto === 1 ? 'autoSelect' : 'manual']: r.c }), {});
 
     res.json({
       ...totals,
@@ -329,8 +335,8 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
  * reports holding hundreds of preserved messages. Two copies of that logic means
  * fixing it in one place and leaving the other one lying.
  */
-function describeTarget(report) {
-  const live = liveTarget(db, report);
+async function describeTarget(report) {
+  const live = await liveTarget(db, report);
   const body = live?.text ?? report.target_body_snapshot ?? null;
 
   report.target_label = report.target_name_snapshot
@@ -351,8 +357,8 @@ function describeTarget(report) {
   return report;
 }
 
-function liveTarget(db, report) {
-  const one = (sql) => db.prepare(sql).get(report.target_id) ?? null;
+async function liveTarget(db, report) {
+  const one = async (sql) => await db.prepare(sql).get(report.target_id) ?? null;
   switch (report.target_type) {
     case 'event':
       return one('SELECT title AS text FROM events WHERE id = ?');
@@ -388,7 +394,7 @@ function liveTarget(db, report) {
 const QUEUE_DEFAULT_STATUSES = LIVE_REPORT_STATUSES;
 
 // A3. Get All Reports
-router.get('/api/admin/reports', authenticateToken, requireCap('report.resolve'), (req, res) => {
+router.get('/api/admin/reports', authenticateToken, requireCap('report.resolve'), async (req, res) => {
   try {
     /* ── Filters ──────────────────────────────────────────────────────────────
      *
@@ -490,7 +496,7 @@ router.get('/api/admin/reports', authenticateToken, requireCap('report.resolve')
      * resolved reports, so picking a report up pushed it out of sight.
      */
     const liveList = LIVE_REPORT_STATUSES.map(() => '?').join(', ');
-    const reports = db.prepare(`
+    const reports = await db.prepare(`
       SELECT r.*,
              COALESCE(u.name, r.reporter_name_snapshot, 'Account since deleted') AS reporter_name,
              u.email AS reporter_email,
@@ -508,7 +514,7 @@ router.get('/api/admin/reports', authenticateToken, requireCap('report.resolve')
          r.created_at ASC
     `).all(...params, ...LIVE_REPORT_STATUSES);
 
-    for (const report of reports) describeTarget(report);
+    for (const report of reports) await describeTarget(report);
 
     /**
      * The counts are the whole dashboard for a one-person team: how much is
@@ -516,7 +522,7 @@ router.get('/api/admin/reports', authenticateToken, requireCap('report.resolve')
      * whole table rather than the filtered page, because their job is to tell a
      * moderator what a filter is currently hiding from them.
      */
-    const counts = db.prepare(`
+    const counts = await db.prepare(`
       SELECT
         SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END)                          AS open,
         SUM(CASE WHEN status = 'reviewing' THEN 1 ELSE 0 END)                     AS reviewing,
@@ -610,7 +616,7 @@ function auditSubject(report) {
 }
 
 // A4. Update Report Status
-router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.resolve'), (req, res) => {
+router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.resolve'), async (req, res) => {
   const body = (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) ? req.body : {};
   const { status, priority, assignedTo, resolution, resolutionNote } = body;
 
@@ -672,7 +678,7 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
   }
 
   try {
-    const report = db.prepare(`
+    const report = await db.prepare(`
       SELECT id, reporter_id, target_author_id, target_type, target_id, status, priority, assigned_to,
              -- Read so a reopen can carry the withdrawn decision's reasoning
              -- onto the history row before clearing it here. Without it the
@@ -763,7 +769,7 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
         nextAssignee = null;
       } else {
         const candidateId = assignedTo === 'me' ? req.user.id : assignedTo;
-        const candidate = db.prepare(
+        const candidate = await db.prepare(
           "SELECT id, role FROM users WHERE id = ? AND deleted_at IS NULL AND account_status = 'active'"
         ).get(candidateId);
         if (!candidate) {
@@ -775,7 +781,7 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
          * is grantable per-user precisely so a triage-only helper can exist, and
          * a role check would refuse to assign work to exactly that person.
          */
-        const candidatePrincipal = principalFor(candidate, { grants: grantsFor(db, candidate.id) });
+        const candidatePrincipal = principalFor(candidate, { grants: await grantsFor(db, candidate.id) });
         if (!can(candidatePrincipal, 'report.resolve')) {
           return res.status(400).json({
             error: 'That person cannot work reports, so nothing would reach them.',
@@ -802,7 +808,7 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
      * exists to make impossible.
      */
     const changes = [];
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       const sets = ['updated_at = ?'];
       const params = [now];
 
@@ -857,7 +863,7 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
       if (changes.length === 0) return;      // nothing asked for; nothing recorded
 
       params.push(report.id);
-      db.prepare(`UPDATE reports SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+      await tx.prepare(`UPDATE reports SET ${sets.join(', ')} WHERE id = ?`).run(...params);
 
       /**
        * One history row per field changed, not one blob.
@@ -867,14 +873,14 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
        * anonymous history row says somebody changed this without saying who,
        * which is the single question this table exists to answer.
        */
-      const insertAction = db.prepare(`
+      const insertAction = await tx.prepare(`
         INSERT INTO moderation_actions
           (id, report_id, actor_id, action, old_status, new_status,
            old_priority, new_priority, old_resolution, new_resolution, note, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const c of changes) {
-        insertAction.run(
+        await insertAction.run(
           `act_${crypto.randomUUID()}`, report.id, req.user.id, c.action,
           c.from ?? null, c.to ?? null,
           c.fromPriority ?? null, c.toPriority ?? null,
@@ -885,7 +891,7 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
         );
       }
       if (selfReview) {
-        insertAction.run(
+        await insertAction.run(
           `act_${crypto.randomUUID()}`, report.id, req.user.id, 'self_review',
           /* Twelve values now that `note` exists — this second call site shares the
              prepared statement and was still passing eleven, so `created_at`
@@ -904,7 +910,7 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
        * questions rather than case ones, and the note already lives in two
        * places that are retained longer than this table is.
        */
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: selfReview ? 'MODERATE_REPORT_SELF_REVIEW' : 'MODERATE_REPORT',
         targetUserId: auditSubject(report),
@@ -939,9 +945,9 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
  * stops it recurring.
  */
 // A5. Export Data to CSV
-router.get('/api/admin/reports/export', authenticateToken, requireCap('report.resolve'), (req, res) => {
+router.get('/api/admin/reports/export', authenticateToken, requireCap('report.resolve'), async (req, res) => {
   try {
-    const students = db.prepare(`
+    const students = await db.prepare(`
       SELECT 
         u.id, 
         u.name, 
@@ -1025,7 +1031,7 @@ router.get('/api/admin/reports/export', authenticateToken, requireCap('report.re
  * bodies, because that is the act the Youth Safety Guidelines make a promise
  * about.
  */
-router.get('/api/admin/reports/:id', authenticateToken, requireCap('report.resolve'), (req, res) => {
+router.get('/api/admin/reports/:id', authenticateToken, requireCap('report.resolve'), async (req, res) => {
   try {
     /**
      * Same columns and the same LEFT JOINs as the queue, for the same reason:
@@ -1034,7 +1040,7 @@ router.get('/api/admin/reports/:id', authenticateToken, requireCap('report.resol
      * report whose reporter has been purged disappear — the quietest possible
      * failure on a safety surface.
      */
-    const report = db.prepare(`
+    const report = await db.prepare(`
       SELECT r.*,
              COALESCE(u.name, r.reporter_name_snapshot, 'Account since deleted') AS reporter_name,
              u.email AS reporter_email,
@@ -1050,7 +1056,7 @@ router.get('/api/admin/reports/:id', authenticateToken, requireCap('report.resol
 
     if (!report) return res.status(404).json({ error: 'Report not found' });
 
-    describeTarget(report);
+    await describeTarget(report);
 
     /**
      * Who this report is ABOUT, resolved to a person or to nothing.
@@ -1075,7 +1081,7 @@ router.get('/api/admin/reports/:id', authenticateToken, requireCap('report.resol
       : report.target_author_id;
 
     const subject = subjectId
-      ? db.prepare(
+      ? await db.prepare(
         'SELECT id, name, role, account_status, suspended_until FROM users WHERE id = ? AND account_status != \'deleted\''
       ).get(subjectId)
       : null;
@@ -1102,7 +1108,7 @@ router.get('/api/admin/reports/:id', authenticateToken, requireCap('report.resol
      * that acted, and an inner join would delete a moderator's decisions from the
      * record when they leave the school.
      */
-    const history = db.prepare(`
+    const history = await db.prepare(`
       SELECT ma.id, ma.action, ma.actor_id, ma.created_at,
              ma.old_status, ma.new_status,
              ma.old_priority, ma.new_priority,
@@ -1115,7 +1121,7 @@ router.get('/api/admin/reports/:id', authenticateToken, requireCap('report.resol
         FROM moderation_actions ma
         LEFT JOIN users us ON us.id = ma.actor_id
        WHERE ma.report_id = ?
-       ORDER BY ma.created_at ASC, ma.rowid ASC
+       ORDER BY ma.created_at ASC, ${insertionTiebreak(db, 'ma')} ASC
     `).all(req.params.id);
 
     res.json({ report, history });
@@ -1147,9 +1153,9 @@ router.get('/api/admin/reports/:id', authenticateToken, requireCap('report.resol
  * writes. A gate with no spend leaves the grant replayable and every functional
  * test still passes.
  */
-router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('report.evidence.read'), requireAAL2('report.evidence'), (req, res) => {
+router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('report.evidence.read'), requireAAL2('report.evidence'), async (req, res) => {
   try {
-    const report = db.prepare(
+    const report = await db.prepare(
       'SELECT id, reporter_id, target_author_id, target_type, target_id, status FROM reports WHERE id = ?'
     ).get(req.params.id);
     if (!report) return res.status(404).json({ error: 'Report not found' });
@@ -1206,7 +1212,7 @@ router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('rep
      * this have been edited after it was reported", which is no, because the row
      * carrying it has been immutable at the database since migration 013.
      */
-    const messages = db.prepare(`
+    const messages = await db.prepare(`
       SELECT m.message_id, m.sender_id, m.body, m.created_at, m.captured_at,
              COALESCE(u.name, m.sender_name_snapshot, 'Account since deleted') AS sender_name
       FROM report_evidence m
@@ -1237,15 +1243,15 @@ router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('rep
      * reporter, because the question this row answers later is whose private
      * messages were read.
      */
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       /**
        * First statement, and bound to the report actually being read — not to
        * whatever the client claimed. `report.id` comes from the row fetched
        * above, so a grant obtained for one report cannot open another.
        */
-      spendChallenge(db, req, 'report.evidence', { reportId: report.id });
+      await spendChallenge(tx, req, 'report.evidence', { reportId: report.id });
 
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO moderation_actions (id, report_id, actor_id, action, created_at)
         VALUES (?, ?, ?, ?, ?)
       `).run(
@@ -1254,7 +1260,7 @@ router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('rep
         new Date().toISOString(),
       );
 
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'REPORT_EVIDENCE_VIEWED',
         targetUserId: auditSubject(report),
@@ -1301,9 +1307,9 @@ router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('rep
  *
  * Counts users rather than rows so the cost stays flat as the ledger grows.
  */
-function hoursLedgerStatus() {
+async function hoursLedgerStatus() {
   try {
-    const row = db.prepare(`
+    const row = await db.prepare(`
       SELECT COUNT(*) AS mismatches FROM (
         SELECT a.user_id
         FROM attendance a
@@ -1349,7 +1355,7 @@ function hoursLedgerStatus() {
  * `analytics.school` is what administrators already hold for platform-health
  * figures, and it is what this endpoint actually returns.
  */
-router.get('/api/admin/system/status', authenticateToken, requireCap('analytics.school'), (req, res) => {
+router.get('/api/admin/system/status', authenticateToken, requireCap('analytics.school'), async (req, res) => {
   const smtpConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 
   res.json({
@@ -1371,10 +1377,10 @@ router.get('/api/admin/system/status', authenticateToken, requireCap('analytics.
      * deployment that has not finished the Resend setup rather than a
      * misleading zero.
      */
-    delivery: deliveryHealth(),
-    notificationQueue: getQueueHealth(),
+    delivery: await deliveryHealth(),
+    notificationQueue: await getQueueHealth(),
     backup: backupStatus(),
-    hoursLedger: hoursLedgerStatus()
+    hoursLedger: await hoursLedgerStatus()
   });
 });
 
@@ -1485,7 +1491,7 @@ function suspensionTargetError(actorPrincipal, actorId, target) {
  * recorded but not enforced, or enforced but not recorded, are both worse than
  * one that fails cleanly and can be retried.
  */
-router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.suspend'), (req, res) => {
+router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.suspend'), async (req, res) => {
   const targetId = req.params.id;
   const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
 
@@ -1553,7 +1559,7 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
     until = new Date(parsed).toISOString();
   }
 
-  const target = db.prepare(
+  const target = await db.prepare(
     'SELECT id, name, role, account_status FROM users WHERE id = ?'
   ).get(targetId);
 
@@ -1581,7 +1587,7 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
   });
 
   try {
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       /**
        * `suspension_lifted_at` is cleared as well as the deadline set.
        *
@@ -1619,7 +1625,7 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
        * reason: access returns on the same session, with no second sign-in to
        * discover it.
        */
-      db.prepare(`
+      await tx.prepare(`
         UPDATE users
         SET account_status = 'suspended',
             suspended_at = ?,
@@ -1630,7 +1636,7 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
         WHERE id = ?
       `).run(now, until, reason, req.user.id, targetId);
 
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO appeal_tokens (token, user_id, expires_at)
         VALUES (?, ?, ?)
       `).run(token, targetId, expiresAt);
@@ -1641,7 +1647,7 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
        * words for one week are different administrative acts, and the trail has to
        * be able to tell them apart years later.
        */
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'ACCOUNT_SUSPENDED',
         targetUserId: targetId,
@@ -1676,7 +1682,7 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
        * matching, so this placement is no longer load-bearing, but the two-line
        * form reads better anyway and there is no reason to go back.
        */
-      notificationService.dispatch(
+      await notificationService.dispatch(
         'ACCOUNT_SUSPENDED', { reason, token, appealDeadline, suspendedUntil: until }, targetId
       );
     });
@@ -1694,10 +1700,10 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
    * is not a thing this product can do. So the count comes back for the
    * administrator to act on deliberately.
    */
-  const activeEvents = db.prepare(`
+  const activeEvents = (await db.prepare(`
     SELECT COUNT(*) AS count FROM events
     WHERE organizer_id = ? AND status NOT IN ('completed', 'cancelled')
-  `).get(targetId).count;
+  `).get(targetId)).count;
 
   const duration = until
     ? `until ${new Date(until).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
@@ -1717,10 +1723,10 @@ router.post('/api/admin/users/:id/suspend', authenticateToken, requireCap('user.
 });
 
 /** Restores a suspended account. Clears the suspension detail; leaves the audit trail. */
-router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('user.suspend'), (req, res) => {
+router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('user.suspend'), async (req, res) => {
   const targetId = req.params.id;
 
-  const target = db.prepare(
+  const target = await db.prepare(
     'SELECT id, name, role, account_status FROM users WHERE id = ?'
   ).get(targetId);
 
@@ -1734,7 +1740,7 @@ router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('use
   const note = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
 
   try {
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       // token_version is deliberately NOT bumped. There are no live sessions to
       // invalidate — the suspension already ended them — and bumping again
       // would only invalidate the session of an administrator who happened to
@@ -1756,7 +1762,7 @@ router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('use
        * swept for a year and names who did it — that records this one. Writing
        * both would make the two indistinguishable on the row.
        */
-      db.prepare(`
+      await tx.prepare(`
         UPDATE users
         SET account_status = 'active',
             suspended_at = NULL,
@@ -1776,7 +1782,7 @@ router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('use
        * an old link disclose a new suspension's reason. Verified by running it.
        * Expiring them here makes each enforcement action carry its own token.
        */
-      db.prepare(
+      await tx.prepare(
         "UPDATE appeal_tokens SET expires_at = ? WHERE user_id = ? AND used_at IS NULL"
       ).run(new Date().toISOString(), targetId);
 
@@ -1795,13 +1801,13 @@ router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('use
        * reinstatement was reached — including by an administrator who never
        * opened the appeal.
        */
-      const orderedBy = db.prepare(`
+      const orderedBy = await tx.prepare(`
         SELECT id FROM appeals
          WHERE user_id = ? AND decision = 'reversed' AND status = 'resolved'
          ORDER BY decided_at DESC LIMIT 1
       `).get(targetId);
 
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'ACCOUNT_UNSUSPENDED',
         targetUserId: targetId,
@@ -1810,7 +1816,7 @@ router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('use
       });
 
       if (orderedBy) {
-        db.prepare(`
+        await tx.prepare(`
           INSERT INTO appeal_events (id, appeal_id, actor_id, actor_role, action,
                                      from_status, to_status, note, created_at)
           VALUES (?, ?, ?, 'reviewer', 'remedy_completed', 'resolved', 'resolved', ?, ?)
@@ -1831,7 +1837,7 @@ router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('use
        * if it delivers this one too — an override used for bad news and not good
        * news is the version that looks self-serving in hindsight.
        */
-      notificationService.dispatch('ACCOUNT_REINSTATED', { reason: note || null }, targetId);
+      await notificationService.dispatch('ACCOUNT_REINSTATED', { reason: note || null }, targetId);
     });
   } catch (err) {
     console.error('Failed to unsuspend account:', err);
@@ -1867,7 +1873,7 @@ router.post('/api/admin/users/:id/unsuspend', authenticateToken, requireCap('use
  * escalation. Refusing one because a previous warning exists would make the
  * second incident unrecordable.
  */
-router.post('/api/admin/users/:id/warn', authenticateToken, requireCap('user.warn'), (req, res) => {
+router.post('/api/admin/users/:id/warn', authenticateToken, requireCap('user.warn'), async (req, res) => {
   const targetId = req.params.id;
   const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
 
@@ -1884,7 +1890,7 @@ router.post('/api/admin/users/:id/warn', authenticateToken, requireCap('user.war
     });
   }
 
-  const target = db.prepare(
+  const target = await db.prepare(
     'SELECT id, name, role, account_status FROM users WHERE id = ?'
   ).get(targetId);
 
@@ -1902,8 +1908,8 @@ router.post('/api/admin/users/:id/warn', authenticateToken, requireCap('user.war
   if (refusal) return res.status(refusal.status).json({ error: refusal.error });
 
   try {
-    inTransaction(() => {
-      recordAudit(db, {
+    await runInTransaction(db, async (tx) => {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'ACCOUNT_WARNED',
         targetUserId: targetId,
@@ -1919,7 +1925,7 @@ router.post('/api/admin/users/:id/warn', authenticateToken, requireCap('user.war
        * losing the notice would reintroduce it one layer down. Rolling back makes
        * it a clean, retryable failure.
        */
-      notificationService.dispatch('ACCOUNT_WARNED', { reason }, targetId);
+      await notificationService.dispatch('ACCOUNT_WARNED', { reason }, targetId);
     });
   } catch (err) {
     console.error('Failed to warn account:', err);
@@ -1934,10 +1940,10 @@ router.post('/api/admin/users/:id/warn', authenticateToken, requireCap('user.war
   });
 });
 
-router.post('/api/admin/users/:id/appeal-token', authenticateToken, requireCap('user.suspend'), (req, res) => {
+router.post('/api/admin/users/:id/appeal-token', authenticateToken, requireCap('user.suspend'), async (req, res) => {
   const targetId = req.params.id;
 
-  const target = db.prepare(
+  const target = await db.prepare(
     'SELECT id, account_status FROM users WHERE id = ?'
   ).get(targetId);
 
@@ -1953,16 +1959,16 @@ router.post('/api/admin/users/:id/appeal-token', authenticateToken, requireCap('
   const expiresAt = new Date(Date.now() + APPEAL_TOKEN_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
   try {
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       // Invalidate existing tokens
-      db.prepare('UPDATE appeal_tokens SET expires_at = ? WHERE user_id = ? AND used_at IS NULL').run(new Date().toISOString(), targetId);
+      await tx.prepare('UPDATE appeal_tokens SET expires_at = ? WHERE user_id = ? AND used_at IS NULL').run(new Date().toISOString(), targetId);
       
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO appeal_tokens (token, user_id, expires_at)
         VALUES (?, ?, ?)
       `).run(token, targetId, expiresAt);
 
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'APPEAL_TOKEN_ISSUED',
         targetUserId: targetId,
@@ -1977,7 +1983,7 @@ router.post('/api/admin/users/:id/appeal-token', authenticateToken, requireCap('
   res.json({ success: true, token, expiresAt });
 });
 
-router.get('/api/admin/audit-logs', authenticateToken, requireCap('audit.read'), (req, res) => {
+router.get('/api/admin/audit-logs', authenticateToken, requireCap('audit.read'), async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
   const offset = (page - 1) * limit;
@@ -2013,14 +2019,14 @@ router.get('/api/admin/audit-logs', authenticateToken, requireCap('audit.read'),
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   try {
-    const totalRow = db.prepare(`
+    const totalRow = await db.prepare(`
       SELECT COUNT(*) as count 
       FROM admin_audit_logs a
       ${whereClause}
     `).get(...params);
     const total = totalRow.count;
 
-    const logs = db.prepare(`
+    const logs = await db.prepare(`
       SELECT a.*, 
              COALESCE(u_admin.name, 'Account since deleted') as admin_name,
              COALESCE(u_target.name, 'Account since deleted') as target_user_name
@@ -2053,9 +2059,9 @@ router.get('/api/admin/audit-logs', authenticateToken, requireCap('audit.read'),
      * not narrow as the reader filters, or each choice would eliminate the
      * others.
      */
-    const actions = db.prepare(
+    const actions = (await db.prepare(
       'SELECT DISTINCT action FROM admin_audit_logs ORDER BY action'
-    ).all().map((r) => r.action);
+    ).all()).map((r) => r.action);
 
     res.json({
       logs,
@@ -2071,9 +2077,9 @@ router.get('/api/admin/audit-logs', authenticateToken, requireCap('audit.read'),
 });
 
 // P-02: Administrator Roster
-router.get('/api/admin/roster', authenticateToken, requireCap('admin.create'), (req, res) => {
+router.get('/api/admin/roster', authenticateToken, requireCap('admin.create'), async (req, res) => {
   try {
-    const admins = db.prepare(`
+    const admins = await db.prepare(`
       SELECT id, name, email, role, avatar, last_sign_in_at,
              promoted_at, promoted_by, promotion_reason
       FROM users
@@ -2083,13 +2089,15 @@ router.get('/api/admin/roster', authenticateToken, requireCap('admin.create'), (
 
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    const roster = admins.map(admin => {
+    /* `Promise.all` + async callback: each admin's activity counts are a query
+       now, so a bare `.map` would send an array of promises as the roster. */
+    const roster = await Promise.all(admins.map(async (admin) => {
       // Recompute capabilities using kernel
       const principal = principalFor(admin, {
-        grants: grantsFor(db, admin.id)
+        grants: await grantsFor(db, admin.id)
       });
       
-      const counts = db.prepare(`
+      const counts = await db.prepare(`
         SELECT action, COUNT(*) as count
         FROM admin_audit_logs
         WHERE admin_id = ? AND created_at >= ?
@@ -2132,7 +2140,7 @@ router.get('/api/admin/roster', authenticateToken, requireCap('admin.create'), (
         decisionCount,
         evidenceReadCount
       };
-    });
+    }));
 
     res.json(roster);
   } catch (err) {
@@ -2141,7 +2149,7 @@ router.get('/api/admin/roster', authenticateToken, requireCap('admin.create'), (
   }
 });
 
-router.get('/api/admin/users/lookup', authenticateToken, requireCap('admin.create'), (req, res) => {
+router.get('/api/admin/users/lookup', authenticateToken, requireCap('admin.create'), async (req, res) => {
   const { email } = req.query;
   if (!email) return res.status(400).json({ error: 'Email query parameter is required' });
 
@@ -2151,8 +2159,8 @@ router.get('/api/admin/users/lookup', authenticateToken, requireCap('admin.creat
     // untouched, so without the status predicate a tombstone is reported back as
     // a promotable administrator — and the promote endpoint below would then act
     // on an account nobody can sign in to.
-    const user = db.prepare(
-      "SELECT id, name, email, avatar, role FROM users WHERE email = ? COLLATE NOCASE AND account_status <> 'deleted'"
+    const user = await db.prepare(
+      "SELECT id, name, email, avatar, role FROM users WHERE email = ? COLLATE nocase AND account_status <> 'deleted'"
     ).get(email);
     if (!user) return res.status(404).json({ error: 'No user found with that email address' });
 
@@ -2178,7 +2186,7 @@ router.post('/api/admin/users/:id/promote', authenticateToken, requireCap('admin
   }
 
   try {
-    const target = db.prepare('SELECT id, role, email, account_status FROM users WHERE id = ?').get(targetUserId);
+    const target = await db.prepare('SELECT id, role, email, account_status FROM users WHERE id = ?').get(targetUserId);
     if (!target) return res.status(404).json({ error: 'User not found' });
     // Deleted accounts keep their row and their role, so they are reachable by
     // id and would otherwise be promotable — granting administrator to an
@@ -2192,16 +2200,16 @@ router.post('/api/admin/users/:id/promote', authenticateToken, requireCap('admin
       return res.status(400).json({ error: 'User is already an administrator' });
     }
 
-    inTransaction(() => {
-      spendChallenge(db, req, 'admin.promote', { targetUserId });
+    await runInTransaction(db, async (tx) => {
+      await spendChallenge(tx, req, 'admin.promote', { targetUserId });
 
-      db.prepare(`
+      await tx.prepare(`
         UPDATE users 
         SET role = ?, promoted_at = CURRENT_TIMESTAMP, promoted_by = ?, promotion_reason = ? 
         WHERE id = ?
       `).run(ROLE.ADMIN, req.user.id, reason.trim(), targetUserId);
 
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'ADMIN_PROMOTED',
         targetUserId,
@@ -2209,7 +2217,7 @@ router.post('/api/admin/users/:id/promote', authenticateToken, requireCap('admin
       });
     });
 
-    notificationService.dispatch('ADMIN_PROMOTED', { reason: reason.trim() }, targetUserId);
+    await notificationService.dispatch('ADMIN_PROMOTED', { reason: reason.trim() }, targetUserId);
     res.json({ success: true });
   } catch (err) {
     /**
@@ -2234,7 +2242,7 @@ router.post('/api/admin/users/:id/revoke', authenticateToken, requireCap('admin.
   const targetUserId = req.params.id;
 
   try {
-    const target = db.prepare('SELECT id, role, email FROM users WHERE id = ?').get(targetUserId);
+    const target = await db.prepare('SELECT id, role, email FROM users WHERE id = ?').get(targetUserId);
     if (!target) return res.status(404).json({ error: 'User not found' });
     
     if (target.role === ROLE.SUPER_ADMIN) {
@@ -2247,10 +2255,10 @@ router.post('/api/admin/users/:id/revoke', authenticateToken, requireCap('admin.
       return res.status(400).json({ error: 'User is not an administrator' });
     }
 
-    inTransaction(() => {
-      spendChallenge(db, req, 'admin.revoke', { targetUserId });
+    await runInTransaction(db, async (tx) => {
+      await spendChallenge(tx, req, 'admin.revoke', { targetUserId });
 
-      db.prepare(`
+      await tx.prepare(`
         UPDATE users
         SET role = ?, promoted_at = NULL, promoted_by = NULL, promotion_reason = NULL
         WHERE id = ?
@@ -2272,7 +2280,7 @@ router.post('/api/admin/users/:id/revoke', authenticateToken, requireCap('admin.
        * has no grant that should survive, and enumerating which ones might would
        * be a list that goes stale the first time a capability is added.
        */
-      db.prepare('DELETE FROM user_capabilities WHERE user_id = ?').run(targetUserId);
+      await tx.prepare('DELETE FROM user_capabilities WHERE user_id = ?').run(targetUserId);
 
       /**
        * Then put back whatever their CLUB memberships still say they hold.
@@ -2287,9 +2295,9 @@ router.post('/api/admin/users/:id/revoke', authenticateToken, requireCap('admin.
        * membership routes make, so there is one answer to "what does this
        * person's rank entitle them to" rather than two.
        */
-      syncOrganizerCapabilities(db, targetUserId, req.user.id);
+      await syncOrganizerCapabilities(db, targetUserId, req.user.id);
 
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'ADMIN_REVOKED',
         targetUserId,
@@ -2297,7 +2305,7 @@ router.post('/api/admin/users/:id/revoke', authenticateToken, requireCap('admin.
       });
     });
 
-    notificationService.dispatch('ADMIN_REVOKED', {}, targetUserId);
+    await notificationService.dispatch('ADMIN_REVOKED', {}, targetUserId);
     res.json({ success: true });
   } catch (err) {
     /**

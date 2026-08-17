@@ -26,7 +26,7 @@ describe('the social and organization features', () => {
     organizer = await srv.login('jordan.whitfield@example.org');
     admin = await srv.login('admin@example.gov');
     ({ db } = await import('./db.js'));
-    organizerId = db.prepare('SELECT id FROM users WHERE email = ?').get('jordan.whitfield@example.org').id;
+    organizerId = (await db.prepare('SELECT id FROM users WHERE email = ?').get('jordan.whitfield@example.org')).id;
 
     const make = async (name, username) => {
       const r = await srv.signupConfirmed({
@@ -61,7 +61,7 @@ describe('the social and organization features', () => {
 
     it('is idempotent — asking twice does not create a second request', async () => {
       await srv.call('POST', `/api/users/${bobId}/friend`, undefined, alice);
-      const rows = db.prepare(
+      const rows = await db.prepare(
         `SELECT COUNT(*) AS n FROM user_relationships WHERE actor_id = ? AND subject_id = ? AND kind = 'friend'`
       ).get(aliceId, bobId);
       expect(rows.n).toBe(1);
@@ -105,7 +105,7 @@ describe('the social and organization features', () => {
       }, organizer);
       expect(created.status).toBe(201);
       eventId = created.body.id;
-      slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId).id;
+      slotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId)).id;
     });
 
     const apply = (token) => srv.call('POST', `/api/events/${eventId}/apply`, { slotId }, token);
@@ -138,7 +138,7 @@ describe('the social and organization features', () => {
 
     it('turns back on when the volunteer re-enables it', async () => {
       const { db: _db } = await import('./db.js');
-      _db.prepare('DELETE FROM applications WHERE user_id = ? AND slot_id = ?').run(bobId, slotId);
+      await _db.prepare('DELETE FROM applications WHERE user_id = ? AND slot_id = ?').run(bobId, slotId);
       await srv.call('PATCH', '/api/auth/profile', { friendActivityVisible: true }, bob);
       const res = await apply(bob);
       expect(res.status).toBe(201);
@@ -149,7 +149,7 @@ describe('the social and organization features', () => {
     it('does not send a second notification for the same event', async () => {
       const before = notificationsFor(bobId, 'A friend signed up').length;
       await srv.call('PATCH', '/api/applications/bulk', {}, alice).catch(() => {});
-      db.prepare('DELETE FROM applications WHERE user_id = ? AND slot_id = ?').run(aliceId, slotId);
+      await db.prepare('DELETE FROM applications WHERE user_id = ? AND slot_id = ?').run(aliceId, slotId);
       await apply(alice);
       expect(notificationsFor(bobId, 'A friend signed up')).toHaveLength(before);
     });
@@ -176,7 +176,7 @@ describe('the social and organization features', () => {
           startDatetime: start.toISOString(), endDatetime: new Date(start.getTime() + 3600000).toISOString(),
         }],
       }, organizer);
-      const slot = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(created.body.id).id;
+      const slot = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(created.body.id)).id;
       await srv.call('POST', `/api/events/${created.body.id}/apply`, { slotId: slot }, alice);
       expect(notificationsFor(bobId, 'A friend signed up')).toHaveLength(before);
     });
@@ -273,8 +273,8 @@ describe('the social and organization features', () => {
 
     it('is idempotent on a second join', async () => {
       await srv.call('POST', `/api/organizations/${orgSlug}/membership`, undefined, alice);
-      const n = db.prepare('SELECT COUNT(*) AS n FROM organization_members WHERE organization_id = ? AND user_id = ?')
-        .get(orgId, aliceId).n;
+      const n = (await db.prepare('SELECT COUNT(*) AS n FROM organization_members WHERE organization_id = ? AND user_id = ?')
+        .get(orgId, aliceId)).n;
       expect(n).toBe(1);
     });
 
@@ -341,12 +341,12 @@ describe('the social and organization features', () => {
         expect(res.status).toBe(201);
         expect(res.body.organizationId).toBe(orgId);
 
-        const forAlice = db.prepare(
+        const forAlice = await db.prepare(
           `SELECT * FROM notifications WHERE user_id = ? AND dedupe_key = ?`
         ).all(aliceId, `org-event:${res.body.id}`);
         expect(forAlice).toHaveLength(1);
 
-        const forCreator = db.prepare(
+        const forCreator = await db.prepare(
           `SELECT * FROM notifications WHERE user_id = ? AND dedupe_key = ?`
         ).all(organizerId, `org-event:${res.body.id}`);
         expect(forCreator).toHaveLength(0);
@@ -383,7 +383,7 @@ describe('the social and organization features', () => {
      * `events` at all.
      */
     it('creates no event, no slot, and no application', async () => {
-      expect(db.prepare('SELECT COUNT(*) AS n FROM events WHERE title = ?').get('Soup kitchen').n).toBe(0);
+      expect((await db.prepare('SELECT COUNT(*) AS n FROM events WHERE title = ?').get('Soup kitchen')).n).toBe(0);
       const browse = await srv.call('GET', '/api/events', undefined, bob);
       expect(browse.status).toBe(200);
       /* The list endpoint answers with a bare array in some shapes and
@@ -554,7 +554,7 @@ describe('the social and organization features', () => {
 
       /* Carol's sensitive fields are open to a friend, and only to a friend. */
       await srv.call('PATCH', '/api/auth/profile', { profileVisibility: 'friends' }, carol);
-      db.prepare("UPDATE users SET bio = ?, school = ?, grade = '12' WHERE id = ?")
+      await db.prepare("UPDATE users SET bio = ?, school = ?, grade = '12' WHERE id = ?")
         .run('Private note.', 'Example Valley High', carolId);
 
       const asFriend = await srv.call('GET', `/api/users/${carolId}/public-profile`, undefined, alice);
@@ -709,7 +709,7 @@ describe('the social and organization features', () => {
         name: 'Sigil Partner', email: 'sigil.partner@test.local', grade: 'Adult',
         username: 'sigilpartner', role: 'student', password: PASSWORD,
       });
-      db.prepare("UPDATE users SET role = 'partner' WHERE id = ?").run(partner.user.id);
+      await db.prepare("UPDATE users SET role = 'partner' WHERE id = ?").run(partner.user.id);
       for (const q of ['%40alice', '%23NHS']) {
         const res = await srv.call('GET', `/api/directory/search?q=${q}`, undefined, partner.cookie);
         expect(res.status).toBe(403);
@@ -743,10 +743,10 @@ describe('the social and organization features', () => {
 
     /* Testing only the sender would leave a row nobody could ever resolve. */
     it('writes no relationship row for a refused request', async () => {
-      const n = db.prepare(
+      const n = (await db.prepare(
         `SELECT COUNT(*) AS n FROM user_relationships
           WHERE kind = 'friend' AND ((actor_id = ? AND subject_id = ?) OR (actor_id = ? AND subject_id = ?))`
-      ).get(organizerId, aliceId, aliceId, organizerId).n;
+      ).get(organizerId, aliceId, aliceId, organizerId)).n;
       expect(n).toBe(0);
     });
 
@@ -758,7 +758,7 @@ describe('the social and organization features', () => {
     /* A row written before the rule existed must not complete by being
        accepted afterwards. */
     it('refuses to ACCEPT a request across the boundary', async () => {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO user_relationships (id, actor_id, subject_id, kind, status, created_at)
         VALUES ('rel-legacy-peer', ?, ?, 'friend', 'pending', datetime('now'))
       `).run(organizerId, aliceId);
@@ -767,7 +767,7 @@ describe('the social and organization features', () => {
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('not_permitted');
 
-      const row = db.prepare("SELECT status FROM user_relationships WHERE id = 'rel-legacy-peer'").get();
+      const row = await db.prepare("SELECT status FROM user_relationships WHERE id = 'rel-legacy-peer'").get();
       expect(row.status, 'a legacy row must not become a friendship').toBe('pending');
     });
 
@@ -776,7 +776,7 @@ describe('the social and organization features', () => {
       const res = await srv.call('DELETE', `/api/users/${organizerId}/friend`, undefined, alice);
       expect(res.status).toBe(200);
       expect(
-        db.prepare("SELECT COUNT(*) AS n FROM user_relationships WHERE id = 'rel-legacy-peer'").get().n
+        (await db.prepare("SELECT COUNT(*) AS n FROM user_relationships WHERE id = 'rel-legacy-peer'").get()).n
       ).toBe(0);
     });
 

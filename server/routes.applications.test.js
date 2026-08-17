@@ -355,7 +355,7 @@ describe('applications: GET /api/applications payload scoping by capability', ()
     const orgToken = await srv.login('jordan.whitfield@example.org');
 
     const { db } = await import('./db.js');
-    const student = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com');
+    const student = await db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com');
 
     // Give the student at least one application to see, independent of
     // whatever earlier describes in this file already created.
@@ -377,14 +377,14 @@ describe('applications: GET /api/applications payload scoping by capability', ()
       name: 'Payload Super', username: 'payload_super_admin', email: 'payload-super@test.local',
       password: 'Password123', grade: 'Adult', role: 'student'
     });
-    db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('super_admin', superSigned.user.id);
+    await db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('super_admin', superSigned.user.id);
     const superToken = superSigned.cookie;
 
     const partnerSigned = await srv.signupConfirmed({
       name: 'Payload Partner', username: 'payload_partner', email: 'payload-partner@test.local',
       password: 'Password123', grade: 'Adult', role: 'student'
     });
-    db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('partner', partnerSigned.user.id);
+    await db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('partner', partnerSigned.user.id);
     const partnerToken = partnerSigned.cookie;
 
     const adminRes = await srv.call('GET', '/api/applications', undefined, adminToken);
@@ -447,13 +447,13 @@ describe('applications: admin-tier oversight of PATCH /api/applications/:id', ()
     adminToken = await srv.login('admin@example.gov');
 
     const { db } = await import('./db.js');
-    studentId = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com').id;
+    studentId = (await db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com')).id;
 
     const superSigned = await srv.signupConfirmed({
       name: 'Oversight Super', username: 'oversight_super', email: 'oversight-super@test.local',
       password: 'Password123', grade: 'Adult', role: 'student'
     });
-    db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('super_admin', superSigned.user.id);
+    await db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('super_admin', superSigned.user.id);
     /* Promoted by SQL, so `login()`'s two-factor enrolment never ran and
        `requireCap` would refuse this account before any capability is read. */
     const { enrolTwoFactor } = await import('./testServer.js');
@@ -464,7 +464,7 @@ describe('applications: admin-tier oversight of PATCH /api/applications/:id', ()
       name: 'Oversight Partner', username: 'oversight_partner', email: 'oversight-partner@test.local',
       password: 'Password123', grade: 'Adult', role: 'student'
     });
-    db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('partner', partnerSigned.user.id);
+    await db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('partner', partnerSigned.user.id);
     partnerToken = partnerSigned.cookie;
 
     // An event hosted by the organizer fixture, with one pending application.
@@ -479,13 +479,13 @@ describe('applications: admin-tier oversight of PATCH /api/applications/:id', ()
       .find(e => e.id === mk.body.id).slots[0];
     await srv.call('POST', `/api/events/${mk.body.id}/apply`, { slotId: slot.id }, studentToken);
 
-    appId = db.prepare('SELECT id FROM applications WHERE user_id = ? AND slot_id = ?')
-      .get(studentId, slot.id).id;
+    appId = (await db.prepare('SELECT id FROM applications WHERE user_id = ? AND slot_id = ?')
+      .get(studentId, slot.id)).id;
   });
 
   const statusOf = async () => {
     const { db } = await import('./db.js');
-    return db.prepare('SELECT status FROM applications WHERE id = ?').get(appId).status;
+    return (await db.prepare('SELECT status FROM applications WHERE id = ?').get(appId)).status;
   };
 
   it('lets an admin waitlist an application on an event it does not host', async () => {

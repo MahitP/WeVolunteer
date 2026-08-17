@@ -82,21 +82,21 @@ describe('reading preserved evidence requires a fresh verification', () => {
    * put an accusation on a permanent record.
    */
   it('records nothing when the read was refused', async () => {
-    const before = db.prepare(
+    const before = (await db.prepare(
       "SELECT COUNT(*) c FROM moderation_actions WHERE report_id = ? AND action = 'evidence_viewed'"
-    ).get(reportA).c;
-    const auditBefore = db.prepare(
+    ).get(reportA)).c;
+    const auditBefore = (await db.prepare(
       "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'"
-    ).get().c;
+    ).get()).c;
 
     await read(reportA);
 
-    expect(db.prepare(
+    expect((await db.prepare(
       "SELECT COUNT(*) c FROM moderation_actions WHERE report_id = ? AND action = 'evidence_viewed'"
-    ).get(reportA).c).toBe(before);
-    expect(db.prepare(
+    ).get(reportA)).c).toBe(before);
+    expect((await db.prepare(
       "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'"
-    ).get().c).toBe(auditBefore);
+    ).get()).c).toBe(auditBefore);
   });
 
   /* ── With a grant ──────────────────────────────────────────────────────── */
@@ -113,12 +113,12 @@ describe('reading preserved evidence requires a fresh verification', () => {
     const challengeId = await srv.stepUp(admin, 'report.evidence', { params: { reportId: reportA } });
     await read(reportA, challengeId);
 
-    expect(db.prepare(
+    expect((await db.prepare(
       "SELECT COUNT(*) c FROM moderation_actions WHERE report_id = ? AND action = 'evidence_viewed'"
-    ).get(reportA).c).toBeGreaterThan(0);
-    expect(db.prepare(
+    ).get(reportA)).c).toBeGreaterThan(0);
+    expect((await db.prepare(
       "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'"
-    ).get().c).toBeGreaterThan(0);
+    ).get()).c).toBeGreaterThan(0);
   });
 
   /**

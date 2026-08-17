@@ -48,7 +48,7 @@ describe('two-factor authentication refuses a wrong code', () => {
        the `v1:` envelope. Using a plaintext secret here would test a shape the
        application never writes. */
     secret = generateSecret();
-    db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
+    await db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
       .run(encryptSecret(secret), EMAIL);
   }, 60000);
 

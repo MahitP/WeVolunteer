@@ -84,31 +84,31 @@ const STALE_PROCESSING_MS = Number(process.env.NOTIFICATION_STALE_MS) || 10 * 60
  * back to `pending` — retrying past the cap would loop forever against a
  * permanently undeliverable address.
  */
-export function reclaimStaleJobs() {
+export async function reclaimStaleJobs() {
   const cutoff = new Date(Date.now() - STALE_PROCESSING_MS).toISOString();
 
   try {
-    const stale = db.prepare(`
+    const stale = await db.prepare(`
       SELECT id, attempts FROM notification_jobs
       WHERE status = 'processing' AND next_attempt_at <= ?
     `).all(cutoff);
 
     if (stale.length === 0) return 0;
 
-    const toPending = db.prepare(
+    const toPending = await db.prepare(
       "UPDATE notification_jobs SET status = 'pending' WHERE id = ?"
     );
-    const toFailed = db.prepare(
+    const toFailed = await db.prepare(
       "UPDATE notification_jobs SET status = 'failed', error_log = ? WHERE id = ?"
     );
 
     let reclaimed = 0;
     for (const job of stale) {
       if (job.attempts >= MAX_ATTEMPTS) {
-        toFailed.run('abandoned: attempts exhausted while processing', job.id);
+        await toFailed.run('abandoned: attempts exhausted while processing', job.id);
         continue;
       }
-      toPending.run(job.id);
+      await toPending.run(job.id);
       reclaimed++;
     }
 
@@ -123,7 +123,7 @@ export function reclaimStaleJobs() {
     // Reclaiming is best-effort recovery. If it cannot run, the tick that follows
     // must still be attempted rather than the whole loop dying here.
     console.error('[Worker] Notification job reclaim failed:', err);
-    reportWorkerError(err, 'reclaimStuckJobs');
+    await reportWorkerError(err, 'reclaimStuckJobs');
     return 0;
   }
 }
@@ -136,13 +136,13 @@ export function reclaimStaleJobs() {
  * outage lasting longer than the ~62 minutes of backoff discarded every queued
  * notification and the only way to find out was to query SQLite by hand.
  */
-export function getQueueHealth() {
+export async function getQueueHealth() {
   try {
-    const byStatus = db.prepare(
+    const byStatus = await db.prepare(
       'SELECT status, COUNT(*) AS c FROM notification_jobs GROUP BY status'
     ).all();
     const counts = Object.fromEntries(byStatus.map(r => [r.status, r.c]));
-    const oldest = db.prepare(
+    const oldest = await db.prepare(
       "SELECT MIN(created_at) AS t FROM notification_jobs WHERE status = 'pending'"
     ).get();
 
@@ -154,7 +154,7 @@ export function getQueueHealth() {
     };
   } catch (err) {
     console.error('[Worker] Could not read notification queue health:', err);
-    reportWorkerError(err, 'getQueueHealth');
+    await reportWorkerError(err, 'getQueueHealth');
     return { pending: null, processing: null, failed: null, oldestPendingAt: null, error: true };
   }
 }
@@ -178,7 +178,7 @@ export function getQueueHealth() {
  */
 export async function processNotificationJobs() {
   try {
-    reclaimStaleJobs();
+    await reclaimStaleJobs();
 
     /**
      * Delivered rows are kept so the queue can answer "did it go out?", which
@@ -193,7 +193,7 @@ export async function processNotificationJobs() {
      */
     if (sweepCounter++ % 100 === 0) {
       try {
-        const removed = sweepSentMessages({ handle: db });
+        const removed = await sweepSentMessages({ handle: db });
         if (removed > 0) console.log(`[Worker] Swept ${removed} delivered mail rows.`);
       } catch (err) {
         /* Housekeeping must never stop delivery. */
@@ -201,7 +201,7 @@ export async function processNotificationJobs() {
       }
     }
 
-    const pendingJobs = db.prepare(`
+    const pendingJobs = await db.prepare(`
       SELECT * FROM notification_jobs
       WHERE status = 'pending' AND next_attempt_at <= ?
       LIMIT 10
@@ -222,7 +222,7 @@ export async function processNotificationJobs() {
        * being a property of how the service happens to be deployed. Without it,
        * two workers both send, and the person gets the email twice.
        */
-      const claim = db.prepare(
+      const claim = await db.prepare(
         "UPDATE notification_jobs SET status = 'processing', next_attempt_at = ?, updated_at = ? "
         + "WHERE id = ? AND status = 'pending'"
       ).run(new Date().toISOString(), new Date().toISOString(), job.id);
@@ -234,16 +234,16 @@ export async function processNotificationJobs() {
           /* Delivered, or deliberately dropped. Either way it is finished and the
              row carries no provider result worth keeping — see the DROPPED
              return in handleEmailJob. */
-          db.prepare("DELETE FROM notification_jobs WHERE id = ?").run(job.id);
+          await db.prepare("DELETE FROM notification_jobs WHERE id = ?").run(job.id);
         } else if (job.channel === MESSAGE_CHANNEL) {
           const outcome = await handleMessageJob(job);
           if (outcome.ok) {
             /* Kept, not deleted, and swept a day later. The one question an
                operator asks during a mail incident is "did that verification
                email actually go out", and a deleted row cannot answer it. */
-            recordQueueOutcome(job.id, outcome, { handle: db });
+            await recordQueueOutcome(job.id, outcome, { handle: db });
           } else {
-            recordQueueOutcome(job.id, {
+            await recordQueueOutcome(job.id, {
               ...outcome,
               attemptCount: job.attempts + 1,
             }, { handle: db });
@@ -253,7 +253,7 @@ export async function processNotificationJobs() {
               console.error(
                 `[Worker] Queued message ${job.id} FAILED permanently (${outcome.category}).`
               );
-              reportWorkerError(err, 'notificationJobExhausted', { jobId: job.id });
+              await reportWorkerError(err, 'notificationJobExhausted', { jobId: job.id });
             }
           }
         } else {
@@ -267,7 +267,7 @@ export async function processNotificationJobs() {
           const exhausted = newAttempts >= MAX_ATTEMPTS;
           const status = exhausted ? 'failed' : 'pending';
 
-          db.prepare(`
+          await db.prepare(`
             UPDATE notification_jobs
             SET status = ?, attempts = ?, next_attempt_at = ?, error_log = ?
             WHERE id = ?
@@ -290,7 +290,7 @@ export async function processNotificationJobs() {
              * permanently lost notification becomes visible", and a notification
              * nobody will ever receive is a defect, not weather.
              */
-            reportWorkerError(err, 'notificationJobExhausted', { jobId: job.id });
+            await reportWorkerError(err, 'notificationJobExhausted', { jobId: job.id });
           } else {
             console.warn(
               `[Worker] Notification job ${job.id} attempt ${newAttempts} failed `
@@ -304,14 +304,14 @@ export async function processNotificationJobs() {
           );
           // Failing to WRITE the retry bookkeeping is a database problem, not a
           // delivery problem, and it silently strands the job.
-          reportWorkerError(bookkeepingErr, 'notificationBookkeeping', { jobId: job.id });
+          await reportWorkerError(bookkeepingErr, 'notificationBookkeeping', { jobId: job.id });
         }
       }
     }
   } catch (err) {
     // Terminal for this tick only. The interval fires again in ten seconds.
     console.error('[Worker] Notification job loop failed for this tick:', err);
-    reportWorkerError(err, 'notificationTick');
+    await reportWorkerError(err, 'notificationTick');
   }
 }
 
@@ -328,8 +328,8 @@ export async function processNotificationJobs() {
  * they have no route, and grouping them together is what makes "the notification
  * worker is broken" one line on a dashboard instead of five.
  */
-function reportWorkerError(err, boundary, context = {}) {
-  recordError(db, {
+async function reportWorkerError(err, boundary, context = {}) {
+  await recordError(db, {
     source: 'worker',
     kind: err?.constructor?.name || 'Error',
     message: err?.message,
@@ -341,7 +341,7 @@ function reportWorkerError(err, boundary, context = {}) {
 async function handleEmailJob(job) {
   const { event, payload, userId } = JSON.parse(job.payload);
 
-  const user = db.prepare('SELECT email, name, account_status FROM users WHERE id = ?').get(userId);
+  const user = await db.prepare('SELECT email, name, account_status FROM users WHERE id = ?').get(userId);
   if (!user) throw new Error('User not found');
 
   /**
@@ -457,7 +457,7 @@ async function handleEmailJob(job) {
        * show when the notification is about the event rather than one slot. A
        * payload that names a specific slot uses that instead.
        */
-      const dbEvent = db.prepare(`
+      const dbEvent = await db.prepare(`
         SELECT e.title,
                e.location,
                u.name AS org_name,
@@ -468,7 +468,7 @@ async function handleEmailJob(job) {
       `).get(payload.eventId);
 
       const slotStart = payload.slotId
-        ? db.prepare('SELECT start_datetime FROM slots WHERE id = ?').get(payload.slotId)?.start_datetime
+        ? (await db.prepare('SELECT start_datetime FROM slots WHERE id = ?').get(payload.slotId))?.start_datetime
         : null;
       const startAt = slotStart || dbEvent?.start_datetime;
 
@@ -565,10 +565,10 @@ let workerInterval = null;
  * Reclaiming runs once synchronously at startup so a restart recovers the jobs its
  * own predecessor stranded, without waiting a full tick.
  */
-export function startNotificationWorker() {
+export async function startNotificationWorker() {
   if (workerInterval) return;
 
-  reclaimStaleJobs();
+  await reclaimStaleJobs();
 
   workerInterval = setInterval(() => {
     processNotificationJobs().catch(err => {

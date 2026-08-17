@@ -114,8 +114,9 @@ function makeEvent(suffix, slots = 1, status = 'open', organizerId = ORGANIZER, 
  */
 function credit(userId, eventId, slotId, hours, present = 1) {
   db.prepare(`
-    INSERT OR IGNORE INTO applications (id, user_id, event_id, slot_id, status, applied_at)
+    INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
     VALUES (?, ?, ?, ?, 'accepted', ?)
+    ON CONFLICT DO NOTHING
   `).run(`app-${slotId}-${userId}`, userId, eventId, slotId, new Date(0).toISOString());
 
   db.prepare(`
@@ -151,52 +152,52 @@ describe('the criteria vocabulary has one definition', () => {
 // ── Defect: awarding, and the UNIQUE(user_id, badge_id) constraint ─────────
 
 describe('awarding at a threshold', () => {
-  it('awards once the credited hours reach the threshold, and not before', () => {
+  it('awards once the credited hours reach the threshold, and not before', async () => {
     const user = makeVolunteer('threshold');
     const badge = makeBadge({ criteria_type: 'hours', criteria_value: 5 });
     const { eventId, slotIds } = makeEvent('threshold', 2);
 
     credit(user, eventId, slotIds[0], 4);
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(holds(user, badge), '4 hours must not earn a 5-hour badge').toBe(false);
 
     credit(user, eventId, slotIds[1], 1);
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(holds(user, badge)).toBe(true);
   });
 
-  it('counts only hours actually credited — an absence is worth nothing', () => {
+  it('counts only hours actually credited — an absence is worth nothing', async () => {
     const user = makeVolunteer('absent');
     const badge = makeBadge({ criteria_type: 'hours', criteria_value: 3 });
     const { eventId, slotIds } = makeEvent('absent', 1);
 
     credit(user, eventId, slotIds[0], 8, /* present */ 0);
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(holds(user, badge)).toBe(false);
   });
 
-  it('never awards the same badge twice, however many times it is evaluated', () => {
+  it('never awards the same badge twice, however many times it is evaluated', async () => {
     const user = makeVolunteer('idempotent');
     const badge = makeBadge({ criteria_type: 'hours', criteria_value: 1 });
     const { eventId, slotIds } = makeEvent('idempotent', 1);
     credit(user, eventId, slotIds[0], 6);
 
-    badgeService.evaluateBadges(user);
-    badgeService.evaluateBadges(user);
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
 
-    const count = db.prepare('SELECT COUNT(*) as c FROM user_badges WHERE user_id = ? AND badge_id = ?')
-      .get(user, badge).c;
+    const count = (await db.prepare('SELECT COUNT(*) as c FROM user_badges WHERE user_id = ? AND badge_id = ?')
+      .get(user, badge)).c;
     expect(count).toBe(1);
   });
 
-  it('leaves an inactive badge unawarded', () => {
+  it('leaves an inactive badge unawarded', async () => {
     const user = makeVolunteer('inactive');
     const badge = makeBadge({ criteria_type: 'hours', criteria_value: 1, active: 0 });
     const { eventId, slotIds } = makeEvent('inactive', 1);
     credit(user, eventId, slotIds[0], 9);
 
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(holds(user, badge)).toBe(false);
   });
 });
@@ -204,7 +205,7 @@ describe('awarding at a threshold', () => {
 // ── Defect: events_attended counted SHIFTS, not events ─────────────────────
 
 describe('events_attended counts events, not shifts', () => {
-  it('two shifts at one event are one event', () => {
+  it('two shifts at one event are one event', async () => {
     const user = makeVolunteer('shifts');
     const oneEvent = makeBadge({ criteria_type: 'events_attended', criteria_value: 1 });
     const twoEvents = makeBadge({ criteria_type: 'events_attended', criteria_value: 2 });
@@ -212,7 +213,7 @@ describe('events_attended counts events, not shifts', () => {
 
     credit(user, eventId, slotIds[0], 2);
     credit(user, eventId, slotIds[1], 2);
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
 
     expect(holds(user, oneEvent), 'one event attended').toBe(true);
     expect(
@@ -222,7 +223,7 @@ describe('events_attended counts events, not shifts', () => {
 
     const second = makeEvent('shifts-2', 1);
     credit(user, second.eventId, second.slotIds[0], 2);
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(holds(user, twoEvents)).toBe(true);
   });
 
@@ -234,31 +235,31 @@ describe('events_attended counts events, not shifts', () => {
     // disagree about which number "events attended" means.
     expect(res.body.stats.eventsCompleted).toBe(2);
     expect(res.body.stats.shiftsCompleted).toBe(3);
-    expect(badgeService.collectStats('user-badge-shifts').eventsAttended).toBe(2);
+    expect((await badgeService.collectStats('user-badge-shifts')).eventsAttended).toBe(2);
   });
 });
 
 // ── Defect: `early_adopter` was an empty switch branch ─────────────────────
 
 describe('early_adopter is earnable', () => {
-  it('awards a badge to an account inside the early cohort', () => {
+  it('awards a badge to an account inside the early cohort', async () => {
     const user = makeVolunteer('early');
     const badge = makeBadge({ criteria_type: 'early_adopter', criteria_value: 100000 });
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(holds(user, badge)).toBe(true);
   });
 
-  it('fails closed on the seeded criteria_value of 0 rather than awarding everybody', () => {
+  it('fails closed on the seeded criteria_value of 0 rather than awarding everybody', async () => {
     const user = makeVolunteer('early-zero');
     const badge = makeBadge({ criteria_type: 'early_adopter', criteria_value: 0 });
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(holds(user, badge)).toBe(false);
   });
 
-  it('excludes an account that joined after the cohort closed', () => {
+  it('excludes an account that joined after the cohort closed', async () => {
     const user = makeVolunteer('late', '2999-01-01T00:00:00.000Z');
     const badge = makeBadge({ criteria_type: 'early_adopter', criteria_value: 2 });
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(holds(user, badge)).toBe(false);
   });
 });
@@ -266,7 +267,7 @@ describe('early_adopter is earnable', () => {
 // ── attendance_rate and events_created ─────────────────────────────────────
 
 describe('the remaining automatic criteria', () => {
-  it('needs a floor of completed commitments before an attendance rate means anything', () => {
+  it('needs a floor of completed commitments before an attendance rate means anything', async () => {
     /**
      * Counted in EVENTS, not shifts.
      *
@@ -286,13 +287,13 @@ describe('the remaining automatic criteria', () => {
     // Perfect record, but only two commitments: 100% of nothing much.
     credit(user, events[0].eventId, events[0].slotIds[0], 1);
     credit(user, events[1].eventId, events[1].slotIds[0], 1);
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(holds(user, badge)).toBe(false);
 
     credit(user, events[2].eventId, events[2].slotIds[0], 1);
     credit(user, events[3].eventId, events[3].slotIds[0], 1);
     credit(user, events[4].eventId, events[4].slotIds[0], 1);
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(holds(user, badge)).toBe(true);
   });
 
@@ -317,7 +318,7 @@ describe('the remaining automatic criteria', () => {
       }
     };
 
-    it('refuses a volunteer whose raw ratio clears 90% but whose recent record does not', () => {
+    it('refuses a volunteer whose raw ratio clears 90% but whose recent record does not', async () => {
       /**
        * 40 attended, then 4 straight misses. Raw: 40/44 = 90.9%, which a plain
        * percentage awards. But the last four commitments were all missed, and
@@ -328,16 +329,16 @@ describe('the remaining automatic criteria', () => {
       const badge = makeBadge({ criteria_type: 'attendance_rate', criteria_value: 90 });
       buildHistory(user, 'decline', { attended: 40, recentMisses: 4 });
 
-      const stats = badgeService.collectStats(user);
+      const stats = await badgeService.collectStats(user);
       expect(stats.reliability.attended / stats.reliability.recorded,
         'the fixture must clear 90% on a raw ratio, or this proves nothing')
         .toBeGreaterThan(0.9);
 
-      badgeService.evaluateBadges(user);
+      await badgeService.evaluateBadges(user);
       expect(holds(user, badge), `score=${stats.reliability.score}`).toBe(false);
     });
 
-    it('awards a volunteer who recovered, whose raw ratio is well under 90%', () => {
+    it('awards a volunteer who recovered, whose raw ratio is well under 90%', async () => {
       /**
        * 6 misses, then 20 consecutive attendances. Raw: 20/26 = 76.9%, which a
        * plain percentage refuses for ever — there is no number of good months
@@ -353,17 +354,17 @@ describe('the remaining automatic criteria', () => {
         credit(user, eventId, slotIds[0], 1, i < 6 ? 0 : 1);
       }
 
-      const stats = badgeService.collectStats(user);
+      const stats = await badgeService.collectStats(user);
       expect(stats.reliability.attended / stats.reliability.recorded,
         'the fixture must FAIL a raw ratio, or this proves nothing')
         .toBeLessThan(0.9);
 
-      badgeService.evaluateBadges(user);
+      await badgeService.evaluateBadges(user);
       expect(holds(user, badge), `score=${stats.reliability.score}`).toBe(true);
     });
   });
 
-  it('does not award a reliability badge for one event with many shifts', () => {
+  it('does not award a reliability badge for one event with many shifts', async () => {
     /* The other half of the grain rule, asserted directly: five slots of one
        event is one commitment, and one commitment is not evidence of a habit. */
     const user = makeVolunteer('one-event-many-shifts');
@@ -371,12 +372,12 @@ describe('the remaining automatic criteria', () => {
     const { eventId, slotIds } = makeEvent('one-event-many-shifts', 6);
 
     for (const slotId of slotIds) credit(user, eventId, slotId, 1);
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
 
     expect(holds(user, badge)).toBe(false);
   });
 
-  it('counts a live event towards events_created, not only a completed one', () => {
+  it('counts a live event towards events_created, not only a completed one', async () => {
     // The original query was `status IN ('published', 'completed')`, and
     // 'published' is not a value the events CHECK constraint permits — so the
     // "Organizer" badge could only ever be earned by an event that had already
@@ -385,19 +386,19 @@ describe('the remaining automatic criteria', () => {
     const organizer = makeAccount('organizer', 'organizer');
     const organizerBadge = makeBadge({ criteria_type: 'events_created', criteria_value: 1 });
 
-    badgeService.evaluateBadges(organizer);
+    await badgeService.evaluateBadges(organizer);
     expect(holds(organizer, organizerBadge), 'no events yet').toBe(false);
 
     makeEvent('created-open', 1, 'open', organizer);
-    badgeService.evaluateBadges(organizer);
+    await badgeService.evaluateBadges(organizer);
     expect(holds(organizer, organizerBadge)).toBe(true);
   });
 
-  it('does not count a cancelled event towards events_created', () => {
+  it('does not count a cancelled event towards events_created', async () => {
     const organizer = makeAccount('organizer-cancelled', 'organizer');
     const organizerBadge = makeBadge({ criteria_type: 'events_created', criteria_value: 1 });
     makeEvent('created-cancelled', 1, 'cancelled', organizer);
-    badgeService.evaluateBadges(organizer);
+    await badgeService.evaluateBadges(organizer);
     expect(holds(organizer, organizerBadge)).toBe(false);
   });
 });
@@ -405,30 +406,30 @@ describe('the remaining automatic criteria', () => {
 // ── Defect: no revocation, of any kind ─────────────────────────────────────
 
 describe('revocation', () => {
-  it('withdraws an automatic badge when the hours behind it are revoked', () => {
+  it('withdraws an automatic badge when the hours behind it are revoked', async () => {
     const user = makeVolunteer('revoked');
     const badge = makeBadge({ criteria_type: 'hours', criteria_value: 4 });
     const { eventId, slotIds } = makeEvent('revoked', 1);
 
     credit(user, eventId, slotIds[0], 5);
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(holds(user, badge)).toBe(true);
 
     // What `outcome.revoked` in attendanceRoutes does: the credit is taken back.
     credit(user, eventId, slotIds[0], 0, /* present */ 0);
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(holds(user, badge), 'a badge must not outlive the service it was awarded for').toBe(false);
   });
 
-  it('never withdraws a badge a human awarded by hand', () => {
+  it('never withdraws a badge a human awarded by hand', async () => {
     const user = makeVolunteer('manual-keep');
     const badge = makeBadge({ criteria_type: 'hours', criteria_value: 500 });
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO user_badges (id, user_id, badge_id, earned_at, awarded_by)
       VALUES (?, ?, ?, ?, 'user-admin')
     `).run('ub-manual-keep', user, badge, new Date().toISOString());
 
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
     expect(
       holds(user, badge),
       'a manual award is a decision, not a query result — a sweep must not undo it'
@@ -527,7 +528,7 @@ describe('admin badge routes: behaviour', () => {
     expect(res.body.error).toMatch(/criteria/i);
     // The refusal names the vocabulary, so the fix is obvious from the response.
     expect(res.body.error).toMatch(/hours/);
-    expect(db.prepare('SELECT COUNT(*) as c FROM badges WHERE name = ?').get('Typo badge').c).toBe(0);
+    expect((await db.prepare('SELECT COUNT(*) as c FROM badges WHERE name = ?').get('Typo badge')).c).toBe(0);
   });
 
   it('accepts every criteria type the service implements', async () => {
@@ -596,8 +597,8 @@ describe('admin badge routes: behaviour', () => {
     const second = await srv.call('POST', '/api/admin/badges/award',
       { userId: 'user-diana', badgeId: badge }, admin);
     expect(second.status).toBe(409);
-    expect(db.prepare('SELECT COUNT(*) as c FROM user_badges WHERE user_id = ? AND badge_id = ?')
-      .get('user-diana', badge).c).toBe(1);
+    expect((await db.prepare('SELECT COUNT(*) as c FROM user_badges WHERE user_id = ? AND badge_id = ?')
+      .get('user-diana', badge)).c).toBe(1);
   });
 
   it('404s rather than 500s on an unknown user or badge', async () => {
@@ -625,13 +626,13 @@ describe('the award notification goes through notificationService', () => {
     "SELECT * FROM notifications WHERE user_id = ? AND title LIKE '%badge%' ORDER BY created_at DESC"
   ).all(userId);
 
-  it('links somewhere that exists, and carries a dedupe key and a category', () => {
+  it('links somewhere that exists, and carries a dedupe key and a category', async () => {
     const user = makeVolunteer('notify');
     makeBadge({ criteria_type: 'hours', criteria_value: 1, name: 'Notified badge' });
     const { eventId, slotIds } = makeEvent('notify', 1);
     credit(user, eventId, slotIds[0], 3);
 
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
 
     const rows = notifications(user);
     expect(rows.length).toBeGreaterThan(0);
@@ -645,9 +646,9 @@ describe('the award notification goes through notificationService', () => {
     expect(row.priority).toBeTruthy();
   });
 
-  it('honours the volunteer\'s notification preference, which a direct INSERT bypassed', () => {
+  it('honours the volunteer\'s notification preference, which a direct INSERT bypassed', async () => {
     const user = makeVolunteer('optout');
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notification_preferences (user_id, category, channel, enabled)
       VALUES (?, 'VOLUNTEER', 'inapp', 0)
       ON CONFLICT(user_id, category, channel) DO UPDATE SET enabled = 0
@@ -657,11 +658,11 @@ describe('the award notification goes through notificationService', () => {
     const { eventId, slotIds } = makeEvent('optout', 1);
     credit(user, eventId, slotIds[0], 3);
 
-    badgeService.evaluateBadges(user);
+    await badgeService.evaluateBadges(user);
 
     expect(notifications(user)).toEqual([]);
     // The badge itself is still earned — the preference is about being told.
-    expect(db.prepare('SELECT COUNT(*) as c FROM user_badges WHERE user_id = ?').get(user).c)
+    expect((await db.prepare('SELECT COUNT(*) as c FROM user_badges WHERE user_id = ?').get(user)).c)
       .toBeGreaterThan(0);
   });
 });

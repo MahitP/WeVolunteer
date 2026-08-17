@@ -63,6 +63,8 @@ import issueReports from './051_issue_reports.js';
 import analyticsConsent from './052_analytics_consent.js';
 import ledgerDuplicateBackfill from './053_ledger_duplicate_backfill.js';
 import resyncUnacceptedLegalHashes from './054_resync_unaccepted_legal_hashes.js';
+import repairTfaLoginAttempts from './055_repair_tfa_login_attempts.js';
+import isoLoginAttemptTimestamps from './056_iso_login_attempt_timestamps.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -332,7 +334,27 @@ export const MIGRATIONS = [
    * with an acceptance row keeps its hash and keeps refusing the boot, which is
    * the invariant working rather than an obstacle to it.
    */
-  resyncUnacceptedLegalHashes
+  resyncUnacceptedLegalHashes,
+  /**
+   * 055 — rebuilds `tfa_login_attempts` on databases where its key column is not
+   * the `token_hash` the sign-in path writes. 025 creates the table with
+   * `CREATE TABLE IF NOT EXISTS`, which skipped a pre-existing table of the same
+   * name and a different shape, so every second-factor submission on the pilot
+   * database answered 500 while every test — all of which build the table from
+   * scratch — passed.
+   */
+  repairTfaLoginAttempts,
+  /**
+   * 056 — converts `tfa_login_attempts.last_attempt_at` from SQLite's
+   * `datetime('now')` format to the ISO-8601 the rest of the schema uses, so
+   * that the rate limiter can compare it against a bound timestamp instead of
+   * `datetime('now','-15 minutes')`, which PostgreSQL does not have.
+   *
+   * Must run AFTER 055, which rebuilds the table on databases where its key
+   * column is the wrong one: converting values in a table that is about to be
+   * rebuilt would convert the rows that get discarded.
+   */
+  isoLoginAttemptTimestamps
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

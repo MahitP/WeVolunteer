@@ -32,12 +32,12 @@ describe('requireCap', () => {
 
   it('lets a super_admin reach an admin route — the bug this whole task exists to prevent', async () => {
     const db = (await import('./db.js')).db;
-    db.prepare("UPDATE users SET role = 'super_admin' WHERE email = 'admin@example.gov'").run();
+    await db.prepare("UPDATE users SET role = 'super_admin' WHERE email = 'admin@example.gov'").run();
     // Identity is re-derived from the database per request, so the existing
     // cookie now describes a super_admin without re-login.
     const res = await srv.call('GET', '/api/admin/organizers/pending', undefined, admin);
     expect(res.status).toBe(200);
-    db.prepare("UPDATE users SET role = 'admin' WHERE email = 'admin@example.gov'").run();
+    await db.prepare("UPDATE users SET role = 'admin' WHERE email = 'admin@example.gov'").run();
   });
 
   /**
@@ -62,11 +62,11 @@ describe('requireCap', () => {
     const before = await srv.call('GET', '/api/admin/reports', undefined, student);
     expect(before.status, 'a student must not reach an admin report route unaided').toBe(403);
 
-    grantCapability({ db, userId: 'user-student-1', capability: 'report.resolve', grantedBy: 'user-admin' });
+    await grantCapability({ db, userId: 'user-student-1', capability: 'report.resolve', grantedBy: 'user-admin' });
     const granted = await srv.call('GET', '/api/admin/reports', undefined, student);
     expect(granted.status, 'the grant must be what admits them').toBe(200);
 
-    revokeCapability({ db, userId: 'user-student-1', capability: 'report.resolve' });
+    await revokeCapability({ db, userId: 'user-student-1', capability: 'report.resolve' });
     const revoked = await srv.call('GET', '/api/admin/reports', undefined, student);
     expect(revoked.status, 'and revoking it must shut the door again').toBe(403);
   });
@@ -75,13 +75,13 @@ describe('requireCap', () => {
     const db = (await import('./db.js')).db;
     const { grantCapability, revokeCapability } = await import('./userCapabilities.js');
 
-    grantCapability({
+    await grantCapability({
       db, userId: 'user-student-1', capability: 'report.resolve', grantedBy: 'user-admin',
       expiresAt: new Date(Date.now() - 1000).toISOString()
     });
     const res = await srv.call('GET', '/api/admin/reports', undefined, student);
     expect(res.status).toBe(403);
 
-    revokeCapability({ db, userId: 'user-student-1', capability: 'report.resolve' });
+    await revokeCapability({ db, userId: 'user-student-1', capability: 'report.resolve' });
   });
 });

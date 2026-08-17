@@ -34,8 +34,8 @@ const ACCEPTED = ['inappropriate', 'spam', 'safety', 'other'];
 async function conversationForReporting() {
   const { db } = await import('./db.js');
   // The seeded past event has applications, which is what unlocks messaging.
-  const app = db.prepare("SELECT event_id, user_id FROM applications LIMIT 1").get();
-  const studentEmail = db.prepare('SELECT email FROM users WHERE id = ?').get(app.user_id).email;
+  const app = await db.prepare("SELECT event_id, user_id FROM applications LIMIT 1").get();
+  const studentEmail = (await db.prepare('SELECT email FROM users WHERE id = ?').get(app.user_id)).email;
   const student = await srv.login(studentEmail);
   const res = await srv.call('POST', '/api/messages/conversations/resolve', { eventId: app.event_id }, student);
   return { student, conversationId: res.body?.conversation?.id, status: res.status };
@@ -139,7 +139,7 @@ describe('the report dialog only offers reasons the server accepts', () => {
       // second live report of the same target with the FIRST report's id, which
       // would make every case after the first assert against the wrong row.
       const ctx = await conversationForReporting();
-      db.prepare("UPDATE reports SET status = 'dismissed' WHERE target_id = ?")
+      await db.prepare("UPDATE reports SET status = 'dismissed' WHERE target_id = ?")
         .run(ctx.conversationId);
 
       const res = await srv.call(
@@ -166,7 +166,7 @@ describe('the report dialog only offers reasons the server accepts', () => {
     const { db } = await import('./db.js');
     for (const reason of ACCEPTED) {
       const ctx = await conversationForReporting();
-      db.prepare("UPDATE reports SET status = 'dismissed' WHERE target_id = ?")
+      await db.prepare("UPDATE reports SET status = 'dismissed' WHERE target_id = ?")
         .run(ctx.conversationId);
 
       const res = await srv.call(

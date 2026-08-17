@@ -43,6 +43,7 @@ async function freshExportWorker({ exportDir } = {}) {
   vi.resetModules();
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const worker = await import('./workers/exportWorker.js');
   return { db: dbMod.db, worker, root: dir };
 }
@@ -121,7 +122,7 @@ describe('exports are written to durable storage, not tmpdir', () => {
 
     await worker.processPendingExports();
 
-    const row = db.prepare('SELECT status, file_location FROM data_export_jobs WHERE id = ?').get('exp-1');
+    const row = await db.prepare('SELECT status, file_location FROM data_export_jobs WHERE id = ?').get('exp-1');
     expect(row.status).toBe('completed');
     expect(row.file_location).toContain(path.join(root, 'exports'));
     expect(existsSync(row.file_location), 'export file was not written').toBe(true);
@@ -133,7 +134,7 @@ describe('exports are written to durable storage, not tmpdir', () => {
     queueExport(db, { id: 'exp-restart', userId });
 
     await worker.processPendingExports();
-    const before = db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-restart');
+    const before = await db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-restart');
 
     // A restart wipes PrivateTmp but not the database directory. The file has to
     // still be there, because the row still promises it for seven days.
@@ -147,7 +148,7 @@ describe('exports are written to durable storage, not tmpdir', () => {
     // module state is rebuilt from scratch and must still find the same file.
     vi.resetModules();
     const reborn = await import('./workers/exportWorker.js');
-    const stillThere = db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-restart');
+    const stillThere = await db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-restart');
     expect(reborn.resolveExportDir()).toBe(path.dirname(stillThere.file_location));
     expect(existsSync(stillThere.file_location)).toBe(true);
   });
@@ -160,10 +161,10 @@ describe('stranded export jobs are reclaimed', () => {
     const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     queueExport(db, { id: 'exp-stuck', userId, status: 'processing', createdAt: longAgo });
 
-    const reclaimed = worker.reclaimStaleExports();
+    const reclaimed = await worker.reclaimStaleExports();
 
     expect(reclaimed).toBe(1);
-    const row = db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-stuck');
+    const row = await db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-stuck');
     // Back to pending so it runs, rather than blocking the user forever.
     expect(row.status).toBe('pending');
   });
@@ -173,8 +174,8 @@ describe('stranded export jobs are reclaimed', () => {
     const userId = makeUser(db);
     queueExport(db, { id: 'exp-now', userId, status: 'processing' });
 
-    expect(worker.reclaimStaleExports()).toBe(0);
-    const row = db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-now');
+    expect(await worker.reclaimStaleExports()).toBe(0);
+    const row = await db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-now');
     expect(row.status).toBe('processing');
   });
 
@@ -185,15 +186,15 @@ describe('stranded export jobs are reclaimed', () => {
     queueExport(db, { id: 'exp-block', userId, status: 'processing', createdAt: longAgo });
 
     // This is the query POST /api/privacy/export uses to refuse a new request.
-    const blockedBefore = db.prepare(
+    const blockedBefore = await db.prepare(
       "SELECT id FROM data_export_jobs WHERE user_id = ? AND status IN ('pending','processing')"
     ).get(userId);
     expect(blockedBefore).toBeTruthy();
 
-    worker.reclaimStaleExports();
+    await worker.reclaimStaleExports();
     await worker.processPendingExports();
 
-    const blockedAfter = db.prepare(
+    const blockedAfter = await db.prepare(
       "SELECT id FROM data_export_jobs WHERE user_id = ? AND status IN ('pending','processing')"
     ).get(userId);
     // The job ran to completion, so the user can request another export.
@@ -208,16 +209,16 @@ describe('cleanup still happens', () => {
     queueExport(db, { id: 'exp-expire', userId });
 
     await worker.processPendingExports();
-    const row = db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-expire');
+    const row = await db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-expire');
     expect(existsSync(row.file_location)).toBe(true);
 
     // Backdate the expiry rather than waiting seven days.
-    db.prepare("UPDATE data_export_jobs SET expires_at = datetime('now','-1 day') WHERE id = ?")
+    await db.prepare("UPDATE data_export_jobs SET expires_at = datetime('now','-1 day') WHERE id = ?")
       .run('exp-expire');
 
-    worker.cleanupExpiredExports();
+    await worker.cleanupExpiredExports();
 
-    const after = db.prepare('SELECT status, file_location FROM data_export_jobs WHERE id = ?').get('exp-expire');
+    const after = await db.prepare('SELECT status, file_location FROM data_export_jobs WHERE id = ?').get('exp-expire');
     expect(after.status).toBe('expired');
     expect(after.file_location).toBeNull();
     expect(existsSync(row.file_location), 'expired export file was left on disk').toBe(false);

@@ -64,14 +64,14 @@ export function slugify(name) {
     .slice(0, 60);
 }
 
-export function uniqueSlug(db, name) {
+export async function uniqueSlug(db, name) {
   const base = slugify(name) || 'organization';
   let candidate = base;
   let n = 1;
   /* COLLATE NOCASE to match idx_organizations_slug, so the uniqueness check and
      the unique index agree about what a collision is. */
-  const taken = db.prepare('SELECT 1 FROM organizations WHERE slug = ? COLLATE NOCASE');
-  while (taken.get(candidate)) {
+  const taken = await db.prepare('SELECT 1 FROM organizations WHERE slug = ? COLLATE nocase');
+  while (await taken.get(candidate)) {
     n += 1;
     candidate = `${base}-${n}`.slice(0, 64);
   }
@@ -166,10 +166,10 @@ export function validateOrganization(payload, { partial = false } = {}) {
  * differently. Takes an explicit `hasModerate` rather than importing `can`,
  * keeping this module free of the authorization kernel the way `blocking.js` is.
  */
-export function canManage(db, organizationId, userId, { hasModerate = false } = {}) {
+export async function canManage(db, organizationId, userId, { hasModerate = false } = {}) {
   if (hasModerate) return true;
   if (!userId) return false;
-  const row = db.prepare(`
+  const row = await db.prepare(`
     SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?
   `).get(organizationId, userId);
   return row?.member_role === 'manager';
@@ -183,13 +183,13 @@ export function canManage(db, organizationId, userId, { hasModerate = false } = 
  * both halves matter: a former member who was banned and then somehow re-added
  * must not be running the club's shifts.
  */
-function stillWelcomeIn(db, organizationId, userId) {
-  const member = db.prepare(
+async function stillWelcomeIn(db, organizationId, userId) {
+  const member = await db.prepare(
     'SELECT 1 AS ok FROM organization_members WHERE organization_id = ? AND user_id = ?'
   ).get(organizationId, userId);
   if (!member) return false;
 
-  const banned = db.prepare(`
+  const banned = await db.prepare(`
     SELECT 1 AS ok FROM organization_bans
      WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
   `).get(organizationId, userId);
@@ -210,9 +210,9 @@ function stillWelcomeIn(db, organizationId, userId) {
 export const MEMBER_ROLES = Object.freeze(['member', 'student_organizer', 'manager']);
 
 /** This person's rank in this organization, or `null` if they are not in it. */
-export function memberRoleOf(db, organizationId, userId) {
+export async function memberRoleOf(db, organizationId, userId) {
   if (!organizationId || !userId) return null;
-  const row = db.prepare(`
+  const row = await db.prepare(`
     SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?
   `).get(organizationId, userId);
   return row?.member_role ?? null;
@@ -234,9 +234,9 @@ export function memberRoleOf(db, organizationId, userId) {
  * Managers are included: every power a student organizer has, a manager has.
  * Nobody should have to promote themselves downward to post a notice.
  */
-export function canHelpRun(db, organizationId, userId, { hasModerate = false } = {}) {
+export async function canHelpRun(db, organizationId, userId, { hasModerate = false } = {}) {
   if (hasModerate) return true;
-  const role = memberRoleOf(db, organizationId, userId);
+  const role = await memberRoleOf(db, organizationId, userId);
   return role === 'manager' || role === 'student_organizer';
 }
 
@@ -309,7 +309,7 @@ export const EVENT_STAFF_CAPABILITIES = Object.freeze([
  * @param {object} event a row from `events` — needs `organizer_id` and
  *   `organization_id`
  */
-export function canRunEvent(db, event, userId, { hasModerate = false } = {}) {
+export async function canRunEvent(db, event, userId, { hasModerate = false } = {}) {
   if (hasModerate) return true;
   if (!event || !userId) return false;
   /**
@@ -329,7 +329,7 @@ export function canRunEvent(db, event, userId, { hasModerate = false } = {}) {
    */
   if (event.organizer_id && event.organizer_id === userId) {
     if (!event.organization_id) return true;
-    return stillWelcomeIn(db, event.organization_id, userId);
+    return await stillWelcomeIn(db, event.organization_id, userId);
   }
 
   /**
@@ -355,22 +355,22 @@ export function canRunEvent(db, event, userId, { hasModerate = false } = {}) {
   }
 
   if (!event.organization_id) return false;
-  return canManage(db, event.organization_id, userId);
+  return await canManage(db, event.organization_id, userId);
 }
 
-export function createOrganization(db, { name, description = '', tags = [], creator, now = new Date().toISOString() }) {
+export async function createOrganization(db, { name, description = '', tags = [], creator, now = new Date().toISOString() }) {
   const orgId = `org-${crypto.randomUUID()}`;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO organizations
       (id, name, slug, description, tags, created_by, created_by_name_snapshot, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
-  `).run(orgId, name, uniqueSlug(db, name), description, JSON.stringify(tags), creator.id, creator.name, now, now);
+  `).run(orgId, name, await uniqueSlug(db, name), description, JSON.stringify(tags), creator.id, creator.name, now, now);
 
   /* The creator is seeded as a manager rather than being implicit in
      `created_by`. One membership table answers "who may manage this", which
      keeps working after the creator's account is deleted and `created_by` goes
      NULL. */
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
     VALUES (?, ?, 'manager', ?)
   `).run(orgId, creator.id, now);
@@ -435,8 +435,8 @@ export function formatOrganization(row) {
  * transaction — never a query per member, which for a club of three hundred is
  * three hundred round trips inside the request that created the event.
  */
-export function memberIds(db, organizationId, { excluding = [] } = {}) {
-  const rows = db.prepare(`
+export async function memberIds(db, organizationId, { excluding = [] } = {}) {
+  const rows = await db.prepare(`
     SELECT m.user_id FROM organization_members m
     JOIN users u ON u.id = m.user_id
     WHERE m.organization_id = ? AND u.account_status = 'active'

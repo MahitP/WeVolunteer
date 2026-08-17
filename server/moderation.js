@@ -277,7 +277,7 @@ export function derivePriority({ category, reporterRole, targetRole }) {
  *   conversationId: string|null, eventId: string|null, exists: boolean
  * }}
  */
-export function resolveTarget(db, targetType, targetId, viewerId) {
+export async function resolveTarget(db, targetType, targetId, viewerId) {
   const empty = {
     targetName: null, targetBody: null, authorId: null, authorName: null,
     authorRole: null, conversationId: null, eventId: null, exists: false,
@@ -285,7 +285,7 @@ export function resolveTarget(db, targetType, targetId, viewerId) {
 
   switch (targetType) {
     case 'event': {
-      const row = db.prepare(`
+      const row = await db.prepare(`
         SELECT e.id, e.title, e.organizer_id, u.name AS author_name, u.role AS author_role
         FROM events e LEFT JOIN users u ON u.id = e.organizer_id WHERE e.id = ?
       `).get(targetId);
@@ -298,7 +298,7 @@ export function resolveTarget(db, targetType, targetId, viewerId) {
     }
 
     case 'comment': {
-      const row = db.prepare(`
+      const row = await db.prepare(`
         SELECT c.id, c.body, c.event_id, c.user_id, u.name AS author_name, u.role AS author_role,
                e.title AS event_title
         FROM event_comments c
@@ -316,7 +316,7 @@ export function resolveTarget(db, targetType, targetId, viewerId) {
     }
 
     case 'announcement': {
-      const row = db.prepare(`
+      const row = await db.prepare(`
         SELECT a.id, a.body, a.event_id, a.author_id, u.name AS author_name, u.role AS author_role,
                e.title AS event_title
         FROM event_announcements a
@@ -344,7 +344,7 @@ export function resolveTarget(db, targetType, targetId, viewerId) {
     }
 
     case 'message': {
-      const row = db.prepare(`
+      const row = await db.prepare(`
         SELECT m.id, m.body, m.conversation_id, m.sender_id,
                u.name AS author_name, u.role AS author_role, c.event_id
         FROM messages m
@@ -363,7 +363,7 @@ export function resolveTarget(db, targetType, targetId, viewerId) {
     }
 
     case 'conversation': {
-      const row = db.prepare(`
+      const row = await db.prepare(`
         SELECT c.id, c.event_id, c.student_id, c.organizer_id, e.title AS event_title
         FROM conversations c LEFT JOIN events e ON e.id = c.event_id WHERE c.id = ?
       `).get(targetId);
@@ -371,7 +371,7 @@ export function resolveTarget(db, targetType, targetId, viewerId) {
       // The reported party is whichever participant is not the reporter.
       const otherId = row.student_id === viewerId ? row.organizer_id : row.student_id;
       const other = otherId
-        ? db.prepare('SELECT name, role FROM users WHERE id = ?').get(otherId)
+        ? await db.prepare('SELECT name, role FROM users WHERE id = ?').get(otherId)
         : null;
       return {
         ...empty, exists: true, conversationId: row.id, eventId: row.event_id,
@@ -391,7 +391,7 @@ export function resolveTarget(db, targetType, targetId, viewerId) {
        * leak `server/messaging.js` already had to close once. An unknown id
        * files a report that the queue renders as an unknown account.
        */
-      const row = db.prepare('SELECT id, name, role FROM users WHERE id = ?').get(targetId);
+      const row = await db.prepare('SELECT id, name, role FROM users WHERE id = ?').get(targetId);
       if (!row) return { ...empty, exists: false };
       return {
         ...empty, exists: true,
@@ -425,18 +425,18 @@ export const EVIDENCE_CONTEXT_AFTER = 10;
 export const EVIDENCE_CONVERSATION_CAP = 500;
 
 /** The messages to freeze for a report, oldest first. */
-export function collectEvidence(db, { targetType, targetId, conversationId }) {
+export async function collectEvidence(db, { targetType, targetId, conversationId }) {
   if (targetType === 'message') {
-    const anchor = db.prepare(
+    const anchor = await db.prepare(
       'SELECT conversation_id, created_at FROM messages WHERE id = ?'
     ).get(targetId);
     if (!anchor) return [];
-    const before = db.prepare(`
+    const before = (await db.prepare(`
       SELECT id, sender_id, body, created_at FROM messages
       WHERE conversation_id = ? AND created_at <= ?
       ORDER BY created_at DESC LIMIT ?
-    `).all(anchor.conversation_id, anchor.created_at, EVIDENCE_CONTEXT_BEFORE + 1).reverse();
-    const after = db.prepare(`
+    `).all(anchor.conversation_id, anchor.created_at, EVIDENCE_CONTEXT_BEFORE + 1)).reverse();
+    const after = await db.prepare(`
       SELECT id, sender_id, body, created_at FROM messages
       WHERE conversation_id = ? AND created_at > ?
       ORDER BY created_at ASC LIMIT ?
@@ -445,7 +445,7 @@ export function collectEvidence(db, { targetType, targetId, conversationId }) {
   }
 
   if (targetType === 'conversation' && conversationId) {
-    return db.prepare(`
+    return await db.prepare(`
       SELECT id, sender_id, body, created_at FROM messages
       WHERE conversation_id = ? ORDER BY created_at ASC LIMIT ?
     `).all(conversationId, EVIDENCE_CONVERSATION_CAP);

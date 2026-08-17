@@ -105,7 +105,7 @@ describe('POST /api/admin/organizers/:id/approve', () => {
    */
   it('approves a genuinely pending organizer and records it once', async () => {
     const id = 'org-pending-probe';
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, created_at)
       VALUES (?, 'Probe Organizer', 'probe-org@example.invalid', 'probeorg', 'x', 'Adult', 'organizer', 0, ?)
     `).run(id, new Date().toISOString());

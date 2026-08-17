@@ -56,8 +56,8 @@ function clearPreview(email) {
 /** The principal the application would build for this row, right now. */
 async function principalOf(email) {
   const utils = await import('./utils.js');
-  const row = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-  return utils.buildPrincipal(row);
+  const row = await db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  return await utils.buildPrincipal(row);
 }
 
 beforeAll(async () => {
@@ -178,13 +178,13 @@ describe('when a preview is in force', () => {
    * is to take capabilities away.
    */
   it('is ignored when only one of the two columns is set', async () => {
-    db.prepare("UPDATE users SET preview_persona = 'student', preview_expires_at = NULL WHERE email = ?")
+    await db.prepare("UPDATE users SET preview_persona = 'student', preview_expires_at = NULL WHERE email = ?")
       .run(OWNER);
     try {
       expect(authz.can(await principalOf(OWNER), 'audit.read')).toBe(true);
     } finally { clearPreview(OWNER); }
 
-    db.prepare("UPDATE users SET preview_persona = NULL, preview_expires_at = ? WHERE email = ?")
+    await db.prepare("UPDATE users SET preview_persona = NULL, preview_expires_at = ? WHERE email = ?")
       .run(new Date(Date.now() + 60000).toISOString(), OWNER);
     try {
       expect(authz.can(await principalOf(OWNER), 'audit.read')).toBe(true);
@@ -295,7 +295,7 @@ describe('the persona preview endpoints', () => {
     const token = await srv.login(STUDENT);
     const res = await start('student', token);
     expect(res.status).toBe(403);
-    expect(db.prepare('SELECT preview_persona FROM users WHERE email = ?').get(STUDENT)
+    expect((await db.prepare('SELECT preview_persona FROM users WHERE email = ?').get(STUDENT))
       .preview_persona).toBeNull();
   });
 
@@ -318,7 +318,7 @@ describe('the persona preview endpoints', () => {
       const res = await start(junk, ownerToken);
       expect(res.status, `'${junk}' was accepted as a persona`).toBe(400);
     }
-    expect(db.prepare('SELECT preview_persona FROM users WHERE email = ?').get(OWNER)
+    expect((await db.prepare('SELECT preview_persona FROM users WHERE email = ?').get(OWNER))
       .preview_persona).toBeNull();
   });
 
@@ -337,7 +337,7 @@ describe('the persona preview endpoints', () => {
       expect(res.status).toBe(200);
 
       expect(
-        db.prepare('SELECT preview_persona FROM users WHERE email = ?').get(OWNER).preview_persona,
+        (await db.prepare('SELECT preview_persona FROM users WHERE email = ?').get(OWNER)).preview_persona,
         "a student's exit call cleared the owner's preview"
       ).toBe('student');
     } finally { clearPreview(OWNER); }

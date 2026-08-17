@@ -24,10 +24,10 @@
  */
 
 import crypto from 'crypto';
+import { runInTransaction } from './db/connectionContext.js';
 
 import { db } from './db.js';
 import { rolesWithCapability } from './authz.js';
-import { inTransaction } from './utils.js';
 import { notificationService } from './services/notificationService.js';
 import { isConversationParticipant } from './messaging.js';
 import {
@@ -92,11 +92,11 @@ export const REPORT_ERRORS = {
  * A `user` target is never checked, and that is the point: see the note on
  * `resolveTarget`'s user branch. There is no oracle if there is no lookup.
  */
-function canReporterSee(targetType, resolved, reporterId) {
+async function canReporterSee(targetType, resolved, reporterId) {
   if (targetType === 'user') return true;
   if (!resolved.exists) return false;
   if (targetType === 'message' || targetType === 'conversation') {
-    return isConversationParticipant(resolved.conversationId, reporterId);
+    return await isConversationParticipant(resolved.conversationId, reporterId);
   }
   return true;
 }
@@ -112,7 +112,7 @@ function canReporterSee(targetType, resolved, reporterId) {
  * @param {string} [input.description]
  * @returns {{ok: true, reportId: string, duplicate: boolean} | {ok: false} & typeof REPORT_ERRORS[keyof typeof REPORT_ERRORS]}
  */
-export function createReport({ reporter, targetType, targetId, category, description }) {
+export async function createReport({ reporter, targetType, targetId, category, description }) {
   const type = normalizeTargetType(targetType);
   if (!type) return { ok: false, ...REPORT_ERRORS.BAD_TARGET_TYPE };
 
@@ -131,9 +131,9 @@ export function createReport({ reporter, targetType, targetId, category, descrip
     return { ok: false, ...REPORT_ERRORS.DESCRIPTION_TOO_LONG };
   }
 
-  const resolved = resolveTarget(db, type, targetId, reporter.id);
+  const resolved = await resolveTarget(db, type, targetId, reporter.id);
 
-  if (!canReporterSee(type, resolved, reporter.id)) {
+  if (!await canReporterSee(type, resolved, reporter.id)) {
     return { ok: false, ...REPORT_ERRORS.NOT_FOUND };
   }
 
@@ -165,14 +165,14 @@ export function createReport({ reporter, targetType, targetId, category, descrip
      * and evidence rows with no report is orphaned message text sitting in a
      * table nobody reads. Neither is a state worth being able to reach.
      */
-    inTransaction(() => {
-      const evidence = collectEvidence(db, {
+    await runInTransaction(db, async (tx) => {
+      const evidence = await collectEvidence(tx, {
         targetType: type,
         targetId,
         conversationId: resolved.conversationId,
       });
 
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO reports (
           id, reporter_id, reporter_name_snapshot, target_type, target_id,
           target_name_snapshot, target_body_snapshot, target_author_id,
@@ -188,21 +188,21 @@ export function createReport({ reporter, targetType, targetId, category, descrip
         category, text || null, priority, now, now
       );
 
-      const insertEvidence = db.prepare(`
+      const insertEvidence = await tx.prepare(`
         INSERT INTO report_evidence
           (report_id, message_id, sender_id, sender_name_snapshot, body, created_at, captured_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
-      const nameOf = db.prepare('SELECT name FROM users WHERE id = ?');
+      const nameOf = await tx.prepare('SELECT name FROM users WHERE id = ?');
       for (const msg of evidence) {
-        insertEvidence.run(
+        await insertEvidence.run(
           id, msg.id, msg.sender_id,
-          msg.sender_id ? (nameOf.get(msg.sender_id)?.name ?? null) : null,
+          msg.sender_id ? (await nameOf.get(msg.sender_id)?.name ?? null) : null,
           msg.body, msg.created_at, now
         );
       }
 
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO moderation_actions (id, report_id, actor_id, action, created_at)
         VALUES (?, ?, ?, 'filed', ?)
       `).run('act_' + crypto.randomBytes(8).toString('hex'), id, reporter.id, now);
@@ -219,7 +219,7 @@ export function createReport({ reporter, targetType, targetId, category, descrip
      * the button is broken.
      */
     if (String(err.message || '').includes('UNIQUE constraint failed')) {
-      const existing = db.prepare(`
+      const existing = await db.prepare(`
         SELECT id FROM reports
         WHERE reporter_id = ? AND target_type = ? AND target_id = ?
           AND status IN ('open', 'reviewing', 'escalated')
@@ -253,8 +253,8 @@ export function createReport({ reporter, targetType, targetId, category, descrip
    */
   if (priority === 'urgent') {
     try {
-      for (const moderator of moderatorIds(db)) {
-        notificationService.dispatch('SYSTEM_ALERT', {
+      for (const moderator of await moderatorIds(db)) {
+        await notificationService.dispatch('SYSTEM_ALERT', {
           title: 'Urgent Safety Report',
           body: `An urgent report requires immediate attention. Report ID: ${id}`,
         }, moderator.id);
@@ -281,11 +281,11 @@ export function createReport({ reporter, targetType, targetId, category, descrip
  * `authenticateToken`, so a notification it can never read is a row nobody will
  * ever clear.
  */
-function moderatorIds(db) {
+async function moderatorIds(db) {
   const roles = rolesWithCapability('report.resolve');
   if (roles.length === 0) return [];
   const placeholders = roles.map(() => '?').join(', ');
-  return db.prepare(`
+  return await db.prepare(`
     SELECT id FROM users
      WHERE account_status = 'active'
        AND deleted_at IS NULL

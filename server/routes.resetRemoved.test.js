@@ -164,8 +164,9 @@ describe('the development reset utility refuses to destroy production data', () 
       process.env.WEV_DB_PATH = ${JSON.stringify(dbFile)};
       process.env.JWT_SECRET = 'x'.repeat(48);
       process.env.DEMO_MODE = 'true';
-      const { db, initDatabase } = await import('${ROOT}/server/db.js');
+      const { db, initDatabase, completeDatabaseInit } = await import('${ROOT}/server/db.js');
       initDatabase();
+      await completeDatabaseInit();
       db.exec("DELETE FROM events");
       db.exec("INSERT INTO users (id,name,email,password_hash,grade,role,created_at) VALUES ('junk','Junk','junk@x.org','h','11','student','2026-01-01')");
     `], { cwd: process.cwd(), stdio: 'pipe' });

@@ -37,6 +37,7 @@ async function freshWorker() {
   vi.resetModules();
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const worker = await import('./workers/notificationWorker.js');
   const service = await import('./emailService.js');
   return { db: dbMod.db, worker, service };
@@ -88,7 +89,7 @@ describe('a queued transactional message is actually delivered', () => {
     expect(result.queued, 'the message was not written to the outbox').toBe(true);
     restore();
 
-    const queued = db.prepare("SELECT * FROM notification_jobs WHERE channel = 'email.message'").all();
+    const queued = await db.prepare("SELECT * FROM notification_jobs WHERE channel = 'email.message'").all();
     expect(queued).toHaveLength(1);
     expect(queued[0].status).toBe('pending');
 
@@ -99,7 +100,7 @@ describe('a queued transactional message is actually delivered', () => {
     await worker.processNotificationJobs();
     restore();
 
-    const [row] = db.prepare("SELECT * FROM notification_jobs WHERE channel = 'email.message'").all();
+    const [row] = await db.prepare("SELECT * FROM notification_jobs WHERE channel = 'email.message'").all();
     expect(row.status, 'the worker did not deliver a queued message').toBe('sent');
     expect(row.provider_message_id).toBe('re_recovered');
     expect(row.sent_by_provider).toBe('resend');
@@ -130,7 +131,7 @@ describe('a queued transactional message is actually delivered', () => {
     await worker.processNotificationJobs();
     restore();
 
-    const [row] = db.prepare("SELECT * FROM notification_jobs WHERE channel = 'email.message'").all();
+    const [row] = await db.prepare("SELECT * FROM notification_jobs WHERE channel = 'email.message'").all();
     expect(row.status).toBe('pending');
     expect(row.attempts).toBe(1);
     expect(row.last_error_category).toBe('transient');
@@ -161,8 +162,8 @@ describe('a queued transactional message is actually delivered', () => {
     );
     restore();
 
-    const [queued] = db.prepare("SELECT * FROM notification_jobs WHERE channel = 'email.message'").all();
-    db.prepare("UPDATE notification_jobs SET status = 'processing' WHERE id = ?").run(queued.id);
+    const [queued] = await db.prepare("SELECT * FROM notification_jobs WHERE channel = 'email.message'").all();
+    await db.prepare("UPDATE notification_jobs SET status = 'processing' WHERE id = ?").run(queued.id);
 
     const resend = fakeProvider('resend', { messageId: 're_dupe' });
     const r2 = service.setProvidersForTests({ resend, smtp: fakeProvider('smtp', {}) });
@@ -231,7 +232,7 @@ describe('a queued transactional message is actually delivered', () => {
        which invalidates it — two messages, and the newer-looking one is dead. */
     expect(ok).toBe(false);
     expect(
-      db.prepare("SELECT COUNT(*) AS c FROM notification_jobs WHERE channel = 'email.message'").get().c,
+      (await db.prepare("SELECT COUNT(*) AS c FROM notification_jobs WHERE channel = 'email.message'").get()).c,
       'a time-critical login code was queued'
     ).toBe(0);
   });

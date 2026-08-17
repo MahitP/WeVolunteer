@@ -137,7 +137,7 @@ describe('signup enforces the age gate server-side', () => {
     const res = await srv.call('POST', '/api/auth/signup', payload);
     expect(res.status).toBe(201);
 
-    const row = db.prepare('SELECT date_of_birth FROM users WHERE email = ?').get(payload.email);
+    const row = await db.prepare('SELECT date_of_birth FROM users WHERE email = ?').get(payload.email);
     expect(row.date_of_birth).toBe('2009-05-20');
   });
 
@@ -148,7 +148,7 @@ describe('signup enforces the age gate server-side', () => {
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('under_minimum_age');
     expect(
-      db.prepare('SELECT id FROM users WHERE email = ?').get(payload.email),
+      await db.prepare('SELECT id FROM users WHERE email = ?').get(payload.email),
       'a refused applicant must leave no account behind'
     ).toBeFalsy();
   });
@@ -159,7 +159,7 @@ describe('signup enforces the age gate server-side', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.field).toBe('dateOfBirth');
-    expect(db.prepare('SELECT id FROM users WHERE email = ?').get(payload.email)).toBeFalsy();
+    expect(await db.prepare('SELECT id FROM users WHERE email = ?').get(payload.email)).toBeFalsy();
   });
 
   it('cannot be bypassed by claiming an Adult grade', async () => {
@@ -197,7 +197,7 @@ describe('signup enforces the age gate server-side', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('under_minimum_age');
-    expect(db.prepare('SELECT id FROM users WHERE email = ?').get(email)).toBeFalsy();
+    expect(await db.prepare('SELECT id FROM users WHERE email = ?').get(email)).toBeFalsy();
   });
 
   it('does not leak the applicant\'s age back to the client', async () => {

@@ -1,10 +1,11 @@
 import express from 'express';
+import { runInTransaction } from '../db/connectionContext.js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { db } from '../db.js';
 import { createVerifier } from '../oauth/pkce.js';
 import { JWT_SECRET, COOKIE_NAME, cookieOptions, OAUTH_PROVIDERS_ENABLED, OAUTH_PROVIDERS_CONFIGURED } from '../config.js';
-import { authenticateToken, formatUserResponse, inTransaction, enabledSecondFactors } from '../utils.js';
+import { authenticateToken, formatUserResponse, enabledSecondFactors } from '../utils.js';
 import { requireAAL2 } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 // Directly, not through `spendChallenge`: that helper reads its three bindings
@@ -77,12 +78,12 @@ export function resolveProvider(name) {
  * Google address differed from your account address, dropped you into the
  * signup form while already signed in.
  */
-function currentUserFromRequest(req) {
+async function currentUserFromRequest(req) {
   const token = req.cookies && req.cookies[COOKIE_NAME];
   if (!token) return null;
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const row = db.prepare('SELECT id, token_version, account_status FROM users WHERE id = ?').get(decoded.id);
+    const row = await db.prepare('SELECT id, token_version, account_status FROM users WHERE id = ?').get(decoded.id);
     if (!row || row.account_status !== 'active') return null;
     if ((decoded.tokenVersion ?? 0) !== row.token_version) return null;
     return { id: row.id };
@@ -114,11 +115,11 @@ function currentSessionJti(req) {
   }
 }
 
-function purgeExpiredSignupSessions() {
+async function purgeExpiredSignupSessions() {
   try {
     const now = new Date().toISOString();
-    db.prepare('DELETE FROM oauth_signup_sessions WHERE expires_at < ?').run(now);
-    db.prepare('DELETE FROM oauth_states WHERE expires_at < ?').run(now);
+    await db.prepare('DELETE FROM oauth_signup_sessions WHERE expires_at < ?').run(now);
+    await db.prepare('DELETE FROM oauth_states WHERE expires_at < ?').run(now);
   } catch (err) {
     console.error('Failed to purge expired OAuth sessions/states:', err);
   }
@@ -203,7 +204,7 @@ router.get('/api/oauth/providers', (req, res) => {
  * oauth_signup_sessions for fifteen minutes. The password is no longer sent at
  * all (see below), and what remains is a body rather than a query string.
  */
-router.post('/api/oauth/:provider/url', (req, res) => {
+router.post('/api/oauth/:provider/url', async (req, res) => {
   const resolved = resolveProvider(req.params.provider);
   if (!resolved.ok) return res.status(resolved.status).json({ error: resolved.error });
   const { key: providerName, provider } = resolved;
@@ -211,7 +212,7 @@ router.post('/api/oauth/:provider/url', (req, res) => {
   const nonce = crypto.randomBytes(32).toString('hex');
   const statePayload = { nonce, provider: providerName };
 
-  const user = currentUserFromRequest(req);
+  const user = await currentUserFromRequest(req);
   if (user) statePayload.userId = user.id;
 
   /**
@@ -310,9 +311,9 @@ router.post('/api/oauth/:provider/url', (req, res) => {
     // No password. It was never needed here — the account this creates signs in
     // through the provider — and carrying it made a URL and a database row into
     // places a plaintext credential could be read.
-    purgeExpiredSignupSessions();
+    await purgeExpiredSignupSessions();
     const sessionId = crypto.randomBytes(16).toString('hex');
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO oauth_signup_sessions (id, signup_data, created_at, expires_at)
       VALUES (?, ?, ?, ?)
     `).run(
@@ -340,7 +341,7 @@ router.post('/api/oauth/:provider/url', (req, res) => {
   // Store state on the server to prevent replay attacks
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 15 * 60 * 1000); // 15 minutes
-  db.prepare('INSERT INTO oauth_states (nonce, created_at, expires_at, code_verifier) VALUES (?, ?, ?, ?)')
+  await db.prepare('INSERT INTO oauth_states (nonce, created_at, expires_at, code_verifier) VALUES (?, ?, ?, ?)')
     .run(nonce, now.toISOString(), expiresAt.toISOString(), codeVerifier);
 
   let url;
@@ -409,14 +410,14 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
   }
 
   // Server-side state invalidation (prevents replay attacks)
-  const stateRow = db.prepare('SELECT code_verifier FROM oauth_states WHERE nonce = ?').get(decodedState.nonce);
+  const stateRow = await db.prepare('SELECT code_verifier FROM oauth_states WHERE nonce = ?').get(decodedState.nonce);
   if (!stateRow) {
     return res.status(400).json({ error: 'Sign-in session expired or already used. Please try again.' });
   }
   /* Read BEFORE the delete: the row is the only copy of the verifier, and the
      delete is what makes the authorization single-use. */
   const codeVerifier = stateRow.code_verifier || null;
-  db.prepare('DELETE FROM oauth_states WHERE nonce = ?').run(decodedState.nonce);
+  await db.prepare('DELETE FROM oauth_states WHERE nonce = ?').run(decodedState.nonce);
 
   res.clearCookie(`${OAUTH_STATE_COOKIE}_${cookieId}`);
 
@@ -437,17 +438,17 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
     }
 
     // ── Returning user: this exact provider identity is already known ──
-    const oauthRow = db.prepare(
+    const oauthRow = await db.prepare(
       'SELECT * FROM oauth_accounts WHERE provider = ? AND provider_user_id = ?'
     ).get(providerName, providerUserId);
 
     if (oauthRow) {
-      const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(oauthRow.user_id);
+      const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(oauthRow.user_id);
       if (!userRow || userRow.account_status === 'deleted') {
         // The link is a tombstone pointing at a deleted account. Clear it so a
         // fresh sign-up with the same Google account is a clean signup rather
         // than a permanent dead end.
-        db.prepare('DELETE FROM oauth_accounts WHERE id = ?').run(oauthRow.id);
+        await db.prepare('DELETE FROM oauth_accounts WHERE id = ?').run(oauthRow.id);
         return res.status(401).json({ error: 'That account was deleted. You can create a new one.' });
       }
       /**
@@ -467,9 +468,9 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
       if (isSuspended(userRow)) {
         return res.status(403).json({ error: 'Account is suspended' });
       }
-      liftIfExpired(db, userRow);
+      await liftIfExpired(db, userRow);
 
-      db.prepare('UPDATE oauth_accounts SET last_used_at = ?, provider_email = ? WHERE id = ?')
+      await db.prepare('UPDATE oauth_accounts SET last_used_at = ?, provider_email = ? WHERE id = ?')
         .run(new Date().toISOString(), providerEmail, oauthRow.id);
 
       if (userRow.tfa_enabled || userRow.tfa_email_enabled) {
@@ -477,16 +478,16 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
         issuePreAuthSession(res, userRow);
         /* One definition, shared with POST /api/auth/login and enforced by
            POST /api/auth/login-2fa. See enabledSecondFactors in utils.js. */
-        return res.json({ action: 'require_2fa', availableMethods: enabledSecondFactors(userRow) });
+        return res.json({ action: 'require_2fa', availableMethods: await enabledSecondFactors(userRow) });
       }
 
-      const user = formatUserResponse(userRow);
-      issueSession(res, user, userRow.token_version);
+      const user = await formatUserResponse(userRow);
+      await issueSession(res, user, userRow.token_version);
       return res.json({ action: 'login', user, emailVerified: userRow.email_verified === 1 });
     }
 
     // ── An account already holds this address ──
-    const existingUser = db.prepare('SELECT * FROM users WHERE email = ? COLLATE NOCASE').get(providerEmail);
+    const existingUser = await db.prepare('SELECT * FROM users WHERE email = ? COLLATE nocase').get(providerEmail);
 
     if (existingUser) {
       if (existingUser.account_status === 'deleted') {
@@ -502,7 +503,7 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
       if (isSuspended(existingUser)) {
         return res.status(403).json({ error: 'Account is suspended' });
       }
-      liftIfExpired(db, existingUser);
+      await liftIfExpired(db, existingUser);
 
       /**
        * Signed in as that very account — but a live session is not enough.
@@ -540,9 +541,9 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
 
         const now = new Date().toISOString();
         try {
-          inTransaction(() => {
-            const spent = consumeChallenge({
-              db,
+          await runInTransaction(db, async (tx) => {
+            const spent = await consumeChallenge({
+              db: tx,
               challengeId: decodedState.challengeId,
               userId: existingUser.id,
               action: 'oauth.link',
@@ -554,7 +555,7 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
             });
             if (!spent.ok) throw new ChallengeNotSpent(spent);
 
-            db.prepare(`
+            await tx.prepare(`
               INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at, last_used_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(user_id, provider) DO UPDATE SET
@@ -599,11 +600,11 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
     }
 
     // ── Brand new person ──
-    purgeExpiredSignupSessions();
+    await purgeExpiredSignupSessions();
 
     let pending = null;
     if (decodedState.signupSessionId) {
-      const sessionRow = db.prepare('SELECT * FROM oauth_signup_sessions WHERE id = ?').get(decodedState.signupSessionId);
+      const sessionRow = await db.prepare('SELECT * FROM oauth_signup_sessions WHERE id = ?').get(decodedState.signupSessionId);
       if (sessionRow) {
         if (new Date(sessionRow.expires_at) > new Date()) {
           try {
@@ -612,7 +613,7 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
             console.error('Failed to parse stored OAuth signup data:', e);
           }
         }
-        db.prepare('DELETE FROM oauth_signup_sessions WHERE id = ?').run(decodedState.signupSessionId);
+        await db.prepare('DELETE FROM oauth_signup_sessions WHERE id = ?').run(decodedState.signupSessionId);
       }
     }
 
@@ -626,7 +627,7 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
       }
       const fields = check.value;
 
-      if (db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE').get(fields.username)) {
+      if (await db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE nocase').get(fields.username)) {
         return res.status(409).json({ error: 'That username was taken while you were signing in. Please choose another.', field: 'username' });
       }
 
@@ -634,8 +635,8 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
       const emailVerified = claims.emailVerified === true ? 1 : 0;
       const now = new Date().toISOString();
 
-      inTransaction(() => {
-        db.prepare(`
+      await runInTransaction(db, async (tx) => {
+        await tx.prepare(`
           INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, email_verified, avatar, bio, school, skills, date_of_birth, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
@@ -649,7 +650,7 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
           fields.dateOfBirth, now
         );
 
-        db.prepare(`
+        await tx.prepare(`
           INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at, last_used_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).run(`oauth-${crypto.randomUUID()}`, newUserId, providerName, providerUserId, providerEmail, now, now, now);
@@ -658,7 +659,7 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
         // records: an account without its acceptance rows is an account that
         // never agreed to anything, and it looks entirely normal until someone
         // asks what this person agreed to.
-        recordAcceptances(db, {
+        await recordAcceptances(tx, {
           userId: newUserId,
           method: 'oauth_signup',
           context: `oauth:${providerName}`,
@@ -667,22 +668,22 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
         });
       });
 
-      const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(newUserId);
+      const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(newUserId);
       if (userRow.tfa_enabled || userRow.tfa_email_enabled) {
         const { issuePreAuthSession } = await import('./authRoutes.js');
         issuePreAuthSession(res, userRow);
         /* One definition, shared with POST /api/auth/login and enforced by
            POST /api/auth/login-2fa. See enabledSecondFactors in utils.js. */
-        return res.json({ action: 'require_2fa', availableMethods: enabledSecondFactors(userRow) });
+        return res.json({ action: 'require_2fa', availableMethods: await enabledSecondFactors(userRow) });
       }
 
-      const user = formatUserResponse(userRow);
-      issueSession(res, user, userRow.token_version);
+      const user = await formatUserResponse(userRow);
+      await issueSession(res, user, userRow.token_version);
 
       // A provider that does not attest the address (Microsoft) still has to
       // confirm it by mail before the account can act.
       if (!emailVerified) {
-        const token = issueVerificationToken(newUserId);
+        const token = await issueVerificationToken(newUserId);
         sendVerificationMail(providerEmail, token);
       }
 
@@ -743,7 +744,7 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
  *     session is, so the token's `userId` must match it (see below). A person who
  *     reaches `link_required` while signed out signs in first, then verifies.
  */
-router.post('/api/oauth/link', authenticateToken, requireAAL2('oauth.link'), (req, res) => {
+router.post('/api/oauth/link', authenticateToken, requireAAL2('oauth.link'), async (req, res) => {
   const { linkToken } = req.body ?? {};
   if (!linkToken) {
     return res.status(400).json({ error: 'Missing token' });
@@ -779,13 +780,13 @@ router.post('/api/oauth/link', authenticateToken, requireAAL2('oauth.link'), (re
   }
 
   try {
-    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!userRow || userRow.account_status !== 'active') {
       return res.status(404).json({ error: 'User not found' });
     }
 
     const now = new Date().toISOString();
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       /**
        * `provider` comes from the signed token, not the request body.
        *
@@ -795,9 +796,9 @@ router.post('/api/oauth/link', authenticateToken, requireAAL2('oauth.link'), (re
        * value the caller could choose independently of the write, which is a
        * binding in name only.
        */
-      spendChallenge(db, req, 'oauth.link', { provider: decoded.provider });
+      await spendChallenge(tx, req, 'oauth.link', { provider: decoded.provider });
 
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at, last_used_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, provider) DO UPDATE SET
@@ -825,7 +826,7 @@ router.post('/api/oauth/link', authenticateToken, requireAAL2('oauth.link'), (re
      * reason was not, which is worse than either alone — the next reader checks
      * the comment.
      */
-    const user = formatUserResponse(userRow);
+    const user = await formatUserResponse(userRow);
     res.json({ success: true, user, emailVerified: userRow.email_verified === 1 });
   } catch (err) {
     if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
@@ -856,7 +857,7 @@ router.post('/api/oauth/link', authenticateToken, requireAAL2('oauth.link'), (re
  * `oauth.unlink` binds `provider`, mirroring `oauth.link`, so a verification
  * collected to remove Google cannot remove Microsoft instead.
  */
-router.post('/api/oauth/disconnect', authenticateToken, requireAAL2('oauth.unlink'), (req, res) => {
+router.post('/api/oauth/disconnect', authenticateToken, requireAAL2('oauth.unlink'), async (req, res) => {
   const { provider } = req.body;
   if (!provider || !providers[String(provider).toLowerCase()]) {
     return res.status(400).json({ error: 'Unknown provider.' });
@@ -864,10 +865,10 @@ router.post('/api/oauth/disconnect', authenticateToken, requireAAL2('oauth.unlin
   const providerName = String(provider).toLowerCase();
 
   try {
-    const userRow = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
+    const userRow = await db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
     if (!userRow) return res.status(404).json({ error: 'User not found' });
 
-    const existing = db.prepare('SELECT 1 FROM oauth_accounts WHERE user_id = ? AND provider = ?')
+    const existing = await db.prepare('SELECT 1 FROM oauth_accounts WHERE user_id = ? AND provider = ?')
       .get(req.user.id, providerName);
     if (!existing) {
       return res.status(404).json({ error: 'That provider is not connected to your account.' });
@@ -884,8 +885,8 @@ router.post('/api/oauth/disconnect', authenticateToken, requireAAL2('oauth.unlin
      * endpoint.
      */
     if (userRow.password_hash === '!OAUTH_ONLY!') {
-      const providerCount = db.prepare('SELECT COUNT(*) as count FROM oauth_accounts WHERE user_id = ?')
-        .get(req.user.id).count;
+      const providerCount = (await db.prepare('SELECT COUNT(*) as count FROM oauth_accounts WHERE user_id = ?')
+        .get(req.user.id)).count;
       if (providerCount <= 1) {
         return res.status(400).json({
           error: 'This is the only way you can sign in. Set a password first, then you can remove it.',
@@ -894,13 +895,13 @@ router.post('/api/oauth/disconnect', authenticateToken, requireAAL2('oauth.unlin
       }
     }
 
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       // Spent with the delete it authorises, bound to the provider actually
       // being removed: no removal without a spent grant, no spent grant
       // without a removal.
-      spendChallenge(db, req, 'oauth.unlink', { provider: providerName });
+      await spendChallenge(tx, req, 'oauth.unlink', { provider: providerName });
 
-      db.prepare('DELETE FROM oauth_accounts WHERE user_id = ? AND provider = ?').run(req.user.id, providerName);
+      await tx.prepare('DELETE FROM oauth_accounts WHERE user_id = ? AND provider = ?').run(req.user.id, providerName);
     });
 
     res.json({ success: true });
@@ -911,9 +912,9 @@ router.post('/api/oauth/disconnect', authenticateToken, requireAAL2('oauth.unlin
   }
 });
 
-router.get('/api/oauth/accounts', authenticateToken, (req, res) => {
+router.get('/api/oauth/accounts', authenticateToken, async (req, res) => {
   try {
-    const accounts = db.prepare(
+    const accounts = await db.prepare(
       'SELECT provider, provider_email, created_at, last_used_at FROM oauth_accounts WHERE user_id = ?'
     ).all(req.user.id);
     res.json(accounts);

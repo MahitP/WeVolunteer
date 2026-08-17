@@ -55,14 +55,14 @@ describe('applying to an organization event', () => {
 
     /* Two events cloned from a real one, so every NOT NULL column is satisfied:
        one belonging to the organization, one belonging to nobody. */
-    const tmplEvent = db.prepare('SELECT * FROM events LIMIT 1').get();
-    const tmplSlot = db.prepare('SELECT * FROM slots WHERE event_id = ? LIMIT 1').get(tmplEvent.id);
+    const tmplEvent = await db.prepare('SELECT * FROM events LIMIT 1').get();
+    const tmplSlot = await db.prepare('SELECT * FROM slots WHERE event_id = ? LIMIT 1').get(tmplEvent.id);
     expect(tmplEvent && tmplSlot, 'no event/slot to clone').toBeTruthy();
 
-    const clone = (table, tmpl, over) => {
+    const clone = async (table, tmpl, over) => {
       const row = { ...tmpl, ...over };
       const cols = Object.keys(row);
-      db.prepare(`INSERT OR REPLACE INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
+      await db.prepare(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
         .run(...cols.map(c => row[c]));
     };
 
@@ -71,74 +71,76 @@ describe('applying to an organization event', () => {
 
     orgEventId = 'elig-org-event';
     publicEventId = 'elig-public-event';
-    clone('events', tmplEvent, {
+    await clone('events', tmplEvent, {
       id: orgEventId, title: 'Organization event', status: 'open',
       organization_id: orgId, organizer_id: organizerId, application_deadline: soon,
     });
-    clone('slots', tmplSlot, { id: 'elig-org-slot', event_id: orgEventId, start_datetime: soon, end_datetime: later });
+    await clone('slots', tmplSlot, { id: 'elig-org-slot', event_id: orgEventId, start_datetime: soon, end_datetime: later });
 
-    clone('events', tmplEvent, {
+    await clone('events', tmplEvent, {
       id: publicEventId, title: 'Public event', status: 'open',
       organization_id: null, organizer_id: organizerId, application_deadline: soon,
     });
     /* A different time, so applying to both cannot trip the schedule-conflict
        guard and mask what is being measured. */
     const soon2 = new Date(Date.now() + 9 * 86400000).toISOString();
-    clone('slots', tmplSlot, { id: 'elig-public-slot', event_id: publicEventId, start_datetime: soon2, end_datetime: soon2 });
+    await clone('slots', tmplSlot, { id: 'elig-public-slot', event_id: publicEventId, start_datetime: soon2, end_datetime: soon2 });
 
     slotOf = { [orgEventId]: 'elig-org-slot', [publicEventId]: 'elig-public-slot' };
   }, 60000);
 
   afterAll(async () => { await srv?.close(); });
 
-  const join = (userId, role = 'member') =>
-    db.prepare(`INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
-                VALUES (?, ?, ?, ?)`).run(orgId, userId, role, new Date().toISOString());
+  const join = async (userId, role = 'member') =>
+    await db.prepare(`INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
+                VALUES (?, ?, ?, ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at`).run(orgId, userId, role, new Date().toISOString());
 
-  const ban = (userId) =>
-    db.prepare(`INSERT OR REPLACE INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
-                VALUES ('elig-ban', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
+  const ban = async (userId) =>
+    await db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                VALUES ('elig-ban', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)
+      ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, user_id = excluded.user_id, banned_by = excluded.banned_by, reason = excluded.reason, created_at = excluded.created_at`)
       .run(orgId, userId, organizerId, new Date().toISOString());
 
-  const setAudience = (eventId, audience) =>
-    db.prepare('UPDATE events SET audience = ? WHERE id = ?').run(audience, eventId);
+  const setAudience = async (eventId, audience) =>
+    await db.prepare('UPDATE events SET audience = ? WHERE id = ?').run(audience, eventId);
 
   const apply = (eventId, session, extra = {}) =>
     srv.call('POST', `/api/events/${eventId}/apply`, { slotId: slotOf[eventId], ...extra }, session);
 
-  beforeEach(() => {
-    db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
-    db.prepare('DELETE FROM applications WHERE event_id IN (?, ?)').run(orgEventId, publicEventId);
-    db.prepare('DELETE FROM organization_members WHERE organization_id = ?').run(orgId);
-    join(organizerId, 'manager');
-    setAudience(orgEventId, 'everyone');
-    setAudience(publicEventId, 'everyone');
+  beforeEach(async () => {
+    await db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
+    await db.prepare('DELETE FROM applications WHERE event_id IN (?, ?)').run(orgEventId, publicEventId);
+    await db.prepare('DELETE FROM organization_members WHERE organization_id = ?').run(orgId);
+    await join(organizerId, 'manager');
+    await setAudience(orgEventId, 'everyone');
+    await setAudience(publicEventId, 'everyone');
   });
 
   describe('bans', () => {
     it('lets an ordinary member apply, so the refusals below mean something', async () => {
       /* The vacuity guard. If applying were broken for everybody, every
          "cannot apply" assertion would pass without the ban doing anything. */
-      join(memberId);
+      await join(memberId);
       const res = await apply(orgEventId, member);
       expect(res.status, JSON.stringify(res.body)).toBe(201);
     });
 
     it('REFUSES a banned user applying to that organization’s event', async () => {
-      join(memberId);
-      ban(memberId);
+      await join(memberId);
+      await ban(memberId);
       const res = await apply(orgEventId, member);
 
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('organization_banned');
-      expect(db.prepare('SELECT COUNT(*) n FROM applications WHERE event_id = ? AND user_id = ?')
-        .get(orgEventId, memberId).n, 'an application row was created anyway').toBe(0);
+      expect((await db.prepare('SELECT COUNT(*) n FROM applications WHERE event_id = ? AND user_id = ?')
+        .get(orgEventId, memberId)).n, 'an application row was created anyway').toBe(0);
     });
 
     it('refuses a banned user who is no longer a member either', async () => {
       /* Banning removes the membership, so the realistic state is banned AND
          not a member. Neither on its own may be what refuses. */
-      ban(memberId);
+      await ban(memberId);
       const res = await apply(orgEventId, member);
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('organization_banned');
@@ -150,8 +152,8 @@ describe('applying to an organization event', () => {
        * deliberately. It re-enters the same handler, so it must not become a
        * second door into it.
        */
-      join(memberId);
-      ban(memberId);
+      await join(memberId);
+      await ban(memberId);
       const res = await apply(orgEventId, member, { overrideConflict: true });
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('organization_banned');
@@ -164,7 +166,7 @@ describe('applying to an organization event', () => {
        * would have let a banned person walk back in through a row they left
        * behind.
        */
-      join(memberId);
+      await join(memberId);
       const first = await apply(orgEventId, member);
       expect(first.status).toBe(201);
       /* Self-withdrawal is `PATCH /api/applications/:id` with a status — there
@@ -174,11 +176,11 @@ describe('applying to an organization event', () => {
         { status: 'withdrawn' }, member);
       expect(withdrawn.status, JSON.stringify(withdrawn.body)).toBe(200);
 
-      ban(memberId);
+      await ban(memberId);
       const again = await apply(orgEventId, member);
       expect(again.status).toBe(403);
-      expect(db.prepare("SELECT status FROM applications WHERE event_id = ? AND user_id = ?")
-        .get(orgEventId, memberId).status, 'the withdrawn row was revived').toBe('withdrawn');
+      expect((await db.prepare("SELECT status FROM applications WHERE event_id = ? AND user_id = ?")
+        .get(orgEventId, memberId)).status, 'the withdrawn row was revived').toBe('withdrawn');
     });
 
     it('does not touch an application made BEFORE the ban', async () => {
@@ -189,29 +191,29 @@ describe('applying to an organization event', () => {
        * an organizer who wants them off a specific shift already has a control
        * for that.
        */
-      join(memberId);
+      await join(memberId);
       const applied = await apply(orgEventId, member);
       expect(applied.status).toBe(201);
 
-      ban(memberId);
-      const row = db.prepare('SELECT status FROM applications WHERE id = ?').get(applied.body.application.id);
+      await ban(memberId);
+      const row = await db.prepare('SELECT status FROM applications WHERE id = ?').get(applied.body.application.id);
       expect(row, 'the existing application was deleted by a later ban').toBeTruthy();
       expect(row.status).not.toBe('withdrawn');
     });
 
     it('leaves the PUBLIC event alone — a ban is scoped to its organization', async () => {
-      join(memberId);
-      ban(memberId);
+      await join(memberId);
+      await ban(memberId);
       const res = await apply(publicEventId, member);
       expect(res.status, 'a ban from one club blocked an unrelated public event').toBe(201);
     });
 
     it('restores eligibility when the ban is lifted', async () => {
-      join(memberId);
-      ban(memberId);
+      await join(memberId);
+      await ban(memberId);
       expect((await apply(orgEventId, member)).status).toBe(403);
 
-      db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
+      await db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
         .run(new Date().toISOString(), orgId, memberId);
 
       const res = await apply(orgEventId, member);
@@ -228,24 +230,24 @@ describe('applying to an organization event', () => {
     });
 
     it('REFUSES a non-member applying to a members-only event', async () => {
-      setAudience(orgEventId, 'organization');
+      await setAudience(orgEventId, 'organization');
       const res = await apply(orgEventId, outsider);
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('organization_members_only');
     });
 
     it('lets a member apply to the same event', async () => {
-      setAudience(orgEventId, 'organization');
-      join(outsiderId);
+      await setAudience(orgEventId, 'organization');
+      await join(outsiderId);
       const res = await apply(orgEventId, outsider);
       expect(res.status, JSON.stringify(res.body)).toBe(201);
     });
 
     it('still refuses a BANNED member of a members-only event', async () => {
       /* Membership and the ban are separate facts, and the ban wins. */
-      setAudience(orgEventId, 'organization');
-      join(memberId);
-      ban(memberId);
+      await setAudience(orgEventId, 'organization');
+      await join(memberId);
+      await ban(memberId);
       const res = await apply(orgEventId, member);
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('organization_banned');
@@ -257,7 +259,7 @@ describe('applying to an organization event', () => {
        * nominate which organization they would like to be measured against.
        * Every fact comes off the event row.
        */
-      setAudience(orgEventId, 'organization');
+      await setAudience(orgEventId, 'organization');
       const res = await apply(orgEventId, outsider, { organizationId: null, audience: 'everyone' });
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('organization_members_only');
@@ -269,7 +271,7 @@ describe('applying to an organization event', () => {
        * missing is a broken record; refusing everybody would silently close a
        * shift nobody could reopen, so it stays open and visible instead.
        */
-      setAudience(publicEventId, 'organization');
+      await setAudience(publicEventId, 'organization');
       const res = await apply(publicEventId, outsider);
       expect(res.status, JSON.stringify(res.body)).toBe(201);
     });
@@ -315,14 +317,14 @@ describe('applying to an organization event', () => {
     it('defaults to everyone when nothing is said', async () => {
       const res = await createEvent({}, organizer);
       expect(res.status, JSON.stringify(res.body)).toBe(201);
-      expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(res.body.id).audience)
+      expect((await db.prepare('SELECT audience FROM events WHERE id = ?').get(res.body.id)).audience)
         .toBe('everyone');
     });
 
     it('stores a members-only event against its organization', async () => {
       const res = await createEvent({ organizationId: orgId, audience: 'organization' }, organizer);
       expect(res.status, JSON.stringify(res.body)).toBe(201);
-      const row = db.prepare('SELECT audience, organization_id FROM events WHERE id = ?').get(res.body.id);
+      const row = await db.prepare('SELECT audience, organization_id FROM events WHERE id = ?').get(res.body.id);
       expect(row).toMatchObject({ audience: 'organization', organization_id: orgId });
     });
 
@@ -365,7 +367,7 @@ describe('applying to an organization event', () => {
          every existing client sends no audience at all. */
       const res = await createEvent({ organizationId: orgId }, organizer);
       expect(res.status, JSON.stringify(res.body)).toBe(201);
-      expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(res.body.id).audience)
+      expect((await db.prepare('SELECT audience FROM events WHERE id = ?').get(res.body.id)).audience)
         .toBe('everyone');
     });
 
@@ -379,8 +381,8 @@ describe('applying to an organization event', () => {
    * nothing to do with the audience — which is what the first draft of the
    * test below did, and it looked exactly like the bug it was checking for.
    */
-    const editEvent = (id, body, session) => {
-      const slot = db.prepare('SELECT * FROM slots WHERE event_id = ? LIMIT 1').get(id);
+    const editEvent = async (id, body, session) => {
+      const slot = await db.prepare('SELECT * FROM slots WHERE event_id = ? LIMIT 1').get(id);
       return srv.call('PUT', `/api/events/${id}`, {
         title: 'Audience fixture', description: 'Edited.', category: 'Other', location: 'Somewhere',
         applicationDeadline: new Date(Date.now() + 5 * 86400000).toISOString(),
@@ -401,7 +403,7 @@ describe('applying to an organization event', () => {
       const created = await createEvent({ organizationId: orgId }, organizer);
       const res = await editEvent(created.body.id, { audience: 'organization' }, organizer);
       expect(res.status, JSON.stringify(res.body)).toBe(200);
-      expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(created.body.id).audience)
+      expect((await db.prepare('SELECT audience FROM events WHERE id = ?').get(created.body.id)).audience)
         .toBe('organization');
     });
 
@@ -414,14 +416,14 @@ describe('applying to an organization event', () => {
        */
       const created = await createEvent({ organizationId: orgId }, organizer);
       const eventId = created.body.id;
-      const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId).id;
+      const slotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId)).id;
 
       const applied = await srv.call('POST', `/api/events/${eventId}/apply`, { slotId }, outsider);
       expect(applied.status, JSON.stringify(applied.body)).toBe(201);
 
       await editEvent(eventId, { audience: 'organization' }, organizer);
 
-      const row = db.prepare('SELECT status FROM applications WHERE id = ?').get(applied.body.application.id);
+      const row = await db.prepare('SELECT status FROM applications WHERE id = ?').get(applied.body.application.id);
       expect(row, 'the application was deleted by the narrowing').toBeTruthy();
       expect(row.status).not.toBe('withdrawn');
     });
@@ -429,7 +431,7 @@ describe('applying to an organization event', () => {
     it('stops NEW applications from non-members once narrowed', async () => {
       const created = await createEvent({ organizationId: orgId }, organizer);
       const eventId = created.body.id;
-      const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId).id;
+      const slotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId)).id;
       await editEvent(eventId, { audience: 'organization' }, organizer);
 
       const res = await srv.call('POST', `/api/events/${eventId}/apply`, { slotId }, outsider);
@@ -441,12 +443,12 @@ describe('applying to an organization event', () => {
       /* Every event this block creates runs at the same hour, so an application
          left by an earlier test collides here as a schedule conflict rather
          than as the audience decision being measured. */
-      db.prepare('DELETE FROM applications WHERE user_id = ?').run(outsiderId);
+      await db.prepare('DELETE FROM applications WHERE user_id = ?').run(outsiderId);
       const created = await createEvent({ organizationId: orgId, audience: 'organization' }, organizer);
       const eventId = created.body.id;
       await editEvent(eventId, { audience: 'everyone' }, organizer);
 
-      const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId).id;
+      const slotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId)).id;
       const res = await srv.call('POST', `/api/events/${eventId}/apply`, { slotId }, outsider);
       expect(res.status, JSON.stringify(res.body)).toBe(201);
     });
@@ -456,7 +458,7 @@ describe('applying to an organization event', () => {
          by saving an unrelated edit. */
       const created = await createEvent({ organizationId: orgId, audience: 'organization' }, organizer);
       await editEvent(created.body.id, { location: 'Moved' }, organizer);
-      expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(created.body.id).audience)
+      expect((await db.prepare('SELECT audience FROM events WHERE id = ?').get(created.body.id)).audience)
         .toBe('organization');
     });
 
@@ -471,7 +473,7 @@ describe('applying to an organization event', () => {
       const created = await createEvent({ organizationId: orgId }, organizer);
       const res = await editEvent(created.body.id, { audience: 'organization' }, outsider);
       expect([403, 404]).toContain(res.status);
-      expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(created.body.id).audience)
+      expect((await db.prepare('SELECT audience FROM events WHERE id = ?').get(created.body.id)).audience)
         .toBe('everyone');
     });
 
@@ -496,8 +498,8 @@ describe('applying to an organization event', () => {
       return (res.body.events || []).find(e => e.id === orgEventId);
     };
 
-    beforeEach(() => {
-      db.prepare("UPDATE events SET audience = 'organization' WHERE id = ?").run(orgEventId);
+    beforeEach(async () => {
+      await db.prepare("UPDATE events SET audience = 'organization' WHERE id = ?").run(orgEventId);
     });
 
     it('is still listed to somebody who cannot apply to it', async () => {
@@ -517,8 +519,9 @@ describe('applying to an organization event', () => {
     });
 
     it('tells a member they are one', async () => {
-      db.prepare(`INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
-                  VALUES (?, ?, 'member', ?)`).run(orgId, memberId, new Date().toISOString());
+      await db.prepare(`INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
+                  VALUES (?, ?, 'member', ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at`).run(orgId, memberId, new Date().toISOString());
       expect((await listed(member)).viewerIsMember).toBe(true);
     });
 
@@ -531,8 +534,9 @@ describe('applying to an organization event', () => {
     it('does not leak anybody ELSE\u2019s membership', async () => {
       /* The field answers "am I a member", and takes no parameter that could
          point it at somebody else — the same rule `viewerBan` follows. */
-      db.prepare(`INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
-                  VALUES (?, ?, 'member', ?)`).run(orgId, memberId, new Date().toISOString());
+      await db.prepare(`INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
+                  VALUES (?, ?, 'member', ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at`).run(orgId, memberId, new Date().toISOString());
       const card = await listed(outsider);
       expect(card.viewerIsMember).toBe(false);
       expect(Object.keys(card).filter(k => /member/i.test(k))).toEqual(['viewerIsMember']);
@@ -565,61 +569,63 @@ describe('applying to an organization event', () => {
 
     const slotId = 'elig-org-slot';
 
-    const seed = (userId, status, order = null) => {
+    const seed = async (userId, status, order = null) => {
       const id = `elig-app-${userId}-${status}`;
-      db.prepare(`INSERT OR REPLACE INTO applications
+      await db.prepare(`INSERT INTO applications
         (id, user_id, event_id, slot_id, status, applied_at, waitlist_order)
         VALUES (?, ?, ?, ?, ?, ?, ?)`)
         .run(id, userId, orgEventId, slotId, status, new Date().toISOString(), order);
       return id;
     };
 
-    beforeEach(() => {
-      db.prepare('DELETE FROM applications WHERE slot_id = ?').run(slotId);
-      db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
-      db.prepare("UPDATE events SET audience = 'everyone' WHERE id = ?").run(orgEventId);
+    beforeEach(async () => {
+      await db.prepare('DELETE FROM applications WHERE slot_id = ?').run(slotId);
+      await db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
+      await db.prepare("UPDATE events SET audience = 'everyone' WHERE id = ?").run(orgEventId);
       /* One free place, so exactly one person can be promoted and the test can
          tell WHICH one. */
-      db.prepare('UPDATE slots SET max_spots = 1 WHERE id = ?').run(slotId);
+      await db.prepare('UPDATE slots SET max_spots = 1 WHERE id = ?').run(slotId);
     });
 
     it('promotes the person at the front of the queue when nothing is wrong', async () => {
-      const first = seed(memberId, 'waitlisted', 1);
-      const promoted = promoteFromWaitlist(slotId);
+      const first = await seed(memberId, 'waitlisted', 1);
+      const promoted = await promoteFromWaitlist(slotId);
       expect(promoted.map(p => p.applicationId)).toEqual([first]);
-      expect(db.prepare('SELECT status FROM applications WHERE id = ?').get(first).status)
+      expect((await db.prepare('SELECT status FROM applications WHERE id = ?').get(first)).status)
         .toBe('accepted');
     });
 
     it('does NOT promote somebody the organization has since banned', async () => {
-      const banned = seed(memberId, 'waitlisted', 1);
-      db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
-                  VALUES ('elig-promo-ban', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
+      const banned = await seed(memberId, 'waitlisted', 1);
+      await db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('elig-promo-ban', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)
+      ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, user_id = excluded.user_id, banned_by = excluded.banned_by, reason = excluded.reason, created_at = excluded.created_at`)
         .run(orgId, memberId, organizerId, new Date().toISOString());
 
-      expect(promoteFromWaitlist(slotId)).toEqual([]);
-      expect(db.prepare('SELECT status, waitlist_order FROM applications WHERE id = ?').get(banned))
+      expect(await promoteFromWaitlist(slotId)).toEqual([]);
+      expect(await db.prepare('SELECT status, waitlist_order FROM applications WHERE id = ?').get(banned))
         .toMatchObject({ status: 'waitlisted' });
     });
 
     it('skips PAST them to the next eligible person, rather than stopping', async () => {
       /* The queue moves on. Holding the place empty would punish everybody
          behind them for somebody else's ban. */
-      seed(memberId, 'waitlisted', 1);
-      const next = seed(outsiderId, 'waitlisted', 2);
-      db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
-                  VALUES ('elig-promo-ban-2', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
+      await seed(memberId, 'waitlisted', 1);
+      const next = await seed(outsiderId, 'waitlisted', 2);
+      await db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('elig-promo-ban-2', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)
+      ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, user_id = excluded.user_id, banned_by = excluded.banned_by, reason = excluded.reason, created_at = excluded.created_at`)
         .run(orgId, memberId, organizerId, new Date().toISOString());
 
-      expect(promoteFromWaitlist(slotId).map(p => p.applicationId)).toEqual([next]);
+      expect((await promoteFromWaitlist(slotId)).map(p => p.applicationId)).toEqual([next]);
     });
 
     it('does NOT promote a non-member into an event narrowed to members', async () => {
-      db.prepare("UPDATE events SET audience = 'organization' WHERE id = ?").run(orgEventId);
-      const outsiderApp = seed(outsiderId, 'waitlisted', 1);
+      await db.prepare("UPDATE events SET audience = 'organization' WHERE id = ?").run(orgEventId);
+      const outsiderApp = await seed(outsiderId, 'waitlisted', 1);
 
-      expect(promoteFromWaitlist(slotId)).toEqual([]);
-      expect(db.prepare('SELECT status FROM applications WHERE id = ?').get(outsiderApp).status)
+      expect(await promoteFromWaitlist(slotId)).toEqual([]);
+      expect((await db.prepare('SELECT status FROM applications WHERE id = ?').get(outsiderApp)).status)
         .toBe('waitlisted');
     });
 
@@ -631,26 +637,28 @@ describe('applying to an organization event', () => {
        * deleted, with the whole function deleted, and with no ban at all. A
        * review caught it.
        */
-      db.prepare('UPDATE slots SET max_spots = 2 WHERE id = ?').run(slotId);
-      const held = seed(memberId, 'accepted');
-      db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
-                  VALUES ('elig-promo-ban-3', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
+      await db.prepare('UPDATE slots SET max_spots = 2 WHERE id = ?').run(slotId);
+      const held = await seed(memberId, 'accepted');
+      await db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('elig-promo-ban-3', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)
+      ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, user_id = excluded.user_id, banned_by = excluded.banned_by, reason = excluded.reason, created_at = excluded.created_at`)
         .run(orgId, memberId, organizerId, new Date().toISOString());
 
-      promoteFromWaitlist(slotId);
-      expect(db.prepare('SELECT status FROM applications WHERE id = ?').get(held).status)
+      await promoteFromWaitlist(slotId);
+      expect((await db.prepare('SELECT status FROM applications WHERE id = ?').get(held)).status)
         .toBe('accepted');
     });
 
     it('keeps a banned applicant out of the auto-select draw', async () => {
-      db.prepare('UPDATE slots SET max_spots = 5 WHERE id = ?').run(slotId);
-      const bannedApp = seed(memberId, 'pending');
-      const okApp = seed(outsiderId, 'pending');
-      db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
-                  VALUES ('elig-draw-ban', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
+      await db.prepare('UPDATE slots SET max_spots = 5 WHERE id = ?').run(slotId);
+      const bannedApp = await seed(memberId, 'pending');
+      const okApp = await seed(outsiderId, 'pending');
+      await db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('elig-draw-ban', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)
+      ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, user_id = excluded.user_id, banned_by = excluded.banned_by, reason = excluded.reason, created_at = excluded.created_at`)
         .run(orgId, memberId, organizerId, new Date().toISOString());
 
-      const draw = computeDraw(db, orgEventId, { runNumber: 1 });
+      const draw = await computeDraw(db, orgEventId, { runNumber: 1 });
       expect(draw.selectedIds, 'the draw SELECTED somebody the club had banned')
         .not.toContain(bannedApp);
       expect(draw.selectedIds).toContain(okApp);
@@ -668,16 +676,17 @@ describe('applying to an organization event', () => {
 
     it('takes a formerly-banned applicant off the waitlist once the ban lifts', async () => {
       /* The self-healing half of the decision above, end to end. */
-      db.prepare('UPDATE slots SET max_spots = 1 WHERE id = ?').run(slotId);
-      const app = seed(memberId, 'waitlisted', 1);
-      db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
-                  VALUES ('elig-lift-ban', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
+      await db.prepare('UPDATE slots SET max_spots = 1 WHERE id = ?').run(slotId);
+      const app = await seed(memberId, 'waitlisted', 1);
+      await db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('elig-lift-ban', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)
+      ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, user_id = excluded.user_id, banned_by = excluded.banned_by, reason = excluded.reason, created_at = excluded.created_at`)
         .run(orgId, memberId, organizerId, new Date().toISOString());
-      expect(promoteFromWaitlist(slotId)).toEqual([]);
+      expect(await promoteFromWaitlist(slotId)).toEqual([]);
 
-      db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE id = ?')
+      await db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE id = ?')
         .run(new Date().toISOString(), 'elig-lift-ban');
-      expect(promoteFromWaitlist(slotId).map(p => p.applicationId)).toEqual([app]);
+      expect((await promoteFromWaitlist(slotId)).map(p => p.applicationId)).toEqual([app]);
     });
   });
 });

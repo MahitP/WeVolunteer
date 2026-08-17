@@ -210,6 +210,7 @@ describe('an export that expired earlier today is cleaned up', () => {
     vi.resetModules();
     const dbMod = await import('./db.js');
     dbMod.initDatabase();
+    await dbMod.completeDatabaseInit();
     const db = dbMod.db;
     const worker = await import('./workers/exportWorker.js');
 
@@ -223,7 +224,7 @@ describe('an export that expired earlier today is cleaned up', () => {
       VALUES ('exp-dt','u-dt','completed', NULL, ?, ?, ?)
     `).run(isoFromNow(-8 * HOUR), isoFromNow(-8 * HOUR), isoFromNow(-3 * HOUR));
 
-    worker.cleanupExpiredExports();
+    await worker.cleanupExpiredExports();
 
     const row = db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-dt');
     expect(

@@ -18,6 +18,7 @@
  *     LAST by distance, matching `distance != null` and `?? Infinity`
  *   • per-slot hours carry a 0.1 floor, as formatSlot does
  */
+import { hoursBetween, greatest } from './db/dialectSql.js';
 
 import { normaliseTag, MAX_TAGS_PER_EVENT } from './eventTags.js';
 
@@ -206,7 +207,7 @@ export function parseEventFilters(query = {}) {
  * can push the cosine a hair above 1 for two nearly identical points, and acos
  * of that is NaN, which would silently drop an event a user is standing next to.
  */
-export function eventQueryFragments({ lat, lng }) {
+export function eventQueryFragments({ lat, lng, db = null }) {
   const EARTH_RADIUS_MILES = 3958.8;
 
   const distanceExpr = lat != null
@@ -243,7 +244,7 @@ export function eventQueryFragments({ lat, lng }) {
                MAX(s.end_datetime)   AS max_end,
                COALESCE(SUM(s.max_spots), 0) AS total_spots,
                COALESCE(SUM(
-                 max(0.1, ROUND((julianday(s.end_datetime) - julianday(s.start_datetime)) * 24, 2))
+                 ${greatest(db, '0.1', hoursBetween(db, 's.start_datetime', 's.end_datetime'))}
                ), 0) AS total_hours,
                (SELECT COUNT(*) FROM applications a2
                  WHERE a2.event_id = e.id AND a2.status = 'accepted') AS accepted
@@ -253,7 +254,10 @@ export function eventQueryFragments({ lat, lng }) {
       )
     `,
     distanceSelect: `${distanceExpr} AS distance_miles`,
-    spotsSelect: 'MAX(0, agg.total_spots - COALESCE(agg.accepted, 0)) AS spots_remaining'
+    /* `greatest`, not `MAX`: SQLite overloads `max` as both the aggregate and
+       the scalar, PostgreSQL keeps them apart and answers
+       `function max(integer, bigint) does not exist`. */
+    spotsSelect: `${greatest(db, '0', 'agg.total_spots - COALESCE(agg.accepted, 0)')} AS spots_remaining`
   };
 }
 
@@ -265,7 +269,7 @@ export function eventQueryFragments({ lat, lng }) {
  * across every branch — the kind of bookkeeping that silently binds the wrong
  * value once a filter is added in the middle.
  */
-export function buildEventWhere(filters, userId) {
+export function buildEventWhere(filters, userId, db = null) {
   const clauses = [];
   const params = {};
 
@@ -333,7 +337,7 @@ export function buildEventWhere(filters, userId) {
    */
   if (filters.openOnly) {
     clauses.push(`e.status = 'open'`);
-    clauses.push('MAX(0, agg.total_spots - COALESCE(agg.accepted, 0)) > 0');
+    clauses.push(`${greatest(db, '0', 'agg.total_spots - COALESCE(agg.accepted, 0)')} > 0`);
     clauses.push('e.application_deadline > @now');
     params.now = new Date().toISOString();
   }

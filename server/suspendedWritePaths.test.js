@@ -73,7 +73,7 @@ describe('a suspended session cannot write anything', () => {
     expect(res.body.code).toBe('account_suspended');
 
     /* And the role is untouched, whatever the token was. */
-    expect(db.prepare('SELECT role FROM users WHERE id = ?').get('user-student-2').role)
+    expect((await db.prepare('SELECT role FROM users WHERE id = ?').get('user-student-2')).role)
       .toBe('student');
   });
 
@@ -87,7 +87,7 @@ describe('a suspended session cannot write anything', () => {
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('account_suspended');
 
-    const row = db.prepare(
+    const row = await db.prepare(
       'SELECT account_status, deleted_at FROM users WHERE id = ?'
     ).get('user-student-2');
     expect(row.account_status).toBe('suspended');
@@ -145,7 +145,7 @@ describe('a suspended session cannot write anything', () => {
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('account_suspended');
 
-      expect(db.prepare('SELECT account_status FROM users WHERE id = ?').get('user-student-1')
+      expect((await db.prepare('SELECT account_status FROM users WHERE id = ?').get('user-student-1'))
         .account_status).toBe('active');
     } finally {
       unsuspend('user-admin');

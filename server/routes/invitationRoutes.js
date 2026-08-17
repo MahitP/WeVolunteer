@@ -1,6 +1,7 @@
 import express from 'express';
+import { runInTransaction } from '../db/connectionContext.js';
 import { db } from '../db.js';
-import { authenticateToken, inTransaction } from '../utils.js';
+import { authenticateToken } from '../utils.js';
 import { requireCap, requireAAL2, ROLE } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import { recordAudit } from '../auditLog.js';
@@ -32,26 +33,26 @@ const router = express.Router();
  * invitation was sent and nothing more.
  */
 router.post('/api/admin/invitations', authenticateToken, requireCap('admin.create'),
-  requireAAL2('admin.invite'), (req, res) => {
+  requireAAL2('admin.invite'), async (req, res) => {
     const email = String(req.body?.email ?? '').trim().toLowerCase();
     const role = req.body?.role ?? INVITABLE_ROLES[0];
     const reason = req.body?.reason;
 
-    const refusal = invitationRefusal(db, { email, role, reason });
+    const refusal = await invitationRefusal(db, { email, role, reason });
     if (refusal) return res.status(refusal.status).json({ error: refusal.error, code: refusal.code });
 
     let created;
     try {
-      created = inTransaction(() => {
+      created = await runInTransaction(db, async (tx) => {
         /* First statement, bound to the address actually being invited, so a
            grant obtained for one person cannot invite another. */
-        spendChallenge(db, req, 'admin.invite', { email });
+        await spendChallenge(tx, req, 'admin.invite', { email });
 
-        const invite = createInvitation(db, {
+        const invite = await createInvitation(tx, {
           email, role, reason, invitedBy: req.user.id,
         });
 
-        recordAudit(db, {
+        await recordAudit(tx, {
           adminId: req.user.id,
           action: 'ADMIN_INVITED',
           /**
@@ -95,9 +96,9 @@ router.post('/api/admin/invitations', authenticateToken, requireCap('admin.creat
   });
 
 /** GET /api/admin/invitations — the pending list (IV-14). */
-router.get('/api/admin/invitations', authenticateToken, requireCap('admin.create'), (req, res) => {
+router.get('/api/admin/invitations', authenticateToken, requireCap('admin.create'), async (req, res) => {
   try {
-    res.json({ invitations: listPendingInvitations(db) });
+    res.json({ invitations: await listPendingInvitations(db) });
   } catch (err) {
     console.error('Failed to list invitations:', err);
     res.status(500).json({ error: 'Could not load the pending invitations.' });
@@ -112,9 +113,9 @@ router.get('/api/admin/invitations', authenticateToken, requireCap('admin.create
  * dangerous one. The same reasoning the platform applies elsewhere — a gate
  * belongs on the operation that grants.
  */
-router.delete('/api/admin/invitations/:id', authenticateToken, requireCap('admin.create'), (req, res) => {
+router.delete('/api/admin/invitations/:id', authenticateToken, requireCap('admin.create'), async (req, res) => {
   try {
-    const invitation = db.prepare(
+    const invitation = await db.prepare(
       'SELECT id, email, role, status FROM admin_invitations WHERE id = ?'
     ).get(req.params.id);
     if (!invitation) return res.status(404).json({ error: 'No such invitation.' });
@@ -125,9 +126,9 @@ router.delete('/api/admin/invitations/:id', authenticateToken, requireCap('admin
       });
     }
 
-    inTransaction(() => {
-      revokeInvitation(db, { id: invitation.id });
-      recordAudit(db, {
+    await runInTransaction(db, async (tx) => {
+      await revokeInvitation(tx, { id: invitation.id });
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'ADMIN_INVITE_REVOKED',
         details: `Revoked the pending ${invitation.role} invitation for ${invitation.email}`,
@@ -164,9 +165,9 @@ router.delete('/api/admin/invitations/:id', authenticateToken, requireCap('admin
  * catches, so a failed audit rolls the promotion back: there is no state where
  * somebody became an administrator and the record did not happen.
  */
-router.post('/api/auth/accept-invitation', authenticateToken, (req, res) => {
+router.post('/api/auth/accept-invitation', authenticateToken, async (req, res) => {
   try {
-    const resolved = resolveInvitation(db, { token: req.body?.token, user: req.user });
+    const resolved = await resolveInvitation(db, { token: req.body?.token, user: req.user });
 
     if (!resolved.ok) {
       console.warn(describeFailure(resolved.logReason));
@@ -177,21 +178,21 @@ router.post('/api/auth/accept-invitation', authenticateToken, (req, res) => {
     const { invitation } = resolved;
     const now = new Date().toISOString();
 
-    inTransaction(() => {
-      db.prepare(`
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare(`
         UPDATE admin_invitations
            SET status = 'accepted', resolved_at = ?, accepted_by = ?
          WHERE id = ? AND status = 'pending'
       `).run(now, req.user.id, invitation.id);
 
-      db.prepare(`
+      await tx.prepare(`
         UPDATE users
            SET role = ?, promoted_at = ?, promoted_by = ?, promotion_reason = ?,
                token_version = token_version + 1
          WHERE id = ?
       `).run(ROLE.ADMIN, now, invitation.invited_by, invitation.reason, req.user.id);
 
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: invitation.invited_by,
         action: 'ADMIN_INVITE_ACCEPTED',
         targetUserId: req.user.id,

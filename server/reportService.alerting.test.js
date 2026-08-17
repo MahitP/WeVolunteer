@@ -140,7 +140,7 @@ describe('SYSTEM_ALERT is a mandatory notice', () => {
 });
 
 describe('an urgent safety report reaches the moderator whatever their preferences say', () => {
-  it('emails the moderator even with notifications fully switched off', () => {
+  it('emails the moderator even with notifications fully switched off', async () => {
     const mod = moderatorId();
     silenceAllPreferences(mod);
     clearOutbox(mod);
@@ -148,7 +148,7 @@ describe('an urgent safety report reaches the moderator whatever their preferenc
     const student = makeStudent();
     const organizer = makeOrganizer();
 
-    const res = createReport({
+    const res = await createReport({
       reporter: { id: student, role: 'student' },
       targetType: 'user',
       targetId: organizer,
@@ -165,14 +165,14 @@ describe('an urgent safety report reaches the moderator whatever their preferenc
     ).toBeGreaterThan(0);
   });
 
-  it('also writes the in-app notification, so both routes are covered', () => {
+  it('also writes the in-app notification, so both routes are covered', async () => {
     const mod = moderatorId();
     silenceAllPreferences(mod);
     clearOutbox(mod);
 
     const student = makeStudent();
     const organizer = makeOrganizer();
-    createReport({
+    await createReport({
       reporter: { id: student, role: 'student' },
       targetType: 'user',
       targetId: organizer,
@@ -190,14 +190,14 @@ describe('an urgent safety report reaches the moderator whatever their preferenc
    * category that is normal on its own. A student who picks the mildest option
    * available while describing something serious must still produce an alert.
    */
-  it('alerts on a student-reports-adult report filed under a NON-urgent category', () => {
+  it('alerts on a student-reports-adult report filed under a NON-urgent category', async () => {
     const mod = moderatorId();
     silenceAllPreferences(mod);
     clearOutbox(mod);
 
     const student = makeStudent();
     const organizer = makeOrganizer();
-    const res = createReport({
+    const res = await createReport({
       reporter: { id: student, role: 'student' },
       targetType: 'user',
       targetId: organizer,
@@ -219,16 +219,16 @@ describe('normal-priority reports still respect preferences', () => {
    * "an alert that fires for everything is an alert people learn to close" — and
    * making SYSTEM_ALERT mandatory must not have widened that.
    */
-  it('sends no alert at all for a normal-priority report', () => {
+  it('sends no alert at all for a normal-priority report', async () => {
     const mod = moderatorId();
     // Preferences fully ENABLED, so a missing alert cannot be blamed on them.
-    db.prepare('UPDATE users SET email_opt_out = 0 WHERE id = ?').run(mod);
-    db.prepare("DELETE FROM notification_preferences WHERE user_id = ?").run(mod);
+    await db.prepare('UPDATE users SET email_opt_out = 0 WHERE id = ?').run(mod);
+    await db.prepare("DELETE FROM notification_preferences WHERE user_id = ?").run(mod);
     clearOutbox(mod);
 
     const reporter = makeOrganizer();   // adult reporting an adult: no student floor
     const target = makeOrganizer();
-    const res = createReport({
+    const res = await createReport({
       reporter: { id: reporter, role: 'organizer' },
       targetType: 'user',
       targetId: target,

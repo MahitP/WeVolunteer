@@ -25,8 +25,9 @@ function initInSubprocess(dbFile, readBack) {
     process.env.WEV_DB_PATH = ${JSON.stringify(dbFile)};
     process.env.JWT_SECRET = 'test';
     process.env.DEMO_MODE = 'true';
-    const { db, initDatabase } = await import('${root}/server/db.js');
+    const { db, initDatabase, completeDatabaseInit } = await import('${root}/server/db.js');
     initDatabase();
+    await completeDatabaseInit();
     console.log('RESULT' + JSON.stringify(${readBack}));
   `], { cwd: process.cwd(), stdio: 'pipe', encoding: 'utf8' });
   return JSON.parse(out.split('\n').find(l => l.startsWith('RESULT')).slice('RESULT'.length));

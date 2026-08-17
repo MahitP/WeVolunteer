@@ -24,8 +24,8 @@ import crypto from 'node:crypto';
  */
 
 /** True when either party has blocked the other. */
-export function isBlockedBetween(db, a, b) {
-  return Boolean(db.prepare(`
+export async function isBlockedBetween(db, a, b) {
+  return Boolean(await db.prepare(`
     SELECT 1 FROM user_blocks
     WHERE (blocker_id = ? AND blocked_id = ?)
        OR (blocker_id = ? AND blocked_id = ?)
@@ -34,9 +34,9 @@ export function isBlockedBetween(db, a, b) {
 }
 
 /** The ids this user has blocked. */
-export function blockedBy(db, blockerId) {
-  return db.prepare('SELECT blocked_id FROM user_blocks WHERE blocker_id = ?')
-    .all(blockerId).map(r => r.blocked_id);
+export async function blockedBy(db, blockerId) {
+  return (await db.prepare('SELECT blocked_id FROM user_blocks WHERE blocker_id = ?')
+    .all(blockerId)).map(r => r.blocked_id);
 }
 
 /**
@@ -46,13 +46,13 @@ export function blockedBy(db, blockerId) {
  * Returns true when a row was actually created, so the caller can decide
  * whether to raise the moderation signal (a repeat tap should not).
  */
-export function block(db, { blockerId, blockedId, now = null }) {
-  const existing = db.prepare(
+export async function block(db, { blockerId, blockedId, now = null }) {
+  const existing = await db.prepare(
     'SELECT 1 FROM user_blocks WHERE blocker_id = ? AND blocked_id = ?'
   ).get(blockerId, blockedId);
   if (existing) return false;
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO user_blocks (id, blocker_id, blocked_id, created_at)
     VALUES (?, ?, ?, ?)
   `).run(
@@ -65,8 +65,8 @@ export function block(db, { blockerId, blockedId, now = null }) {
 }
 
 /** Removes a block. Returns true when one was actually removed. */
-export function unblock(db, { blockerId, blockedId }) {
-  const { changes } = db.prepare(
+export async function unblock(db, { blockerId, blockedId }) {
+  const { changes } = await db.prepare(
     'DELETE FROM user_blocks WHERE blocker_id = ? AND blocked_id = ?'
   ).run(blockerId, blockedId);
   return changes > 0;

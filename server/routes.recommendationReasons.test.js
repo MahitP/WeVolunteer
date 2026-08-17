@@ -30,21 +30,21 @@ const FAR = { lat: 40.5000, lng: -74.0000 };    // ~34 mi north
 
 async function insertEvent({ id, title, tags = [], lat = null, lng = null, category = 'Other', description = 'General help.' }) {
   const { db } = await import('./db.js');
-  const org = db.prepare("SELECT id FROM users WHERE role='organizer' LIMIT 1").get().id;
+  const org = (await db.prepare("SELECT id FROM users WHERE role='organizer' LIMIT 1").get()).id;
   const ahead = d => new Date(Date.now() + d * 864e5).toISOString();
 
-  db.prepare(`INSERT INTO events (id,title,description,category,location,application_deadline,organizer_id,status,created_at,latitude,longitude)
+  await db.prepare(`INSERT INTO events (id,title,description,category,location,application_deadline,organizer_id,status,created_at,latitude,longitude)
               VALUES (?,?,?,?,'Hall',?,?, 'open', ?, ?, ?)`)
     .run(id, title, description, category, ahead(10), org, ahead(-30), lat, lng);
 
-  db.prepare(`INSERT INTO slots (id,event_id,name,description,start_datetime,end_datetime,max_spots)
+  await db.prepare(`INSERT INTO slots (id,event_id,name,description,start_datetime,end_datetime,max_spots)
               VALUES (?,?,'Shift','work',?,?,20)`)
     .run(`slot-${id}`, id, ahead(12), ahead(12.2));
 
   for (const label of tags) {
     const { normaliseTag } = await import('./eventTags.js');
     const n = normaliseTag(label);
-    db.prepare('INSERT INTO event_tags (event_id, tag, label) VALUES (?,?,?)')
+    await db.prepare('INSERT INTO event_tags (event_id, tag, label) VALUES (?,?,?)')
       .run(id, n.tag, n.label);
   }
 }
@@ -100,7 +100,7 @@ describe('authorization is unchanged', () => {
        seed rather than named, so this does not break when the demo data
        changes. */
     const { db } = await import('./db.js');
-    const row = db.prepare(
+    const row = await db.prepare(
       "SELECT email FROM users WHERE role='organizer' AND account_status='active' LIMIT 1",
     ).get();
     expect(row, 'the demo seed should contain an organizer').toBeTruthy();

@@ -1,4 +1,5 @@
 import express from 'express';
+import { runInTransaction } from '../db/connectionContext.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -10,7 +11,7 @@ import {
 } from '../email.js';
 import { VALID_GRADES, JWT_SECRET, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
-import { authenticateToken, selfUserResponse, inTransaction } from '../utils.js';
+import { authenticateToken, selfUserResponse } from '../utils.js';
 import { requireAAL2, ROLE, can } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import { recordAudit } from '../auditLog.js';
@@ -54,9 +55,9 @@ const router = express.Router();
  * irreversible and a deliberateness check is worth having — but it is no longer
  * a server-side credential, because it never was one.
  */
-router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delete'), (req, res) => {
+router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delete'), async (req, res) => {
   try {
-    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!userRow) return res.status(404).json({ error: 'User not found' });
 
     if (can(req.principal, 'admin.create')) {
@@ -75,10 +76,10 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
     // the earlier check gating this on the account's role was a redundant
     // optimisation, not a second gate, and dropping it changes nothing
     // observable.
-    const activeEventsCount = db.prepare(`
+    const activeEventsCount = (await db.prepare(`
       SELECT COUNT(*) as count FROM events
       WHERE organizer_id = ? AND status NOT IN ('completed', 'cancelled')
-    `).get(req.principal.userId).count;
+    `).get(req.principal.userId)).count;
 
     if (activeEventsCount > 0) {
       return res.status(409).json({
@@ -89,7 +90,7 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
 
     const now = new Date().toISOString();
 
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       /**
        * 0. Spend the grant, first, inside the same transaction as the deletion.
        *
@@ -103,13 +104,13 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
        * directions: no deletion without a spent grant, no spent grant without a
        * deletion.
        */
-      spendChallenge(db, req, 'account.delete', {});
+      await spendChallenge(tx, req, 'account.delete', {});
 
       // 1. Snapshot Certificates
-      const certificates = db.prepare('SELECT * FROM certificates WHERE user_id = ?').all(req.user.id);
+      const certificates = await tx.prepare('SELECT * FROM certificates WHERE user_id = ?').all(req.user.id);
       for (const cert of certificates) {
         // Fetch current dynamic data
-        const eventRow = db.prepare(`
+        const eventRow = await tx.prepare(`
           SELECT e.title, org.name AS organizer_name,
                  COALESCE(SUM(at.hours_awarded),0) AS hours, MAX(s.end_datetime) AS last_end
           FROM attendance at
@@ -121,7 +122,7 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
         `).get(cert.user_id, cert.event_id);
         
         if (eventRow) {
-          db.prepare(`
+          await tx.prepare(`
             UPDATE certificates 
             SET volunteer_name_snapshot = ?, event_name_snapshot = ?, 
                 organization_snapshot = ?, hours_snapshot = ?, completed_at_snapshot = ?
@@ -151,7 +152,7 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
        * `attendance` is deliberately untouched — that is the verified service
        * record, and the delete dialog promises the user it is preserved.
        */
-      const releasedEvents = db.prepare(`
+      const releasedEvents = await tx.prepare(`
         SELECT DISTINCT a.event_id, e.organizer_id, e.title
         FROM applications a
         JOIN events e ON a.event_id = e.id
@@ -162,20 +163,20 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
           AND e.status NOT IN ('completed', 'cancelled')
       `).all(req.user.id, new Date().toISOString());
 
-      db.prepare(`
+      await tx.prepare(`
         UPDATE applications SET status = 'withdrawn', waitlist_order = NULL
         WHERE user_id = ? AND status IN ('pending', 'waitlisted', 'accepted')
       `).run(req.user.id);
 
       // 2. Delete preferences
-      db.prepare('DELETE FROM notification_preferences WHERE user_id = ?').run(req.user.id);
-      db.prepare('DELETE FROM user_favorites WHERE user_id = ?').run(req.user.id);
-      db.prepare('DELETE FROM notifications WHERE user_id = ?').run(req.user.id);
-      db.prepare('DELETE FROM oauth_accounts WHERE user_id = ?').run(req.user.id);
+      await tx.prepare('DELETE FROM notification_preferences WHERE user_id = ?').run(req.user.id);
+      await tx.prepare('DELETE FROM user_favorites WHERE user_id = ?').run(req.user.id);
+      await tx.prepare('DELETE FROM notifications WHERE user_id = ?').run(req.user.id);
+      await tx.prepare('DELETE FROM oauth_accounts WHERE user_id = ?').run(req.user.id);
       // Live credentials for an account that no longer exists. A reset link
       // already in someone's inbox must not outlive the account it belongs to.
-      db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(req.user.id);
-      db.prepare('DELETE FROM email_verification_tokens WHERE user_id = ?').run(req.user.id);
+      await tx.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(req.user.id);
+      await tx.prepare('DELETE FROM email_verification_tokens WHERE user_id = ?').run(req.user.id);
 
       // 3. Update User Table (Anonymise and Soft Delete)
       const deletedEmail = `deleted_${req.user.id}@system.local`;
@@ -203,7 +204,7 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
        * that no longer exists is a fact about a deleted account and nothing
        * else.
        */
-      db.prepare(`
+      await tx.prepare(`
         UPDATE users
         SET name = ?, email = ?, username = ?, avatar = NULL, bio = NULL, school = NULL,
             profile_picture_url = NULL, profile_picture_uploaded_at = NULL,
@@ -221,7 +222,7 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
       //
       // admin_id is the account itself: this is a self-deletion, and the column
       // is NOT NULL with a foreign key, so there is no administrator to name.
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'ACCOUNT_DELETED',
         targetUserId: req.user.id,
@@ -237,7 +238,7 @@ router.delete('/api/auth/account', authenticateToken, requireAAL2('account.delet
        * three days out is not much better than a spot silently held.
        */
       for (const ev of releasedEvents) {
-        db.prepare(`
+        await tx.prepare(`
           INSERT INTO notifications (id, user_id, kind, title, body, link, read, created_at)
           VALUES (?, ?, 'info', ?, ?, ?, 0, ?)
         `).run(
@@ -316,9 +317,9 @@ router.post('/api/auth/forgot-password', async (req, res) => {
      * leo.chen@… should get their mail, not silence.
      */
     const identifier = String(email).trim();
-    const user = db.prepare(`
+    const user = await db.prepare(`
       SELECT id, email FROM users
-      WHERE (email = ? COLLATE NOCASE OR username = ? COLLATE NOCASE)
+      WHERE (email = ? COLLATE nocase OR username = ? COLLATE nocase)
         AND account_status = 'active'
     `).get(identifier, identifier);
 
@@ -330,8 +331,8 @@ router.post('/api/auth/forgot-password', async (req, res) => {
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
       // One live token per user: issuing a new link invalidates the old one.
-      db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(user.id);
-      db.prepare('INSERT INTO password_reset_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
+      await db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(user.id);
+      await db.prepare('INSERT INTO password_reset_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
         .run(tokenHash, user.id, expiresAt);
 
       await sendPasswordResetEmail(user.email, token);
@@ -368,25 +369,25 @@ router.post('/api/auth/reset-password', async (req, res) => {
     /* The link carries the plaintext; the table holds the digest. Hashing the
        incoming value is what turns one into the other. */
     const tokenHash = hashToken(token);
-    const row = db.prepare('SELECT * FROM password_reset_tokens WHERE token_hash = ?').get(tokenHash);
+    const row = await db.prepare('SELECT * FROM password_reset_tokens WHERE token_hash = ?').get(tokenHash);
     if (!row) {
       return res.status(400).json({ error: 'That reset link is not valid. Request a new one.' });
     }
 
     if (new Date(row.expires_at) < new Date()) {
-      db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
+      await db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That reset link has expired. Request a new one.' });
     }
 
-    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
+    const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
     if (!userRow || userRow.account_status === 'deleted') {
-      db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
+      await db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That reset link is not valid. Request a new one.' });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
 
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       /**
        * Bumping token_version signs every existing session out.
        *
@@ -394,12 +395,12 @@ router.post('/api/auth/reset-password', async (req, res) => {
        * else had the old password, leaving their 7-day cookie live would make
        * the reset cosmetic.
        */
-      db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?')
+      await tx.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?')
         .run(passwordHash, row.user_id);
-      db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
+      await tx.prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?').run(tokenHash);
       // Any other outstanding reset link for this account is now moot, and
       // leaving it live is a second key to a lock that was just changed.
-      db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(row.user_id);
+      await tx.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(row.user_id);
     });
 
     /**
@@ -410,7 +411,7 @@ router.post('/api/auth/reset-password', async (req, res) => {
      * would land back on the "check your email" wall right after recovering.
      */
     if (userRow.email_verified !== 1) {
-      db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(row.user_id);
+      await db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(row.user_id);
     }
 
     // Someone who has just proved control of their mailbox and chosen a new
@@ -459,7 +460,7 @@ router.post('/api/auth/change-password', authenticateToken, requireAAL2('passwor
   }
 
   try {
-    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!userRow) return res.status(404).json({ error: 'User not found' });
 
     // Reported back to the client so the UI can say "password added" rather than
@@ -478,22 +479,22 @@ router.post('/api/auth/change-password', authenticateToken, requireAAL2('passwor
     // bcryptAsync.test.js, which fails the build on that shape.
     const passwordHash = await bcrypt.hash(newPassword, 10);
 
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       // The grant is spent with the write it authorises, not before it: a
       // rollback here must leave the user's verification unspent. See the
       // longer note on DELETE /api/auth/account above.
-      spendChallenge(db, req, 'password.change', {});
+      await spendChallenge(tx, req, 'password.change', {});
 
-      db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?')
+      await tx.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?')
         .run(passwordHash, req.user.id);
-      db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(req.user.id);
+      await tx.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(req.user.id);
     });
 
     // token_version just invalidated every session including this one. Reissue
     // for the caller so changing a password does not eject the person doing it,
     // while every other device is signed out — which is the point.
-    const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-    issueSession(res, selfUserResponse(fresh), fresh.token_version);
+    const fresh = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    await issueSession(res, await selfUserResponse(fresh), fresh.token_version);
 
     res.json({ success: true, addedPassword: isOauthOnly });
   } catch (err) {
@@ -542,7 +543,7 @@ router.post('/api/auth/change-email', authenticateToken, requireAAL2('email.chan
   const target = check.value;
 
   try {
-    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!userRow) return res.status(404).json({ error: 'User not found' });
 
     if (target === String(userRow.email).toLowerCase()) {
@@ -555,7 +556,7 @@ router.post('/api/auth/change-email', authenticateToken, requireAAL2('email.chan
     // Deliberately the same answer whether the address is on an active account
     // or a deletion tombstone: both mean "not available", and distinguishing
     // them would tell the caller something about somebody else.
-    if (db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE AND id != ?').get(target, req.user.id)) {
+    if (await db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE nocase AND id != ?').get(target, req.user.id)) {
       return res.status(409).json({
         error: 'Another account already uses that email address.',
         field: 'newEmail'
@@ -565,7 +566,7 @@ router.post('/api/auth/change-email', authenticateToken, requireAAL2('email.chan
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + EMAIL_CHANGE_TTL_MS).toISOString();
 
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       /**
        * Bound to `newEmail` exactly as the request presented it, NOT to the
        * normalised `target`.
@@ -581,17 +582,17 @@ router.post('/api/auth/change-email', authenticateToken, requireAAL2('email.chan
        * one target, so binding the raw value is if anything the tighter of the
        * two — and it removes the only way this binding can break by accident.
        */
-      spendChallenge(db, req, 'email.change', { newEmail });
+      await spendChallenge(tx, req, 'email.change', { newEmail });
 
       // One live request per user: asking again supersedes the previous link
       // rather than leaving two addresses able to claim the account. Inside the
       // transaction with the insert that replaces it, so a rollback cannot
       // discard the pending change the user already had.
-      db.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(req.user.id);
+      await tx.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(req.user.id);
       /* Digest only. This link can move an account's only recovery channel to a
          new address, so a readable copy of it is an account-takeover primitive.
          See migration 048. */
-      db.prepare('INSERT INTO email_change_tokens (token_hash, user_id, new_email, expires_at) VALUES (?, ?, ?, ?)')
+      await tx.prepare('INSERT INTO email_change_tokens (token_hash, user_id, new_email, expires_at) VALUES (?, ?, ?, ?)')
         .run(hashToken(token), req.user.id, target, expiresAt);
     });
 
@@ -621,37 +622,37 @@ router.post('/api/auth/change-email', authenticateToken, requireAAL2('email.chan
  * never signed in — a phone reading a school mailbox — and the token itself is
  * the proof of control, exactly as with the welcome link.
  */
-router.post('/api/auth/confirm-email-change', (req, res) => {
+router.post('/api/auth/confirm-email-change', async (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'Token is required' });
 
   try {
     const tokenHash = hashToken(token);
-    const row = db.prepare('SELECT * FROM email_change_tokens WHERE token_hash = ?').get(tokenHash);
+    const row = await db.prepare('SELECT * FROM email_change_tokens WHERE token_hash = ?').get(tokenHash);
     if (!row) {
       return res.status(400).json({ error: 'That link is not valid. Request the change again from Settings.' });
     }
     if (new Date(row.expires_at) < new Date()) {
-      db.prepare('DELETE FROM email_change_tokens WHERE token_hash = ?').run(tokenHash);
+      await db.prepare('DELETE FROM email_change_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That link has expired. Request the change again from Settings.' });
     }
 
-    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
+    const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
     if (!userRow || userRow.account_status !== 'active') {
-      db.prepare('DELETE FROM email_change_tokens WHERE token_hash = ?').run(tokenHash);
+      await db.prepare('DELETE FROM email_change_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That link is not valid. Request the change again from Settings.' });
     }
 
     // Re-check availability: the address was free when the request was made,
     // and someone else may have claimed it during the 24-hour window.
-    if (db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE AND id != ?').get(row.new_email, row.user_id)) {
-      db.prepare('DELETE FROM email_change_tokens WHERE token_hash = ?').run(tokenHash);
+    if (await db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE nocase AND id != ?').get(row.new_email, row.user_id)) {
+      await db.prepare('DELETE FROM email_change_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(409).json({
         error: 'Another account claimed that email address while this request was open. Try a different one.'
       });
     }
 
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       /**
        * Bumping token_version signs every session out, including whichever one
        * asked for the change.
@@ -662,24 +663,24 @@ router.post('/api/auth/confirm-email-change', (req, res) => {
        * leaving that session live would make the notice to the old address
        * useless.
        */
-      db.prepare(
+      await tx.prepare(
         'UPDATE users SET email = ?, email_verified = 1, token_version = token_version + 1 WHERE id = ?'
       ).run(row.new_email, row.user_id);
 
-      db.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(row.user_id);
+      await tx.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(row.user_id);
       // Reset links already in flight were mailed to the OLD address and must
       // not stay usable now that the account answers somewhere else.
-      db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(row.user_id);
-      db.prepare('DELETE FROM email_verification_tokens WHERE user_id = ?').run(row.user_id);
+      await tx.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(row.user_id);
+      await tx.prepare('DELETE FROM email_verification_tokens WHERE user_id = ?').run(row.user_id);
     });
 
-    const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
-    const user = selfUserResponse(fresh);
+    const fresh = await db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
+    const user = await selfUserResponse(fresh);
 
     // Opening the link proves control of the new mailbox, so the person holding
     // it gets a working session — otherwise confirming from a phone would leave
     // them signed out everywhere with no explanation.
-    issueSession(res, user, fresh.token_version);
+    await issueSession(res, user, fresh.token_version);
     clearLoginFailuresForUser(fresh.id);
 
     res.json({ success: true, user, emailVerified: true });
@@ -690,9 +691,9 @@ router.post('/api/auth/confirm-email-change', (req, res) => {
 });
 
 /** Cancels a pending email-address change. */
-router.post('/api/auth/cancel-email-change', authenticateToken, (req, res) => {
+router.post('/api/auth/cancel-email-change', authenticateToken, async (req, res) => {
   try {
-    const { changes } = db.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(req.user.id);
+    const { changes } = await db.prepare('DELETE FROM email_change_tokens WHERE user_id = ?').run(req.user.id);
     res.json({ success: true, cancelled: changes > 0 });
   } catch (err) {
     console.error('Cancel email change error:', err);
@@ -701,9 +702,9 @@ router.post('/api/auth/cancel-email-change', authenticateToken, (req, res) => {
 });
 
 /** Reports whether a change is waiting on confirmation, for the Settings card. */
-router.get('/api/auth/pending-email-change', authenticateToken, (req, res) => {
+router.get('/api/auth/pending-email-change', authenticateToken, async (req, res) => {
   try {
-    const row = db.prepare(
+    const row = await db.prepare(
       'SELECT new_email, expires_at FROM email_change_tokens WHERE user_id = ? AND expires_at > ?'
     ).get(req.user.id, new Date().toISOString());
     res.json(row ? { pending: row.new_email, expiresAt: row.expires_at } : { pending: null });
@@ -723,7 +724,7 @@ router.get('/api/auth/pending-email-change', authenticateToken, (req, res) => {
  */
 const USERNAME_COOLDOWN_DAYS = 30;
 
-router.post('/api/auth/change-username', authenticateToken, (req, res) => {
+router.post('/api/auth/change-username', authenticateToken, async (req, res) => {
   const check = validateUsername(req.body.username);
   if (!check.ok) {
     return res.status(400).json({ error: check.error, field: 'username' });
@@ -731,7 +732,7 @@ router.post('/api/auth/change-username', authenticateToken, (req, res) => {
   const target = check.value;
 
   try {
-    const userRow = db.prepare('SELECT username, username_changed_at FROM users WHERE id = ?').get(req.user.id);
+    const userRow = await db.prepare('SELECT username, username_changed_at FROM users WHERE id = ?').get(req.user.id);
     if (!userRow) return res.status(404).json({ error: 'User not found' });
 
     const current = String(userRow.username || '');
@@ -763,17 +764,17 @@ router.post('/api/auth/change-username', authenticateToken, (req, res) => {
       }
     }
 
-    if (!caseOnly && db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE AND id != ?').get(target, req.user.id)) {
+    if (!caseOnly && await db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE nocase AND id != ?').get(target, req.user.id)) {
       return res.status(409).json({ error: 'That username is already taken.', field: 'username' });
     }
 
     // No token_version bump: a username authenticates nothing, so changing it
     // is no reason to sign anyone out.
-    db.prepare('UPDATE users SET username = ?, username_changed_at = ? WHERE id = ?')
+    await db.prepare('UPDATE users SET username = ?, username_changed_at = ? WHERE id = ?')
       .run(target, caseOnly ? userRow.username_changed_at : new Date().toISOString(), req.user.id);
 
-    const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-    res.json({ success: true, user: selfUserResponse(fresh) });
+    const fresh = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    res.json({ success: true, user: await selfUserResponse(fresh) });
   } catch (err) {
     console.error('Change username error:', err);
     if (String(err.message).includes('UNIQUE')) {
@@ -784,34 +785,34 @@ router.post('/api/auth/change-username', authenticateToken, (req, res) => {
 });
 
 /** Confirms an address from the link in the welcome email. Single use. */
-router.post('/api/auth/verify-email', (req, res) => {
+router.post('/api/auth/verify-email', async (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'Token is required' });
 
   try {
     const tokenHash = hashToken(token);
-    const row = db.prepare('SELECT * FROM email_verification_tokens WHERE token_hash = ?').get(tokenHash);
+    const row = await db.prepare('SELECT * FROM email_verification_tokens WHERE token_hash = ?').get(tokenHash);
     if (!row) {
       return res.status(400).json({ error: 'That confirmation link is not valid. Request a new one.' });
     }
     if (new Date(row.expires_at) < new Date()) {
-      db.prepare('DELETE FROM email_verification_tokens WHERE token_hash = ?').run(tokenHash);
+      await db.prepare('DELETE FROM email_verification_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That confirmation link has expired. Request a new one.' });
     }
 
-    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
+    const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
     if (!userRow || userRow.account_status !== 'active') {
-      db.prepare('DELETE FROM email_verification_tokens WHERE token_hash = ?').run(tokenHash);
+      await db.prepare('DELETE FROM email_verification_tokens WHERE token_hash = ?').run(tokenHash);
       return res.status(400).json({ error: 'That confirmation link is not valid. Request a new one.' });
     }
 
-    inTransaction(() => {
-      db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(row.user_id);
-      db.prepare('DELETE FROM email_verification_tokens WHERE token_hash = ?').run(tokenHash);
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(row.user_id);
+      await tx.prepare('DELETE FROM email_verification_tokens WHERE token_hash = ?').run(tokenHash);
     });
 
-    const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
-    const user = selfUserResponse(fresh);
+    const fresh = await db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
+    const user = await selfUserResponse(fresh);
 
     /**
      * Confirming signs you in, which is what makes the link from the welcome
@@ -819,8 +820,13 @@ router.post('/api/auth/verify-email', (req, res) => {
      * single-use and 24-hour, and the act of opening it proves control of the
      * mailbox — the same proof "forgot password" relies on.
      */
-    issueSession(res, user, fresh.token_version);
-    purgeExpiredVerificationTokens();
+    await issueSession(res, user, fresh.token_version);
+    /* Awaited. It is housekeeping, and it used to be a bare call because on
+       SQLite the delete had already happened by the time control returned. On
+       PostgreSQL the promise outlives the request: a rejection becomes an
+       unhandled rejection after the 200 has been sent, and the rows stay. One
+       indexed delete is not worth leaving that open. */
+    await purgeExpiredVerificationTokens();
 
     res.json({ success: true, user, emailVerified: true });
   } catch (err) {
@@ -832,13 +838,13 @@ router.post('/api/auth/verify-email', (req, res) => {
 /** Sends a fresh confirmation link to the signed-in user's own address. */
 router.post('/api/auth/resend-verification', authenticateToken, async (req, res) => {
   try {
-    const user = db.prepare('SELECT id, email, email_verified FROM users WHERE id = ?').get(req.user.id);
+    const user = await db.prepare('SELECT id, email, email_verified FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     if (user.email_verified === 1) {
       return res.json({ success: true, message: 'That address is already confirmed.' });
     }
 
-    const token = issueVerificationToken(user.id);
+    const token = await issueVerificationToken(user.id);
     await sendVerificationEmail(user.email, token);
 
     res.json({ success: true, email: user.email });
@@ -857,13 +863,13 @@ router.post('/api/auth/resend-verification', authenticateToken, async (req, res)
  * unused email" whatever had actually gone wrong, including when nothing was
  * wrong with the address at all.
  */
-router.get('/api/auth/check-email', (req, res) => {
+router.get('/api/auth/check-email', async (req, res) => {
   const check = validateEmail(req.query.email);
   if (!check.ok) {
     return res.json({ available: false, valid: false, error: check.error });
   }
   try {
-    const row = db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE').get(check.value);
+    const row = await db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE nocase').get(check.value);
     res.json({ available: !row, valid: true });
   } catch (err) {
     console.error('check-email error:', err);
@@ -898,11 +904,11 @@ router.get('/api/auth/check-email', (req, res) => {
  * whether to show the interstitial, and an error response for the ordinary case
  * would make "no agreement needed" indistinguishable from "the request failed".
  */
-router.get('/api/legal/organizer-agreement', authenticateToken, (req, res) => {
+router.get('/api/legal/organizer-agreement', authenticateToken, async (req, res) => {
   try {
-    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
+    const user = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'Account not found' });
-    res.json(organizerAgreementStatus(db, user));
+    res.json(await organizerAgreementStatus(db, user));
   } catch (error) {
     console.error('Organizer agreement status error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -927,9 +933,9 @@ router.get('/api/legal/organizer-agreement', authenticateToken, (req, res) => {
  * gating it would mean an organizer who cannot complete a re-auth round trip is
  * locked out of the only action that restores their account.
  */
-router.post('/api/legal/organizer-agreement/accept', authenticateToken, (req, res) => {
+router.post('/api/legal/organizer-agreement/accept', authenticateToken, async (req, res) => {
   try {
-    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
+    const user = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'Account not found' });
 
     if (user.role !== ROLE.ORGANIZER) {
@@ -949,9 +955,9 @@ router.post('/api/legal/organizer-agreement/accept', authenticateToken, (req, re
       });
     }
 
-    const result = acceptOrganizerAgreement(db, { userId: user.id, req });
+    const result = await acceptOrganizerAgreement(db, { userId: user.id, req });
 
-    recordAudit(db, {
+    await recordAudit(db, {
       adminId: user.id,
       action: 'ACCEPT_ORGANIZER_AGREEMENT',
       targetUserId: user.id,
@@ -984,11 +990,11 @@ router.post('/api/legal/organizer-agreement/accept', authenticateToken, (req, re
  * gives: the client asks on load, and an error would make "nothing to accept"
  * indistinguishable from "the request failed".
  */
-router.get('/api/legal/student-organizer-agreement', authenticateToken, (req, res) => {
+router.get('/api/legal/student-organizer-agreement', authenticateToken, async (req, res) => {
   try {
-    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
+    const user = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'Account not found' });
-    res.json(studentOrganizerAgreementStatus(db, user));
+    res.json(await studentOrganizerAgreementStatus(db, user));
   } catch (error) {
     console.error('Student organizer agreement status error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -1012,12 +1018,12 @@ router.get('/api/legal/student-organizer-agreement', authenticateToken, (req, re
  * the account, and gating it would lock a student out of the only action that
  * releases their capabilities.
  */
-router.post('/api/legal/student-organizer-agreement/accept', authenticateToken, (req, res) => {
+router.post('/api/legal/student-organizer-agreement/accept', authenticateToken, async (req, res) => {
   try {
-    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
+    const user = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'Account not found' });
 
-    if (!helpsRunAnywhere(db, user.id)) {
+    if (!await helpsRunAnywhere(db, user.id)) {
       return res.status(400).json({
         error: 'The Student Organizer Agreement applies to student organizers.',
         code: 'not_a_student_organizer',
@@ -1031,9 +1037,9 @@ router.post('/api/legal/student-organizer-agreement/accept', authenticateToken, 
       });
     }
 
-    const result = acceptStudentOrganizerAgreement(db, { userId: user.id, req });
+    const result = await acceptStudentOrganizerAgreement(db, { userId: user.id, req });
 
-    recordAudit(db, {
+    await recordAudit(db, {
       adminId: user.id,
       action: 'ACCEPT_STUDENT_ORGANIZER_AGREEMENT',
       targetUserId: user.id,

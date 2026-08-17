@@ -75,7 +75,7 @@ describe('the profile headline', () => {
 
     /* Nothing is stored, so there is nothing for a future query to disclose. */
     it('stores nothing', async () => {
-      const row = db.prepare('SELECT profile_headline, profile_highlights FROM users WHERE id = ?')
+      const row = await db.prepare('SELECT profile_headline, profile_highlights FROM users WHERE id = ?')
         .get(studentId);
       expect(row.profile_headline).toBeNull();
       expect(row.profile_highlights).toBeNull();
@@ -115,10 +115,10 @@ describe('the profile headline', () => {
     });
 
     it('shows it once the account chooses a public profile', async () => {
-      db.prepare(`UPDATE users SET profile_visibility = 'public' WHERE id = ?`).run(studentId);
+      await db.prepare(`UPDATE users SET profile_visibility = 'public' WHERE id = ?`).run(studentId);
       const res = await srv.call('GET', '/api/users/by-username/headliner', undefined, viewer);
       expect(res.body.profile.headline).toBe('Walks home down Elm after 4pm');
-      db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(studentId);
+      await db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(studentId);
     });
 
     it('shows it to the account itself regardless', async () => {
@@ -144,7 +144,7 @@ describe('the profile headline', () => {
       ownerId = owner.user.id;
       /* Promoted with SQL, then the existing cookie is reused: identity is
          re-derived from the users row on every request. */
-      db.prepare(`UPDATE users SET role = 'super_admin' WHERE id = ?`).run(ownerId);
+      await db.prepare(`UPDATE users SET role = 'super_admin' WHERE id = ?`).run(ownerId);
       const { enrolTwoFactor } = await import('./testServer.js');
       await enrolTwoFactor(db, 'theowner@test.local');
       ownerCookie = owner.cookie;
@@ -159,7 +159,7 @@ describe('the profile headline', () => {
     });
 
     it('emits it at a private visibility, to a stranger', async () => {
-      db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(ownerId);
+      await db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(ownerId);
       const res = await srv.call('GET', '/api/users/by-username/theowner', undefined, viewer);
       expect(res.status).toBe(200);
       expect(res.body.profile.headline).toBe('Runs WeVolunteer for the district.');
@@ -195,13 +195,13 @@ describe('the profile headline', () => {
     });
 
     it('is derived from the role and not from the name', async () => {
-      db.prepare(`UPDATE users SET role = 'student' WHERE id = ?`).run(ownerId);
+      await db.prepare(`UPDATE users SET role = 'student' WHERE id = ?`).run(ownerId);
       const res = await srv.call('GET', '/api/users/by-username/theowner', undefined, viewer);
       /* Same account, same name, same username — no distinction, and the
          headline now follows the privacy setting like anybody else's. */
       expect(res.body.profile.distinction).toBeNull();
       expect(res.body.profile).not.toHaveProperty('headline');
-      db.prepare(`UPDATE users SET role = 'super_admin' WHERE id = ?`).run(ownerId);
+      await db.prepare(`UPDATE users SET role = 'super_admin' WHERE id = ?`).run(ownerId);
     });
   });
 });

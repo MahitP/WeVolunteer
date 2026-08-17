@@ -66,7 +66,7 @@ import { verifyTotpStep } from './cryptoUtils.js';
  *   stored, so single-use cannot be guaranteed. The caller must refuse the
  *   sign-in and say so; see the note on the write below.
  */
-export function verifyTotpOnce(db, user, token) {
+export async function verifyTotpOnce(db, user, token) {
   const result = verifyTotpStep(token, user?.tfa_secret);
   if (!result.valid) return false;
 
@@ -110,7 +110,7 @@ export function verifyTotpOnce(db, user, token) {
    * call `reauth.js` makes about an unspendable grant.
    */
   try {
-    db.prepare('UPDATE users SET tfa_last_counter = ? WHERE id = ?').run(result.counter, user.id);
+    await db.prepare('UPDATE users SET tfa_last_counter = ? WHERE id = ?').run(result.counter, user.id);
   } catch (err) {
     console.error(
       '[2fa] Could not record the TOTP replay high-water mark; refusing the sign-in '

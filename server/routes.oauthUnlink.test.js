@@ -144,7 +144,7 @@ describe('oauth disconnect: the lockout guard is preserved and comes first', () 
   it('still refuses to remove a provider-only account\'s last sign-in method', async () => {
     const { cookie, user } = await srv.signupConfirmed(account());
     linkProvider(user.id, 'google', 'sub-google-6');
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(OAUTH_ONLY, user.id);
+    await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(OAUTH_ONLY, user.id);
 
     // A provider-only account has no password, so it verifies by re-consent.
     const challengeId = await srv.stepUpOAuth(cookie, 'oauth.unlink', {
@@ -159,7 +159,7 @@ describe('oauth disconnect: the lockout guard is preserved and comes first', () 
     expect(isLinked(user.id, 'google')).toBe(true);
 
     // …and the refusal did not cost the verification.
-    const row = db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
+    const row = await db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
     expect(row.consumed_at).toBeNull();
   });
 
@@ -167,7 +167,7 @@ describe('oauth disconnect: the lockout guard is preserved and comes first', () 
     const { cookie, user } = await srv.signupConfirmed(account());
     linkProvider(user.id, 'google', 'sub-google-7');
     linkProvider(user.id, 'microsoft', 'sub-ms-7');
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(OAUTH_ONLY, user.id);
+    await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(OAUTH_ONLY, user.id);
 
     const challengeId = await srv.stepUpOAuth(cookie, 'oauth.unlink', {
       params: { provider: 'microsoft' }, provider: 'google', sub: 'sub-google-7'
@@ -192,7 +192,7 @@ describe('oauth disconnect: the lockout guard is preserved and comes first', () 
     );
     expect(res.status).toBe(404);
 
-    const row = db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
+    const row = await db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
     expect(row.consumed_at).toBeNull();
   });
 });

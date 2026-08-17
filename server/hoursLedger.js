@@ -100,7 +100,7 @@ export function createHoursLedgerTable(db) {
  * rewrite will consume, and exists now so the invariant can be tested before
  * anything depends on it.
  */
-export function recordHoursChange(db, entry) {
+export async function recordHoursChange(db, entry) {
   const {
     id,
     userId, eventId, slotId,
@@ -129,13 +129,14 @@ export function recordHoursChange(db, entry) {
 
   const rowId = id || `ledger-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
-  db.prepare(`
-    INSERT OR IGNORE INTO hours_ledger (
+  await db.prepare(`
+    INSERT INTO hours_ledger (
       id, user_id, event_id, slot_id,
       user_name, event_title, slot_name,
       action, present_before, present_after, hours_before, hours_after, delta,
       actor_id, actor_role, source, reason, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (id) DO NOTHING
   `).run(
     rowId, userId, eventId, slotId,
     userName, eventTitle, slotName,
@@ -167,8 +168,8 @@ export function recordHoursChange(db, entry) {
  *
  * Never writes to `attendance`.
  */
-export function backfillHoursLedger(db, { now = new Date().toISOString() } = {}) {
-  const rows = db.prepare(`
+export async function backfillHoursLedger(db, { now = new Date().toISOString() } = {}) {
+  const rows = await db.prepare(`
     SELECT a.event_id, a.slot_id, a.user_id, a.present, a.hours_awarded,
            u.name AS user_name, e.title AS event_title, s.name AS slot_name
     FROM attendance a
@@ -212,8 +213,8 @@ export function backfillHoursLedger(db, { now = new Date().toISOString() } = {})
    * platform has a year of records.
    */
   const alreadyRecorded = new Set(
-    db.prepare('SELECT slot_id, user_id FROM hours_ledger')
-      .all().map(r => `${r.slot_id}:${r.user_id}`)
+    (await db.prepare('SELECT slot_id, user_id FROM hours_ledger').all())
+      .map(r => `${r.slot_id}:${r.user_id}`)
   );
 
   let inserted = 0;
@@ -223,7 +224,7 @@ export function backfillHoursLedger(db, { now = new Date().toISOString() } = {})
     const id = `migrate:${r.slot_id}:${r.user_id}`;
     if (alreadyRecorded.has(`${r.slot_id}:${r.user_id}`)) { skipped++; continue; }
 
-    recordHoursChange(db, {
+    await recordHoursChange(db, {
       id,
       userId: r.user_id,
       eventId: r.event_id,
@@ -258,16 +259,16 @@ export function backfillHoursLedger(db, { now = new Date().toISOString() } = {})
  *
  * SQLite lacks FULL OUTER JOIN before 3.39, so the join is done here.
  */
-export function verifyLedgerParity(db) {
+export async function verifyLedgerParity(db) {
   const ledger = new Map();
-  for (const r of db.prepare(
+  for (const r of await db.prepare(
     'SELECT user_id, SUM(delta) AS total FROM hours_ledger GROUP BY user_id'
   ).all()) {
     ledger.set(r.user_id, round(r.total));
   }
 
   const attendance = new Map();
-  for (const r of db.prepare(
+  for (const r of await db.prepare(
     'SELECT user_id, SUM(hours_awarded) AS total FROM attendance WHERE present = 1 GROUP BY user_id'
   ).all()) {
     attendance.set(r.user_id, round(r.total));
@@ -293,8 +294,8 @@ export function verifyLedgerParity(db) {
  * record, and the id's random suffix would otherwise order them arbitrarily —
  * an audit log has to read back in the order things actually happened.
  */
-export function getLedgerForUser(db, userId) {
-  return db.prepare(
+export async function getLedgerForUser(db, userId) {
+  return await db.prepare(
     'SELECT rowid AS seq, * FROM hours_ledger WHERE user_id = ? ORDER BY created_at DESC, rowid DESC'
   ).all(userId);
 }

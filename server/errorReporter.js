@@ -369,7 +369,7 @@ function safeContext(context) {
  * The return value is for tests and for callers that want to know — no caller is
  * required to check it, and none may rely on a throw.
  */
-export function recordError(db, event = {}) {
+export async function recordError(db, event = {}) {
   try {
     if (!db || typeof db.prepare !== 'function') return { ok: false, reason: 'no_db' };
 
@@ -390,14 +390,14 @@ export function recordError(db, event = {}) {
     const fp = fingerprint({ source, kind, message, route });
     const now = new Date().toISOString();
 
-    const existing = db.prepare('SELECT fingerprint FROM error_groups WHERE fingerprint = ?').get(fp);
+    const existing = await db.prepare('SELECT fingerprint FROM error_groups WHERE fingerprint = ?').get(fp);
 
     if (!existing && source === 'client') {
-      const { c } = db.prepare(
+      const { c } = await db.prepare(
         "SELECT COUNT(*) AS c FROM error_groups WHERE source = 'client' AND status = 'open'"
       ).get();
       if (c >= CLIENT_GROUP_CEILING) {
-        recordOverflow(db, now);
+        await recordOverflow(db, now);
         // Deliberately `ok`. The caller answers 202 either way: a different
         // answer would tell an attacker exactly when the ceiling was reached,
         // and a client that retries on failure would amplify the flood.
@@ -406,7 +406,7 @@ export function recordError(db, event = {}) {
     }
 
     if (existing) {
-      db.prepare(`
+      await db.prepare(`
         UPDATE error_groups
            SET occurrences = occurrences + 1,
                last_seen_at = ?,
@@ -415,7 +415,7 @@ export function recordError(db, event = {}) {
          WHERE fingerprint = ?
       `).run(now, fp);
     } else {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO error_groups
           (fingerprint, source, kind, message, route, status, occurrences, users_seen,
            first_seen_at, last_seen_at, release)
@@ -426,12 +426,12 @@ export function recordError(db, event = {}) {
 
     // Above the hourly rate the counter keeps climbing and the evidence stops
     // duplicating — 100 copies of one stack say nothing the first said.
-    const recentEvents = db.prepare(
+    const recentEvents = await db.prepare(
       'SELECT COUNT(*) AS c FROM error_events WHERE fingerprint = ? AND occurred_at > ?'
     ).get(fp, new Date(Date.now() - 3600_000).toISOString()).c;
 
     if (recentEvents < MAX_EVENTS_PER_HOUR) {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO error_events
           (id, fingerprint, occurred_at, stack, route, method, status_code,
            user_hash, role, user_agent, context)
@@ -449,7 +449,7 @@ export function recordError(db, event = {}) {
       );
 
       // Keep only the newest MAX_EVENTS_PER_GROUP rows for this problem.
-      db.prepare(`
+      await db.prepare(`
         DELETE FROM error_events
          WHERE fingerprint = ?
            AND id NOT IN (
@@ -466,7 +466,7 @@ export function recordError(db, event = {}) {
      * which is the thing this design refuses to do. The dashboard must say
      * "distinct users seen recently" rather than imply a total.
      */
-    db.prepare(`
+    await db.prepare(`
       UPDATE error_groups
          SET users_seen = (
            SELECT COUNT(DISTINCT user_hash) FROM error_events
@@ -536,7 +536,7 @@ export const SINGLE_CLIENT_GROUP_RETENTION_DAYS = 7;
  * having no retained events, and no group's fate is decided by evidence that
  * may already have expired.
  */
-export function sweepErrors(db, now = new Date()) {
+export async function sweepErrors(db, now = new Date()) {
   const empty = { groups: 0, events: 0 };
   try {
     if (!db || typeof db.prepare !== 'function') return { ...empty, failed: true };
@@ -545,30 +545,30 @@ export function sweepErrors(db, now = new Date()) {
 
     // Groups first: each delete cascades to its own evidence, so the event pass
     // below is left with only the rows whose group is still alive.
-    const closed = db.prepare(`
+    const closed = (await db.prepare(`
       DELETE FROM error_groups
        WHERE status IN ('resolved', 'ignored') AND last_seen_at < ?
-    `).run(cutoff(CLOSED_GROUP_RETENTION_DAYS)).changes;
+    `).run(cutoff(CLOSED_GROUP_RETENTION_DAYS))).changes;
 
     // `<= 1` rather than `= 1`: a group written by a partially-failed record
     // could hold 0, and leaving it forever would be the one row this rule exists
     // to remove.
-    const singles = db.prepare(`
+    const singles = (await db.prepare(`
       DELETE FROM error_groups
        WHERE source = 'client' AND occurrences <= 1 AND last_seen_at < ?
-    `).run(cutoff(SINGLE_CLIENT_GROUP_RETENTION_DAYS)).changes;
+    `).run(cutoff(SINGLE_CLIENT_GROUP_RETENTION_DAYS))).changes;
 
-    const stale = db.prepare(`
+    const stale = (await db.prepare(`
       DELETE FROM error_groups
        WHERE status = 'open' AND last_seen_at < ?
-    `).run(cutoff(OPEN_GROUP_RETENTION_DAYS)).changes;
+    `).run(cutoff(OPEN_GROUP_RETENTION_DAYS))).changes;
 
     // Evidence older than its window, for groups that survived above. The
     // group keeps its counter: "this happened 4,000 times" outlives the
     // stacks, which is the whole reason the two tables are separate.
-    const events = db.prepare(
+    const events = (await db.prepare(
       'DELETE FROM error_events WHERE occurred_at < ?'
-    ).run(cutoff(EVENT_RETENTION_DAYS)).changes;
+    ).run(cutoff(EVENT_RETENTION_DAYS))).changes;
 
     return { groups: closed + singles + stale, events };
   } catch (err) {
@@ -578,15 +578,15 @@ export function sweepErrors(db, now = new Date()) {
 }
 
 /** The reserved counter row. Best-effort by the same rule as everything here. */
-function recordOverflow(db, now) {
+async function recordOverflow(db, now) {
   try {
-    const exists = db.prepare('SELECT 1 FROM error_groups WHERE fingerprint = ?').get(OVERFLOW_FINGERPRINT);
+    const exists = await db.prepare('SELECT 1 FROM error_groups WHERE fingerprint = ?').get(OVERFLOW_FINGERPRINT);
     if (exists) {
-      db.prepare(
+      await db.prepare(
         'UPDATE error_groups SET occurrences = occurrences + 1, last_seen_at = ? WHERE fingerprint = ?'
       ).run(now, OVERFLOW_FINGERPRINT);
     } else {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO error_groups
           (fingerprint, source, kind, message, route, status, occurrences, users_seen, first_seen_at, last_seen_at)
         VALUES (?, 'client', 'ClientGroupCeiling', 'client error group ceiling reached', NULL, 'open', 1, 0, ?, ?)

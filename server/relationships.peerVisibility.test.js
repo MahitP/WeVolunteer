@@ -45,8 +45,8 @@ describe('friend-tier visibility is peer-only', () => {
     ({ db } = await import('./db.js'));
     ({ areFriends } = await import('./relationships.js'));
 
-    organizerId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('jordan.whitfield@example.org').id;
+    organizerId = (await db.prepare('SELECT id FROM users WHERE email = ?')
+      .get('jordan.whitfield@example.org')).id;
 
     const make = async (name, username) => {
       const r = await srv.signupConfirmed({
@@ -67,10 +67,10 @@ describe('friend-tier visibility is peer-only', () => {
 
   /* ── The case the feature exists for ──────────────────────────────────── */
 
-  it('grants friend visibility between two students', () => {
+  it('grants friend visibility between two students', async () => {
     forceAcceptedFriendship('rel-peer-ok', aliceId, bobId);
-    expect(areFriends(db, aliceId, bobId)).toBe(true);
-    expect(areFriends(db, bobId, aliceId), 'direction must not matter').toBe(true);
+    expect(await areFriends(db, aliceId, bobId)).toBe(true);
+    expect(await areFriends(db, bobId, aliceId), 'direction must not matter').toBe(true);
     drop('rel-peer-ok');
   });
 
@@ -81,17 +81,17 @@ describe('friend-tier visibility is peer-only', () => {
    * table level — it is only the CURRENT eligibility of the two accounts that
    * disqualifies it.
    */
-  it('refuses a legacy accepted organizer→student friendship', () => {
+  it('refuses a legacy accepted organizer→student friendship', async () => {
     forceAcceptedFriendship('rel-legacy-org-student', organizerId, aliceId);
-    expect(areFriends(db, organizerId, aliceId)).toBe(false);
-    expect(areFriends(db, aliceId, organizerId)).toBe(false);
+    expect(await areFriends(db, organizerId, aliceId)).toBe(false);
+    expect(await areFriends(db, aliceId, organizerId)).toBe(false);
     drop('rel-legacy-org-student');
   });
 
-  it('refuses it in the other direction too', () => {
+  it('refuses it in the other direction too', async () => {
     forceAcceptedFriendship('rel-legacy-student-org', aliceId, organizerId);
-    expect(areFriends(db, aliceId, organizerId)).toBe(false);
-    expect(areFriends(db, organizerId, aliceId)).toBe(false);
+    expect(await areFriends(db, aliceId, organizerId)).toBe(false);
+    expect(await areFriends(db, organizerId, aliceId)).toBe(false);
     drop('rel-legacy-student-org');
   });
 
@@ -101,7 +101,7 @@ describe('friend-tier visibility is peer-only', () => {
    * grade and bio to anyone `areFriends` calls a friend.
    */
   it('withholds the friends-only tier from a legacy non-peer relationship', async () => {
-    db.prepare("UPDATE users SET profile_visibility = 'friends' WHERE id = ?").run(aliceId);
+    await db.prepare("UPDATE users SET profile_visibility = 'friends' WHERE id = ?").run(aliceId);
     forceAcceptedFriendship('rel-legacy-profile', organizerId, aliceId);
 
     const organizerToken = await srv.login('jordan.whitfield@example.org');
@@ -114,23 +114,23 @@ describe('friend-tier visibility is peer-only', () => {
     expect(res.body?.profile?.grade ?? null).toBeNull();
 
     drop('rel-legacy-profile');
-    db.prepare("UPDATE users SET profile_visibility = 'private' WHERE id = ?").run(aliceId);
+    await db.prepare("UPDATE users SET profile_visibility = 'private' WHERE id = ?").run(aliceId);
   });
 
   /* ── Blocking still wins ──────────────────────────────────────────────── */
 
-  it('refuses friend visibility when one side has blocked the other', () => {
+  it('refuses friend visibility when one side has blocked the other', async () => {
     forceAcceptedFriendship('rel-blocked', aliceId, bobId);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO user_blocks (id, blocker_id, blocked_id, created_at)
       VALUES ('blk-peervis', ?, ?, datetime('now'))
     `).run(aliceId, bobId);
 
-    expect(areFriends(db, aliceId, bobId)).toBe(false);
-    expect(areFriends(db, bobId, aliceId)).toBe(false);
+    expect(await areFriends(db, aliceId, bobId)).toBe(false);
+    expect(await areFriends(db, bobId, aliceId)).toBe(false);
 
-    db.prepare("DELETE FROM user_blocks WHERE id = 'blk-peervis'").run();
-    expect(areFriends(db, aliceId, bobId), 'unblocking restores it').toBe(true);
+    await db.prepare("DELETE FROM user_blocks WHERE id = 'blk-peervis'").run();
+    expect(await areFriends(db, aliceId, bobId), 'unblocking restores it').toBe(true);
     drop('rel-blocked');
   });
 
@@ -138,21 +138,21 @@ describe('friend-tier visibility is peer-only', () => {
 
   it('grants nothing once the friendship row is gone', async () => {
     forceAcceptedFriendship('rel-removal', aliceId, bobId);
-    expect(areFriends(db, aliceId, bobId)).toBe(true);
+    expect(await areFriends(db, aliceId, bobId)).toBe(true);
 
     const res = await srv.call('DELETE', `/api/users/${bobId}/friend`, undefined, alice);
     expect(res.status).toBe(200);
-    expect(areFriends(db, aliceId, bobId)).toBe(false);
+    expect(await areFriends(db, aliceId, bobId)).toBe(false);
   });
 
   /* ── Degenerate inputs ────────────────────────────────────────────────── */
 
-  it('grants nothing for a missing account, self, or null', () => {
+  it('grants nothing for a missing account, self, or null', async () => {
     forceAcceptedFriendship('rel-degenerate', aliceId, bobId);
-    expect(areFriends(db, aliceId, aliceId), 'self').toBe(false);
-    expect(areFriends(db, aliceId, 'no-such-user'), 'missing subject').toBe(false);
-    expect(areFriends(db, 'no-such-user', bobId), 'missing actor').toBe(false);
-    expect(areFriends(db, null, bobId), 'null').toBe(false);
+    expect(await areFriends(db, aliceId, aliceId), 'self').toBe(false);
+    expect(await areFriends(db, aliceId, 'no-such-user'), 'missing subject').toBe(false);
+    expect(await areFriends(db, 'no-such-user', bobId), 'missing actor').toBe(false);
+    expect(await areFriends(db, null, bobId), 'null').toBe(false);
     drop('rel-degenerate');
   });
 
@@ -161,12 +161,12 @@ describe('friend-tier visibility is peer-only', () => {
    * looked at. Guards the read side against the same mistake the write side
    * already refuses.
    */
-  it('grants nothing for a pending request between peers', () => {
-    db.prepare(`
+  it('grants nothing for a pending request between peers', async () => {
+    await db.prepare(`
       INSERT INTO user_relationships (id, actor_id, subject_id, kind, status, created_at)
       VALUES ('rel-pending', ?, ?, 'friend', 'pending', datetime('now'))
     `).run(bobId, carolId);
-    expect(areFriends(db, bobId, carolId)).toBe(false);
+    expect(await areFriends(db, bobId, carolId)).toBe(false);
     drop('rel-pending');
   });
 
@@ -182,6 +182,6 @@ describe('friend-tier visibility is peer-only', () => {
     const accept = await srv.call('POST', `/api/users/${bobId}/friend/accept`, undefined, carolToken);
     expect(accept.status).toBe(200);
 
-    expect(areFriends(db, bobId, carolId)).toBe(true);
+    expect(await areFriends(db, bobId, carolId)).toBe(true);
   });
 });

@@ -80,9 +80,9 @@ describe('the error-report limiter', () => {
      * groups asserted the grouping behaviour instead of the limiter, and read as
      * "the limiter leaked" when it had not.
      */
-    const recorded = db.prepare(
+    const recorded = (await db.prepare(
       "SELECT COALESCE(SUM(occurrences), 0) AS n FROM error_groups WHERE source = 'client'"
-    ).get().n;
+    ).get()).n;
     expect(recorded, 'a rate-limited report still reached the database').toBe(LIMIT);
   }, 60000);
 

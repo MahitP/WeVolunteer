@@ -118,7 +118,7 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
     expect(res.body.volunteer.email).toBe('privacy.fresh.student@example.org');
   });
 
-  it('reveals grade/school/bio/email to the seeded hosting-organizer relationship (Priya <-> jwhitfield)', async () => {
+  it('reveals grade/school/bio/email to the seeded hosting-organizer await relationship(Priya <-> jwhitfield)', async () => {
     const res = await srv.call('GET', '/api/users/user-student-2/profile', undefined, hostingOrgToken);
     expect(res.status).toBe(200);
     expect(res.body.volunteer.grade).toBe('11');

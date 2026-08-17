@@ -107,76 +107,76 @@ beforeEach(() => {
 });
 
 describe('a badge that can be lost', () => {
-  it('is withdrawn once absences drop the volunteer below the threshold', () => {
+  it('is withdrawn once absences drop the volunteer below the threshold', async () => {
     const badge = seedBadge({ id: 'reliable', criteria_type: 'attendance_rate', criteria_value: 90 });
 
     const slots = [];
     for (let i = 0; i < 8; i += 1) slots.push(commitment('vol', { daysAgo: 60 - i }));
 
-    badgeService.evaluateBadges('vol');
+    await badgeService.evaluateBadges('vol');
     expect(holds('vol', badge), 'eight for eight should earn it').toBe(true);
 
     /* The four most recent commitments become absences — the shape of somebody
        who has stopped turning up. */
     for (const s of slots.slice(-4)) markAbsent(s.slotId, 'vol');
 
-    badgeService.evaluateBadges('vol');
-    const after = reliability.reliabilityOf(db, 'vol');
+    await badgeService.evaluateBadges('vol');
+    const after = await reliability.reliabilityOf(db, 'vol');
     expect(holds('vol', badge), `score=${after.score} recorded=${after.recorded}`).toBe(false);
   });
 
-  it('is returned when the volunteer starts turning up again', () => {
+  it('is returned when the volunteer starts turning up again', async () => {
     /* Recovery is the other half. A badge that can be lost but not regained
        punishes a bad term for ever. */
     const badge = seedBadge({ id: 'reliable', criteria_type: 'attendance_rate', criteria_value: 90 });
 
     for (let i = 0; i < 6; i += 1) commitment('vol', { present: 0, daysAgo: 300 - i });
-    badgeService.evaluateBadges('vol');
+    await badgeService.evaluateBadges('vol');
     expect(holds('vol', badge)).toBe(false);
 
     for (let i = 0; i < 20; i += 1) commitment('vol', { present: 1, daysAgo: 100 - i * 4 });
-    badgeService.evaluateBadges('vol');
+    await badgeService.evaluateBadges('vol');
 
-    const after = reliability.reliabilityOf(db, 'vol');
+    const after = await reliability.reliabilityOf(db, 'vol');
     expect(holds('vol', badge), `score=${after.score}`).toBe(true);
   });
 
-  it('is withdrawn when credited hours are taken back below a tier', () => {
+  it('is withdrawn when credited hours are taken back below a tier', async () => {
     const badge = seedBadge({ id: 'ten-hours', criteria_type: 'hours', criteria_value: 10 });
 
     const a = commitment('vol', { hours: 6, daysAgo: 30 });
     commitment('vol', { hours: 6, daysAgo: 20 });
 
-    badgeService.evaluateBadges('vol');
+    await badgeService.evaluateBadges('vol');
     expect(holds('vol', badge), 'twelve hours should earn a ten-hour tier').toBe(true);
 
     markAbsent(a.slotId, 'vol');
-    badgeService.evaluateBadges('vol');
+    await badgeService.evaluateBadges('vol');
 
     expect(holds('vol', badge), 'six hours no longer reaches ten').toBe(false);
   });
 
-  it('never withdraws a badge an administrator granted by hand', () => {
+  it('never withdraws a badge an administrator granted by hand', async () => {
     /* The distinction `meetsCriteria` returns `null` for. A manual award is
        somebody's judgement and this sweep has no standing to overrule it. */
     const badge = seedBadge({ id: 'manual', criteria_type: 'manual', criteria_value: 0 });
     db.prepare('INSERT INTO user_badges (id, user_id, badge_id, earned_at, awarded_by) VALUES (?, ?, ?, ?, ?)')
       .run('ub-manual', 'vol', badge, new Date().toISOString(), 'admin-1');
 
-    badgeService.evaluateBadges('vol');
+    await badgeService.evaluateBadges('vol');
 
     expect(holds('vol', badge)).toBe(true);
   });
 
-  it('leaves the attendance record itself untouched when it withdraws', () => {
+  it('leaves the attendance record itself untouched when it withdraws', async () => {
     /* Losing a badge is a change of status, not a change of history. */
     const badge = seedBadge({ id: 'reliable', criteria_type: 'attendance_rate', criteria_value: 90 });
     const slots = [];
     for (let i = 0; i < 8; i += 1) slots.push(commitment('vol', { daysAgo: 60 - i }));
-    badgeService.evaluateBadges('vol');
+    await badgeService.evaluateBadges('vol');
 
     for (const s of slots.slice(-4)) markAbsent(s.slotId, 'vol');
-    badgeService.evaluateBadges('vol');
+    await badgeService.evaluateBadges('vol');
 
     const rows = db.prepare('SELECT COUNT(*) AS c FROM attendance WHERE user_id = ?').get('vol').c;
     expect(rows).toBe(8);

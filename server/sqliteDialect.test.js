@@ -1,0 +1,311 @@
+/**
+ * The SQLite-only SQL this codebase still speaks, counted and held.
+ *
+ * ── Why this file exists ──
+ *
+ * The async port is finished: every application query site awaits, and
+ * `asyncShapes.test.js` keeps them that way. That was the loud half of the
+ * PostgreSQL migration. This is the quiet half — SQL that parses under SQLite
+ * and does not exist under PostgreSQL at all.
+ *
+ * Each construct below was executed against a real PostgreSQL 17 server rather
+ * than assumed incompatible. Verbatim, on 2026-08-16:
+ *
+ *   datetime('now','-1 hour')  ERROR: function datetime(unknown, unknown) does not exist
+ *   INSERT OR IGNORE …         ERROR: syntax error at or near "OR"
+ *   … COLLATE NOCASE           ERROR: collation "nocase" for encoding "UTF8" does not exist
+ *   strftime('%Y-%m', c)       ERROR: function strftime(unknown, text) does not exist
+ *   julianday(c)               ERROR: function julianday(text) does not exist
+ *   SELECT … sqlite_master     ERROR: relation "sqlite_master" does not exist
+ *   SELECT rowid FROM …        ERROR: column "rowid" does not exist
+ *   … WHERE 1                  ERROR: argument of WHERE must be type boolean, not type integer
+ *
+ * Not everything is a blocker. The same session put 29 of `db.js`'s 30
+ * `CREATE TABLE` statements through PostgreSQL unchanged — `TEXT`, `REAL` and
+ * `INTEGER` all exist there, so the tables themselves are close to portable. The
+ * incompatibility is concentrated in the functions, the pragmas and the
+ * conflict-handling syntax counted here.
+ *
+ * ── Why a ratchet rather than a fix ──
+ *
+ * Translating the 6 that remain in runtime queries is a phase of its own, and each one is a semantic
+ * decision: `datetime('now')` is `now()` but also a timezone question,
+ * `COLLATE NOCASE` is `citext` or `lower()` and therefore an index question,
+ * `INSERT OR IGNORE` is `ON CONFLICT DO NOTHING` but only once you have named
+ * the constraint it should conflict on. `sqlPlaceholders.js` deliberately does
+ * not translate any of them, for the same reason.
+ *
+ * What must not happen meanwhile is the surface growing. A migration that
+ * pauses and quietly gets larger is one that never finishes, so this fails the
+ * build when a count goes up, and asks whoever lowered one to lower the number
+ * with it.
+ */
+import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
+/* The migration registry's comment stripper, reused rather than rewritten. It
+   walks the source character by character precisely because a regex cannot tell
+   a comment from `//` inside a string, and getting that wrong here would either
+   count prose or miss real SQL. */
+import { canonicalSource } from './migrations/index.js';
+
+const SERVER = path.resolve(import.meta.dirname);
+
+function sourceFiles(dir, out = []) {
+  for (const entry of readdirSync(dir)) {
+    if (entry === 'node_modules') continue;
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) sourceFiles(full, out);
+    else if (entry.endsWith('.js') && !entry.includes('.test.')) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * Counted inside SQL string literals only.
+ *
+ * A bare `/PRAGMA/` over the source also matches the word in the prose above
+ * every one of these queries, and this codebase comments heavily — the naive
+ * scan reported 127 PRAGMAs against 101 real ones. So: find the string
+ * literals, keep the ones that look like SQL, and count within those.
+ *
+ * Comments are stripped FIRST, which is not the same thing. A comment saying
+ * "`INSERT OR IGNORE` rather than a plain insert, because…" contains a
+ * backtick-delimited span that a literal scanner reads as a template string
+ * holding SQL. Seven of those were being counted as outstanding work after the
+ * call sites they describe had already been converted — and worse, improving
+ * one of those comments could have tripped the ratchet. The measurement has to
+ * be of the code.
+ */
+const STRING_LITERAL = /`(?:[^`\\]|\\.)*`|'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"/g;
+const LOOKS_LIKE_SQL = /\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|PRAGMA)\b/i;
+
+/**
+ * Two files talk ABOUT the dialect rather than speaking it, and counting them
+ * makes the ratchet self-defeating: `engine.js`'s refusal message lists the
+ * constructs it is refusing over, and `sqlPlaceholders.js` explains which ones
+ * it deliberately does not translate. Improving either explanation would fail
+ * this file.
+ */
+const EXPLAINS_RATHER_THAN_EXECUTES = new Set([
+  path.join('db', 'engine.js'),
+  path.join('db', 'sqlPlaceholders.js'),
+  /* Generated, and PostgreSQL-native by construction. Its three `COLLATE
+     nocase` clauses name the ICU collation its own preamble defines, not
+     SQLite's built-in keyword, and `db.postgresSchema.test.js` already asserts
+     it carries no SQLite-only construct. Counting it here would ratchet the
+     PostgreSQL schema as though it were SQLite debt. */
+  path.join('db', 'postgresSchema.js'),
+]);
+
+const FILES = sourceFiles(SERVER)
+  .map(f => ({
+    rel: path.relative(SERVER, f),
+    sql: (canonicalSource(readFileSync(f, 'utf8')).match(STRING_LITERAL) ?? [])
+      .filter(lit => LOOKS_LIKE_SQL.test(lit)),
+  }))
+  .filter(f => !EXPLAINS_RATHER_THAN_EXECUTES.has(f.rel));
+
+/** Boot-time SQL: the schema path, which cannot execute under PostgreSQL at all. */
+const isBoot = rel => rel === 'db.js' || rel.startsWith('migrations/') || rel.endsWith('seed_badges.js');
+
+/**
+ * Every construct, what PostgreSQL wants instead, and how many are left.
+ *
+ * `runtime` and `boot` are counted apart because they retire differently. The
+ * runtime ones are ordinary per-query translations. The boot ones only matter
+ * once there is a PostgreSQL schema path at all, and `PRAGMA` in particular is
+ * mostly `foreign_keys`/`journal_mode`/`table_info` — configuration and
+ * introspection with direct PostgreSQL equivalents, not queries to rewrite.
+ */
+const CONSTRUCTS = [
+  { name: 'PRAGMA',          pattern: /\bPRAGMA\s+\w/gi,                    runtime: 4, boot: 82,
+    postgres: 'session settings and information_schema; PRAGMA does not exist' },
+  /**
+   * Case-sensitive, and the case carries the meaning.
+   *
+   * `COLLATE NOCASE` is SQLite's built-in keyword and exists nowhere else.
+   * `COLLATE nocase` is the ICU collation `postgresSchema.js` defines in its
+   * preamble — and SQLite resolves collation names case-insensitively, so the
+   * lower-case spelling reaches its built-in unchanged. One token therefore
+   * satisfies both engines, and the 29 runtime sites were converted by writing
+   * it, not by branching on the dialect.
+   *
+   * Verified on both before adopting it: equality and ORDER BY behave
+   * identically. `LIKE` does not — PostgreSQL refuses a nondeterministic
+   * collation there — and no site combines the two. `db.dialectSql.test.js`
+   * pins the equality and ordering behaviour; the test below pins that no other
+   * spelling creeps in, since `COLLATE NoCase` would work on SQLite and fail on
+   * PostgreSQL with nothing to catch it.
+   */
+  { name: 'COLLATE NOCASE',  pattern: /COLLATE\s+NOCASE/g,                  runtime: 0, boot: 5,
+    postgres: 'the shared `nocase` ICU collation — write it lower-case' },
+  { name: 'sqlite_master',   pattern: /\bsqlite_master\b/gi,                runtime: 2, boot: 19,
+    postgres: 'information_schema.tables / pg_indexes' },
+  { name: 'INSERT OR …',     pattern: /INSERT\s+OR\s+(?:IGNORE|REPLACE)/gi, runtime: 0, boot: 2,
+    postgres: 'ON CONFLICT (cols) DO NOTHING / DO UPDATE — needs the constraint named' },
+  { name: 'datetime()',      pattern: /\bdatetime\s*\(/gi,                  runtime: 0, boot: 3,
+    postgres: "now(), or now() - interval '1 hour' — and a timezone decision" },
+  { name: 'strftime()',      pattern: /\bstrftime\s*\(/gi,                  runtime: 0, boot: 1,
+    postgres: 'to_char() / date_trunc()' },
+  { name: 'julianday()',     pattern: /\bjulianday\s*\(/gi,                 runtime: 0, boot: 0,
+    postgres: 'timestamp subtraction yielding an interval' },
+  { name: 'AUTOINCREMENT',   pattern: /\bAUTOINCREMENT\b/gi,                runtime: 0, boot: 1,
+    postgres: 'GENERATED … AS IDENTITY, or bigserial' },
+];
+
+/* Rebuilt per call because `String.match` with a /g/ regex is stateful, and
+   `flags` is carried over rather than hard-coded: the COLLATE pattern is
+   deliberately case-SENSITIVE, and forcing `gi` here silently un-did that. */
+const freshly = (pattern) => new RegExp(pattern.source, pattern.flags);
+
+const tally = (predicate, pattern) => FILES
+  .filter(f => predicate(f.rel))
+  .reduce((n, f) => n + f.sql.reduce((m, lit) => m + (lit.match(pattern)?.length ?? 0), 0), 0);
+
+describe('SQLite-only SQL still in the codebase', () => {
+  it('finds SQL to count at all, so the ratchet is not vacuous', () => {
+    const literals = FILES.reduce((n, f) => n + f.sql.length, 0);
+    expect(literals, 'no SQL literals found — the scanner is broken, not the codebase clean')
+      .toBeGreaterThan(400);
+  });
+
+  for (const c of CONSTRUCTS) {
+    it(`${c.name} — at most ${c.runtime} runtime, ${c.boot} boot (PostgreSQL: ${c.postgres})`, () => {
+      const runtime = tally(rel => !isBoot(rel), freshly(c.pattern));
+      const boot = tally(isBoot, freshly(c.pattern));
+
+      expect(
+        runtime,
+        `${c.name} grew in runtime code: ${runtime} sites, was ${c.runtime}. `
+        + `PostgreSQL needs ${c.postgres}. Write the portable form, or raise this number `
+        + 'deliberately and say why in POSTGRES_MIGRATION_STATUS.md.',
+      ).toBeLessThanOrEqual(c.runtime);
+
+      expect(
+        boot,
+        `${c.name} grew in the boot/schema path: ${boot} sites, was ${c.boot}.`,
+      ).toBeLessThanOrEqual(c.boot);
+    });
+  }
+
+  /**
+   * The headline number, so the ratchet is visible as one figure rather than
+   * eight. It is the thing to quote when asking "how far is PostgreSQL".
+   */
+  /**
+   * Only one spelling of the shared collation, and it is the portable one.
+   *
+   * The ratchet above distinguishes `NOCASE` from `nocase` by case, so a third
+   * spelling would be counted as neither and pass silently while failing under
+   * PostgreSQL.
+   */
+  it('spells the shared collation exactly one way', () => {
+    const wrong = [];
+    for (const { rel, sql } of FILES) {
+      if (isBoot(rel)) continue;
+      for (const lit of sql) {
+        for (const m of lit.matchAll(/COLLATE\s+(\w+)/g)) {
+          if (m[1] !== 'nocase') wrong.push(`${rel} — COLLATE ${m[1]}`);
+        }
+      }
+    }
+    expect(wrong, 'the shared collation is `nocase`, lower-case: SQLite resolves collation '
+      + 'names case-insensitively, PostgreSQL does not').toEqual([]);
+  });
+
+  it('holds the total at 119 — 6 runtime, 113 boot', () => {
+    const runtime = CONSTRUCTS.reduce((n, c) => n + tally(rel => !isBoot(rel), freshly(c.pattern)), 0);
+    const boot = CONSTRUCTS.reduce((n, c) => n + tally(isBoot, freshly(c.pattern)), 0);
+
+    expect(runtime, 'runtime SQLite-only SQL grew').toBeLessThanOrEqual(6);
+    expect(boot, 'boot-path SQLite-only SQL grew').toBeLessThanOrEqual(113);
+  });
+});
+
+/**
+ * The engine gate must stay shut, and the reason it is shut must stay true.
+ *
+ * `POSTGRES_READY = false` is the one line that keeps a half-ported application
+ * away from a real database. The risk is not that somebody flips it maliciously
+ * — it is that the counters above reach zero, somebody reads the gate's comment
+ * (which used to say the blocker was the synchronous call sites), sees that
+ * those are done, and flips it. The call sites ARE done. The application still
+ * cannot boot against PostgreSQL, for reasons that live somewhere else
+ * entirely, and this pins them so the next person meets them here.
+ */
+describe('the PostgreSQL engine gate', () => {
+  const dbSrc = readFileSync(path.join(SERVER, 'db.js'), 'utf8');
+  const engineSrc = readFileSync(path.join(SERVER, 'db', 'engine.js'), 'utf8');
+
+  it('is shut', async () => {
+    const { POSTGRES_READY } = await import('./db/engine.js');
+    expect(
+      POSTGRES_READY,
+      'opening this gate requires an engine-selecting db.js, a PostgreSQL schema path, '
+      + 'and the 194 constructs above translated. See POSTGRES_MIGRATION_STATUS.md.',
+    ).toBe(false);
+  });
+
+  /**
+   * The first blocker, now closed, and pinned so it cannot silently reopen.
+   *
+   * `resolveEngine()` had no caller for the whole of phases 7 and 8 — it was
+   * imported by its own test and nothing else, while `db.js` constructed a
+   * `DatabaseSync` unconditionally. `DATABASE_ENGINE=postgres` therefore could
+   * not have produced a PostgreSQL connection even with the gate open; it would
+   * have produced a SQLite one, and a deployment that believed it had migrated.
+   *
+   * What this now asserts is the wiring, and the shape of it: one decision, at
+   * module scope, feeding a factory that both engines go through. A later change
+   * that quietly restores an unconditional `new DatabaseSync(dbPath)` at module
+   * scope brings the original defect back, and fails here.
+   */
+  it('is wired: db.js selects its engine rather than assuming one', () => {
+    expect(dbSrc, 'db.js must consult resolveEngine() — otherwise the engine flag decides nothing')
+      .toMatch(/resolveEngine\(\)/);
+    expect(dbSrc, 'both engines must be built through one factory').toMatch(/export function openConnection\(/);
+    expect(
+      /const connection = new DatabaseSync\(/.test(dbSrc),
+      'db.js constructs SQLite directly again, bypassing the engine selection',
+    ).toBe(false);
+  });
+
+  /**
+   * The PostgreSQL boot path exists, and cannot silently create nothing.
+   *
+   * `initDatabase()` has to stay synchronous, so on PostgreSQL it defers the
+   * schema instead of building it. A deferral that nobody completes is a server
+   * running against an empty database, so the deferral is tracked and
+   * `assertSchemaReady()` turns it into a named error.
+   */
+  it('cannot boot PostgreSQL without creating a schema', () => {
+    expect(dbSrc, 'initDatabase must remain synchronous').toMatch(/export function initDatabase\(/);
+    expect(dbSrc, 'the PostgreSQL schema must be applied by completeDatabaseInit')
+      .toMatch(/applyPostgresSchema\(db\)/);
+    expect(dbSrc, 'a deferred schema that is never applied must be an error, not a quiet empty database')
+      .toMatch(/export function assertSchemaReady\(/);
+  });
+
+  /**
+   * The second blocker. `initDatabase()` is synchronous and must stay that way
+   * — some forty callers do not await it, and `asyncShapes.test.js` fails the
+   * build if it changes. Every `CREATE TABLE`, every migration and the badge
+   * catalogue run inside it. Under PostgreSQL each of those statements returns
+   * a promise nobody can await, so the schema path cannot execute at all.
+   *
+   * This is why "every query site awaits" is not the same as "ready".
+   */
+  it('cannot create a schema: the whole DDL path is inside synchronous boot', () => {
+    expect(dbSrc, 'initDatabase is no longer synchronous — see the guard in asyncShapes.test.js')
+      .toMatch(/export function initDatabase\(/);
+    const body = dbSrc.slice(dbSrc.indexOf('export function initDatabase('));
+    expect(body, 'the migration runner still runs inside synchronous boot').toMatch(/runMigrations\(/);
+  });
+
+  it('says all of this where the next person will read it', () => {
+    for (const phrase of ['POSTGRES_MIGRATION_STATUS.md', 'DATABASE_URL']) {
+      expect(engineSrc, `engine.js should point at ${phrase}`).toContain(phrase);
+    }
+  });
+});

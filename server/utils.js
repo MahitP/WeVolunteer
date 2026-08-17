@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { db } from './db.js';
+import { currentConnection, transactionOn } from './db/connectionContext.js';
 import { notificationService } from './services/notificationService.js';
 import { sendNotificationEmail, sendMail } from './email.js';
 import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, isEmailGateAllowed, COOKIE_NAME, REQUIRE_ADMIN_2FA, DEMO_MODE } from './config.js';
@@ -157,7 +158,7 @@ export function secondFactorRequiredFor(role, user = null) {
  *   `email_verified`)
  * @returns {string[]} some subset of ['totp', 'email', 'recovery'], possibly empty
  */
-export function enabledSecondFactors(row) {
+export async function enabledSecondFactors(row) {
   if (!row) return [];
   const methods = [];
   if (row.tfa_enabled) methods.push('totp');
@@ -183,9 +184,9 @@ export function enabledSecondFactors(row) {
      own right: offering them to an account that has enrolled nothing would turn
      a leftover code set into a way past a second factor nobody switched on. */
   if (methods.length) {
-    const held = db.prepare(
+    const held = (await db.prepare(
       'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
-    ).get(row.id)?.n ?? 0;
+    ).get(row.id))?.n ?? 0;
     if (held > 0) methods.push('recovery');
   }
 
@@ -203,20 +204,20 @@ export function enabledSecondFactors(row) {
  * cannot be identified individually, they expire within seven days, and refusing
  * them would sign out every currently signed-in user the moment this deploys.
  */
-export function isSessionRevoked(jti) {
+export async function isSessionRevoked(jti) {
   if (!jti) return false;
-  return !!db.prepare('SELECT 1 FROM revoked_sessions WHERE jti = ?').get(jti);
+  return !!await db.prepare('SELECT 1 FROM revoked_sessions WHERE jti = ?').get(jti);
 }
 
 /** Records a session as signed out, until the point its token would expire anyway. */
-export function revokeSession({ jti, userId, expSeconds }) {
+export async function revokeSession({ jti, userId, expSeconds }) {
   if (!jti) return false;
   // `exp` is seconds since the epoch. Without it, fall back to the 7-day token
   // lifetime so the row still has a definite point at which it can be purged.
   const expiresAt = expSeconds
     ? new Date(expSeconds * 1000).toISOString()
     : new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO revoked_sessions (jti, user_id, revoked_at, expires_at)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(jti) DO NOTHING
@@ -231,9 +232,9 @@ export function revokeSession({ jti, userId, expSeconds }) {
  * denylist row has no further work to do. Without this the table would grow by
  * one row per sign-out forever.
  */
-export function purgeExpiredRevocations(now = new Date()) {
-  return db.prepare('DELETE FROM revoked_sessions WHERE expires_at < ?')
-    .run(now.toISOString()).changes;
+export async function purgeExpiredRevocations(now = new Date()) {
+  return (await db.prepare('DELETE FROM revoked_sessions WHERE expires_at < ?')
+    .run(now.toISOString())).changes;
 }
 
 /**
@@ -262,14 +263,17 @@ export function purgeExpiredRevocations(now = new Date()) {
  * only ever looks back fifteen, so anything older is already invisible to it,
  * and the extra margin means a sweep can never race a live window.
  */
-export function sweepTwoFactorRemnants(dbHandle = db, now = new Date()) {
+export async function sweepTwoFactorRemnants(dbHandle = db, now = new Date()) {
   let removed = 0;
   try {
-    removed += dbHandle.prepare('DELETE FROM tfa_email_codes WHERE expires_at < ?')
-      .run(now.toISOString()).changes;
-    removed += dbHandle.prepare(
-      "DELETE FROM tfa_login_attempts WHERE last_attempt_at < datetime('now', '-1 hour')"
-    ).run().changes;
+    removed += (await dbHandle.prepare('DELETE FROM tfa_email_codes WHERE expires_at < ?')
+      .run(now.toISOString())).changes;
+    /* An hour before `now`, computed here. The column is ISO-8601 as of
+       migration 056, and the comparison has to be in the same format. */
+    const staleBefore = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+    removed += (await dbHandle.prepare(
+      'DELETE FROM tfa_login_attempts WHERE last_attempt_at < ?'
+    ).run(staleBefore)).changes;
   } catch {
     /* Caught rather than thrown, like `sweepErrors`: this runs inside one
        shared try block with the other sweep tasks, and a table missing on an
@@ -280,8 +284,7 @@ export function sweepTwoFactorRemnants(dbHandle = db, now = new Date()) {
 }
 
 /**
- * Builds the request principal with `grants` attached as a lazy, memoizing
- * getter rather than an eagerly-fetched array.
+ * Builds the request principal, resolving `grants` before it returns.
  *
  * Only one route consults capabilities today (more arrive in Task 7), so
  * running `grantsFor` on every authenticated request — most of which never
@@ -368,24 +371,45 @@ function previewPersonaFor(userRow) {
  * (`secondFactorRequiredFor`), before a principal exists — so an owner previewing
  * as a student is still an owner as far as authentication is concerned.
  */
-export function buildPrincipal(
+export async function buildPrincipal(
   userRow,
   fetchGrants = (id) => grantsFor(db, id),
   computeWithheld = (row) => withheldCapabilitiesFor(db, row)
 ) {
   const principal = principalFor(userRow, {
-    withheld: computeWithheld(userRow),
+    withheld: await computeWithheld(userRow),
     effectiveRole: previewPersonaFor(userRow) || userRow?.role,
   });
-  let cached = null;
-  Object.defineProperty(principal, 'grants', {
-    get() {
-      if (cached === null) cached = fetchGrants(userRow.id);
-      return cached;
-    },
-    enumerable: true,
-    configurable: true
-  });
+  /**
+   * Resolved eagerly, where it used to be a lazy memoising getter.
+   *
+   * ── Why the laziness had to go ──
+   *
+   * `grantsFor` reads `user_capabilities`, so it is async now. A property
+   * getter cannot await, so the getter could only ever hand back a **promise**
+   * — and `can()` reads it as
+   *
+   *     Array.isArray(principal.grants) && principal.grants.includes(cap)
+   *
+   * which is `false` for a promise. Every user-capability grant would have
+   * stopped applying, silently: a Student Organizer would simply lose the four
+   * capabilities their agreement confers, with no error anywhere. The same
+   * shape as the `withheld` defect, and fixed the same way — see `can()`.
+   *
+   * The alternative was making `can()` async, which is not available: it is a
+   * pure synchronous predicate called from hundreds of branches, and
+   * `authz.js` deliberately imports nothing.
+   *
+   * ── What it costs ──
+   *
+   * One indexed lookup per authenticated request, on a table that is empty for
+   * almost every account. Previously it was skipped whenever nothing read
+   * `grants` — which is the common case, because a role's own capabilities
+   * usually answer first. That is a real regression in query count and a
+   * deliberate trade for an authorization kernel that cannot silently
+   * under-grant.
+   */
+  principal.grants = await fetchGrants(userRow.id);
   return principal;
 }
 
@@ -430,14 +454,14 @@ const REAUTH_CHALLENGE_HEADER_KEY = REAUTH_CHALLENGE_HEADER.toLowerCase();
  * `peek` is injectable purely so a test can count calls without going through
  * db.js; production code never passes it.
  */
-export function resolveAssurance(
+export async function resolveAssurance(
   { challengeId, userId, sessionJti },
   peek = (args) => peekChallenge({ db, ...args })
 ) {
   if (!challengeId || typeof challengeId !== 'string') return null;
   if (!userId || !sessionJti) return null;
 
-  const result = peek({ challengeId, userId });
+  const result = await peek({ challengeId, userId });
   if (!result || !result.ok) return null;
 
   // The session binding. `peekChallenge` scopes its read to the user; this is
@@ -454,7 +478,20 @@ export function authenticateToken(req, res, next) {
 
   if (!token) return res.status(401).json({ error: 'Access token required' });
 
-  jwt.verify(token, JWT_SECRET, (err, decodedUser) => {
+  /**
+   * The callback is `async` because the principal is now built from the
+   * database — `withheldCapabilitiesFor` reads the agreement acceptances.
+   *
+   * Express 4 does not await middleware and does not catch a rejected one, so a
+   * throw in here would become an unhandled rejection and take the process
+   * down. The whole body is wrapped below and any failure is answered as a 500
+   * by this middleware itself, which is also the only safe answer: a request
+   * whose principal could not be built must not reach a handler with
+   * `req.principal` undefined, because every capability gate would then read
+   * `undefined` and refuse — or worse, be skipped by a guard that tolerates it.
+   */
+  jwt.verify(token, JWT_SECRET, async (err, decodedUser) => {
+    try {
     if (err) return res.status(403).json({ error: 'Invalid or expired token' });
 
     // A preauth token must never be accepted as a full session token.
@@ -465,7 +502,7 @@ export function authenticateToken(req, res, next) {
     // Re-derive identity from the database on every request rather than
     // trusting the (up to 7-day-old) token payload, so a deleted user's
     // token stops working and a role/email change takes effect immediately.
-    const userRow = db.prepare(
+    const userRow = await db.prepare(
       /* An explicit list, not `SELECT *`, and that is a trap worth naming: a
          column this list omits is simply absent from the row `buildPrincipal`
          resolves the principal from, with no error anywhere. The persona preview
@@ -496,7 +533,7 @@ export function authenticateToken(req, res, next) {
      * The sweep does the same thing for accounts that never come back.
      */
     const suspended = isSuspended(userRow);
-    liftIfExpired(db, userRow);
+    await liftIfExpired(db, userRow);
 
     if ((decodedUser.tokenVersion ?? 0) !== userRow.token_version) {
       return res.status(401).json({ error: 'Session expired, please sign in again' });
@@ -505,7 +542,7 @@ export function authenticateToken(req, res, next) {
     // This one session signed out. Checked after token_version so the account-wide
     // case still reports itself as such, and before req.user is populated so a
     // revoked token never reaches a handler.
-    if (isSessionRevoked(decodedUser.jti)) {
+    if (await isSessionRevoked(decodedUser.jti)) {
       return res.status(401).json({ error: 'You have been signed out. Please sign in again.' });
     }
 
@@ -563,7 +600,7 @@ export function authenticateToken(req, res, next) {
 
     // The capability principal. req.user is left exactly as it was, so every
     // existing handler and test keeps working while call sites migrate.
-    req.principal = buildPrincipal(userRow);
+    req.principal = await buildPrincipal(userRow);
     req.principal.tfaRequired = secondFactorRequiredFor(userRow.role, userRow)
       && !userRow.tfa_enabled && !userRow.tfa_email_enabled;
 
@@ -614,7 +651,7 @@ export function authenticateToken(req, res, next) {
     // Assurance. Additive to the principal and nothing else — a request that
     // presents no challenge id leaves it at the AAL1 principalFor() already
     // built, having touched the database not at all.
-    const aalAction = resolveAssurance({
+    const aalAction = await resolveAssurance({
       challengeId: req.reauthChallengeId,
       userId: userRow.id,
       sessionJti: decodedUser.jti
@@ -636,6 +673,13 @@ export function authenticateToken(req, res, next) {
     }
 
     next();
+    } catch (error) {
+      /* Never rethrow: see the note on the callback above. */
+      console.error('authenticateToken failed to build the principal:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Could not verify your session. Please try again.' });
+      }
+    }
   });
 }
 
@@ -666,20 +710,22 @@ export function authenticateToken(req, res, next) {
  *
  * One function, called by every endpoint that returns the caller to itself.
  */
-export function selfUserResponse(row) {
+export async function selfUserResponse(row) {
   if (!row) return null;
   return {
-    ...formatUserResponse(row),
-    grants: grantsFor(db, row.id),
-    withheld: withheldCapabilitiesFor(db, row),
+    /* Awaited: spreading a PROMISE yields {} — the user object would lose its
+       id and every downstream query would bind undefined. */
+    ...(await formatUserResponse(row)),
+    grants: await grantsFor(db, row.id),
+    withheld: await withheldCapabilitiesFor(db, row),
   };
 }
 
-export function formatUserResponse(row) {
+export async function formatUserResponse(row) {
   if (!row) return null;
 
   // Calculate hours dynamically from confirmed attendance records where student was present
-  const hoursRow = db.prepare(`
+  const hoursRow = await db.prepare(`
     SELECT SUM(hours_awarded) as total
     FROM attendance
     WHERE user_id = ? AND present = 1
@@ -799,16 +845,17 @@ export function formatUserResponse(row) {
  * better-sqlite3 — so multi-statement writes have to drive BEGIN/COMMIT
  * directly or they fail at runtime and leave partial data behind.
  */
+/**
+ * A transaction on the ambient connection.
+ *
+ * The primitive itself is `transactionOn` in `server/db/connectionContext.js` —
+ * it lives there rather than here because two of its callers
+ * (`organizerAgreement.js`, `studentOrganizerAgreement.js`) are modules that
+ * `utils.js` already imports, so importing back would be a cycle. This is the
+ * ambient-connection spelling that the ~71 existing callers use, unchanged.
+ */
 export function inTransaction(fn) {
-  db.exec('BEGIN');
-  try {
-    const result = fn();
-    db.exec('COMMIT');
-    return result;
-  } catch (err) {
-    try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
-    throw err;
-  }
+  return transactionOn(currentConnection(), fn);
 }
 
 /**
@@ -839,14 +886,14 @@ export const NOTIFICATION_KINDS = [
  * every few minutes and re-attempt the same reminder without ever producing a
  * duplicate, because a unique index rejects the second insert.
  */
-export function createNotification({ userId, kind, title, body, link = null, dedupeKey = null }) {
+export async function createNotification({ userId, kind, title, body, link = null, dedupeKey = null }) {
   try {
     if (!NOTIFICATION_KINDS.includes(kind)) {
       console.warn(`Unknown notification kind "${kind}" — falling back to info.`);
       kind = 'info';
     }
     const id = `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notifications (id, user_id, kind, title, body, link, read, created_at, dedupe_key)
       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
     `).run(id, userId, kind, title, body || '', link, new Date().toISOString(), dedupeKey);
@@ -854,7 +901,7 @@ export function createNotification({ userId, kind, title, body, link = null, ded
     // Stage 5: Email Notification Dispatch
     const IMPORTANT_EMAIL_KINDS = ['accepted', 'declined', 'promoted', 'hours', 'cancelled'];
     if (IMPORTANT_EMAIL_KINDS.includes(kind)) {
-      const user = db.prepare('SELECT email, email_opt_out FROM users WHERE id = ?').get(userId);
+      const user = await db.prepare('SELECT email, email_opt_out FROM users WHERE id = ?').get(userId);
       if (user && user.email_opt_out !== 1) {
         // Fire and forget, we don't want to block the request on SMTP
         sendNotificationEmail(user.email, title, body || '').catch(err => {
@@ -903,12 +950,12 @@ export const NOTIFICATION_RETENTION_DAYS = {
  * from the table above is left alone rather than silently swept on a default —
  * an unknown priority is a bug to notice, not data to delete.
  */
-export function purgeExpiredNotifications(now = new Date()) {
+export async function purgeExpiredNotifications(now = new Date()) {
   let removed = 0;
-  const stmt = db.prepare('DELETE FROM notifications WHERE priority = ? AND created_at < ?');
+  const stmt = await db.prepare('DELETE FROM notifications WHERE priority = ? AND created_at < ?');
   for (const [priority, days] of Object.entries(NOTIFICATION_RETENTION_DAYS)) {
     const cutoff = new Date(now.getTime() - days * 24 * 3600 * 1000).toISOString();
-    removed += stmt.run(priority, cutoff).changes;
+    removed += await stmt.run(priority, cutoff).changes;
   }
   return removed;
 }
@@ -921,7 +968,7 @@ export function purgeExpiredNotifications(now = new Date()) {
  *     have not applied to. Only useful to someone who showed intent.
  *   • reminder — a shift you are confirmed for starts within 24h.
  */
-export function runNotificationSweep() {
+export async function runNotificationSweep() {
   const now = new Date();
   const in48h = new Date(now.getTime() + 48 * 3600 * 1000).toISOString();
   const in24h = new Date(now.getTime() + 24 * 3600 * 1000).toISOString();
@@ -930,7 +977,7 @@ export function runNotificationSweep() {
 
   try {
     // Deadline approaching on a starred event the student hasn't applied to
-    const closingSoon = db.prepare(`
+    const closingSoon = await db.prepare(`
       SELECT f.user_id, e.id as event_id, e.title, e.application_deadline
       FROM user_favorites f
       JOIN events e ON f.event_id = e.id
@@ -944,7 +991,7 @@ export function runNotificationSweep() {
     `).all(now.toISOString(), in48h);
 
     for (const row of closingSoon) {
-      if (notificationService.dispatch('EVENT_DEADLINE_APPROACHING', {
+      if (await notificationService.dispatch('EVENT_DEADLINE_APPROACHING', {
         eventId: row.event_id,
         eventTitle: row.title,
         countdownPhrase: countdownPhrase(row.application_deadline)
@@ -954,7 +1001,7 @@ export function runNotificationSweep() {
     }
 
     // Shift starting within 24h for confirmed volunteers
-    const upcoming = db.prepare(`
+    const upcoming = await db.prepare(`
       SELECT a.user_id, e.id as event_id, e.title, e.location, s.id as slot_id,
              s.name as slot_name, s.start_datetime
       FROM applications a
@@ -967,7 +1014,7 @@ export function runNotificationSweep() {
     `).all(now.toISOString(), in24h);
 
     for (const row of upcoming) {
-      if (notificationService.dispatch('EVENT_REMINDER_24H', {
+      if (await notificationService.dispatch('EVENT_REMINDER_24H', {
         eventId: row.event_id,
         eventTitle: row.title,
         slotName: row.slot_name,
@@ -978,7 +1025,7 @@ export function runNotificationSweep() {
     }
 
     // Shift starting within 2h for confirmed volunteers
-    const upcoming2h = db.prepare(`
+    const upcoming2h = await db.prepare(`
       SELECT a.user_id, e.id as event_id, e.title, e.location, s.id as slot_id,
              s.name as slot_name, s.start_datetime
       FROM applications a
@@ -991,7 +1038,7 @@ export function runNotificationSweep() {
     `).all(now.toISOString(), in2h);
 
     for (const row of upcoming2h) {
-      if (notificationService.dispatch('EVENT_REMINDER_2H', {
+      if (await notificationService.dispatch('EVENT_REMINDER_2H', {
         eventId: row.event_id,
         eventTitle: row.title,
         slotName: row.slot_name,
@@ -1001,7 +1048,7 @@ export function runNotificationSweep() {
       }
     }
 
-    const stalled = db.prepare(`
+    const stalled = await db.prepare(`
       SELECT e.id AS event_id, e.title, e.organizer_id, e.auto_approve,
              COUNT(a.id) AS pending_count
       FROM events e
@@ -1018,7 +1065,7 @@ export function runNotificationSweep() {
         ? 'Run Auto Select to choose volunteers.'
         : 'Review them and choose who is accepted.';
 
-      if (notificationService.dispatch('DECISION_NEEDED', {
+      if (await notificationService.dispatch('DECISION_NEEDED', {
         eventId: row.event_id,
         eventTitle: row.title,
         applicantsText: applicants + (n === 1 ? ' is' : ' are'),
@@ -1028,13 +1075,13 @@ export function runNotificationSweep() {
       }
     }
     
-    const removed = purgeExpiredNotifications(now);
-    const revocations = purgeExpiredRevocations(now);
+    const removed = await purgeExpiredNotifications(now);
+    const revocations = await purgeExpiredRevocations(now);
     if (revocations > 0) console.log(`[Sessions] Purged ${revocations} expired revocation(s).`);
 
     // Step-up challenges: one row per sensitive action a user starts, including
     // every abandoned one, each carrying an ip_hash. Worthless once expired.
-    const challenges = sweepExpiredChallenges(db, now);
+    const challenges = await sweepExpiredChallenges(db, now);
     if (challenges > 0) console.log(`[Reauth] Purged ${challenges} spent step-up challenge(s).`);
 
     /**
@@ -1052,14 +1099,14 @@ export function runNotificationSweep() {
      * anything older than the widest window is already invisible to the ceiling
      * that reads it; an hour is a generous margin on that.
      */
-    const tfa = sweepTwoFactorRemnants(db, now);
+    const tfa = await sweepTwoFactorRemnants(db, now);
     if (tfa > 0) console.log(`[2FA] Purged ${tfa} expired code and attempt row(s).`);
 
     /* Check-in codes expire after five minutes; these are swept a day later, so
        "did Leo's code work this morning?" is still answerable in the afternoon.
        After that it is credential material with no remaining purpose, which is
        the same reason the 2FA codes above are swept. */
-    const codes = sweepCheckinTokens(db, now);
+    const codes = await sweepCheckinTokens(db, now);
     if (codes > 0) console.log(`[Check-in] Purged ${codes} expired check-in code(s).`);
 
     /**
@@ -1071,7 +1118,7 @@ export function runNotificationSweep() {
      * internally and returns counts instead of throwing, so a failure in it
      * cannot abandon the sweep tasks above it inside this one shared try block.
      */
-    const errors = sweepErrors(db, now);
+    const errors = await sweepErrors(db, now);
     if (errors.groups > 0 || errors.events > 0) {
       console.log(`[Errors] Purged ${errors.groups} error group(s) and ${errors.events} event(s).`);
     }
@@ -1153,15 +1200,15 @@ export function countdownPhrase(iso) {
 }
 
 /** Notify every confirmed volunteer on an event. Returns how many were told. */
-export function notifyConfirmedVolunteers(eventId, event, payload, dedupeKey = null) {
-  const recipients = db.prepare(`
+export async function notifyConfirmedVolunteers(eventId, event, payload, dedupeKey = null) {
+  const recipients = await db.prepare(`
     SELECT DISTINCT user_id FROM applications
     WHERE event_id = ? AND status = 'accepted'
   `).all(eventId);
   let sent = 0;
   
   for (const r of recipients) {
-    if (notificationService.dispatch(event, payload, r.user_id, dedupeKey ? `${dedupeKey}:${r.user_id}` : null)) {
+    if (await notificationService.dispatch(event, payload, r.user_id, dedupeKey ? `${dedupeKey}:${r.user_id}` : null)) {
       sent++;
     }
   }
@@ -1181,13 +1228,13 @@ export function notifyConfirmedVolunteers(eventId, event, payload, dedupeKey = n
  * Called inside the caller's transaction, so the read and the write cannot
  * interleave with another applicant joining the same slot.
  */
-export function assignWaitlistOrder(applicationId, slotId) {
-  const row = db.prepare(`
+export async function assignWaitlistOrder(applicationId, slotId) {
+  const row = await db.prepare(`
     SELECT COALESCE(MAX(waitlist_order), 0) AS last
     FROM applications
     WHERE slot_id = ? AND status = 'waitlisted' AND id != ?
   `).get(slotId, applicationId);
-  db.prepare('UPDATE applications SET waitlist_order = ? WHERE id = ?')
+  await db.prepare('UPDATE applications SET waitlist_order = ? WHERE id = ?')
     .run(row.last + 1, applicationId);
   return row.last + 1;
 }
@@ -1218,8 +1265,8 @@ export function assignWaitlistOrder(applicationId, slotId) {
  * commits — dispatching inside one would leave notification writes to roll back
  * with it, and a socket emit cannot be un-sent.
  */
-export function promoteFromWaitlist(slotId) {
-  const slot = db.prepare(`
+export async function promoteFromWaitlist(slotId) {
+  const slot = await db.prepare(`
     SELECT s.id, s.name, s.max_spots, s.event_id,
            e.title AS event_title, e.organizer_id, e.status AS event_status,
            e.organization_id, e.audience
@@ -1232,9 +1279,9 @@ export function promoteFromWaitlist(slotId) {
   // waiting — they would arrange a ride around a shift that is not happening.
   if (slot.event_status === 'cancelled' || slot.event_status === 'completed') return [];
 
-  const accepted = db.prepare(
+  const accepted = (await db.prepare(
     "SELECT COUNT(*) AS c FROM applications WHERE slot_id = ? AND status = 'accepted'"
-  ).get(slotId).c;
+  ).get(slotId)).c;
 
   const free = slot.max_spots - accepted;
   if (free <= 0) return [];
@@ -1263,7 +1310,7 @@ export function promoteFromWaitlist(slotId) {
    * past them rather than dropping them, so a lifted ban or a new membership
    * puts them back in line where they were.
    */
-  const waiting = db.prepare(`
+  const waiting = await db.prepare(`
     SELECT a.id, a.user_id, u.name AS volunteer_name
     FROM applications a JOIN users u ON u.id = a.user_id
     WHERE a.slot_id = ? AND a.status = 'waitlisted'
@@ -1273,25 +1320,28 @@ export function promoteFromWaitlist(slotId) {
   const queue = [];
   for (const row of waiting) {
     if (queue.length >= free) break;
-    if (eventApplicationEligibility(slot, row.user_id).ok) queue.push(row);
+    if ((await eventApplicationEligibility(slot, row.user_id)).ok) queue.push(row);
   }
   if (queue.length === 0) return [];
 
-  const promote = db.prepare(
+  const promote = await db.prepare(
     "UPDATE applications SET status = 'accepted', waitlist_order = NULL WHERE id = ?"
   );
-  const renumber = db.prepare('UPDATE applications SET waitlist_order = ? WHERE id = ?');
+  const renumber = await db.prepare('UPDATE applications SET waitlist_order = ? WHERE id = ?');
 
-  for (const row of queue) promote.run(row.id);
+  for (const row of queue) await promote.run(row.id);
 
   // Close the gap the promotion left, so positions stay 1..n and the person who
   // was 3rd is told they are now 2nd rather than staying stuck at 3.
-  const remaining = db.prepare(`
+  const remaining = await db.prepare(`
     SELECT id FROM applications
     WHERE slot_id = ? AND status = 'waitlisted'
     ORDER BY waitlist_order IS NULL, waitlist_order ASC, applied_at ASC, id ASC
   `).all(slotId);
-  remaining.forEach((r, i) => renumber.run(i + 1, r.id));
+  /* A sequential loop, not `forEach`: the callback would have to be async, and
+     `forEach` neither awaits nor collects what it returns — every renumbering
+     would be an unhandled promise racing the response. */
+  for (const [i, r] of remaining.entries()) await renumber.run(i + 1, r.id);
 
   return queue.map(row => ({
     applicationId: row.id,
@@ -1309,15 +1359,15 @@ export function promoteFromWaitlist(slotId) {
  * Notifies both sides about promotions returned by `promoteFromWaitlist`.
  * Deliberately separate, so it is only ever called after a commit.
  */
-export function notifyPromotions(promotions) {
+export async function notifyPromotions(promotions) {
   for (const p of promotions) {
-    notificationService.dispatch('WAITLIST_PROMOTED', {
+    await notificationService.dispatch('WAITLIST_PROMOTED', {
       eventId: p.eventId,
       eventTitle: p.eventTitle,
       slotName: p.slotName
     }, p.userId);
 
-    notificationService.dispatch('WAITLIST_PROMOTION_MADE', {
+    await notificationService.dispatch('WAITLIST_PROMOTION_MADE', {
       eventId: p.eventId,
       eventTitle: p.eventTitle,
       slotName: p.slotName,
@@ -1334,9 +1384,9 @@ export function notifyPromotions(promotions) {
  * hold one should use `promoteFromWaitlist` inside it and `notifyPromotions`
  * after the commit.
  */
-export function handleWaitlistPromotion(slotId) {
+export async function handleWaitlistPromotion(slotId) {
   try {
-    return notifyPromotions(promoteFromWaitlist(slotId));
+    return await notifyPromotions(await promoteFromWaitlist(slotId));
   } catch (err) {
     console.error('Waitlist promotion error:', err);
     return 0;

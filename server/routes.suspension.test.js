@@ -71,7 +71,7 @@ describe('POST /api/admin/users/:id/suspend', () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('suspended');
 
-    const row = db.prepare(
+    const row = await db.prepare(
       'SELECT account_status, suspension_reason, suspended_by, suspended_at FROM users WHERE id = ?'
     ).get('user-student-2');
 
@@ -138,10 +138,10 @@ describe('POST /api/admin/users/:id/suspend', () => {
    * whether or not its cookie was invalidated.
    */
   it('does not sign the account out, because the gate does not need it', async () => {
-    const before = db.prepare('SELECT token_version FROM users WHERE id = ?').get('user-student-3');
+    const before = await db.prepare('SELECT token_version FROM users WHERE id = ?').get('user-student-3');
     await srv.call('POST', '/api/admin/users/user-student-3/suspend',
       { reason: GOOD_REASON }, adminToken);
-    const after = db.prepare('SELECT token_version FROM users WHERE id = ?').get('user-student-3');
+    const after = await db.prepare('SELECT token_version FROM users WHERE id = ?').get('user-student-3');
 
     expect(after.token_version).toBe(before.token_version);
   });
@@ -206,7 +206,7 @@ describe('POST /api/admin/users/:id/suspend', () => {
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
       { reason: GOOD_REASON }, adminToken);
 
-    const audit = db.prepare(`
+    const audit = await db.prepare(`
       SELECT * FROM admin_audit_logs
       WHERE action = 'ACCOUNT_SUSPENDED' AND target_user_id = ?
       ORDER BY created_at DESC LIMIT 1
@@ -227,7 +227,7 @@ describe('POST /api/admin/users/:id/suspend', () => {
         { reason: 'spam' }, adminToken);
       expect(terse.status).toBe(400);
 
-      const still = db.prepare('SELECT account_status FROM users WHERE id = ?').get('user-student-2');
+      const still = await db.prepare('SELECT account_status FROM users WHERE id = ?').get('user-student-2');
       expect(still.account_status, 'a refused suspension must not partially apply').toBe('active');
     });
 
@@ -248,7 +248,7 @@ describe('POST /api/admin/users/:id/suspend', () => {
 
       // The original reason must survive — a repeat call must not overwrite the
       // record of why the account was suspended in the first place.
-      const row = db.prepare('SELECT suspension_reason FROM users WHERE id = ?').get('user-student-2');
+      const row = await db.prepare('SELECT suspension_reason FROM users WHERE id = ?').get('user-student-2');
       expect(row.suspension_reason).toBe(GOOD_REASON);
     });
 
@@ -280,9 +280,9 @@ describe('POST /api/admin/users/:id/suspend', () => {
       // Privilege-escalation guard: user.suspend is an ordinary admin
       // capability, so without this an admin could remove the person who could
       // undo it.
-      const second = db.prepare("SELECT id FROM users WHERE role = 'admin' AND id != 'user-admin'").get();
+      const second = await db.prepare("SELECT id FROM users WHERE role = 'admin' AND id != 'user-admin'").get();
       if (!second) {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, created_at)
           VALUES ('user-admin-2','Second Admin','admin2@example.gov','sysadmin2','x','N/A','admin',1,?)
         `).run(new Date().toISOString());
@@ -293,15 +293,15 @@ describe('POST /api/admin/users/:id/suspend', () => {
         { reason: GOOD_REASON }, adminToken);
       expect(res.status).toBe(403);
 
-      db.prepare("DELETE FROM users WHERE id = 'user-admin-2'").run();
+      await db.prepare("DELETE FROM users WHERE id = 'user-admin-2'").run();
     });
 
     it('refuses suspending a deleted account', async () => {
-      db.prepare("UPDATE users SET account_status = 'deleted' WHERE id = 'user-student-3'").run();
+      await db.prepare("UPDATE users SET account_status = 'deleted' WHERE id = 'user-student-3'").run();
       const res = await srv.call('POST', '/api/admin/users/user-student-3/suspend',
         { reason: GOOD_REASON }, adminToken);
       expect(res.status).toBe(409);
-      db.prepare("UPDATE users SET account_status = 'active' WHERE id = 'user-student-3'").run();
+      await db.prepare("UPDATE users SET account_status = 'active' WHERE id = 'user-student-3'").run();
     });
   });
 
@@ -311,20 +311,20 @@ describe('POST /api/admin/users/:id/suspend', () => {
       // organizers precisely because ON DELETE CASCADE would take their events
       // — and their volunteers' attendance rows — with them. Suspension must
       // not reintroduce that by another door.
-      const before = db.prepare(
+      const before = (await db.prepare(
         'SELECT COUNT(*) AS c FROM attendance WHERE event_id IN (SELECT id FROM events WHERE organizer_id = ?)'
-      ).get('user-org-1').c;
+      ).get('user-org-1')).c;
 
       const res = await srv.call('POST', '/api/admin/users/user-org-1/suspend',
         { reason: 'Safety report under investigation, pending review.' }, adminToken);
       expect(res.status).toBe(200);
 
-      const after = db.prepare(
+      const after = (await db.prepare(
         'SELECT COUNT(*) AS c FROM attendance WHERE event_id IN (SELECT id FROM events WHERE organizer_id = ?)'
-      ).get('user-org-1').c;
+      ).get('user-org-1')).c;
 
       expect(after, 'suspending an organizer must not destroy volunteers\' service records').toBe(before);
-      expect(db.prepare('SELECT id FROM users WHERE id = ?').get('user-org-1')).toBeTruthy();
+      expect(await db.prepare('SELECT id FROM users WHERE id = ?').get('user-org-1')).toBeTruthy();
     });
 
     it('reports how many active events the suspended organizer still hosts', async () => {
@@ -355,7 +355,7 @@ describe('POST /api/admin/users/:id/unsuspend', () => {
     const res = await srv.call('POST', '/api/admin/users/user-student-2/unsuspend', {}, adminToken);
     expect(res.status).toBe(200);
 
-    const row = db.prepare(
+    const row = await db.prepare(
       'SELECT account_status, suspension_reason, suspended_by, suspended_at FROM users WHERE id = ?'
     ).get('user-student-2');
 
@@ -381,12 +381,12 @@ describe('POST /api/admin/users/:id/unsuspend', () => {
     await srv.call('POST', '/api/admin/users/user-student-2/unsuspend',
       { reason: 'Report not substantiated.' }, adminToken);
 
-    const suspended = db.prepare(
+    const suspended = (await db.prepare(
       "SELECT COUNT(*) AS c FROM admin_audit_logs WHERE action = 'ACCOUNT_SUSPENDED' AND target_user_id = ?"
-    ).get('user-student-2').c;
-    const lifted = db.prepare(
+    ).get('user-student-2')).c;
+    const lifted = (await db.prepare(
       "SELECT COUNT(*) AS c FROM admin_audit_logs WHERE action = 'ACCOUNT_UNSUSPENDED' AND target_user_id = ?"
-    ).get('user-student-2').c;
+    ).get('user-student-2')).c;
 
     expect(suspended, 'the suspension record must survive reinstatement').toBeGreaterThan(0);
     expect(lifted).toBeGreaterThan(0);
@@ -442,8 +442,8 @@ describe('timed suspension', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.suspendedUntil).toBe(until);
-    expect(db.prepare('SELECT suspended_until FROM users WHERE id = ?')
-      .get('user-student-2').suspended_until).toBe(until);
+    expect((await db.prepare('SELECT suspended_until FROM users WHERE id = ?')
+      .get('user-student-2')).suspended_until).toBe(until);
   });
 
   it('still blocks while the deadline is in the future', async () => {
@@ -481,7 +481,7 @@ describe('timed suspension', () => {
     await srv.call('POST', '/api/auth/login',
       { email: 'priya.patel@example.com', password: 'password123' });
 
-    const row = db.prepare(`SELECT account_status, suspension_reason, suspension_lifted_at
+    const row = await db.prepare(`SELECT account_status, suspension_reason, suspension_lifted_at
                               FROM users WHERE id = ?`).get('user-student-2');
     expect(row.account_status).toBe('active');
     expect(row.suspension_lifted_at).toBeTruthy();
@@ -514,8 +514,8 @@ describe('timed suspension', () => {
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
       { reason: GOOD_REASON }, adminToken);
 
-    expect(db.prepare('SELECT suspended_until FROM users WHERE id = ?')
-      .get('user-student-2').suspended_until).toBe(null);
+    expect((await db.prepare('SELECT suspended_until FROM users WHERE id = ?')
+      .get('user-student-2')).suspended_until).toBe(null);
 
     const res = await srv.call('POST', '/api/auth/login',
       { email: 'priya.patel@example.com', password: 'password123' });
@@ -582,7 +582,7 @@ describe('timed suspension', () => {
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
       { reason: GOOD_REASON, until }, adminToken);
 
-    const notice = db.prepare(`
+    const notice = await db.prepare(`
       SELECT body FROM notifications
        WHERE user_id = 'user-student-2' AND title LIKE '%suspended%'
        ORDER BY rowid DESC LIMIT 1
@@ -599,8 +599,8 @@ describe('timed suspension', () => {
 
       expect(res.status).toBe(400);
       expect(res.body.code).toBe('until_in_past');
-      expect(db.prepare('SELECT account_status FROM users WHERE id = ?')
-        .get('user-student-2').account_status).toBe('active');
+      expect((await db.prepare('SELECT account_status FROM users WHERE id = ?')
+        .get('user-student-2')).account_status).toBe('active');
     });
 
     /**
@@ -636,13 +636,13 @@ describe('timed suspension', () => {
       { reason: GOOD_REASON, until: inDays(7) }, adminToken);
     await srv.call('POST', '/api/admin/users/user-student-2/unsuspend', {}, adminToken);
 
-    expect(db.prepare('SELECT suspended_until FROM users WHERE id = ?')
-      .get('user-student-2').suspended_until).toBe(null);
+    expect((await db.prepare('SELECT suspended_until FROM users WHERE id = ?')
+      .get('user-student-2')).suspended_until).toBe(null);
 
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
       { reason: GOOD_REASON }, adminToken);
-    expect(db.prepare('SELECT suspended_until FROM users WHERE id = ?')
-      .get('user-student-2').suspended_until, 'inherited a deadline nobody chose').toBe(null);
+    expect((await db.prepare('SELECT suspended_until FROM users WHERE id = ?')
+      .get('user-student-2')).suspended_until, 'inherited a deadline nobody chose').toBe(null);
   });
 
   it('records the duration in the audit trail', async () => {
@@ -650,7 +650,7 @@ describe('timed suspension', () => {
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
       { reason: GOOD_REASON, until }, adminToken);
 
-    const row = db.prepare(`SELECT details FROM admin_audit_logs
+    const row = await db.prepare(`SELECT details FROM admin_audit_logs
                              WHERE action = 'ACCOUNT_SUSPENDED' AND target_user_id = ?
                              ORDER BY rowid DESC LIMIT 1`).get('user-student-2');
     expect(row.details).toContain(until);

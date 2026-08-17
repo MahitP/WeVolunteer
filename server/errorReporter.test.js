@@ -313,13 +313,13 @@ describe('fingerprint', () => {
    * The fingerprint is computed after redaction, so a message that contained an
    * address cannot be recovered from — or identified by — the stored digest.
    */
-  it('is computed from the redacted message, not the raw one', () => {
+  it('is computed from the redacted message, not the raw one', async () => {
     const raw = 'mail to leo.chen@example.com failed';
     const viaRecord = fingerprint({ source: 'server', kind: 'TypeError', message: redactMessage(raw), route: null });
     const viaRaw = fingerprint({ source: 'server', kind: 'TypeError', message: raw, route: null });
     expect(viaRecord).not.toBe(viaRaw);
 
-    recordError(db, base({ message: raw }));
+    await recordError(db, base({ message: raw }));
     const [g] = groups();
     expect(g.message).not.toContain('leo.chen@example.com');
     expect(g.fingerprint).toBe(viaRecord);
@@ -329,30 +329,30 @@ describe('fingerprint', () => {
 /* ── Recording ─────────────────────────────────────────────────────────── */
 
 describe('recordError — the happy path', () => {
-  it('creates one group and one event', () => {
-    const res = recordError(db, base({ route: '/api/events/:id', method: 'GET', statusCode: 500 }));
+  it('creates one group and one event', async () => {
+    const res = await recordError(db, base({ route: '/api/events/:id', method: 'GET', statusCode: 500 }));
     expect(res.ok).toBe(true);
     expect(groups().length).toBe(1);
     expect(events().length).toBe(1);
     expect(groups()[0]).toMatchObject({ source: 'server', kind: 'TypeError', occurrences: 1, status: 'open' });
   });
 
-  it('increments the counter instead of duplicating the group', () => {
-    for (let i = 0; i < 5; i++) recordError(db, base());
+  it('increments the counter instead of duplicating the group', async () => {
+    for (let i = 0; i < 5; i++) await recordError(db, base());
     expect(groups().length).toBe(1);
     expect(groups()[0].occurrences).toBe(5);
   });
 
-  it('reopens a resolved group when the problem recurs', () => {
-    recordError(db, base());
+  it('reopens a resolved group when the problem recurs', async () => {
+    await recordError(db, base());
     db.prepare("UPDATE error_groups SET status = 'resolved', resolved_at = 'x'").run();
-    recordError(db, base());
+    await recordError(db, base());
     expect(groups()[0].status).toBe('open');
     expect(groups()[0].resolved_at).toBeNull();
   });
 
-  it('drops every context key the table cannot hold', () => {
-    recordError(db, base({
+  it('drops every context key the table cannot hold', async () => {
+    await recordError(db, base({
       context: {
         component: 'EventModal', eventId: 'evt-1',
         password: 'hunter2', newEmail: 'a@b.com', challengeId: 'reauth-abc', token: 'x'
@@ -365,14 +365,14 @@ describe('recordError — the happy path', () => {
     }
   });
 
-  it('stores the normalised route for a client report, not what was sent', () => {
-    recordError(db, base({ source: 'client', route: '/verify/CERT-SECRET-9?token=abc#frag' }));
+  it('stores the normalised route for a client report, not what was sent', async () => {
+    await recordError(db, base({ source: 'client', route: '/verify/CERT-SECRET-9?token=abc#frag' }));
     expect(groups()[0].route).toBe('/verify/:code');
     expect(events()[0].route).toBe('/verify/:code');
   });
 
-  it('never stores a raw client path anywhere in either table', () => {
-    recordError(db, base({ source: 'client', route: '/admin/secret-panel?user=leo@x.com' }));
+  it('never stores a raw client path anywhere in either table', async () => {
+    await recordError(db, base({ source: 'client', route: '/admin/secret-panel?user=leo@x.com' }));
     const dump = JSON.stringify([...groups(), ...events()]);
     expect(dump).not.toContain('secret-panel');
     expect(dump).not.toContain('leo@x.com');
@@ -381,42 +381,45 @@ describe('recordError — the happy path', () => {
 });
 
 describe('recordError — never throws', () => {
-  it('survives a db whose prepare throws', () => {
+  it('survives a db whose prepare throws', async () => {
     const hostile = { prepare: () => { throw new Error('database is locked'); } };
     let res;
-    expect(() => { res = recordError(hostile, base()); }).not.toThrow();
+    res = await recordError(hostile, base());
     expect(res.ok).toBe(false);
   });
 
-  it('survives a db whose run throws mid-write', () => {
+  it('survives a db whose run throws mid-write', async () => {
     const hostile = { prepare: () => ({ get: () => undefined, run: () => { throw new Error('disk I/O'); } }) };
-    expect(() => recordError(hostile, base())).not.toThrow();
+    expect(async () => recordError(hostile, base())).not.toThrow();
   });
 
-  it('survives no db, no event, and hostile payloads', () => {
+  it('survives no db, no event, and hostile payloads', async () => {
     for (const call of [
-      () => recordError(null, base()),
-      () => recordError(undefined, undefined),
-      () => recordError(db, null),
-      () => recordError(db, 'nope'),
-      () => recordError(db, base({ message: { toString() { throw new Error('hostile toString'); } } })),
-      () => recordError(db, base({ stack: 12345, context: 'not-an-object' })),
-      () => recordError(db, base({ kind: 'x'.repeat(10_000), message: 'y'.repeat(100_000) })),
+      async () => recordError(null, base()),
+      async () => recordError(undefined, undefined),
+      async () => recordError(db, null),
+      async () => recordError(db, 'nope'),
+      async () => recordError(db, base({ message: { toString() { throw new Error('hostile toString'); } } })),
+      async () => recordError(db, base({ stack: 12345, context: 'not-an-object' })),
+      async () => recordError(db, base({ kind: 'x'.repeat(10_000), message: 'y'.repeat(100_000) })),
     ]) {
-      expect(call).not.toThrow();
+      /* `resolves` rather than `not.toThrow`: `recordError` is async now, so a
+         failure would arrive as a rejection. The property — it never fails the
+         caller, whatever it is handed — is unchanged. */
+      await expect(call()).resolves.not.toThrow();
     }
   });
 
-  it('refuses an unknown source rather than guessing one', () => {
-    expect(recordError(db, base({ source: 'browser' })).ok).toBe(false);
-    expect(recordError(db, base({ source: undefined })).ok).toBe(false);
+  it('refuses an unknown source rather than guessing one', async () => {
+    expect((await recordError(db, base({ source: 'browser' }))).ok).toBe(false);
+    expect((await recordError(db, base({ source: undefined }))).ok).toBe(false);
     expect(groups().length).toBe(0);
   });
 });
 
 describe('recordError — storage is bounded', () => {
-  it('keeps at most 50 events for one fingerprint while the counter keeps climbing', () => {
-    for (let i = 0; i < 120; i++) recordError(db, base());
+  it('keeps at most 50 events for one fingerprint while the counter keeps climbing', async () => {
+    for (let i = 0; i < 120; i++) await recordError(db, base());
     expect(groups()[0].occurrences).toBe(120);
     expect(events().length).toBeLessThanOrEqual(MAX_EVENTS_PER_GROUP);
   });
@@ -425,12 +428,12 @@ describe('recordError — storage is bounded', () => {
    * The unauthenticated-intake bound. Without it the fingerprint is
    * attacker-chosen and every forged one earns its own group.
    */
-  it('stops creating client groups at the ceiling and counts the overflow', () => {
+  it('stops creating client groups at the ceiling and counts the overflow', async () => {
     for (let i = 0; i < CLIENT_GROUP_CEILING + 25; i++) {
       // Distinct by LETTERS, not digits: the fingerprint deliberately collapses
       // numeric variation, so `failure 1` and `failure 2` are one group. An
       // attacker varies words, and so must this test.
-      const res = recordError(db, base({ source: 'client', message: `unique failure ${label(i)}` }));
+      const res = await recordError(db, base({ source: 'client', message: `unique failure ${label(i)}` }));
       expect(res.ok, 'overflow must still read as accepted — a different answer is an oracle').toBe(true);
     }
 
@@ -444,8 +447,8 @@ describe('recordError — storage is bounded', () => {
     expect(overflow.occurrences).toBeGreaterThan(0);
   });
 
-  it('does not apply the client ceiling to server errors', () => {
-    for (let i = 0; i < 20; i++) recordError(db, base({ message: `server problem ${label(i)}` }));
+  it('does not apply the client ceiling to server errors', async () => {
+    for (let i = 0; i < 20; i++) await recordError(db, base({ message: `server problem ${label(i)}` }));
     expect(groups().filter(g => g.source === 'server').length).toBeGreaterThan(10);
   });
 });

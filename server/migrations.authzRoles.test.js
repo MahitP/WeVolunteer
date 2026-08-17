@@ -173,7 +173,7 @@ describe('001_authz_roles', () => {
     const db = await getDb();
     // verifyLedgerParity(db) returns { ok, mismatches, usersChecked }; assert on
     // both `ok` and `mismatches` so neither can pass by being undefined.
-    const result = verifyLedgerParity(db);
+    const result = await verifyLedgerParity(db);
     expect(result.mismatches).toEqual([]);
     expect(result.ok).toBe(true);
   });

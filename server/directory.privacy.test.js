@@ -53,7 +53,7 @@ describe('the member directory: what one member may learn about another', () => 
     admin = await srv.login('admin@example.gov');
 
     ({ db } = await import('./db.js'));
-    studentId = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com').id;
+    studentId = (await db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com')).id;
 
     /* A second student, so the "one member reading another" case is a real one
        rather than a self-read wearing a disguise. */
@@ -64,7 +64,7 @@ describe('the member directory: what one member may learn about another', () => 
     otherStudent = signup.cookie;
     otherId = signup.user.id;
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE users SET bio = ?, school = ?, location = ?,
                        hobbies = ?, skills = ?, profile_visibility = 'public'
       WHERE id = ?
@@ -195,13 +195,13 @@ describe('the member directory: what one member may learn about another', () => 
     });
 
     it('search never returns a suspended or deleted account', async () => {
-      db.prepare(`UPDATE users SET account_status = 'deleted' WHERE id = ?`).run(otherId);
+      await db.prepare(`UPDATE users SET account_status = 'deleted' WHERE id = ?`).run(otherId);
       const res = await srv.call('GET', '/api/directory/search?q=Priya', undefined, student);
       expect(res.body.users.find(u => u.id === otherId)).toBeUndefined();
 
       const profile = await srv.call('GET', '/api/users/by-username/priya', undefined, student);
       expect(profile.status).toBe(404);
-      db.prepare(`UPDATE users SET account_status = 'active' WHERE id = ?`).run(otherId);
+      await db.prepare(`UPDATE users SET account_status = 'active' WHERE id = ?`).run(otherId);
     });
 
     /**
@@ -249,7 +249,7 @@ describe('the member directory: what one member may learn about another', () => 
         username: 'partnerorg', role: 'student', password: 'TestPass123!',
       });
       const partnerToken = partner.cookie;
-      db.prepare(`UPDATE users SET role = 'partner' WHERE email = ?`).run('partner.dir@test.local');
+      await db.prepare(`UPDATE users SET role = 'partner' WHERE email = ?`).run('partner.dir@test.local');
 
       for (const path of [
         '/api/directory/search?q=priya',
@@ -319,7 +319,7 @@ describe('the member directory: what one member may learn about another', () => 
       /* There is no latitude/longitude on `users` and there must not be one:
          an event's coordinates are a meeting point an organizer published; a
          student's would be a child's whereabouts. */
-      const columns = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+      const columns = (await db.prepare('PRAGMA table_info(users)').all()).map(c => c.name);
       expect(columns).not.toContain('latitude');
       expect(columns).not.toContain('longitude');
     });

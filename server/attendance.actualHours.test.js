@@ -31,16 +31,16 @@ describe('actual hours, and events that credit none', () => {
     const appId = `app-${Math.random().toString(36).slice(2)}`;
     const now = new Date().toISOString();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline,
                           organizer_id, status, created_at, credits_hours)
       VALUES (?, 'Past shift', 'd', 'Other', 'Somewhere', ?, ?, 'open', ?, ?)
     `).run(eventId, start.toISOString(), organizerId, now, creditsHours ? 1 : 0);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
       VALUES (?, ?, 'Shift', 'd', ?, ?, 5)
     `).run(slotId, eventId, start.toISOString(), end.toISOString());
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
       VALUES (?, ?, ?, ?, 'accepted', ?)
     `).run(appId, studentId, eventId, slotId, now);
@@ -62,8 +62,8 @@ describe('actual hours, and events that credit none', () => {
     admin = await srv.login('admin@example.gov');
     student = await srv.login('leo.chen@example.com');
     ({ db } = await import('./db.js'));
-    studentId = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com').id;
-    organizerId = db.prepare('SELECT id FROM users WHERE email = ?').get('jordan.whitfield@example.org').id;
+    studentId = (await db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com')).id;
+    organizerId = (await db.prepare('SELECT id FROM users WHERE email = ?').get('jordan.whitfield@example.org')).id;
   }, 60000);
 
   afterAll(async () => { await srv?.close(); });
@@ -265,14 +265,14 @@ describe('actual hours, and events that credit none', () => {
     });
 
     it('does not disturb the derived-hours total', async () => {
-      const before = db.prepare(
+      const before = (await db.prepare(
         'SELECT COALESCE(SUM(hours_awarded), 0) AS h FROM attendance WHERE user_id = ? AND present = 1'
-      ).get(studentId).h;
+      ).get(studentId)).h;
       const { eventId, appId } = await pastEventWithApplicant({ creditsHours: false, hours: 8 });
       await srv.call('POST', `/api/events/${eventId}/attendance`, { attendanceMap: { [appId]: true } }, organizer);
-      const after = db.prepare(
+      const after = (await db.prepare(
         'SELECT COALESCE(SUM(hours_awarded), 0) AS h FROM attendance WHERE user_id = ? AND present = 1'
-      ).get(studentId).h;
+      ).get(studentId)).h;
       expect(after).toBe(before);
     });
 
@@ -280,9 +280,9 @@ describe('actual hours, and events that credit none', () => {
     it('still counts toward the participation statistics', async () => {
       const { volunteerStats } = await import('./volunteerStats.js');
       const { eventId, appId } = await pastEventWithApplicant({ creditsHours: false, hours: 2 });
-      const before = volunteerStats(db, studentId).eventsAttended;
+      const before = (await volunteerStats(db, studentId)).eventsAttended;
       await srv.call('POST', `/api/events/${eventId}/attendance`, { attendanceMap: { [appId]: true } }, organizer);
-      expect(volunteerStats(db, studentId).eventsAttended).toBe(before + 1);
+      expect((await volunteerStats(db, studentId)).eventsAttended).toBe(before + 1);
     });
   });
 });

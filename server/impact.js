@@ -71,8 +71,8 @@ function bucket(label, count, extra = {}) {
  * `eventsCompleted` is likewise events with attendance recorded, not events
  * created. An event nobody attended did not happen.
  */
-function community(db) {
-  const totals = db.prepare(`
+async function community(db) {
+  const totals = await db.prepare(`
     SELECT COUNT(DISTINCT user_id) AS volunteers,
            COALESCE(SUM(hours_awarded), 0) AS hours,
            COUNT(DISTINCT event_id) AS events
@@ -80,7 +80,7 @@ function community(db) {
      WHERE present = 1
   `).get();
 
-  const orgs = db.prepare(`
+  const orgs = await db.prepare(`
     SELECT COUNT(DISTINCT e.organizer_id) AS organizations
       FROM events e
      WHERE EXISTS (SELECT 1 FROM attendance a WHERE a.event_id = e.id AND a.present = 1)
@@ -106,8 +106,8 @@ function community(db) {
  * people, and a twelve-point line chart with one tiny point is exactly where a
  * reader's eye goes.
  */
-function growth(db) {
-  const rows = db.prepare(`
+async function growth(db) {
+  const rows = await db.prepare(`
     SELECT substr(s.start_datetime, 1, 7) AS month,
            COUNT(DISTINCT a.user_id)      AS volunteers,
            COUNT(DISTINCT a.event_id)     AS events,
@@ -139,8 +139,8 @@ function growth(db) {
  * Null rather than zero when there is nobody to average over. Zero is a claim —
  * "nobody came back" — and an empty programme has not made it.
  */
-function volunteers(db) {
-  const perVolunteer = db.prepare(`
+async function volunteers(db) {
+  const perVolunteer = await db.prepare(`
     SELECT user_id,
            COUNT(DISTINCT event_id) AS events,
            COALESCE(SUM(hours_awarded), 0) AS hours
@@ -182,8 +182,8 @@ function volunteers(db) {
  * "where did the effort go", and a category with many short shifts is not a
  * larger need than one with a few long ones.
  */
-function categories(db) {
-  const rows = db.prepare(`
+async function categories(db) {
+  const rows = await db.prepare(`
     SELECT e.category                     AS label,
            COUNT(DISTINCT a.user_id)      AS volunteers,
            COUNT(DISTINCT a.event_id)     AS events,
@@ -214,8 +214,8 @@ function categories(db) {
  * with more than a handful of members per unit — this becomes a breakdown. Until
  * then a count is the honest thing to publish.
  */
-function geography(db) {
-  const { places } = db.prepare(`
+async function geography(db) {
+  const { places } = await db.prepare(`
     SELECT COUNT(DISTINCT e.location) AS places
       FROM events e
      WHERE e.location IS NOT NULL AND TRIM(e.location) <> ''
@@ -266,8 +266,8 @@ function geography(db) {
  * normalised key — an arbitrary pick among the spellings in use, which is fine for
  * a display label and is why `tag` is what any filter would use.
  */
-function tags(db) {
-  const rows = db.prepare(`
+async function tags(db) {
+  const rows = await db.prepare(`
     SELECT et.tag                          AS tag,
            MAX(et.label)                   AS label,
            COUNT(DISTINCT a.user_id)       AS volunteers,
@@ -301,16 +301,16 @@ function tags(db) {
  * are computed live, so it is always "now" — but a page that has been open for
  * an hour should not imply its numbers are.
  */
-export function buildImpact(db) {
+export async function buildImpact(db) {
   return {
     generatedAt: new Date().toISOString(),
     minBucket: MIN_BUCKET,
-    community: community(db),
-    growth: growth(db),
-    volunteers: volunteers(db),
-    categories: categories(db),
-    tags: tags(db),
-    geography: geography(db),
+    community: await community(db),
+    growth: await growth(db),
+    volunteers: await volunteers(db),
+    categories: await categories(db),
+    tags: await tags(db),
+    geography: await geography(db),
   };
 }
 
@@ -330,7 +330,7 @@ const DEFINITIONS = Object.freeze({
   returningRate: 'Share of volunteers who came back for a second, different event.',
   averageHours: 'Total credited hours divided by the number of volunteers.',
   medianHours: 'The middle volunteer\'s hours. Read beside the average: a gap between them means a few people carry most of the total.',
-  distinctLocations: 'Places at least one attended event was held. Locations themselves are never published — see geography() above.',
+  distinctLocations: 'Places at least one attended event was held. Locations themselves are never published — see await geography() above.',
 });
 
 /**
@@ -385,9 +385,10 @@ const DEFINITIONS = Object.freeze({
  * and telling them "not published yet" on their own platform is a bug wearing a
  * privacy argument. The per-bucket suppression that does the real work stays.
  */
-export function buildAdminImpact(db) {
+export async function buildAdminImpact(db) {
   return {
-    ...buildImpact(db),
+    /* Awaited: spreading a promise contributes no properties at all. */
+    ...(await buildImpact(db)),
     definitions: DEFINITIONS,
   };
 }

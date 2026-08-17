@@ -51,18 +51,18 @@ export const INELIGIBLE = Object.freeze({
  * Only an ACTIVE ban counts. A lifted ban is history, and migration 044's
  * uniqueness is partial for exactly that reason — lifted rows accumulate.
  */
-export function activeBanFor(organizationId, userId) {
+export async function activeBanFor(organizationId, userId) {
   if (!organizationId || !userId) return null;
-  return db.prepare(`
+  return await db.prepare(`
     SELECT reason FROM organization_bans
      WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
   `).get(organizationId, userId) || null;
 }
 
 /** Is this person a member of the organization — of any rank? */
-export function isMemberOf(organizationId, userId) {
+export async function isMemberOf(organizationId, userId) {
   if (!organizationId || !userId) return false;
-  return Boolean(db.prepare(
+  return Boolean(await db.prepare(
     'SELECT 1 FROM organization_members WHERE organization_id = ? AND user_id = ?'
   ).get(organizationId, userId));
 }
@@ -78,7 +78,7 @@ export function isMemberOf(organizationId, userId) {
  *   `audience` and `organizer_id`
  * @param {string} userId the applicant
  */
-export function eventApplicationEligibility(event, userId) {
+export async function eventApplicationEligibility(event, userId) {
   if (!event || !userId) return { ok: true };
 
   const organizationId = event.organization_id || null;
@@ -106,7 +106,7 @@ export function eventApplicationEligibility(event, userId) {
      by an individual organizer is unaffected by any of this. */
   if (!organizationId) return { ok: true };
 
-  const ban = activeBanFor(organizationId, userId);
+  const ban = await activeBanFor(organizationId, userId);
   if (ban) {
     return {
       ok: false,
@@ -120,7 +120,7 @@ export function eventApplicationEligibility(event, userId) {
     };
   }
 
-  if (audience === 'organization' && !isMemberOf(organizationId, userId)) {
+  if (audience === 'organization' && !await isMemberOf(organizationId, userId)) {
     return {
       ok: false,
       code: INELIGIBLE.NOT_MEMBER,

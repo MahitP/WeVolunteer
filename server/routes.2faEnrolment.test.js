@@ -167,7 +167,7 @@ describe('POST /api/2fa/enable — a rejected code and the grant', () => {
     expect(wrong.status).toBe(400);
     expect(wrong.body.error).toBe('Invalid token');
 
-    const row = db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(enableGrant);
+    const row = await db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(enableGrant);
     expect(row.consumed_at, 'a rejected code must not cost the verification').toBeNull();
 
     const right = await srv.call('POST', '/api/2fa/enable',
@@ -189,7 +189,7 @@ describe('POST /api/2fa/enable — a rejected code and the grant', () => {
       { [REAUTH_CHALLENGE_HEADER]: enableGrant });
     expect(ok.status).toBe(200);
 
-    const row = db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(enableGrant);
+    const row = await db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(enableGrant);
     expect(row.consumed_at).not.toBeNull();
   }, 30000);
 });
@@ -224,7 +224,7 @@ describe('POST /api/2fa/enable — the recovery-code set it hands back', () => {
     const insert = db.prepare(
       "INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))"
     );
-    for (const hash of stale) insert.run(`rc-${crypto.randomUUID()}`, user.id, hash);
+    for (const hash of stale) await insert.run(`rc-${crypto.randomUUID()}`, user.id, hash);
 
     const secret = await beginEnrolment(cookie);
     const enableGrant = await srv.stepUp(cookie, '2fa.enable', { password: PW });
@@ -237,7 +237,7 @@ describe('POST /api/2fa/enable — the recovery-code set it hands back', () => {
        when a set was actually issued. */
     expect(res.body.recoveryCodes ?? null).toBeNull();
 
-    const held = db.prepare('SELECT code_hash FROM recovery_codes WHERE user_id = ?').all(user.id);
+    const held = await db.prepare('SELECT code_hash FROM recovery_codes WHERE user_id = ?').all(user.id);
     expect(held, 'the set must be neither doubled nor replaced').toHaveLength(10);
     for (const hash of stale) {
       expect(held.some(r => r.code_hash === hash), 'a code the user wrote down was voided').toBe(true);
@@ -257,7 +257,7 @@ describe('POST /api/2fa/enable — the recovery-code set it hands back', () => {
     expect(res.status).toBe(200);
     expect(res.body.recoveryCodes).toHaveLength(10);
     expect(
-      db.prepare('SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?').get(user.id).n
+      (await db.prepare('SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?').get(user.id)).n
     ).toBe(10);
   }, 30000);
 });
@@ -282,7 +282,7 @@ describe('POST /api/2fa/disable — removing one factor is not removing them all
       { [REAUTH_CHALLENGE_HEADER]: enableGrant });
     expect(enabled.status).toBe(200);
 
-    db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(user.id);
+    await db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(user.id);
     const emailGrant = await srv.stepUp(cookie, '2fa.enable', { password: PW });
     const emailOn = await srv.call('POST', '/api/2fa/email/enable', {}, cookie,
       { [REAUTH_CHALLENGE_HEADER]: emailGrant });
@@ -307,7 +307,7 @@ describe('POST /api/2fa/disable — removing one factor is not removing them all
     expect(res.status).toBe(200);
     expect(res.body.twoFactorStillOn, 'email 2FA survives, so 2FA is still on').toBe(true);
 
-    const row = db.prepare(
+    const row = await db.prepare(
       'SELECT tfa_enabled, tfa_secret, tfa_email_enabled, tfa_last_counter FROM users WHERE id = ?'
     ).get(user.id);
     expect(row.tfa_enabled).toBe(0);
@@ -335,7 +335,7 @@ describe('POST /api/2fa/disable — removing one factor is not removing them all
     expect(res.status).toBe(200);
     expect(res.body.twoFactorStillOn).toBe(false);
 
-    const row = db.prepare(
+    const row = await db.prepare(
       'SELECT tfa_enabled, tfa_email_enabled FROM users WHERE id = ?'
     ).get(user.id);
     expect(row.tfa_enabled).toBe(0);

@@ -68,8 +68,8 @@ describe('friend messaging', () => {
     cleo = await make('Cleo Friend', 'cleo_friend');
 
     organizerToken = await srv.login('jordan.whitfield@example.org');
-    organizerId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('jordan.whitfield@example.org').id;
+    organizerId = (await db.prepare('SELECT id FROM users WHERE email = ?')
+      .get('jordan.whitfield@example.org')).id;
   });
 
   afterAll(async () => { await srv.close(); });
@@ -103,7 +103,7 @@ describe('friend messaging', () => {
     });
 
     it('opens it as a peer thread with no event and no role columns set', async () => {
-      const row = db.prepare('SELECT * FROM conversations WHERE id = ?').get(convId);
+      const row = await db.prepare('SELECT * FROM conversations WHERE id = ?').get(convId);
       expect(row.kind).toBe('peer');
       expect(row.event_id).toBeNull();
       /* Neither friend is seated in a column that would describe them as
@@ -141,8 +141,7 @@ describe('friend messaging', () => {
     });
 
     it('tracks unread the same way every other thread does', async () => {
-      const convo = (await srv.call('GET', '/api/messages/conversations', undefined, ada.token))
-        .body.conversations.find(c => c.id === convId);
+      const convo = (await srv.call('GET', '/api/messages/conversations', undefined, ada.token)).body.conversations.find(c => c.id === convId);
       /* Ada sent the first message and Ben answered, so Ben's reply is unread
          for her — the sender's own send marks their side read. */
       expect(convo.unreadCount).toBe(1);
@@ -151,8 +150,7 @@ describe('friend messaging', () => {
       expect((await srv.call('POST', `/api/messages/conversations/${convId}/read`,
         { messageId: last }, ada.token)).status).toBe(200);
 
-      const after = (await srv.call('GET', '/api/messages/conversations', undefined, ada.token))
-        .body.conversations.find(c => c.id === convId);
+      const after = (await srv.call('GET', '/api/messages/conversations', undefined, ada.token)).body.conversations.find(c => c.id === convId);
       expect(after.unreadCount).toBe(0);
     });
 
@@ -186,7 +184,7 @@ describe('friend messaging', () => {
 
     it('refuses a PENDING request — asking is not agreeing', async () => {
       await srv.call('POST', `/api/users/${cleo.id}/friend`, {}, ada.token);
-      const pending = db.prepare(`
+      const pending = await db.prepare(`
         SELECT status FROM user_relationships
         WHERE actor_id = ? AND subject_id = ? AND kind = 'friend'
       `).get(ada.id, cleo.id);
@@ -375,7 +373,7 @@ describe('friend messaging', () => {
      * survive.
      */
     it('does not let a legacy organizer↔student friendship unlock messaging', async () => {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO user_relationships (id, actor_id, subject_id, kind, status, created_at)
         VALUES ('rel-legacy-msg', ?, ?, 'friend', 'accepted', datetime('now'))
       `).run(organizerId, ada.id);
@@ -387,7 +385,7 @@ describe('friend messaging', () => {
           { userId: ada.id }, organizerToken);
         expect(asOrganizer.status).toBe(403);
       } finally {
-        db.prepare("DELETE FROM user_relationships WHERE id = 'rel-legacy-msg'").run();
+        await db.prepare("DELETE FROM user_relationships WHERE id = 'rel-legacy-msg'").run();
       }
     });
 
@@ -468,8 +466,7 @@ describe('friend messaging', () => {
         slots: [{ name: 'Shift', description: 'd', startDatetime: start, endDatetime: end, maxSpots: 3 }],
       }, organizerToken);
       eventId = mk.body.id;
-      slotId = (await srv.call('GET', '/api/events', undefined, organizerToken))
-        .body.find(e => e.id === eventId).slots[0].id;
+      slotId = (await srv.call('GET', '/api/events', undefined, organizerToken)).body.find(e => e.id === eventId).slots[0].id;
       await srv.call('POST', `/api/events/${eventId}/apply`, { slotId }, cleo.token);
     });
 
@@ -513,8 +510,8 @@ describe('friend messaging', () => {
         { eventId, studentId: cleo.id }, cleo.token);
       const convId = res.body.conversation.id;
 
-      db.prepare("UPDATE events SET status = 'completed' WHERE id = ?").run(eventId);
-      db.prepare('UPDATE slots SET end_datetime = ? WHERE event_id = ?')
+      await db.prepare("UPDATE events SET status = 'completed' WHERE id = ?").run(eventId);
+      await db.prepare('UPDATE slots SET end_datetime = ? WHERE event_id = ?')
         .run(new Date(Date.now() - 40 * 864e5).toISOString(), eventId);
 
       expect((await send(cleo, convId)).status).toBe(409);

@@ -113,8 +113,8 @@ function publicMeta(doc) {
  * document publishes it — the same reason `requiredConsentKeys()` is derived and
  * the signed-out route test reads `PUBLIC_ROUTES`.
  */
-router.get('/api/legal/documents', (req, res) => {
-  res.json({ documents: effectiveDocuments(db).map(publicMeta) });
+router.get('/api/legal/documents', async (req, res) => {
+  res.json({ documents: (await effectiveDocuments(db)).map(publicMeta) });
 });
 
 /**
@@ -149,7 +149,7 @@ router.get('/api/legal/documents', (req, res) => {
  * about this person". An empty answer is a normal 200, because a deployment
  * with no owner yet is a state the page renders around rather than an error.
  */
-router.get('/api/platform/owner', (req, res) => {
+router.get('/api/platform/owner', async (req, res) => {
   /**
    * The role is the authority; the configured username only chooses between
    * accounts that already hold it. A `PLATFORM_OWNER_USERNAME` naming a student
@@ -176,8 +176,8 @@ router.get('/api/platform/owner', (req, res) => {
   const columns = 'SELECT name, username, avatar, avatar_color, profile_picture_url';
 
   const owner = PLATFORM_OWNER_USERNAME
-    ? db.prepare(`${columns} ${byRole} AND LOWER(username) = LOWER(?)`).get(PLATFORM_OWNER_USERNAME)
-    : db.prepare(`${columns} ${byRole} ORDER BY created_at ASC, id ASC LIMIT 1`).get();
+    ? await db.prepare(`${columns} ${byRole} AND LOWER(username) = LOWER(?)`).get(PLATFORM_OWNER_USERNAME)
+    : await db.prepare(`${columns} ${byRole} ORDER BY created_at ASC, id ASC LIMIT 1`).get();
 
   if (PLATFORM_OWNER_USERNAME && !owner) {
     /* Loud, because the symptom is silence: a public page that simply stops
@@ -213,14 +213,14 @@ router.get('/api/platform/owner', (req, res) => {
  * still wraps the call because the fallback path is unchanged and is what every
  * document uses until somebody edits it.
  */
-router.get('/api/legal/documents/:slug', (req, res) => {
+router.get('/api/legal/documents/:slug', async (req, res) => {
   if (!documentBySlug(req.params.slug)) {
     return res.status(404).json({ error: 'No such legal document.' });
   }
 
   let resolved;
   try {
-    resolved = resolveDocument(db, req.params.slug, { withBody: true });
+    resolved = await resolveDocument(db, req.params.slug, { withBody: true });
   } catch (err) {
     if (err instanceof PolicyContentError) {
       console.error(`[legal] ${err.message}`);
@@ -254,9 +254,9 @@ router.get('/api/legal/documents/:slug', (req, res) => {
  * scoped to `req.user.id` and is declared SELF_ONLY in the completeness
  * registry, which is the mechanism this codebase provides for exactly this.
  */
-router.get('/api/legal/updates', authenticateToken, (req, res) => {
+router.get('/api/legal/updates', authenticateToken, async (req, res) => {
   try {
-    res.json({ updates: pendingNoticesFor(db, req.user.id) });
+    res.json({ updates: await pendingNoticesFor(db, req.user.id) });
   } catch (err) {
     console.error('Legal updates error:', err.message);
     /* An empty list rather than a 500. A failure to compute the excerpt must
@@ -275,7 +275,7 @@ router.get('/api/legal/updates', authenticateToken, (req, res) => {
  * Idempotent: the upsert keeps the first acknowledgement, so a double-click, a
  * retry and a second tab all converge on one row.
  */
-router.post('/api/legal/updates/acknowledge', authenticateToken, (req, res) => {
+router.post('/api/legal/updates/acknowledge', authenticateToken, async (req, res) => {
   const { slug, version } = req.body ?? {};
   if (typeof slug !== 'string' || typeof version !== 'string' || !slug || !version) {
     return res.status(400).json({ error: 'slug and version are required.', code: 'slug_required' });
@@ -284,7 +284,7 @@ router.post('/api/legal/updates/acknowledge', authenticateToken, (req, res) => {
     return res.status(404).json({ error: 'No such legal document.' });
   }
 
-  acknowledgeNotice(db, req.user.id, slug, version);
+  await acknowledgeNotice(db, req.user.id, slug, version);
   res.json({ ok: true });
 });
 

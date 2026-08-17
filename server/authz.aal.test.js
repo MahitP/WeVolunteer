@@ -118,7 +118,7 @@ async function hit(path, { session, challengeId } = {}) {
 
 /** An open, granted challenge for one action, bound to one session. */
 async function grantedChallenge({ session, action = 'account.delete', params = {} }) {
-  const { id } = reauth.openChallenge({
+  const { id } = await reauth.openChallenge({
     db, userId: session.userId, action, params, sessionJti: session.jti
   });
   const granted = await reauth.grantByPassword({
@@ -217,46 +217,45 @@ describe('requireAAL2 — the gate', () => {
 /* ── resolveAssurance: what it costs, and when it declines to look ─────────── */
 
 describe('resolveAssurance — cost', () => {
-  it('issues no lookup at all when the request carries no challenge id', () => {
+  it('issues no lookup at all when the request carries no challenge id', async () => {
     const peek = vi.fn(() => ({ ok: true, challenge: { action: 'account.delete', sessionJti: 'j' } }));
 
-    expect(utils.resolveAssurance({ challengeId: undefined, userId: 'u1', sessionJti: 'j' }, peek)).toBeNull();
-    expect(utils.resolveAssurance({ challengeId: '', userId: 'u1', sessionJti: 'j' }, peek)).toBeNull();
+    expect(await utils.resolveAssurance({ challengeId: undefined, userId: 'u1', sessionJti: 'j' }, peek)).toBeNull();
+    expect(await utils.resolveAssurance({ challengeId: '', userId: 'u1', sessionJti: 'j' }, peek)).toBeNull();
 
     // authenticateToken runs on every authenticated request in the app. A
     // lookup here is a lookup everywhere.
     expect(peek).not.toHaveBeenCalled();
   });
 
-  it('issues no lookup for a token with no jti, and does not throw', () => {
+  it('issues no lookup for a token with no jti, and does not throw', async () => {
     const peek = vi.fn(() => ({ ok: true, challenge: { action: 'account.delete', sessionJti: 'j' } }));
 
     // Every challenge is bound to a session jti at creation, so a session that
     // has none can never match one. Resolving that without a query — and
     // without an exception — is the whole requirement.
-    expect(utils.resolveAssurance({ challengeId: 'reauth-x', userId: 'u1', sessionJti: undefined }, peek)).toBeNull();
+    expect(await utils.resolveAssurance({ challengeId: 'reauth-x', userId: 'u1', sessionJti: undefined }, peek)).toBeNull();
     expect(peek).not.toHaveBeenCalled();
   });
 
-  it('issues exactly one lookup when a challenge id is present', () => {
+  it('issues exactly one lookup when a challenge id is present', async () => {
     const peek = vi.fn(() => ({ ok: true, challenge: { action: 'account.delete', sessionJti: 'j' } }));
 
-    expect(utils.resolveAssurance({ challengeId: 'reauth-x', userId: 'u1', sessionJti: 'j' }, peek))
-      .toBe('account.delete');
+    expect(await utils.resolveAssurance({ challengeId: 'reauth-x', userId: 'u1', sessionJti: 'j' }, peek)).toBe('account.delete');
     expect(peek).toHaveBeenCalledTimes(1);
     expect(peek).toHaveBeenCalledWith({ challengeId: 'reauth-x', userId: 'u1' });
   });
 
-  it('declines a grant opened in a different session', () => {
+  it('declines a grant opened in a different session', async () => {
     const peek = vi.fn(() => ({ ok: true, challenge: { action: 'account.delete', sessionJti: 'other' } }));
 
-    expect(utils.resolveAssurance({ challengeId: 'reauth-x', userId: 'u1', sessionJti: 'j' }, peek)).toBeNull();
+    expect(await utils.resolveAssurance({ challengeId: 'reauth-x', userId: 'u1', sessionJti: 'j' }, peek)).toBeNull();
   });
 
-  it('declines whatever peekChallenge refused', () => {
+  it('declines whatever peekChallenge refused', async () => {
     const peek = vi.fn(() => ({ ok: false, error: 'consumed' }));
 
-    expect(utils.resolveAssurance({ challengeId: 'reauth-x', userId: 'u1', sessionJti: 'j' }, peek)).toBeNull();
+    expect(await utils.resolveAssurance({ challengeId: 'reauth-x', userId: 'u1', sessionJti: 'j' }, peek)).toBeNull();
   });
 });
 
@@ -267,7 +266,7 @@ describe('peekChallenge', () => {
     const id = await grantedChallenge({ session: alice });
     const before = challengeRow(id);
 
-    const res = reauth.peekChallenge({ db, challengeId: id, userId: alice.userId });
+    const res = await reauth.peekChallenge({ db, challengeId: id, userId: alice.userId });
 
     expect(res.ok).toBe(true);
     expect(res.challenge).toMatchObject({
@@ -279,7 +278,7 @@ describe('peekChallenge', () => {
 
   it('never reveals another user\'s challenge', async () => {
     const id = await grantedChallenge({ session: alice });
-    const res = reauth.peekChallenge({ db, challengeId: id, userId: bob.userId });
+    const res = await reauth.peekChallenge({ db, challengeId: id, userId: bob.userId });
 
     expect(res.ok).toBe(false);
     // Indistinguishable from an id that does not exist — the id is not a secret
@@ -287,18 +286,18 @@ describe('peekChallenge', () => {
     expect(res.error).toBe(reauth.REAUTH_ERRORS.NOT_FOUND);
   });
 
-  it('refuses a challenge that was opened but never granted', () => {
-    const { id } = reauth.openChallenge({
+  it('refuses a challenge that was opened but never granted', async () => {
+    const { id } = await reauth.openChallenge({
       db, userId: alice.userId, action: 'account.delete', sessionJti: alice.jti
     });
-    const res = reauth.peekChallenge({ db, challengeId: id, userId: alice.userId });
+    const res = await reauth.peekChallenge({ db, challengeId: id, userId: alice.userId });
 
     expect(res.ok).toBe(false);
     expect(res.error).toBe(reauth.REAUTH_ERRORS.NOT_GRANTED);
   });
 
-  it('does not throw on a missing id', () => {
-    expect(reauth.peekChallenge({ db, challengeId: null, userId: alice.userId }).ok).toBe(false);
+  it('does not throw on a missing id', async () => {
+    expect((await reauth.peekChallenge({ db, challengeId: null, userId: alice.userId })).ok).toBe(false);
   });
 });
 
@@ -373,7 +372,7 @@ describe('assurance over HTTP', () => {
 
   it('an expired grant confers nothing', async () => {
     const id = await grantedChallenge({ session: alice });
-    db.prepare('UPDATE reauth_challenges SET expires_at = ? WHERE id = ?')
+    await db.prepare('UPDATE reauth_challenges SET expires_at = ? WHERE id = ?')
       .run(new Date(Date.now() - 1000).toISOString(), id);
 
     const res = await hit('/probe/delete', { session: alice, challengeId: id });

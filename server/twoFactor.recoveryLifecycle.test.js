@@ -105,7 +105,7 @@ describe('the recovery set over an account lifetime', () => {
      */
     if (res.status === 401 && secret && second?.method === 'totp') {
       await waitForNextStep();
-      return attempt({ token: await freshTotp(secret), method: 'totp' });
+      return await attempt({ token: await freshTotp(secret), method: 'totp' });
     }
     return res;
   }
@@ -129,7 +129,7 @@ describe('the recovery set over an account lifetime', () => {
 
   /** Turns email 2FA on for an already-enrolled account. */
   async function enableEmail(cookie, user) {
-    db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(user.id);
+    await db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(user.id);
     const grant = await srv.stepUp(cookie, '2fa.enable', { password: PW });
     const res = await srv.call('POST', '/api/2fa/email/enable', {}, cookie,
       { [REAUTH_CHALLENGE_HEADER]: grant });
@@ -309,7 +309,7 @@ describe('the recovery set over an account lifetime', () => {
       const { cookie, user } = await enrolTotp();
       const status = await srv.call('GET', '/api/2fa/status', undefined, cookie);
 
-      const row = db.prepare(
+      const row = await db.prepare(
         'SELECT tfa_enabled, tfa_email_enabled FROM users WHERE id = ?'
       ).get(user.id);
 

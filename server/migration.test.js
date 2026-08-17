@@ -129,7 +129,7 @@ describeIfRealDb('migration rehearsal against a copy of the real database', () =
     } finally { cleanup(); }
   });
 
-  it('leaves every volunteer total byte-identical after migrating', () => {
+  it('leaves every volunteer total byte-identical after migrating', async () => {
     const { dest, cleanup } = copyRealDb();
     try {
       const db = new DatabaseSync(dest);
@@ -138,7 +138,7 @@ describeIfRealDb('migration rehearsal against a copy of the real database', () =
       const attendanceBefore = dumpAttendance(db);
 
       createHoursLedgerTable(db);
-      backfillHoursLedger(db);
+      await backfillHoursLedger(db);
 
       expectMeaningfulSnapshot(before);
       expect(snapshot(db)).toEqual(before);
@@ -147,34 +147,34 @@ describeIfRealDb('migration rehearsal against a copy of the real database', () =
     } finally { cleanup(); }
   });
 
-  it('reaches parity between ledger and attendance', () => {
+  it('reaches parity between ledger and attendance', async () => {
     const { dest, cleanup } = copyRealDb();
     try {
       const db = new DatabaseSync(dest);
       createHoursLedgerTable(db);
-      const result = backfillHoursLedger(db);
+      const result = await backfillHoursLedger(db);
 
       const attendanceCount = db.prepare('SELECT COUNT(*) c FROM attendance').get().c;
       expect(result.inserted).toBe(attendanceCount);
 
-      const parity = verifyLedgerParity(db);
+      const parity = await verifyLedgerParity(db);
       expect(parity.mismatches).toEqual([]);
       expect(parity.ok).toBe(true);
     } finally { cleanup(); }
   });
 
-  it('is idempotent — running three times changes nothing after the first', () => {
+  it('is idempotent — running three times changes nothing after the first', async () => {
     const { dest, cleanup } = copyRealDb();
     try {
       const db = new DatabaseSync(dest);
       createHoursLedgerTable(db);
 
       const before = snapshot(db);
-      const first = backfillHoursLedger(db);
+      const first = await backfillHoursLedger(db);
       const ledgerAfterFirst = db.prepare('SELECT * FROM hours_ledger ORDER BY id').all();
 
-      const second = backfillHoursLedger(db);
-      const third = backfillHoursLedger(db);
+      const second = await backfillHoursLedger(db);
+      const third = await backfillHoursLedger(db);
 
       expect(second.inserted).toBe(0);
       expect(third.inserted).toBe(0);
@@ -184,12 +184,12 @@ describeIfRealDb('migration rehearsal against a copy of the real database', () =
     } finally { cleanup(); }
   });
 
-  it('re-running createHoursLedgerTable does not disturb existing entries', () => {
+  it('re-running createHoursLedgerTable does not disturb existing entries', async () => {
     const { dest, cleanup } = copyRealDb();
     try {
       const db = new DatabaseSync(dest);
       createHoursLedgerTable(db);
-      backfillHoursLedger(db);
+      await backfillHoursLedger(db);
       const before = db.prepare('SELECT * FROM hours_ledger ORDER BY id').all();
 
       createHoursLedgerTable(db);
@@ -198,7 +198,7 @@ describeIfRealDb('migration rehearsal against a copy of the real database', () =
     } finally { cleanup(); }
   });
 
-  it('is fully reversible — dropping the ledger restores the original state', () => {
+  it('is fully reversible — dropping the ledger restores the original state', async () => {
     const { dest, cleanup } = copyRealDb();
     try {
       const db = new DatabaseSync(dest);
@@ -206,7 +206,7 @@ describeIfRealDb('migration rehearsal against a copy of the real database', () =
       const before = snapshot(db);
 
       createHoursLedgerTable(db);
-      backfillHoursLedger(db);
+      await backfillHoursLedger(db);
       db.exec('DROP TABLE hours_ledger');
 
       expect(dumpAttendance(db)).toEqual(attendanceBefore);
@@ -214,7 +214,7 @@ describeIfRealDb('migration rehearsal against a copy of the real database', () =
     } finally { cleanup(); }
   });
 
-  it('preserves the retained hours value on rows marked absent', () => {
+  it('preserves the retained hours value on rows marked absent', async () => {
     const { dest, cleanup } = copyRealDb();
     try {
       const db = new DatabaseSync(dest);
@@ -244,7 +244,7 @@ describeIfRealDb('migration rehearsal against a copy of the real database', () =
         .run(victim.slot_id, victim.user_id);
 
       createHoursLedgerTable(db);
-      backfillHoursLedger(db);
+      await backfillHoursLedger(db);
 
       const absent = db.prepare('SELECT * FROM hours_ledger WHERE present_after = 0').all();
       expect(absent.length).toBeGreaterThan(0);

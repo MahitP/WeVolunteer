@@ -31,8 +31,9 @@ describe('the Student Organizer Agreement', () => {
   const idOf = async (s) => (await srv.call('GET', '/api/auth/me', undefined, s)).body.id;
 
   const seat = (userId, role) => db.prepare(`
-    INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
+    INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
     VALUES (?, ?, ?, ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
   `).run(orgId, userId, role, new Date().toISOString());
 
   const setRole = (userId, memberRole) =>
@@ -75,7 +76,7 @@ describe('the Student Organizer Agreement', () => {
   afterAll(async () => { await srv?.close(); });
 
   beforeEach(async () => {
-    db.prepare(
+    await db.prepare(
       `DELETE FROM legal_acceptances
         WHERE user_id IN (?, ?) AND document_slug = 'student-organizer-agreement'`
     ).run(helperId, bystanderId);
@@ -103,10 +104,10 @@ describe('the Student Organizer Agreement', () => {
        * membership row and withheld by `can()` — so the rows exist while the
        * request is still refused, and no client is involved in the decision.
        */
-      const granted = db.prepare(
+      const granted = (await db.prepare(
         `SELECT COUNT(*) AS n FROM user_capabilities
           WHERE user_id = ? AND capability LIKE 'organization.%'`
-      ).get(helperId).n;
+      ).get(helperId)).n;
       expect(granted, 'the promotion did not grant').toBe(4);
 
       const me = await srv.call('GET', '/api/auth/me', undefined, helper);
@@ -263,7 +264,7 @@ describe('the Student Organizer Agreement', () => {
         /* Promoted after the fact, the way the authorization matrix builds its
            elevated fixtures — identity is re-derived from the row per request,
            so no re-sign-in is needed. */
-        db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, signed.user.id);
+        await db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, signed.user.id);
         seat(signed.user.id, 'manager');
 
         const me = await srv.call('GET', '/api/auth/me', undefined, signed.cookie);
@@ -340,7 +341,7 @@ describe('the Student Organizer Agreement', () => {
       await accept(helper);
       expect((await post(helper)).status).toBe(201);
 
-      db.prepare(
+      await db.prepare(
         `UPDATE legal_acceptances SET version = '0.9'
           WHERE user_id = ? AND document_slug = 'student-organizer-agreement'`
       ).run(helperId);

@@ -77,13 +77,13 @@ describe('hours adjustment readiness', () => {
    * carry such a correction, so building the workflow later is a UI and endpoint
    * job rather than a schema migration.
    */
-  it('accepts an adjustment that changes hours while staying present', () => {
+  it('accepts an adjustment that changes hours while staying present', async () => {
     const db = makeDb();
     const event = db.prepare('SELECT * FROM events WHERE id=?').get('e1');
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
 
     db.prepare('UPDATE attendance SET hours_awarded = ? WHERE slot_id=? AND user_id=?').run(4.5, 's1', 'u1');
-    const { delta } = recordHoursChange(db, {
+    const { delta } = await recordHoursChange(db, {
       userId: 'u1', eventId: 'e1', slotId: 's1',
       userName: 'Priya Patel', eventTitle: 'Food Pantry', slotName: 'Box Packer',
       action: 'adjusted',
@@ -94,28 +94,28 @@ describe('hours adjustment readiness', () => {
 
     expect(delta).toBe(1.5);
     expect(hoursOf(db, 'u1')).toBe(4.5);
-    expect(verifyLedgerParity(db).ok).toBe(true);
+    expect((await verifyLedgerParity(db)).ok).toBe(true);
   });
 
-  it('supports a downward adjustment', () => {
+  it('supports a downward adjustment', async () => {
     const db = makeDb();
     const event = db.prepare('SELECT * FROM events WHERE id=?').get('e1');
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
 
     db.prepare('UPDATE attendance SET hours_awarded = ? WHERE slot_id=? AND user_id=?').run(1, 's1', 'u1');
-    recordHoursChange(db, {
+    await recordHoursChange(db, {
       userId: 'u1', eventId: 'e1', slotId: 's1',
       action: 'adjusted', presentBefore: 1, hoursBefore: 3, presentAfter: 1, hoursAfter: 1,
       actorId: 'admin1', actorRole: 'admin', source: 'admin_correction', reason: 'Left early'
     });
 
     expect(hoursOf(db, 'u1')).toBe(1);
-    expect(verifyLedgerParity(db).ok).toBe(true);
+    expect((await verifyLedgerParity(db)).ok).toBe(true);
   });
 
-  it('carries the attribution an adjustment workflow will need', () => {
+  it('carries the attribution an adjustment workflow will need', async () => {
     const db = makeDb();
-    recordHoursChange(db, {
+    await recordHoursChange(db, {
       userId: 'u1', eventId: 'e1', slotId: 's1',
       action: 'adjusted', presentBefore: 1, hoursBefore: 3, presentAfter: 1, hoursAfter: 2,
       actorId: 'admin1', actorRole: 'admin', source: 'admin_correction',
@@ -129,11 +129,11 @@ describe('hours adjustment readiness', () => {
     });
   });
 
-  it('exposes admin_correction as a first-class source, distinct from routine saves', () => {
+  it('exposes admin_correction as a first-class source, distinct from routine saves', async () => {
     const db = makeDb();
     const event = db.prepare('SELECT * FROM events WHERE id=?').get('e1');
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
-    recordHoursChange(db, {
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await recordHoursChange(db, {
       userId: 'u1', eventId: 'e1', slotId: 's1',
       action: 'adjusted', presentBefore: 1, hoursBefore: 3, presentAfter: 1, hoursAfter: 3,
       actorId: 'admin1', actorRole: 'admin', source: 'admin_correction', reason: 'no-op review'
@@ -157,10 +157,10 @@ describe('soft-delete requirement — characterising the residual cascade risk',
    * attendance exists; organizer denial is scoped to unapproved organizers).
    * What remains is direct database access.
    */
-  it('DOCUMENTS: deleting a user still destroys their attendance via CASCADE', () => {
+  it('DOCUMENTS: deleting a user still destroys their attendance via CASCADE', async () => {
     const db = makeDb();
     const event = db.prepare('SELECT * FROM events WHERE id=?').get('e1');
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
     expect(hoursOf(db, 'u1')).toBe(3);
 
     db.exec("DELETE FROM users WHERE id = 'u1'");
@@ -170,10 +170,10 @@ describe('soft-delete requirement — characterising the residual cascade risk',
     expect(db.prepare("SELECT COUNT(*) c FROM attendance WHERE user_id='u1'").get().c).toBe(0);
   });
 
-  it('DOCUMENTS: the ledger survives that deletion, so the loss is at least evidenced', () => {
+  it('DOCUMENTS: the ledger survives that deletion, so the loss is at least evidenced', async () => {
     const db = makeDb();
     const event = db.prepare('SELECT * FROM events WHERE id=?').get('e1');
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
 
     db.exec("DELETE FROM users WHERE id = 'u1'");
     db.exec("DELETE FROM events WHERE id = 'e1'");
@@ -184,18 +184,18 @@ describe('soft-delete requirement — characterising the residual cascade risk',
     expect(rows[0].event_title).toBe('Food Pantry');
     expect(rows[0].delta).toBe(3);
     // Parity is deliberately broken here — that asymmetry is the alarm.
-    expect(verifyLedgerParity(db).ok).toBe(false);
+    expect((await verifyLedgerParity(db)).ok).toBe(false);
   });
 
-  it('DOCUMENTS: parity verification detects hours destroyed behind the API', () => {
+  it('DOCUMENTS: parity verification detects hours destroyed behind the API', async () => {
     const db = makeDb();
     const event = db.prepare('SELECT * FROM events WHERE id=?').get('e1');
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
-    expect(verifyLedgerParity(db).ok).toBe(true);
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    expect((await verifyLedgerParity(db)).ok).toBe(true);
 
     db.exec("DELETE FROM attendance WHERE user_id = 'u1'");
 
-    const parity = verifyLedgerParity(db);
+    const parity = await verifyLedgerParity(db);
     expect(parity.ok).toBe(false);
     expect(parity.mismatches).toEqual([{ userId: 'u1', ledgerTotal: 3, attendanceTotal: 0 }]);
   });

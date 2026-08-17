@@ -46,7 +46,7 @@ describe('a volunteer profile for whoever has volunteered', () => {
     const clone = (table, tmpl, over) => {
       const row = { ...tmpl, ...over };
       const cols = Object.keys(row);
-      db.prepare(`INSERT OR REPLACE INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
+      db.prepare(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
         .run(...cols.map(c => row[c]));
     };
     const past = new Date(Date.now() - 20 * 86400000).toISOString();
@@ -55,8 +55,9 @@ describe('a volunteer profile for whoever has volunteered', () => {
       id: `ovp-sl-${tag}`, event_id: `ovp-ev-${tag}`,
       start_datetime: past, end_datetime: new Date(Date.now() - 20 * 86400000 + 7200000).toISOString(),
     });
-    db.prepare(`INSERT OR REPLACE INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
-                VALUES (?, ?, ?, 1, 2)`).run(`ovp-ev-${tag}`, `ovp-sl-${tag}`, userId);
+    db.prepare(`INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
+                VALUES (?, ?, ?, 1, 2)
+      ON CONFLICT (slot_id, user_id) DO UPDATE SET event_id = excluded.event_id, present = excluded.present, hours_awarded = excluded.hours_awarded`).run(`ovp-ev-${tag}`, `ovp-sl-${tag}`, userId);
   };
 
   const clearAttendance = (userId) =>
@@ -73,7 +74,7 @@ describe('a volunteer profile for whoever has volunteered', () => {
       grade: 'Adult',
       role: 'student',
     });
-    db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, signed.user.id);
+    await db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, signed.user.id);
     return signed.user.id;
   };
 
@@ -149,7 +150,7 @@ describe('a volunteer profile for whoever has volunteered', () => {
        status check it would answer 200 as a live profile. */
     const ownerId = await makeAccount('super_admin');
     giveAttendance(ownerId, 'tombstone');
-    db.prepare("UPDATE users SET account_status = 'deleted' WHERE id = ?").run(ownerId);
+    await db.prepare("UPDATE users SET account_status = 'deleted' WHERE id = ?").run(ownerId);
     expect((await profileOf(ownerId)).status).toBe(404);
   });
 

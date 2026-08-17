@@ -356,33 +356,34 @@ export const LEGAL_DOCUMENTS = [
      */
     slug: 'ai-and-on-device-processing',
     /**
-     * 2.0, and MAJOR rather than MINOR.
+     * Back to 1.0, deliberately.
      *
-     * v1.0 said the assistant runs in the browser and set out what leaves the
-     * device. 2.0 adds optional dictation, which sends a recording of somebody's
-     * voice to their browser vendor's speech service. That is new sharing with a
-     * third party, so by the versioning test at the top of this file — would a
-     * reasonable reader of the previous version be surprised or worse off — it
-     * is MAJOR, whatever the size of the diff.
+     * This was briefly bumped to 2.0 because the document had gained a section
+     * on dictation — audio sent to a browser vendor's speech service, which is
+     * new sharing and therefore MAJOR by the test at the top of this file.
      *
-     * No re-acceptance follows, because this is a notice: nothing is collected
-     * against it in either version. The bump exists so the published record says
-     * what changed rather than v1.0 quietly meaning something new.
+     * That capability is no longer exposed. The control was withdrawn before
+     * release: it is the only third-party audio path in a platform used by
+     * minors, the vendor relationship has not been reviewed by anyone, and the
+     * page cannot observe what is retained — a poor trade for a convenience,
+     * given typing works and the questions are short. The section describing it
+     * came out with it, because a policy that describes an unavailable feature
+     * is inaccurate in the direction that matters least excusably.
      *
-     * Worth knowing when reviewing: v1.0 was registered the same day and the
-     * feature has never been deployed, so nobody has read either version. If you
-     * would rather this shipped as a single 1.0, that is a defensible call and
-     * it is yours to make — the rule was followed literally here because the
-     * alternative is judging when "never really published" starts and stops.
+     * With the section gone the document says what 1.0 said, so 1.0 is what it
+     * is. Nothing was invalidated by the round trip: this is a `notice`, no
+     * acceptance is collected in any version, and the document has never been
+     * deployed. A 2.0 sitting in the registry describing a capability nobody
+     * can use would be the worse record.
      */
-    version: '2.0',
+    version: '1.0',
     title: 'AI and On-Device Processing Policy',
     consentType: 'notice',
     scope: 'notice',
     summary: 'Where the optional assistant runs, what is downloaded and from whom, what stays on your device, and what it is not permitted to decide.',
     effectiveAt: '2026-08-15',
     file: '12-ai-and-on-device-processing.md',
-    contentHash: 'dbd6dd4a4d70405e5648514dc18c48f47cf9d6237e6a12e01c12ab80b87f22ba',
+    contentHash: '10239aee73d74a7d20bbe75489bd3e2d365319634fcf15798757b2313adbd924',
     bundledWith: null,
   },
 ];

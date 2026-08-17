@@ -386,7 +386,7 @@ describe('Account Deletion System', () => {
         const challengeId = await srv.stepUp(acct.cookie, 'account.delete', { password: 'CorrectPassword123' });
         return { ...acct, challengeId };
       };
-      const [a, b] = await Promise.all([make(1), make(2)]);
+      const [a, b] = await Promise.all([await make(1), await make(2)]);
 
       const results = await Promise.all([
         deleteAccount(a.cookie, a.challengeId),

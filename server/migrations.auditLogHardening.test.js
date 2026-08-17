@@ -15,13 +15,14 @@ beforeAll(async () => {
   // Use the test database bootstrap which runs all migrations
   const dbModule = await import('./db.js');
   dbModule.initDatabase();
+  await dbModule.completeDatabaseInit();
   db = dbModule.db;
   
   const auditLogModule = await import('./auditLog.js');
   recordAudit = auditLogModule.recordAudit;
 
   // Seed the admin user once for all tests
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, name, username, email, password_hash, role, verified, account_status, grade, created_at)
     VALUES (?, 'Admin User', 'admin_user', 'admin@test.local', 'hash', 'super_admin', 1, 'active', 'Adult', '2000-01-01T00:00:00.000Z')
   `).run('user-admin');
@@ -40,8 +41,8 @@ describe('Migration 019: Audit Log Hardening', () => {
     expect(indexes).toContain('idx_admin_audit_logs_created');
   });
 
-  it('prevents ANY updates to admin_audit_logs (admin_audit_logs_no_update)', () => {
-    const { id } = recordAudit(db, {
+  it('prevents ANY updates to admin_audit_logs (admin_audit_logs_no_update)', async () => {
+    const { id } = await recordAudit(db, {
       adminId: 'user-admin',
       action: 'MIGRATION_TEST',
       details: 'initial'
@@ -56,8 +57,8 @@ describe('Migration 019: Audit Log Hardening', () => {
     }).toThrow(/admin_audit_logs is append-only: records cannot be altered/);
   });
 
-  it('prevents deletions of recent admin_audit_logs (admin_audit_logs_no_delete)', () => {
-    const { id } = recordAudit(db, {
+  it('prevents deletions of recent admin_audit_logs (admin_audit_logs_no_delete)', async () => {
+    const { id } = await recordAudit(db, {
       adminId: 'user-admin',
       action: 'MIGRATION_TEST',
       details: 'recent'
@@ -68,9 +69,9 @@ describe('Migration 019: Audit Log Hardening', () => {
     }).toThrow(/admin_audit_logs is append-only: only the retention worker may delete aged logs/);
   });
 
-  it('allows retention worker to delete logs older than 365 days', () => {
+  it('allows retention worker to delete logs older than 365 days', async () => {
     // Seed an old log using the createdAt backdate option
-    const { id } = recordAudit(db, {
+    const { id } = await recordAudit(db, {
       adminId: 'user-admin',
       action: 'MIGRATION_TEST_OLD',
       details: 'old',
@@ -82,19 +83,19 @@ describe('Migration 019: Audit Log Hardening', () => {
       db.prepare('DELETE FROM admin_audit_logs WHERE id = ?').run(id);
     }).not.toThrow();
 
-    const stillExists = db.prepare('SELECT 1 FROM admin_audit_logs WHERE id = ?').get(id);
+    const stillExists = await db.prepare('SELECT 1 FROM admin_audit_logs WHERE id = ?').get(id);
     expect(stillExists).toBeUndefined();
   });
 
-  it('prevents deletion of users who have authored audit logs (cascade hazard)', () => {
+  it('prevents deletion of users who have authored audit logs (cascade hazard)', async () => {
     // Create a throwaway user to test deletion
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, name, username, email, password_hash, role, verified, account_status, grade, created_at)
       VALUES (?, 'Cascade Test User', 'cascade_test', 'cascade@test.local', 'hash', 'admin', 1, 'active', 'Adult', '2000-01-01T00:00:00.000Z')
     `).run('user-cascade-tester');
 
     // Give them an audit log
-    recordAudit(db, {
+    await recordAudit(db, {
       adminId: 'user-cascade-tester',
       action: 'MIGRATION_TEST',
       details: 'test'

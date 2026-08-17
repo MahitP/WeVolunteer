@@ -82,8 +82,9 @@ describe('privileged profile fields are gated on every route that can reach them
       db.prepare("UPDATE events SET attendee_visibility = 'accepted' WHERE id = ?").run(ev);
       db.prepare("UPDATE users SET profile_visibility = 'private', school = 'PRIVATE-SCHOOL', grade = '11' WHERE id = 'user-student-2'").run();
       for (const uid of ['user-student-1', 'user-student-2']) {
-        db.prepare(`INSERT OR REPLACE INTO applications (id, user_id, event_id, slot_id, status, applied_at)
-          VALUES (?, ?, ?, ?, 'accepted', ?)`).run(`app-roster-${uid}`, uid, ev, slot.id, new Date().toISOString());
+        db.prepare(`INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
+          VALUES (?, ?, ?, ?, 'accepted', ?)
+      ON CONFLICT (id) DO UPDATE SET user_id = excluded.user_id, event_id = excluded.event_id, slot_id = excluded.slot_id, status = excluded.status, applied_at = excluded.applied_at`).run(`app-roster-${uid}`, uid, ev, slot.id, new Date().toISOString());
       }
       return ev;
     };
@@ -106,8 +107,8 @@ describe('privileged profile fields are gated on every route that can reach them
     it('still gives the hosting organizer school and grade', async () => {
       const ev = seedRoster();
       if (!ev) return;
-      const organizerId = db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(ev).organizer_id;
-      const email = db.prepare('SELECT email FROM users WHERE id = ?').get(organizerId).email;
+      const organizerId = (await db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(ev)).organizer_id;
+      const email = (await db.prepare('SELECT email FROM users WHERE id = ?').get(organizerId)).email;
       const host = await srv.login(email);
       const res = await srv.call('GET', `/api/events/${ev}/attendees`, undefined, host);
       expect(res.status).toBe(200);
@@ -146,7 +147,7 @@ describe('privileged profile fields are gated on every route that can reach them
 
     it('does not stop /api/events/:id resolving a real id', async () => {
       const org = await srv.login('jordan.whitfield@example.org');
-      const ev = db.prepare('SELECT id FROM events WHERE organizer_id = ? LIMIT 1').get('user-org-1');
+      const ev = await db.prepare('SELECT id FROM events WHERE organizer_id = ? LIMIT 1').get('user-org-1');
       if (!ev) return;
       const res = await srv.call('GET', `/api/events/${ev.id}`, undefined, org);
       expect(res.status).toBe(200);

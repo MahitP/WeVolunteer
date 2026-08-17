@@ -58,7 +58,7 @@ describe('Admin Audit Logging', () => {
 
     // 3. Verify the audit log was created
     const { db } = await import('./db.js');
-    const logs = db.prepare("SELECT * FROM admin_audit_logs WHERE target_user_id = 'user-org-pending' AND action = 'APPROVE_ORGANIZER'").all();
+    const logs = await db.prepare("SELECT * FROM admin_audit_logs WHERE target_user_id = 'user-org-pending' AND action = 'APPROVE_ORGANIZER'").all();
     expect(logs.length).toBe(1);
     expect(logs[0].admin_id).toBe('user-admin');
     expect(logs[0].details).toBe('Approved pending organizer account');
@@ -85,7 +85,7 @@ describe('Admin Audit Logging', () => {
 
     // Verify the audit log was created
     const { db } = await import('./db.js');
-    const logs = db.prepare("SELECT * FROM admin_audit_logs WHERE target_user_id = ? AND action = 'DENY_ORGANIZER'").all(user.id);
+    const logs = await db.prepare("SELECT * FROM admin_audit_logs WHERE target_user_id = ? AND action = 'DENY_ORGANIZER'").all(user.id);
     expect(logs.length).toBe(1);
     expect(logs[0].admin_id).toBe('user-admin');
     expect(logs[0].details).toBe('Denied and deleted pending organizer account request');

@@ -102,13 +102,13 @@ function pidAlive(pid) {
  * Returns `{ acquired, conflict }` rather than exiting, so the boot path decides what
  * to do with the answer and the decision stays testable without spawning a process.
  */
-export function acquireInstanceLock(db) {
+export async function acquireInstanceLock(db) {
   createInstanceLockTable(db);
 
   const me = { hostname: os.hostname(), pid: process.pid };
   const now = new Date();
 
-  const existing = db.prepare('SELECT * FROM instance_lock WHERE id = 1').get();
+  const existing = await db.prepare('SELECT * FROM instance_lock WHERE id = 1').get();
 
   if (existing) {
     const sameProcess = existing.hostname === me.hostname && existing.pid === me.pid;
@@ -138,18 +138,21 @@ export function acquireInstanceLock(db) {
 
   // Take it. `INSERT OR REPLACE` on a fixed primary key is an upsert here, and the
   // whole statement is a single write so two racing acquisitions serialize.
-  db.prepare(`
-    INSERT OR REPLACE INTO instance_lock (id, hostname, pid, acquired_at, heartbeat_at)
+  await db.prepare(`
+    INSERT INTO instance_lock (id, hostname, pid, acquired_at, heartbeat_at)
     VALUES (1, ?, ?, ?, ?)
+    ON CONFLICT (id) DO UPDATE SET
+      hostname = excluded.hostname, pid = excluded.pid,
+      acquired_at = excluded.acquired_at, heartbeat_at = excluded.heartbeat_at
   `).run(me.hostname, me.pid, now.toISOString(), now.toISOString());
 
   return { acquired: true, conflict: null };
 }
 
 /** Refreshes this process's claim. Never throws — it is bookkeeping, not a check. */
-export function heartbeatInstanceLock(db) {
+export async function heartbeatInstanceLock(db) {
   try {
-    db.prepare(`
+    await db.prepare(`
       UPDATE instance_lock SET heartbeat_at = ?
       WHERE id = 1 AND hostname = ? AND pid = ?
     `).run(new Date().toISOString(), os.hostname(), process.pid);
@@ -161,7 +164,7 @@ export function heartbeatInstanceLock(db) {
 }
 
 /** Starts the heartbeat. Returns the timer so shutdown can clear it. */
-export function startInstanceLockHeartbeat(db) {
+export async function startInstanceLockHeartbeat(db) {
   if (heartbeatTimer) return heartbeatTimer;
   heartbeatTimer = setInterval(() => heartbeatInstanceLock(db), HEARTBEAT_MS);
   // Never the reason the process stays alive.
@@ -183,9 +186,9 @@ export function stopInstanceLockHeartbeat() {
  * takeover would delete the CURRENT holder's row on its way out, handing a third
  * instance a free pass.
  */
-export function releaseInstanceLock(db) {
+export async function releaseInstanceLock(db) {
   try {
-    db.prepare('DELETE FROM instance_lock WHERE id = 1 AND hostname = ? AND pid = ?')
+    await db.prepare('DELETE FROM instance_lock WHERE id = 1 AND hostname = ? AND pid = ?')
       .run(os.hostname(), process.pid);
   } catch (err) {
     console.error('[InstanceLock] Release failed:', err.message);

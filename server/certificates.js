@@ -79,13 +79,46 @@ function generateCode() {
  * certificate, the UNIQUE(code) insert fails and a fresh code is generated
  * and retried, rather than the row silently failing to appear.
  */
-export function getOrCreateCertificateCode(db, userId, eventId) {
-  const existing = db.prepare(
+export async function getOrCreateCertificateCode(db, userId, eventId) {
+  const existing = await db.prepare(
     'SELECT code FROM certificates WHERE user_id = ? AND event_id = ?'
   ).get(userId, eventId);
+  /**
+   * An issued certificate is returned unconditionally, whatever became of the
+   * event afterwards.
+   *
+   * That is not an oversight, it is the published position:
+   * `06-certificate-verification-policy.md` states "There is no option to void
+   * a certificate", keeps the drafted voiding text behind a `[[NOT YET BUILT]]`
+   * marker that blocks publication, and couples it to the Data Deletion Policy
+   * and the Privacy Policy. Revoking one here would make three published
+   * documents false and would be a policy change, not a bug fix.
+   */
   if (existing) return existing.code;
 
-  const insert = db.prepare(
+  /**
+   * A certificate is never ISSUED for an event that was called off.
+   *
+   * Cancelling is not archiving. `PATCH /api/events/:id/status` notifies every
+   * confirmed volunteer with `EVENT_CANCELLED` because "they may have arranged
+   * a ride around it" — it means the event is not happening. Attendance rows
+   * can survive it (the update deliberately refuses to delete them), and this
+   * function is reached from the boot backfill and from the certificates list,
+   * so without this guard a called-off event mints a fresh credential on the
+   * next start. Verified before writing this: it did.
+   *
+   * The platform now counts that event as zero hours and keeps it off the
+   * transcript. Issuing a verification code asserting a college can check that
+   * the service happened would be the platform contradicting itself, in the one
+   * artifact that leaves it.
+   *
+   * Returning null rather than throwing: the callers are a boot task and a list
+   * endpoint, and neither should fail because one row is ineligible.
+   */
+  const event = await db.prepare('SELECT status FROM events WHERE id = ?').get(eventId);
+  if (event?.status === 'cancelled') return null;
+
+  const insert = await db.prepare(
     'INSERT INTO certificates (user_id, event_id, code, created_at) VALUES (?, ?, ?, ?)'
   );
 
@@ -93,7 +126,7 @@ export function getOrCreateCertificateCode(db, userId, eventId) {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const code = generateCode();
     try {
-      insert.run(userId, eventId, code, new Date().toISOString());
+      await insert.run(userId, eventId, code, new Date().toISOString());
       break;
     } catch (err) {
       // A UNIQUE(user_id, event_id) collision means someone else created this
@@ -107,7 +140,7 @@ export function getOrCreateCertificateCode(db, userId, eventId) {
 
   // Re-select regardless of which branch above fired, so the value returned
   // is always what's actually stored (stable per certificate).
-  const row = db.prepare(
+  const row = await db.prepare(
     'SELECT code FROM certificates WHERE user_id = ? AND event_id = ?'
   ).get(userId, eventId);
 
@@ -129,19 +162,19 @@ export function getOrCreateCertificateCode(db, userId, eventId) {
  * Never writes to `attendance`. Runs at boot, mirroring the hours-ledger
  * backfill.
  */
-export function backfillCertificates(db) {
-  const pairs = db.prepare(`
+export async function backfillCertificates(db) {
+  const pairs = await db.prepare(`
     SELECT DISTINCT user_id, event_id FROM attendance WHERE present = 1
   `).all();
 
   let inserted = 0;
   for (const { user_id, event_id } of pairs) {
-    const before = db.prepare(
+    const before = await db.prepare(
       'SELECT 1 FROM certificates WHERE user_id = ? AND event_id = ?'
     ).get(user_id, event_id);
     if (before) continue;
 
-    getOrCreateCertificateCode(db, user_id, event_id);
+    await getOrCreateCertificateCode(db, user_id, event_id);
     inserted++;
   }
 

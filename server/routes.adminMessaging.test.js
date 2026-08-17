@@ -48,9 +48,9 @@ describe('opening a thread', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
 
     const id = res.body.conversation.id;
-    const participants = db.prepare(
+    const participants = (await db.prepare(
       'SELECT user_id FROM conversation_participants WHERE conversation_id = ?'
-    ).all(id).map(r => r.user_id);
+    ).all(id)).map(r => r.user_id);
 
     expect(participants, 'the admin must be a participant or every read 404s')
       .toContain('user-admin');
@@ -72,7 +72,7 @@ describe('opening a thread', () => {
    */
   it('is not scoped to an event', async () => {
     const res = await openThread(STUDENT);
-    const row = db.prepare('SELECT event_id, student_id, organizer_id FROM conversations WHERE id = ?')
+    const row = await db.prepare('SELECT event_id, student_id, organizer_id FROM conversations WHERE id = ?')
       .get(res.body.conversation.id);
 
     expect(row.event_id).toBe(null);
@@ -86,15 +86,15 @@ describe('opening a thread', () => {
     const second = await openThread(STUDENT);
 
     expect(second.body.conversation.id).toBe(first.body.conversation.id);
-    expect(db.prepare(`
+    expect((await db.prepare(`
       SELECT COUNT(*) c FROM conversations
        WHERE kind = 'admin_student' AND created_by = 'user-admin' AND student_id = ?
-    `).get(STUDENT).c).toBe(1);
+    `).get(STUDENT)).c).toBe(1);
   });
 
   it('records that a channel was opened, naming who and to whom', async () => {
     await openThread(STUDENT);
-    const row = db.prepare(`
+    const row = await db.prepare(`
       SELECT admin_id, target_user_id, details FROM admin_audit_logs
        WHERE action = 'ADMIN_CONVERSATION_OPENED' AND target_user_id = ?
        ORDER BY rowid DESC LIMIT 1
@@ -149,10 +149,10 @@ describe('using the thread', () => {
     expect(conversation.lifecycle.writable).toBe(true);
 
     const { computeConversationLifecycle } = await import('./messaging.js');
-    const row = db.prepare('SELECT * FROM conversations WHERE id = ?').get(conversation.id);
+    const row = await db.prepare('SELECT * FROM conversations WHERE id = ?').get(conversation.id);
 
     // Far enough in the future that every event-based window has long closed.
-    const lifecycle = computeConversationLifecycle(row, new Date('2099-01-01T00:00:00.000Z'));
+    const lifecycle = await computeConversationLifecycle(row, new Date('2099-01-01T00:00:00.000Z'));
     expect(lifecycle.writable).toBe(true);
     expect(lifecycle.state).toBe('active');
   });

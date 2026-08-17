@@ -54,6 +54,7 @@ async function fresh() {
   vi.resetModules();
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const utils = await import('./utils.js');
   return { db: dbMod.db, utils };
 }
@@ -85,7 +86,7 @@ describe('purgeExpiredRevocations', () => {
     revocation(db, 'jti-old-2', 200);
     expect(rows(db)).toBe(2);
 
-    const removed = utils.purgeExpiredRevocations();
+    const removed = await utils.purgeExpiredRevocations();
 
     expect(removed).toBe(2);
     expect(rows(db)).toBe(0);
@@ -95,12 +96,12 @@ describe('purgeExpiredRevocations', () => {
     const { db, utils } = await fresh();
     // Still inside its 7-day life: the denylist row is the ONLY thing making this
     // token stop working, so removing it would un-revoke a session.
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO revoked_sessions (jti, user_id, revoked_at, expires_at)
       VALUES ('jti-live', 'u1', ?, ?)
     `).run(new Date().toISOString(), new Date(Date.now() + 3 * 86400_000).toISOString());
 
-    utils.purgeExpiredRevocations();
+    await utils.purgeExpiredRevocations();
 
     expect(rows(db), 'a live revocation was purged, un-revoking a signed-out session').toBe(1);
   });
@@ -113,7 +114,7 @@ describe('the sweep actually runs it', () => {
 
     // The regression: the function existed and was never invoked, so the table grew
     // forever while the code read as though pruning were handled.
-    utils.runNotificationSweep();
+    await utils.runNotificationSweep();
 
     expect(rows(db), 'the sweep did not purge expired revocations').toBe(0);
   });
@@ -121,14 +122,14 @@ describe('the sweep actually runs it', () => {
   it('leaves live revocations alone when sweeping', async () => {
     const { db, utils } = await fresh();
     revocation(db, 'jti-expired', 48);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO revoked_sessions (jti, user_id, revoked_at, expires_at)
       VALUES ('jti-live', 'u1', ?, ?)
     `).run(new Date().toISOString(), new Date(Date.now() + 3 * 86400_000).toISOString());
 
-    utils.runNotificationSweep();
+    await utils.runNotificationSweep();
 
-    const remaining = db.prepare('SELECT jti FROM revoked_sessions').all().map(r => r.jti);
+    const remaining = (await db.prepare('SELECT jti FROM revoked_sessions').all()).map(r => r.jti);
     expect(remaining).toEqual(['jti-live']);
   });
 
@@ -138,12 +139,12 @@ describe('the sweep actually runs it', () => {
     // Maintenance is the least important thing the sweep does; it must never be the
     // reason reminders stop going out.
     const real = db.prepare.bind(db);
-    vi.spyOn(db, 'prepare').mockImplementation((sql) => {
+    vi.spyOn(db, 'prepare').mockImplementation(async (sql) => {
       if (/DELETE FROM revoked_sessions/.test(sql)) throw new Error('database is locked');
       return real(sql);
     });
 
-    expect(() => utils.runNotificationSweep()).not.toThrow();
+    await expect(utils.runNotificationSweep()).resolves.toBeTypeOf('number');
   });
 });
 

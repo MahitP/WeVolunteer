@@ -27,7 +27,7 @@ beforeAll(async () => {
     name: 'Triage Owner', username: 'triage_owner', email: 'triage@test.local',
     password: 'Password123', grade: 'Adult', role: 'student'
   });
-  db.prepare("UPDATE users SET role = 'super_admin', verified = 1 WHERE email = 'triage@test.local'").run();
+  await db.prepare("UPDATE users SET role = 'super_admin', verified = 1 WHERE email = 'triage@test.local'").run();
   /* Promoting by SQL skips `login()`, which is where the two-factor enrolment
      normally happens — and an unenrolled administrator is refused by
      `requireCap` before `error.read` is ever consulted. */
@@ -92,7 +92,7 @@ describe('GET /api/errors/summary is not swallowed by /:fingerprint', () => {
   it('counts occurrences by day from events, not from group last_seen_at', async () => {
     const fp = group('fp-day');
     for (const at of ['2026-08-01T01:00:00.000Z', '2026-08-01T09:00:00.000Z', '2026-08-02T01:00:00.000Z']) {
-      db.prepare('INSERT INTO error_events (id, fingerprint, occurred_at) VALUES (?, ?, ?)')
+      await db.prepare('INSERT INTO error_events (id, fingerprint, occurred_at) VALUES (?, ?, ?)')
         .run(`ev-${at}`, fp, at);
     }
     const res = await get('/api/errors/summary');
@@ -243,9 +243,9 @@ describe('GET /api/errors', () => {
 describe('GET /api/errors/:fingerprint', () => {
   it('returns the group with its events, newest first', async () => {
     const fp = group('fp-detail');
-    db.prepare('INSERT INTO error_events (id, fingerprint, occurred_at) VALUES (?, ?, ?)')
+    await db.prepare('INSERT INTO error_events (id, fingerprint, occurred_at) VALUES (?, ?, ?)')
       .run('ev-1', fp, '2026-08-01T00:00:00.000Z');
-    db.prepare('INSERT INTO error_events (id, fingerprint, occurred_at) VALUES (?, ?, ?)')
+    await db.prepare('INSERT INTO error_events (id, fingerprint, occurred_at) VALUES (?, ?, ?)')
       .run('ev-2', fp, '2026-08-02T00:00:00.000Z');
 
     const res = await get(`/api/errors/${fp}`);
@@ -270,7 +270,7 @@ describe('PATCH /api/errors/:fingerprint', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ fingerprint: fp, status: 'resolved', previousStatus: 'open' });
 
-    const row = db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(fp);
+    const row = await db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(fp);
     expect(row.status).toBe('resolved');
     expect(row.resolved_at).toBeTruthy();
     expect(row.resolved_by).toBeTruthy();
@@ -279,7 +279,7 @@ describe('PATCH /api/errors/:fingerprint', () => {
   it('clears resolved_at and resolved_by when reopening', async () => {
     const fp = group('fp-reopen', { status: 'resolved' });
     await patch(`/api/errors/${fp}`, { status: 'open' });
-    const row = db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(fp);
+    const row = await db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(fp);
     expect(row).toMatchObject({ status: 'open', resolved_at: null, resolved_by: null });
   });
 
@@ -304,7 +304,7 @@ describe('PATCH /api/errors/:fingerprint', () => {
       const res = await patch(`/api/errors/${fp}`, { status: bad });
       expect(res.status, `status ${JSON.stringify(bad)} was accepted`).toBe(400);
     }
-    expect(db.prepare('SELECT status FROM error_groups WHERE fingerprint = ?').get(fp).status).toBe('open');
+    expect((await db.prepare('SELECT status FROM error_groups WHERE fingerprint = ?').get(fp)).status).toBe('open');
     expect(auditRows().length, 'a refused change still wrote an audit row').toBe(0);
   });
 
@@ -321,15 +321,15 @@ describe('PATCH /api/errors/:fingerprint', () => {
    */
   it('reopens automatically when the problem recurs', async () => {
     const { recordError } = await import('./errorReporter.js');
-    recordError(db, { source: 'server', kind: 'TypeError', message: 'recurring failure' });
+    await recordError(db, { source: 'server', kind: 'TypeError', message: 'recurring failure' });
 
-    const fp = db.prepare("SELECT fingerprint FROM error_groups WHERE message LIKE '%recurring%'").get().fingerprint;
+    const fp = (await db.prepare("SELECT fingerprint FROM error_groups WHERE message LIKE '%recurring%'").get()).fingerprint;
     await patch(`/api/errors/${fp}`, { status: 'resolved' });
-    expect(db.prepare('SELECT status FROM error_groups WHERE fingerprint = ?').get(fp).status).toBe('resolved');
+    expect((await db.prepare('SELECT status FROM error_groups WHERE fingerprint = ?').get(fp)).status).toBe('resolved');
 
-    recordError(db, { source: 'server', kind: 'TypeError', message: 'recurring failure' });
+    await recordError(db, { source: 'server', kind: 'TypeError', message: 'recurring failure' });
 
-    const after = db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(fp);
+    const after = await db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(fp);
     expect(after.status, 'a resolved group stayed closed while still failing').toBe('open');
     expect(after.resolved_at).toBeNull();
     expect(after.occurrences).toBe(2);

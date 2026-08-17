@@ -59,7 +59,7 @@ afterAll(async () => { await srv?.close(); });
 async function completedExport(userId, id) {
   const { db } = await import('./db.js');
   const now = new Date();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO data_export_jobs (id, user_id, status, file_location, created_at, completed_at, expires_at)
     VALUES (?, ?, 'completed', NULL, ?, ?, ?)
   `).run(

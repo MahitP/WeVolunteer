@@ -52,15 +52,15 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
     srv = await startTestServer();
     ({ db } = await import('./db.js'));
     await enrolTwoFactor(db, EMAIL);
-    db.prepare('UPDATE users SET email_verified = 1 WHERE email = ?').run(EMAIL);
+    await db.prepare('UPDATE users SET email_verified = 1 WHERE email = ?').run(EMAIL);
 
     /* `enrolTwoFactor` sets up the authenticator only. Recovery codes are a
        separate enrolment, and without at least one stored row the method is
        correctly NOT offered — which is the behaviour utils.js documents. */
     const bcrypt = (await import('bcryptjs')).default;
-    const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+    const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
     for (const plain of ['SEEDCODEAAAA', 'SEEDCODEBBBB']) {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO recovery_codes (id, user_id, code_hash, created_at)
         VALUES (?, ?, ?, ?)
       `).run(`rc-seed-${plain}`, userId, bcrypt.hashSync(plain, 10), new Date().toISOString());
@@ -94,7 +94,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
       /* Clear the high-water mark so the replay guard cannot reject this token
          first — the condition under test is the WRITE failing, which is only
          reached once the code itself has been accepted. */
-      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE email = ?').run(EMAIL);
+      await db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE email = ?').run(EMAIL);
 
       /* Simulate the broken-schema condition without rebuilding `users`: a
          trigger that raises on the one UPDATE this path performs. */
@@ -116,7 +116,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
     });
 
     it('still works once the condition clears', async () => {
-      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE email = ?').run(EMAIL);
+      await db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE email = ?').run(EMAIL);
       const preauth = await beginLogin();
       const res = await submit(preauth, { method: 'totp', token: await freshTotp() });
       expect(res.status).toBe(200);
@@ -160,16 +160,16 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      */
     it.each([['recovery', 'code'], ['email', 'code'], ['totp', 'token']])(
       'refuses an empty %s submission as malformed, not as a wrong guess', async (method, field) => {
-        const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-        db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+        const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+        await db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
 
         const res = await submit(await beginLogin(), { method, [field]: '   ' });
         expect(res.status).toBe(400);
         expect(res.body.code).toBe('malformed_code');
 
-        const spent = db.prepare(
+        const spent = (await db.prepare(
           'SELECT COALESCE(SUM(attempts), 0) AS n FROM tfa_login_attempts WHERE user_id = ?'
-        ).get(userId).n;
+        ).get(userId)).n;
         expect(spent, 'an empty submission must cost no attempts').toBe(0);
       });
 
@@ -183,8 +183,8 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
   describe('recovery codes are a genuine last resort', () => {
     const addRecoveryCode = async (plain) => {
       const bcrypt = (await import('bcryptjs')).default;
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      db.prepare(`
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      await db.prepare(`
         INSERT INTO recovery_codes (id, user_id, code_hash, created_at)
         VALUES (?, ?, ?, ?)
       `).run(`rc-${Math.random().toString(36).slice(2)}`, userId,
@@ -192,9 +192,9 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
       return userId;
     };
 
-    const remaining = () => db.prepare(
+    const remaining = async () => (await db.prepare(
       'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = (SELECT id FROM users WHERE email = ?)'
-    ).get(EMAIL).n;
+    ).get(EMAIL)).n;
 
     it('is offered even when the authenticator is the only enrolled factor', async () => {
       const res = await srv.call('POST', '/api/auth/login', { email: EMAIL, password: PASSWORD });
@@ -209,30 +209,30 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      */
     it('works with the authenticator broken and the address unconfirmed', async () => {
       await addRecoveryCode('LASTRESORT01');
-      db.prepare('UPDATE users SET email_verified = 0 WHERE email = ?').run(EMAIL);
+      await db.prepare('UPDATE users SET email_verified = 0 WHERE email = ?').run(EMAIL);
       const login = await srv.call('POST', '/api/auth/login', { email: EMAIL, password: PASSWORD });
       expect(login.body.availableMethods).not.toContain('email');
       expect(login.body.availableMethods).toContain('recovery');
 
       const res = await submit(await beginLogin(), { method: 'recovery', code: 'LASTRESORT01' });
       expect(res.status).toBe(200);
-      db.prepare('UPDATE users SET email_verified = 1 WHERE email = ?').run(EMAIL);
+      await db.prepare('UPDATE users SET email_verified = 1 WHERE email = ?').run(EMAIL);
     });
 
     it('accepts a real code, and refuses the same one twice', async () => {
       const plain = 'TESTRECOVERY1';
       await addRecoveryCode(plain);
-      const before = remaining();
+      const before = await remaining();
 
       const first = await submit(await beginLogin(), { method: 'recovery', code: plain });
       expect(first.status).toBe(200);
       /* The session transition, and the code is CONSUMED — one fewer left. */
       expect((first.headers.get('set-cookie') || '')).toContain('wev_session=');
-      expect(remaining()).toBe(before - 1);
+      expect(await remaining()).toBe(before - 1);
 
       const second = await submit(await beginLogin(), { method: 'recovery', code: plain });
       expect(second.status).toBe(401);
-      expect(remaining()).toBe(before - 1);
+      expect(await remaining()).toBe(before - 1);
     });
 
     /* Case and surrounding whitespace are a transcription artefact, not a
@@ -250,9 +250,9 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      * fallback, and saying so beats offering a method with nothing behind it.
      */
     it('stops offering recovery once every code is spent', async () => {
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      const saved = db.prepare('SELECT * FROM recovery_codes WHERE user_id = ?').all(userId);
-      db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(userId);
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      const saved = await db.prepare('SELECT * FROM recovery_codes WHERE user_id = ?').all(userId);
+      await db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(userId);
       try {
         const login = await srv.call('POST', '/api/auth/login', { email: EMAIL, password: PASSWORD });
         expect(login.body.availableMethods).not.toContain('recovery');
@@ -265,7 +265,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
         expect(res.body.code).toBe('method_unavailable');
       } finally {
         for (const r of saved) {
-          db.prepare(`
+          await db.prepare(`
             INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, ?)
           `).run(r.id, r.user_id, r.code_hash, r.created_at);
         }
@@ -300,7 +300,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
     it('refuses a real session token presented as a pre-auth grant', async () => {
       const jwt = (await import('jsonwebtoken')).default;
       const { JWT_SECRET } = await import('./config.js');
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
       const session = jwt.sign({ id: userId, jti: 'x' }, JWT_SECRET, { expiresIn: '7d' });
 
       const res = await submit(session, { method: 'totp', token: await freshTotp() });
@@ -320,8 +320,8 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      */
     it('clears the grant on success', async () => {
       const bcrypt = (await import('bcryptjs')).default;
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      db.prepare(`
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      await db.prepare(`
         INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, ?)
       `).run(`rc-clear-${Math.random().toString(36).slice(2)}`, userId,
         bcrypt.hashSync('GRANTCLEAR01', 10), new Date().toISOString());
@@ -354,15 +354,20 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      * in it.
      */
     it('throttles sustained guessing across fresh grants', async () => {
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      const clear = () => db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
-      clear();
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      const clear = async () => await db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+      await clear();
 
-      /* 19 attempts already spent, against a grant that no longer exists. */
-      db.prepare(`
+      /* 19 attempts already spent, against a grant that no longer exists.
+         ISO-8601, matching what the route now writes: the column moved formats
+         in migration 056, and a fixture still writing `datetime('now')` produces
+         a row that sorts BELOW every cutoff and is therefore invisible to the
+         window — which is this test failing for the reason the migration
+         exists, rather than the rule being wrong. */
+      await db.prepare(`
         INSERT INTO tfa_login_attempts (token_hash, user_id, attempts, last_attempt_at)
-        VALUES ('spent-on-an-older-grant', ?, 19, datetime('now'))
-      `).run(userId);
+        VALUES ('spent-on-an-older-grant', ?, 19, ?)
+      `).run(userId, new Date().toISOString());
 
       /* A brand-new grant, with a per-token counter of zero, is still refused on
          the ACCOUNT budget once it crosses the ceiling. */
@@ -373,11 +378,11 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
       expect(twentyFirst.status).toBe(429);
 
       /* And a CORRECT code is refused too — the ceiling is not a guess filter. */
-      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
+      await db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
       const withGoodCode = await submit(await beginLogin(), { method: 'totp', token: await freshTotp() });
       expect(withGoodCode.status).toBe(429);
 
-      clear();
+      await clear();
     });
   });
 
@@ -391,11 +396,11 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      */
     it('returns the remaining count and writes a notice', async () => {
       const bcrypt = (await import('bcryptjs')).default;
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(userId);
-      db.prepare('DELETE FROM notifications WHERE user_id = ?').run(userId);
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      await db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(userId);
+      await db.prepare('DELETE FROM notifications WHERE user_id = ?').run(userId);
       for (const plain of ['LASTBUTONE01', 'THEVERYLAST1']) {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, ?)
         `).run(`rc-n-${plain}`, userId, bcrypt.hashSync(plain, 10), new Date().toISOString());
       }
@@ -404,7 +409,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
       expect(first.status).toBe(200);
       expect(first.body.recoveryCodesRemaining).toBe(1);
 
-      const notices = db.prepare(
+      const notices = await db.prepare(
         `SELECT * FROM notifications WHERE user_id = ? AND title LIKE 'A recovery code was used%'`
       ).all(userId);
       expect(notices).toHaveLength(1);
@@ -412,12 +417,12 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
     });
 
     it('says so plainly when the last one is spent', async () => {
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
       const res = await submit(await beginLogin(), { method: 'recovery', code: 'THEVERYLAST1' });
       expect(res.status).toBe(200);
       expect(res.body.recoveryCodesRemaining).toBe(0);
 
-      const notices = db.prepare(
+      const notices = await db.prepare(
         `SELECT body FROM notifications WHERE user_id = ? AND title LIKE 'A recovery code was used%'
          ORDER BY created_at DESC`
       ).all(userId);
@@ -426,8 +431,8 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
 
     /* An ordinary TOTP sign-in must not claim a count it did not spend. */
     it('omits the count when no recovery code was used', async () => {
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      await db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
       const res = await submit(await beginLogin(), { method: 'totp', token: await freshTotp() });
       expect(res.status).toBe(200);
       expect(res.body).not.toHaveProperty('recoveryCodesRemaining');
@@ -436,16 +441,16 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
 
   describe('email codes', () => {
     it('offers email once the address is confirmed, even without the separate flag', async () => {
-      db.prepare('UPDATE users SET tfa_email_enabled = 0, email_verified = 1 WHERE email = ?').run(EMAIL);
+      await db.prepare('UPDATE users SET tfa_email_enabled = 0, email_verified = 1 WHERE email = ?').run(EMAIL);
       const res = await srv.call('POST', '/api/auth/login', { email: EMAIL, password: PASSWORD });
       expect(res.body.availableMethods).toContain('email');
     });
 
     it('does not offer email when the address is unconfirmed', async () => {
-      db.prepare('UPDATE users SET email_verified = 0 WHERE email = ?').run(EMAIL);
+      await db.prepare('UPDATE users SET email_verified = 0 WHERE email = ?').run(EMAIL);
       const res = await srv.call('POST', '/api/auth/login', { email: EMAIL, password: PASSWORD });
       expect(res.body.availableMethods).not.toContain('email');
-      db.prepare('UPDATE users SET email_verified = 1 WHERE email = ?').run(EMAIL);
+      await db.prepare('UPDATE users SET email_verified = 1 WHERE email = ?').run(EMAIL);
     });
 
     /**
@@ -460,7 +465,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      */
     it('sends to exactly the accounts the login screen was told it could', async () => {
       for (const verified of [1, 0]) {
-        db.prepare('UPDATE users SET email_verified = ? WHERE email = ?').run(verified, EMAIL);
+        await db.prepare('UPDATE users SET email_verified = ? WHERE email = ?').run(verified, EMAIL);
         const login = await srv.call('POST', '/api/auth/login', { email: EMAIL, password: PASSWORD });
         const offered = login.body.availableMethods.includes('email');
         expect(offered).toBe(verified === 1);
@@ -479,7 +484,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
           expect(send.body.code).toBe('method_unavailable');
         }
       }
-      db.prepare('UPDATE users SET email_verified = 1 WHERE email = ?').run(EMAIL);
+      await db.prepare('UPDATE users SET email_verified = 1 WHERE email = ?').run(EMAIL);
     });
 
     /**
@@ -494,17 +499,17 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      */
     it('accepts a delivered code, then refuses the same one again', async () => {
       const bcrypt = (await import('bcryptjs')).default;
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
 
       const preauth = await beginLogin();
       await srv.call('POST', '/api/auth/login-2fa/email/send', {}, undefined,
         { Cookie: `wev_preauth=${preauth}` });
 
-      const row = db.prepare(
+      const row = await db.prepare(
         'SELECT id FROM tfa_email_codes WHERE user_id = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1'
       ).get(userId);
       expect(row, 'the send route stored no live code').toBeTruthy();
-      db.prepare('UPDATE tfa_email_codes SET code_hash = ?, attempts = 0 WHERE id = ?')
+      await db.prepare('UPDATE tfa_email_codes SET code_hash = ?, attempts = 0 WHERE id = ?')
         .run(bcrypt.hashSync('123456', 10), row.id);
 
       const ok = await submit(preauth, { method: 'email', code: '123456' });
@@ -515,7 +520,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
 
       /* Single use. The row is marked spent, so a replay finds nothing to match
          and is refused like any wrong code. */
-      expect(db.prepare('SELECT used_at FROM tfa_email_codes WHERE id = ?').get(row.id).used_at)
+      expect((await db.prepare('SELECT used_at FROM tfa_email_codes WHERE id = ?').get(row.id)).used_at)
         .toBeTruthy();
       const replay = await submit(await beginLogin(), { method: 'email', code: '123456' });
       expect(replay.status).toBe(401);
@@ -524,11 +529,11 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
     /** A wrong code is a 401, and it burns one of the three attempts, not three. */
     it('spends one attempt per wrong guess however many codes are live', async () => {
       const bcrypt = (await import('bcryptjs')).default;
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(userId);
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      await db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(userId);
       const expires = new Date(Date.now() + 600000).toISOString();
       for (const n of ['111111', '222222', '333333']) {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO tfa_email_codes (id, user_id, code_hash, expires_at, created_at)
           VALUES (?, ?, ?, ?, datetime('now'))
         `).run(`multi-${n}`, userId, bcrypt.hashSync(n, 10), expires);
@@ -536,18 +541,18 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
 
       const res = await submit(await beginLogin(), { method: 'email', code: '999999' });
       expect(res.status).toBe(401);
-      const attempts = db.prepare(
+      const attempts = (await db.prepare(
         'SELECT attempts FROM tfa_email_codes WHERE user_id = ? ORDER BY id'
-      ).all(userId).map(r => r.attempts);
+      ).all(userId)).map(r => r.attempts);
       expect(attempts).toEqual([1, 1, 1]);
-      db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(userId);
+      await db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(userId);
     });
 
     it('refuses an expired code with 401 rather than 500', async () => {
       const preauth = await beginLogin();
       const bcrypt = (await import('bcryptjs')).default;
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      db.prepare(`
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      await db.prepare(`
         INSERT INTO tfa_email_codes (id, user_id, code_hash, expires_at, created_at)
         VALUES (?, ?, ?, ?, datetime('now'))
       `).run(`exp-${Math.random().toString(36).slice(2)}`, userId,
@@ -577,8 +582,8 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
   describe('the guessing budget', () => {
     it('is not bypassable by firing attempts concurrently on one grant', async () => {
       const preauth = await beginLogin();
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      await db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
 
       /**
        * The RECOVERY method, deliberately — not TOTP.
@@ -591,9 +596,9 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
        * unfixed handler and proves nothing.
        */
       const bcrypt = (await import('bcryptjs')).default;
-      db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(userId);
+      await db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(userId);
       for (const plain of ['RACECODEAAAA', 'RACECODEBBBB', 'RACECODECCCC']) {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO recovery_codes (id, user_id, code_hash, created_at)
           VALUES (?, ?, ?, ?)
         `).run(`rc-race-${plain}`, userId, bcrypt.hashSync(plain, 10), new Date().toISOString());
@@ -624,23 +629,23 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      */
     it('does not count the attempts it refuses', async () => {
       const preauth = await beginLogin();
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      await db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
 
       for (let i = 0; i < 5; i++) {
         expect((await submit(preauth, { method: 'totp', token: '000000' })).status).toBe(401);
       }
-      const atCeiling = db.prepare(
+      const atCeiling = (await db.prepare(
         'SELECT COALESCE(SUM(attempts), 0) AS n FROM tfa_login_attempts WHERE user_id = ?'
-      ).get(userId).n;
+      ).get(userId)).n;
       expect(atCeiling).toBe(5);
 
       for (let i = 0; i < 4; i++) {
         expect((await submit(preauth, { method: 'totp', token: '000000' })).status).toBe(429);
       }
-      const afterRefusals = db.prepare(
+      const afterRefusals = (await db.prepare(
         'SELECT COALESCE(SUM(attempts), 0) AS n FROM tfa_login_attempts WHERE user_id = ?'
-      ).get(userId).n;
+      ).get(userId)).n;
       expect(afterRefusals, 'a refused request costs nothing').toBe(5);
     });
 
@@ -651,8 +656,8 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      * verification must not quietly bring it back.
      */
     it('clears the budget on a successful sign-in', async () => {
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      await db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
 
       const failing = await beginLogin();
       expect((await submit(failing, { method: 'totp', token: '000000' })).status).toBe(401);
@@ -661,14 +666,14 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
          step, and a spent step is correctly refused as a replay. Clearing the
          high-water mark is what makes THIS test about the attempt counter
          rather than about `tfa_last_counter`. */
-      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
+      await db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
 
       const preauth = await beginLogin();
       expect((await submit(preauth, { method: 'totp', token: await freshTotp() })).status).toBe(200);
 
-      const left = db.prepare(
+      const left = (await db.prepare(
         'SELECT COALESCE(SUM(attempts), 0) AS n FROM tfa_login_attempts WHERE user_id = ?'
-      ).get(userId).n;
+      ).get(userId)).n;
       expect(left).toBe(0);
     });
   });
@@ -683,9 +688,9 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
    */
   describe('the pre-auth grant', () => {
     it('cannot be replayed to mint a second session', async () => {
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
-      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      await db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+      await db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
 
       const preauth = await beginLogin();
       const first = await submit(preauth, { method: 'totp', token: await freshTotp() });
@@ -693,7 +698,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
 
       /* The same cookie again. A fresh code is used so the refusal cannot be
          the replay guard on the TOTP step standing in for this one. */
-      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
+      await db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
       const replay = await submit(preauth, { method: 'totp', token: await freshTotp() });
       expect(replay.status).toBe(401);
     });
@@ -703,13 +708,13 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
      * sign-in that is standing at the second-factor step.
      */
     it('is refused once the account token version moves', async () => {
-      const userId = db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL).id;
-      db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
+      const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
+      await db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId);
 
       const preauth = await beginLogin();
-      db.prepare('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?').run(userId);
+      await db.prepare('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?').run(userId);
 
-      db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
+      await db.prepare('UPDATE users SET tfa_last_counter = NULL WHERE id = ?').run(userId);
       const res = await submit(preauth, { method: 'totp', token: await freshTotp() });
       expect(res.status).toBe(401);
     });

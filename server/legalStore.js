@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { LEGAL_DOCUMENTS, documentBySlug, publishedHash } from './legalDocuments.js';
 import { policyContent } from './legalContent.js';
 import { parsePolicyMarkdown, isSafeHref } from '../src/utils/policyMarkdown.js';
+import { tableExists } from './db/dialectSql.js';
 
 /**
  * The override layer that lets legal text change without a deploy.
@@ -173,10 +174,8 @@ export function sha256(text) {
 }
 
 /** True once the revisions table exists — false on a database mid-migration. */
-function revisionsTableExists(db) {
-  return !!db.prepare(
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'legal_document_revisions'"
-  ).get();
+async function revisionsTableExists(db) {
+  return tableExists(db, 'legal_document_revisions');
 }
 
 /**
@@ -192,12 +191,12 @@ function revisionsTableExists(db) {
  * render a hub page that shows only titles and versions is a cost with no
  * reader on the other end of it.
  */
-export function currentRevision(db, slug, { withBody = true } = {}) {
-  if (!revisionsTableExists(db)) return null;
+export async function currentRevision(db, slug, { withBody = true } = {}) {
+  if (!await revisionsTableExists(db)) return null;
   const columns = withBody
     ? 'id, slug, version, body, content_hash, effective_at, created_at, created_by'
     : 'id, slug, version, content_hash, effective_at, created_at, created_by';
-  return db.prepare(
+  return await db.prepare(
     `SELECT ${columns} FROM legal_document_revisions WHERE slug = ? ORDER BY id DESC LIMIT 1`
   ).get(slug) || null;
 }
@@ -258,10 +257,10 @@ function mergeRevision(doc, revision, { withBody = false } = {}) {
   };
 }
 
-export function resolveDocument(db, slugOrDoc, { withBody = false } = {}) {
+export async function resolveDocument(db, slugOrDoc, { withBody = false } = {}) {
   const doc = typeof slugOrDoc === 'string' ? documentBySlug(slugOrDoc) : slugOrDoc;
   if (!doc) return null;
-  return mergeRevision(doc, currentRevision(db, doc.slug, { withBody }), { withBody });
+  return mergeRevision(doc, await currentRevision(db, doc.slug, { withBody }), { withBody });
 }
 
 /**
@@ -271,11 +270,11 @@ export function resolveDocument(db, slugOrDoc, { withBody = false } = {}) {
  * unauthenticated and rate-limited at 120/min, so ten round trips per request is
  * ten times the database work for a page that has not changed.
  */
-export function effectiveDocuments(db) {
+export async function effectiveDocuments(db) {
   const latest = new Map();
 
-  if (revisionsTableExists(db)) {
-    const rows = db.prepare(`
+  if (await revisionsTableExists(db)) {
+    const rows = await db.prepare(`
       SELECT r.slug, r.version, r.content_hash, r.effective_at, r.created_at, r.id
       FROM legal_document_revisions r
       JOIN (SELECT slug, MAX(id) AS id FROM legal_document_revisions GROUP BY slug) newest
@@ -589,23 +588,21 @@ export function parseEffectiveAt(raw, { now = new Date(), previousEffectiveAt = 
  *     moves. Reusing a version that table already holds is not a validation
  *     nicety — it is a server that will not start.
  */
-function highestVersion(db, slug) {
+async function highestVersion(db, slug) {
   const candidates = [];
 
   const registered = documentBySlug(slug);
   if (registered) candidates.push(registered.version);
 
-  if (revisionsTableExists(db)) {
-    for (const row of db.prepare(
+  if (await revisionsTableExists(db)) {
+    for (const row of await db.prepare(
       'SELECT version FROM legal_document_revisions WHERE slug = ?'
     ).all(slug)) candidates.push(row.version);
   }
 
-  const hasCatalogue = db.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'legal_documents'"
-  ).get();
+  const hasCatalogue = await tableExists(db, 'legal_documents');
   if (hasCatalogue) {
-    for (const row of db.prepare(
+    for (const row of await db.prepare(
       'SELECT version FROM legal_documents WHERE slug = ?'
     ).all(slug)) candidates.push(row.version);
   }
@@ -629,7 +626,7 @@ function highestVersion(db, slug) {
  * The caller also spends the re-authentication grant in the same transaction, so
  * the publication and the proof of identity commit or roll back together.
  */
-export function publishRevision(db, { slug, version, body, effectiveAt, userId, now = null }) {
+export async function publishRevision(db, { slug, version, body, effectiveAt, userId, now = null }) {
   /**
    * The publication instant is decided BEFORE validation, not after.
    *
@@ -642,13 +639,13 @@ export function publishRevision(db, { slug, version, body, effectiveAt, userId, 
   const at = now ?? new Date().toISOString();
 
   const { version: nextVersion, body: cleanBody, effectiveAt: effective } =
-    validatePublication(db, { slug, version, body, effectiveAt }, { now: at });
+    await validatePublication(db, { slug, version, body, effectiveAt }, { now: at });
 
   /* Non-null: `validatePublication` refuses an unregistered slug above. */
   const doc = documentBySlug(slug);
   const contentHash = sha256(cleanBody);
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO legal_document_revisions
       (slug, version, body, content_hash, effective_at, created_at, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -675,14 +672,13 @@ export function publishRevision(db, { slug, version, body, effectiveAt, userId, 
    * make that unreachable; the clause is what keeps it unreachable rather than
    * merely unlikely.
    */
-  const catalogued = db.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'legal_documents'"
-  ).get();
+  const catalogued = await tableExists(db, 'legal_documents');
   if (catalogued) {
-    db.prepare(`
-      INSERT OR IGNORE INTO legal_documents
+    await db.prepare(`
+      INSERT INTO legal_documents
         (slug, version, title, consent_type, content_hash, effective_at, published_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (slug, version) DO NOTHING
     `).run(slug, nextVersion, doc.title, doc.consentType, contentHash, effective, at);
   }
 
@@ -705,7 +701,7 @@ export function publishRevision(db, { slug, version, body, effectiveAt, userId, 
  * Returns the normalised values, so the caller writes exactly what was checked
  * rather than re-deriving them from the request.
  */
-export function validatePublication(db, { slug, version, body, effectiveAt }, { now = new Date() } = {}) {
+export async function validatePublication(db, { slug, version, body, effectiveAt }, { now = new Date() } = {}) {
   const doc = documentBySlug(slug);
   if (!doc) throw new LegalValidationError(`No such legal document: ${slug}`, 'slug');
 
@@ -721,13 +717,13 @@ export function validatePublication(db, { slug, version, body, effectiveAt }, { 
    * so the two move together and the check is atomic with the insert when
    * `publishRevision` calls this a second time.
    */
-  const previous = currentRevision(db, slug, { withBody: false });
+  const previous = await currentRevision(db, slug, { withBody: false });
   const previousEffectiveAt = previous?.effective_at ?? doc.effectiveAt ?? null;
 
   const effective = parseEffectiveAt(effectiveAt, { now, previousEffectiveAt });
   const { body: cleanBody } = validateBody(body, { slug });
 
-  const highest = highestVersion(db, slug);
+  const highest = await highestVersion(db, slug);
   if (highest && compareVersions(nextVersion, highest) <= 0) {
     throw new LegalValidationError(
       compareVersions(nextVersion, highest) === 0
@@ -748,7 +744,7 @@ export function validatePublication(db, { slug, version, body, effectiveAt }, { 
    * document changed and makes them re-read it to find out that it did not. It
    * is also the shape of an accidental double-submit.
    */
-  const current = currentRevision(db, slug, { withBody: true });
+  const current = await currentRevision(db, slug, { withBody: true });
   const existingBody = current ? current.body : policyContent(slug);
   if (existingBody.replace(/\r\n/g, '\n').trim() === cleanBody) {
     throw new LegalValidationError(
@@ -768,16 +764,16 @@ function suggestNext(version) {
 }
 
 /** Every revision of one document, newest first. Bodies omitted. */
-export function revisionHistory(db, slug) {
-  if (!revisionsTableExists(db)) return [];
-  return db.prepare(`
+export async function revisionHistory(db, slug) {
+  if (!await revisionsTableExists(db)) return [];
+  return (await db.prepare(`
     SELECT r.id, r.version, r.content_hash, r.effective_at, r.created_at, r.created_by,
            u.name AS author_name
     FROM legal_document_revisions r
     LEFT JOIN users u ON u.id = r.created_by
     WHERE r.slug = ?
     ORDER BY r.id DESC
-  `).all(slug).map(row => ({
+  `).all(slug)).map(row => ({
     id: row.id,
     version: row.version,
     contentHash: row.content_hash,

@@ -50,8 +50,9 @@ describe('server/db.js', () => {
     const out = execFileSync(process.execPath, ['-e', `
       process.env.WEV_DB_PATH = ${JSON.stringify(dbFile)};
       process.env.DEMO_MODE = '';
-      const { initDatabase } = require('./server/db.js');
+      const { initDatabase, completeDatabaseInit } = require('./server/db.js');
       initDatabase();
+      completeDatabaseInit().then(() => {});
       console.log('REQUIRED_OK');
     `], { cwd: ROOT, encoding: 'utf8', stdio: 'pipe' });
 
@@ -71,8 +72,9 @@ describe('server/db.js', () => {
     const out = execFileSync(process.execPath, ['-e', `
       process.env.WEV_DB_PATH = ${JSON.stringify(dbFile)};
       process.env.DEMO_MODE = '';
-      const { initDatabase } = require('./server/db.js');
+      const { initDatabase, completeDatabaseInit } = require('./server/db.js');
       initDatabase();
+      completeDatabaseInit().then(() => {});
       const { DatabaseSync } = require('node:sqlite');
       const probe = new DatabaseSync(${JSON.stringify(dbFile)});
       const names = probe.prepare(

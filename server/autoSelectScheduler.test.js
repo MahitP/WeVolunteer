@@ -34,6 +34,7 @@
  * possible for that event — which is what makes this restart-safe without any extra
  * bookkeeping: the state lives in the database, not in the process.
  */
+import { DatabaseSync } from 'node:sqlite';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -64,6 +65,7 @@ async function fresh({ graceHours, enabled } = {}) {
   vi.resetModules();
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const sched = await import('./services/autoSelectScheduler.js');
   const autoSelect = await import('./services/autoSelect.js');
   return { db: dbMod.db, sched, autoSelect };
@@ -133,7 +135,7 @@ describe('selecting which events are due', () => {
     const { db, sched } = await fresh({ graceHours: 24 });
     seedEvent(db, { id: 'ev-due', deadlineHoursAgo: 48 });
 
-    expect(sched.findDueEvents(db).map(e => e.id)).toContain('ev-due');
+    expect((await sched.findDueEvents(db)).map(e => e.id)).toContain('ev-due');
   });
 
   it('leaves an event alone while it is still inside the grace period', async () => {
@@ -142,7 +144,7 @@ describe('selecting which events are due', () => {
 
     // The organizer gets a full day to run the draw themselves before the safety
     // net fires. Running immediately would remove their chance to review.
-    expect(sched.findDueEvents(db).map(e => e.id)).not.toContain('ev-fresh');
+    expect((await sched.findDueEvents(db)).map(e => e.id)).not.toContain('ev-fresh');
   });
 
   it('ignores events whose deadline has not passed at all', async () => {
@@ -150,14 +152,14 @@ describe('selecting which events are due', () => {
     seedEvent(db, { id: 'ev-open', deadlineHoursAgo: -48 });
 
     // A draw before the deadline excludes students who may still apply.
-    expect(sched.findDueEvents(db).map(e => e.id)).not.toContain('ev-open');
+    expect((await sched.findDueEvents(db)).map(e => e.id)).not.toContain('ev-open');
   });
 
   it('ignores events that are not Auto Select', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
     seedEvent(db, { id: 'ev-manual', autoApprove: 0 });
 
-    expect(sched.findDueEvents(db).map(e => e.id)).not.toContain('ev-manual');
+    expect((await sched.findDueEvents(db)).map(e => e.id)).not.toContain('ev-manual');
   });
 
   it('ignores cancelled and completed events', async () => {
@@ -165,7 +167,7 @@ describe('selecting which events are due', () => {
     seedEvent(db, { id: 'ev-cancelled', status: 'cancelled' });
     seedEvent(db, { id: 'ev-completed', status: 'completed' });
 
-    const due = sched.findDueEvents(db).map(e => e.id);
+    const due = (await sched.findDueEvents(db)).map(e => e.id);
     expect(due).not.toContain('ev-cancelled');
     expect(due).not.toContain('ev-completed');
   });
@@ -176,18 +178,18 @@ describe('selecting which events are due', () => {
 
     // Nothing to decide; running would create a confirmed run for no reason and
     // close the event out from under the organizer.
-    expect(sched.findDueEvents(db).map(e => e.id)).not.toContain('ev-empty');
+    expect((await sched.findDueEvents(db)).map(e => e.id)).not.toContain('ev-empty');
   });
 
   it('ignores an event whose selection is already confirmed', async () => {
     const { db, sched, autoSelect } = await fresh({ graceHours: 0 });
     seedEvent(db, { id: 'ev-done' });
 
-    autoSelect.runAndConfirm(db, 'ev-done', { source: 'scheduler' });
+    await autoSelect.runAndConfirm(db, 'ev-done', { source: 'scheduler' });
 
     // The durable idempotency guard. This is also what makes the scheduler
     // restart-safe: the state is a row, not a process variable.
-    expect(sched.findDueEvents(db).map(e => e.id)).not.toContain('ev-done');
+    expect((await sched.findDueEvents(db)).map(e => e.id)).not.toContain('ev-done');
   });
 });
 
@@ -196,7 +198,7 @@ describe('running the scheduler', () => {
     const { db, sched } = await fresh({ graceHours: 0 });
     seedEvent(db, { id: 'ev-run', maxSpots: 2, applicants: 5 });
 
-    const result = sched.runAutoSelectSweep(db);
+    const result = await sched.runAutoSelectSweep(db);
 
     expect(result.executed).toBe(1);
     const s = statuses(db, 'ev-run');
@@ -209,9 +211,9 @@ describe('running the scheduler', () => {
     const { db, sched } = await fresh({ graceHours: 0 });
     seedEvent(db, { id: 'ev-confirm' });
 
-    sched.runAutoSelectSweep(db);
+    await sched.runAutoSelectSweep(db);
 
-    const run = db.prepare('SELECT * FROM auto_select_runs WHERE event_id = ?').get('ev-confirm');
+    const run = await db.prepare('SELECT * FROM auto_select_runs WHERE event_id = ?').get('ev-confirm');
     expect(run.is_confirmed).toBe(1);
     expect(run.run_number).toBe(1);
   });
@@ -220,11 +222,11 @@ describe('running the scheduler', () => {
     const { db, sched } = await fresh({ graceHours: 0 });
     seedEvent(db, { id: 'ev-attrib' });
 
-    sched.runAutoSelectSweep(db);
+    await sched.runAutoSelectSweep(db);
 
     // A district asking "who chose these volunteers" must be able to tell an
     // automatic draw from an organizer's.
-    const summary = JSON.parse(db.prepare('SELECT selection_summary FROM events WHERE id = ?').get('ev-attrib').selection_summary);
+    const summary = JSON.parse((await db.prepare('SELECT selection_summary FROM events WHERE id = ?').get('ev-attrib')).selection_summary);
     expect(summary.executedBy).toBe('scheduler');
   });
 
@@ -232,9 +234,9 @@ describe('running the scheduler', () => {
     const { db, sched } = await fresh({ graceHours: 0 });
     seedEvent(db, { id: 'ev-notify' });
 
-    sched.runAutoSelectSweep(db);
+    await sched.runAutoSelectSweep(db);
 
-    const notes = db.prepare('SELECT * FROM notifications WHERE user_id = ?').all('ev-notify-org');
+    const notes = await db.prepare('SELECT * FROM notifications WHERE user_id = ?').all('ev-notify-org');
     expect(notes.length, 'the organizer was not told the draw ran without them').toBeGreaterThan(0);
   });
 
@@ -242,12 +244,12 @@ describe('running the scheduler', () => {
     const { db, sched } = await fresh({ graceHours: 0 });
     seedEvent(db, { id: 'ev-students', maxSpots: 1, applicants: 3 });
 
-    sched.runAutoSelectSweep(db);
+    await sched.runAutoSelectSweep(db);
 
-    const notified = db.prepare(`
+    const notified = (await db.prepare(`
       SELECT COUNT(DISTINCT user_id) AS c FROM notifications
       WHERE user_id LIKE 'ev-students-u%'
-    `).get().c;
+    `).get()).c;
     expect(notified).toBe(3);
   });
 });
@@ -257,24 +259,24 @@ describe('idempotency and double-execution', () => {
     const { db, sched } = await fresh({ graceHours: 0 });
     seedEvent(db, { id: 'ev-twice', maxSpots: 2, applicants: 5 });
 
-    expect(sched.runAutoSelectSweep(db).executed).toBe(1);
+    expect((await sched.runAutoSelectSweep(db)).executed).toBe(1);
     const after1 = statuses(db, 'ev-twice');
 
-    expect(sched.runAutoSelectSweep(db).executed).toBe(0);
+    expect((await sched.runAutoSelectSweep(db)).executed).toBe(0);
     expect(statuses(db, 'ev-twice')).toEqual(after1);
 
     // Exactly one run row, ever.
-    expect(db.prepare('SELECT COUNT(*) AS c FROM auto_select_runs WHERE event_id = ?').get('ev-twice').c).toBe(1);
+    expect((await db.prepare('SELECT COUNT(*) AS c FROM auto_select_runs WHERE event_id = ?').get('ev-twice')).c).toBe(1);
   });
 
   it('does not duplicate notifications on a second sweep', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
     seedEvent(db, { id: 'ev-nodup', maxSpots: 1, applicants: 3 });
 
-    sched.runAutoSelectSweep(db);
-    const before = db.prepare('SELECT COUNT(*) AS c FROM notifications').get().c;
-    sched.runAutoSelectSweep(db);
-    const after = db.prepare('SELECT COUNT(*) AS c FROM notifications').get().c;
+    await sched.runAutoSelectSweep(db);
+    const before = (await db.prepare('SELECT COUNT(*) AS c FROM notifications').get()).c;
+    await sched.runAutoSelectSweep(db);
+    const after = (await db.prepare('SELECT COUNT(*) AS c FROM notifications').get()).c;
 
     expect(after).toBe(before);
   });
@@ -284,19 +286,19 @@ describe('idempotency and double-execution', () => {
     const { slotId } = seedEvent(db, { id: 'ev-partial', maxSpots: 3, applicants: 4 });
 
     // The organizer already hand-accepted one applicant before the deadline.
-    db.prepare("UPDATE applications SET status = 'accepted' WHERE id = ?").run('ev-partial-a0');
+    await db.prepare("UPDATE applications SET status = 'accepted' WHERE id = ?").run('ev-partial-a0');
 
-    sched.runAutoSelectSweep(db);
+    await sched.runAutoSelectSweep(db);
 
     const s = statuses(db, 'ev-partial');
     // 3 spots, one already taken -> exactly 2 more accepted, never 3.
     expect(s.accepted).toBe(3);
     expect(s.waitlisted).toBe(1);
 
-    const accepted = db.prepare(
+    const accepted = (await db.prepare(
       "SELECT COUNT(*) AS c FROM applications WHERE slot_id = ? AND status = 'accepted'"
-    ).get(slotId).c;
-    const max = db.prepare('SELECT max_spots FROM slots WHERE id = ?').get(slotId).max_spots;
+    ).get(slotId)).c;
+    const max = (await db.prepare('SELECT max_spots FROM slots WHERE id = ?').get(slotId)).max_spots;
     expect(accepted).toBeLessThanOrEqual(max);
   });
 
@@ -305,23 +307,23 @@ describe('idempotency and double-execution', () => {
     seedEvent(db, { id: 'ev-draft', maxSpots: 2, applicants: 5 });
 
     // The organizer drew but never pressed confirm.
-    const draft = autoSelect.computeDraw(db, 'ev-draft', { runNumber: 1 });
-    autoSelect.recordRun(db, 'ev-draft', draft, { runNumber: 1, reason: null });
+    const draft = await autoSelect.computeDraw(db, 'ev-draft', { runNumber: 1 });
+    await autoSelect.recordRun(db, 'ev-draft', draft, { runNumber: 1, reason: null });
     const draftSelected = JSON.parse(
-      db.prepare('SELECT selected_ids FROM auto_select_runs WHERE event_id = ?').get('ev-draft').selected_ids
+      (await db.prepare('SELECT selected_ids FROM auto_select_runs WHERE event_id = ?').get('ev-draft')).selected_ids
     );
 
-    sched.runAutoSelectSweep(db);
+    await sched.runAutoSelectSweep(db);
 
     // Their draw is what gets applied — the scheduler must not override a human's
     // result with a fresh one they never saw.
-    const runs = db.prepare('SELECT * FROM auto_select_runs WHERE event_id = ?').all('ev-draft');
+    const runs = await db.prepare('SELECT * FROM auto_select_runs WHERE event_id = ?').all('ev-draft');
     expect(runs).toHaveLength(1);
     expect(runs[0].is_confirmed).toBe(1);
 
-    const acceptedIds = db.prepare(
+    const acceptedIds = (await db.prepare(
       "SELECT id FROM applications WHERE event_id = ? AND status = 'accepted' ORDER BY id"
-    ).all('ev-draft').map(r => r.id);
+    ).all('ev-draft')).map(r => r.id);
     expect(acceptedIds).toEqual([...draftSelected].sort());
   });
 
@@ -330,11 +332,13 @@ describe('idempotency and double-execution', () => {
     seedEvent(db, { id: 'ev-overlap', maxSpots: 2, applicants: 5 });
 
     // Re-entrancy: a slow sweep still running when the next interval fires.
-    const results = [sched.runAutoSelectSweep(db), sched.runAutoSelectSweep(db)];
+    /* Both started before either is awaited — `sweepInFlight` is set before the
+       first await, so the second must still report `skipped`. */
+    const results = await Promise.all([sched.runAutoSelectSweep(db), sched.runAutoSelectSweep(db)]);
     const total = results.reduce((n, r) => n + r.executed, 0);
 
     expect(total, 'the same event was drawn twice').toBe(1);
-    expect(db.prepare('SELECT COUNT(*) AS c FROM auto_select_runs').get().c).toBe(1);
+    expect((await db.prepare('SELECT COUNT(*) AS c FROM auto_select_runs').get()).c).toBe(1);
   });
 });
 
@@ -347,8 +351,8 @@ describe('fairness is unchanged', () => {
     // deterministic for a given event/slot/run. Two computations of run 1 must
     // agree — that is what guarantees the scheduler cannot draw "differently"
     // from the organizer.
-    const a = autoSelect.computeDraw(db, 'ev-fair', { runNumber: 1 });
-    const b = autoSelect.computeDraw(db, 'ev-fair', { runNumber: 1 });
+    const a = await autoSelect.computeDraw(db, 'ev-fair', { runNumber: 1 });
+    const b = await autoSelect.computeDraw(db, 'ev-fair', { runNumber: 1 });
 
     expect(a.selectedIds).toEqual(b.selectedIds);
     expect(a.waitlistIds).toEqual(b.waitlistIds);
@@ -363,17 +367,30 @@ describe('resilience', () => {
     seedEvent(db, { id: 'ev-ok2', maxSpots: 1, applicants: 2 });
 
     // Force the first event processed to throw, whichever it is.
-    const realPrepare = db.prepare.bind(db);
+    /**
+     * Poisoned on the DRIVER, not on the `db` handle.
+     *
+     * `applyRun` became async in wave 6, and its transaction now runs on its own
+     * connection — PostgreSQL pins a pooled client, SQLite opens a second
+     * connection to the same file. A spy on `db.prepare` therefore never sees
+     * the statement any more, and this test silently stopped simulating any
+     * failure at all: it reported 0 failures and passed nothing.
+     *
+     * Spying on `DatabaseSync.prototype` catches whichever connection issues it,
+     * which is both what this test meant all along and less coupled to the
+     * implementation than the handle-level spy was.
+     */
+    const realPrepare = DatabaseSync.prototype.prepare;
     let poisoned = false;
-    vi.spyOn(db, 'prepare').mockImplementation((sql) => {
+    vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (sql) {
       if (!poisoned && /UPDATE auto_select_runs SET is_confirmed/.test(sql)) {
         poisoned = true;
         throw new Error('simulated failure');
       }
-      return realPrepare(sql);
+      return realPrepare.call(this, sql);
     });
 
-    const result = sched.runAutoSelectSweep(db);
+    const result = await sched.runAutoSelectSweep(db);
     vi.restoreAllMocks();
 
     expect(result.failed).toBe(1);
@@ -385,24 +402,38 @@ describe('resilience', () => {
     seedEvent(db, { id: 'ev-throw' });
 
     vi.spyOn(db, 'prepare').mockImplementation(() => { throw new Error('database is locked'); });
-    expect(() => sched.runAutoSelectSweep(db)).not.toThrow();
+    /* Now a promise: a rejection fails the test just as a throw did. */
+    await sched.runAutoSelectSweep(db);
   });
 
   it('a failed event is retried on the next sweep', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
     seedEvent(db, { id: 'ev-retry', maxSpots: 1, applicants: 2 });
 
-    const realPrepare = db.prepare.bind(db);
+    /**
+     * Poisoned on the DRIVER, not on the `db` handle.
+     *
+     * `applyRun` became async in wave 6, and its transaction now runs on its own
+     * connection — PostgreSQL pins a pooled client, SQLite opens a second
+     * connection to the same file. A spy on `db.prepare` therefore never sees
+     * the statement any more, and this test silently stopped simulating any
+     * failure at all: it reported 0 failures and passed nothing.
+     *
+     * Spying on `DatabaseSync.prototype` catches whichever connection issues it,
+     * which is both what this test meant all along and less coupled to the
+     * implementation than the handle-level spy was.
+     */
+    const realPrepare = DatabaseSync.prototype.prepare;
     let fail = true;
-    vi.spyOn(db, 'prepare').mockImplementation((sql) => {
+    vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (sql) {
       if (fail && /UPDATE auto_select_runs SET is_confirmed/.test(sql)) throw new Error('transient');
-      return realPrepare(sql);
+      return realPrepare.call(this, sql);
     });
-    sched.runAutoSelectSweep(db);
+    await sched.runAutoSelectSweep(db);
     expect(statuses(db, 'ev-retry').pending).toBe(2);
 
     fail = false;
-    const second = sched.runAutoSelectSweep(db);
+    const second = await sched.runAutoSelectSweep(db);
     vi.restoreAllMocks();
 
     // No dead-lettering: the guard is "is there a confirmed run", so a failure
@@ -439,7 +470,11 @@ describe('the scheduler can be turned off', () => {
 
     // Startup recovery: a draw that came due while the process was down must not
     // wait a further 15 minutes.
-    sched.startAutoSelectScheduler(db);
+    /* The catch-up sweep became async with `applyRun`. It is deliberately not
+       awaited at boot — the server must not block on it — so the test awaits the
+       handle the scheduler exposes rather than racing it. */
+    const timer = sched.startAutoSelectScheduler(db);
+    await timer.startupSweep;
     sched.stopAutoSelectScheduler();
 
     expect(statuses(db, 'ev-startup').accepted).toBe(1);

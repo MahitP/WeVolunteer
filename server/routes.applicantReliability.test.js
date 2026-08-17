@@ -99,11 +99,12 @@ describe('applicant reliability figures', () => {
       const names = ['Reliable Volunteer', '25 Hours', '50 Hours'];
       awarded = [];
       for (const name of names) {
-        const badge = db.prepare('SELECT id FROM badges WHERE name = ? AND active = 1').get(name);
+        const badge = await db.prepare('SELECT id FROM badges WHERE name = ? AND active = 1').get(name);
         expect(badge, `the catalogue has no active "${name}" — has it been renamed?`).toBeTruthy();
-        db.prepare(`
-          INSERT OR IGNORE INTO user_badges (id, user_id, badge_id, earned_at, awarded_by)
+        await db.prepare(`
+          INSERT INTO user_badges (id, user_id, badge_id, earned_at, awarded_by)
           VALUES (?, ?, ?, ?, NULL)
+    ON CONFLICT DO NOTHING
         `).run(`ub-fixture-${awarded.length}`, subject, badge.id, new Date().toISOString());
         awarded.push(name);
       }
@@ -133,8 +134,8 @@ describe('applicant reliability figures', () => {
        * and must not be presented as such.
        */
       const { db } = await import('./db.js');
-      const badge = db.prepare('SELECT id FROM badges WHERE name = ?').get('Reliable Volunteer');
-      db.prepare('UPDATE badges SET active = 0 WHERE id = ?').run(badge.id);
+      const badge = await db.prepare('SELECT id FROM badges WHERE name = ?').get('Reliable Volunteer');
+      await db.prepare('UPDATE badges SET active = 0 WHERE id = ?').run(badge.id);
 
       const refetched = (await srv.call('GET', '/api/applications', undefined, organizer)).body;
       const v = refetched.find(a => a.volunteer.id === subject).volunteer;
@@ -142,7 +143,7 @@ describe('applicant reliability figures', () => {
       expect(v.badges.map(b => b.name)).not.toContain('Reliable Volunteer');
       expect(v.badges.map(b => b.name).sort(), 'the others must survive').toEqual(['25 Hours', '50 Hours']);
 
-      db.prepare('UPDATE badges SET active = 1 WHERE id = ?').run(badge.id);
+      await db.prepare('UPDATE badges SET active = 1 WHERE id = ?').run(badge.id);
     });
 
     it('publishes a list for every applicant', () => {
@@ -170,11 +171,11 @@ describe('applicant reliability figures', () => {
     it('matches the database row for row', async () => {
       const { db } = await import('./db.js');
       for (const app of applicants) {
-        const held = db.prepare(`
+        const held = (await db.prepare(`
           SELECT COUNT(*) AS c FROM user_badges ub
           JOIN badges b ON b.id = ub.badge_id
           WHERE ub.user_id = ? AND b.active = 1
-        `).get(app.volunteer.id).c;
+        `).get(app.volunteer.id)).c;
         expect(app.volunteer.badges.length).toBe(held);
       }
     });

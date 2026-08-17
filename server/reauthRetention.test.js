@@ -35,6 +35,7 @@ async function fresh() {
   vi.resetModules();
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const utils = await import('./utils.js');
   const reauth = await import('./reauth.js');
   return { db: dbMod.db, utils, reauth };
@@ -75,7 +76,7 @@ describe('sweepExpiredChallenges', () => {
     const { db, reauth } = await fresh();
     challenge(db, 'live', -3);      // expires three minutes from NOW
 
-    expect(reauth.sweepExpiredChallenges(db, NOW)).toBe(0);
+    expect(await reauth.sweepExpiredChallenges(db, NOW)).toBe(0);
     expect(surviving(db)).toEqual(['live']);
   });
 
@@ -83,7 +84,7 @@ describe('sweepExpiredChallenges', () => {
     const { db, reauth } = await fresh();
     challenge(db, 'recent', 2);
 
-    expect(reauth.sweepExpiredChallenges(db, NOW)).toBe(0);
+    expect(await reauth.sweepExpiredChallenges(db, NOW)).toBe(0);
     expect(surviving(db)).toEqual(['recent']);
   });
 
@@ -93,7 +94,7 @@ describe('sweepExpiredChallenges', () => {
     challenge(db, 'old', 90);
     challenge(db, 'live', -1);
 
-    expect(reauth.sweepExpiredChallenges(db, NOW)).toBe(2);
+    expect(await reauth.sweepExpiredChallenges(db, NOW)).toBe(2);
     expect(surviving(db)).toEqual(['live']);
   });
 
@@ -102,8 +103,8 @@ describe('sweepExpiredChallenges', () => {
     challenge(db, 'old', 300);
     challenge(db, 'live', -1);
 
-    expect(reauth.sweepExpiredChallenges(db, NOW)).toBe(1);
-    expect(reauth.sweepExpiredChallenges(db, NOW)).toBe(0);
+    expect(await reauth.sweepExpiredChallenges(db, NOW)).toBe(1);
+    expect(await reauth.sweepExpiredChallenges(db, NOW)).toBe(0);
     expect(surviving(db)).toEqual(['live']);
   });
 });
@@ -113,8 +114,8 @@ describe('the maintenance sweep actually runs it', () => {
     const { db, utils } = await fresh();
     // Backdated far enough that the sweep's own `new Date()` is well past the
     // retention window, whatever the wall clock says when this runs.
-    const userId = db.prepare('SELECT id FROM users LIMIT 1').get().id;
-    db.prepare(`
+    const userId = (await db.prepare('SELECT id FROM users LIMIT 1').get()).id;
+    await db.prepare(`
       INSERT INTO reauth_challenges (id, user_id, action, params_hash, session_jti, created_at, expires_at, attempts)
       VALUES ('swept', ?, 'account.delete', 'hash', 'jti', ?, ?, 0)
     `).run(
@@ -123,20 +124,20 @@ describe('the maintenance sweep actually runs it', () => {
       new Date(Date.now() - 29 * 86400_000).toISOString()
     );
 
-    utils.runNotificationSweep();
+    await utils.runNotificationSweep();
 
     expect(surviving(db), 'the sweep did not purge spent challenges').toEqual([]);
   });
 
   it('leaves a live challenge alone when sweeping', async () => {
     const { db, utils } = await fresh();
-    const userId = db.prepare('SELECT id FROM users LIMIT 1').get().id;
-    db.prepare(`
+    const userId = (await db.prepare('SELECT id FROM users LIMIT 1').get()).id;
+    await db.prepare(`
       INSERT INTO reauth_challenges (id, user_id, action, params_hash, session_jti, created_at, expires_at, attempts)
       VALUES ('live', ?, 'account.delete', 'hash', 'jti', ?, ?, 0)
     `).run(userId, new Date().toISOString(), new Date(Date.now() + 5 * 60_000).toISOString());
 
-    utils.runNotificationSweep();
+    await utils.runNotificationSweep();
 
     expect(surviving(db), 'the sweep deleted a challenge a user is still answering').toEqual(['live']);
   });

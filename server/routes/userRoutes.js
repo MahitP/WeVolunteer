@@ -56,7 +56,7 @@ const router = express.Router();
  * The route was already registered INLINE_GATED for its `canSeeContact` logic,
  * so this is the gate joining the one that is there rather than a new layer.
  */
-router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
+router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
   if (!can(req.principal, 'directory.read')) {
     return res.status(403).json({ error: 'Access denied' });
   }
@@ -99,7 +99,7 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
      * deliberately NOT excluded: a suspended member still exists and their
      * profile is still theirs.
      */
-    const row = db.prepare(`
+    const row = await db.prepare(`
       SELECT * FROM users
        WHERE id = ?
          AND account_status <> 'deleted'
@@ -117,7 +117,7 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
     // `applicant.review` is the "kind of actor" check (organizer, and
     // super_admin via the wildcard); the subquery is the ownership check —
     // an actual applicant of an event this principal actually hosts.
-    const hostsApplicant = can(req.principal, 'applicant.review') && !!db.prepare(`
+    const hostsApplicant = can(req.principal, 'applicant.review') && !!await db.prepare(`
       SELECT 1 FROM applications a
       JOIN events e ON a.event_id = e.id
       WHERE a.user_id = ? AND e.organizer_id = ?
@@ -156,10 +156,10 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
      * the same student. `milestoneInputs` is the single derivation, and
      * `volunteerInsights.test.js` asserts the agreement.
      */
-    const totals = milestoneInputs(db, req.params.id);
+    const totals = await milestoneInputs(db, req.params.id);
 
     // Completed service, newest first
-    const completed = db.prepare(`
+    const completed = await db.prepare(`
       SELECT e.id as event_id, e.title, e.category, e.location, u.name as organizer_name,
              s.name as slot_name, s.start_datetime, s.end_datetime, at.hours_awarded,
              /* Which organization ran it, so the transcript can be filtered to one
@@ -185,7 +185,7 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
     `).all(req.params.id);
 
     // Upcoming confirmed shifts
-    const upcoming = db.prepare(`
+    const upcoming = await db.prepare(`
       SELECT e.id as event_id, e.title, e.category, e.location, s.name as slot_name,
              s.start_datetime, s.end_datetime
       FROM applications a
@@ -196,13 +196,13 @@ router.get('/api/users/:id/profile', authenticateToken, (req, res) => {
       ORDER BY s.start_datetime ASC
     `).all(req.params.id, new Date().toISOString());
 
-    const pendingCount = db.prepare(`
+    const pendingCount = (await db.prepare(`
       SELECT COUNT(*) as c FROM applications
       WHERE user_id = ? AND status IN ('pending', 'waitlisted')
-    `).get(req.params.id).c;
+    `).get(req.params.id)).c;
 
     // Hours by category — what kind of volunteer someone is
-    const byCategory = db.prepare(`
+    const byCategory = await db.prepare(`
       SELECT e.category, COALESCE(SUM(at.hours_awarded), 0) as hours
       FROM attendance at
       JOIN events e ON at.event_id = e.id
@@ -338,14 +338,14 @@ function formatServiceRow(r) {
  * mechanism, and the reasoning lives with the route rather than in a
  * capability that only pretends to discriminate.
  */
-router.get('/api/organizers/:id/profile', authenticateToken, (req, res) => {
+router.get('/api/organizers/:id/profile', authenticateToken, async (req, res) => {
   try {
     // See the sibling volunteer profile above: a deleted account keeps its row
     // and its role, so the role predicate alone matches tombstones. The demo
     // administrator removed from the pilot database is exactly such a row — it
     // is `account_status = 'deleted'` and still `role = 'admin'`, and without
     // this it answered 200 here instead of 404.
-    const row = db.prepare(
+    const row = await db.prepare(
       "SELECT * FROM users WHERE id = ? AND role IN ('organizer','admin') AND account_status <> 'deleted'"
     ).get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Organizer not found' });
@@ -356,7 +356,7 @@ router.get('/api/organizers/:id/profile', authenticateToken, (req, res) => {
     const canSeeContact = req.params.id === req.principal.userId
       || can(req.principal, 'user.contact.read');
 
-    const totals = db.prepare(`
+    const totals = await db.prepare(`
       SELECT COUNT(DISTINCT e.id) as events_hosted,
              COUNT(DISTINCT a.user_id) as volunteers_helped
       FROM events e
@@ -364,14 +364,14 @@ router.get('/api/organizers/:id/profile', authenticateToken, (req, res) => {
       WHERE e.organizer_id = ?
     `).get(req.params.id);
 
-    const hoursAwarded = db.prepare(`
+    const hoursAwarded = (await db.prepare(`
       SELECT COALESCE(SUM(at.hours_awarded), 0) as h
       FROM attendance at
       JOIN events e ON at.event_id = e.id
       WHERE e.organizer_id = ? AND at.present = 1
-    `).get(req.params.id).h;
+    `).get(req.params.id)).h;
 
-    const events = db.prepare(`
+    const events = await db.prepare(`
       SELECT e.id, e.title, e.category, e.location, e.status, e.application_deadline,
              (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) as start_datetime,
              (SELECT COALESCE(SUM(s.max_spots), 0) FROM slots s WHERE s.event_id = e.id) as max_spots,
@@ -437,7 +437,7 @@ router.get('/api/organizers/:id/profile', authenticateToken, (req, res) => {
 
 // 18. Favorites toggle and list
 
-router.patch('/api/auth/profile', authenticateToken, (req, res) => {
+router.patch('/api/auth/profile', authenticateToken, async (req, res) => {
   try {
     const { grade, leaderboardOptIn, emailOptOut } = req.body;
 
@@ -491,7 +491,7 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
     const writingDistinguishedFields =
       check.value.headline !== undefined || check.value.highlights !== undefined;
     if (writingDistinguishedFields) {
-      const self = db.prepare('SELECT role FROM users WHERE id = ?').get(req.user.id);
+      const self = await db.prepare('SELECT role FROM users WHERE id = ?').get(req.user.id);
       if (!distinctionFor(self?.role)) {
         return res.status(403).json({
           error: 'Your account does not have a profile headline. Use "About you" instead.',
@@ -585,10 +585,10 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
 
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
     values.push(req.user.id);
-    db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+    await db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-    const row = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-    res.json({ user: selfUserResponse(row) });
+    const row = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    res.json({ user: await selfUserResponse(row) });
   } catch (err) {
     console.error('Profile update error:', err);
     res.status(500).json({ error: 'Failed to update profile' });
@@ -597,10 +597,10 @@ router.patch('/api/auth/profile', authenticateToken, (req, res) => {
 
 // 20. Statistics endpoint for a volunteer
 
-router.get('/api/user/preferences', authenticateToken, (req, res) => {
+router.get('/api/user/preferences', authenticateToken, async (req, res) => {
   try {
-    const prefs = db.prepare('SELECT category, channel, enabled FROM notification_preferences WHERE user_id = ?').all(req.user.id);
-    const userRow = db.prepare('SELECT email_opt_out FROM users WHERE id = ?').get(req.user.id);
+    const prefs = await db.prepare('SELECT category, channel, enabled FROM notification_preferences WHERE user_id = ?').all(req.user.id);
+    const userRow = await db.prepare('SELECT email_opt_out FROM users WHERE id = ?').get(req.user.id);
 
     res.json({
       globalEmailOptOut: userRow ? userRow.email_opt_out === 1 : false,
@@ -612,16 +612,16 @@ router.get('/api/user/preferences', authenticateToken, (req, res) => {
   }
 });
 
-router.post('/api/user/preferences', authenticateToken, (req, res) => {
+router.post('/api/user/preferences', authenticateToken, async (req, res) => {
   try {
     const { category, channel, enabled } = req.body;
     
     if (category === 'global' && channel === 'email') {
-      db.prepare('UPDATE users SET email_opt_out = ? WHERE id = ?').run(enabled ? 0 : 1, req.user.id);
+      await db.prepare('UPDATE users SET email_opt_out = ? WHERE id = ?').run(enabled ? 0 : 1, req.user.id);
       return res.json({ success: true });
     }
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notification_preferences (user_id, category, channel, enabled)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(user_id, category, channel) DO UPDATE SET enabled = excluded.enabled

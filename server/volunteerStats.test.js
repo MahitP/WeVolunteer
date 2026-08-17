@@ -74,18 +74,18 @@ beforeAll(async () => {
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-beforeEach(() => {
+beforeEach(async () => {
   db?.close();
   db = new DatabaseSync(path.join(dir, `t-${Math.random().toString(36).slice(2)}.db`));
   schema(db);
 });
 
-const stats = () => volunteerStats(db, 'u1', { now: NOW });
+const stats = async () => await volunteerStats(db, 'u1', { now: NOW });
 
 describe('what counts as signed up', () => {
-  it('counts an accepted application to a shift that has ended', () => {
+  it('counts an accepted application to a shift that has ended', async () => {
     scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 1 });
-    expect(stats().eventsSignedUp).toBe(1);
+    expect((await stats()).eventsSignedUp).toBe(1);
   });
 
   /**
@@ -94,35 +94,35 @@ describe('what counts as signed up', () => {
    * a place given back in time for somebody else to take. Counting it would
    * teach students to no-show instead of withdrawing.
    */
-  it('does not count a withdrawal', () => {
+  it('does not count a withdrawal', async () => {
     scenario(db, { event: 'e1', applicationStatus: 'withdrawn' });
-    expect(stats().eventsSignedUp).toBe(0);
+    expect((await stats()).eventsSignedUp).toBe(0);
   });
 
   /** Being turned down is not something to answer for on a public profile. */
-  it('does not count a rejected or waitlisted application', () => {
+  it('does not count a rejected or waitlisted application', async () => {
     scenario(db, { event: 'e1', applicationStatus: 'rejected' });
     scenario(db, { event: 'e2', applicationStatus: 'waitlisted' });
     scenario(db, { event: 'e3', applicationStatus: 'pending' });
-    expect(stats().eventsSignedUp).toBe(0);
+    expect((await stats()).eventsSignedUp).toBe(0);
   });
 
   /** Nobody turned up to nothing, because there was nothing to turn up to. */
-  it('does not count a cancelled event, on either side', () => {
+  it('does not count a cancelled event, on either side', async () => {
     scenario(db, { event: 'e1', eventStatus: 'cancelled', applicationStatus: 'accepted', present: 0 });
-    const s = stats();
+    const s = await stats();
     expect(s.eventsSignedUp).toBe(0);
     expect(s.eventsAttended).toBe(0);
     expect(s.eventsAbsent).toBe(0);
   });
 
   /** A commitment, not yet an outcome. */
-  it('does not count a shift that has not happened yet', () => {
+  it('does not count a shift that has not happened yet', async () => {
     scenario(db, { event: 'e1', start: FUTURE, end: FUTURE_END, applicationStatus: 'accepted' });
-    expect(stats().eventsSignedUp).toBe(0);
+    expect((await stats()).eventsSignedUp).toBe(0);
   });
 
-  it('counts an event once however many of its shifts were worked', () => {
+  it('counts an event once however many of its shifts were worked', async () => {
     db.prepare('INSERT INTO events (id, status) VALUES (?, ?)').run('e1', 'open');
     for (const n of [1, 2, 3]) {
       db.prepare('INSERT INTO slots (id, event_id, start_datetime, end_datetime) VALUES (?, ?, ?, ?)')
@@ -132,7 +132,7 @@ describe('what counts as signed up', () => {
       db.prepare('INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded) VALUES (?, ?, ?, ?, ?)')
         .run('e1', `s${n}`, 'u1', 1, 2);
     }
-    const s = stats();
+    const s = await stats();
     expect(s.eventsSignedUp).toBe(1);
     expect(s.eventsAttended).toBe(1);
     expect(s.hoursCredited).toBe(6);
@@ -140,16 +140,16 @@ describe('what counts as signed up', () => {
 });
 
 describe('attendance is the organizer\'s record, not the signup', () => {
-  it('counts present = 1 as attended', () => {
+  it('counts present = 1 as attended', async () => {
     scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 1 });
-    expect(stats().eventsAttended).toBe(1);
-    expect(stats().eventsAbsent).toBe(0);
+    expect((await stats()).eventsAttended).toBe(1);
+    expect((await stats()).eventsAbsent).toBe(0);
   });
 
-  it('counts present = 0 as absent', () => {
+  it('counts present = 0 as absent', async () => {
     scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 0 });
-    expect(stats().eventsAttended).toBe(0);
-    expect(stats().eventsAbsent).toBe(1);
+    expect((await stats()).eventsAttended).toBe(0);
+    expect((await stats()).eventsAbsent).toBe(1);
   });
 
   /**
@@ -158,16 +158,16 @@ describe('attendance is the organizer\'s record, not the signup', () => {
    * absent — and the number is published so the gap is legible as "not
    * confirmed yet" rather than as a no-show.
    */
-  it('never reads a missing attendance record as absence', () => {
+  it('never reads a missing attendance record as absence', async () => {
     scenario(db, { event: 'e1', applicationStatus: 'accepted' });
-    const s = stats();
+    const s = await stats();
     expect(s.eventsSignedUp).toBe(1);
     expect(s.eventsAttended).toBe(0);
     expect(s.eventsAbsent).toBe(0);
     expect(s.eventsAwaitingRecord).toBe(1);
   });
 
-  it('treats a mixed-shift event as attended, not as both', () => {
+  it('treats a mixed-shift event as attended, not as both', async () => {
     db.prepare('INSERT INTO events (id, status) VALUES (?, ?)').run('e1', 'open');
     for (const [n, present] of [['1', 1], ['2', 0]]) {
       db.prepare('INSERT INTO slots (id, event_id, start_datetime, end_datetime) VALUES (?, ?, ?, ?)')
@@ -177,16 +177,16 @@ describe('attendance is the organizer\'s record, not the signup', () => {
       db.prepare('INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded) VALUES (?, ?, ?, ?, ?)')
         .run('e1', `s${n}`, 'u1', present, present ? 3 : 0);
     }
-    const s = stats();
+    const s = await stats();
     expect(s.eventsAttended).toBe(1);
     expect(s.eventsAbsent).toBe(0);
   });
 
-  it('keeps the identity signedUp = attended + absent + awaiting', () => {
+  it('keeps the identity signedUp = attended + absent + awaiting', async () => {
     scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 1 });
     scenario(db, { event: 'e2', applicationStatus: 'accepted', present: 0 });
     scenario(db, { event: 'e3', applicationStatus: 'accepted' });
-    const s = stats();
+    const s = await stats();
     expect(s.eventsSignedUp).toBe(s.eventsAttended + s.eventsAbsent + s.eventsAwaitingRecord);
     expect(s).toMatchObject({ eventsSignedUp: 3, eventsAttended: 1, eventsAbsent: 1, eventsAwaitingRecord: 1 });
   });
@@ -196,22 +196,22 @@ describe('attendance is the organizer\'s record, not the signup', () => {
    * an event deletes its applications and deliberately never touches
    * attendance. A profile is the wrong place to surface that as "-1".
    */
-  it('clamps awaiting at zero when attendance outlives its application', () => {
+  it('clamps awaiting at zero when attendance outlives its application', async () => {
     scenario(db, { event: 'e1', present: 1 });
-    expect(stats().eventsAwaitingRecord).toBe(0);
+    expect((await stats()).eventsAwaitingRecord).toBe(0);
   });
 });
 
 describe('credited hours', () => {
-  it('sums only shifts the volunteer was present for', () => {
+  it('sums only shifts the volunteer was present for', async () => {
     scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 1, hours: 4.5 });
     scenario(db, { event: 'e2', applicationStatus: 'accepted', present: 0 });
-    expect(stats().hoursCredited).toBe(4.5);
+    expect((await stats()).hoursCredited).toBe(4.5);
   });
 
-  it('is zero, not null, for somebody who has never volunteered', () => {
-    expect(stats().hoursCredited).toBe(0);
-    expect(stats().eventsSignedUp).toBe(0);
+  it('is zero, not null, for somebody who has never volunteered', async () => {
+    expect((await stats()).hoursCredited).toBe(0);
+    expect((await stats()).eventsSignedUp).toBe(0);
   });
 
   /**
@@ -220,28 +220,28 @@ describe('credited hours', () => {
    * because the Auto Select curve rewards FEWER hours, could also sabotage a
    * rival's odds by inflating theirs.
    */
-  it('never includes external hours', () => {
+  it('never includes external hours', async () => {
     db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
       .run('x1', 'u1', '2026-03-01', 40);
     db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
       .run('x2', 'u1', '2026-03-02', 900);
-    expect(stats().hoursCredited).toBe(0);
+    expect((await stats()).hoursCredited).toBe(0);
   });
 });
 
 describe('last volunteered', () => {
-  it('is null for somebody who never has', () => {
-    expect(lastVolunteeredAt(db, 'u1')).toBeNull();
+  it('is null for somebody who never has', async () => {
+    expect(await lastVolunteeredAt(db, 'u1')).toBeNull();
   });
 
-  it('is the end of the most recent shift actually attended', () => {
+  it('is the end of the most recent shift actually attended', async () => {
     scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 1 });
-    expect(lastVolunteeredAt(db, 'u1')).toBe(PAST_END);
+    expect(await lastVolunteeredAt(db, 'u1')).toBe(PAST_END);
   });
 
-  it('ignores a shift the volunteer was marked absent for', () => {
+  it('ignores a shift the volunteer was marked absent for', async () => {
     scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 0 });
-    expect(lastVolunteeredAt(db, 'u1')).toBeNull();
+    expect(await lastVolunteeredAt(db, 'u1')).toBeNull();
   });
 
   /**
@@ -249,48 +249,48 @@ describe('last volunteered', () => {
    * on a figure that appears on a public profile, where a reader takes it as
    * evidence that somebody is still active.
    */
-  it('ignores external service entirely', () => {
+  it('ignores external service entirely', async () => {
     db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
       .run('x1', 'u1', '2099-05-20', 3);
-    expect(lastVolunteeredAt(db, 'u1')).toBeNull();
+    expect(await lastVolunteeredAt(db, 'u1')).toBeNull();
   });
 
-  it('is unmoved by an external entry when real attendance exists', () => {
+  it('is unmoved by an external entry when real attendance exists', async () => {
     scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 1 });
     db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
       .run('x1', 'u1', '2099-05-20', 3);
-    expect(lastVolunteeredAt(db, 'u1')).toBe(PAST_END);
+    expect(await lastVolunteeredAt(db, 'u1')).toBe(PAST_END);
   });
 });
 
 describe('the external summary', () => {
-  it('is zero and empty for somebody with no entries', () => {
-    expect(externalHoursSummary(db, 'u1')).toEqual({ selfReportedHours: 0, entries: 0 });
+  it('is zero and empty for somebody with no entries', async () => {
+    expect(await externalHoursSummary(db, 'u1')).toEqual({ selfReportedHours: 0, entries: 0 });
   });
 
   /* One total, because there is one kind of entry. A `verifiedHours` half would
      be a review workflow reappearing as a field name. */
-  it('totals every entry as self-reported, with no verified split', () => {
+  it('totals every entry as self-reported, with no verified split', async () => {
     db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
       .run('x1', 'u1', '2026-05-20', 3.25);
     db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
       .run('x2', 'u1', '2026-05-21', 1.5);
-    const summary = externalHoursSummary(db, 'u1');
+    const summary = await externalHoursSummary(db, 'u1');
     expect(summary).toEqual({ selfReportedHours: 4.75, entries: 2 });
     expect(summary).not.toHaveProperty('verifiedHours');
   });
 
-  it('counts only the volunteer asked about', () => {
+  it('counts only the volunteer asked about', async () => {
     db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
       .run('x1', 'u2', '2026-05-20', 8);
-    expect(externalHoursSummary(db, 'u1')).toEqual({ selfReportedHours: 0, entries: 0 });
+    expect(await externalHoursSummary(db, 'u1')).toEqual({ selfReportedHours: 0, entries: 0 });
   });
 });
 
 describe('the batch query Auto Select uses', () => {
-  it('returns nothing for an empty or all-unknown id list', () => {
-    expect(attendanceRecordsFor(db, []).size).toBe(0);
-    expect(attendanceRecordsFor(db, [null, undefined]).size).toBe(0);
+  it('returns nothing for an empty or all-unknown id list', async () => {
+    expect((await attendanceRecordsFor(db, [])).size).toBe(0);
+    expect((await attendanceRecordsFor(db, [null, undefined])).size).toBe(0);
   });
 
   /**
@@ -298,24 +298,24 @@ describe('the batch query Auto Select uses', () => {
    * neutral. Returning a zeroed row instead would make every volunteer the
    * system knows nothing about look like a total no-show.
    */
-  it('omits a volunteer with no attendance rather than zeroing them', () => {
-    expect(attendanceRecordsFor(db, ['u1']).has('u1')).toBe(false);
+  it('omits a volunteer with no attendance rather than zeroing them', async () => {
+    expect((await attendanceRecordsFor(db, ['u1'])).has('u1')).toBe(false);
   });
 
-  it('agrees exactly with the single-user counts', () => {
+  it('agrees exactly with the single-user counts', async () => {
     scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 1 });
     scenario(db, { event: 'e2', applicationStatus: 'accepted', present: 0 });
-    const one = stats();
-    const many = attendanceRecordsFor(db, ['u1', 'u1']).get('u1');
+    const one = await stats();
+    const many = (await attendanceRecordsFor(db, ['u1', 'u1'])).get('u1');
     expect(many).toEqual({
       attended: one.eventsAttended, absent: one.eventsAbsent,
       recorded: one.eventsAttended + one.eventsAbsent,
     });
   });
 
-  it('excludes cancelled events, matching the single-user query', () => {
+  it('excludes cancelled events, matching the single-user query', async () => {
     scenario(db, { event: 'e1', eventStatus: 'cancelled', applicationStatus: 'accepted', present: 0 });
-    expect(attendanceRecordsFor(db, ['u1']).has('u1')).toBe(false);
+    expect((await attendanceRecordsFor(db, ['u1'])).has('u1')).toBe(false);
   });
 });
 
@@ -329,12 +329,12 @@ describe('the batch query Auto Select uses', () => {
  * so the definitions are shared, and this asserts they stayed shared.
  */
 describe('participationCountsFor', () => {
-  it('agrees with volunteerStats for every user, one by one', () => {
+  it('agrees with volunteerStats for every user, one by one', async () => {
     const ids = db.prepare('SELECT id FROM users').all().map(r => r.id);
-    const batch = participationCountsFor(db, ids);
+    const batch = await participationCountsFor(db, ids);
 
     for (const id of ids) {
-      const single = volunteerStats(db, id);
+      const single = await volunteerStats(db, id);
       const many = batch.get(id);
       expect(many, `no batch row for ${id}`).toBeTruthy();
       expect(many.signedUp, `signedUp drifted for ${id}`).toBe(single.eventsSignedUp);
@@ -343,27 +343,27 @@ describe('participationCountsFor', () => {
     }
   });
 
-  it('returns a row for every id asked about, including ones with no history', () => {
+  it('returns a row for every id asked about, including ones with no history', async () => {
     const ids = db.prepare('SELECT id FROM users LIMIT 3').all().map(r => r.id);
-    const counts = participationCountsFor(db, [...ids, 'user-does-not-exist']);
+    const counts = await participationCountsFor(db, [...ids, 'user-does-not-exist']);
     expect(counts.size).toBe(ids.length + 1);
     expect(counts.get('user-does-not-exist')).toEqual({ signedUp: 0, attended: 0, absent: 0 });
   });
 
-  it('is empty for an empty request, without touching the database', () => {
-    expect(participationCountsFor(db, []).size).toBe(0);
-    expect(participationCountsFor(db, [null, undefined]).size).toBe(0);
+  it('is empty for an empty request, without touching the database', async () => {
+    expect((await participationCountsFor(db, [])).size).toBe(0);
+    expect((await participationCountsFor(db, [null, undefined])).size).toBe(0);
   });
 
   /* Two queries for the whole page, however many applicants are on it — the
      reason this function exists rather than a loop over `volunteerStats`. */
-  it('does not scale its query count with the number of users', () => {
+  it('does not scale its query count with the number of users', async () => {
     const ids = db.prepare('SELECT id FROM users').all().map(r => r.id);
     let prepared = 0;
     const realPrepare = db.prepare.bind(db);
     db.prepare = (sql) => { prepared += 1; return realPrepare(sql); };
     try {
-      participationCountsFor(db, ids);
+      await participationCountsFor(db, ids);
     } finally {
       db.prepare = realPrepare;
     }

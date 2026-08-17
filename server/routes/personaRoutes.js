@@ -82,7 +82,7 @@ router.post(
   '/api/admin/persona-preview',
   authenticateToken,
   requireCap('persona.preview'),
-  (req, res) => {
+  async (req, res) => {
     const { persona } = req.body ?? {};
 
     if (!PREVIEWABLE.includes(persona)) {
@@ -100,7 +100,7 @@ router.post(
      * write below is about, and the value being stored is only meaningful beside
      * the role it will be intersected with.
      */
-    const row = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
+    const row = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
     if (!row) return res.status(404).json({ error: 'Account not found.' });
 
     /**
@@ -137,7 +137,7 @@ router.post(
     }
 
     const expiresAt = new Date(Date.now() + PREVIEW_TTL_MS).toISOString();
-    db.prepare('UPDATE users SET preview_persona = ?, preview_expires_at = ? WHERE id = ?')
+    await db.prepare('UPDATE users SET preview_persona = ?, preview_expires_at = ? WHERE id = ?')
       .run(persona, expiresAt, row.id);
 
     /**
@@ -147,7 +147,7 @@ router.post(
      * and "the owner was browsing as a student between 14:02 and 14:31" is
      * exactly the sort of thing an audit trail exists to be able to answer.
      */
-    recordAudit(db, {
+    await recordAudit(db, {
       adminId: row.id,
       action: 'PERSONA_PREVIEW_START',
       targetUserId: row.id,
@@ -162,7 +162,7 @@ router.delete(
   '/api/admin/persona-preview',
   authenticateToken,
   requireCap('persona.preview.exit'),
-  (req, res) => {
+  async (req, res) => {
     /**
      * Only the caller's own row, always.
      *
@@ -172,16 +172,16 @@ router.delete(
      * action against another account, and this endpoint would then be a
      * capability every student holds over every owner.
      */
-    const previous = db.prepare('SELECT preview_persona FROM users WHERE id = ?').get(req.user.id);
+    const previous = await db.prepare('SELECT preview_persona FROM users WHERE id = ?').get(req.user.id);
 
-    db.prepare(
+    await db.prepare(
       'UPDATE users SET preview_persona = NULL, preview_expires_at = NULL WHERE id = ?'
     ).run(req.user.id);
 
     /* Only audited when there was something to end. Recording a no-op for every
        caller who has never previewed anything would bury the real entries. */
     if (previous?.preview_persona) {
-      recordAudit(db, {
+      await recordAudit(db, {
         adminId: req.user.id,
         action: 'PERSONA_PREVIEW_END',
         targetUserId: req.user.id,

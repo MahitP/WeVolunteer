@@ -157,6 +157,7 @@ const EVENT_CATEGORY = {
   ORGANIZATION_BANNED: 'enforcement',
   ORGANIZATION_BAN_APPEAL_STANDS: 'enforcement',
   ORGANIZATION_BAN_APPEAL_REVERSED: 'enforcement',
+  ORGANIZATION_BAN_LIFTED: 'enforcement',
   ORGANIZATION_MEMBERSHIP_REMOVED: 'enforcement',
   REMOVED_FROM_EVENT: 'enforcement',
   ADMIN_PROMOTED: 'enforcement',

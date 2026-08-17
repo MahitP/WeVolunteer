@@ -11,6 +11,59 @@ import path from 'path';
 // header name has exactly one definition and tests read it from there rather
 // than retyping the wire form — see sensitiveActions.js's header.
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
+import { randomUUID } from 'crypto';
+
+/**
+ * Which engine the harness boots against, and how PostgreSQL is isolated.
+ *
+ * ── Why a namespace per test FILE, not per test ──
+ *
+ * Vitest gives each test file its own module registry, so `db.js` — which opens
+ * its connection at module scope — is instantiated once per file. That is the
+ * natural isolation boundary, and it matches what the SQLite harness already
+ * does with one temp file per file. Files run in parallel, so the namespace name
+ * carries a UUID.
+ *
+ * The namespace is pinned in the CONNECTION STRING rather than with
+ * `SET search_path`. `SET` applies to one session and the pool hands out ten, so
+ * the first version created its tables on one connection and then queried from
+ * another — which surfaces as "relation does not exist" from a route, several
+ * tests away from the cause.
+ */
+const POSTGRES_APP_MODE = process.env.WEV_POSTGRES_APP_TEST === '1';
+
+/**
+ * The URL the harness connects with, namespaced.
+ *
+ * `TEST_POSTGRES_URL` and not `DATABASE_URL`: the second is what a deployment
+ * sets, and a harness that read it could point a test run at a real database.
+ * This one exists only in test environments and is already the variable the
+ * adapter suites use.
+ */
+function postgresHarnessUrl(namespace) {
+  const raw = process.env.TEST_POSTGRES_URL;
+  if (!raw) {
+    throw new Error(
+      'WEV_POSTGRES_APP_TEST=1 but TEST_POSTGRES_URL is not set.\n'
+      + '  The PostgreSQL application suite must never silently fall back to SQLite —\n'
+      + '  a run that reported "postgres" and used a file would be worse than no run.\n'
+      + '  Set TEST_POSTGRES_URL, or drop WEV_POSTGRES_APP_TEST.'
+    );
+  }
+  const url = new URL(raw);
+  url.searchParams.set('options', `-c search_path=${namespace},public`);
+  return url.toString();
+}
+
+/** A short-lived handle outside the namespace, for creating and dropping it. */
+async function withAdminConnection(fn) {
+  const { PostgresDatabase } = await import('./db/postgresConnection.js');
+  const { translatePlaceholders } = await import('./db/sqlPlaceholders.js');
+  const admin = new PostgresDatabase({
+    connectionString: process.env.TEST_POSTGRES_URL, max: 1, translate: translatePlaceholders,
+  });
+  try { return await fn(admin); } finally { await admin.close(); }
+}
 
 
 /**
@@ -50,7 +103,7 @@ export const freshTotp = (secret = TEST_TOTP_SECRET, accountKey) => freshTotpTok
  */
 export async function enrolTwoFactor(db, email) {
   const { encryptSecret } = await import('./cryptoUtils.js');
-  db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
+  await db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
     .run(encryptSecret(TEST_TOTP_SECRET), email);
 }
 
@@ -122,9 +175,9 @@ async function freshTotpToken(secret, accountKey = secret) {
  * code is refused — which is the only place the rule should be exercised, because
  * it is the only place it is the subject.
  */
-function clearTotpMark(database, email) {
+async function clearTotpMark(database, email) {
   try {
-    database.prepare('UPDATE users SET tfa_last_counter = NULL WHERE email = ?').run(email);
+    await database.prepare('UPDATE users SET tfa_last_counter = NULL WHERE email = ?').run(email);
   } catch {
     /* The column arrives with migration 029; a fixture built before it ran has
        nothing to clear and nothing to fail about. */
@@ -133,7 +186,23 @@ function clearTotpMark(database, email) {
 
 export async function startTestServer() {
   const dir = mkdtempSync(path.join(tmpdir(), 'wev-test-'));
+  /* Set in both modes. Under PostgreSQL nothing reads it, but leaving a stale
+     value from a previous run in the environment is how a "postgres" test comes
+     to open a file. */
   process.env.WEV_DB_PATH = path.join(dir, 'test.db');
+
+  const namespace = POSTGRES_APP_MODE ? `wev_t_${randomUUID().replace(/-/g, '').slice(0, 20)}` : null;
+  if (POSTGRES_APP_MODE) {
+    process.env.DATABASE_ENGINE = 'postgres';
+    process.env.DATABASE_URL = postgresHarnessUrl(namespace);
+    await withAdminConnection(db => db.exec(`CREATE SCHEMA IF NOT EXISTS ${namespace}`));
+  } else {
+    /* Explicit rather than assumed: a leaked `DATABASE_ENGINE=postgres` from an
+       earlier process would otherwise make the SQLite suite silently run on
+       PostgreSQL, which is the same false-confidence problem in reverse. */
+    process.env.DATABASE_ENGINE = 'sqlite';
+  }
+
   process.env.DEMO_MODE = 'true';
   process.env.REQUIRE_ADMIN_2FA = 'true';
   process.env.JWT_SECRET = 'test-secret-not-for-production';
@@ -161,7 +230,7 @@ export async function startTestServer() {
   process.env.MICROSOFT_CLIENT_ID ??= 'test-microsoft-client-id';
   process.env.MICROSOFT_CLIENT_SECRET ??= 'test-microsoft-secret';
 
-  const { initDatabase, db } = await import('./db.js');
+  const { initDatabase, completeDatabaseInit, db } = await import('./db.js');
   const { app } = await import('./app.js');
 
   /**
@@ -184,30 +253,61 @@ export async function startTestServer() {
    * only trustworthy source here: `process.env.WEV_DB_PATH` was set correctly and
    * still described nothing.
    */
-  const openedPath = db.prepare('PRAGMA database_list').all()
-    .find(r => r.name === 'main')?.file || '';
-  // Both sides are resolved through realpath first: on macOS mkdtemp hands back
-  // /var/folders/… while SQLite reports /private/var/folders/… for the same file,
-  // because /var is a symlink. Comparing the raw strings makes every run look
-  // like a failure.
-  const real = (p) => { try { return realpathSync(p); } catch { return p; } };
-  if (!real(openedPath).startsWith(real(dir))) {
-    throw new Error(
-      'startTestServer(): the database connection is not the throwaway one.\n'
-      + `  expected under: ${dir}\n`
-      + `  actually opened: ${openedPath || '(none)'}\n`
-      + '\n'
-      + 'db.js opens its connection at module scope, so something imported it\n'
-      + 'before this function set WEV_DB_PATH — almost certainly a STATIC import\n'
-      + 'at the top of the test file that reaches db.js (directly, or via\n'
-      + 'routes/*, utils.js, services/*, attendance.js, eventQuery.js …).\n'
-      + 'Move that import inside beforeAll, after startTestServer() resolves.\n'
-      + '\n'
-      + 'Left unchecked this writes test fixtures into a real database file.'
-    );
+  if (POSTGRES_APP_MODE) {
+    /**
+     * The PostgreSQL half of the same guarantee, and the more important half.
+     *
+     * A suite that claims to exercise PostgreSQL and quietly opens a SQLite file
+     * is worse than no suite: it produces confidence proportional to the number
+     * of tests and evidence of nothing. So the engine is asserted from the
+     * connection itself rather than from the environment variable that was
+     * supposed to select it, and the namespace is asserted too — a run that
+     * landed in `public` would see another worker's rows.
+     */
+    if (db.dialect !== 'postgres') {
+      throw new Error(
+        'startTestServer(): WEV_POSTGRES_APP_TEST=1 but the connection is not PostgreSQL.\n'
+        + `  db.dialect = ${JSON.stringify(db.dialect)}\n`
+        + '\n'
+        + 'db.js opens its connection at module scope, so something imported it\n'
+        + 'before this function set DATABASE_ENGINE — almost certainly a STATIC\n'
+        + 'import at the top of the test file that reaches db.js.'
+      );
+    }
+    const { search_path: activePath } = await db.prepare('SHOW search_path').get();
+    if (!String(activePath).includes(namespace)) {
+      throw new Error(
+        `startTestServer(): search_path is ${activePath}, expected ${namespace}.\n`
+        + '  Without it this run shares tables with every other worker.'
+      );
+    }
+  } else {
+    const openedPath = db.prepare('PRAGMA database_list').all()
+      .find(r => r.name === 'main')?.file || '';
+    // Both sides are resolved through realpath first: on macOS mkdtemp hands back
+    // /var/folders/… while SQLite reports /private/var/folders/… for the same file,
+    // because /var is a symlink. Comparing the raw strings makes every run look
+    // like a failure.
+    const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+    if (!real(openedPath).startsWith(real(dir))) {
+      throw new Error(
+        'startTestServer(): the database connection is not the throwaway one.\n'
+        + `  expected under: ${dir}\n`
+        + `  actually opened: ${openedPath || '(none)'}\n`
+        + '\n'
+        + 'db.js opens its connection at module scope, so something imported it\n'
+        + 'before this function set WEV_DB_PATH — almost certainly a STATIC import\n'
+        + 'at the top of the test file that reaches db.js (directly, or via\n'
+        + 'routes/*, utils.js, services/*, attendance.js, eventQuery.js …).\n'
+        + 'Move that import inside beforeAll, after startTestServer() resolves.\n'
+        + '\n'
+        + 'Left unchecked this writes test fixtures into a real database file.'
+      );
+    }
   }
 
   initDatabase();
+  await completeDatabaseInit();
 
   /**
    * Every seeded administrator is enrolled in two-factor authentication.
@@ -236,7 +336,7 @@ export async function startTestServer() {
   {
     const { encryptSecret } = await import('./cryptoUtils.js');
     const { db: seeded } = await import('./db.js');
-    seeded.prepare(
+    await seeded.prepare(
       "UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE role IN ('admin', 'super_admin')"
     ).run(encryptSecret(TEST_TOTP_SECRET));
   }
@@ -309,7 +409,7 @@ export async function startTestServer() {
     {
       const { db: live } = await import('./db.js');
       const { encryptSecret } = await import('./cryptoUtils.js');
-      live.prepare(
+      await live.prepare(
         "UPDATE users SET tfa_enabled = 1, tfa_secret = ?\n"
         + "         WHERE email = ? AND role IN ('admin', 'super_admin')\n"
         + '           AND (tfa_enabled IS NULL OR tfa_enabled = 0)\n'
@@ -328,7 +428,7 @@ export async function startTestServer() {
     }
 
     /* Not testing replay — see clearTotpMark. */
-    clearTotpMark(db, email);
+    await clearTotpMark(db, email);
     const second = await call('POST', '/api/auth/login-2fa',
       { method: 'totp', token: await freshTotpToken(TEST_TOTP_SECRET, `login:${email}`) },
       undefined, { Cookie: `wev_preauth=${preauth}` });
@@ -366,14 +466,14 @@ export async function startTestServer() {
    */
   const makeOwner = async (email) => {
     const { db } = await import('./db.js');
-    const row = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    const row = await db.prepare('SELECT id FROM users WHERE email = ?').get(email);
     if (!row) throw new Error(`makeOwner: no account for ${email}`);
     /* Enrolled at the same moment as the promotion. This helper turns an
        ordinary account into one the 2FA policy applies to, so without this the
        caller gets an owner who is immediately refused by `requireCap` — which is
        correct behaviour and a confusing way to learn it. */
     const { encryptSecret } = await import('./cryptoUtils.js');
-    db.prepare(
+    await db.prepare(
       "UPDATE users SET role = 'super_admin', tfa_enabled = 1, tfa_secret = ?, "
       + 'token_version = token_version + 1 WHERE id = ?'
     ).run(encryptSecret(TEST_TOTP_SECRET), row.id);
@@ -440,7 +540,7 @@ export async function startTestServer() {
      * the documented behaviour of that function anyway.
      */
     const { issueVerificationToken } = await import('./services/verification.js');
-    const token = issueVerificationToken(userId);
+    const token = await issueVerificationToken(userId);
     const res = await call('POST', '/api/auth/verify-email', { token });
     if (res.status !== 200) throw new Error(`Could not confirm ${userId}: ${JSON.stringify(res.body)}`);
     return res.cookie;
@@ -555,9 +655,18 @@ export async function startTestServer() {
    */
   const verified = async (token, action, opts) => reauthHeader(await stepUp(token, action, opts));
 
-  const close = () => new Promise(resolve => {
-    server.close(() => { rmSync(dir, { recursive: true, force: true }); resolve(); });
-  });
+  const close = async () => {
+    await new Promise(resolve => server.close(resolve));
+    if (POSTGRES_APP_MODE) {
+      /* Close this file's pool BEFORE dropping its schema: `DROP SCHEMA … CASCADE`
+         blocks behind any session still holding a lock on a table in it, and a
+         pool with idle connections holds them for as long as it lives. */
+      const { db: live } = await import('./db.js');
+      await live.close?.();
+      await withAdminConnection(admin => admin.exec(`DROP SCHEMA IF EXISTS ${namespace} CASCADE`));
+    }
+    rmSync(dir, { recursive: true, force: true });
+  };
 
   return {
     base,

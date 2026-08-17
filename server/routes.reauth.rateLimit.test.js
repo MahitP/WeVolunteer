@@ -50,7 +50,7 @@ beforeAll(async () => {
 
   const id = 'reauth-rl-user';
   const now = new Date().toISOString();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, name, email, username, password_hash, grade, role,
                        verified, email_verified, created_at)
     VALUES (?, ?, ?, ?, ?, 'Adult', 'student', 1, 1, ?)
@@ -62,7 +62,7 @@ beforeAll(async () => {
     { expiresIn: '7d' }
   );
 
-  session = sign(db.prepare('SELECT id, role, email, name FROM users WHERE id = ?').get(id));
+  session = sign(await db.prepare('SELECT id, role, email, name FROM users WHERE id = ?').get(id));
 
   /**
    * A brand-new account, so the per-account ceiling is never the thing refusing.

@@ -39,9 +39,9 @@ describe('an account can hold the complete collection', () => {
     ({ badgeService } = await import('./services/badgeService.js'));
     milestones = await import('./milestones.js');
 
-    subjectId = db.prepare(
+    subjectId = (await db.prepare(
       "SELECT id FROM users WHERE role = 'student' AND account_status = 'active' AND email NOT LIKE '%invalid%' LIMIT 1"
-    ).get()?.id;
+    ).get())?.id;
   }, 60000);
 
   afterAll(async () => { await srv?.close(); });
@@ -71,7 +71,7 @@ describe('an account can hold the complete collection', () => {
       const row = { ...template, ...overrides };
       const cols = Object.keys(row);
       db.prepare(
-        `INSERT OR REPLACE INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`
+        `INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`
       ).run(...cols.map(c => row[c]));
     };
 
@@ -88,8 +88,9 @@ describe('an account can hold the complete collection', () => {
          That last absence is why the slot's `end_datetime` above carries the
          backdating: the streak is derived from when the SHIFT was, which is the
          only honest source, since nothing here records when it was credited. */
-      db.prepare(`INSERT OR REPLACE INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
-                  VALUES (?, ?, ?, 1, 20)`)
+      db.prepare(`INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
+                  VALUES (?, ?, ?, 1, 20)
+      ON CONFLICT (slot_id, user_id) DO UPDATE SET event_id = excluded.event_id, present = excluded.present, hours_awarded = excluded.hours_awarded`)
         .run(ev, sl, subjectId);
     }
     /* Backdated so the early-adopter rank can qualify. */
@@ -98,13 +99,13 @@ describe('an account can hold the complete collection', () => {
     return true;
   };
 
-  it('earns every ACTIVE badge from real service history, not inserted rows', () => {
+  it('earns every ACTIVE badge from real service history, not inserted rows', async () => {
     expect(buildHistory(), 'no template rows to build a history from').toBe(true);
 
     /* The real evaluator, the one attendance changes call. */
-    badgeService.evaluateBadges(subjectId);
+    await badgeService.evaluateBadges(subjectId);
 
-    const missing = db.prepare(`
+    const missing = await db.prepare(`
       SELECT b.category, b.name FROM badges b
        WHERE b.active = 1
          AND b.id NOT IN (SELECT badge_id FROM user_badges WHERE user_id = ?)
@@ -117,15 +118,15 @@ describe('an account can hold the complete collection', () => {
     ).toEqual([]);
   });
 
-  it('holds those badges through a re-evaluation, because the history earns them', () => {
+  it('holds those badges through a re-evaluation, because the history earns them', async () => {
     /**
      * The property that separates a real collection from a decorated one.
      * `evaluateBadges` deletes automatic awards whose criteria no longer hold,
      * so inserted rows would vanish here while derived ones survive.
      */
-    const before = db.prepare('SELECT COUNT(*) n FROM user_badges WHERE user_id = ?').get(subjectId).n;
-    badgeService.evaluateBadges(subjectId);
-    const after = db.prepare('SELECT COUNT(*) n FROM user_badges WHERE user_id = ?').get(subjectId).n;
+    const before = (await db.prepare('SELECT COUNT(*) n FROM user_badges WHERE user_id = ?').get(subjectId)).n;
+    await badgeService.evaluateBadges(subjectId);
+    const after = (await db.prepare('SELECT COUNT(*) n FROM user_badges WHERE user_id = ?').get(subjectId)).n;
 
     expect(after, 'badges were withdrawn on re-evaluation — they were not really earned').toBe(before);
     expect(after).toBeGreaterThanOrEqual(20);

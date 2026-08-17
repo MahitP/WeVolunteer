@@ -75,7 +75,7 @@ describe('intake: accepts a report without a session', () => {
     expect(res.status).toBe(202);
 
     const signedIn = groups().find(g => g.message.includes('signed-in'));
-    const ev = db.prepare('SELECT * FROM error_events WHERE fingerprint = ?').get(signedIn.fingerprint);
+    const ev = await db.prepare('SELECT * FROM error_events WHERE fingerprint = ?').get(signedIn.fingerprint);
     expect(ev.user_hash).toMatch(/^[0-9a-f]{32}$/);
     // A hash, never the id.
     expect(JSON.stringify(events())).not.toContain('user-student-1');
@@ -204,7 +204,7 @@ describe('intake: route privacy, asserted on stored values', () => {
       '/admin/secret-panel', '/../../etc/passwd', '//evil.com/x',
       'https://evil.com/events', 'not-a-path', '/' + 'a'.repeat(4000),
     ]) {
-      db.prepare('DELETE FROM error_groups').run();
+      await db.prepare('DELETE FROM error_groups').run();
       const res = await report({ route: hostile, message: `hostile ${hostile.slice(0, 12)}` });
       expect(res.status).toBe(202);
       expect(storedRoute(), `${hostile} was stored raw`).toBe('unknown');
@@ -213,7 +213,7 @@ describe('intake: route privacy, asserted on stored values', () => {
 
   it('neutralises a route that is not a string at all', async () => {
     for (const bad of [null, 42, { a: 1 }, ['/events'], true]) {
-      db.prepare('DELETE FROM error_groups').run();
+      await db.prepare('DELETE FROM error_groups').run();
       const res = await report({ route: bad, message: 'non-string route' });
       expect(res.status, 'intake failed on hostile input instead of neutralising it').toBe(202);
       expect(storedRoute()).toBe('unknown');
@@ -255,12 +255,12 @@ describe('intake: the ceiling is a bound, not an oracle', () => {
 
     expect([...statuses], 'the response varied, which tells an attacker when the ceiling was hit').toEqual([202]);
 
-    const real = db.prepare(
+    const real = (await db.prepare(
       "SELECT COUNT(*) c FROM error_groups WHERE source = 'client' AND fingerprint != ?"
-    ).get(OVERFLOW_FINGERPRINT).c;
+    ).get(OVERFLOW_FINGERPRINT)).c;
     expect(real).toBeLessThanOrEqual(CLIENT_GROUP_CEILING);
 
-    const overflow = db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(OVERFLOW_FINGERPRINT);
+    const overflow = await db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(OVERFLOW_FINGERPRINT);
     expect(overflow, 'the flood vanished silently instead of being counted').toBeTruthy();
     expect(overflow.occurrences).toBeGreaterThan(0);
   }, 120000);

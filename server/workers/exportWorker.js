@@ -47,8 +47,8 @@ const STALE_EXPORT_MS = Number(process.env.EXPORT_STALE_MS) || 10 * 60 * 1000;
  * already gone during cleanup is a benign race, and reporting it would be
  * reporting weather.
  */
-function reportExportError(err, boundary, context = {}) {
-  recordError(db, {
+async function reportExportError(err, boundary, context = {}) {
+  await recordError(db, {
     source: 'worker',
     kind: err?.constructor?.name || 'Error',
     message: err?.message,
@@ -74,13 +74,17 @@ function ensureExportDir() {
   return dir;
 }
 
-export function startExportWorker() {
+export async function startExportWorker() {
   if (isRunning) return;
   isRunning = true;
   // A restart recovers the export its own predecessor abandoned, rather than
   // leaving that student blocked until someone edits the database.
-  reclaimStaleExports();
-  poll();
+  await reclaimStaleExports();
+  /* Deliberately not awaited: `poll` re-arms itself with `setTimeout`, so its
+     promise settles only when the worker stops. The `.catch` is what says so —
+     and it is also the difference between a crashed poll loop and an unhandled
+     rejection that takes the process down under Node's default. */
+  poll().catch(err => console.error('[export] poll loop stopped:', err));
 }
 
 export function stopExportWorker() {
@@ -100,10 +104,10 @@ export function stopExportWorker() {
  * the UI, and no error anyone would see. On a feature whose whole purpose is
  * letting a family obtain a copy of their child's record, that is a silent denial.
  */
-export function reclaimStaleExports() {
+export async function reclaimStaleExports() {
   const cutoff = new Date(Date.now() - STALE_EXPORT_MS).toISOString();
   try {
-    const result = db.prepare(`
+    const result = await db.prepare(`
       UPDATE data_export_jobs SET status = 'pending'
       WHERE status = 'processing' AND created_at <= ?
     `).run(cutoff);
@@ -117,7 +121,7 @@ export function reclaimStaleExports() {
     return result.changes;
   } catch (err) {
     console.error('[ExportWorker] Export reclaim failed:', err);
-    reportExportError(err, 'reclaimStaleExports');
+    await reportExportError(err, 'reclaimStaleExports');
     return 0;
   }
 }
@@ -127,7 +131,7 @@ export function reclaimStaleExports() {
  * of waiting on the five-second timer.
  */
 export async function processPendingExports() {
-  const job = db.prepare(`
+  const job = await db.prepare(`
     SELECT id, user_id FROM data_export_jobs
     WHERE status = 'pending'
     ORDER BY created_at ASC LIMIT 1
@@ -140,12 +144,12 @@ async function poll() {
   if (!isRunning) return;
 
   try {
-    reclaimStaleExports();
+    await reclaimStaleExports();
     await processPendingExports();
-    cleanupExpiredExports();
+    await cleanupExpiredExports();
   } catch (error) {
     console.error('[ExportWorker] Error polling:', error);
-    reportExportError(error, 'poll');
+    await reportExportError(error, 'poll');
   } finally {
     if (isRunning) {
       // Poll every 5 seconds
@@ -162,13 +166,13 @@ async function poll() {
  * Renamed from `cleanupExpiredJobs` and exported so the durability test can assert
  * it without waiting for a poll. Behaviour is unchanged.
  */
-export function cleanupExpiredExports() {
-  const expiredJobs = db.prepare(`
+export async function cleanupExpiredExports() {
+  const expiredJobs = await db.prepare(`
     SELECT id, file_location FROM data_export_jobs
     WHERE status = 'completed' AND expires_at < ?
   `).all(new Date().toISOString());
 
-  const updateStmt = db.prepare(`UPDATE data_export_jobs SET status = 'expired', file_location = NULL WHERE id = ?`);
+  const updateStmt = await db.prepare(`UPDATE data_export_jobs SET status = 'expired', file_location = NULL WHERE id = ?`);
 
   for (const job of expiredJobs) {
     if (job.file_location && fs.existsSync(job.file_location)) {
@@ -178,7 +182,7 @@ export function cleanupExpiredExports() {
         console.error(`[ExportWorker] Failed to delete expired file ${job.file_location}:`, err);
       }
     }
-    updateStmt.run(job.id);
+    await updateStmt.run(job.id);
   }
 }
 
@@ -186,7 +190,7 @@ async function processJob(job) {
   const { id, user_id } = job;
   
   // Optimistic lock
-  const updated = db.prepare(`
+  const updated = await db.prepare(`
     UPDATE data_export_jobs SET status = 'processing' 
     WHERE id = ? AND status = 'pending'
   `).run(id);
@@ -206,14 +210,14 @@ async function processJob(job) {
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const completedAt = new Date().toISOString();
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE data_export_jobs 
       SET status = 'completed', file_location = ?, completed_at = ?, expires_at = ?
       WHERE id = ?
     `).run(tmpFilePath, completedAt, expiresAt, id);
 
     // Notify user
-    notificationService.dispatch('SYSTEM_ALERT', {
+    await notificationService.dispatch('SYSTEM_ALERT', {
       title: 'Data Export Ready',
       body: 'Your data export is ready to download. It will expire in 7 days.',
       link: '/settings?section=privacy'
@@ -224,14 +228,14 @@ async function processJob(job) {
     console.error(`[ExportWorker] Failed job ${id}:`, error);
     // The user is about to be told their export failed. Something has to be able
     // to tell us WHY, and until now nothing did.
-    reportExportError(error, 'processJob', { jobId: id });
-    db.prepare(`UPDATE data_export_jobs SET status = 'failed' WHERE id = ?`).run(id);
+    await reportExportError(error, 'processJob', { jobId: id });
+    await db.prepare(`UPDATE data_export_jobs SET status = 'failed' WHERE id = ?`).run(id);
     
     if (fs.existsSync(tmpFilePath)) {
       fs.unlinkSync(tmpFilePath);
     }
     
-    notificationService.dispatch('SYSTEM_ALERT', {
+    await notificationService.dispatch('SYSTEM_ALERT', {
       title: 'Data Export Failed',
       body: 'There was a problem generating your data export. Please try again.',
       link: '/settings?section=privacy'
@@ -240,7 +244,7 @@ async function processJob(job) {
 }
 
 function generateZip(userId, outputPath) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     const output = fs.createWriteStream(outputPath);
     const archive = new ZipArchive({ zlib: { level: 9 } });
 
@@ -250,7 +254,7 @@ function generateZip(userId, outputPath) {
     archive.pipe(output);
 
     // --- Profile ---
-    const user = db.prepare(`
+    const user = await db.prepare(`
       SELECT username, email, name, grade, role, school, bio, skills, leaderboard_opt_in, profile_visibility, created_at, account_status
       FROM users WHERE id = ?
     `).get(userId);
@@ -258,8 +262,8 @@ function generateZip(userId, outputPath) {
     archive.append(JSON.stringify(user, null, 2), { name: 'profile.json' });
 
     // --- Account / Settings ---
-    const notifPrefs = db.prepare(`SELECT category, channel, enabled FROM notification_preferences WHERE user_id = ?`).all(userId);
-    const oauthAccounts = db.prepare(`SELECT provider, provider_user_id, provider_email, created_at, last_used_at FROM oauth_accounts WHERE user_id = ?`).all(userId);
+    const notifPrefs = await db.prepare(`SELECT category, channel, enabled FROM notification_preferences WHERE user_id = ?`).all(userId);
+    const oauthAccounts = await db.prepare(`SELECT provider, provider_user_id, provider_email, created_at, last_used_at FROM oauth_accounts WHERE user_id = ?`).all(userId);
     const accountData = {
       created_at: user.created_at,
       role: user.role,
@@ -274,7 +278,7 @@ function generateZip(userId, outputPath) {
     archive.append(JSON.stringify(accountData, null, 2), { name: 'account.json' });
 
     // --- Volunteer History ---
-    const history = db.prepare(`
+    const history = await db.prepare(`
       SELECT e.title AS event, e.category, e.location, a.hours_awarded AS hours, s.end_datetime AS completed
       FROM attendance a
       JOIN slots s ON a.slot_id = s.id
@@ -285,14 +289,14 @@ function generateZip(userId, outputPath) {
     archive.append(JSON.stringify(history, null, 2), { name: 'volunteer_history.json' });
 
     // --- Certificates ---
-    const certificates = db.prepare(`
+    const certificates = await db.prepare(`
       SELECT code, volunteer_name_snapshot, event_name_snapshot, organization_snapshot, hours_snapshot, completed_at_snapshot, created_at
       FROM certificates WHERE user_id = ?
     `).all(userId);
     archive.append(JSON.stringify(certificates, null, 2), { name: 'certificates.json' });
 
     // --- Applications ---
-    const applications = db.prepare(`
+    const applications = await db.prepare(`
       SELECT e.title as event, s.name as slot, s.start_datetime as start, app.status, app.applied_at
       FROM applications app
       JOIN events e ON app.event_id = e.id
@@ -302,7 +306,7 @@ function generateZip(userId, outputPath) {
     archive.append(JSON.stringify(applications, null, 2), { name: 'applications.json' });
 
     // --- Events (Participated) ---
-    const events = db.prepare(`
+    const events = await db.prepare(`
       SELECT e.title, e.description, e.location, e.category, s.name as slot, a.status as participation_status
       FROM applications a
       JOIN events e ON a.event_id = e.id
@@ -312,7 +316,7 @@ function generateZip(userId, outputPath) {
     archive.append(JSON.stringify(events, null, 2), { name: 'events.json' });
 
     // --- Messages ---
-    const conversations = db.prepare(`
+    const conversations = await db.prepare(`
       SELECT c.id as conversation_id, e.title as event_title, c.created_at
       FROM conversation_participants p
       JOIN conversations c ON p.conversation_id = c.id
@@ -320,8 +324,10 @@ function generateZip(userId, outputPath) {
       WHERE p.user_id = ?
     `).all(userId);
 
-    const messagesData = conversations.map(conv => {
-      const messages = db.prepare(`
+    /* `Promise.all`: the per-conversation message fetch is a query now, so a
+       bare `.map` would put promises into the export archive. */
+    const messagesData = await Promise.all(conversations.map(async (conv) => {
+      const messages = await db.prepare(`
         SELECT m.body, m.created_at, u.name as sender_name
         FROM messages m
         JOIN users u ON m.sender_id = u.id
@@ -334,11 +340,11 @@ function generateZip(userId, outputPath) {
         started_at: conv.created_at,
         messages
       };
-    });
+    }));
     archive.append(JSON.stringify(messagesData, null, 2), { name: 'messages.json' });
 
     // --- Notifications ---
-    const notifications = db.prepare(`
+    const notifications = await db.prepare(`
       SELECT kind, title, body, read, created_at
       FROM notifications WHERE user_id = ?
       ORDER BY created_at DESC

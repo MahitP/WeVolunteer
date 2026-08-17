@@ -70,8 +70,8 @@
  * `COALESCE` because `SUM()` over no rows is NULL, and a member who has not yet
  * volunteered should read 0, not blank.
  */
-export function organizationHoursForUser(db, organizationId, userId) {
-  const row = db.prepare(`
+export async function organizationHoursForUser(db, organizationId, userId) {
+  const row = await db.prepare(`
     SELECT COALESCE(SUM(a.hours_awarded), 0) AS hours,
            COUNT(DISTINCT a.event_id)        AS events
     FROM attendance a
@@ -95,8 +95,8 @@ export function organizationHoursForUser(db, organizationId, userId) {
  * that only wants the current roster should read through it by id rather than
  * iterate it.
  */
-export function organizationHoursByUser(db, organizationId) {
-  const rows = db.prepare(`
+export async function organizationHoursByUser(db, organizationId) {
+  const rows = await db.prepare(`
     SELECT a.user_id                          AS userId,
            COALESCE(SUM(a.hours_awarded), 0)  AS hours,
            COUNT(DISTINCT a.event_id)         AS events
@@ -117,8 +117,8 @@ export function organizationHoursByUser(db, organizationId) {
  * count: a club with forty members and eight who ever attended has done eight
  * people's worth of volunteering, and reporting forty would flatter it.
  */
-export function organizationHoursTotal(db, organizationId) {
-  const row = db.prepare(`
+export async function organizationHoursTotal(db, organizationId) {
+  const row = await db.prepare(`
     SELECT COALESCE(SUM(a.hours_awarded), 0) AS hours,
            COUNT(DISTINCT a.event_id)        AS events,
            COUNT(DISTINCT a.user_id)         AS volunteers
@@ -146,8 +146,8 @@ export function organizationHoursTotal(db, organizationId) {
  * Self-scoped by construction — it takes a user id and returns only that user's
  * rows — so no caller can turn it into a report about somebody else.
  */
-export function organizationHistoryForUser(db, organizationId, userId, { limit = 50 } = {}) {
-  return db.prepare(`
+export async function organizationHistoryForUser(db, organizationId, userId, { limit = 50 } = {}) {
+  return (await db.prepare(`
     SELECT e.id                              AS eventId,
            e.title                           AS title,
            e.credits_hours                   AS creditsHours,
@@ -161,6 +161,6 @@ export function organizationHistoryForUser(db, organizationId, userId, { limit =
     GROUP BY e.id
     ORDER BY startsAt DESC
     LIMIT ?
-  `).all(organizationId, userId, limit)
+  `).all(organizationId, userId, limit))
     .map(r => ({ ...r, hours: Number(r.hours), creditsHours: r.creditsHours !== 0 }));
 }

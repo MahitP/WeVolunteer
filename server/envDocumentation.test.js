@@ -31,7 +31,7 @@
  * forget, which is the failure being prevented.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -44,13 +44,26 @@ const LIMIT_NAME = /^[A-Z0-9_]*(?:RATE_LIMIT|_LIMIT|_CEILING)$/;
 
 /** Source files only — a name that appears solely in a test is a fixture. */
 function sourceFiles(dir, out = []) {
-  for (const entry of readdirSync(dir)) {
-    if (entry === 'node_modules' || entry === 'scratch' || entry.startsWith('.')) continue;
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) { sourceFiles(full, out); continue; }
-    if (!entry.endsWith('.js')) continue;
-    if (entry.includes('.test.')) continue;
-    if (entry === 'testServer.js') continue;
+  /**
+   * `withFileTypes` rather than a `statSync` per entry.
+   *
+   * The previous form stat-ed EVERY name before filtering by extension, so a
+   * transient file in `server/` — a SQLite `-wal` or `-journal` belonging to
+   * another test file running in parallel — could vanish between the readdir
+   * and the stat and take this guard down with ENOENT. It failed exactly once
+   * in a full run and passed in isolation, which is the signature.
+   *
+   * `readdirSync` reports the type it already has, so there is no second
+   * syscall to lose a race with. Same idiom as `db.accessSurface.test.js`.
+   */
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const name = entry.name;
+    if (name === 'node_modules' || name === 'scratch' || name.startsWith('.')) continue;
+    const full = path.join(dir, name);
+    if (entry.isDirectory()) { sourceFiles(full, out); continue; }
+    if (!name.endsWith('.js')) continue;
+    if (name.includes('.test.')) continue;
+    if (name === 'testServer.js') continue;
     out.push(full);
   }
   return out;

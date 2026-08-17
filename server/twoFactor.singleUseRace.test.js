@@ -56,13 +56,17 @@ describe('a second-factor code cannot be spent twice, even concurrently', () => 
   };
 
   /** Enrols an authenticator and a set of recovery codes, by direct write. */
-  const enrol = (userId, codes) => {
-    db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE id = ?')
+  const enrol = async (userId, codes) => {
+    await db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE id = ?')
       .run(encryptSecret(TOTP_SECRET), userId);
     const ins = db.prepare(
       "INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))"
     );
-    codes.forEach((c, i) => ins.run(`rc-${userId}-${i}`, userId, bcrypt.hashSync(c, 10)));
+    /* Sequential, not `forEach`: an async callback there is neither awaited nor
+       collected, so the codes would still be arriving when the race starts. */
+    for (const [i, c] of codes.entries()) {
+      await ins.run(`rc-${userId}-${i}`, userId, bcrypt.hashSync(c, 10));
+    }
   };
 
   /** One sign-in as far as the pre-auth grant, returning the cookie header. */
@@ -99,7 +103,7 @@ describe('a second-factor code cannot be spent twice, even concurrently', () => 
   it('grants one session when eight independent pre-auth grants spend one recovery code', async () => {
     const { user } = await srv.signupConfirmed(account());
     const CODE = 'ZZZZ9999YYYY';
-    enrol(user.id, [CODE]);
+    await enrol(user.id, [CODE]);
 
     const grants = [];
     for (let i = 0; i < 8; i++) grants.push(await preauth(user.email));
@@ -134,7 +138,7 @@ describe('a second-factor code cannot be spent twice, even concurrently', () => 
   it('grants one session when five parallel submissions share a pre-auth grant', async () => {
     const { user } = await srv.signupConfirmed(account());
     const CODES = ['AAAA1111BBBB', 'CCCC2222DDDD', 'EEEE3333FFFF'];
-    enrol(user.id, CODES);
+    await enrol(user.id, CODES);
 
     const cookie = await preauth(user.email);
     const attempts = await Promise.all(Array.from({ length: 5 }, () =>
@@ -155,7 +159,7 @@ describe('a second-factor code cannot be spent twice, even concurrently', () => 
    */
   it('grants one session when four parallel submissions spend one emailed code', async () => {
     const { user } = await srv.signupConfirmed(account());
-    db.prepare('UPDATE users SET tfa_email_enabled = 1, email_verified = 1 WHERE id = ?').run(user.id);
+    await db.prepare('UPDATE users SET tfa_email_enabled = 1, email_verified = 1 WHERE id = ?').run(user.id);
 
     const cookie = await preauth(user.email);
 
@@ -179,7 +183,7 @@ describe('a second-factor code cannot be spent twice, even concurrently', () => 
       `statuses: ${attempts.map(a => a.status).join(',')}`
     ).toBe(1);
 
-    const row = db.prepare(
+    const row = await db.prepare(
       'SELECT used_at FROM tfa_email_codes WHERE user_id = ? ORDER BY rowid DESC LIMIT 1'
     ).get(user.id);
     expect(row.used_at).toBeTruthy();
@@ -192,7 +196,7 @@ describe('a second-factor code cannot be spent twice, even concurrently', () => 
   it('a lost race consumes no additional code', async () => {
     const { user } = await srv.signupConfirmed(account());
     const CODES = ['LOSE1111AAAA', 'LOSE2222BBBB', 'LOSE3333CCCC', 'LOSE4444DDDD'];
-    enrol(user.id, CODES);
+    await enrol(user.id, CODES);
 
     const grants = [];
     for (let i = 0; i < 6; i++) grants.push(await preauth(user.email));

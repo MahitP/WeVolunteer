@@ -110,8 +110,8 @@ export const COMMENT_HELD_MESSAGE =
  * Returns a boolean, never a count. How many people reported you is information
  * the subject of a report does not get.
  */
-export function eventHasLiveReport(db, eventId) {
-  const row = db.prepare(`
+export async function eventHasLiveReport(db, eventId) {
+  const row = await db.prepare(`
     SELECT 1 AS held
     WHERE EXISTS (
       SELECT 1 FROM reports r
@@ -145,8 +145,8 @@ export function eventHasLiveReport(db, eventId) {
 }
 
 /** Is this comment the target of a live report? */
-export function commentHasLiveReport(db, commentId) {
-  const row = db.prepare(`
+export async function commentHasLiveReport(db, commentId) {
+  const row = await db.prepare(`
     SELECT 1 AS held FROM reports
     WHERE status IN (${LIVE}) AND target_type = 'comment' AND target_id = ?
     UNION
@@ -173,8 +173,8 @@ export function commentHasLiveReport(db, commentId) {
  * CASCADE: purging an organizer's shell deletes every event they ran and takes
  * its comments, announcements and conversations with it.
  */
-export function userIsPartyToLiveReport(db, userId) {
-  const row = db.prepare(`
+export async function userIsPartyToLiveReport(db, userId) {
+  const row = await db.prepare(`
     SELECT 1 AS held
     WHERE EXISTS (
       SELECT 1 FROM reports

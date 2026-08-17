@@ -382,60 +382,60 @@ describe('commitmentsFor, against a database', () => {
   const PAST = '2026-01-01T12:00:00.000Z';
   const NOW = '2026-08-01T00:00:00.000Z';
 
-  it('reads a volunteer\'s completed commitments newest first', () => {
+  it('reads a volunteer\'s completed commitments newest first', async () => {
     const db = makeDb();
     commit(db, 'u1', { endsAt: '2026-01-01T00:00:00.000Z' });
     commit(db, 'u1', { endsAt: '2026-03-01T00:00:00.000Z' });
 
-    const s = reliabilityOf(db, 'u1', { now: NOW });
+    const s = await reliabilityOf(db, 'u1', { now: NOW });
     expect(s.recorded).toBe(2);
     expect(s.attended).toBe(2);
   });
 
-  it('excludes cancelled events from both sides', () => {
+  it('excludes cancelled events from both sides', async () => {
     const db = makeDb();
     commit(db, 'u1', { endsAt: PAST, present: 0, status: 'cancelled' });
     commit(db, 'u1', { endsAt: PAST });
 
-    const s = reliabilityOf(db, 'u1', { now: NOW });
+    const s = await reliabilityOf(db, 'u1', { now: NOW });
     expect(s.recorded, report(s)).toBe(1);
     expect(s.absent).toBe(0);
   });
 
-  it('excludes withdrawn and waitlisted applications', () => {
+  it('excludes withdrawn and waitlisted applications', async () => {
     const db = makeDb();
     commit(db, 'u1', { endsAt: PAST, present: null, appStatus: 'withdrawn' });
     commit(db, 'u1', { endsAt: PAST, present: null, appStatus: 'waitlisted' });
     commit(db, 'u1', { endsAt: PAST });
 
-    const s = reliabilityOf(db, 'u1', { now: NOW });
+    const s = await reliabilityOf(db, 'u1', { now: NOW });
     expect(s.recorded + s.awaitingRecord, report(s)).toBe(1);
   });
 
-  it('excludes a shift that has not ended yet', () => {
+  it('excludes a shift that has not ended yet', async () => {
     const db = makeDb();
     commit(db, 'u1', { endsAt: '2027-01-01T00:00:00.000Z', present: null });
     commit(db, 'u1', { endsAt: PAST });
 
-    const s = reliabilityOf(db, 'u1', { now: NOW });
+    const s = await reliabilityOf(db, 'u1', { now: NOW });
     expect(s.recorded + s.awaitingRecord, report(s)).toBe(1);
   });
 
-  it('counts an unconfirmed past commitment as awaiting a record', () => {
+  it('counts an unconfirmed past commitment as awaiting a record', async () => {
     const db = makeDb();
     commit(db, 'u1', { endsAt: PAST, present: null });
 
-    const s = reliabilityOf(db, 'u1', { now: NOW });
+    const s = await reliabilityOf(db, 'u1', { now: NOW });
     expect(s.awaitingRecord).toBe(1);
     expect(s.recorded).toBe(0);
   });
 
-  it('collapses two shifts of one event into a single commitment', () => {
+  it('collapses two shifts of one event into a single commitment', async () => {
     const db = makeDb();
     const e = commit(db, 'u1', { endsAt: PAST, present: 1 });
     commit(db, 'u1', { endsAt: PAST, present: 0, eventId: e });
 
-    const s = reliabilityOf(db, 'u1', { now: NOW });
+    const s = await reliabilityOf(db, 'u1', { now: NOW });
     /* Attended one shift and missed another of the same festival: they
        attended that event. Matches attendanceRecordsFor's MAX(present). */
     expect(s.recorded, report(s)).toBe(1);
@@ -443,20 +443,20 @@ describe('commitmentsFor, against a database', () => {
     expect(s.absent).toBe(0);
   });
 
-  it('keeps volunteers separate when batched', () => {
+  it('keeps volunteers separate when batched', async () => {
     const db = makeDb();
     commit(db, 'u1', { endsAt: PAST, present: 1 });
     commit(db, 'u2', { endsAt: PAST, present: 0 });
 
-    const s1 = reliabilityOf(db, 'u1', { now: NOW });
-    const s2 = reliabilityOf(db, 'u2', { now: NOW });
+    const s1 = await reliabilityOf(db, 'u1', { now: NOW });
+    const s2 = await reliabilityOf(db, 'u2', { now: NOW });
     expect(s1.attended).toBe(1);
     expect(s2.absent).toBe(1);
   });
 
-  it('returns an empty summary for somebody with no history', () => {
+  it('returns an empty summary for somebody with no history', async () => {
     const db = makeDb();
-    const s = reliabilityOf(db, 'nobody', { now: NOW });
+    const s = await reliabilityOf(db, 'nobody', { now: NOW });
     expect(s.recorded).toBe(0);
     expect(s.isReliable).toBe(false);
   });

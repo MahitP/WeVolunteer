@@ -69,28 +69,28 @@ const format = (r) => ({
 });
 
 /** The caller's own external records. Self-scoped by construction. */
-router.get('/api/external-hours', authenticateToken, requireCap('portfolio.write'), (req, res) => {
-  const rows = db.prepare(
+router.get('/api/external-hours', authenticateToken, requireCap('portfolio.write'), async (req, res) => {
+  const rows = await db.prepare(
     'SELECT * FROM external_hours WHERE user_id = ? ORDER BY occurred_on DESC, created_at DESC'
   ).all(req.principal.userId);
   res.json({ entries: rows.map(format) });
 });
 
 /** Log one. */
-router.post('/api/external-hours', authenticateToken, requireCap('portfolio.write'), (req, res) => {
+router.post('/api/external-hours', authenticateToken, requireCap('portfolio.write'), async (req, res) => {
   const check = validateExternalHours(req.body ?? {});
   if (!check.ok) return res.status(400).json({ error: check.error, field: check.field });
 
   const now = new Date().toISOString();
   const id = `ext-${crypto.randomUUID()}`;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO external_hours
       (id, user_id, organization_name, activity_name, description, occurred_on, hours, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, req.principal.userId, check.value.organizationName, check.value.activityName,
     check.value.description ?? '', check.value.occurredOn, check.value.hours, now, now);
 
-  res.status(201).json({ entry: format(db.prepare('SELECT * FROM external_hours WHERE id = ?').get(id)) });
+  res.status(201).json({ entry: format(await db.prepare('SELECT * FROM external_hours WHERE id = ?').get(id)) });
 });
 
 /**
@@ -101,8 +101,8 @@ router.post('/api/external-hours', authenticateToken, requireCap('portfolio.writ
  * afternoon; if they wrote down the wrong date they should be able to fix it
  * without deleting and retyping the rest.
  */
-router.patch('/api/external-hours/:id', authenticateToken, requireCap('portfolio.write'), (req, res) => {
-  const row = db.prepare('SELECT * FROM external_hours WHERE id = ?').get(req.params.id);
+router.patch('/api/external-hours/:id', authenticateToken, requireCap('portfolio.write'), async (req, res) => {
+  const row = await db.prepare('SELECT * FROM external_hours WHERE id = ?').get(req.params.id);
   /* 404, not 403, for somebody else's record: a distinguishable refusal would
      confirm the id exists. Same rule as the export download in privacyRoutes. */
   if (!row || row.user_id !== req.principal.userId) {
@@ -124,18 +124,18 @@ router.patch('/api/external-hours/:id', authenticateToken, requireCap('portfolio
 
   updates.push('updated_at = ?'); values.push(new Date().toISOString());
   values.push(row.id);
-  db.prepare(`UPDATE external_hours SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  await db.prepare(`UPDATE external_hours SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-  res.json({ entry: format(db.prepare('SELECT * FROM external_hours WHERE id = ?').get(row.id)) });
+  res.json({ entry: format(await db.prepare('SELECT * FROM external_hours WHERE id = ?').get(row.id)) });
 });
 
 /** Delete one. The owner's record, the owner's to remove. */
-router.delete('/api/external-hours/:id', authenticateToken, requireCap('portfolio.write'), (req, res) => {
-  const row = db.prepare('SELECT * FROM external_hours WHERE id = ?').get(req.params.id);
+router.delete('/api/external-hours/:id', authenticateToken, requireCap('portfolio.write'), async (req, res) => {
+  const row = await db.prepare('SELECT * FROM external_hours WHERE id = ?').get(req.params.id);
   if (!row || row.user_id !== req.principal.userId) {
     return res.status(404).json({ error: 'No such entry.', code: 'not_found' });
   }
-  db.prepare('DELETE FROM external_hours WHERE id = ?').run(row.id);
+  await db.prepare('DELETE FROM external_hours WHERE id = ?').run(row.id);
   res.json({ success: true });
 });
 

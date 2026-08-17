@@ -215,6 +215,7 @@ describe('the mail rate limiter does not lock out a shared campus address', () =
     vi.resetModules();
     const dbMod = await import('./db.js');
     dbMod.initDatabase();
+    await dbMod.completeDatabaseInit();
     const { app } = await import('./app.js');
     return { app, request, dir };
   }
@@ -232,8 +233,7 @@ describe('the mail rate limiter does not lock out a shared campus address', () =
      */
     const statuses = [];
     for (let i = 0; i < 12; i++) {
-      const res = await request(app)
-        .post('/api/auth/forgot-password')
+      const res = await request(app).post('/api/auth/forgot-password')
         .send({ email: `student${i}@school.example.org` });
       statuses.push(res.status);
     }
@@ -248,8 +248,7 @@ describe('the mail rate limiter does not lock out a shared campus address', () =
     // The abuse the limiter exists to prevent: flooding one person's inbox.
     const statuses = [];
     for (let i = 0; i < 12; i++) {
-      const res = await request(app)
-        .post('/api/auth/forgot-password')
+      const res = await request(app).post('/api/auth/forgot-password')
         .send({ email: 'victim@school.example.org' });
       statuses.push(res.status);
     }
@@ -264,8 +263,7 @@ describe('the mail rate limiter does not lock out a shared campus address', () =
     // so a generous per-IP ceiling stays underneath it.
     const statuses = [];
     for (let i = 0; i < 130; i++) {
-      const res = await request(app)
-        .post('/api/auth/forgot-password')
+      const res = await request(app).post('/api/auth/forgot-password')
         .send({ email: `probe${i}@school.example.org` });
       statuses.push(res.status);
     }
@@ -279,8 +277,7 @@ describe('the mail rate limiter does not lock out a shared campus address', () =
     const statuses = [];
     for (let i = 0; i < 12; i++) {
       const spelling = i % 2 === 0 ? 'Victim@School.Example.org' : '  victim@school.example.org ';
-      const res = await request(app)
-        .post('/api/auth/forgot-password')
+      const res = await request(app).post('/api/auth/forgot-password')
         .send({ email: spelling });
       statuses.push(res.status);
     }

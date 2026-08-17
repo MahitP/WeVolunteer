@@ -421,6 +421,54 @@ export function escapeHtml(value) {
  * email as its own source. Callers are responsible for escaping the user-supplied
  * values they interpolate into it, which is what `escapeHtml` above is for.
  */
+/**
+ * The one layout every outgoing message is rendered into.
+ *
+ * Verification, password reset, email change, the admin invitation, the 2FA
+ * code, and — through `notificationWorker.js` — every notification the platform
+ * sends. There is no second template, which is why branding is changed here and
+ * only here.
+ *
+ * ── Why the logo is drawn rather than fetched ──
+ *
+ * The header mark is a table cell with a background colour and the letters "WV"
+ * in it, beside the product name. It is deliberately NOT an `<img>`, and that is
+ * a deliberate choice rather than an unfinished one:
+ *
+ *   • Gmail, Outlook and Apple Mail block remote images by default for a sender
+ *     the recipient has not corresponded with before — which is precisely the
+ *     case for a verification email, the first message anybody receives. An
+ *     image-based logo is therefore missing exactly when first impressions are
+ *     made, leaving a broken-image box where the branding should be.
+ *   • A hosted asset needs a stable public HTTPS origin. `APP_URL` is whatever
+ *     the deployment sets, and on a development or pilot instance that is
+ *     `localhost` — an address that resolves, on the recipient's machine, to the
+ *     recipient's machine.
+ *   • Base64-embedding it instead is worse: Gmail strips `data:` URIs in
+ *     `<img src>` outright.
+ *
+ * A background-coloured cell renders identically in every one of those clients,
+ * with images off, and costs nothing to download. It is the same green and the
+ * same two letters as the application's own icon, so the two agree.
+ *
+ * ── What this canNOT do: the sender avatar ──
+ *
+ * The round picture beside the sender's name in an inbox is not part of the
+ * message at all. No HTML in this file can set it. It comes from one of:
+ *
+ *   • BIMI — a DNS record at `default._bimi.<MAIL_DOMAIN>` pointing at an SVG
+ *     Tiny PS logo over HTTPS, which requires DMARC at `p=quarantine` or
+ *     `p=reject` first. Gmail additionally requires a Verified Mark Certificate,
+ *     which is a paid certificate and needs a registered trademark.
+ *   • The Google Workspace profile photo of the sending account, for mail
+ *     relayed through that account.
+ *   • The recipient's own address book.
+ *
+ * See `docs/EMAIL_BRANDING.md` for what is actually configurable on this
+ * deployment. It is written there rather than promised here because the answer
+ * is operational, and inventing a provider feature that does not exist would be
+ * worse than saying plainly that the avatar needs DNS.
+ */
 export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = null) => {
   const safeTitle = escapeHtml(title);
   const safeCtaUrl = escapeHtml(ctaUrl);
@@ -556,6 +604,12 @@ export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = n
       .content h1, .content p {
         color: #eee !important;
       }
+      /* The wordmark is ink-on-white in the light theme and would vanish
+         against the dark card. The mark itself is white on the brand green and
+         needs no override. */
+      .brand-word {
+        color: #eee !important;
+      }
       .footer {
         color: #888 !important;
       }
@@ -573,8 +627,11 @@ export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = n
                 <td class="header">
                   <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                     <tr>
-                      <td style="background-color: ${brandColor}; border-radius: 8px; width: 48px; height: 48px; text-align: center; vertical-align: middle;">
-                        <span style="color: #ffffff; font-family: 'Arial', sans-serif; font-size: 20px; font-weight: bold; letter-spacing: -0.5px; line-height: 48px;">WV</span>
+                      <td style="background-color: ${brandColor}; border-radius: 8px; width: 48px; height: 48px; min-width: 48px; text-align: center; vertical-align: middle;">
+                        <span style="color: #ffffff; font-family: 'Arial', Helvetica, sans-serif; font-size: 20px; font-weight: bold; letter-spacing: -0.5px; line-height: 48px;">WV</span>
+                      </td>
+                      <td style="padding-left: 12px; vertical-align: middle;">
+                        <span class="brand-word" style="font-family: 'Arial', Helvetica, sans-serif; font-size: 18px; font-weight: bold; color: ${inkColor}; letter-spacing: -0.2px;">${escapeHtml(APP_NAME)}</span>
                       </td>
                     </tr>
                   </table>

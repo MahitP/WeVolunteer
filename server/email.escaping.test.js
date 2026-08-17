@@ -110,14 +110,15 @@ describe('notification emails escape database values', () => {
     vi.resetModules();
     const dbMod = await import('./db.js');
     dbMod.initDatabase();
+    await dbMod.completeDatabaseInit();
     const db = dbMod.db;
 
     const now = new Date().toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, username, email, password_hash, name, grade, role, created_at)
       VALUES ('u1','u1','u1@example.org','x',?,'11','student',?)
     `).run(userName, now);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, username, email, password_hash, name, grade, role, created_at)
       VALUES ('org1','org1','org1@example.org','x',?,'Adult','organizer',?)
     `).run(orgName, now);
@@ -130,11 +131,11 @@ describe('notification emails escape database values', () => {
      * worker selected `e.start_datetime`, threw on every send, and its catch block
      * silently dropped the whole event-details card from every notification email.
      */
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, created_at)
       VALUES ('e1', ?, 'd', 'School', ?, ?, 'org1', 'open', ?)
     `).run(eventTitle, eventLocation, now, now);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
       VALUES ('s1', 'e1', 'Morning', 'd', ?, ?, 5)
     `).run(now, now);
@@ -148,7 +149,7 @@ describe('notification emails escape database values', () => {
 
     vi.resetModules();
     const worker = await import('./workers/notificationWorker.js');
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notification_jobs (id, channel, payload, status, attempts, next_attempt_at, created_at)
       VALUES ('j1','email',?,'pending',0,?,?)
     `).run(

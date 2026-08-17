@@ -65,8 +65,8 @@ describe('cross-feature privilege escalation', () => {
        for something you can never do is a worse answer than "no". */
     expect(res.body?.code).not.toBe('reauth_required');
 
-    expect(db.prepare('SELECT COUNT(*) AS n FROM admin_invitations WHERE email = ?')
-      .get('chain@example.invalid').n).toBe(0);
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM admin_invitations WHERE email = ?')
+      .get('chain@example.invalid')).n).toBe(0);
   });
 
   /**
@@ -86,7 +86,7 @@ describe('cross-feature privilege escalation', () => {
     const { can } = await import('./authz.js');
     const { principalFor } = await import('./authz.js');
 
-    const adminRow = db.prepare('SELECT * FROM users WHERE email = ?').get('admin@example.gov');
+    const adminRow = await db.prepare('SELECT * FROM users WHERE email = ?').get('admin@example.gov');
 
     for (const cap of SUPER_ONLY) {
       /* A principal holding the grant explicitly — the strongest form of the
@@ -118,10 +118,10 @@ describe('cross-feature privilege escalation', () => {
     expect(res.status).toBe(400);
     expect(res.body?.code).toBe('role_invalid');
 
-    expect(db.prepare('SELECT COUNT(*) AS n FROM admin_invitations WHERE email = ?')
-      .get('wants-the-crown@example.invalid').n).toBe(0);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM admin_invitations WHERE email = ?')
-      .get('wants-the-crown@example.invalid').n).toBe(0);
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM admin_invitations WHERE email = ?')
+      .get('wants-the-crown@example.invalid')).n).toBe(0);
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM admin_invitations WHERE email = ?')
+      .get('wants-the-crown@example.invalid')).n).toBe(0);
   });
 
   /**
@@ -164,7 +164,7 @@ describe('cross-feature privilege escalation', () => {
     ['warn', 'POST', (id) => `/api/admin/users/${id}/warn`, { reason: 'Warning the owner' }],
     ['revoke ownership from', 'POST', (id) => `/api/admin/users/${id}/revoke`, { reason: 'Demoting the owner' }],
   ])('an administrator cannot %s the owner', async (_label, method, pathFor, body) => {
-    const ownerRow = db.prepare('SELECT id, role, account_status FROM users WHERE email = ?')
+    const ownerRow = await db.prepare('SELECT id, role, account_status FROM users WHERE email = ?')
       .get(OWNER_EMAIL);
     expect(ownerRow.role).toBe(ROLE.SUPER_ADMIN);
 
@@ -186,7 +186,7 @@ describe('cross-feature privilege escalation', () => {
 
     /* The end state is the assertion. A refusal that still changed the row would
        satisfy a status check and lose the platform. */
-    const after = db.prepare('SELECT role, account_status FROM users WHERE id = ?').get(ownerRow.id);
+    const after = await db.prepare('SELECT role, account_status FROM users WHERE id = ?').get(ownerRow.id);
     expect(after.role).toBe(ROLE.SUPER_ADMIN);
     expect(after.account_status).toBe('active');
   });
@@ -206,7 +206,7 @@ describe('cross-feature privilege escalation', () => {
    * person who wrote it.
    */
   it('has no administrative account-deletion route to reach the owner through', async () => {
-    const ownerRow = db.prepare('SELECT id FROM users WHERE email = ?').get(OWNER_EMAIL);
+    const ownerRow = await db.prepare('SELECT id FROM users WHERE email = ?').get(OWNER_EMAIL);
 
     for (const path of [
       `/api/admin/users/${ownerRow.id}`,
@@ -217,7 +217,7 @@ describe('cross-feature privilege escalation', () => {
     }
 
     /* And the owner is still there, which is the point of all of it. */
-    expect(db.prepare('SELECT account_status FROM users WHERE id = ?').get(ownerRow.id)
+    expect((await db.prepare('SELECT account_status FROM users WHERE id = ?').get(ownerRow.id))
       .account_status).toBe('active');
   });
 
@@ -229,7 +229,7 @@ describe('cross-feature privilege escalation', () => {
    * that has a promote endpoint, and it costs one test to know.
    */
   it('an administrator cannot promote themselves to owner', async () => {
-    const before = db.prepare('SELECT role FROM users WHERE email = ?').get('admin@example.gov').role;
+    const before = (await db.prepare('SELECT role FROM users WHERE email = ?').get('admin@example.gov')).role;
 
     const res = await srv.call('POST', '/api/admin/users/user-admin/promote',
       { reason: 'Self-service', role: ROLE.SUPER_ADMIN }, admin);
@@ -238,7 +238,7 @@ describe('cross-feature privilege escalation', () => {
     /* Refused on the capability: `admin.create` is SUPER_ONLY, so promotion is not
        something an administrator can perform on anybody, themselves included. */
     expect(res.status).toBe(403);
-    expect(db.prepare('SELECT role FROM users WHERE email = ?').get('admin@example.gov').role)
+    expect((await db.prepare('SELECT role FROM users WHERE email = ?').get('admin@example.gov')).role)
       .toBe(before);
   });
 
@@ -254,7 +254,7 @@ describe('cross-feature privilege escalation', () => {
    */
   it('a grant of one capability confers no other', async () => {
     const { can, principalFor } = await import('./authz.js');
-    const studentRow = db.prepare('SELECT * FROM users WHERE email = ?')
+    const studentRow = await db.prepare('SELECT * FROM users WHERE email = ?')
       .get(STUDENT_EMAIL);
 
     const helper = principalFor(studentRow, { grants: ['report.evidence.read'] });
@@ -276,7 +276,7 @@ describe('cross-feature privilege escalation', () => {
    */
   it('a misspelled capability is refused even for the owner', async () => {
     const { can, principalFor } = await import('./authz.js');
-    const ownerRow = db.prepare('SELECT * FROM users WHERE email = ?')
+    const ownerRow = await db.prepare('SELECT * FROM users WHERE email = ?')
       .get(OWNER_EMAIL);
 
     const principal = principalFor(ownerRow);

@@ -86,7 +86,7 @@ describe('messages/users/search result scoping (Task 7d)', () => {
       password: 'Password123', grade: 'Adult', role: 'student'
     });
     const { db } = await import('./db.js');
-    db.prepare("UPDATE users SET role = 'partner' WHERE email = ?").run('search-partner-7d@test.local');
+    await db.prepare("UPDATE users SET role = 'partner' WHERE email = ?").run('search-partner-7d@test.local');
     partnerToken = partnerSigned.cookie;
   });
 
@@ -122,17 +122,17 @@ describe('messages/users/search result scoping (Task 7d)', () => {
     // directly, the same way other suites (e.g. routes.recommendations.test.js)
     // build fixtures outside the capability system rather than through it.
     const { db } = await import('./db.js');
-    const adminId = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get().id;
+    const adminId = (await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get()).id;
     const now = new Date();
     const future = new Date(now.getTime() + 40 * 864e5).toISOString();
     const futureEnd = new Date(now.getTime() + 40 * 864e5 + 108e5).toISOString();
     const deadline = new Date(now.getTime() + 35 * 864e5).toISOString();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, created_at)
       VALUES ('event-admin-search-7d', 'Admin-hosted event for search scoping', 'd', 'Other', 'Hall', ?, ?, 'open', ?)
     `).run(deadline, adminId, now.toISOString());
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
       VALUES ('slot-admin-search-7d', 'event-admin-search-7d', 'Shift', 'd', ?, ?, 5)
     `).run(future, futureEnd);
@@ -183,13 +183,13 @@ describe('messages/conversations/resolve capability walkthrough (v1.2a messaging
       password: 'Password123', grade: 'Adult', role: 'student'
     });
     const { db } = await import('./db.js');
-    db.prepare("UPDATE users SET role = 'partner' WHERE email = ?").run('resolve-partner-7e@test.local');
-    db.prepare("UPDATE users SET role = 'super_admin', verified = 1 WHERE email = ?").run('resolve-superadmin-7e@test.local');
+    await db.prepare("UPDATE users SET role = 'partner' WHERE email = ?").run('resolve-partner-7e@test.local');
+    await db.prepare("UPDATE users SET role = 'super_admin', verified = 1 WHERE email = ?").run('resolve-superadmin-7e@test.local');
     partnerToken = partnerSigned.cookie;
     superAdminToken = superAdminSigned.cookie;
 
-    studentId = db.prepare("SELECT id FROM users WHERE email = 'leo.chen@example.com'").get().id;
-    const adminId = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get().id;
+    studentId = (await db.prepare("SELECT id FROM users WHERE email = 'leo.chen@example.com'").get()).id;
+    const adminId = (await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get()).id;
 
     // An event the organizer fixture actually hosts, with a real application
     // from the student — exercises the organizer's ownership check and the
@@ -214,11 +214,11 @@ describe('messages/conversations/resolve capability walkthrough (v1.2a messaging
     const deadline = new Date(Date.now() + 30 * 864e5).toISOString();
     const futureStart = new Date(Date.now() + 35 * 864e5).toISOString();
     const futureEnd = new Date(Date.now() + 35 * 864e5 + 108e5).toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, created_at)
       VALUES (?, 'Unhosted-by-organizer event', 'd', 'Other', 'Hall', ?, ?, 'open', ?)
     `).run(unhostedEventId, deadline, adminId, new Date().toISOString());
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
       VALUES ('slot-resolve-unhosted-7e', ?, 'Shift', 'd', ?, ?, 5)
     `).run(unhostedEventId, futureStart, futureEnd);

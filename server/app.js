@@ -1,4 +1,5 @@
 import express from 'express';
+import { probeWritable as probeDatabaseWritable } from './db/dialectSql.js';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -1004,21 +1005,19 @@ let writeProbeCache = { at: 0, ok: null };
  * else in the codebase). A scratch INSERT/ROLLBACK would also work but leaves
  * rowid sequences and WAL frames behind for no extra signal.
  */
-function probeWritable() {
+async function probeWritable() {
   const now = Date.now();
   if (writeProbeCache.ok !== null && now - writeProbeCache.at < WRITE_PROBE_INTERVAL_MS) {
     return writeProbeCache.ok;
   }
 
+  /* The probe itself lives in `db/dialectSql.js`: PostgreSQL has no pragmas, and
+     its equivalent trick — allocating a transaction id — is different enough to
+     want the reasoning written down beside the SQLite one rather than branched
+     inline here. The caching and the /health wiring stay. */
   let ok = false;
   try {
-    const current = db.prepare('PRAGMA user_version').get();
-    const value = Number(current?.user_version ?? 0);
-    // Interpolated rather than bound: PRAGMA does not accept bind parameters. The
-    // value comes from SQLite itself and is coerced through Number(), so it cannot
-    // carry anything but a number.
-    db.exec(`PRAGMA user_version = ${value}`);
-    ok = true;
+    ok = await probeDatabaseWritable(db);
   } catch {
     ok = false;
   }
@@ -1029,10 +1028,10 @@ function probeWritable() {
 
 // Health check is registered BEFORE the production SPA catch-all below, so it
 // always returns its JSON — a load balancer must never receive index.html here.
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
   let readable = false;
   try {
-    db.prepare('SELECT 1').get();
+    await db.prepare('SELECT 1').get();
     readable = true;
   } catch {
     readable = false;
@@ -1051,7 +1050,7 @@ app.get('/health', (req, res) => {
     });
   }
 
-  const writable = probeWritable();
+  const writable = await probeWritable();
   if (!writable) {
     return res.status(503).json({
       status: 'error',
@@ -1149,7 +1148,7 @@ if (IS_PRODUCTION) {
 
 // Error handler registered LAST, so it catches errors from every layer above,
 // including the static/SPA block.
-app.use((err, req, res, _next) => {
+app.use(async (err, req, res, _next) => {
   if (String(err.message).startsWith('Origin not allowed by CORS')) {
     console.warn(err.message);
     return res.status(403).json({ error: 'Origin not allowed.' });
@@ -1215,7 +1214,7 @@ app.use((err, req, res, _next) => {
    * failure happened before routing resolved, which is honest: there was no
    * route.
    */
-  recordError(db, {
+  await recordError(db, {
     source: 'server',
     kind: err?.constructor?.name || 'Error',
     message: err?.message,

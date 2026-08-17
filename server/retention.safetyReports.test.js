@@ -119,12 +119,12 @@ describe('the decision is enforced by the database, not by convention', () => {
       .toThrow(/ABORT|never/i);
   });
 
-  it('leaves a decade-old resolved report and its evidence in place after a sweep', () => {
+  it('leaves a decade-old resolved report and its evidence in place after a sweep', async () => {
     const { reportId } = seedResolvedReport({ ageDays: 10 * 365 });
-    sweep(db);
-    expect(db.prepare('SELECT COUNT(*) AS c FROM reports WHERE id = ?').get(reportId).c).toBe(1);
+    await sweep(db);
+    expect((await db.prepare('SELECT COUNT(*) AS c FROM reports WHERE id = ?').get(reportId)).c).toBe(1);
     expect(
-      db.prepare('SELECT COUNT(*) AS c FROM report_evidence WHERE report_id = ?').get(reportId).c
+      (await db.prepare('SELECT COUNT(*) AS c FROM report_evidence WHERE report_id = ?').get(reportId)).c
     ).toBe(1);
   });
 });

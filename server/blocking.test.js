@@ -83,7 +83,7 @@ describe('blocking', () => {
 
     expect(again.status).toBe(200);
     expect(again.body.created, 'a repeat block must not create a second row').toBe(false);
-    expect(db.prepare('SELECT COUNT(*) AS c FROM user_blocks WHERE blocker_id = ?').get(STUDENT).c).toBe(1);
+    expect((await db.prepare('SELECT COUNT(*) AS c FROM user_blocks WHERE blocker_id = ?').get(STUDENT)).c).toBe(1);
   });
 
   it('CLOSES AN EXISTING CONVERSATION — the case that actually matters', async () => {
@@ -158,29 +158,29 @@ describe('blocking', () => {
     const { eventId } = await eventWithApplicant(orgToken, studentToken, STUDENT);
     await srv.call('POST', `/api/blocks/${ORG}`, {}, studentToken);
 
-    const app = db.prepare('SELECT status FROM applications WHERE event_id = ? AND user_id = ?')
+    const app = await db.prepare('SELECT status FROM applications WHERE event_id = ? AND user_id = ?')
       .get(eventId, STUDENT);
     expect(app, 'the application must survive a block').toBeTruthy();
     expect(app.status).not.toBe('withdrawn');
   });
 
   it('leaves credited hours untouched', async () => {
-    const before = db.prepare(
+    const before = (await db.prepare(
       'SELECT COALESCE(SUM(hours_awarded),0) AS h FROM attendance WHERE user_id = ? AND present = 1'
-    ).get(STUDENT).h;
+    ).get(STUDENT)).h;
 
     await srv.call('POST', `/api/blocks/${ORG}`, {}, studentToken);
 
-    const after = db.prepare(
+    const after = (await db.prepare(
       'SELECT COALESCE(SUM(hours_awarded),0) AS h FROM attendance WHERE user_id = ? AND present = 1'
-    ).get(STUDENT).h;
+    ).get(STUDENT)).h;
     expect(after).toBe(before);
   });
 
   it('raises a moderation signal, because students block instead of reporting', async () => {
     await srv.call('POST', `/api/blocks/${ORG}`, {}, studentToken);
 
-    const audit = db.prepare(`
+    const audit = await db.prepare(`
       SELECT * FROM admin_audit_logs
       WHERE action = 'USER_BLOCKED' AND target_user_id = ?
       ORDER BY created_at DESC LIMIT 1
@@ -220,7 +220,7 @@ describe('blocking', () => {
       // the channel a student would use to complain about them.
       const res = await srv.call('POST', `/api/blocks/${STUDENT}`, {}, orgToken);
       expect(res.status).toBe(403);
-      expect(db.prepare('SELECT COUNT(*) AS c FROM user_blocks').get().c).toBe(0);
+      expect((await db.prepare('SELECT COUNT(*) AS c FROM user_blocks').get()).c).toBe(0);
     });
 
     it('refuses self-blocking', async () => {

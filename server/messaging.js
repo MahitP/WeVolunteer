@@ -1,7 +1,7 @@
 import crypto from 'crypto';
+import { runInTransaction } from './db/connectionContext.js';
 import { db } from './db.js';
 import { canRunEvent } from './organizations.js';
-import { inTransaction } from './utils.js';
 import { can, principalFor } from './authz.js';
 import { isBlockedBetween } from './blocking.js';
 /* The ONE definition of "these two are friends". See resolvePeerConversation —
@@ -18,12 +18,12 @@ export function newId(prefix) {
   return `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 }
 
-export function getConversation(conversationId) {
-  return db.prepare('SELECT * FROM conversations WHERE id = ?').get(conversationId);
+export async function getConversation(conversationId) {
+  return await db.prepare('SELECT * FROM conversations WHERE id = ?').get(conversationId);
 }
 
-export function getParticipant(conversationId, userId) {
-  return db.prepare(`
+export async function getParticipant(conversationId, userId) {
+  return await db.prepare(`
     SELECT cp.*, u.name, u.avatar, u.role
     FROM conversation_participants cp
     JOIN users u ON u.id = cp.user_id
@@ -31,16 +31,16 @@ export function getParticipant(conversationId, userId) {
   `).get(conversationId, userId);
 }
 
-export function isConversationParticipant(conversationId, userId) {
-  return !!getParticipant(conversationId, userId);
+export async function isConversationParticipant(conversationId, userId) {
+  return !!await getParticipant(conversationId, userId);
 }
 
-export function otherParticipant(conversationId, userId) {
+export async function otherParticipant(conversationId, userId) {
   /* No `u.school`. It is one of a volunteer's PUBLIC_ONLY_FIELDS
      (profileSerializer.js) and `profile_visibility` defaults to 'private', so a
      student who never opened the setting has it withheld from every peer — while
      every conversation payload published it. Nothing in the message UI read it. */
-  return db.prepare(`
+  return await db.prepare(`
     SELECT u.id, u.name, u.avatar, u.role
     FROM conversation_participants cp
     JOIN users u ON u.id = cp.user_id
@@ -57,8 +57,8 @@ export function otherParticipant(conversationId, userId) {
  * real `req.principal` so per-user capability grants (Task 4) are honoured,
  * not just the base role's.
  */
-export function eligibleRelationship({ eventId, actor, studentId = null, principal = null }) {
-  const event = db.prepare(`
+export async function eligibleRelationship({ eventId, actor, studentId = null, principal = null }) {
+  const event = await db.prepare(`
     SELECT e.*, u.name AS organizer_name, u.avatar AS organizer_avatar, u.school AS organizer_school
     FROM events e
     JOIN users u ON u.id = e.organizer_id
@@ -95,7 +95,7 @@ export function eligibleRelationship({ eventId, actor, studentId = null, princip
     /* `canRunEvent`: a club's manager can now edit, cancel, broadcast to and
        credit hours on an event a helper posted, so refusing them a conversation
        about a volunteer on it was the one power that did not follow. */
-    if (!canRunEvent(db, event, actor.id, { hasModerate: can(p, 'event.moderate') })) {
+    if (!await canRunEvent(db, event, actor.id, { hasModerate: can(p, 'event.moderate') })) {
       return { ok: false, status: 403, error: 'Access denied: You do not host this event' };
     }
     if (!resolvedStudentId) {
@@ -111,10 +111,10 @@ export function eligibleRelationship({ eventId, actor, studentId = null, princip
     return { ok: false, status: 403, error: 'Access denied' };
   }
 
-  const student = db.prepare("SELECT id, name, avatar, role FROM users WHERE id = ? AND role = 'student'").get(resolvedStudentId);
+  const student = await db.prepare("SELECT id, name, avatar, role FROM users WHERE id = ? AND role = 'student'").get(resolvedStudentId);
 
   const relationship = student
-    ? db.prepare(`
+    ? await db.prepare(`
         SELECT a.*, s.start_datetime, s.end_datetime
         FROM applications a
         JOIN slots s ON s.id = a.slot_id
@@ -166,7 +166,7 @@ export function eligibleRelationship({ eventId, actor, studentId = null, princip
    * Staff are exempt: moderation has to be able to reach both parties precisely
    * when a block has been placed, and `event.moderate` is not a party to it.
    */
-  if (!isStaff && isBlockedBetween(db, resolvedStudentId, actor.id)) {
+  if (!isStaff && await isBlockedBetween(db, resolvedStudentId, actor.id)) {
     return { ok: false, status: 403, error: 'Messaging unlocks after an application exists for this event' };
   }
 
@@ -180,23 +180,23 @@ export function eligibleRelationship({ eventId, actor, studentId = null, princip
   };
 }
 
-export function resolveConversation({ eventId, actor, studentId = null, principal = null }) {
-  const rel = eligibleRelationship({ eventId, actor, studentId, principal });
+export async function resolveConversation({ eventId, actor, studentId = null, principal = null }) {
+  const rel = await eligibleRelationship({ eventId, actor, studentId, principal });
   if (!rel.ok) return rel;
 
-  let conversation = db.prepare(`
+  let conversation = await db.prepare(`
     SELECT * FROM conversations WHERE event_id = ? AND student_id = ? AND organizer_id = ?
   `).get(rel.event.id, rel.studentId, rel.organizerId);
 
   if (!conversation) {
     const now = new Date().toISOString();
     const conversationId = newId('conv');
-    inTransaction(() => {
-      db.prepare(`
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare(`
         INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(conversationId, rel.event.id, rel.studentId, rel.organizerId, actor.id, now);
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
         VALUES (?, ?, ?, ?), (?, ?, ?, ?)
       `).run(
@@ -204,10 +204,10 @@ export function resolveConversation({ eventId, actor, studentId = null, principa
         conversationId, rel.organizerId, 'organizer', now
       );
     });
-    conversation = getConversation(conversationId);
+    conversation = await getConversation(conversationId);
   }
 
-  return { ok: true, conversation: decorateConversation(conversation, actor.id), relationship: rel };
+  return { ok: true, conversation: await decorateConversation(conversation, actor.id), relationship: rel };
 }
 
 /**
@@ -248,7 +248,7 @@ export function adminThreadKind(counterpartyPrincipal) {
  * "message" twice idempotent even if two requests interleave; the lookup is what
  * makes the normal case not raise.
  */
-export function resolveAdminConversation({ actor, counterpartyId, counterpartyPrincipal }) {
+export async function resolveAdminConversation({ actor, counterpartyId, counterpartyPrincipal }) {
   if (!counterpartyId || typeof counterpartyId !== 'string') {
     return { ok: false, status: 400, error: 'A person to contact is required' };
   }
@@ -256,7 +256,7 @@ export function resolveAdminConversation({ actor, counterpartyId, counterpartyPr
     return { ok: false, status: 400, error: 'You cannot open a conversation with yourself' };
   }
 
-  const counterparty = db.prepare(
+  const counterparty = await db.prepare(
     "SELECT id, role, account_status FROM users WHERE id = ? AND account_status != 'deleted'"
   ).get(counterpartyId);
   if (!counterparty) return { ok: false, status: 404, error: 'Person not found' };
@@ -279,7 +279,7 @@ export function resolveAdminConversation({ actor, counterpartyId, counterpartyPr
   const studentId = kind === 'admin_student' ? counterparty.id : null;
   const organizerId = kind === 'admin_organizer' ? counterparty.id : null;
 
-  let conversation = db.prepare(`
+  let conversation = await db.prepare(`
     SELECT * FROM conversations
      WHERE kind = ? AND created_by = ? AND COALESCE(student_id, organizer_id) = ?
   `).get(kind, actor.id, counterparty.id);
@@ -287,8 +287,8 @@ export function resolveAdminConversation({ actor, counterpartyId, counterpartyPr
   if (!conversation) {
     const now = new Date().toISOString();
     const conversationId = newId('conv');
-    inTransaction(() => {
-      db.prepare(`
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare(`
         INSERT INTO conversations (id, kind, event_id, student_id, organizer_id, created_by, created_at)
         VALUES (?, ?, NULL, ?, ?, ?, ?)
       `).run(conversationId, kind, studentId, organizerId, actor.id, now);
@@ -299,7 +299,7 @@ export function resolveAdminConversation({ actor, counterpartyId, counterpartyPr
        * later that this thread was opened by staff rather than by a peer — the
        * account's current role may have changed by then.
        */
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
         VALUES (?, ?, ?, ?), (?, ?, ?, ?)
       `).run(
@@ -307,13 +307,13 @@ export function resolveAdminConversation({ actor, counterpartyId, counterpartyPr
         conversationId, counterparty.id, counterparty.role, now
       );
     });
-    conversation = getConversation(conversationId);
+    conversation = await getConversation(conversationId);
   }
 
   return {
     ok: true,
     created: true,
-    conversation: decorateConversation(conversation, actor.id),
+    conversation: await decorateConversation(conversation, actor.id),
   };
 }
 
@@ -376,7 +376,7 @@ export function peerPairKey(a, b) {
  * on every read and every send, which is what makes unfriending take effect on an
  * open thread rather than only on the next new one.
  */
-export function resolvePeerConversation({ actor, friendId }) {
+export async function resolvePeerConversation({ actor, friendId }) {
   if (!friendId || typeof friendId !== 'string') {
     return { ok: false, status: 400, error: 'A person to message is required' };
   }
@@ -397,20 +397,20 @@ export function resolvePeerConversation({ actor, friendId }) {
    * equally uninformative in both cases — and it does not reveal a block, which
    * would tell a blocked party who blocked them.
    */
-  if (!areFriends(db, actor.id, friendId)) {
+  if (!await areFriends(db, actor.id, friendId)) {
     return { ok: false, status: 403, error: 'You can only message people you are friends with' };
   }
 
   const pairKey = peerPairKey(actor.id, friendId);
 
-  let conversation = db.prepare(
+  let conversation = await db.prepare(
     "SELECT * FROM conversations WHERE kind = 'peer' AND pair_key = ?"
   ).get(pairKey);
 
   if (!conversation) {
     const now = new Date().toISOString();
     const conversationId = newId('conv');
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       /**
        * Both role columns stay NULL. Both of these people are students and
        * neither is an organizer, so seating one of them in `organizer_id` would
@@ -419,7 +419,7 @@ export function resolvePeerConversation({ actor, friendId }) {
        * is the participant rows, which is what `isConversationParticipant`
        * reads anyway.
        */
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO conversations (id, kind, event_id, student_id, organizer_id, pair_key, created_by, created_at)
         VALUES (?, 'peer', NULL, NULL, NULL, ?, ?, ?)
       `).run(conversationId, pairKey, actor.id, now);
@@ -428,7 +428,7 @@ export function resolvePeerConversation({ actor, friendId }) {
          opened, exactly as it is for the other kinds. Both are students here;
          recording it is what lets a reader a year later tell that this was a
          peer thread and not staff contact, even if a role has changed since. */
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
         VALUES (?, ?, ?, ?), (?, ?, ?, ?)
       `).run(
@@ -436,15 +436,21 @@ export function resolvePeerConversation({ actor, friendId }) {
         conversationId, friendId, 'student', now
       );
     });
-    conversation = getConversation(conversationId);
+    conversation = await getConversation(conversationId);
   }
 
-  return { ok: true, conversation: decorateConversation(conversation, actor.id) };
+  return { ok: true, conversation: await decorateConversation(conversation, actor.id) };
 }
 
-export function decorateConversation(conversation, viewerId) {
+export async function decorateConversation(conversation, viewerId) {
   if (!conversation) return null;
-  const event = db.prepare(`
+  /* Every non-aggregated column is grouped, including the two from `users`.
+     SQLite allows a bare column that is functionally dependent on the grouped
+     key and picks an arbitrary row for it; PostgreSQL requires it to be named,
+     and answers `column "u.name" must appear in the GROUP BY clause`. Adding
+     them changes no result here — `e.id` is the primary key, so each group has
+     exactly one organizer. */
+  const event = await db.prepare(`
     SELECT e.id, e.title, e.location, e.status, e.application_deadline,
            u.name AS organizer_name, u.school AS organizer_school,
            MIN(s.start_datetime) AS start_datetime,
@@ -453,17 +459,17 @@ export function decorateConversation(conversation, viewerId) {
     JOIN users u ON u.id = e.organizer_id
     LEFT JOIN slots s ON s.event_id = e.id
     WHERE e.id = ?
-    GROUP BY e.id
+    GROUP BY e.id, u.name, u.school
   `).get(conversation.event_id);
-  const participant = getParticipant(conversation.id, viewerId);
-  const other = otherParticipant(conversation.id, viewerId);
-  const lifecycle = computeConversationLifecycle(conversation, new Date());
+  const participant = await getParticipant(conversation.id, viewerId);
+  const other = await otherParticipant(conversation.id, viewerId);
+  const lifecycle = await computeConversationLifecycle(conversation, new Date());
   const lastMessage = conversation.last_message_id
-    ? db.prepare('SELECT id, sender_id, body, created_at FROM messages WHERE id = ?').get(conversation.last_message_id)
+    ? await db.prepare('SELECT id, sender_id, body, created_at FROM messages WHERE id = ?').get(conversation.last_message_id)
     : null;
-  const unread = unreadCount(conversation.id, viewerId);
+  const unread = await unreadCount(conversation.id, viewerId);
   
-  const otherParticipantRow = other ? db.prepare('SELECT last_read_message_id, last_read_at FROM conversation_participants WHERE conversation_id = ? AND user_id = ?').get(conversation.id, other.id) : null;
+  const otherParticipantRow = other ? await db.prepare('SELECT last_read_message_id, last_read_at FROM conversation_participants WHERE conversation_id = ? AND user_id = ?').get(conversation.id, other.id) : null;
 
   return {
     id: conversation.id,
@@ -524,35 +530,40 @@ export function formatMessage(row) {
   };
 }
 
-export function listConversationsForUser(userId) {
-  return db.prepare(`
+export async function listConversationsForUser(userId) {
+  const rows = await db.prepare(`
     SELECT c.*
     FROM conversations c
     JOIN conversation_participants cp ON cp.conversation_id = c.id
     WHERE cp.user_id = ?
     ORDER BY COALESCE(c.last_message_at, c.created_at) DESC
-  `).all(userId).map(c => decorateConversation(c, userId));
+  `).all(userId);
+
+  /* `Promise.all`, not a bare `.map`: `decorateConversation` is async now, and
+     an array of pending promises serialises to `[{}, {}]` — an empty
+     conversation list that looks like a real one. */
+  return Promise.all(rows.map(c => decorateConversation(c, userId)));
 }
 
-export function unreadCount(conversationId, userId) {
-  const participant = db.prepare(`
+export async function unreadCount(conversationId, userId) {
+  const participant = await db.prepare(`
     SELECT last_read_at FROM conversation_participants
     WHERE conversation_id = ? AND user_id = ?
   `).get(conversationId, userId);
   if (!participant) return 0;
   if (!participant.last_read_at) {
-    return db.prepare(`
+    return (await db.prepare(`
       SELECT COUNT(*) AS c FROM messages
       WHERE conversation_id = ? AND sender_id != ?
-    `).get(conversationId, userId).c;
+    `).get(conversationId, userId)).c;
   }
-  return db.prepare(`
+  return (await db.prepare(`
     SELECT COUNT(*) AS c FROM messages
     WHERE conversation_id = ? AND sender_id != ? AND created_at > ?
-  `).get(conversationId, userId, participant.last_read_at).c;
+  `).get(conversationId, userId, participant.last_read_at)).c;
 }
 
-export function computeConversationLifecycle(conversation, now = new Date()) {
+export async function computeConversationLifecycle(conversation, now = new Date()) {
   /**
    * A moderation thread never goes read-only, and this returns EARLY rather than
    * relying on the queries below finding nothing.
@@ -612,11 +623,11 @@ export function computeConversationLifecycle(conversation, now = new Date()) {
    * somehow absent, and participants are the membership of record regardless.
    */
   if (conversation.kind === 'peer') {
-    const ids = db.prepare(
+    const ids = (await db.prepare(
       'SELECT user_id FROM conversation_participants WHERE conversation_id = ?'
-    ).all(conversation.id).map(r => r.user_id);
+    ).all(conversation.id)).map(r => r.user_id);
 
-    if (ids.length === 2 && areFriends(db, ids[0], ids[1])) {
+    if (ids.length === 2 && await areFriends(db, ids[0], ids[1])) {
       return { state: 'active', writable: true, reason: null, banner: null };
     }
     return {
@@ -637,18 +648,18 @@ export function computeConversationLifecycle(conversation, now = new Date()) {
     return { state: 'active', writable: true, reason: null, banner: null };
   }
 
-  const apps = db.prepare(`
+  const apps = await db.prepare(`
     SELECT a.status, a.applied_at, s.end_datetime
     FROM applications a
     JOIN slots s ON s.id = a.slot_id
     WHERE a.event_id = ? AND a.user_id = ?
   `).all(conversation.event_id, conversation.student_id);
 
-  const eventDates = db.prepare(`
+  const eventDates = await db.prepare(`
     SELECT e.status, MAX(s.end_datetime) AS end_datetime
     FROM events e LEFT JOIN slots s ON s.event_id = e.id
     WHERE e.id = ?
-    GROUP BY e.id
+    GROUP BY e.id, e.status
   `).get(conversation.event_id);
 
   const addDays = (iso, days) => new Date(new Date(iso).getTime() + days * 86400000);

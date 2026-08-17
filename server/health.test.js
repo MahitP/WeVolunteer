@@ -34,6 +34,7 @@ async function freshApp() {
   vi.resetModules();
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const { app } = await import('./app.js');
   return { app, db: dbMod.db };
 }

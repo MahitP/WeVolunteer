@@ -129,7 +129,7 @@ describe('check-in', () => {
      * about whether a cancelled event still happened.
      */
     it('refuses check-in for a cancelled event', async () => {
-      db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(eventId);
+      await db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(eventId);
 
       const res = await srv.call('POST', `/api/events/${eventId}/checkin`,
         { checkinMap: { [application.id]: true } }, orgToken);
@@ -140,15 +140,15 @@ describe('check-in', () => {
 
     /** And it writes nothing while refusing. */
     it('records no mark when it refuses', async () => {
-      db.prepare('DELETE FROM attendance_checkin WHERE event_id = ?').run(eventId);
-      db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(eventId);
+      await db.prepare('DELETE FROM attendance_checkin WHERE event_id = ?').run(eventId);
+      await db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(eventId);
 
       await srv.call('POST', `/api/events/${eventId}/checkin`,
         { checkinMap: { [application.id]: true } }, orgToken);
 
-      expect(db.prepare(
+      expect((await db.prepare(
         'SELECT COUNT(*) AS n FROM attendance_checkin WHERE event_id = ?'
-      ).get(eventId).n).toBe(0);
+      ).get(eventId)).n).toBe(0);
     });
   });
 });

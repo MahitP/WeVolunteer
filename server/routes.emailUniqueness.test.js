@@ -69,8 +69,9 @@ function initAgainst(dbFile, env = {}) {
   execFileSync(process.execPath, ['--input-type=module', '-e', `
     process.env.WEV_DB_PATH = ${JSON.stringify(dbFile)};
     ${Object.entries(env).map(([k, v]) => `process.env.${k} = ${JSON.stringify(v)};`).join('\n')}
-    const { initDatabase } = await import('${root}/server/db.js');
+    const { initDatabase, completeDatabaseInit } = await import('${root}/server/db.js');
     initDatabase();
+    await completeDatabaseInit();
   `], { cwd: process.cwd(), stdio: 'pipe' });
 }
 

@@ -249,7 +249,7 @@ function round(value) {
  *
  * @returns {Map<string, Commitment[]>}
  */
-export function commitmentsFor(db, userIds, { now = new Date().toISOString() } = {}) {
+export async function commitmentsFor(db, userIds, { now = new Date().toISOString() } = {}) {
   const ids = [...new Set((userIds || []).filter(Boolean))];
   const out = new Map();
   if (ids.length === 0) return out;
@@ -260,7 +260,7 @@ export function commitmentsFor(db, userIds, { now = new Date().toISOString() } =
      lookups. `a.status = 'accepted'` and the ended-shift bound are the same
      DUE_COMMITMENTS definition `volunteerStats` uses, so the two cannot
      disagree about what a commitment is. */
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT a.user_id                AS userId,
            a.event_id               AS eventId,
            MAX(s.end_datetime)      AS occurredAt,
@@ -290,14 +290,14 @@ export function commitmentsFor(db, userIds, { now = new Date().toISOString() } =
 }
 
 /** The canonical summary for many volunteers at once. */
-export function reliabilityFor(db, userIds, options = {}) {
-  const commitments = commitmentsFor(db, userIds, options);
+export async function reliabilityFor(db, userIds, options = {}) {
+  const commitments = await commitmentsFor(db, userIds, options);
   const out = new Map();
   for (const [userId, list] of commitments) out.set(userId, summarise(list));
   return out;
 }
 
 /** The canonical summary for one volunteer. */
-export function reliabilityOf(db, userId, options = {}) {
-  return reliabilityFor(db, [userId], options).get(userId) ?? summarise([]);
+export async function reliabilityOf(db, userId, options = {}) {
+  return (await reliabilityFor(db, [userId], options)).get(userId) ?? summarise([]);
 }

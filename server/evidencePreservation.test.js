@@ -368,7 +368,7 @@ describe('a safety record survives the deletion of the people in it', () => {
               'still being looked at', 'open', 'normal', ?, ?)
     `).run(longAgo, longAgo);
 
-    const result = sweep(db, { now: new Date() });
+    const result = await sweep(db, { now: new Date() });
 
     expect(
       db.prepare("SELECT 1 FROM users WHERE id = 'u-held'").get(),
@@ -379,7 +379,7 @@ describe('a safety record survives the deletion of the people in it', () => {
     // ...and the hold lifts when the report is dealt with, or it is not a hold,
     // it is a permanent exemption nobody chose.
     db.prepare("UPDATE reports SET status = 'resolved' WHERE id = 'rep-held-1'").run();
-    sweep(db, { now: new Date() });
+    await sweep(db, { now: new Date() });
     expect(
       db.prepare("SELECT 1 FROM users WHERE id = 'u-held'").get(),
       'resolving the report must release the shell to the published 3-year schedule'
@@ -419,7 +419,7 @@ describe('a safety record survives the deletion of the people in it', () => {
       UPDATE users SET account_status = 'deleted', deleted_at = ? WHERE id = ?
     `).run(longAgo, organizerId);
 
-    sweep(db, { now: new Date() });
+    await sweep(db, { now: new Date() });
 
     const attendanceAfter = db.prepare('SELECT COUNT(*) c FROM attendance').get().c;
 

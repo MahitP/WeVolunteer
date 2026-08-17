@@ -36,24 +36,24 @@ describe('the browse filter vocabulary', () => {
      * So the fixture clones events of its own rather than asserting the seed
      * happens to be large enough.
      */
-    const template = db.prepare('SELECT * FROM events LIMIT 1').get();
+    const template = await db.prepare('SELECT * FROM events LIMIT 1').get();
     expect(template, 'no event to clone').toBeTruthy();
     const events = [];
     for (let i = 0; i < 12; i += 1) {
       const id = `vocab-ev-${i}`;
       const row = { ...template, id, title: `Vocabulary fixture ${i}`, status: 'open' };
       const cols = Object.keys(row);
-      db.prepare(`INSERT OR REPLACE INTO events (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
+      await db.prepare(`INSERT INTO events (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
         .run(...cols.map(c => row[c]));
       events.push(id);
     }
 
     const names = Array.from({ length: 22 }, (_, i) => `vocab${String(i).padStart(2, '0')}`);
-    db.prepare(`DELETE FROM event_tags WHERE tag LIKE 'vocab%'`).run();
+    await db.prepare(`DELETE FROM event_tags WHERE tag LIKE 'vocab%'`).run();
     names.forEach((name, i) => {
       const uses = Math.max(1, events.length - Math.floor((i * events.length) / names.length));
       events.slice(0, uses).forEach(ev =>
-        db.prepare('INSERT OR REPLACE INTO event_tags (event_id, tag, label) VALUES (?,?,?)')
+        db.prepare('INSERT INTO event_tags (event_id, tag, label) VALUES (?,?,?)')
           .run(ev, name, name));
     });
   }, 60000);
@@ -85,7 +85,7 @@ describe('the browse filter vocabulary', () => {
      */
     const shown = (await browseTags()).map(t => t.tag);
     const counts = Object.fromEntries(
-      db.prepare('SELECT tag, COUNT(*) n FROM event_tags GROUP BY tag').all().map(r => [r.tag, r.n]),
+      (await db.prepare('SELECT tag, COUNT(*) n FROM event_tags GROUP BY tag').all()).map(r => [r.tag, r.n]),
     );
     const omitted = Object.keys(counts).filter(t => !shown.includes(t));
 
@@ -106,7 +106,7 @@ describe('the browse filter vocabulary', () => {
        SQLite may return equal rows in any order and the bar would shuffle. */
     const shown = await browseTags();
     const counts = Object.fromEntries(
-      db.prepare('SELECT tag, COUNT(*) n FROM event_tags GROUP BY tag').all().map(r => [r.tag, r.n]),
+      (await db.prepare('SELECT tag, COUNT(*) n FROM event_tags GROUP BY tag').all()).map(r => [r.tag, r.n]),
     );
     for (let i = 1; i < shown.length; i += 1) {
       const prev = shown[i - 1]; const cur = shown[i];

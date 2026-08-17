@@ -74,9 +74,9 @@ export const STUDENT_ORGANIZER_CAPABILITIES = Object.freeze([
  * one sentence: if you help run a club, you hold the capabilities that let you
  * run its events.
  */
-export function helpsRunAnywhere(db, userId) {
+export async function helpsRunAnywhere(db, userId) {
   if (!userId) return false;
-  return Boolean(db.prepare(`
+  return Boolean(await db.prepare(`
     SELECT 1 FROM organization_members
      WHERE user_id = ? AND member_role IN ('manager', 'student_organizer') LIMIT 1
   `).get(userId));
@@ -99,13 +99,13 @@ export function helpsRunAnywhere(db, userId) {
  * @param {string|null} grantedBy who caused the change, recorded on the grant
  * @returns {'granted'|'revoked'} what the recomputation decided
  */
-export function syncOrganizerCapabilities(db, userId, grantedBy = null) {
+export async function syncOrganizerCapabilities(db, userId, grantedBy = null) {
   if (!userId) return 'revoked';
-  const holds = helpsRunAnywhere(db, userId);
+  const holds = await helpsRunAnywhere(db, userId);
 
   for (const capability of STUDENT_ORGANIZER_CAPABILITIES) {
-    if (holds) grantCapability({ db, userId, capability, grantedBy });
-    else revokeCapability({ db, userId, capability });
+    if (holds) await grantCapability({ db, userId, capability, grantedBy });
+    else await revokeCapability({ db, userId, capability });
   }
 
   return holds ? 'granted' : 'revoked';

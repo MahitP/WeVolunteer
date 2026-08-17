@@ -129,7 +129,7 @@ const SOURCES = [
 
 const files = SOURCES
   .map(f => ({ name: f.name, source: fs.readFileSync(f.full, 'utf8') }))
-  .filter(f => f.source.includes('canRunEvent('));
+  .filter(f => f.source.includes('await canRunEvent('));
 
 describe('every canRunEvent caller loads a whole event row', () => {
   it('finds the call sites at all', () => {

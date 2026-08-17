@@ -95,15 +95,15 @@ describe('the methods a sign-in is offered', () => {
   });
 
   it('does not offer recovery codes to an account holding none', async () => {
-    db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
+    await db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
 
     const { body } = await beginLogin();
     expect(body.availableMethods).toEqual(['email']);
   });
 
   it('offers recovery codes once the account holds some', async () => {
-    db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
-    db.prepare(
+    await db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
+    await db.prepare(
       "INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))"
     ).run('rc-availability-test', userId(), '$2a$10$notarealhashbutthatisfineher.eeeeeeeeeeeeeeeeeeeeeeeeeee');
 
@@ -129,7 +129,7 @@ describe('the methods a sign-in may actually SPEND', () => {
   });
 
   it('refuses a recovery code when the account holds no recovery codes', async () => {
-    db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
+    await db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
     const { preauth } = await beginLogin();
 
     const res = await submit({ method: 'recovery', code: 'ABCDEFGHIJ' }, preauth);
@@ -138,7 +138,7 @@ describe('the methods a sign-in may actually SPEND', () => {
   });
 
   it('refuses a request that names no method at all', async () => {
-    db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
+    await db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
     const { preauth } = await beginLogin();
 
     const res = await submit({}, preauth);
@@ -155,9 +155,9 @@ describe('the methods a sign-in may actually SPEND', () => {
     /* The attempt counters bound how many guesses somebody gets. A method that
        was never on offer is not a guess, and charging for it would let a
        confused client burn the budget the real method needs. */
-    const attempts = db.prepare(
+    const attempts = (await db.prepare(
       'SELECT COALESCE(SUM(attempts), 0) AS n FROM tfa_login_attempts WHERE user_id = ?'
-    ).get(userId()).n;
+    ).get(userId())).n;
     expect(attempts).toBe(0);
   });
 
@@ -172,10 +172,10 @@ describe('the methods a sign-in may actually SPEND', () => {
        way anything can: by re-hashing candidates is impossible, so instead the
        row is replaced with a known hash. */
     const bcrypt = (await import('bcryptjs')).default;
-    const row = db.prepare(
+    const row = await db.prepare(
       'SELECT id FROM tfa_email_codes WHERE user_id = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1'
     ).get(userId());
-    db.prepare('UPDATE tfa_email_codes SET code_hash = ? WHERE id = ?')
+    await db.prepare('UPDATE tfa_email_codes SET code_hash = ? WHERE id = ?')
       .run(await bcrypt.hash('424242', 10), row.id);
 
     const res = await submit({ method: 'email', code: '424242' }, preauth);
@@ -184,7 +184,7 @@ describe('the methods a sign-in may actually SPEND', () => {
   });
 
   it('accepts TOTP normally once the enrolment is actually confirmed', async () => {
-    db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
+    await db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
       .run(encryptSecret(SECRET), EMAIL);
     const { body, preauth } = await beginLogin();
     expect(body.availableMethods).toContain('totp');

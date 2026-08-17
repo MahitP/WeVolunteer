@@ -67,8 +67,8 @@ beforeAll(async () => {
      WHERE id = ?
   `);
   const now = new Date().toISOString();
-  tombstone.run(now, 'Deleted U.', `deleted_${DEAD_STUDENT}@system.local`, `deleted_${DEAD_STUDENT}`, DEAD_STUDENT);
-  tombstone.run(now, 'Deleted O.', `deleted_${DEAD_ORGANIZER}@system.local`, `deleted_${DEAD_ORGANIZER}`, DEAD_ORGANIZER);
+  await tombstone.run(now, 'Deleted U.', `deleted_${DEAD_STUDENT}@system.local`, `deleted_${DEAD_STUDENT}`, DEAD_STUDENT);
+  await tombstone.run(now, 'Deleted O.', `deleted_${DEAD_ORGANIZER}@system.local`, `deleted_${DEAD_ORGANIZER}`, DEAD_ORGANIZER);
 });
 
 afterAll(async () => { await srv?.close(); });
@@ -112,7 +112,7 @@ describe('deleted accounts are not readable as profiles', () => {
 describe('deleted accounts are not administratively actionable', () => {
   it('does not return a deleted account from the admin lookup', async () => {
     const ownerToken = await srv.loginAsOwner(OWNER_EMAIL);
-    const dead = db.prepare('SELECT email FROM users WHERE id = ?').get(DEAD_STUDENT);
+    const dead = await db.prepare('SELECT email FROM users WHERE id = ?').get(DEAD_STUDENT);
 
     const res = await srv.call(
       'GET', `/api/admin/users/lookup?email=${encodeURIComponent(dead.email)}`, undefined, ownerToken
@@ -122,7 +122,7 @@ describe('deleted accounts are not administratively actionable', () => {
 
   it('still returns a live account from the admin lookup', async () => {
     const ownerToken = await srv.loginAsOwner(OWNER_EMAIL);
-    const live = db.prepare('SELECT email FROM users WHERE id = ?').get(LIVE_STUDENT);
+    const live = await db.prepare('SELECT email FROM users WHERE id = ?').get(LIVE_STUDENT);
 
     const res = await srv.call(
       'GET', `/api/admin/users/lookup?email=${encodeURIComponent(live.email)}`, undefined, ownerToken
@@ -174,7 +174,7 @@ describe('deleted accounts are not administratively actionable', () => {
 
     expect(res.status).toBe(404);
 
-    const after = db.prepare('SELECT role FROM users WHERE id = ?').get(DEAD_STUDENT);
+    const after = await db.prepare('SELECT role FROM users WHERE id = ?').get(DEAD_STUDENT);
     expect(after.role).toBe('student');
   });
 });
@@ -210,10 +210,10 @@ describe('deleted accounts are excluded from counts and exports', () => {
 
     // Positive control first: if the export were simply empty or broken, the
     // absence assertion below would pass for the wrong reason.
-    const live = db.prepare('SELECT email FROM users WHERE id = ?').get(LIVE_STUDENT);
+    const live = await db.prepare('SELECT email FROM users WHERE id = ?').get(LIVE_STUDENT);
     expect(csv).toContain(live.email);
 
-    const dead = db.prepare('SELECT email FROM users WHERE id = ?').get(DEAD_STUDENT);
+    const dead = await db.prepare('SELECT email FROM users WHERE id = ?').get(DEAD_STUDENT);
     expect(csv, 'a deleted account was exported').not.toContain(dead.email);
     expect(csv, 'the reserved CLI actor was exported').not.toContain('system-cli@wevolunteer.invalid');
   });
@@ -223,12 +223,12 @@ describe('deleted accounts are excluded from counts and exports', () => {
     const res = await srv.call('GET', '/api/admin/stats', undefined, ownerToken);
     expect(res.status).toBe(200);
 
-    const liveStudents = db.prepare(
+    const liveStudents = (await db.prepare(
       "SELECT COUNT(*) AS c FROM users WHERE role = 'student' AND account_status <> 'deleted'"
-    ).get().c;
-    const allStudentRows = db.prepare(
+    ).get()).c;
+    const allStudentRows = (await db.prepare(
       "SELECT COUNT(*) AS c FROM users WHERE role = 'student'"
-    ).get().c;
+    ).get()).c;
 
     // The fixture must actually contain a deleted student, or this asserts nothing.
     expect(allStudentRows, 'no tombstone in the fixture — this test is vacuous')

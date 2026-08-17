@@ -89,7 +89,7 @@ describe('the Legal Center editor', () => {
       name: 'Owner', username: 'legal_owner', email: 'legal.owner@test.local',
       password: OWNER_PASSWORD, grade: 'Adult', role: 'student',
     });
-    db.prepare('UPDATE users SET role = ?, verified = 1 WHERE email = ?')
+    await db.prepare('UPDATE users SET role = ?, verified = 1 WHERE email = ?')
       .run('super_admin', 'legal.owner@test.local');
     /* An administrator with no second factor is refused by `requireCap` before
        any capability is consulted, so an unenrolled fixture would read 403 for
@@ -285,7 +285,7 @@ describe('the Legal Center editor', () => {
      * rather than in a parallel log nobody reads.
      */
     it('writes an audit row naming the document and version', async () => {
-      const row = db.prepare(`
+      const row = await db.prepare(`
         SELECT action, details FROM admin_audit_logs
         WHERE action = 'LEGAL_DOCUMENT_PUBLISHED'
         ORDER BY created_at DESC LIMIT 1
@@ -409,14 +409,14 @@ describe('the Legal Center editor', () => {
      */
     it('re-syncs without complaint after revisions have been published', async () => {
       const { syncLegalDocuments } = await import('./consent.js');
-      expect(() => syncLegalDocuments(db)).not.toThrow();
-      expect(() => syncLegalDocuments(db)).not.toThrow();
+      await expect(syncLegalDocuments(db)).resolves.not.toThrow();
+      await expect(syncLegalDocuments(db)).resolves.not.toThrow();
     });
 
     it('records each published revision as its own immutable catalogue row', async () => {
-      const rows = db.prepare(
+      const rows = (await db.prepare(
         'SELECT version FROM legal_documents WHERE slug = ? ORDER BY version'
-      ).all(EDITABLE).map(r => r.version);
+      ).all(EDITABLE)).map(r => r.version);
       /* The registry's original and both revisions, none overwritten. */
       expect(rows).toContain('1.0');
       expect(rows).toContain('1.1.0');
@@ -433,10 +433,10 @@ describe('the Legal Center editor', () => {
     });
 
     it('does not disturb the revisions already stored', async () => {
-      const before = db.prepare('SELECT COUNT(*) AS n FROM legal_document_revisions').get().n;
+      const before = (await db.prepare('SELECT COUNT(*) AS n FROM legal_document_revisions').get()).n;
       const migration = (await import('./migrations/034_legal_document_revisions.js')).default;
       migration.up(db);
-      expect(db.prepare('SELECT COUNT(*) AS n FROM legal_document_revisions').get().n).toBe(before);
+      expect((await db.prepare('SELECT COUNT(*) AS n FROM legal_document_revisions').get()).n).toBe(before);
     });
 
     it('refuses a duplicate (slug, version) at the schema level', () => {
@@ -486,7 +486,7 @@ describe('the Legal Center editor', () => {
        somebody already agreed to — that is the one thing this subsystem exists
        to keep true. */
     it('leaves existing acceptance rows byte-identical', async () => {
-      const before = db.prepare(
+      const before = await db.prepare(
         'SELECT document_slug, version, content_hash, accepted_at FROM legal_acceptances ORDER BY id'
       ).all();
 
@@ -497,7 +497,7 @@ describe('the Legal Center editor', () => {
       });
       expect(res.status).toBe(200);
 
-      const after = db.prepare(
+      const after = await db.prepare(
         'SELECT document_slug, version, content_hash, accepted_at FROM legal_acceptances ORDER BY id'
       ).all();
       expect(after).toEqual(before);

@@ -150,14 +150,14 @@ dir = mkdtempSync(path.join(tmpdir(), 'wev-leak-'));
 const keysOf = (o) => Object.keys(o).sort();
 
 describe('what a public profile may contain', () => {
-  it('gives a stranger exactly the baseline, plus the public-only fields', () => {
-    const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
+  it('gives a stranger exactly the baseline, plus the public-only fields', async () => {
+    const p = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
     expect(keysOf(p)).toEqual([...BASELINE_KEYS, ...SENSITIVE_KEYS, ...DISTINGUISHED_KEYS].sort());
   });
 
-  it('withholds the public-only fields when the profile is private', () => {
+  it('withholds the public-only fields when the profile is private', async () => {
     db.prepare(`UPDATE users SET profile_visibility = 'private'`).run();
-    const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
+    const p = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
     expect(keysOf(p)).toEqual([...BASELINE_KEYS].sort());
     for (const k of SENSITIVE_KEYS) expect(p).not.toHaveProperty(k);
   });
@@ -170,19 +170,19 @@ describe('what a public profile may contain', () => {
    * text and were on the baseline, so a student who set a private profile still
    * published one line to every holder of `directory.read`.
    */
-  it('withholds a student\'s headline and highlights when the profile is private', () => {
+  it('withholds a student\'s headline and highlights when the profile is private', async () => {
     db.prepare(`UPDATE users SET profile_visibility = 'private', role = 'student'`).run();
-    const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
+    const p = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
     for (const k of DISTINGUISHED_KEYS) expect(p).not.toHaveProperty(k);
   });
 
   /* On an official account they are the page, and an institution is not a child:
      an owner's one-line introduction must not vanish behind a privacy toggle. */
   it.each(['super_admin', 'partner'])(
-    'keeps a %s account\'s headline and highlights at every privacy setting', (role) => {
+    'keeps a %s account\'s headline and highlights at every privacy setting', async (role) => {
       db.prepare(`UPDATE users SET profile_visibility = 'private', role = ?, bio = 'Who we are.'`)
         .run(role);
-      const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
+      const p = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
       for (const k of DISTINGUISHED_KEYS) expect(p).toHaveProperty(k);
       /* The exemption this test exists to pin: a partner's own description of
          itself is visible at a private setting, because an institution is not a
@@ -197,22 +197,22 @@ describe('what a public profile may contain', () => {
     });
 
   /* And the other direction: a STUDENT's bio keeps its gate exactly as it was. */
-  it('still hides an ordinary account\'s bio at a private setting', () => {
+  it('still hides an ordinary account\'s bio at a private setting', async () => {
     db.prepare(`UPDATE users SET profile_visibility = 'private', role = 'student', bio = 'Mine.'`)
       .run();
-    const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
+    const p = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
     expect(p).not.toHaveProperty('bio');
     expect(p.distinction).toBeNull();
   });
 
   /* 'friends' behaves as 'private' to a stranger and as 'public' to an accepted
      friend. One decision, made here, so no consumer invents its own reading. */
-  it('treats friends-only as private to a stranger and public to a friend', () => {
+  it('treats friends-only as private to a stranger and public to a friend', async () => {
     db.prepare(`UPDATE users SET profile_visibility = 'friends'`).run();
     const row = db.prepare('SELECT * FROM users').get();
-    expect(keysOf(publicProfile(db, row, { viewerId: 'other' })))
+    expect(keysOf(await publicProfile(db, row, { viewerId: 'other' })))
       .toEqual([...BASELINE_KEYS].sort());
-    expect(keysOf(publicProfile(db, row, { viewerId: 'other', isFriend: true })))
+    expect(keysOf(await publicProfile(db, row, { viewerId: 'other', isFriend: true })))
       .toEqual([...BASELINE_KEYS, ...SENSITIVE_KEYS, ...DISTINGUISHED_KEYS].sort());
   });
 
@@ -222,12 +222,12 @@ describe('what a public profile may contain', () => {
    * email address, which is not something anybody choosing that setting agreed
    * to.
    */
-  it('adds contact detail only for staff holding user.contact.read', () => {
+  it('adds contact detail only for staff holding user.contact.read', async () => {
     const row = db.prepare('SELECT * FROM users').get();
-    const stranger = publicProfile(db, row, { viewerId: 'other' });
+    const stranger = await publicProfile(db, row, { viewerId: 'other' });
     for (const k of CONTACT_KEYS) expect(stranger).not.toHaveProperty(k);
 
-    const staff = publicProfile(db, row, { viewerId: 'admin', canSeeContact: true });
+    const staff = await publicProfile(db, row, { viewerId: 'admin', canSeeContact: true });
     expect(keysOf(staff)).toEqual([...BASELINE_KEYS, ...SENSITIVE_KEYS, ...CONTACT_KEYS, ...DISTINGUISHED_KEYS].sort());
   });
 
@@ -237,8 +237,8 @@ describe('what a public profile may contain', () => {
    * are self-reported and unverifiable, so an unverified figure beside a
    * credited one is not something to publish to a reader.
    */
-  it('gives the subject their own switches and their external total', () => {
-    const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'u1' });
+  it('gives the subject their own switches and their external total', async () => {
+    const p = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'u1' });
     expect(keysOf(p)).toEqual([
       ...BASELINE_KEYS, ...SENSITIVE_KEYS, ...CONTACT_KEYS, ...DISTINGUISHED_KEYS,
       'friendActivityVisible', 'externalService',
@@ -246,13 +246,11 @@ describe('what a public profile may contain', () => {
     expect(p.isSelf).toBe(true);
   });
 
-  it('withholds the external total from every other reader, staff included', () => {
+  it('withholds the external total from every other reader, staff included', async () => {
     const row = db.prepare('SELECT * FROM users').get();
-    expect(publicProfile(db, row, { viewerId: 'other' })).not.toHaveProperty('externalService');
-    expect(publicProfile(db, row, { viewerId: 'a', canSeeContact: true }))
-      .not.toHaveProperty('externalService');
-    expect(publicProfile(db, row, { viewerId: 'f', isFriend: true }))
-      .not.toHaveProperty('externalService');
+    expect(await publicProfile(db, row, { viewerId: 'other' })).not.toHaveProperty('externalService');
+    expect(await publicProfile(db, row, { viewerId: 'a', canSeeContact: true })).not.toHaveProperty('externalService');
+    expect(await publicProfile(db, row, { viewerId: 'f', isFriend: true })).not.toHaveProperty('externalService');
   });
 });
 
@@ -264,15 +262,15 @@ describe('what may never appear, at any visibility', () => {
     ['the subject', { viewerId: 'u1' }],
   ];
 
-  it.each(AUDIENCES)('never leaks a secret value to %s', (_label, opts) => {
-    const serialized = JSON.stringify(publicProfile(db, db.prepare('SELECT * FROM users').get(), opts));
+  it.each(AUDIENCES)('never leaks a secret value to %s', async (_label, opts) => {
+    const serialized = JSON.stringify(await publicProfile(db, db.prepare('SELECT * FROM users').get(), opts));
     for (const value of FORBIDDEN_VALUES) {
       expect(serialized, `${value} reached the payload`).not.toContain(value);
     }
   });
 
-  it.each(AUDIENCES)('never names a forbidden column to %s', (_label, opts) => {
-    const keys = keysOf(publicProfile(db, db.prepare('SELECT * FROM users').get(), opts));
+  it.each(AUDIENCES)('never names a forbidden column to %s', async (_label, opts) => {
+    const keys = keysOf(await publicProfile(db, db.prepare('SELECT * FROM users').get(), opts));
     for (const k of ['passwordHash', 'password_hash', 'tfaSecret', 'tfa_secret',
       'dateOfBirth', 'date_of_birth', 'phone', 'address', 'suspensionReason',
       'tokenVersion', 'accountStatus', 'completed']) {
@@ -286,8 +284,8 @@ describe('what may never appear, at any visibility', () => {
    * for a minor, to any authenticated caller. Counts replaced it; the itemised
    * form lives behind its own endpoint and its own gate.
    */
-  it('never carries the itemised history, only counts', () => {
-    const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'u1' });
+  it('never carries the itemised history, only counts', async () => {
+    const p = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'u1' });
     expect(p).not.toHaveProperty('completed');
     expect(keysOf(p.stats)).toEqual(
       ['eventsAttended', 'eventsAwaitingRecord', 'eventsSignedUp', 'hours'],
@@ -299,10 +297,10 @@ describe('what may never appear, at any visibility', () => {
 });
 
 describe('the search summary is a strict subset of the profile', () => {
-  it('emits only fields the full profile also emits', () => {
+  it('emits only fields the full profile also emits', async () => {
     const row = db.prepare('SELECT * FROM users').get();
     const summary = profileSummary(row);
-    const full = publicProfile(db, row, { viewerId: 'other' });
+    const full = await publicProfile(db, row, { viewerId: 'other' });
     /* `kind` is the one addition, and it describes the ROW's type rather than
        the person — search returns users and organizations in one list. */
     for (const k of Object.keys(summary)) {
@@ -332,13 +330,13 @@ describe('the distinguished presentation is derived from role and nothing else',
    * a check on their name would be uninheritable by the next owner, invisible to
    * authz.js, and wrong the day the account changes hands.
    */
-  it('ignores the name and the username entirely', () => {
+  it('ignores the name and the username entirely', async () => {
     db.prepare(`UPDATE users SET username = 'Mahit', name = 'Mahit P.'`).run();
-    const asStudent = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'x' });
+    const asStudent = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'x' });
     expect(asStudent.distinction).toBeNull();
 
     db.prepare(`UPDATE users SET role = 'super_admin'`).run();
-    const asOwner = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'x' });
+    const asOwner = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'x' });
     expect(asOwner.distinction).toMatchObject({ kind: 'owner' });
 
     /* And the same account keeps its member content — the distinction is
@@ -347,10 +345,10 @@ describe('the distinguished presentation is derived from role and nothing else',
     expect(asOwner.stats).toBeTruthy();
   });
 
-  it('parses highlights defensively rather than throwing', () => {
+  it('parses highlights defensively rather than throwing', async () => {
     for (const bad of ['not json', '{"a":1}', '[1,2,3]', '']) {
       db.prepare('UPDATE users SET profile_highlights = ?').run(bad);
-      const p = publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'x' });
+      const p = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'x' });
       expect(Array.isArray(p.highlights)).toBe(true);
     }
   });

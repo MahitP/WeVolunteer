@@ -13,6 +13,7 @@ let db, roster, promotionMetadata;
 beforeAll(async () => {
   const dbModule = await import('./db.js');
   dbModule.initDatabase();
+  await dbModule.completeDatabaseInit();
   db = dbModule.db;
   roster = (await import('./migrations/020_administrator_roster.js')).default;
   promotionMetadata = (await import('./migrations/021_administrator_promotion_metadata.js')).default;

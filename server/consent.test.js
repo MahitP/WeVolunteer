@@ -234,7 +234,7 @@ describe('signup enforces and records consent', () => {
     const payload = account();
     await srv.call('POST', '/api/auth/signup', payload);
 
-    const row = db.prepare('SELECT id FROM users WHERE email = ?').get(payload.email);
+    const row = await db.prepare('SELECT id FROM users WHERE email = ?').get(payload.email);
     expect(row, 'a refused signup must not leave a half-made account behind').toBeFalsy();
   });
 
@@ -255,10 +255,10 @@ describe('signup enforces and records consent', () => {
     const res = await srv.call('POST', '/api/auth/signup', payload);
     expect(res.status).toBe(201);
 
-    const user = db.prepare('SELECT id FROM users WHERE email = ?').get(payload.email);
+    const user = await db.prepare('SELECT id FROM users WHERE email = ?').get(payload.email);
     expect(user).toBeTruthy();
 
-    const rows = db.prepare('SELECT * FROM legal_acceptances WHERE user_id = ?').all(user.id);
+    const rows = await db.prepare('SELECT * FROM legal_acceptances WHERE user_id = ?').all(user.id);
     const expected = SIGNUP_DOCUMENTS;
 
     expect(
@@ -293,8 +293,8 @@ describe('signup enforces and records consent', () => {
     const payload = account({ consent: consentAll() });
     await srv.call('POST', '/api/auth/signup', payload);
 
-    const user = db.prepare('SELECT id FROM users WHERE email = ?').get(payload.email);
-    const row = db.prepare('SELECT ip_prefix, ua_family FROM legal_acceptances WHERE user_id = ?').get(user.id);
+    const user = await db.prepare('SELECT id FROM users WHERE email = ?').get(payload.email);
+    const row = await db.prepare('SELECT ip_prefix, ua_family FROM legal_acceptances WHERE user_id = ?').get(user.id);
 
     if (row.ip_prefix !== null) {
       expect(row.ip_prefix, 'a stored address must be a network prefix').toMatch(/\/(24|48)$/);
@@ -332,7 +332,7 @@ describe('signup enforces and records consent', () => {
     const refused = await srv.call('POST', '/api/auth/signup', { ...base, signupToken, password: undefined });
     expect(refused.status, 'the provider path must be gated exactly like the password path').toBe(400);
     expect(refused.body.code).toBe('consent_required');
-    expect(db.prepare('SELECT id FROM users WHERE email = ?').get(email)).toBeFalsy();
+    expect(await db.prepare('SELECT id FROM users WHERE email = ?').get(email)).toBeFalsy();
 
     // With consent: accepted, and recorded as an OAuth signup.
     const ok = await srv.call('POST', '/api/auth/signup', {
@@ -340,8 +340,8 @@ describe('signup enforces and records consent', () => {
     });
     expect(ok.status).toBe(201);
 
-    const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    const rows = db.prepare('SELECT * FROM legal_acceptances WHERE user_id = ?').all(user.id);
+    const user = await db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    const rows = await db.prepare('SELECT * FROM legal_acceptances WHERE user_id = ?').all(user.id);
     expect(rows.length).toBe(SIGNUP_DOCUMENTS.length);
     expect(rows[0].method).toBe('oauth_signup');
     expect(rows[0].context).toBe('oauth:google');
@@ -353,19 +353,19 @@ describe('signup enforces and records consent', () => {
     const first = account({ consent: consentAll() });
     await srv.call('POST', '/api/auth/signup', first);
 
-    const before = db.prepare('SELECT COUNT(*) AS c FROM legal_acceptances').get().c;
+    const before = (await db.prepare('SELECT COUNT(*) AS c FROM legal_acceptances').get()).c;
 
     const clash = account({ consent: consentAll(), username: first.username });
     const res = await srv.call('POST', '/api/auth/signup', clash);
     expect(res.status).toBe(409);
 
-    const after = db.prepare('SELECT COUNT(*) AS c FROM legal_acceptances').get().c;
+    const after = (await db.prepare('SELECT COUNT(*) AS c FROM legal_acceptances').get()).c;
     expect(after, 'a failed signup must not leave orphan acceptance rows').toBe(before);
   });
 
   it('publishes the catalogue at boot', async () => {
     for (const doc of LEGAL_DOCUMENTS) {
-      const row = db.prepare('SELECT * FROM legal_documents WHERE slug = ? AND version = ?')
+      const row = await db.prepare('SELECT * FROM legal_documents WHERE slug = ? AND version = ?')
         .get(doc.slug, doc.version);
       expect(row, `${doc.slug} v${doc.version} was not published`).toBeTruthy();
       /* What was actually published — the pinned constant while enforced, the live
@@ -396,13 +396,13 @@ describe('signup enforces and records consent', () => {
     const { syncLegalDocuments } = await import('./consent.js');
     const doc = LEGAL_DOCUMENTS[0];
 
-    db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
+    await db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
       .run('deadbeef', doc.slug, doc.version);
 
-    expect(() => syncLegalDocuments(db)).not.toThrow();
+    await expect(syncLegalDocuments(db)).resolves.not.toThrow();
 
-    expect(db.prepare('SELECT content_hash FROM legal_documents WHERE slug = ? AND version = ?')
-      .get(doc.slug, doc.version).content_hash).not.toBe('deadbeef');
+    expect((await db.prepare('SELECT content_hash FROM legal_documents WHERE slug = ? AND version = ?')
+      .get(doc.slug, doc.version)).content_hash).not.toBe('deadbeef');
   });
 
   /**
@@ -424,16 +424,16 @@ describe('signup enforces and records consent', () => {
     try {
       const { syncLegalDocuments } = await import('./consent.js');
 
-      db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
+      await db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
         .run('deadbeef', doc.slug, doc.version);
 
-      expect(() => syncLegalDocuments(db)).toThrow(/immutable|different content hash/i);
+      await expect(syncLegalDocuments(db)).rejects.toThrow(/immutable|different content hash/i);
     } finally {
       vi.doUnmock('./legalDocuments.js');
       vi.resetModules();
     }
 
-    db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
+    await db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
       .run(doc.contentHash, doc.slug, doc.version);
   });
 });

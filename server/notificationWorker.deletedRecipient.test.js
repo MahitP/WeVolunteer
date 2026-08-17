@@ -67,6 +67,7 @@ async function freshWorker() {
 
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const worker = await import('./workers/notificationWorker.js');
   return { db: dbMod.db, worker };
 }
@@ -127,7 +128,7 @@ describe('a notification queued for a deleted account', () => {
 
     // And no dashboard row, which is the whole point: a deleted recipient is not
     // a defect in this application.
-    expect(db.prepare("SELECT COUNT(*) c FROM error_groups WHERE source = 'worker'").get().c).toBe(0);
+    expect((await db.prepare("SELECT COUNT(*) c FROM error_groups WHERE source = 'worker'").get()).c).toBe(0);
   });
 
   it('still delivers to an active account', async () => {

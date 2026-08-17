@@ -26,6 +26,7 @@ beforeAll(async () => {
   const utils = await import('./utils.js');
   db = dbMod.db;
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   ({ NOTIFICATION_RETENTION_DAYS, purgeExpiredNotifications } = utils);
 });
 
@@ -34,18 +35,20 @@ afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
 const NOW = new Date('2026-07-30T12:00:00.000Z');
 const daysAgo = (n) => new Date(NOW.getTime() - n * 24 * 3600 * 1000).toISOString();
 
-function seed(rows) {
-  db.exec('DELETE FROM notifications');
-  const userId = db.prepare('SELECT id FROM users LIMIT 1').get().id;
+async function seed(rows) {
+  await db.exec('DELETE FROM notifications');
+  const userId = (await db.prepare('SELECT id FROM users LIMIT 1').get()).id;
   const stmt = db.prepare(`
     INSERT INTO notifications (id, user_id, kind, priority, title, body, link, read, created_at)
     VALUES (?, ?, 'APPLICATION', ?, 't', 'b', NULL, 0, ?)
   `);
-  rows.forEach(([id, priority, age]) => stmt.run(id, userId, priority, daysAgo(age)));
+  /* A loop rather than `forEach`: the callback cannot await, so every insert
+     would be an unhandled promise racing the assertion below it. */
+  for (const [id, priority, age] of rows) await stmt.run(id, userId, priority, daysAgo(age));
 }
 
-const surviving = () =>
-  db.prepare('SELECT id FROM notifications ORDER BY id').all().map(r => r.id);
+const surviving = async () =>
+  (await db.prepare('SELECT id FROM notifications ORDER BY id').all()).map(r => r.id);
 
 describe('every priority has a finite retention window', () => {
   it('declares a window for all four priorities', () => {
@@ -66,67 +69,67 @@ describe('every priority has a finite retention window', () => {
 });
 
 describe('purgeExpiredNotifications', () => {
-  it('deletes nothing that is still inside its window', () => {
-    seed([
+  it('deletes nothing that is still inside its window', async () => {
+    await seed([
       ['low-fresh', 'LOW', 1],
       ['normal-fresh', 'NORMAL', 29],
       ['important-fresh', 'IMPORTANT', 89],
       ['critical-fresh', 'CRITICAL', 364]
     ]);
-    expect(purgeExpiredNotifications(NOW)).toBe(0);
-    expect(surviving()).toEqual(['critical-fresh', 'important-fresh', 'low-fresh', 'normal-fresh']);
+    expect(await purgeExpiredNotifications(NOW)).toBe(0);
+    expect(await surviving()).toEqual(['critical-fresh', 'important-fresh', 'low-fresh', 'normal-fresh']);
   });
 
-  it('deletes everything past its window', () => {
-    seed([
+  it('deletes everything past its window', async () => {
+    await seed([
       ['low-old', 'LOW', 31],
       ['normal-old', 'NORMAL', 91],
       ['important-old', 'IMPORTANT', 366],
       ['critical-old', 'CRITICAL', 366]
     ]);
-    expect(purgeExpiredNotifications(NOW)).toBe(4);
-    expect(surviving()).toEqual([]);
+    expect(await purgeExpiredNotifications(NOW)).toBe(4);
+    expect(await surviving()).toEqual([]);
   });
 
   // The specific regression: IMPORTANT used to be immortal.
-  it('bounds IMPORTANT and CRITICAL growth (they were previously never deleted)', () => {
-    seed([
+  it('bounds IMPORTANT and CRITICAL await growth(they were previously never deleted)', async () => {
+    await seed([
       ['important-ancient', 'IMPORTANT', 800],
       ['critical-ancient', 'CRITICAL', 800]
     ]);
-    expect(purgeExpiredNotifications(NOW)).toBe(2);
-    expect(surviving()).toEqual([]);
+    expect(await purgeExpiredNotifications(NOW)).toBe(2);
+    expect(await surviving()).toEqual([]);
   });
 
   // The other half of the old rule: NORMAL was swept at 30 days, which threw
   // away the ordinary history that gives a season context.
-  it('keeps a NORMAL notification that the old 30-day rule would have deleted', () => {
-    seed([['normal-60d', 'NORMAL', 60]]);
-    expect(purgeExpiredNotifications(NOW)).toBe(0);
-    expect(surviving()).toEqual(['normal-60d']);
+  it('keeps a NORMAL notification that the old 30-day rule would have deleted', async () => {
+    await seed([['normal-60d', 'NORMAL', 60]]);
+    expect(await purgeExpiredNotifications(NOW)).toBe(0);
+    expect(await surviving()).toEqual(['normal-60d']);
   });
 
-  it('leaves an unrecognised priority alone rather than sweeping it on a default', () => {
-    seed([['weird', 'URGENT_ISH', 5000]]);
-    expect(purgeExpiredNotifications(NOW)).toBe(0);
-    expect(surviving()).toEqual(['weird']);
+  it('leaves an unrecognised priority alone rather than sweeping it on a default', async () => {
+    await seed([['weird', 'URGENT_ISH', 5000]]);
+    expect(await purgeExpiredNotifications(NOW)).toBe(0);
+    expect(await surviving()).toEqual(['weird']);
   });
 
-  it('is idempotent', () => {
-    seed([['low-old', 'LOW', 40], ['low-fresh', 'LOW', 2]]);
-    expect(purgeExpiredNotifications(NOW)).toBe(1);
-    expect(purgeExpiredNotifications(NOW)).toBe(0);
-    expect(surviving()).toEqual(['low-fresh']);
+  it('is idempotent', async () => {
+    await seed([['low-old', 'LOW', 40], ['low-fresh', 'LOW', 2]]);
+    expect(await purgeExpiredNotifications(NOW)).toBe(1);
+    expect(await purgeExpiredNotifications(NOW)).toBe(0);
+    expect(await surviving()).toEqual(['low-fresh']);
   });
 
-  it('never touches the durable records a notification refers to', () => {
-    const beforeHours = db.prepare('SELECT COUNT(*) AS c FROM attendance').get().c;
-    const beforeLedger = db.prepare('SELECT COUNT(*) AS c FROM hours_ledger').get().c;
-    const beforeCerts = db.prepare('SELECT COUNT(*) AS c FROM certificates').get().c;
-    seed([['important-ancient', 'IMPORTANT', 900]]);
-    purgeExpiredNotifications(NOW);
-    expect(db.prepare('SELECT COUNT(*) AS c FROM attendance').get().c).toBe(beforeHours);
-    expect(db.prepare('SELECT COUNT(*) AS c FROM hours_ledger').get().c).toBe(beforeLedger);
-    expect(db.prepare('SELECT COUNT(*) AS c FROM certificates').get().c).toBe(beforeCerts);
+  it('never touches the durable records a notification refers to', async () => {
+    const beforeHours = (await db.prepare('SELECT COUNT(*) AS c FROM attendance').get()).c;
+    const beforeLedger = (await db.prepare('SELECT COUNT(*) AS c FROM hours_ledger').get()).c;
+    const beforeCerts = (await db.prepare('SELECT COUNT(*) AS c FROM certificates').get()).c;
+    await seed([['important-ancient', 'IMPORTANT', 900]]);
+    await purgeExpiredNotifications(NOW);
+    expect((await db.prepare('SELECT COUNT(*) AS c FROM attendance').get()).c).toBe(beforeHours);
+    expect((await db.prepare('SELECT COUNT(*) AS c FROM hours_ledger').get()).c).toBe(beforeLedger);
+    expect((await db.prepare('SELECT COUNT(*) AS c FROM certificates').get()).c).toBe(beforeCerts);
   });
 });

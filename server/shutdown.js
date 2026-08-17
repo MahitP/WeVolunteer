@@ -151,7 +151,7 @@ export async function shutdown({ signal, httpServer, io, intervals = [] }) {
    * happens after losing the lock to a takeover cannot hand it away.
    */
   try {
-    releaseInstanceLock(db);
+    await releaseInstanceLock(db);
   } catch (err) {
     console.error('[Shutdown] Instance lock release failed:', err);
   }

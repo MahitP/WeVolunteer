@@ -234,6 +234,7 @@ export const EVENT_CATEGORIES = {
   ORGANIZATION_BANNED: 'ACCOUNT',
   ORGANIZATION_BAN_APPEAL_STANDS: 'ACCOUNT',
   ORGANIZATION_BAN_APPEAL_REVERSED: 'ACCOUNT',
+  ORGANIZATION_BAN_LIFTED: 'ACCOUNT',
   ACCOUNT_WARNED: 'ACCOUNT',
   ACCOUNT_REINSTATED: 'ACCOUNT',
   APPEAL_DECISION_STANDS: 'ACCOUNT',
@@ -610,6 +611,33 @@ export function getInAppContent(event, payload) {
           + 'You can join again whenever you like.' + why,
         link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : undefined,
         ctaText: payload.organizationSlug ? `Go to ${org}` : undefined,
+      };
+    }
+
+    /**
+     * A manager lifted the ban without an appeal having been made.
+     *
+     * Distinct from `ORGANIZATION_BAN_APPEAL_REVERSED`, which answers something
+     * the person wrote. This one arrives unprompted, so it says why it is
+     * arriving — somebody told they are banned and then never told otherwise has
+     * no way to discover that the door reopened, and would keep believing the
+     * club is closed to them.
+     *
+     * It deliberately does not claim the ban was a mistake. The manager may have
+     * simply changed their mind, and putting an admission in their mouth is not
+     * this message's to make.
+     */
+    case 'ORGANIZATION_BAN_LIFTED': {
+      const org = payload.organizationName || 'an organization';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: `The ban on ${org} has been lifted`,
+        body:
+          `A manager of ${org} has lifted the ban. You can join again whenever `
+          + 'you like.',
+        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : '/organizations',
+        ctaText: `Go to ${org}`,
       };
     }
 

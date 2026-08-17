@@ -125,7 +125,7 @@ describe('a person cannot open unlimited appeals', () => {
       + "VALUES (?, ?, 'report_outcome', 'resolved', ?, ?, ?)"
     );
     for (let n = 0; n < APPEAL_WINDOW_MAX + 3; n++) {
-      insert.run(`aged-${userId}-${n}`, userId, STATEMENT, old, old);
+      await insert.run(`aged-${userId}-${n}`, userId, STATEMENT, old, old);
     }
 
     const after = await fileAppeal(cookie);
@@ -143,7 +143,7 @@ describe('a person cannot open unlimited appeals', () => {
       + "VALUES (?, ?, 'report_outcome', 'resolved', ?, ?, ?)"
     );
     for (let n = 0; n < APPEAL_WINDOW_MAX; n++) {
-      insert.run(`recent-${userId}-${n}`, userId, STATEMENT, now, now);
+      await insert.run(`recent-${userId}-${n}`, userId, STATEMENT, now, now);
     }
 
     const blocked = await fileAppeal(cookie);

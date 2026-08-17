@@ -48,15 +48,16 @@ describe('badge re-evaluation through the attendance route', () => {
     /* Put the shift in the past so finalisation is permitted. */
     const start = new Date(Date.now() - 3 * 86400000).toISOString();
     const end = new Date(Date.now() - 3 * 86400000 + 2 * 3600000).toISOString();
-    realDb.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE id = ?')
+    await realDb.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE id = ?')
       .run(start, end, target.slotId);
-    realDb.prepare("UPDATE events SET status = 'open' WHERE id = ?").run(target.eventId);
+    await realDb.prepare("UPDATE events SET status = 'open' WHERE id = ?").run(target.eventId);
 
     /* A badge this volunteer holds and would lose the moment hours vanish. */
     const badgeId = 'test-hours-tier';
-    realDb.prepare(`
-      INSERT OR REPLACE INTO badges (id, name, description, icon, category, criteria_type, criteria_value, active, created_at)
+    await realDb.prepare(`
+      INSERT INTO badges (id, name, description, icon, category, criteria_type, criteria_value, active, created_at)
       VALUES (?, 'Fixture hours tier', 'Fixture', '*', 'Fixture', 'hours', 1, 1, ?)
+      ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description, icon = excluded.icon, category = excluded.category, criteria_type = excluded.criteria_type, criteria_value = excluded.criteria_value, active = excluded.active, created_at = excluded.created_at
     `).run(badgeId, new Date().toISOString());
 
     /* Credit them first, through the route, so the badge is genuinely earned. */
@@ -64,7 +65,7 @@ describe('badge re-evaluation through the attendance route', () => {
       { attendanceMap: { [target.id]: true } }, organizer);
     expect(credited.status, JSON.stringify(credited.body)).toBe(200);
 
-    const heldAfterCredit = !!realDb.prepare(
+    const heldAfterCredit = !!await realDb.prepare(
       'SELECT id FROM user_badges WHERE user_id = ? AND badge_id = ?'
     ).get(target.userId, badgeId);
     expect(heldAfterCredit, 'the fixture badge should have been awarded on credit').toBe(true);
@@ -74,13 +75,13 @@ describe('badge re-evaluation through the attendance route', () => {
       { attendanceMap: { [target.id]: false }, reason: 'Did not attend after all' }, organizer);
     expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
 
-    const stillHeld = !!realDb.prepare(
+    const stillHeld = !!await realDb.prepare(
       'SELECT id FROM user_badges WHERE user_id = ? AND badge_id = ?'
     ).get(target.userId, badgeId);
 
-    const hours = realDb.prepare(
+    const hours = (await realDb.prepare(
       'SELECT COALESCE(SUM(hours_awarded), 0) AS h FROM attendance WHERE user_id = ? AND present = 1'
-    ).get(target.userId).h;
+    ).get(target.userId)).h;
 
     expect(stillHeld, `volunteer now has ${hours} credited hours but still holds a 1-hour badge`).toBe(false);
   });

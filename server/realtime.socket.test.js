@@ -35,11 +35,15 @@ beforeAll(async () => {
   process.env.DEMO_MODE = 'true';
   process.env.JWT_SECRET = 'socket-test-secret';
 
-  const { initDatabase, db: liveDb } = await import('./db.js');
+  const { initDatabase, completeDatabaseInit, db: liveDb } = await import('./db.js');
   const { app } = await import('./app.js');
   const { initSocketServer } = await import('./realtime/socketServer.js');
   db = liveDb;
   initDatabase();
+  /* The demo organizer needs its agreement acceptance, or its capabilities stay
+     withheld and every fixture below it fails. Async since the seed owns a
+     transaction — see db.js. */
+  await completeDatabaseInit();
 
   httpServer = createServer(app);
   initSocketServer(httpServer);
@@ -134,11 +138,11 @@ describe('realtime handshake authentication', () => {
     const cookie = await signIn('leochen');
     const jwt = (await import('jsonwebtoken')).default;
     const { id } = jwt.decode(cookie);
-    db.prepare("UPDATE users SET account_status = 'suspended' WHERE id = ?").run(id);
+    await db.prepare("UPDATE users SET account_status = 'suspended' WHERE id = ?").run(id);
     try {
       await expect(openSocket(cookie)).rejects.toThrow(/REJECTED/);
     } finally {
-      db.prepare("UPDATE users SET account_status = 'active' WHERE id = ?").run(id);
+      await db.prepare("UPDATE users SET account_status = 'active' WHERE id = ?").run(id);
     }
   });
 });

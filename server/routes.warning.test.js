@@ -75,12 +75,12 @@ describe('POST /api/admin/users/:id/warn', () => {
    * gentler word.
    */
   it('changes nothing about the account', async () => {
-    const before = db.prepare('SELECT * FROM users WHERE id = ?').get('user-student-2');
+    const before = await db.prepare('SELECT * FROM users WHERE id = ?').get('user-student-2');
 
     await srv.call('POST', '/api/admin/users/user-student-2/warn',
       { reason: REASON }, await adminToken());
 
-    const after = db.prepare('SELECT * FROM users WHERE id = ?').get('user-student-2');
+    const after = await db.prepare('SELECT * FROM users WHERE id = ?').get('user-student-2');
     expect(after.account_status).toBe(before.account_status);
     expect(after.token_version, 'a warning must not sign anybody out').toBe(before.token_version);
     expect(after.suspended_at).toBe(before.suspended_at);

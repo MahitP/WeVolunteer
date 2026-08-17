@@ -34,7 +34,7 @@ describe('volunteer insights endpoint', () => {
     (await srv.call('GET', '/api/stats/volunteer', undefined, session)).body;
 
   it('returns six months of hours, always', () => {
-    return insights().then((body) => {
+    return insights().then(async (body) => {
       expect(body.monthlyHours).toHaveLength(6);
       /* Ascending, and ending in the current month — which is what makes the
          chart's last column mean "this month". */
@@ -127,12 +127,12 @@ describe('volunteer insights endpoint', () => {
       role: 'student',
     });
 
-    db.prepare('UPDATE users SET leaderboard_opt_in = 1 WHERE email = ?').run('ranked.then.gone@example.com');
+    await db.prepare('UPDATE users SET leaderboard_opt_in = 1 WHERE email = ?').run('ranked.then.gone@example.com');
 
     const before = (await srv.call('GET', '/api/leaderboard', undefined, student)).body;
     expect(before.some(r => r.name === 'Ranked Then Gone')).toBe(true);
 
-    db.prepare("UPDATE users SET account_status = 'deleted', deleted_at = ? WHERE email = ?")
+    await db.prepare("UPDATE users SET account_status = 'deleted', deleted_at = ? WHERE email = ?")
       .run(new Date().toISOString(), 'ranked.then.gone@example.com');
 
     const after = (await srv.call('GET', '/api/leaderboard', undefined, student)).body;
@@ -146,7 +146,7 @@ describe('volunteer insights endpoint', () => {
     expect(Array.isArray(board)).toBe(true);
     const { db } = await import('./db.js');
     for (const row of board) {
-      const optIn = db.prepare('SELECT leaderboard_opt_in AS o FROM users WHERE id = ?').get(row.id)?.o;
+      const optIn = (await db.prepare('SELECT leaderboard_opt_in AS o FROM users WHERE id = ?').get(row.id))?.o;
       expect(optIn).toBe(1);
     }
   });

@@ -89,16 +89,16 @@ describe('Administrator Promotion and Revocation', () => {
     expect(res.status).toBe(200);
 
     // Verify database changes
-    const user = db.prepare("SELECT role, promoted_by, promotion_reason FROM users WHERE id = 'user-student-2'").get();
+    const user = await db.prepare("SELECT role, promoted_by, promotion_reason FROM users WHERE id = 'user-student-2'").get();
     expect(user.role).toBe('admin');
     expect(user.promotion_reason).toBe('They are very helpful');
     
     // Verify audit log
-    const log = db.prepare("SELECT * FROM admin_audit_logs WHERE action = 'ADMIN_PROMOTED' AND target_user_id = 'user-student-2'").get();
+    const log = await db.prepare("SELECT * FROM admin_audit_logs WHERE action = 'ADMIN_PROMOTED' AND target_user_id = 'user-student-2'").get();
     expect(log).toBeDefined();
     
     // Verify notification
-    const notif = db.prepare("SELECT * FROM notifications WHERE user_id = 'user-student-2' AND title LIKE '%administrator%'").get();
+    const notif = await db.prepare("SELECT * FROM notifications WHERE user_id = 'user-student-2' AND title LIKE '%administrator%'").get();
     expect(notif).toBeDefined();
   });
 
@@ -108,7 +108,7 @@ describe('Administrator Promotion and Revocation', () => {
        `user-super`, the seeded owner that no longer exists — so the request
        404'd on a missing user and the test passed its own precondition without
        ever reaching the refusal it was written to prove. */
-    const ownerId = db.prepare('SELECT id FROM users WHERE email = ?').get(OWNER_EMAIL).id;
+    const ownerId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(OWNER_EMAIL)).id;
     const res = await fetch(srv.base + `/api/admin/users/${ownerId}/revoke`, {
       method: 'POST',
       headers: { 
@@ -177,19 +177,19 @@ describe('Administrator Promotion and Revocation', () => {
     expect(res.status).toBe(200);
 
     // Verify database changes
-    const user = db.prepare("SELECT role FROM users WHERE id = 'user-admin'").get();
+    const user = await db.prepare("SELECT role FROM users WHERE id = 'user-admin'").get();
     expect(user.role).toBe('student');
     
     // Verify explicit grants were wiped
-    const grants = db.prepare("SELECT count(*) as count FROM user_capabilities WHERE user_id = 'user-admin'").get();
+    const grants = await db.prepare("SELECT count(*) as count FROM user_capabilities WHERE user_id = 'user-admin'").get();
     expect(grants.count).toBe(0);
     
     // Verify audit log
-    const log = db.prepare("SELECT * FROM admin_audit_logs WHERE action = 'ADMIN_REVOKED' AND target_user_id = 'user-admin'").get();
+    const log = await db.prepare("SELECT * FROM admin_audit_logs WHERE action = 'ADMIN_REVOKED' AND target_user_id = 'user-admin'").get();
     expect(log).toBeDefined();
     
     // Verify notification
-    const notif = db.prepare("SELECT * FROM notifications WHERE user_id = 'user-admin' AND title LIKE '%revoked%'").get();
+    const notif = await db.prepare("SELECT * FROM notifications WHERE user_id = 'user-admin' AND title LIKE '%revoked%'").get();
     expect(notif).toBeDefined();
   });
 });

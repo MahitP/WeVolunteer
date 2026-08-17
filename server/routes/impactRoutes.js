@@ -43,9 +43,9 @@ const router = express.Router();
  * explicit age shown on the page — a stale impact figure presented as live is
  * the failure this comment exists to prevent.
  */
-router.get('/api/impact', authenticateToken, requireCap('analytics.impact'), (req, res) => {
+router.get('/api/impact', authenticateToken, requireCap('analytics.impact'), async (req, res) => {
   try {
-    res.json(buildImpact(db));
+    res.json(await buildImpact(db));
   } catch (err) {
     console.error('Failed to build impact figures:', err);
     res.status(500).json({ error: 'Could not load the impact figures.' });
@@ -75,9 +75,9 @@ router.get('/api/impact', authenticateToken, requireCap('analytics.impact'), (re
  * precisely because the audience is narrower: a super_admin holds `'*'` and can
  * already read everything `/api/impact` returns.
  */
-router.get('/api/admin/impact', authenticateToken, requireCap('analytics.platform'), (req, res) => {
+router.get('/api/admin/impact', authenticateToken, requireCap('analytics.platform'), async (req, res) => {
   try {
-    res.json(buildAdminImpact(db));
+    res.json(await buildAdminImpact(db));
   } catch (err) {
     console.error('Failed to build admin impact figures:', err);
     res.status(500).json({ error: 'Could not load the community figures.' });

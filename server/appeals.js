@@ -124,7 +124,7 @@ export const NEVER_OVERRIDABLE = Object.freeze(['self', 'suspension_issuer', 'su
  *
  * Returns an array of string reasons, empty when the actor is eligible.
  */
-export function disqualifiers(db, actorId, appeal) {
+export async function disqualifiers(db, actorId, appeal) {
   const found = [];
   const add = (r) => { if (!found.includes(r)) found.push(r); };
 
@@ -138,12 +138,12 @@ export function disqualifiers(db, actorId, appeal) {
 
   // 3. The same question against the LIVE column, which catches a re-suspension
   //    issued after this appeal was filed.
-  const live = db.prepare('SELECT suspended_by FROM users WHERE id = ?').get(appeal.user_id);
+  const live = await db.prepare('SELECT suspended_by FROM users WHERE id = ?').get(appeal.user_id);
   if (live?.suspended_by && live.suspended_by === actorId) add('suspension_issuer');
 
   // 4. The audit trail's own answer to "who suspended this person", which is the
   //    only one that survives an unsuspend.
-  const audited = db.prepare(`
+  const audited = await db.prepare(`
     SELECT 1 AS hit FROM admin_audit_logs
      WHERE target_user_id = ? AND admin_id = ? AND action = 'ACCOUNT_SUSPENDED'
      LIMIT 1
@@ -152,7 +152,7 @@ export function disqualifiers(db, actorId, appeal) {
 
   // 5-7. Involvement in the report this appeal is attached to.
   if (appeal.report_id) {
-    const rep = db.prepare(
+    const rep = await db.prepare(
       'SELECT reporter_id, resolved_by, assigned_to, target_author_id FROM reports WHERE id = ?'
     ).get(appeal.report_id);
     if (rep) {
@@ -164,7 +164,7 @@ export function disqualifiers(db, actorId, appeal) {
   }
 
   // 8. A live report in either direction between the reviewer and the appellant.
-  const crossed = db.prepare(`
+  const crossed = await db.prepare(`
     SELECT 1 AS hit FROM reports
      WHERE status IN ('open', 'reviewing', 'escalated')
        AND ((reporter_id = ? AND target_author_id = ?) OR (reporter_id = ? AND target_author_id = ?))
@@ -176,7 +176,7 @@ export function disqualifiers(db, actorId, appeal) {
   //    two-person team that means reopening costs you the decision, which is the
   //    right incentive: reopen is otherwise the lever for relitigating an
   //    outcome you disliked.
-  const reopened = db.prepare(`
+  const reopened = await db.prepare(`
     SELECT 1 AS hit FROM appeal_events
      WHERE appeal_id = ? AND action = 'reopened' AND actor_id = ?
      LIMIT 1
@@ -212,8 +212,8 @@ export const explainConflicts = (conflicts) =>
  * one path and skipped by another. The table is append-only by trigger
  * (migration 015), so this is the only operation available on it.
  */
-export function recordAppealEvent(db, { appealId, actorId = null, actorRole = null, action, fromStatus = null, toStatus = null, note = null }) {
-  db.prepare(`
+export async function recordAppealEvent(db, { appealId, actorId = null, actorRole = null, action, fromStatus = null, toStatus = null, note = null }) {
+  await db.prepare(`
     INSERT INTO appeal_events (id, appeal_id, actor_id, actor_role, action, from_status, to_status, note, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(newAppealEventId(), appealId, actorId, actorRole, action, fromStatus, toStatus, note, new Date().toISOString());

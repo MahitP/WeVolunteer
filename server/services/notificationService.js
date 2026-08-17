@@ -7,33 +7,48 @@ class NotificationService {
    * Dispatches an event to the appropriate channels based on user preferences.
    * This should ideally be called inside the same transaction as the primary action.
    */
-  dispatch(event, payload, userId, dedupeKey = null) {
+  async dispatch(event, payload, userId, dedupeKey = null) {
     try {
       const category = EVENT_CATEGORIES[event] || 'SYSTEM';
       
       // Get user and their global opt out
-      const user = db.prepare('SELECT email_opt_out FROM users WHERE id = ?').get(userId);
+      const user = await db.prepare('SELECT email_opt_out FROM users WHERE id = ?').get(userId);
       if (!user) return null;
 
       // Deduplication check
       if (dedupeKey) {
-        const existing = db.prepare(`
-          SELECT 1 FROM notifications 
-          WHERE user_id = ? AND dedupe_key = ? 
-            AND created_at > datetime('now', '-7 days')
-        `).get(userId, dedupeKey);
+        /* The cutoff is computed here and bound, not written as
+           `datetime('now','-7 days')`. That form produced `2026-08-09 12:00:00`
+           and compared it against a column holding `2026-08-09T12:00:00.000Z` —
+           two formats, compared as text, agreeing only by the accident that `T`
+           sorts above a space. Binding an ISO-8601 cutoff compares like with
+           like, and is the only form PostgreSQL has. */
+        const dedupeSince = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const existing = await db.prepare(`
+          SELECT 1 FROM notifications
+          WHERE user_id = ? AND dedupe_key = ?
+            AND created_at > ?
+        `).get(userId, dedupeKey, dedupeSince);
         
         if (existing) return false;
       }
 
       // Get preferences for this category
-      const prefs = db.prepare(`
+      const prefs = await db.prepare(`
         SELECT channel, enabled 
         FROM notification_preferences 
         WHERE user_id = ? AND category = ?
       `).all(userId, category);
 
       // Map preferences. Default to enabled (1) if no row exists.
+      /**
+       * Synchronous on purpose: it only searches `prefs`, already fetched above.
+       *
+       * A batch conversion made this `async`, and both call sites read it as
+       * `mandatory || getPref(...)` — a pending promise is truthy, so every
+       * channel came out enabled and **every notification preference was
+       * ignored**. Nothing here touches the database; there is nothing to await.
+       */
       const getPref = (channel) => {
         const row = prefs.find(p => p.channel === channel);
         return row ? row.enabled === 1 : true; // default true
@@ -63,11 +78,11 @@ class NotificationService {
       const inAppContent = getInAppContent(event, payload);
 
       if (inAppEnabled) {
-        this._insertInApp(userId, inAppContent, dedupeKey);
+        await this._insertInApp(userId, inAppContent, dedupeKey);
       }
 
       if (emailEnabled) {
-        this._insertEmailJob(event, payload, userId, dedupeKey);
+        await this._insertEmailJob(event, payload, userId, dedupeKey);
       }
 
       return true;
@@ -97,12 +112,12 @@ class NotificationService {
     }
   }
 
-  _insertInApp(userId, { kind, priority, title, body, link }, dedupeKey) {
+  async _insertInApp(userId, { kind, priority, title, body, link }, dedupeKey) {
     const id = `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const notification = {
       id, user_id: userId, kind, priority: priority || 'NORMAL', title, body: body || '', link, read: 0, created_at: new Date().toISOString(), dedupe_key: dedupeKey
     };
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notifications (id, user_id, kind, priority, title, body, link, read, created_at, dedupe_key)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(notification.id, notification.user_id, notification.kind, notification.priority, notification.title, notification.body, notification.link, notification.read, notification.created_at, notification.dedupe_key);
@@ -115,11 +130,11 @@ class NotificationService {
     }
   }
 
-  _insertEmailJob(event, payload, userId, dedupeKey) {
+  async _insertEmailJob(event, payload, userId, dedupeKey) {
     const id = `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     // Storing dedupeKey in the payload so the worker can track it if needed, or we could add a dedupe_key to jobs.
     // For simplicity, we just insert the job.
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notification_jobs (id, channel, payload, next_attempt_at, created_at)
       VALUES (?, 'email', ?, ?, ?)
     `).run(
