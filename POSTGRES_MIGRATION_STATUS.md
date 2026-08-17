@@ -2519,3 +2519,65 @@ artefact; the file passes alone. Run the suites sequentially.
    PostgreSQL, not synthetic tables.
 3. Write and rehearse the rollback procedure.
 4. Re-run the dry run against a larger, timed dataset.
+
+---
+
+## Phase 14 — application concurrency, proven by mutation
+
+```
+                        phase 13      now
+PostgreSQL passing         4,708      4,759
+PostgreSQL failing            62         28
+PostgreSQL files green   247/282    262/283
+SQLite passing             4,747      4,748   (0 failing)
+Adapter passing            7,004      7,005   (0 failing)
+```
+
+### 14a · The concurrency gap is closed, and the suite is not vacuous
+
+`server/application.postgresConcurrency.test.js` drives the APPLICATION's own
+paths — `recordError`, `sendErrorAlerts`, `createReport`, `consumeCheckinToken` —
+concurrently against a real pool, over repeated rounds so a race that only
+sometimes loses still fails. Nothing sleeps; every assertion is about final
+state.
+
+**The proof it is worth having:** reverting the atomic alert claim to the
+read-then-mark it replaced makes the ownership case fail with **all six**
+overlapping sweeps claiming the same problem — `expected 6 to be 1`. That is
+the production alert-loop reproducing on demand. A synthetic-table suite would
+never have looked at it.
+
+Invariants held: 12 simultaneous reports count to exactly 12 (no lost update),
+8 simultaneous first-sightings produce one group, 6 overlapping sweeps yield one
+claim and one mail, 6 identical reports yield one row and one id, 8 redemptions
+of one check-in token yield exactly one success.
+
+### 14b · A duplicate report answered 500 on PostgreSQL
+
+`createReport` recognised its own duplicate index by matching the error MESSAGE
+against `UNIQUE constraint failed` — SQLite's wording. PostgreSQL says
+`duplicate key value violates unique constraint`, so the handled branch never
+ran and a second report of the same thing 500'd. The comment at that site is
+explicit that showing a distressed student an error after they worked up to
+pressing the button is the outcome the handling exists to prevent.
+`isUniqueViolation()` checks SQLSTATE `23505` first, because a code is stable
+where prose is not.
+
+### 14c · Guards
+
+- camelCase aliases in **test** SQL. Its first version passed a deliberate
+  mutation, which is how a hole in it was found: it scanned the STRIPPED source,
+  and `strip()` blanks string literals — exactly where a test's SQL lives.
+- the engine-skip confinement guard now polices only the EXCLUDING direction.
+  `skipIf(!RUNNING_ON_POSTGRES)` adds PostgreSQL coverage rather than removing
+  it, and requiring it to be listed was asking permission to test more.
+
+### Why POSTGRES_READY is still false
+
+1. **28 failures remain** — a long tail, largest cluster three.
+2. **Concurrency is verified for the single-use and counter classes, not for
+   capacity or waitlist promotion.** Those need fixtures that build an event with
+   real spots and race the accept path; not done.
+3. **Scale untested.** The dry run is 548 rows.
+4. **Rollback after cutover is documented but not rehearsed** — it needs a real
+   deployment.
