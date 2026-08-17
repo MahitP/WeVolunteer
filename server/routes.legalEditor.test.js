@@ -439,13 +439,17 @@ describe('the Legal Center editor', () => {
       expect((await db.prepare('SELECT COUNT(*) AS n FROM legal_document_revisions').get()).n).toBe(before);
     });
 
-    it('refuses a duplicate (slug, version) at the schema level', () => {
-      const insert = () => db.prepare(`
+    it('refuses a duplicate (slug, version) at the schema level', async () => {
+      /* `await expect(async () => …).rejects` — the portable refusal form.
+         SQLite's `.run()` throws synchronously and PostgreSQL returns a rejected
+         promise, so `expect(fn).toThrow()` observes only one of them: here it
+         saw the function return normally and reported "expected to throw" while
+         the write WAS being refused. */
+      await expect(async () => db.prepare(`
         INSERT INTO legal_document_revisions
           (slug, version, body, content_hash, effective_at, created_at, created_by)
         VALUES (?, '1.1.0', 'x', 'h', '2026-09-01', '2026-09-01T00:00:00Z', NULL)
-      `).run(EDITABLE);
-      expect(insert).toThrow();
+      `).run(EDITABLE)).rejects.toThrow();
     });
   });
   /**
