@@ -1,0 +1,228 @@
+/**
+ * The APPLICATION's own paths, run concurrently against real PostgreSQL.
+ *
+ * ── Why this file exists separately from capacity.postgresConcurrency.test.js ──
+ *
+ * That file drives tables it creates itself. It proves PostgreSQL's locking
+ * primitives behave — which is worth knowing and is not the question. The
+ * question is whether *this application's* read-then-write paths are safe when
+ * two requests arrive together, and a synthetic table cannot answer it because
+ * the application's SQL is not the SQL under test.
+ *
+ * The alerting defect found in this migration is the argument for the
+ * distinction. `runNotificationSweep` called `sendErrorAlerts` without awaiting
+ * it, justified by a comment stating that the marking was synchronous so
+ * overlapping sweeps could not double-send. That was true on SQLite and false
+ * on PostgreSQL, where every statement is a round trip. No synthetic-table test
+ * would ever have looked at it.
+ *
+ * ── How these tests are made deterministic ──
+ *
+ * Every case runs its operations through `Promise.all`, so they are genuinely
+ * in flight together against a pool rather than interleaved by a scheduler this
+ * file controls. That means a single green run proves less than it appears to,
+ * so each invariant is asserted over REPEATED rounds with fresh state. A race
+ * that only sometimes loses still fails, and it fails on the invariant rather
+ * than on a timing assumption.
+ *
+ * Nothing here sleeps. The assertions are all about final state — how many rows
+ * exist, what the counter reached, which id won — so there is no arbitrary
+ * delay to tune and no flake to chase.
+ */
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
+
+/**
+ * Runs only when the application is genuinely on PostgreSQL.
+ *
+ * On SQLite these invariants are held by a different mechanism entirely — a
+ * process-wide write queue and synchronous statements — so passing here would
+ * say nothing about the engine being migrated to. `describe.skipIf` rather than
+ * an early return, so a skip is visible in the report instead of a test that
+ * asserts nothing.
+ */
+describe.skipIf(!RUNNING_ON_POSTGRES)('the application under real PostgreSQL concurrency', () => {
+  let srv, db, reportService, errorReporter, alerting, email;
+
+  beforeAll(async () => {
+    /* Without a recipient `sendErrorAlerts` returns `not_configured` and the
+       ownership race below would pass by never sending at all. */
+    process.env.ALERT_EMAIL = 'ops@concurrency.test';
+    const { startTestServer } = await import('./testServer.js');
+    srv = await startTestServer();
+    ({ db } = await import('./db.js'));
+    reportService = await import('./reportService.js');
+    errorReporter = await import('./errorReporter.js');
+    alerting = await import('./alerting.js');
+    email = await import('./email.js');
+  }, 60_000);
+
+  afterAll(async () => { await srv?.close(); delete process.env.ALERT_EMAIL; });
+
+  it('is on PostgreSQL — a skip must not look like a pass', async () => {
+    const { rows } = { rows: [await db.prepare('SELECT 1 AS ok').get()] };
+    expect(rows[0].ok).toBe(1);
+    expect(db.dialect, 'this suite is meaningless on any other engine').toBe('postgres');
+  });
+
+  /**
+   * The error reporter's occurrence counter is an increment on a row several
+   * requests can touch at once — the classic lost update. It is now written as
+   * `INSERT … ON CONFLICT DO UPDATE SET occurrences = error_groups.occurrences + 1`,
+   * which is atomic; the previous read-then-write lost reports outright, because
+   * the loser's duplicate-key error aborted it before the event row was written.
+   */
+  describe('error reporting', () => {
+    const fingerprintRow = async (message) =>
+      await db.prepare('SELECT occurrences FROM error_groups WHERE message = ?').get(message);
+
+    it('counts every one of 12 simultaneous reports of the same problem', async () => {
+      for (let round = 0; round < 4; round += 1) {
+        const message = `concurrent-round-${round}-${Math.random().toString(36).slice(2)}`;
+        await Promise.all(Array.from({ length: 12 }, () =>
+          errorReporter.recordError(db, { kind: 'TypeError', message, route: '/api/events', source: 'server' })));
+
+        const row = await fingerprintRow(message);
+        expect(row, 'twelve reports produced no group at all').toBeTruthy();
+        expect(
+          Number(row.occurrences),
+          'a lost update: two reports read the same count and both wrote back count+1',
+        ).toBe(12);
+      }
+    }, 60_000);
+
+    it('creates exactly one group for simultaneous first-sightings', async () => {
+      for (let round = 0; round < 4; round += 1) {
+        const message = `first-sighting-${round}-${Math.random().toString(36).slice(2)}`;
+        await Promise.all(Array.from({ length: 8 }, () =>
+          errorReporter.recordError(db, { kind: 'RangeError', message, route: '/api/x', source: 'server' })));
+
+        const n = (await db.prepare('SELECT COUNT(*) AS c FROM error_groups WHERE message = ?').get(message)).c;
+        expect(Number(n), 'the same problem was filed under more than one group').toBe(1);
+      }
+    }, 60_000);
+  });
+
+  /**
+   * Only one sweep may own a given alert. The claim is a conditional UPDATE …
+   * RETURNING for exactly this reason: `runNotificationSweep` does not await
+   * the send, so two ticks really can be inside `sendErrorAlerts` together.
+   */
+  describe('alert ownership', () => {
+    it('lets exactly one of six overlapping sweeps claim a problem', async () => {
+      for (let round = 0; round < 3; round += 1) {
+        const fp = `fp-race-${round}-${Math.random().toString(36).slice(2)}`;
+        const now = new Date().toISOString();
+        await db.prepare('DELETE FROM error_groups').run();
+        await db.prepare(`
+          INSERT INTO error_groups
+            (fingerprint, source, kind, message, route, status, occurrences, users_seen,
+             first_seen_at, last_seen_at, alerted_at)
+          VALUES (?, 'server', 'TypeError', 'race', '/r', 'open', 1, 0, ?, ?, NULL)
+        `).run(fp, now, now);
+
+        let sends = 0;
+        const send = async () => { sends += 1; return { ok: true }; };
+        const results = await Promise.all(Array.from({ length: 6 }, () =>
+          alerting.sendErrorAlerts(db, { send, appUrl: 'http://x' })));
+
+        const sent = results.filter(r => r.sent > 0).length;
+        expect(sent, 'more than one sweep claimed the same problem — this is the alert loop').toBe(1);
+        expect(sends, 'the digest was mailed more than once').toBe(1);
+        expect(await claimedAt(fp)).not.toBeNull();
+      }
+    }, 60_000);
+
+    const claimedAt = async (fp) =>
+      (await db.prepare('SELECT alerted_at FROM error_groups WHERE fingerprint = ?').get(fp))?.alerted_at;
+  });
+
+  /**
+   * Filing the same report twice is an insert guarded by a unique index, with
+   * the collision handled by reading back the original id. Under concurrency
+   * both callers can reach the INSERT, so the loser MUST take the handled
+   * branch rather than surfacing a 500 — which is what it did on PostgreSQL
+   * until `isUniqueViolation()` stopped matching SQLite's error wording.
+   */
+  describe('report duplicate suppression', () => {
+    /**
+     * Isolation is by DISTINCT TARGET, not by cleanup.
+     *
+     * `reports` and `moderation_actions` are both append-only — their triggers
+     * refuse DELETE outright, which is the audit guarantee working. So each
+     * round races against a different event rather than resetting, and the
+     * uniqueness under test is per `(reporter, target_type, target_id)` anyway.
+     */
+    it('files one report and returns the same id to all six simultaneous callers', async () => {
+      const reporter = await db.prepare(
+        "SELECT id FROM users WHERE role = 'student' AND account_status = 'active' LIMIT 1"
+      ).get();
+      const events = await db.prepare('SELECT id FROM events ORDER BY id LIMIT 3').all();
+      expect(reporter?.id, 'fixture: no student to report with').toBeTruthy();
+      expect(events.length, 'fixture: needs distinct events to race against').toBeGreaterThan(0);
+
+      for (const target of events) {
+        const already = (await db.prepare(
+          'SELECT COUNT(*) AS c FROM reports WHERE reporter_id = ? AND target_id = ?'
+        ).get(reporter.id, target.id)).c;
+        if (Number(already) > 0) continue;   // a seeded report already owns this pair
+
+        const results = await Promise.all(Array.from({ length: 6 }, () =>
+          reportService.createReport({
+            reporter: { id: reporter.id, role: 'student' },
+            targetType: 'event',
+            targetId: target.id,
+            category: 'something_feels_wrong',
+            description: 'concurrent duplicate suppression probe',
+          }).catch((err) => ({ ok: false, threw: String(err?.message ?? err) }))));
+
+        const ok = results.filter(r => r.ok);
+        expect(
+          ok.length,
+          `a duplicate surfaced as a failure instead of the original id: ${JSON.stringify(results.filter(r => !r.ok))}`,
+        ).toBe(6);
+
+        const ids = new Set(ok.map(r => r.reportId));
+        expect(ids.size, 'six callers were given more than one report id for one report').toBe(1);
+
+        const stored = (await db.prepare(
+          'SELECT COUNT(*) AS c FROM reports WHERE reporter_id = ? AND target_id = ?'
+        ).get(reporter.id, target.id)).c;
+        expect(Number(stored), 'the unique index did not hold under concurrency').toBe(1);
+      }
+    }, 60_000);
+  });
+
+  /**
+   * A check-in token is single-use by contract: it is how attendance is claimed,
+   * and a token that can be redeemed twice is a double attendance record.
+   */
+  describe('check-in tokens', () => {
+    it('lets exactly one of eight simultaneous redemptions succeed', async () => {
+      const { issueCheckinToken, consumeCheckinToken } = await import('./checkinTokens.js');
+      const application = await db.prepare(
+        "SELECT * FROM applications WHERE status = 'accepted' LIMIT 1"
+      ).get();
+      expect(application?.id, 'fixture: no accepted application to check in').toBeTruthy();
+      const actor = application.user_id;
+
+      for (let round = 0; round < 3; round += 1) {
+        await db.prepare('DELETE FROM attendance WHERE user_id = ?').run(application.user_id);
+        const issued = await issueCheckinToken(db, { application });
+        const tokenId = issued?.tokenId ?? issued?.id ?? issued?.token;
+        expect(tokenId, 'fixture: no check-in token was issued').toBeTruthy();
+
+        const outcomes = await Promise.all(Array.from({ length: 8 }, () =>
+          consumeCheckinToken(db, { tokenId, actorId: actor }).then(
+            (r) => (r && r.ok !== false ? 'ok' : 'refused'),
+            () => 'threw',
+          )));
+
+        expect(
+          outcomes.filter(o => o === 'ok').length,
+          `a single-use token was consumed more than once: ${outcomes.join(',')}`,
+        ).toBe(1);
+      }
+    }, 60_000);
+  });
+});
