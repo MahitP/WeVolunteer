@@ -2326,3 +2326,196 @@ and changed character: what is left is no longer mostly awaits. Unchanged:
    to `map`/`filter`, or an anonymous non-hook function).
 3. **Then the remaining assertion-level failures**, which are individually small.
 4. **Then concurrency on PostgreSQL**, then the migration dry run, then the gate.
+
+---
+
+## Phase 13 — the raw-handle blind spot, the failure tail, and the first data migration
+
+Starting point, reproduced rather than assumed: 4,570 passing / 213 failing /
+19 skipped, 223 of 282 files.
+
+### 13a · Eleven suites were reading a different database from the one they wrote to
+
+`new DatabaseSync(process.env.WEV_DB_PATH)` opens a second connection to the
+SQLite file — which is the application's database only when the application is
+on SQLite. Under the PostgreSQL harness those tests wrote through the API and
+then read an empty file, reporting `no such table: users`. **182 tests came back**
+when they were moved onto the application's own handle: evidence preservation,
+account deletion, identity change, OAuth, organizer agreements, sessions, 2FA,
+privacy and Auto Select. None of it is engine-specific.
+
+The shape hid more than itself. Files holding a raw handle are excluded from the
+fixture ratchet, so **none of their unawaited chains had ever been counted** —
+the measurement tracking the port had its blind spot exactly where the
+least-ported files were. Two things now close it: a mutation-proven guard that
+refuses a raw handle on the application database, and a fix to the exclusion
+itself, which read the *unstripped* source — so a COMMENT naming the constructor
+removed a file from the count. That happened on the first file ported here,
+silently, while its chains were still unported.
+
+The handle is shared, so the `close()` calls had to go with it. Leaving one in
+closed the application's own connection and took the whole file down with
+`ERR_INVALID_STATE` — worth recording because the fix looks like a tidy-up and
+is not.
+
+### 13b · Refusal assertions were the largest remaining correctness risk
+
+`expect(() => db.prepare(…).run(…)).toThrow()` observes a synchronous throw and
+nothing else. On PostgreSQL the statement returns a rejected promise, the
+function returns normally, and the assertion is wrong — with an unhandled
+rejection behind it. These are the assertions that prove the append-only
+triggers REFUSE writes: audit log, appeals history, report evidence, capability
+kernel, moderation threads.
+
+21 converted to `await expect(async () => stmt).rejects.toThrow(…)`, which
+observes both engines. Five `.not.toThrow()` cases are the same problem pointing
+the other way — there the naive form PASSES while the write is refused — and
+became a plain `await stmt`. One of the five was a false positive of the
+codemod's name heuristic (`deleteUploadedFile` is a filesystem call) and was left
+alone; reviewing rather than applying blindly is what caught it.
+
+### 13c · A guard that could not see two levels of parentheses
+
+`errorReporter.js` held
+
+    const recentEvents = await db.prepare(…).get(fp, new Date(Date.now() - 3600_000).toISOString()).c;
+
+reading `.c` off the promise. `recentEvents` was `undefined`, `undefined < MAX`
+is false, and **no error event was ever persisted on PostgreSQL** — every client
+report produced a group row and no evidence.
+
+`asyncShapes` has a guard for exactly this shape and it did not fire. Its regex
+allowed ONE level of nesting inside the argument list; `Date.now()` inside
+`Date(…)` is two. Argument lists nest arbitrarily, so the guard now counts depth
+instead of enumerating it. Mutation-proven by restoring this exact line.
+
+The same file had a **read-then-write race**: `SELECT … WHERE fingerprint = ?`
+then INSERT-or-UPDATE, so two reports sharing a fingerprint both read "not
+present", both insert, and the second violates the primary key — losing the
+report, because the failure lands before the event row is written. SQLite ran the
+handler synchronously behind a write gate; a pool makes it ordinary. Now one
+atomic upsert, right-hand columns qualified because PostgreSQL reads a bare
+`occurrences` in `DO UPDATE` as ambiguous.
+
+### 13d · The migration mechanism, separated from what it produces
+
+PostgreSQL never replays the SQLite migrations — `initDatabase()` returns before
+running one and the generated schema is applied whole. So a test asserting that
+migration 001 wrote a `schema_migrations` row is asking about machinery that
+never ran.
+
+Measured before deciding: **15 of the 19 migration suites already pass on
+PostgreSQL unchanged.** That is why the exemption is per TEST rather than per
+file — the four remaining files mix mechanism with behaviour. 20 mechanism
+assertions are marked SQLite-only; the behaviour assertions beside them were
+PORTED (the role CHECK, case-insensitive email uniqueness, seed survival) and now
+run on PostgreSQL. `server/testEngine.js` states the bar and a mutation-proven
+guard pins the four files allowed to use it.
+
+**An honest gap this makes explicit:** SQLite's index-USAGE assertions
+(`EXPLAIN QUERY PLAN`) have no PostgreSQL counterpart. The indexes are verified
+to exist there by the parity tests; that the planner chooses them is not
+asserted on PostgreSQL.
+
+### 13e · A hook timeout that was silently deleting coverage
+
+`hookTimeout` sat at its 10-second default while `testTimeout` had been raised to
+fifteen, making `beforeAll` the tightest budget in the suite despite being the
+part that boots a server and applies a schema. On PostgreSQL each file creates
+its own schema namespace — ~65 tables and ~95 indexes — and five files tipped
+over. **Vitest reports every test in a file whose suite hook failed as *skipped*,
+so 76 tests quietly stopped running while the failure count improved.** A suite
+that looks better because it is measuring less is the most misleading shape it
+can take, and this is the third time this cascade has appeared in this migration.
+
+### 13f · The 2FA single-use race was never actually run on PostgreSQL
+
+`twoFactor.singleUseRace.test.js` proves a second factor cannot be spent twice
+by concurrent submissions. One case asserted the spent row with
+`ORDER BY rowid DESC`; PostgreSQL has no `rowid`, so the test errored before
+reaching its assertion and the invariant went unverified on the target engine.
+
+It was not a real race. With the ordering made portable, all four cases pass on
+PostgreSQL: one session from four parallel submissions of one emailed code,
+eight parallel recovery-code spends, five parallel submissions sharing one
+pre-auth grant, and a lost race consuming nothing extra.
+
+The `rowid` uses left in `db.js` are the boot-time email and username dedupe,
+which sit after `initDatabase()`'s PostgreSQL early return — checked, not assumed.
+
+### 13g · The first SQLite → PostgreSQL data migration
+
+`bin/migrate-sqlite-to-postgres.mjs`. Source opened READ-ONLY; run against a
+snapshot, never the live pilot file.
+
+```
+65 of 65 tables matched between source and generated schema
+548 rows copied
+row counts and PRIMARY KEY SETS      all match
+all 87 foreign keys                  VALIDATE against the loaded data
+NULL primary keys                    none
+```
+
+Primary keys are compared as SETS rather than counts, because equal counts with
+different ids is precisely what a count cannot see.
+
+**The NULL-primary-key risk is structural, not actual.** 52 tables declare a TEXT
+primary key that SQLite reports nullable and PostgreSQL refuses; in the real data
+there is not one NULL id.
+
+Foreign keys are suspended for the load and every constraint VALIDATEd
+afterwards — stronger than a topological insertion order, which this schema does
+not admit cleanly anyway (`users` and `organizations` reference each other).
+
+**Repeatability:** a second run REFUSES and exits non-zero rather than
+duplicating; row counts verified untouched afterwards.
+
+**End to end:** the real application then booted against the migrated database,
+applied its schema, ran its own hours-ledger parity check against attendance for
+three volunteers, and read back 18 users, 4 events, 16 attendance rows, 18 audit
+logs. Fifteen semantic comparisons match across engines — 0/1 booleans, ISO
+timestamp extremes, NULL counts, distinct role and action counts, credited hours,
+ledger delta sum. Tombstoned accounts survive intact: three `deleted` users on
+both sides with anonymised addresses preserved exactly.
+
+### 13h · Measured state
+
+```
+                        phase 12      now
+PostgreSQL passing         4,570      4,708
+PostgreSQL failing           213         62
+PostgreSQL files green   223/282    247/282
+SQLite passing             4,745      4,800   (0 failing)
+fixture debt                  63         22
+```
+
+Lint warning-free, build clean, `npm audit --omit=dev` clean, schema drift clean.
+
+**A measurement caveat worth recording:** running the SQLite and PostgreSQL
+suites CONCURRENTLY against the same PostgreSQL server produces spurious
+timeouts in `db.postgresSchema.test.js`. Seven of the 62 failures above are that
+artefact; the file passes alone. Run the suites sequentially.
+
+### Why POSTGRES_READY is still false
+
+1. **62 failures remain**, now a long tail rather than a class — no single cause
+   above six occurrences. They need individual diagnosis.
+2. **Concurrency is only partly verified.** The single-use races (2FA, recovery
+   codes, pre-auth grants) now pass on PostgreSQL, and the capacity suite passes
+   — but that suite drives SYNTHETIC tables, so it proves PostgreSQL's locking
+   primitives rather than the application's own capacity path. Waitlist
+   promotion, check-in and capability-grant races are untested there.
+3. **The dry run is one small snapshot.** 548 rows is a shape check, not a
+   volume or timing check, and it says nothing about how long a real cutover
+   takes or how it behaves under load.
+4. **No rollback procedure has been written or rehearsed.**
+
+### Next operation
+
+1. Diagnose the remaining 62 individually — start with the six in
+   `routes.organizationMembers` and the four each in `routes.moderationQueue`
+   and `routes.conversationReport`.
+2. Drive the application's OWN capacity and waitlist paths concurrently on
+   PostgreSQL, not synthetic tables.
+3. Write and rehearse the rollback procedure.
+4. Re-run the dry run against a larger, timed dataset.
