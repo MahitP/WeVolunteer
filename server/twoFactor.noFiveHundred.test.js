@@ -27,6 +27,46 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer, TEST_TOTP_SECRET, freshTotp, enrolTwoFactor } from './testServer.js';
 
 const EMAIL = 'admin@example.gov';
+
+/**
+ * Makes the one UPDATE this path performs fail, per engine.
+ *
+ * The BEHAVIOUR under test is engine-independent and security-relevant: a
+ * second factor whose replay high-water mark cannot be written must REFUSE the
+ * sign-in — a code that cannot be made single-use must not complete one — and
+ * must say so as a named 503 rather than an unexplained 500.
+ *
+ * Only the simulation is dialect-specific. SQLite raises from the trigger body
+ * directly; PostgreSQL has no `RAISE(ABORT, …)` in that position and needs a
+ * trigger FUNCTION, so it gets one.
+ */
+async function blockCounterWrite(db) {
+  if (db.dialect === 'postgres') {
+    await db.exec(`
+      CREATE OR REPLACE FUNCTION block_counter_write_fn() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'simulated missing column'; END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER block_counter_write
+        BEFORE UPDATE OF tfa_last_counter ON users
+        FOR EACH ROW EXECUTE FUNCTION block_counter_write_fn();
+    `);
+    return;
+  }
+  await db.exec(`
+    CREATE TRIGGER IF NOT EXISTS block_counter_write
+    BEFORE UPDATE OF tfa_last_counter ON users
+    BEGIN SELECT RAISE(ABORT, 'simulated missing column'); END
+  `);
+}
+
+async function unblockCounterWrite(db) {
+  if (db.dialect === 'postgres') {
+    await db.exec('DROP TRIGGER IF EXISTS block_counter_write ON users');
+    await db.exec('DROP FUNCTION IF EXISTS block_counter_write_fn()');
+    return;
+  }
+  await db.exec('DROP TRIGGER IF EXISTS block_counter_write');
+}
 const PASSWORD = 'password123';
 
 describe('the second-factor step never answers 500 for a user-facing failure', () => {
@@ -98,11 +138,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
 
       /* Simulate the broken-schema condition without rebuilding `users`: a
          trigger that raises on the one UPDATE this path performs. */
-      db.exec(`
-        CREATE TRIGGER IF NOT EXISTS block_counter_write
-        BEFORE UPDATE OF tfa_last_counter ON users
-        BEGIN SELECT RAISE(ABORT, 'simulated missing column'); END
-      `);
+      await blockCounterWrite(db);
       try {
         const res = await submit(preauth, { method: 'totp', token });
         expect(res.status).not.toBe(500);
@@ -111,7 +147,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
         /* And it names a way in that does not depend on the broken path. */
         expect(res.body.availableMethods).toContain('recovery');
       } finally {
-        db.exec('DROP TRIGGER IF EXISTS block_counter_write');
+        await unblockCounterWrite(db);
       }
     });
 
