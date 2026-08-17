@@ -143,17 +143,55 @@ describe('await is written where the value is, not where the call is', () => {
   });
 
   /**
-   * The same mistake on a raw statement chain, which is the shape the remaining
-   * route conversions produce: `(await db.prepare(sql).get(id)).count` reads
-   * `.count` off the promise. There are none today; this keeps it that way while
-   * ~790 of these are converted.
+   * The same mistake on a raw statement chain:
+   * `await db.prepare(sql).get(id).count` reads `.count` off the PROMISE, gets
+   * `undefined`, and `await undefined` is `undefined`.
+   *
+   * ── Why this is balanced rather than matched ──
+   *
+   * This was a regex, and the regex allowed exactly ONE level of parentheses
+   * inside the argument list: `(?:[^()]|\([^()]*\))*`. That is enough for
+   * `.get(id)` and for `.get(fp, new Date(x).toISOString())`, and NOT enough for
+   *
+   *     .get(fp, new Date(Date.now() - 3600_000).toISOString()).c
+   *
+   * where `Date.now()` sits inside `Date(…)`. One real defect lived behind that
+   * gap in `errorReporter.js`: `recentEvents` was `undefined`, `undefined < 100`
+   * is false, and so **no error event was ever persisted on PostgreSQL** — the
+   * per-hour cap read as permanently exceeded. SQLite returned a plain object
+   * and was correct, which is why nothing noticed.
+   *
+   * Argument lists nest arbitrarily, so the depth has to be counted rather than
+   * enumerated. Guard 15 below already does this for `prepare()`; this is the
+   * same technique applied to the execution call.
    */
   it('never reads a property off an unresolved prepare() chain', () => {
-    const re = /await\s+\w+(?:\.\w+)*\.prepare\s*\((?:[^()]|\([^()]*\))*\)\s*\.\s*(?:get|all|run)\s*\((?:[^()]|\([^()]*\))*\)\s*\??\.\s*(?!then\b|catch\b|finally\b)[a-zA-Z_]/gs;
+    const START = /await\s+\w+(?:\.\w+)*\.prepare\s*\(/g;
+    /** From the index of an open paren, the index just past its match. */
+    const closeOf = (src, open) => {
+      let depth = 0;
+      for (let i = open; i < src.length; i += 1) {
+        if (src[i] === '(') depth += 1;
+        else if (src[i] === ')') { depth -= 1; if (depth === 0) return i + 1; }
+      }
+      return -1;
+    };
+
     const bad = [];
     for (const { rel, src } of FILES) {
-      for (const m of src.matchAll(re)) {
-        bad.push(`${rel}:${lineOf(src, m.index)} — ${m[0].replace(/\s+/g, ' ').trim().slice(0, 90)}`);
+      for (const m of src.matchAll(START)) {
+        const afterPrepare = closeOf(src, m.index + m[0].length - 1);
+        if (afterPrepare < 0) continue;
+        const exec = /^\s*\.\s*(?:get|all|run|iterate)\s*\(/.exec(src.slice(afterPrepare));
+        if (!exec) continue;
+        const execOpen = afterPrepare + exec[0].length - 1;
+        const afterExec = closeOf(src, execOpen);
+        if (afterExec < 0) continue;
+        /* A property read straight off the awaited chain — but `.then`,
+           `.catch` and `.finally` belong to the promise and are deliberate. */
+        if (/^\s*\??\.\s*(?!then\b|catch\b|finally\b)[a-zA-Z_]/.test(src.slice(afterExec))) {
+          bad.push(`${rel}:${lineOf(src, m.index)} — ${src.slice(m.index, afterExec + 12).replace(/\s+/g, ' ').trim().slice(0, 90)}`);
+        }
       }
     }
     expect(bad, 'Write `(await db.prepare(sql).get(id)).prop` — the property is on the ROW.')

@@ -49,7 +49,54 @@ const post = (body, headers = {}) =>
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
 
-const report = (over = {}) => post({ kind: 'TypeError', message: 'client boom', route: '/events', ...over });
+/**
+ * The intake answers 202 BEFORE it writes, deliberately.
+ *
+ * `POST /api/errors/report` sends its response first and records afterwards, so
+ * that a reporting failure can never become a client-visible failure on a path
+ * with no session to recover. That is the behaviour, and it is correct.
+ *
+ * It also means the response arriving says nothing about the row existing. On
+ * SQLite the write was synchronous, so it had always landed by the time `fetch`
+ * resolved and every assertion below could read immediately — an accident of the
+ * engine, not a guarantee the endpoint makes. On PostgreSQL the write is a real
+ * round-trip and the read overtakes it.
+ *
+ * So the wait is explicit. Nothing is weakened: the assertions still check the
+ * stored row's exact contents, and a report that never lands still fails, just
+ * with a timeout instead of a confusing `undefined`.
+ *
+ * ── Total occurrences across every group — a counter that only ever goes up.
+ *
+ * Waiting for "the row count stopped changing" is not enough: two consecutive
+ * reads both see zero before the write has even begun, and the wait returns
+ * immediately. Every accepted report increments this by exactly one, whether it
+ * creates a group or collapses into an existing one, so waiting for it to RISE
+ * is a positive signal rather than the absence of one.
+ */
+const recorded = async () =>
+  (await groups()).reduce((n, g) => n + Number(g.occurrences ?? 0), 0);
+
+/** Blocks until the count rises above `before`, or fails loudly. */
+const waitForRecord = async (before) => {
+  for (let i = 0; i < 300; i += 1) {
+    if (await recorded() > before) return;
+    await new Promise(r => setTimeout(r, 10));
+  }
+  throw new Error('the intake accepted a report that was never recorded');
+};
+
+/**
+ * `{ records: false }` is for the one case that makes recording FAIL on
+ * purpose. Waiting there would time out on the thing the test is asserting.
+ */
+const report = async (over = {}, { records = true } = {}) => {
+  const before = await recorded();
+  const res = await post({ kind: 'TypeError', message: 'client boom', route: '/events', ...over });
+  /* A refused body never reaches the reporter, so only a 202 is waited on. */
+  if (res.status === 202 && records) await waitForRecord(before);
+  return res;
+};
 
 describe('intake: accepts a report without a session', () => {
   it('answers 202 and stores one group and one event', async () => {
@@ -67,12 +114,14 @@ describe('intake: accepts a report without a session', () => {
     expect((await events())[0].user_hash).toBeNull();
 
     const cookie = await srv.login('leo.chen@example.com');
+    const before = await recorded();
     const res = await fetch(`${srv.base}/api/errors/report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: `wev_session=${cookie}` },
       body: JSON.stringify({ kind: 'TypeError', message: 'signed-in report', route: '/events' }),
     });
     expect(res.status).toBe(202);
+    await waitForRecord(before);
 
     const signedIn = (await groups()).find(g => g.message.includes('signed-in'));
     const ev = await db.prepare('SELECT * FROM error_events WHERE fingerprint = ?').get(signedIn.fingerprint);
@@ -84,11 +133,13 @@ describe('intake: accepts a report without a session', () => {
   it('answers 202 for a garbage or expired session rather than 401', async () => {
     // A broken session is one of the states most worth hearing about; refusing
     // the report would also make this endpoint a token-validity oracle.
+    const before = await recorded();
     const res = await post(
       { kind: 'Error', message: 'broken session report', route: '/login' },
       { Cookie: 'wev_session=not-a-real-token' }
     );
     expect(res.status).toBe(202);
+    await waitForRecord(before);
     expect((await groups()).length).toBe(1);
     expect((await events())[0].user_hash).toBeNull();
   });
@@ -271,7 +322,7 @@ describe('intake: failures never reach the client', () => {
     const reporter = await import('./errorReporter.js');
     const spy = vi.spyOn(reporter, 'recordError').mockImplementation(() => { throw new Error('reporter exploded'); });
 
-    const res = await report({ message: 'resilience probe' });
+    const res = await report({ message: 'resilience probe' }, { records: false });
 
     const called = spy.mock.calls.length;
     spy.mockRestore();

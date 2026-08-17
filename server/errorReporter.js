@@ -405,30 +405,44 @@ export async function recordError(db, event = {}) {
       }
     }
 
-    if (existing) {
-      await db.prepare(`
-        UPDATE error_groups
-           SET occurrences = occurrences + 1,
-               last_seen_at = ?,
-               status = CASE WHEN status = 'resolved' THEN 'open' ELSE status END,
-               resolved_at = CASE WHEN status = 'resolved' THEN NULL ELSE resolved_at END
-         WHERE fingerprint = ?
-      `).run(now, fp);
-    } else {
-      await db.prepare(`
-        INSERT INTO error_groups
-          (fingerprint, source, kind, message, route, status, occurrences, users_seen,
-           first_seen_at, last_seen_at, release)
-        VALUES (?, ?, ?, ?, ?, 'open', 1, 0, ?, ?, ?)
-      `).run(fp, source, kind, message, route, now, now,
-        typeof event.release === 'string' ? event.release.slice(0, 40) : null);
-    }
+    /**
+     * ONE atomic upsert, not a SELECT followed by an INSERT or an UPDATE.
+     *
+     * The read above decides the ceiling, which is advisory — a race there costs
+     * at most one extra group. Deciding the WRITE from it is a different matter:
+     * two reports carrying the same fingerprint both read "not present", both
+     * take the INSERT branch, and the second one violates
+     * `error_groups_pkey`. The whole report is then lost, because the failure
+     * happens before the event row is written.
+     *
+     * SQLite made that almost unreachable — the handler ran synchronously behind
+     * a write gate — so the shape survived. On PostgreSQL the pool makes it
+     * ordinary, and an error reporter that drops reports when several arrive
+     * together is worst exactly when it is most needed.
+     *
+     * Columns on the right-hand side are qualified with the table name.
+     * PostgreSQL treats a bare `occurrences` in `DO UPDATE SET` as ambiguous
+     * between the existing row and the proposed one and refuses the statement;
+     * the qualified form means the stored row on both engines.
+     */
+    await db.prepare(`
+      INSERT INTO error_groups
+        (fingerprint, source, kind, message, route, status, occurrences, users_seen,
+         first_seen_at, last_seen_at, release)
+      VALUES (?, ?, ?, ?, ?, 'open', 1, 0, ?, ?, ?)
+      ON CONFLICT (fingerprint) DO UPDATE
+        SET occurrences  = error_groups.occurrences + 1,
+            last_seen_at = excluded.last_seen_at,
+            status       = CASE WHEN error_groups.status = 'resolved' THEN 'open' ELSE error_groups.status END,
+            resolved_at  = CASE WHEN error_groups.status = 'resolved' THEN NULL ELSE error_groups.resolved_at END
+    `).run(fp, source, kind, message, route, now, now,
+      typeof event.release === 'string' ? event.release.slice(0, 40) : null);
 
     // Above the hourly rate the counter keeps climbing and the evidence stops
     // duplicating — 100 copies of one stack say nothing the first said.
-    const recentEvents = await db.prepare(
+    const recentEvents = (await db.prepare(
       'SELECT COUNT(*) AS c FROM error_events WHERE fingerprint = ? AND occurred_at > ?'
-    ).get(fp, new Date(Date.now() - 3600_000).toISOString()).c;
+    ).get(fp, new Date(Date.now() - 3600_000).toISOString())).c;
 
     if (recentEvents < MAX_EVENTS_PER_HOUR) {
       await db.prepare(`
