@@ -280,6 +280,23 @@ export function nullSafeEquals(db, column, param) {
  * `FOR UPDATE` is not syntax it accepts. That asymmetry is the whole reason
  * this bug was invisible until the application ran on a connection pool.
  */
+/**
+ * A case-insensitive LIKE.
+ *
+ * SQLite's `LIKE` ignores case for ASCII by default. PostgreSQL's does not, and
+ * the difference is silent: the directory search simply stopped matching
+ * `@Ana` against the handle `ana` — no error, just an empty result, which reads
+ * as "no such person".
+ *
+ * `ILIKE` is the PostgreSQL answer rather than `COLLATE nocase`, because
+ * PostgreSQL refuses a nondeterministic collation inside `LIKE` outright —
+ * noted in this file's own COLLATE reasoning, and the reason that route cannot
+ * simply reuse the shared collation here.
+ */
+export function caseInsensitiveLike(db) {
+  return isPostgres(db) ? 'ILIKE' : 'LIKE';
+}
+
 export function forUpdate(db) {
   return isPostgres(db) ? ' FOR UPDATE' : '';
 }

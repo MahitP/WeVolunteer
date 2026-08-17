@@ -34,7 +34,7 @@ import { formatOrganization } from '../organizations.js';
    both halves of discovery. */
 import { normaliseTag } from '../eventTags.js';
 import { notificationService } from '../services/notificationService.js';
-import { jsonArrayContains } from '../db/dialectSql.js';
+import { jsonArrayContains, caseInsensitiveLike } from '../db/dialectSql.js';
 
 const router = express.Router();
 
@@ -253,7 +253,21 @@ router.get('/api/users/:id/service-record', authenticateToken, requireCap('direc
  * withhold. Suspended and deleted accounts are excluded outright.
  */
 router.get('/api/directory/search', authenticateToken, requireCap('directory.read'), async (req, res) => {
-  const raw = String(req.query.q ?? '').trim();
+  /**
+   * NUL bytes are stripped before the value can reach a query.
+   *
+   * PostgreSQL refuses `\0` inside a text value outright — `invalid byte
+   * sequence for encoding "UTF8": 0x00` — and the refusal happens at the driver,
+   * so it surfaces as a 500 rather than as an empty result. SQLite stores the
+   * byte happily, which is why `?q=@abc%00def` was a harmless no-match there and
+   * an unauthenticated 500 here.
+   *
+   * Stripped rather than rejected: a NUL in a search box is never a deliberate
+   * query, and answering 400 to it would tell a prober they had found an edge
+   * the server treats specially. Removing it makes the search mean what the
+   * visible characters say.
+   */
+  const raw = String(req.query.q ?? '').replace(/\0/g, '').trim();
 
   /**
    * ── Two sigils, because a searcher already knows which kind they want ──
@@ -311,16 +325,19 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
      * `LIMIT n + 1` is how `hasMore` is answered without a second COUNT over
      * the whole table. The extra row is dropped before it reaches the client.
      */
+    /* SQLite's LIKE ignores case; PostgreSQL's does not, so `@Ana` silently
+       stopped matching the handle `ana` — an empty result, not an error. */
+    const LIKE = caseInsensitiveLike(db);
     const rows = await db.prepare(`
       SELECT id, username, name, avatar, profile_picture_url, role, location
       FROM users
       WHERE ${LIVE_USER}
-        AND (name LIKE ? ESCAPE '\\' OR username LIKE ? ESCAPE '\\')
+        AND (name ${LIKE} ? ESCAPE '\\' OR username ${LIKE} ? ESCAPE '\\')
       ORDER BY
         /* Exact username first, then prefix matches, then the rest. A student
            searching for a friend's exact handle should not have to scroll. */
         CASE WHEN username = ? COLLATE nocase THEN 0
-             WHEN username LIKE ? ESCAPE '\\' THEN 1
+             WHEN username ${LIKE} ? ESCAPE '\\' THEN 1
              WHEN name LIKE ? ESCAPE '\\' THEN 2
              ELSE 3 END,
         name COLLATE nocase
