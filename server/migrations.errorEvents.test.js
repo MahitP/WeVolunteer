@@ -100,13 +100,13 @@ describe('004_error_events — constraints behave', () => {
 
   it('refuses a source outside the closed set', async () => {
     const db = await getDb();
-    expect(() => insertGroup(db, group('fp-bad-source', { source: 'browser' }))).toThrow();
-    expect(() => insertGroup(db, group('fp-ok-source', { source: 'worker' }))).not.toThrow();
+    await expect(async () => insertGroup(db, group('fp-bad-source', { source: 'browser' }))).rejects.toThrow();
+    await insertGroup(db, group('fp-ok-source', { source: 'worker' }));
   });
 
   it('refuses a status outside the closed set, and defaults to open', async () => {
     const db = await getDb();
-    expect(() => insertGroup(db, group('fp-bad-status', { status: 'wontfix' }))).toThrow();
+    await expect(async () => insertGroup(db, group('fp-bad-status', { status: 'wontfix' }))).rejects.toThrow();
 
     await db.prepare(`
       INSERT INTO error_groups (fingerprint, source, kind, message, first_seen_at, last_seen_at)
@@ -119,9 +119,9 @@ describe('004_error_events — constraints behave', () => {
 
   it('refuses an event whose group does not exist', async () => {
     const db = await getDb();
-    expect(() => db.prepare(`
+    await expect(async () => db.prepare(`
       INSERT INTO error_events (id, fingerprint, occurred_at) VALUES ('ev-orphan', 'fp-never-existed', ?)
-    `).run('2026-08-03T00:00:00.000Z')).toThrow();
+    `).run('2026-08-03T00:00:00.000Z')).rejects.toThrow();
   });
 
   it('round-trips an event through every column', async () => {

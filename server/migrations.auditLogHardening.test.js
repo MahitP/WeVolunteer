@@ -48,13 +48,13 @@ describe('Migration 019: Audit Log Hardening', () => {
       details: 'initial'
     });
 
-    expect(() => {
+    await expect(async () => {
       db.prepare('UPDATE admin_audit_logs SET details = ? WHERE id = ?').run('changed', id);
-    }).toThrow(/admin_audit_logs is append-only: records cannot be altered/);
+    }).rejects.toThrow(/admin_audit_logs is append-only: records cannot be altered/);
 
-    expect(() => {
+    await expect(async () => {
       db.prepare('UPDATE admin_audit_logs SET created_at = ? WHERE id = ?').run('2000-01-01T00:00:00.000Z', id);
-    }).toThrow(/admin_audit_logs is append-only: records cannot be altered/);
+    }).rejects.toThrow(/admin_audit_logs is append-only: records cannot be altered/);
   });
 
   it('prevents deletions of recent admin_audit_logs (admin_audit_logs_no_delete)', async () => {
@@ -64,9 +64,9 @@ describe('Migration 019: Audit Log Hardening', () => {
       details: 'recent'
     });
 
-    expect(() => {
+    await expect(async () => {
       db.prepare('DELETE FROM admin_audit_logs WHERE id = ?').run(id);
-    }).toThrow(/admin_audit_logs is append-only: only the retention worker may delete aged logs/);
+    }).rejects.toThrow(/admin_audit_logs is append-only: only the retention worker may delete aged logs/);
   });
 
   it('allows retention worker to delete logs older than 365 days', async () => {
@@ -79,9 +79,10 @@ describe('Migration 019: Audit Log Hardening', () => {
     });
 
     // The trigger should allow this deletion because created_at is < 364 days ago
-    expect(() => {
-      db.prepare('DELETE FROM admin_audit_logs WHERE id = ?').run(id);
-    }).not.toThrow();
+    /* Succeeds, so it is simply awaited: `expect(fn).not.toThrow()` observes a
+       synchronous throw only, and on PostgreSQL the statement rejects instead —
+       so the assertion would pass while the delete was being refused. */
+    await db.prepare('DELETE FROM admin_audit_logs WHERE id = ?').run(id);
 
     const stillExists = await db.prepare('SELECT 1 FROM admin_audit_logs WHERE id = ?').get(id);
     expect(stillExists).toBeUndefined();
@@ -102,8 +103,8 @@ describe('Migration 019: Audit Log Hardening', () => {
     });
 
     // Deleting the user should be blocked by users_no_delete_with_audit_logs
-    expect(() => {
+    await expect(async () => {
       db.prepare('DELETE FROM users WHERE id = ?').run('user-cascade-tester');
-    }).toThrow(/cannot delete user: they have created audit logs which must be retained/);
+    }).rejects.toThrow(/cannot delete user: they have created audit logs which must be retained/);
   });
 });

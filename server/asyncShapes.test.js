@@ -597,7 +597,7 @@ describe('the await group closes after the execution, not before it', () => {
  * promise. Both engines are in use, so the shape is not yet a defect
  * everywhere; it is unported work.
  *
- * There are 63 of them, and that is the honest size of what stands between the
+ * There are 59 of them, and that is the honest size of what stands between the
  * PostgreSQL application suite and green. Asserting zero would break the build
  * for everybody until the whole port lands; asserting a ceiling makes the
  * number visible, stops it growing, and turns each batch of ported files into a
@@ -700,7 +700,7 @@ describe('the unported fixture surface', () => {
   });
 
   /** Lowered only by porting files, never raised to accommodate new ones. */
-  const CEILING = 63;
+  const CEILING = 59;
 
   it(`has at most ${CEILING} unawaited prepare() chains in proxy-holding test files`, () => {
     const offenders = new Map();

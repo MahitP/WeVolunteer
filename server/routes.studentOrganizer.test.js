@@ -145,12 +145,12 @@ describe('Student Organizer', () => {
       expect(res.body.field).toBe('memberRole');
     });
 
-    it('refuses a rank the database itself would not store', () => {
+    it('refuses a rank the database itself would not store', async () => {
       /* The CHECK constraint from migration 046 is the backstop under the route
          validation — a path that skips the route must still not write junk. */
-      expect(() => db.prepare(
+      await expect(async () => db.prepare(
         'UPDATE organization_members SET member_role = ? WHERE organization_id = ? AND user_id = ?'
-      ).run('president', orgId, helperId)).toThrow();
+      ).run('president', orgId, helperId)).rejects.toThrow();
     });
 
     it('leaves the account a student', async () => {

@@ -61,10 +61,10 @@ describe('010_graduation_year — applies and registers', () => {
   it('accepts a NULL year — the permanent answer for an adult, and for every pre-010 row', async () => {
     const db = await getDb();
     const now = new Date().toISOString();
-    expect(() => db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, name, email, username, password_hash, grade, role, created_at)
       VALUES ('u-gy-null', 'No Year', 'gy.null@test.local', 'gy_null', 'x', 'Adult', 'organizer', ?)
-    `).run(now)).not.toThrow();
+    `).run(now);
 
     expect(await db.prepare("SELECT graduation_year FROM users WHERE id = 'u-gy-null'").get())
       .toEqual({ graduation_year: null });

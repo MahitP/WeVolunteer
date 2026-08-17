@@ -50,12 +50,18 @@ describe('the browse filter vocabulary', () => {
 
     const names = Array.from({ length: 22 }, (_, i) => `vocab${String(i).padStart(2, '0')}`);
     await db.prepare(`DELETE FROM event_tags WHERE tag LIKE 'vocab%'`).run();
-    names.forEach((name, i) => {
+    /* `for … of` rather than `forEach`: an async callback handed to `forEach` is
+       started and abandoned — `forEach` neither awaits nor collects the promises
+       — so on PostgreSQL the fixture returned before its inserts had landed and
+       the tests read an empty vocabulary. Sequential is also what this needs:
+       the counts below depend on every row being present. */
+    for (const [i, name] of names.entries()) {
       const uses = Math.max(1, events.length - Math.floor((i * events.length) / names.length));
-      events.slice(0, uses).forEach(ev =>
-        db.prepare('INSERT INTO event_tags (event_id, tag, label) VALUES (?,?,?)')
-          .run(ev, name, name));
-    });
+      for (const ev of events.slice(0, uses)) {
+        await db.prepare('INSERT INTO event_tags (event_id, tag, label) VALUES (?,?,?)')
+          .run(ev, name, name);
+      }
+    }
   }, 60000);
 
   afterAll(async () => { await srv?.close(); });
@@ -66,10 +72,10 @@ describe('the browse filter vocabulary', () => {
     return res.body.tags;
   };
 
-  it('has more tags in the database than the bar will show', () => {
+  it('has more tags in the database than the bar will show', async () => {
     /* The vacuity guard. With fewer than fifteen distinct tags every assertion
        below passes without the cap doing anything. */
-    const distinct = db.prepare('SELECT COUNT(DISTINCT tag) n FROM event_tags').get().n;
+    const distinct = (await db.prepare('SELECT COUNT(DISTINCT tag) n FROM event_tags').get()).n;
     expect(distinct).toBeGreaterThan(BROWSE_TAG_LIMIT);
   });
 

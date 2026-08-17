@@ -257,10 +257,10 @@ describe('a report outlives what it is about', () => {
       targetType: 'user', targetId: 'frozen_subject', reason: 'other', details: 'the original words',
     }, cookie);
 
-    expect(() => db.prepare('DELETE FROM reports WHERE id = ?').run(filed.body.reportId))
+    await expect(async () => db.prepare('DELETE FROM reports WHERE id = ?').run(filed.body.reportId)).rejects
       .toThrow(/never deleted/);
-    expect(() => db.prepare("UPDATE reports SET description = 'rewritten' WHERE id = ?")
-      .run(filed.body.reportId)).toThrow(/record of what was said/);
+    await expect(async () => db.prepare("UPDATE reports SET description = 'rewritten' WHERE id = ?")
+      .run(filed.body.reportId)).rejects.toThrow(/record of what was said/);
     expect((await db.prepare('SELECT description FROM reports WHERE id = ?').get(filed.body.reportId)).description)
       .toBe('the original words');
   });
@@ -271,10 +271,10 @@ describe('a report outlives what it is about', () => {
       targetType: 'conversation', targetId: convId, reason: 'sexual_content',
     }, cookie);
 
-    expect(() => db.prepare('DELETE FROM report_evidence WHERE report_id = ?').run(filed.body.reportId))
+    await expect(async () => db.prepare('DELETE FROM report_evidence WHERE report_id = ?').run(filed.body.reportId)).rejects
       .toThrow(/never deleted/);
-    expect(() => db.prepare("UPDATE report_evidence SET body = 'rewritten' WHERE report_id = ?")
-      .run(filed.body.reportId)).toThrow(/never edited/);
+    await expect(async () => db.prepare("UPDATE report_evidence SET body = 'rewritten' WHERE report_id = ?")
+      .run(filed.body.reportId)).rejects.toThrow(/never edited/);
   });
 
   /**

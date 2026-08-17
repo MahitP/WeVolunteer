@@ -104,18 +104,18 @@ describe('the decision is enforced by the database, not by convention', () => {
     expect(RETENTION.safetyReportDays).toBeUndefined();
   });
 
-  it('refuses to delete a resolved report, at the database', () => {
+  it('refuses to delete a resolved report, at the database', async () => {
     const { reportId } = seedResolvedReport({ ageDays: 8 * 365 });
-    expect(() => db.prepare('DELETE FROM reports WHERE id = ?').run(reportId))
+    await expect(async () => db.prepare('DELETE FROM reports WHERE id = ?').run(reportId)).rejects
       .toThrow(/never deleted|no_delete|ABORT/i);
   });
 
-  it('refuses to edit or blank a frozen evidence body, however old', () => {
+  it('refuses to edit or blank a frozen evidence body, however old', async () => {
     const { reportId } = seedResolvedReport({ ageDays: 12 * 365 });
-    expect(() => db.prepare(
+    await expect(async () => db.prepare(
       "UPDATE report_evidence SET body = '[redacted]' WHERE report_id = ?"
-    ).run(reportId)).toThrow(/frozen|never edited|ABORT/i);
-    expect(() => db.prepare('DELETE FROM report_evidence WHERE report_id = ?').run(reportId))
+    ).run(reportId)).rejects.toThrow(/frozen|never edited|ABORT/i);
+    await expect(async () => db.prepare('DELETE FROM report_evidence WHERE report_id = ?').run(reportId)).rejects
       .toThrow(/ABORT|never/i);
   });
 

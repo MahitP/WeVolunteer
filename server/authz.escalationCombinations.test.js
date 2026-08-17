@@ -132,11 +132,11 @@ describe('cross-feature privilege escalation', () => {
    * is what still refuses. Asserted by attempting the write directly, because
    * that is the only way to reach past the application.
    */
-  it('the database refuses to store an owner invitation at all', () => {
-    expect(() => db.prepare(`
+  it('the database refuses to store an owner invitation at all', async () => {
+    await expect(async () => db.prepare(`
       INSERT INTO admin_invitations (id, email, role, token_hash, invited_by, reason, status, created_at, expires_at)
       VALUES ('inv-escalation-probe', 'db@example.invalid', 'super_admin', 'x', 'user-admin', 'probe', 'pending', '2026-08-07', '2026-08-14')
-    `).run()).toThrow();
+    `).run()).rejects.toThrow();
   });
 
   /* ── An administrator must not be able to remove the owner ─────────────── */

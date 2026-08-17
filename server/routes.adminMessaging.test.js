@@ -217,8 +217,8 @@ describe('the shape is enforced by the schema', () => {
       row.created_by, row.created_at);
   };
 
-  it('refuses an unknown kind', () => {
-    expect(() => insert({ kind: 'admin_everybody' })).toThrow();
+  it('refuses an unknown kind', async () => {
+    await expect(async () => insert({ kind: 'admin_everybody' })).rejects.toThrow();
   });
 
   /**
@@ -226,16 +226,16 @@ describe('the shape is enforced by the schema', () => {
    * thread about no event — which every event query and the lifecycle rules would
    * read as a thread about nothing.
    */
-  it('still requires an event, a student and an organizer for an event thread', () => {
-    expect(() => insert({ kind: 'student_organizer', event_id: null })).toThrow();
+  it('still requires an event, a student and an organizer for an event thread', async () => {
+    await expect(async () => insert({ kind: 'student_organizer', event_id: null })).rejects.toThrow();
   });
 
-  it('refuses an admin_student row that also names an organizer', () => {
-    expect(() => insert({ kind: 'admin_student', organizer_id: ORGANIZER })).toThrow();
+  it('refuses an admin_student row that also names an organizer', async () => {
+    await expect(async () => insert({ kind: 'admin_student', organizer_id: ORGANIZER })).rejects.toThrow();
   });
 
-  it('refuses an admin_organizer row with no organizer', () => {
-    expect(() => insert({ kind: 'admin_organizer', student_id: STUDENT, organizer_id: null }))
+  it('refuses an admin_organizer row with no organizer', async () => {
+    await expect(async () => insert({ kind: 'admin_organizer', student_id: STUDENT, organizer_id: null })).rejects
       .toThrow();
   });
 
@@ -246,15 +246,15 @@ describe('the shape is enforced by the schema', () => {
    */
   it('refuses a duplicate thread between the same admin and person', async () => {
     await openThread(ORGANIZER);
-    expect(() => insert({
+    await expect(async () => insert({
       kind: 'admin_organizer', student_id: null, organizer_id: ORGANIZER,
-    })).toThrow(/UNIQUE|constraint/i);
+    })).rejects.toThrow(/UNIQUE|constraint/i);
   });
 
-  it('allows a second administrator their own thread with the same person', () => {
+  it('allows a second administrator their own thread with the same person', async () => {
     // Distinct `created_by`, so this is a different thread and not a duplicate —
     // a moderation contact belongs to the person who opened it, not to a shared
     // mailbox.
-    expect(() => insert({ created_by: 'user-org-1', student_id: STUDENT })).not.toThrow();
+    await insert({ created_by: 'user-org-1', student_id: STUDENT });
   });
 });
