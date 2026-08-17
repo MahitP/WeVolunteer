@@ -267,7 +267,7 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
    * the server treats specially. Removing it makes the search mean what the
    * visible characters say.
    */
-  const raw = String(req.query.q ?? '').replace(/\0/g, '').trim();
+  const raw = String(req.query.q ?? '').replace(/\u0000/gu, '').trim();
 
   /**
    * ── Two sigils, because a searcher already knows which kind they want ──
