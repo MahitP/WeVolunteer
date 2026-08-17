@@ -107,19 +107,19 @@ describe('a shift that ended earlier today is not reported as upcoming', () => {
     const slotId = `slot-dt-${now.getTime()}`;
     const appId = `app-dt-${now.getTime()}`;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline,
                           organizer_id, status, created_at)
       VALUES (?, 'Earlier Today', 'd', 'School', 'L', ?, 'user-org-1', 'open', ?)
     `).run(eventId, isoFromNow(-6 * HOUR), now.toISOString());
 
     // Started 4h ago, ended 2h ago — unambiguously over, and unambiguously today.
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
       VALUES (?, ?, 'Morning', 'd', ?, ?, 5)
     `).run(slotId, eventId, isoFromNow(-4 * HOUR), isoFromNow(-2 * HOUR));
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
       VALUES (?, ?, ?, ?, 'accepted', ?)
     `).run(appId, userId, eventId, slotId, isoFromNow(-8 * HOUR));
@@ -172,16 +172,16 @@ describe('a shift that ended earlier today is not reported as upcoming', () => {
     const eventId = `event-later-${now.getTime()}`;
     const slotId = `slot-later-${now.getTime()}`;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline,
                           organizer_id, status, created_at)
       VALUES (?, 'Later Today', 'd', 'School', 'L', ?, 'user-org-1', 'open', ?)
     `).run(eventId, isoFromNow(HOUR), now.toISOString());
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
       VALUES (?, ?, 'Evening', 'd', ?, ?, 5)
     `).run(slotId, eventId, isoFromNow(3 * HOUR), isoFromNow(5 * HOUR));
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
       VALUES (?, ?, ?, ?, 'accepted', ?)
     `).run(`app-later-${now.getTime()}`, me.id, eventId, slotId, now.toISOString());
@@ -215,7 +215,7 @@ describe('an export that expired earlier today is cleaned up', () => {
     const worker = await import('./workers/exportWorker.js');
 
     const now = new Date().toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, username, email, password_hash, name, grade, role, created_at)
       VALUES ('u-dt','u-dt','u-dt@example.org','x','DT','11','student',?)
     `).run(now);
