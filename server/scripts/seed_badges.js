@@ -207,7 +207,17 @@ export const RETIRED_NAMES = Object.freeze([
  * @param {object} database an open database handle
  * @returns {{created: number, updated: number, retired: number}}
  */
-export function reconcileBadgeCatalogue(database) {
+/**
+ * Async because the boot half that calls it is.
+ *
+ * This used to be synchronous and called from `initDatabase()`, which returns
+ * before it on PostgreSQL — so the catalogue never reconciled there at all. On a
+ * fresh PostgreSQL database that means NO badges; on one migrated from SQLite it
+ * means the badges arrive but never converge again, so a retired definition
+ * stays active and a new one never appears. The comment at the old call site
+ * said this must run automatically, and on PostgreSQL it was not running at all.
+ */
+export async function reconcileBadgeCatalogue(database) {
   const summary = { created: 0, updated: 0, retired: 0 };
 
   const find = database.prepare('SELECT * FROM badges WHERE name = ?');
@@ -223,9 +233,9 @@ export function reconcileBadgeCatalogue(database) {
   const retire = database.prepare('UPDATE badges SET active = 0 WHERE name = ? AND active = 1');
 
   for (const badge of CONFERRED_CATALOGUE) {
-    const existing = find.get(badge.name);
+    const existing = await find.get(badge.name);
     if (!existing) {
-      insert.run(
+      await insert.run(
         `badge-${crypto.randomUUID()}`,
         badge.name, badge.description, badge.icon, badge.category,
         badge.criteria_type, badge.criteria_value, new Date().toISOString()
@@ -245,7 +255,7 @@ export function reconcileBadgeCatalogue(database) {
       && existing.active === 1;
     if (same) continue;
 
-    update.run(
+    await update.run(
       badge.description, badge.icon, badge.category,
       badge.criteria_type, badge.criteria_value, existing.id
     );
@@ -253,7 +263,7 @@ export function reconcileBadgeCatalogue(database) {
   }
 
   for (const name of RETIRED_NAMES) {
-    summary.retired += retire.run(name).changes;
+    summary.retired += (await retire.run(name)).changes;
   }
 
   return summary;
@@ -303,7 +313,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   (async () => {
     const { db, initDatabase } = await import('../db.js');
     initDatabase();
-    const summary = reconcileBadgeCatalogue(db);
+    const summary = await reconcileBadgeCatalogue(db);
     console.log(
       `Badge catalogue reconciled: ${summary.created} created, `
       + `${summary.updated} updated, ${summary.retired} retired.`

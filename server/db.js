@@ -1334,7 +1334,9 @@ export function initDatabase() {
    * which freezes the awards already made under it. Somebody's earned badge is
    * their history, and a catalogue clean-up is not a reason to take it.
    */
-  reconcileBadgeCatalogue(db);
+  /* Moved to `completeDatabaseInit()`: this is async now, and `initDatabase()`
+     returns before this point on PostgreSQL — so leaving it here meant the badge
+     catalogue never reconciled on that engine at all. */
   /**
    * `seedOrganizerAcceptance` is NOT called here. It writes through
    * `acceptOrganizerAgreement`, which owns a transaction and is therefore async,
@@ -1475,6 +1477,7 @@ export async function completeDatabaseInit() {
   /* Then: the organizer-agreement seed below accepts legal documents, so they
      have to exist. This is the order `initDatabase` used when it was sync. */
   await syncLegalDocuments(db);
+  await reconcileBadgeCatalogue(db);
   await initHoursLedger();
   await initCertificates();
   await seedOrganizerAcceptance();
