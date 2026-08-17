@@ -183,10 +183,15 @@ describe('a second-factor code cannot be spent twice, even concurrently', () => 
       `statuses: ${attempts.map(a => a.status).join(',')}`
     ).toBe(1);
 
+    /* `created_at DESC` rather than `rowid DESC`: PostgreSQL has no `rowid`, so
+       this assertion could not run there at all — the security invariant above
+       was going unverified on the engine the application is migrating to. Only
+       one code is ever issued in this test, so "the latest" and "the only" are
+       the same row; the ORDER BY is belt and braces. */
     const row = await db.prepare(
-      'SELECT used_at FROM tfa_email_codes WHERE user_id = ? ORDER BY rowid DESC LIMIT 1'
+      'SELECT used_at FROM tfa_email_codes WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
     ).get(user.id);
-    expect(row.used_at).toBeTruthy();
+    expect(row.used_at, 'the spent code must be marked used').toBeTruthy();
   }, 30_000);
 
   /**
