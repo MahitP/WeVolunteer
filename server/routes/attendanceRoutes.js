@@ -325,7 +325,16 @@ router.get('/api/certificates', authenticateToken, async (req, res) => {
          An already-issued certificate is never revoked; see the note in
          certificates.js. */
       WHERE at.user_id = ? AND at.present = 1 AND e.status <> 'cancelled'
-      GROUP BY e.id
+      /* The joined tables' keys are grouped too, not just the event's.
+         PostgreSQL lets an aggregate query select a column it did not group by
+         only when that column is functionally dependent on a grouped PRIMARY
+         KEY, and that reasoning is per table. Grouping by e.id alone covers
+         e.title and e.category, but u.name and o.name come from other tables,
+         so PostgreSQL refused the whole query and this endpoint answered 500.
+         SQLite picks an arbitrary row for a bare column instead, which is why
+         it worked there. Adding the keys changes no grouping: an event has
+         exactly one organizer and one organization. */
+      GROUP BY e.id, u.id, o.id
       ORDER BY last_end DESC
     `).all(req.user.id);
 
@@ -405,7 +414,8 @@ router.get('/api/users/:id/certificates', authenticateToken, requireCap('directo
       JOIN events e ON at.event_id = e.id
       JOIN users u ON e.organizer_id = u.id
       WHERE at.user_id = ? AND at.present = 1
-      GROUP BY e.id
+      /* u.id as well as e.id — see the note on the same shape above. */
+      GROUP BY e.id, u.id
       ORDER BY last_end DESC
     `).all(req.params.id);
 

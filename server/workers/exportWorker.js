@@ -243,14 +243,33 @@ async function processJob(job) {
   }
 }
 
+/**
+ * The archive's completion is a SEPARATE promise from the work that fills it.
+ *
+ * This used to be one `new Promise(async (resolve, reject) => …)` — an async
+ * executor, which the async port introduced when it added `await` to the
+ * queries inside. That shape swallows failures: a rejected `await` in an async
+ * executor rejects the executor's own implicit promise, which nobody holds, so
+ * `reject` is never called. `finalize()` is then never reached, `close` never
+ * fires, and the promise NEVER SETTLES — the export job sits in `processing`
+ * forever rather than failing and being retried. PostgreSQL makes that reachable
+ * in a way SQLite did not, because every one of these reads can now reject.
+ *
+ * Splitting it fixes the direction of the failure. `finished` carries only the
+ * stream outcome, and the async IIFE carries the queries, so a rejection from
+ * either surfaces to the caller.
+ */
 function generateZip(userId, outputPath) {
-  return new Promise(async (resolve, reject) => {
-    const output = fs.createWriteStream(outputPath);
-    const archive = new ZipArchive({ zlib: { level: 9 } });
+  const output = fs.createWriteStream(outputPath);
+  const archive = new ZipArchive({ zlib: { level: 9 } });
 
+  const finished = new Promise((resolve, reject) => {
     output.on('close', () => resolve());
+    output.on('error', (err) => reject(err));
     archive.on('error', (err) => reject(err));
+  });
 
+  return (async () => {
     archive.pipe(output);
 
     // --- Profile ---
@@ -352,5 +371,6 @@ function generateZip(userId, outputPath) {
     archive.append(JSON.stringify(notifications, null, 2), { name: 'notifications.json' });
 
     archive.finalize();
-  });
+    await finished;
+  })();
 }
