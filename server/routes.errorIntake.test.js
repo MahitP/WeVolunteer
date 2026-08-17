@@ -98,13 +98,33 @@ const post = (body, headers = {}) =>
 const recorded = async () =>
   (await groups()).reduce((n, g) => n + Number(g.occurrences ?? 0), 0);
 
-/** Blocks until the count rises above `before`, or fails loudly. */
+/**
+ * Blocks until the report has fully landed — GROUP and EVENT — or fails loudly.
+ *
+ * Waiting only on the occurrence counter is not enough. `recordError` writes the
+ * group first and the event row after it, so a wait that stops at the group can
+ * return while the event insert is still in flight. Tests that read
+ * `events()[0]` then saw an empty array, intermittently: two of three
+ * consecutive suite runs failed here on different cases.
+ *
+ * So the event count is settled too, by reading it twice with a tick between.
+ * The counter rising is the positive signal that work happened; the second read
+ * is what confirms the tail of it finished.
+ */
 const waitForRecord = async (before) => {
   for (let i = 0; i < 300; i += 1) {
-    if (await recorded() > before) return;
+    if (await recorded() > before) break;
+    await new Promise(r => setTimeout(r, 10));
+    if (i === 299) throw new Error('the intake accepted a report that was never recorded');
+  }
+  let last = -1;
+  for (let i = 0; i < 300; i += 1) {
+    const n = (await events()).length;
+    if (n === last) return;
+    last = n;
     await new Promise(r => setTimeout(r, 10));
   }
-  throw new Error('the intake accepted a report that was never recorded');
+  throw new Error('the intake never stopped writing event rows');
 };
 
 /**
