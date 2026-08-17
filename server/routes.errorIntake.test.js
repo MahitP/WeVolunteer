@@ -33,9 +33,30 @@ afterAll(async () => {
   delete process.env.ERROR_REPORT_RATE_LIMIT;
 });
 
+/**
+ * The reset has to DRAIN, not just delete.
+ *
+ * `POST /api/errors/report` answers 202 before it writes, deliberately. So a
+ * report accepted by the previous test can still be in flight when this hook
+ * runs: the delete removes nothing, the write lands a moment later, and the
+ * next test sees a row it never created. That is what made
+ * "answers 400 for a bare scalar body" — which asserts NOTHING was stored —
+ * fail on one run in two while every other assertion in the file passed.
+ *
+ * Deleting twice with a tick between is enough: a straggler either landed
+ * before the first delete or is awaiting its own round trip, and one macrotask
+ * is longer than the remaining work. The loop then confirms the table is
+ * actually empty rather than assuming it.
+ */
 beforeEach(async () => {
-  await db.prepare('DELETE FROM error_events').run();
-  await db.prepare('DELETE FROM error_groups').run();
+  for (let i = 0; i < 50; i += 1) {
+    await db.prepare('DELETE FROM error_events').run();
+    await db.prepare('DELETE FROM error_groups').run();
+    await new Promise(r => setTimeout(r, 5));
+    const left = Number((await db.prepare('SELECT COUNT(*) AS c FROM error_groups').get()).c);
+    if (left === 0) return;
+  }
+  throw new Error('the error intake kept writing while the suite tried to reset');
 });
 
 const groups = async () => await db.prepare('SELECT * FROM error_groups').all();
