@@ -267,9 +267,10 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
    * the server treats specially. Removing it makes the search mean what the
    * visible characters say.
    */
-  // eslint-disable-next-line no-control-regex -- matching NUL is the entire point:
-  // PostgreSQL refuses the byte and the driver turns it into a 500.
-  const raw = String(req.query.q ?? '').replace(/\u0000/gu, '').trim();
+  /* `replaceAll` with a plain string rather than a regex: matching a control
+     character in a pattern is a lint warning worth respecting in general, and
+     there is no need for a pattern here at all. */
+  const raw = String(req.query.q ?? '').replaceAll('\u0000', '').trim();
 
   /**
    * ── Two sigils, because a searcher already knows which kind they want ──
