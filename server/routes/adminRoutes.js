@@ -527,8 +527,8 @@ router.get('/api/admin/reports', authenticateToken, requireCap('report.resolve')
         SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END)                          AS open,
         SUM(CASE WHEN status = 'reviewing' THEN 1 ELSE 0 END)                     AS reviewing,
         SUM(CASE WHEN status = 'escalated' THEN 1 ELSE 0 END)                     AS escalated,
-        SUM(CASE WHEN status IN (${liveList}) AND priority = 'urgent' THEN 1 ELSE 0 END) AS urgentLive,
-        SUM(CASE WHEN status IN (${liveList}) AND assigned_to = ? THEN 1 ELSE 0 END)     AS assignedToMe
+        SUM(CASE WHEN status IN (${liveList}) AND priority = 'urgent' THEN 1 ELSE 0 END) AS "urgentLive",
+        SUM(CASE WHEN status IN (${liveList}) AND assigned_to = ? THEN 1 ELSE 0 END)     AS "assignedToMe"
       FROM reports
     `).get(...LIVE_REPORT_STATUSES, ...LIVE_REPORT_STATUSES, req.user.id);
 

@@ -36,16 +36,16 @@ describe('organization hours', () => {
   let otherId;
 
   /** An organization with the organizer as its manager. Returns {id, slug}. */
-  const makeOrg = (name) => {
+  const makeOrg = async (name) => {
     const id = `org-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Math.random().toString(36).slice(2, 7)}`;
     const slug = id;
     const now = new Date().toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO organizations (id, name, slug, description, tags, created_by,
         created_by_name_snapshot, status, created_at, updated_at)
       VALUES (?, ?, ?, '', '[]', ?, 'Jordan', 'active', ?, ?)
     `).run(id, name, slug, managerId, now, now);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
       VALUES (?, ?, 'manager', ?)
       ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
@@ -53,8 +53,8 @@ describe('organization hours', () => {
     return { id, slug };
   };
 
-  const join = (orgId, userId, role = 'member') => {
-    db.prepare(`
+  const join = async (orgId, userId, role = 'member') => {
+    await db.prepare(`
       INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
       VALUES (?, ?, ?, ?)
       ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
@@ -69,11 +69,11 @@ describe('organization hours', () => {
    * hours are READ, and driving the whole check-in flow to produce them would
    * put the thing under test behind six other things.
    */
-  const credit = (orgId, userId, hours, { title = 'Event', shifts = 1 } = {}) => {
+  const credit = async (orgId, userId, hours, { title = 'Event', shifts = 1 } = {}) => {
     const eventId = `evt-${Math.random().toString(36).slice(2, 9)}`;
     const now = new Date().toISOString();
     const start = '2026-05-01T14:00:00.000Z';
-    const template = db.prepare('SELECT * FROM events LIMIT 1').get();
+    const template = await db.prepare('SELECT * FROM events LIMIT 1').get();
     const columns = Object.keys(template);
     const values = columns.map(c => {
       if (c === 'id') return eventId;
@@ -84,17 +84,17 @@ describe('organization hours', () => {
       if (c === 'created_at' || c === 'updated_at') return now;
       return template[c];
     });
-    db.prepare(
+    await db.prepare(
       `INSERT INTO events (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`
     ).run(...values);
 
     for (let i = 0; i < shifts; i += 1) {
       const slotId = `slot-${Math.random().toString(36).slice(2, 9)}`;
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
         VALUES (?, ?, 'Shift', '', ?, ?, 5)
       `).run(slotId, eventId, start, start);
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
         VALUES (?, ?, ?, 1, ?)
       `).run(eventId, slotId, userId, hours / shifts);
@@ -129,52 +129,52 @@ describe('organization hours', () => {
    * moving because of the other.
    */
   it('keeps one organization\'s hours out of another\'s', async () => {
-    const nhs = makeOrg('NHS');
-    const cs = makeOrg('CS Club');
-    join(nhs.id, studentId);
-    join(cs.id, studentId);
+    const nhs = await makeOrg('NHS');
+    const cs = await makeOrg('CS Club');
+    await join(nhs.id, studentId);
+    await join(cs.id, studentId);
 
-    credit(nhs.id, studentId, 10);
-    credit(cs.id, studentId, 4);
+    await credit(nhs.id, studentId, 10);
+    await credit(cs.id, studentId, 4);
 
     expect((await fetchOrg(nhs.slug, student)).body.viewer.hours).toBe(10);
     expect((await fetchOrg(cs.slug, student)).body.viewer.hours).toBe(4);
   });
 
   it('ignores hours from events that belong to no organization', async () => {
-    const nhs = makeOrg('NHS');
-    join(nhs.id, studentId);
+    const nhs = await makeOrg('NHS');
+    await join(nhs.id, studentId);
 
-    credit(nhs.id, studentId, 6);
-    credit(null, studentId, 20);
+    await credit(nhs.id, studentId, 6);
+    await credit(null, studentId, 20);
 
     expect((await fetchOrg(nhs.slug, student)).body.viewer.hours).toBe(6);
   });
 
   it('counts only the volunteer asking, not everybody who attended', async () => {
-    const nhs = makeOrg('NHS');
-    join(nhs.id, studentId);
-    join(nhs.id, otherId);
+    const nhs = await makeOrg('NHS');
+    await join(nhs.id, studentId);
+    await join(nhs.id, otherId);
 
-    credit(nhs.id, studentId, 5);
-    credit(nhs.id, otherId, 30);
+    await credit(nhs.id, studentId, 5);
+    await credit(nhs.id, otherId, 30);
 
     expect((await fetchOrg(nhs.slug, student)).body.viewer.hours).toBe(5);
     expect((await fetchOrg(nhs.slug, other)).body.viewer.hours).toBe(30);
   });
 
   it('does not credit an absence', async () => {
-    const nhs = makeOrg('NHS');
-    join(nhs.id, studentId);
-    const eventId = credit(nhs.id, studentId, 8);
+    const nhs = await makeOrg('NHS');
+    await join(nhs.id, studentId);
+    const eventId = await credit(nhs.id, studentId, 8);
     await db.prepare('UPDATE attendance SET present = 0 WHERE event_id = ?').run(eventId);
 
     expect((await fetchOrg(nhs.slug, student)).body.viewer.hours).toBe(0);
   });
 
   it('reads zero, not blank, for a member who has not volunteered yet', async () => {
-    const nhs = makeOrg('NHS');
-    join(nhs.id, studentId);
+    const nhs = await makeOrg('NHS');
+    await join(nhs.id, studentId);
 
     const res = await fetchOrg(nhs.slug, student);
     expect(res.body.viewer.hours).toBe(0);
@@ -186,9 +186,9 @@ describe('organization hours', () => {
    * service, not of membership.
    */
   it('keeps the hours of somebody who has since left', async () => {
-    const nhs = makeOrg('NHS');
-    join(nhs.id, studentId);
-    credit(nhs.id, studentId, 12);
+    const nhs = await makeOrg('NHS');
+    await join(nhs.id, studentId);
+    await credit(nhs.id, studentId, 12);
     await db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
       .run(nhs.id, studentId);
 
@@ -203,9 +203,9 @@ describe('organization hours', () => {
    * was already fixed for.
    */
   it('lists one history row per event, not one per shift', async () => {
-    const nhs = makeOrg('NHS');
-    join(nhs.id, studentId);
-    credit(nhs.id, studentId, 3, { shifts: 3, title: 'Two Shift Day' });
+    const nhs = await makeOrg('NHS');
+    await join(nhs.id, studentId);
+    await credit(nhs.id, studentId, 3, { shifts: 3, title: 'Two Shift Day' });
 
     const res = await fetchOrg(nhs.slug, student);
 
@@ -226,9 +226,9 @@ describe('organization hours', () => {
    */
   describe('who sees whose figures', () => {
     it('gives a manager each member\'s hours and the organization total', async () => {
-      const nhs = makeOrg('NHS');
-      join(nhs.id, studentId);
-      credit(nhs.id, studentId, 7);
+      const nhs = await makeOrg('NHS');
+      await join(nhs.id, studentId);
+      await credit(nhs.id, studentId, 7);
 
       const res = await fetchOrg(nhs.slug, manager);
 
@@ -238,10 +238,10 @@ describe('organization hours', () => {
     });
 
     it('gives an ordinary member no figure for anybody else', async () => {
-      const nhs = makeOrg('NHS');
-      join(nhs.id, studentId);
-      join(nhs.id, otherId);
-      credit(nhs.id, otherId, 30);
+      const nhs = await makeOrg('NHS');
+      await join(nhs.id, studentId);
+      await join(nhs.id, otherId);
+      await credit(nhs.id, otherId, 30);
 
       const res = await fetchOrg(nhs.slug, student);
 
@@ -252,11 +252,11 @@ describe('organization hours', () => {
     });
 
     it('never hands a club somebody\'s platform-wide total', async () => {
-      const nhs = makeOrg('NHS');
-      join(nhs.id, studentId);
-      credit(nhs.id, studentId, 2);
+      const nhs = await makeOrg('NHS');
+      await join(nhs.id, studentId);
+      await credit(nhs.id, studentId, 2);
       /* Forty hours earned elsewhere, for nobody's organization. */
-      credit(null, studentId, 40);
+      await credit(null, studentId, 40);
 
       const res = await fetchOrg(nhs.slug, manager);
 

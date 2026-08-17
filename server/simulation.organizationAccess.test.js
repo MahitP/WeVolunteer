@@ -46,7 +46,7 @@ describe('one club, five people', () => {
   const setRoleAsA = (userId, memberRole) =>
     srv.call('PATCH', `/api/organizations/${orgKey}/members/${userId}`, { memberRole }, s.A);
 
-  const seat = (userId, role) => db.prepare(`
+  const seat = async (userId, role) => await db.prepare(`
     INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
     VALUES (?, ?, ?, ?)
       ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
@@ -97,10 +97,10 @@ describe('one club, five people', () => {
 
   // ───────────────────────────────────────────────────────────────────────────
   it('1. A runs the club; B, C and E join it; D stays outside', async () => {
-    seat(id.A, 'manager');
-    seat(id.B, 'member');
-    seat(id.C, 'member');
-    seat(id.E, 'member');
+    await seat(id.A, 'manager');
+    await seat(id.B, 'member');
+    await seat(id.C, 'member');
+    await seat(id.E, 'member');
 
     const page = await srv.call('GET', `/api/organizations/${orgKey}`, undefined, s.A);
     expect(page.status).toBe(200);
@@ -438,7 +438,7 @@ describe('one club, five people', () => {
      *
      * C is seated as a manager first so the club is not left without one.
      */
-    seat(id.C, 'manager');
+    await seat(id.C, 'manager');
     const made = await createEvent({
       organizationId: orgId, title: 'A’s shift',
       slots: [{
@@ -470,7 +470,7 @@ describe('one club, five people', () => {
       expect(await listedBefore(s.A), 'a removed member still listed the club’s applicants')
         .toBe(0);
     } finally {
-      seat(id.A, 'manager');
+      await seat(id.A, 'manager');
     }
   });
 

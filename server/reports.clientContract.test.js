@@ -40,8 +40,8 @@ afterAll(async () => { await srv.close(); });
  * row. Each case gets its own target so it is testing what it says it is.
  */
 let evSeq = 0;
-const anyEventId = () => {
-  const rows = db.prepare('SELECT id FROM events ORDER BY id').all();
+const anyEventId = async () => {
+  const rows = await db.prepare('SELECT id FROM events ORDER BY id').all();
   const row = rows[evSeq++ % rows.length];
   return row.id;
 };
@@ -54,7 +54,7 @@ describe('POST /api/reports accepts the shipped client payload', () => {
     // targetId, reason: trimmed })`, where `trimmed` is the textarea contents.
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'event',
-      targetId: anyEventId(),
+      targetId: await anyEventId(),
       reason: 'This event is misleading and is not a real volunteering opportunity.',
     }, t);
 
@@ -80,7 +80,7 @@ describe('POST /api/reports accepts the shipped client payload', () => {
     const t = await srv.login('cameron.caldwell@example.com');
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'event',
-      targetId: anyEventId(),
+      targetId: await anyEventId(),
       reason: 'spam_or_advertising',
       details: 'Recruiting for something that is not volunteering.',
     }, t);
@@ -98,7 +98,7 @@ describe('POST /api/reports accepts the shipped client payload', () => {
     const t = await srv.login('admin@example.gov');
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'event',
-      targetId: anyEventId(),
+      targetId: await anyEventId(),
       reason: 'The headline complaint.',
       details: 'The extra context.',
     }, t);

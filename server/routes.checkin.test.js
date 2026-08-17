@@ -19,9 +19,9 @@ describe('check-in', () => {
    * is FOR, so that is what the fixture now describes. The refusals get their own
    * cases below rather than being the accidental default of every other one.
    */
-  const startShiftsNow = (id) => {
+  const startShiftsNow = async (id) => {
     const now = Date.now();
-    db.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE event_id = ?').run(
+    await db.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE event_id = ?').run(
       new Date(now - 30 * 60 * 1000).toISOString(),
       new Date(now + 90 * 60 * 1000).toISOString(),
       id
@@ -35,7 +35,7 @@ describe('check-in', () => {
     const apps = (await srv.call('GET', '/api/applications', undefined, orgToken)).body;
     application = apps.find(a => a.status === 'accepted');
     eventId = application.eventId;
-    startShiftsNow(eventId);
+    await startShiftsNow(eventId);
   });
   afterAll(async () => { await srv.close(); });
 
@@ -81,20 +81,20 @@ describe('check-in', () => {
   /* ── The two refusals ─────────────────────────────────────────────────── */
 
   describe('when attendance cannot be taken', () => {
-    const setSlots = (startOffsetMs, endOffsetMs) => {
+    const setSlots = async (startOffsetMs, endOffsetMs) => {
       const now = Date.now();
-      db.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE event_id = ?').run(
+      await db.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE event_id = ?').run(
         new Date(now + startOffsetMs).toISOString(),
         new Date(now + endOffsetMs).toISOString(),
         eventId
       );
     };
 
-    afterEach(() => {
+    afterEach(async () => {
       /* 'open', not 'approved' — the column carries a CHECK constraint of
          ('open','closed','completed','cancelled') and there is no 'approved'. */
-      db.prepare("UPDATE events SET status = 'open' WHERE id = ?").run(eventId);
-      startShiftsNow(eventId);
+      await db.prepare("UPDATE events SET status = 'open' WHERE id = ?").run(eventId);
+      await startShiftsNow(eventId);
     });
 
     /**
@@ -103,7 +103,7 @@ describe('check-in', () => {
      * thing this table must not contain.
      */
     it('refuses check-in before the window opens', async () => {
-      setSlots(3 * 24 * 60 * 60 * 1000, 3 * 24 * 60 * 60 * 1000 + 3600_000);
+      await setSlots(3 * 24 * 60 * 60 * 1000, 3 * 24 * 60 * 60 * 1000 + 3600_000);
 
       const res = await srv.call('POST', `/api/events/${eventId}/checkin`,
         { checkinMap: { [application.id]: true } }, orgToken);
@@ -115,7 +115,7 @@ describe('check-in', () => {
 
     /** Two hours before is inside the window; three hours before is not. */
     it('allows check-in once the window has opened', async () => {
-      setSlots(60 * 60 * 1000, 4 * 60 * 60 * 1000);
+      await setSlots(60 * 60 * 1000, 4 * 60 * 60 * 1000);
 
       const res = await srv.call('POST', `/api/events/${eventId}/checkin`,
         { checkinMap: { [application.id]: true } }, orgToken);

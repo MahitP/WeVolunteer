@@ -50,9 +50,9 @@ afterAll(async () => { await srv.close(); });
 let seq = 0;
 
 /** A student who can file a report. */
-function makeStudent() {
+async function makeStudent() {
   const id = `alert-student-${++seq}`;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, email, password_hash, name, role, grade, username,
                        email_verified, account_status, created_at)
     VALUES (?, ?, 'h', 'Alert Student', 'student', '10', ?, 1, 'active', datetime('now'))
@@ -66,9 +66,9 @@ function makeStudent() {
  * `moderation.js` floors that case at `urgent` whatever category was chosen, which
  * is the case these tests are about.
  */
-function makeOrganizer() {
+async function makeOrganizer() {
   const id = `alert-organizer-${++seq}`;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, email, password_hash, name, role, grade, username,
                        email_verified, account_status, created_at)
     VALUES (?, ?, 'h', 'Alert Organizer', 'organizer', 'Adult', ?, 1, 'active', datetime('now'))
@@ -77,13 +77,13 @@ function makeOrganizer() {
 }
 
 /** Every notification row written for a user, by channel. */
-const notificationsFor = (userId) =>
-  db.prepare('SELECT id, kind, title FROM notifications WHERE user_id = ?').all(userId);
+const notificationsFor = async (userId) =>
+  await db.prepare('SELECT id, kind, title FROM notifications WHERE user_id = ?').all(userId);
 
 /** Every queued OUTBOUND EMAIL job addressed to a user. */
-function emailJobsFor(userId) {
-  return db.prepare("SELECT payload FROM notification_jobs WHERE channel = 'email'")
-    .all()
+async function emailJobsFor(userId) {
+  return (await db.prepare("SELECT payload FROM notification_jobs WHERE channel = 'email'")
+    .all())
     .map(r => { try { return JSON.parse(r.payload); } catch { return null; } })
     .filter(p => p && p.userId === userId);
 }
@@ -97,10 +97,10 @@ function emailJobsFor(userId) {
  * fixture with it rather than leaving a test that silently alerts nobody. The demo
  * seed contains one `admin` (`user-admin`) and no `super_admin`.
  */
-function moderatorId() {
+async function moderatorId() {
   const roles = rolesWithCapability('report.resolve');
   const placeholders = roles.map(() => '?').join(', ');
-  const row = db.prepare(
+  const row = await db.prepare(
     `SELECT id FROM users WHERE role IN (${placeholders}) AND account_status = 'active' LIMIT 1`
   ).get(...roles);
   expect(row, `no seeded user holds report.resolve (roles: ${roles.join(', ')})`).toBeTruthy();
@@ -108,10 +108,10 @@ function moderatorId() {
 }
 
 /** Switches off every notification route this user has. */
-function silenceAllPreferences(userId) {
-  db.prepare('UPDATE users SET email_opt_out = 1 WHERE id = ?').run(userId);
+async function silenceAllPreferences(userId) {
+  await db.prepare('UPDATE users SET email_opt_out = 1 WHERE id = ?').run(userId);
   for (const channel of ['email', 'inapp']) {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notification_preferences (user_id, channel, category, enabled)
       VALUES (?, ?, 'ACCOUNT', 0)
       ON CONFLICT DO UPDATE SET enabled = 0
@@ -119,9 +119,9 @@ function silenceAllPreferences(userId) {
   }
 }
 
-function clearOutbox(userId) {
-  db.prepare('DELETE FROM notifications WHERE user_id = ?').run(userId);
-  db.prepare("DELETE FROM notification_jobs WHERE channel = 'email'").run();
+async function clearOutbox(userId) {
+  await db.prepare('DELETE FROM notifications WHERE user_id = ?').run(userId);
+  await db.prepare("DELETE FROM notification_jobs WHERE channel = 'email'").run();
 }
 
 describe('SYSTEM_ALERT is a mandatory notice', () => {
@@ -141,12 +141,12 @@ describe('SYSTEM_ALERT is a mandatory notice', () => {
 
 describe('an urgent safety report reaches the moderator whatever their preferences say', () => {
   it('emails the moderator even with notifications fully switched off', async () => {
-    const mod = moderatorId();
-    silenceAllPreferences(mod);
-    clearOutbox(mod);
+    const mod = await moderatorId();
+    await silenceAllPreferences(mod);
+    await clearOutbox(mod);
 
-    const student = makeStudent();
-    const organizer = makeOrganizer();
+    const student = await makeStudent();
+    const organizer = await makeOrganizer();
 
     const res = await createReport({
       reporter: { id: student, role: 'student' },
@@ -160,18 +160,18 @@ describe('an urgent safety report reaches the moderator whatever their preferenc
     // This is the assertion the defect failed: with email_opt_out = 1 and the
     // category preference disabled, no email job was queued at all.
     expect(
-      emailJobsFor(mod).length,
+      (await emailJobsFor(mod)).length,
       'an urgent safety report queued no email for the only moderator'
     ).toBeGreaterThan(0);
   });
 
   it('also writes the in-app notification, so both routes are covered', async () => {
-    const mod = moderatorId();
-    silenceAllPreferences(mod);
-    clearOutbox(mod);
+    const mod = await moderatorId();
+    await silenceAllPreferences(mod);
+    await clearOutbox(mod);
 
-    const student = makeStudent();
-    const organizer = makeOrganizer();
+    const student = await makeStudent();
+    const organizer = await makeOrganizer();
     await createReport({
       reporter: { id: student, role: 'student' },
       targetType: 'user',
@@ -180,7 +180,7 @@ describe('an urgent safety report reaches the moderator whatever their preferenc
       description: 'They said they would make sure I never volunteer again.',
     });
 
-    expect(notificationsFor(mod).length).toBeGreaterThan(0);
+    expect((await notificationsFor(mod)).length).toBeGreaterThan(0);
   });
 
   /**
@@ -191,12 +191,12 @@ describe('an urgent safety report reaches the moderator whatever their preferenc
    * available while describing something serious must still produce an alert.
    */
   it('alerts on a student-reports-adult report filed under a NON-urgent category', async () => {
-    const mod = moderatorId();
-    silenceAllPreferences(mod);
-    clearOutbox(mod);
+    const mod = await moderatorId();
+    await silenceAllPreferences(mod);
+    await clearOutbox(mod);
 
-    const student = makeStudent();
-    const organizer = makeOrganizer();
+    const student = await makeStudent();
+    const organizer = await makeOrganizer();
     const res = await createReport({
       reporter: { id: student, role: 'student' },
       targetType: 'user',
@@ -207,7 +207,7 @@ describe('an urgent safety report reaches the moderator whatever their preferenc
     expect(res.ok, JSON.stringify(res)).toBe(true);
 
     expect(
-      emailJobsFor(mod).length,
+      (await emailJobsFor(mod)).length,
       'the student-reports-adult urgency floor produced no alert'
     ).toBeGreaterThan(0);
   });
@@ -220,14 +220,14 @@ describe('normal-priority reports still respect preferences', () => {
    * making SYSTEM_ALERT mandatory must not have widened that.
    */
   it('sends no alert at all for a normal-priority report', async () => {
-    const mod = moderatorId();
+    const mod = await moderatorId();
     // Preferences fully ENABLED, so a missing alert cannot be blamed on them.
     await db.prepare('UPDATE users SET email_opt_out = 0 WHERE id = ?').run(mod);
     await db.prepare("DELETE FROM notification_preferences WHERE user_id = ?").run(mod);
-    clearOutbox(mod);
+    await clearOutbox(mod);
 
-    const reporter = makeOrganizer();   // adult reporting an adult: no student floor
-    const target = makeOrganizer();
+    const reporter = await makeOrganizer();   // adult reporting an adult: no student floor
+    const target = await makeOrganizer();
     const res = await createReport({
       reporter: { id: reporter, role: 'organizer' },
       targetType: 'user',
@@ -237,7 +237,7 @@ describe('normal-priority reports still respect preferences', () => {
     });
     expect(res.ok, JSON.stringify(res)).toBe(true);
 
-    expect(emailJobsFor(mod)).toEqual([]);
-    expect(notificationsFor(mod)).toEqual([]);
+    expect(await emailJobsFor(mod)).toEqual([]);
+    expect(await notificationsFor(mod)).toEqual([]);
   });
 });

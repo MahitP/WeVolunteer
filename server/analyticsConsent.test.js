@@ -42,17 +42,17 @@ beforeAll(async () => {
 afterAll(async () => { await srv?.close?.(); });
 
 /** The column as actually stored, which is the thing that matters. */
-const stored = () =>
-  db.prepare('SELECT analytics_consent FROM users WHERE id = ?').get(studentId).analytics_consent;
+const stored = async () =>
+  (await db.prepare('SELECT analytics_consent FROM users WHERE id = ?').get(studentId)).analytics_consent;
 
 describe('a brand new account', () => {
-  it('has not been asked, which is not the same as having declined', () => {
+  it('has not been asked, which is not the same as having declined', async () => {
     /**
      * NULL rather than 0. The distinction is the whole reason this is not a
      * boolean column: "never asked" is a state a consent record has to be able
      * to represent, or it cannot tell agreement from silence.
      */
-    expect(stored()).toBeNull();
+    expect(await stored()).toBeNull();
   });
 
   it('is reported to the client as null, not false', async () => {
@@ -69,22 +69,22 @@ describe('recording a decision', () => {
     const res = await srv.call('PATCH', '/api/auth/profile', { analyticsConsent: true }, student);
     expect(res.status).toBe(200);
     expect(res.body.user.analyticsConsent).toBe(true);
-    expect(stored()).toBe(1);
+    expect(await stored()).toBe(1);
   });
 
   it('stores a no, and it is distinguishable from never having been asked', async () => {
     const res = await srv.call('PATCH', '/api/auth/profile', { analyticsConsent: false }, student);
     expect(res.status).toBe(200);
     expect(res.body.user.analyticsConsent).toBe(false);
-    expect(stored()).toBe(0);
-    expect(stored()).not.toBeNull();
+    expect(await stored()).toBe(0);
+    expect(await stored()).not.toBeNull();
   });
 
   it('is revocable, repeatedly', async () => {
     await srv.call('PATCH', '/api/auth/profile', { analyticsConsent: true }, student);
-    expect(stored()).toBe(1);
+    expect(await stored()).toBe(1);
     await srv.call('PATCH', '/api/auth/profile', { analyticsConsent: false }, student);
-    expect(stored()).toBe(0);
+    expect(await stored()).toBe(0);
   });
 });
 
@@ -98,13 +98,13 @@ describe('what does not count as consent', () => {
     ['an object', {}],
   ])('refuses %s with a 400 rather than coercing it', async (_label, value) => {
     await srv.call('PATCH', '/api/auth/profile', { analyticsConsent: false }, student);
-    const before = stored();
+    const before = await stored();
 
     const res = await srv.call('PATCH', '/api/auth/profile', { analyticsConsent: value }, student);
 
     expect(res.status, `${_label} was accepted`).toBe(400);
     expect(res.body.field).toBe('analyticsConsent');
-    expect(stored(), 'a refused request changed the stored consent anyway').toBe(before);
+    expect(await stored(), 'a refused request changed the stored consent anyway').toBe(before);
   });
 });
 
@@ -136,7 +136,7 @@ describe('the answer is nobody else’s business', () => {
 });
 
 describe('an account that predates the column', () => {
-  it('reads as not-asked rather than as consent', () => {
+  it('reads as not-asked rather than as consent', async () => {
     /**
      * The migration adds the column with no DEFAULT and does not backfill, so
      * every account that existed before it becomes NULL. Simulated by writing
@@ -145,8 +145,8 @@ describe('an account that predates the column', () => {
      * If this ever read as `true`, the deploy that added consent would have
      * silently granted it on behalf of every existing student.
      */
-    db.prepare('UPDATE users SET analytics_consent = NULL WHERE id = ?').run(studentId);
-    const row = db.prepare('SELECT * FROM users WHERE id = ?').get(studentId);
+    await db.prepare('UPDATE users SET analytics_consent = NULL WHERE id = ?').run(studentId);
+    const row = await db.prepare('SELECT * FROM users WHERE id = ?').get(studentId);
 
     expect(row.analytics_consent).toBeNull();
     expect(row.analytics_consent === 1).toBe(false);

@@ -24,16 +24,16 @@ beforeAll(async () => {
 }, 60000);
 afterAll(async () => { await srv?.close(); });
 
-const groupsFor = (like) =>
-  db.prepare("SELECT * FROM error_groups WHERE message LIKE ?").all(`%${like}%`);
-const clearErrors = () => {
-  db.prepare('DELETE FROM error_events').run();
-  db.prepare('DELETE FROM error_groups').run();
+const groupsFor = async (like) =>
+  await db.prepare("SELECT * FROM error_groups WHERE message LIKE ?").all(`%${like}%`);
+const clearErrors = async () => {
+  await db.prepare('DELETE FROM error_events').run();
+  await db.prepare('DELETE FROM error_groups').run();
 };
 
 describe('the Express error handler records a 500', () => {
   it('produces exactly one group and one event, and the response is unchanged', async () => {
-    clearErrors();
+    await clearErrors();
     // /api/__boom is not a route, so this exercises the 404 path, not the error
     // handler. Drive a real 500 instead by making a real handler throw.
     const res = await srv.call('GET', '/api/__throw-for-capture-test');
@@ -44,7 +44,7 @@ describe('the Express error handler records a 500', () => {
   });
 
   it('records nothing for a malformed JSON body — that is the caller\'s mistake', async () => {
-    clearErrors();
+    await clearErrors();
     const response = await fetch(`${srv.base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -58,7 +58,7 @@ describe('the Express error handler records a 500', () => {
   });
 
   it('records nothing for an oversized body', async () => {
-    clearErrors();
+    await clearErrors();
     const response = await fetch(`${srv.base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -113,7 +113,7 @@ describe('the error handler, driven directly', () => {
   });
 
   it('records a 500 with the route PATTERN, never the real URL', async () => {
-    clearErrors();
+    await clearErrors();
     const err = new TypeError('capture-pattern-probe failed');
     const res = fakeRes();
     await (await handler())(err, fakeReq(), res, () => {});
@@ -121,7 +121,7 @@ describe('the error handler, driven directly', () => {
     expect(res.statusCode).toBe(500);
     expect(res.body).toEqual({ error: 'Internal server error' });
 
-    const [g] = groupsFor('capture-pattern-probe');
+    const [g] = await groupsFor('capture-pattern-probe');
     expect(g, 'the 500 was not recorded').toBeTruthy();
     expect(g.source).toBe('server');
     expect(g.kind).toBe('TypeError');
@@ -132,9 +132,9 @@ describe('the error handler, driven directly', () => {
   });
 
   it('stores a hash of the user, never the id', async () => {
-    clearErrors();
+    await clearErrors();
     await (await handler())(new Error('capture-hash-probe'), fakeReq(), fakeRes(), () => {});
-    const [g] = groupsFor('capture-hash-probe');
+    const [g] = await groupsFor('capture-hash-probe');
     const ev = await db.prepare('SELECT * FROM error_events WHERE fingerprint = ?').get(g.fingerprint);
     expect(ev.user_hash).toMatch(/^[0-9a-f]{32}$/);
     expect(ev.user_hash).not.toBe('user-student-1');
@@ -146,7 +146,7 @@ describe('the error handler, driven directly', () => {
    * has made the application worse.
    */
   it('answers 500 identically when recording is impossible', async () => {
-    clearErrors();
+    await clearErrors();
     const reporter = await import('./errorReporter.js');
     const spy = vi.spyOn(reporter, 'recordError');
     // Not a throw we expect to see: recordError never throws. This asserts the
@@ -186,7 +186,7 @@ describe('the error handler, driven directly', () => {
   });
 
   it('records without a user, a route, or a stack', async () => {
-    clearErrors();
+    await clearErrors();
     const res = fakeRes();
     const bare = await handler();
     /* `.resolves`, not `.not.toThrow()`: the handler is async, so "does not
@@ -197,13 +197,13 @@ describe('the error handler, driven directly', () => {
       bare({ message: 'capture-bare-probe' }, { method: 'POST' }, res, () => {})
     ).resolves.not.toThrow();
     expect(res.statusCode).toBe(500);
-    expect(groupsFor('capture-bare-probe').length).toBe(1);
+    expect((await groupsFor('capture-bare-probe')).length).toBe(1);
   });
 });
 
 describe('background failures are captured where nobody is watching', () => {
   it('the scheduler reports a sweep failure against a hostile db', async () => {
-    clearErrors();
+    await clearErrors();
     const { runAutoSelectSweep } = await import('./services/autoSelectScheduler.js');
     // A db that throws on the first statement — the "locked or unhealthy
     // database" case the sweep's own comment names.

@@ -107,10 +107,10 @@ describe('the retention worker sweeps at startup', () => {
       createdAt: stale
     });
 
-    const countStale = () => db.prepare(
+    const countStale = async () => (await db.prepare(
       'SELECT COUNT(*) c FROM admin_audit_logs WHERE id = ?'
-    ).get(seeded.id).c;
-    expect(countStale()).toBe(1);
+    ).get(seeded.id)).c;
+    expect(await countStale()).toBe(1);
 
     try {
       await worker.startRetentionWorker(db);
@@ -118,7 +118,7 @@ describe('the retention worker sweeps at startup', () => {
       // No timer advanced, no waiting. If retention only happens on the interval,
       // this row is still here — which is the state a server restarted daily was
       // permanently in.
-      expect(countStale()).toBe(0);
+      expect(await countStale()).toBe(0);
     } finally {
       worker.stopRetentionWorker();
     }

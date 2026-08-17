@@ -21,7 +21,7 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
   const ORGANIZER = 'user-org-1';          // hosts event-softball
   const DEDUPE = 'awaiting-decision:event-sweep-test';
 
-  const notificationsFor = (userId, dedupeKey) => db.prepare(
+  const notificationsFor = async (userId, dedupeKey) => await db.prepare(
     'SELECT * FROM notifications WHERE user_id = ? AND dedupe_key = ?'
   ).all(userId, dedupeKey);
 
@@ -54,7 +54,7 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
 
     await runNotificationSweep();
 
-    const sent = notificationsFor(ORGANIZER, DEDUPE);
+    const sent = await notificationsFor(ORGANIZER, DEDUPE);
     expect(sent).toHaveLength(1);
     expect(sent[0].kind).toBe('APPLICATION');
     expect(sent[0].title).toMatch(/decision needed/i);
@@ -67,17 +67,17 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
     // would collect four of these an hour until they acted.
     await runNotificationSweep();
     await runNotificationSweep();
-    expect(notificationsFor(ORGANIZER, DEDUPE)).toHaveLength(1);
+    expect(await notificationsFor(ORGANIZER, DEDUPE)).toHaveLength(1);
   });
 
-  it('tells the organizer, not the applicants', () => {
-    const applicants = db.prepare(
+  it('tells the organizer, not the applicants', async () => {
+    const applicants = (await db.prepare(
       "SELECT DISTINCT user_id FROM applications WHERE event_id = 'event-sweep-test' AND status = 'pending'"
-    ).all().map(r => r.user_id);
+    ).all()).map(r => r.user_id);
 
     expect(applicants.length).toBeGreaterThan(0);
     for (const userId of applicants) {
-      expect(notificationsFor(userId, DEDUPE)).toHaveLength(0);
+      expect(await notificationsFor(userId, DEDUPE)).toHaveLength(0);
     }
   });
 
@@ -97,7 +97,7 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
     `);
 
     await runNotificationSweep();
-    expect(notificationsFor(ORGANIZER, 'awaiting-decision:event-future')).toHaveLength(0);
+    expect(await notificationsFor(ORGANIZER, 'awaiting-decision:event-future')).toHaveLength(0);
   });
 
   it('ignores cancelled and completed events', async () => {
@@ -119,8 +119,8 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
     await runNotificationSweep();
 
     // A cancelled event has nothing to staff; a completed one is already done.
-    expect(notificationsFor(ORGANIZER, 'awaiting-decision:event-cxl')).toHaveLength(0);
-    expect(notificationsFor(ORGANIZER, 'awaiting-decision:event-done')).toHaveLength(0);
+    expect(await notificationsFor(ORGANIZER, 'awaiting-decision:event-cxl')).toHaveLength(0);
+    expect(await notificationsFor(ORGANIZER, 'awaiting-decision:event-done')).toHaveLength(0);
   });
 
   it('fires for a closed event that still has undecided applicants', async () => {
@@ -130,6 +130,6 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
     db.exec(`UPDATE events SET application_deadline = '${new Date(Date.now() - 3600 * 1000).toISOString()}' WHERE id = 'event-future'`);
 
     await runNotificationSweep();
-    expect(notificationsFor(ORGANIZER, 'awaiting-decision:event-future')).toHaveLength(1);
+    expect(await notificationsFor(ORGANIZER, 'awaiting-decision:event-future')).toHaveLength(1);
   });
 });

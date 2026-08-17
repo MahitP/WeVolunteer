@@ -124,8 +124,8 @@ describe('the member directory: what one member may learn about another', () => 
   });
 
   describe('a private profile', () => {
-    beforeAll(() => {
-      db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(otherId);
+    beforeAll(async () => {
+      await db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(otherId);
     });
 
     /**
@@ -169,8 +169,8 @@ describe('the member directory: what one member may learn about another', () => 
       expect(res.body.profile.bio).toBe('I like helping out.');
     });
 
-    afterAll(() => {
-      db.prepare(`UPDATE users SET profile_visibility = 'public' WHERE id = ?`).run(otherId);
+    afterAll(async () => {
+      await db.prepare(`UPDATE users SET profile_visibility = 'public' WHERE id = ?`).run(otherId);
     });
   });
 
@@ -180,8 +180,8 @@ describe('the member directory: what one member may learn about another', () => 
    * think to check.
    */
   describe('no alternate route discloses more than the profile does', () => {
-    beforeAll(() => {
-      db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(otherId);
+    beforeAll(async () => {
+      await db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(otherId);
     });
 
     it('search results carry no private field', async () => {
@@ -290,8 +290,8 @@ describe('the member directory: what one member may learn about another', () => 
       expect(res.status).toBe(403);
     });
 
-    afterAll(() => {
-      db.prepare(`UPDATE users SET profile_visibility = 'public' WHERE id = ?`).run(otherId);
+    afterAll(async () => {
+      await db.prepare(`UPDATE users SET profile_visibility = 'public' WHERE id = ?`).run(otherId);
     });
   });
 

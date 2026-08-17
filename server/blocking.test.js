@@ -32,8 +32,8 @@ beforeAll(async () => {
 });
 afterAll(async () => { await srv.close(); });
 
-function clearBlocks() {
-  db.prepare('DELETE FROM user_blocks').run();
+async function clearBlocks() {
+  await db.prepare('DELETE FROM user_blocks').run();
 }
 
 let dayCursor = 40;
@@ -66,7 +66,7 @@ describe('blocking', () => {
     adminToken = await srv.login('admin@example.gov');
   });
 
-  beforeEach(() => clearBlocks());
+  beforeEach(async () => await clearBlocks());
 
   it('records a block and lists it back', async () => {
     const res = await srv.call('POST', `/api/blocks/${ORG}`, {}, studentToken);

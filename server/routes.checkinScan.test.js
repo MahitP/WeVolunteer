@@ -35,9 +35,9 @@ describe('QR check-in', () => {
   let eventId;
 
   /** Moves every shift on an event into the present. */
-  const startShiftsNow = (id) => {
+  const startShiftsNow = async (id) => {
     const now = Date.now();
-    db.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE event_id = ?').run(
+    await db.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE event_id = ?').run(
       new Date(now - 30 * 60 * 1000).toISOString(),
       new Date(now + 90 * 60 * 1000).toISOString(),
       id,
@@ -45,9 +45,9 @@ describe('QR check-in', () => {
   };
 
   /** Moves every shift on an event into next week. */
-  const startShiftsLater = (id) => {
+  const startShiftsLater = async (id) => {
     const now = Date.now();
-    db.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE event_id = ?').run(
+    await db.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE event_id = ?').run(
       new Date(now + 7 * 24 * 3600 * 1000).toISOString(),
       new Date(now + 7 * 24 * 3600 * 1000 + 3600 * 1000).toISOString(),
       id,
@@ -78,11 +78,11 @@ describe('QR check-in', () => {
 
   afterAll(async () => { await srv?.close(); });
 
-  beforeEach(() => {
-    startShiftsNow(eventId);
-    db.prepare("UPDATE events SET status = 'open' WHERE id = ?").run(eventId);
-    db.prepare('DELETE FROM checkin_tokens').run();
-    db.prepare('DELETE FROM attendance_checkin WHERE event_id = ?').run(eventId);
+  beforeEach(async () => {
+    await startShiftsNow(eventId);
+    await db.prepare("UPDATE events SET status = 'open' WHERE id = ?").run(eventId);
+    await db.prepare('DELETE FROM checkin_tokens').run();
+    await db.prepare('DELETE FROM attendance_checkin WHERE event_id = ?').run(eventId);
   });
 
   /* ── Minting ──────────────────────────────────────────────────────────── */
@@ -117,7 +117,7 @@ describe('QR check-in', () => {
     });
 
     it('refuses before the shift has started', async () => {
-      startShiftsLater(eventId);
+      await startShiftsLater(eventId);
       const res = await mint();
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('checkin_not_started');

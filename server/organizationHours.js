@@ -97,7 +97,7 @@ export async function organizationHoursForUser(db, organizationId, userId) {
  */
 export async function organizationHoursByUser(db, organizationId) {
   const rows = await db.prepare(`
-    SELECT a.user_id                          AS userId,
+    SELECT a.user_id                          AS "userId",
            COALESCE(SUM(a.hours_awarded), 0)  AS hours,
            COUNT(DISTINCT a.event_id)         AS events
     FROM attendance a
@@ -148,12 +148,12 @@ export async function organizationHoursTotal(db, organizationId) {
  */
 export async function organizationHistoryForUser(db, organizationId, userId, { limit = 50 } = {}) {
   return (await db.prepare(`
-    SELECT e.id                              AS eventId,
+    SELECT e.id                              AS "eventId",
            e.title                           AS title,
-           e.credits_hours                   AS creditsHours,
+           e.credits_hours                   AS "creditsHours",
            COALESCE(SUM(a.hours_awarded), 0) AS hours,
            COUNT(*)                          AS shifts,
-           (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) AS startsAt
+           (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) AS "startsAt"
     FROM attendance a
     JOIN events e ON e.id = a.event_id
     WHERE e.organization_id = ? AND a.user_id = ? AND a.present = 1

@@ -78,7 +78,7 @@ const iso = (ms) => new Date(Date.now() + ms).toISOString();
  * An Auto Select event whose deadline passed `deadlineHoursAgo` hours ago, with
  * `applicants` pending applications on one slot of `maxSpots` capacity.
  */
-function seedEvent(db, {
+async function seedEvent(db, {
   id = 'ev-auto',
   maxSpots = 2,
   applicants = 5,
@@ -87,30 +87,30 @@ function seedEvent(db, {
   status = 'open'
 } = {}) {
   const now = new Date().toISOString();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, username, email, password_hash, name, grade, role, verified, email_verified, created_at)
     VALUES (?, ?, ?, 'x', 'Org', 'Adult', 'organizer', 1, 1, ?)
   `).run(`${id}-org`, `${id}-org`, `${id}-org@example.org`, now);
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO events (id, title, description, category, location, application_deadline,
                         organizer_id, status, auto_approve, created_at)
     VALUES (?, ?, 'd', 'School', 'L', ?, ?, ?, ?, ?)
   `).run(id, `Event ${id}`, iso(-deadlineHoursAgo * HOUR), `${id}-org`, status, autoApprove, now);
 
   const slotId = `${id}-slot`;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
     VALUES (?, ?, 'Shift', 'd', ?, ?, ?)
   `).run(slotId, id, iso(10 * 24 * HOUR), iso(10 * 24 * HOUR + 2 * HOUR), maxSpots);
 
   for (let i = 0; i < applicants; i++) {
     const uid = `${id}-u${i}`;
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, username, email, password_hash, name, grade, role, verified, email_verified, created_at)
       VALUES (?, ?, ?, 'x', ?, '10', 'student', 1, 1, ?)
     `).run(uid, uid, `${uid}@example.org`, `Student ${i}`, now);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
       VALUES (?, ?, ?, ?, 'pending', ?)
     `).run(`${id}-a${i}`, uid, id, slotId, now);
@@ -118,9 +118,9 @@ function seedEvent(db, {
   return { eventId: id, slotId };
 }
 
-const statuses = (db, eventId) => db.prepare(
+const statuses = async (db, eventId) => (await db.prepare(
   'SELECT status, COUNT(*) AS c FROM applications WHERE event_id = ? GROUP BY status'
-).all(eventId).reduce((a, r) => { a[r.status] = r.c; return a; }, {});
+).all(eventId)).reduce((a, r) => { a[r.status] = r.c; return a; }, {});
 
 beforeEach(() => { dir = null; });
 afterEach(() => {
@@ -133,14 +133,14 @@ afterEach(() => {
 describe('selecting which events are due', () => {
   it('picks an Auto Select event whose deadline passed beyond the grace period', async () => {
     const { db, sched } = await fresh({ graceHours: 24 });
-    seedEvent(db, { id: 'ev-due', deadlineHoursAgo: 48 });
+    await seedEvent(db, { id: 'ev-due', deadlineHoursAgo: 48 });
 
     expect((await sched.findDueEvents(db)).map(e => e.id)).toContain('ev-due');
   });
 
   it('leaves an event alone while it is still inside the grace period', async () => {
     const { db, sched } = await fresh({ graceHours: 24 });
-    seedEvent(db, { id: 'ev-fresh', deadlineHoursAgo: 2 });
+    await seedEvent(db, { id: 'ev-fresh', deadlineHoursAgo: 2 });
 
     // The organizer gets a full day to run the draw themselves before the safety
     // net fires. Running immediately would remove their chance to review.
@@ -149,7 +149,7 @@ describe('selecting which events are due', () => {
 
   it('ignores events whose deadline has not passed at all', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-open', deadlineHoursAgo: -48 });
+    await seedEvent(db, { id: 'ev-open', deadlineHoursAgo: -48 });
 
     // A draw before the deadline excludes students who may still apply.
     expect((await sched.findDueEvents(db)).map(e => e.id)).not.toContain('ev-open');
@@ -157,15 +157,15 @@ describe('selecting which events are due', () => {
 
   it('ignores events that are not Auto Select', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-manual', autoApprove: 0 });
+    await seedEvent(db, { id: 'ev-manual', autoApprove: 0 });
 
     expect((await sched.findDueEvents(db)).map(e => e.id)).not.toContain('ev-manual');
   });
 
   it('ignores cancelled and completed events', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-cancelled', status: 'cancelled' });
-    seedEvent(db, { id: 'ev-completed', status: 'completed' });
+    await seedEvent(db, { id: 'ev-cancelled', status: 'cancelled' });
+    await seedEvent(db, { id: 'ev-completed', status: 'completed' });
 
     const due = (await sched.findDueEvents(db)).map(e => e.id);
     expect(due).not.toContain('ev-cancelled');
@@ -174,7 +174,7 @@ describe('selecting which events are due', () => {
 
   it('ignores an event with no pending applications', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-empty', applicants: 0 });
+    await seedEvent(db, { id: 'ev-empty', applicants: 0 });
 
     // Nothing to decide; running would create a confirmed run for no reason and
     // close the event out from under the organizer.
@@ -183,7 +183,7 @@ describe('selecting which events are due', () => {
 
   it('ignores an event whose selection is already confirmed', async () => {
     const { db, sched, autoSelect } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-done' });
+    await seedEvent(db, { id: 'ev-done' });
 
     await autoSelect.runAndConfirm(db, 'ev-done', { source: 'scheduler' });
 
@@ -196,12 +196,12 @@ describe('selecting which events are due', () => {
 describe('running the scheduler', () => {
   it('selects volunteers and applies the result', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-run', maxSpots: 2, applicants: 5 });
+    await seedEvent(db, { id: 'ev-run', maxSpots: 2, applicants: 5 });
 
     const result = await sched.runAutoSelectSweep(db);
 
     expect(result.executed).toBe(1);
-    const s = statuses(db, 'ev-run');
+    const s = await statuses(db, 'ev-run');
     expect(s.accepted).toBe(2);
     expect(s.waitlisted).toBe(3);
     expect(s.pending).toBeUndefined();
@@ -209,7 +209,7 @@ describe('running the scheduler', () => {
 
   it('marks the run confirmed so it is terminal', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-confirm' });
+    await seedEvent(db, { id: 'ev-confirm' });
 
     await sched.runAutoSelectSweep(db);
 
@@ -220,7 +220,7 @@ describe('running the scheduler', () => {
 
   it('records that the scheduler, not a human, made the selection', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-attrib' });
+    await seedEvent(db, { id: 'ev-attrib' });
 
     await sched.runAutoSelectSweep(db);
 
@@ -232,7 +232,7 @@ describe('running the scheduler', () => {
 
   it('notifies the organizer that it ran automatically', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-notify' });
+    await seedEvent(db, { id: 'ev-notify' });
 
     await sched.runAutoSelectSweep(db);
 
@@ -242,7 +242,7 @@ describe('running the scheduler', () => {
 
   it('notifies the selected and waitlisted students', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-students', maxSpots: 1, applicants: 3 });
+    await seedEvent(db, { id: 'ev-students', maxSpots: 1, applicants: 3 });
 
     await sched.runAutoSelectSweep(db);
 
@@ -257,13 +257,13 @@ describe('running the scheduler', () => {
 describe('idempotency and double-execution', () => {
   it('a second sweep does nothing', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-twice', maxSpots: 2, applicants: 5 });
+    await seedEvent(db, { id: 'ev-twice', maxSpots: 2, applicants: 5 });
 
     expect((await sched.runAutoSelectSweep(db)).executed).toBe(1);
-    const after1 = statuses(db, 'ev-twice');
+    const after1 = await statuses(db, 'ev-twice');
 
     expect((await sched.runAutoSelectSweep(db)).executed).toBe(0);
-    expect(statuses(db, 'ev-twice')).toEqual(after1);
+    expect(await statuses(db, 'ev-twice')).toEqual(after1);
 
     // Exactly one run row, ever.
     expect((await db.prepare('SELECT COUNT(*) AS c FROM auto_select_runs WHERE event_id = ?').get('ev-twice')).c).toBe(1);
@@ -271,7 +271,7 @@ describe('idempotency and double-execution', () => {
 
   it('does not duplicate notifications on a second sweep', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-nodup', maxSpots: 1, applicants: 3 });
+    await seedEvent(db, { id: 'ev-nodup', maxSpots: 1, applicants: 3 });
 
     await sched.runAutoSelectSweep(db);
     const before = (await db.prepare('SELECT COUNT(*) AS c FROM notifications').get()).c;
@@ -283,14 +283,14 @@ describe('idempotency and double-execution', () => {
 
   it('never reselects an already-accepted volunteer or exceeds capacity', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    const { slotId } = seedEvent(db, { id: 'ev-partial', maxSpots: 3, applicants: 4 });
+    const { slotId } = await seedEvent(db, { id: 'ev-partial', maxSpots: 3, applicants: 4 });
 
     // The organizer already hand-accepted one applicant before the deadline.
     await db.prepare("UPDATE applications SET status = 'accepted' WHERE id = ?").run('ev-partial-a0');
 
     await sched.runAutoSelectSweep(db);
 
-    const s = statuses(db, 'ev-partial');
+    const s = await statuses(db, 'ev-partial');
     // 3 spots, one already taken -> exactly 2 more accepted, never 3.
     expect(s.accepted).toBe(3);
     expect(s.waitlisted).toBe(1);
@@ -304,7 +304,7 @@ describe('idempotency and double-execution', () => {
 
   it('confirms the organizer\'s existing draft rather than drawing again', async () => {
     const { db, sched, autoSelect } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-draft', maxSpots: 2, applicants: 5 });
+    await seedEvent(db, { id: 'ev-draft', maxSpots: 2, applicants: 5 });
 
     // The organizer drew but never pressed confirm.
     const draft = await autoSelect.computeDraw(db, 'ev-draft', { runNumber: 1 });
@@ -329,7 +329,7 @@ describe('idempotency and double-execution', () => {
 
   it('overlapping sweeps cannot both execute', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-overlap', maxSpots: 2, applicants: 5 });
+    await seedEvent(db, { id: 'ev-overlap', maxSpots: 2, applicants: 5 });
 
     // Re-entrancy: a slow sweep still running when the next interval fires.
     /* Both started before either is awaited — `sweepInFlight` is set before the
@@ -345,7 +345,7 @@ describe('idempotency and double-execution', () => {
 describe('fairness is unchanged', () => {
   it('produces the same selection as the manual route for the same run number', async () => {
     const { db, autoSelect } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-fair', maxSpots: 2, applicants: 6 });
+    await seedEvent(db, { id: 'ev-fair', maxSpots: 2, applicants: 6 });
 
     // The seed is `${eventId}:${slotId}:run-${runNumber}`, so a draw is
     // deterministic for a given event/slot/run. Two computations of run 1 must
@@ -363,8 +363,8 @@ describe('fairness is unchanged', () => {
 describe('resilience', () => {
   it('one failing event does not stop the others', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-ok1', maxSpots: 1, applicants: 2 });
-    seedEvent(db, { id: 'ev-ok2', maxSpots: 1, applicants: 2 });
+    await seedEvent(db, { id: 'ev-ok1', maxSpots: 1, applicants: 2 });
+    await seedEvent(db, { id: 'ev-ok2', maxSpots: 1, applicants: 2 });
 
     // Force the first event processed to throw, whichever it is.
     /**
@@ -399,7 +399,7 @@ describe('resilience', () => {
 
   it('the sweep never throws, so the interval cannot kill the process', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-throw' });
+    await seedEvent(db, { id: 'ev-throw' });
 
     vi.spyOn(db, 'prepare').mockImplementation(() => { throw new Error('database is locked'); });
     /* Now a promise: a rejection fails the test just as a throw did. */
@@ -408,7 +408,7 @@ describe('resilience', () => {
 
   it('a failed event is retried on the next sweep', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-retry', maxSpots: 1, applicants: 2 });
+    await seedEvent(db, { id: 'ev-retry', maxSpots: 1, applicants: 2 });
 
     /**
      * Poisoned on the DRIVER, not on the `db` handle.
@@ -430,7 +430,7 @@ describe('resilience', () => {
       return realPrepare.call(this, sql);
     });
     await sched.runAutoSelectSweep(db);
-    expect(statuses(db, 'ev-retry').pending).toBe(2);
+    expect((await statuses(db, 'ev-retry')).pending).toBe(2);
 
     fail = false;
     const second = await sched.runAutoSelectSweep(db);
@@ -439,21 +439,21 @@ describe('resilience', () => {
     // No dead-lettering: the guard is "is there a confirmed run", so a failure
     // leaves the event due and it simply runs again 15 minutes later.
     expect(second.executed).toBe(1);
-    expect(statuses(db, 'ev-retry').accepted).toBe(1);
+    expect((await statuses(db, 'ev-retry')).accepted).toBe(1);
   });
 });
 
 describe('the scheduler can be turned off', () => {
   it('respects AUTO_SELECT_SCHEDULER=false', async () => {
     const { db, sched } = await fresh({ graceHours: 0, enabled: false });
-    seedEvent(db, { id: 'ev-off' });
+    await seedEvent(db, { id: 'ev-off' });
 
     const started = sched.startAutoSelectScheduler(db);
     expect(started).toBeNull();
     sched.stopAutoSelectScheduler();
 
     // A district that wants selection to stay entirely manual must be able to say so.
-    expect(statuses(db, 'ev-off').pending).toBe(5);
+    expect((await statuses(db, 'ev-off')).pending).toBe(5);
   });
 
   it('starts and stops cleanly', async () => {
@@ -466,7 +466,7 @@ describe('the scheduler can be turned off', () => {
 
   it('runs a catch-up sweep at startup', async () => {
     const { db, sched } = await fresh({ graceHours: 0 });
-    seedEvent(db, { id: 'ev-startup', maxSpots: 1, applicants: 2 });
+    await seedEvent(db, { id: 'ev-startup', maxSpots: 1, applicants: 2 });
 
     // Startup recovery: a draw that came due while the process was down must not
     // wait a further 15 minutes.
@@ -477,6 +477,6 @@ describe('the scheduler can be turned off', () => {
     await timer.startupSweep;
     sched.stopAutoSelectScheduler();
 
-    expect(statuses(db, 'ev-startup').accepted).toBe(1);
+    expect((await statuses(db, 'ev-startup')).accepted).toBe(1);
   });
 });

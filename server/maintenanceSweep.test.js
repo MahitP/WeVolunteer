@@ -60,8 +60,8 @@ async function fresh() {
 }
 
 /** A revocation row whose token expired `hoursAgo` hours ago. */
-function revocation(db, jti, hoursAgo) {
-  db.prepare(`
+async function revocation(db, jti, hoursAgo) {
+  await db.prepare(`
     INSERT INTO revoked_sessions (jti, user_id, revoked_at, expires_at)
     VALUES (?, 'u1', ?, ?)
   `).run(
@@ -71,7 +71,7 @@ function revocation(db, jti, hoursAgo) {
   );
 }
 
-const rows = (db) => db.prepare('SELECT COUNT(*) AS c FROM revoked_sessions').get().c;
+const rows = async (db) => (await db.prepare('SELECT COUNT(*) AS c FROM revoked_sessions').get()).c;
 
 beforeEach(() => { dir = null; });
 afterEach(() => {
@@ -82,14 +82,14 @@ afterEach(() => {
 describe('purgeExpiredRevocations', () => {
   it('removes revocations whose token has already expired', async () => {
     const { db, utils } = await fresh();
-    revocation(db, 'jti-old-1', 48);
-    revocation(db, 'jti-old-2', 200);
-    expect(rows(db)).toBe(2);
+    await revocation(db, 'jti-old-1', 48);
+    await revocation(db, 'jti-old-2', 200);
+    expect(await rows(db)).toBe(2);
 
     const removed = await utils.purgeExpiredRevocations();
 
     expect(removed).toBe(2);
-    expect(rows(db)).toBe(0);
+    expect(await rows(db)).toBe(0);
   });
 
   it('keeps revocations whose token is still valid', async () => {
@@ -103,25 +103,25 @@ describe('purgeExpiredRevocations', () => {
 
     await utils.purgeExpiredRevocations();
 
-    expect(rows(db), 'a live revocation was purged, un-revoking a signed-out session').toBe(1);
+    expect(await rows(db), 'a live revocation was purged, un-revoking a signed-out session').toBe(1);
   });
 });
 
 describe('the sweep actually runs it', () => {
   it('runNotificationSweep purges expired revocations', async () => {
     const { db, utils } = await fresh();
-    revocation(db, 'jti-swept', 48);
+    await revocation(db, 'jti-swept', 48);
 
     // The regression: the function existed and was never invoked, so the table grew
     // forever while the code read as though pruning were handled.
     await utils.runNotificationSweep();
 
-    expect(rows(db), 'the sweep did not purge expired revocations').toBe(0);
+    expect(await rows(db), 'the sweep did not purge expired revocations').toBe(0);
   });
 
   it('leaves live revocations alone when sweeping', async () => {
     const { db, utils } = await fresh();
-    revocation(db, 'jti-expired', 48);
+    await revocation(db, 'jti-expired', 48);
     await db.prepare(`
       INSERT INTO revoked_sessions (jti, user_id, revoked_at, expires_at)
       VALUES ('jti-live', 'u1', ?, ?)

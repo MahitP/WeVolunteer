@@ -75,31 +75,31 @@ let seq = 0;
  * exercises the `applied_at` fallback — and the application then needs a slot_id that
  * does not resolve, so that case is built separately below.
  */
-function seedApplication({ slotEnd, appliedAt }) {
+async function seedApplication({ slotEnd, appliedAt }) {
   const n = ++seq;
   const userId = `ret-app-user-${n}`;
   const eventId = `ret-app-event-${n}`;
   const slotId = `ret-app-slot-${n}`;
   const appId = `ret-app-${n}`;
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, email, password_hash, name, role, grade, username,
                        email_verified, account_status, created_at)
     VALUES (?, ?, 'h', 'Retention Student', 'student', '11', ?, 1, 'active', datetime('now'))
   `).run(userId, `${userId}@example.com`, userId.replace(/-/g, '_'));
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO events (id, title, description, category, location, application_deadline,
                         organizer_id, status, created_at)
     VALUES (?, 'Retention Fixture Event', 'd', 'Other', 'Somewhere', ?, 'user-org-1', 'completed', ?)
   `).run(eventId, appliedAt, appliedAt);
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
     VALUES (?, ?, 'Shift', 'd', ?, ?, 5)
   `).run(slotId, eventId, slotEnd, slotEnd);
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
     VALUES (?, ?, ?, ?, 'accepted', ?)
   `).run(appId, userId, eventId, slotId, appliedAt);
@@ -107,11 +107,11 @@ function seedApplication({ slotEnd, appliedAt }) {
   return { appId, userId, eventId, slotId };
 }
 
-const appExists = (id) =>
-  db.prepare('SELECT COUNT(*) AS c FROM applications WHERE id = ?').get(id).c === 1;
+const appExists = async (id) =>
+  (await db.prepare('SELECT COUNT(*) AS c FROM applications WHERE id = ?').get(id)).c === 1;
 
-beforeEach(() => {
-  db.prepare("DELETE FROM applications WHERE id LIKE 'ret-app-%'").run();
+beforeEach(async () => {
+  await db.prepare("DELETE FROM applications WHERE id LIKE 'ret-app-%'").run();
 });
 
 describe('the published period is enforced', () => {
@@ -122,26 +122,26 @@ describe('the published period is enforced', () => {
   });
 
   it('deletes an application whose event ended past the window', async () => {
-    const { appId } = seedApplication({
+    const { appId } = await seedApplication({
       slotEnd: daysAgo(RETENTION.applicationDays + 30),
       appliedAt: daysAgo(RETENTION.applicationDays + 60),
     });
-    expect(appExists(appId)).toBe(true);
+    expect(await appExists(appId)).toBe(true);
     await sweep(db);
-    expect(appExists(appId)).toBe(false);
+    expect(await appExists(appId)).toBe(false);
   });
 
   it('keeps an application whose event ended one day inside the window', async () => {
-    const { appId } = seedApplication({
+    const { appId } = await seedApplication({
       slotEnd: daysAgo(RETENTION.applicationDays - 1),
       appliedAt: daysAgo(RETENTION.applicationDays + 60),
     });
     await sweep(db);
-    expect(appExists(appId)).toBe(true);
+    expect(await appExists(appId)).toBe(true);
   });
 
   it('reports what it removed, so the sweep can be logged and asserted', async () => {
-    seedApplication({
+    await seedApplication({
       slotEnd: daysAgo(RETENTION.applicationDays + 30),
       appliedAt: daysAgo(RETENTION.applicationDays + 60),
     });
@@ -150,13 +150,13 @@ describe('the published period is enforced', () => {
   });
 
   it('counts without deleting on a dry run', async () => {
-    const { appId } = seedApplication({
+    const { appId } = await seedApplication({
       slotEnd: daysAgo(RETENTION.applicationDays + 30),
       appliedAt: daysAgo(RETENTION.applicationDays + 60),
     });
     const result = await sweep(db, { dryRun: true });
     expect(result.applications).toBeGreaterThan(0);
-    expect(appExists(appId)).toBe(true);
+    expect(await appExists(appId)).toBe(true);
   });
 });
 
@@ -168,23 +168,23 @@ describe('the event decides the clock, not the application', () => {
    * swept before the event happens — it is the organizer's roster.
    */
   it('KEEPS an old application to an event that has not happened yet', async () => {
-    const { appId } = seedApplication({
+    const { appId } = await seedApplication({
       slotEnd: inDays(30),                                   // event is in the future
       appliedAt: daysAgo(RETENTION.applicationDays + 400),   // applied a very long time ago
     });
     await sweep(db);
-    expect(appExists(appId), 'an application to a FUTURE event was deleted').toBe(true);
+    expect(await appExists(appId), 'an application to a FUTURE event was deleted').toBe(true);
   });
 
   it('deletes an application filed recently to an event that ended long ago', async () => {
     // The mirror image: a late-recorded application to an ancient event still ages
     // out with the event, because the event is what the policy names.
-    const { appId } = seedApplication({
+    const { appId } = await seedApplication({
       slotEnd: daysAgo(RETENTION.applicationDays + 30),
       appliedAt: daysAgo(1),
     });
     await sweep(db);
-    expect(appExists(appId)).toBe(false);
+    expect(await appExists(appId)).toBe(false);
   });
 
   /**
@@ -228,9 +228,9 @@ describe('the event decides the clock, not the application', () => {
     await db.prepare('DELETE FROM slots WHERE id = ?').run(slotId);
     await db.prepare('PRAGMA foreign_keys = ON').run();
 
-    expect(appExists(appId)).toBe(true);
+    expect(await appExists(appId)).toBe(true);
     await sweep(db);
-    expect(appExists(appId), 'a slotless event\'s ancient application was retained for ever').toBe(false);
+    expect(await appExists(appId), 'a slotless event\'s ancient application was retained for ever').toBe(false);
   });
 });
 
@@ -245,7 +245,7 @@ describe('what the sweep must never touch', () => {
    * inside the sweep is the guard that would catch it.
    */
   it('deletes the application but keeps the attendance, hours and certificate', async () => {
-    const { appId, userId, eventId, slotId } = seedApplication({
+    const { appId, userId, eventId, slotId } = await seedApplication({
       slotEnd: daysAgo(RETENTION.applicationDays + 30),
       appliedAt: daysAgo(RETENTION.applicationDays + 60),
     });
@@ -261,7 +261,7 @@ describe('what the sweep must never touch', () => {
 
     await sweep(db);
 
-    expect(appExists(appId), 'the aged application should have gone').toBe(false);
+    expect(await appExists(appId), 'the aged application should have gone').toBe(false);
     expect(
       (await db.prepare('SELECT hours_awarded FROM attendance WHERE slot_id = ? AND user_id = ?')
         .get(slotId, userId))?.hours_awarded,
@@ -274,11 +274,11 @@ describe('what the sweep must never touch', () => {
   });
 
   it('takes application_conflicts with the application, and nothing else', async () => {
-    const a = seedApplication({
+    const a = await seedApplication({
       slotEnd: daysAgo(RETENTION.applicationDays + 30),
       appliedAt: daysAgo(RETENTION.applicationDays + 60),
     });
-    const b = seedApplication({
+    const b = await seedApplication({
       slotEnd: daysAgo(10),                                  // well inside the window
       appliedAt: daysAgo(20),
     });
@@ -290,8 +290,8 @@ describe('what the sweep must never touch', () => {
 
     await sweep(db);
 
-    expect(appExists(a.appId)).toBe(false);
-    expect(appExists(b.appId), 'a recent application was swept as collateral').toBe(true);
+    expect(await appExists(a.appId)).toBe(false);
+    expect(await appExists(b.appId), 'a recent application was swept as collateral').toBe(true);
     expect(
       (await db.prepare('SELECT COUNT(*) AS c FROM application_conflicts WHERE application_id = ?')
         .get(a.appId)).c,
@@ -300,8 +300,8 @@ describe('what the sweep must never touch', () => {
   });
 
   it('leaves a recent application alone however old the account is', async () => {
-    const { appId } = seedApplication({ slotEnd: daysAgo(5), appliedAt: daysAgo(6) });
+    const { appId } = await seedApplication({ slotEnd: daysAgo(5), appliedAt: daysAgo(6) });
     await sweep(db);
-    expect(appExists(appId)).toBe(true);
+    expect(await appExists(appId)).toBe(true);
   });
 });

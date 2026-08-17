@@ -57,8 +57,8 @@ async function freshWorker() {
 }
 
 /** Inserts a job row directly, bypassing notificationService's preference checks. */
-function queueJob(db, { id, status = 'pending', attempts = 0, nextAttemptAt = null, payload = null }) {
-  db.prepare(`
+async function queueJob(db, { id, status = 'pending', attempts = 0, nextAttemptAt = null, payload = null }) {
+  await db.prepare(`
     INSERT INTO notification_jobs (id, channel, payload, status, attempts, next_attempt_at, created_at)
     VALUES (?, 'email', ?, ?, ?, ?, ?)
   `).run(
@@ -104,7 +104,7 @@ describe('the worker loop cannot take the process down', () => {
 
   it('survives a failure while recording a failed attempt', async () => {
     const { db, worker } = await freshWorker();
-    queueJob(db, { id: 'job-bookkeeping' });
+    await queueJob(db, { id: 'job-bookkeeping' });
 
     // The bookkeeping UPDATE in the catch block was itself unprotected, so a
     // database that is unhappy for the send is unhappy for the write-back too.
@@ -128,7 +128,7 @@ describe('stale processing jobs are reclaimed', () => {
 
     // A job left mid-send by a restart: status processing, claimed long ago.
     const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    queueJob(db, { id: 'job-stranded', status: 'processing' });
+    await queueJob(db, { id: 'job-stranded', status: 'processing' });
     await db.prepare('UPDATE notification_jobs SET next_attempt_at = ? WHERE id = ?')
       .run(longAgo, 'job-stranded');
 
@@ -144,7 +144,7 @@ describe('stale processing jobs are reclaimed', () => {
 
     // Claimed just now — a concurrent send, not an orphan. Reclaiming this would
     // deliver the same notification twice.
-    queueJob(db, { id: 'job-inflight', status: 'processing' });
+    await queueJob(db, { id: 'job-inflight', status: 'processing' });
     await db.prepare('UPDATE notification_jobs SET next_attempt_at = ? WHERE id = ?')
       .run(new Date().toISOString(), 'job-inflight');
 
@@ -159,7 +159,7 @@ describe('stale processing jobs are reclaimed', () => {
     const { db, worker } = await freshWorker();
 
     const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    queueJob(db, { id: 'job-exhausted', status: 'processing', attempts: 5 });
+    await queueJob(db, { id: 'job-exhausted', status: 'processing', attempts: 5 });
     await db.prepare('UPDATE notification_jobs SET next_attempt_at = ? WHERE id = ?')
       .run(longAgo, 'job-exhausted');
 
@@ -174,7 +174,7 @@ describe('stale processing jobs are reclaimed', () => {
     const { db, worker } = await freshWorker();
 
     const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    queueJob(db, { id: 'job-orphan', status: 'processing' });
+    await queueJob(db, { id: 'job-orphan', status: 'processing' });
     await db.prepare('UPDATE notification_jobs SET next_attempt_at = ? WHERE id = ?')
       .run(longAgo, 'job-orphan');
 
@@ -193,7 +193,7 @@ describe('failed jobs are visible', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     // attempts=4 so this run is the fifth and final one.
-    queueJob(db, { id: 'job-final', attempts: 4 });
+    await queueJob(db, { id: 'job-final', attempts: 4 });
     // No such user, so handleEmailJob throws.
     await db.prepare('UPDATE notification_jobs SET payload = ? WHERE id = ?').run(
       JSON.stringify({ event: 'APPLICATION_ACCEPTED', payload: {}, userId: 'nobody' }),
@@ -212,9 +212,9 @@ describe('failed jobs are visible', () => {
   it('exposes a queue health summary for the admin surface', async () => {
     const { db, worker } = await freshWorker();
 
-    queueJob(db, { id: 'p1' });
-    queueJob(db, { id: 'f1', status: 'failed', attempts: 5 });
-    queueJob(db, { id: 'f2', status: 'failed', attempts: 5 });
+    await queueJob(db, { id: 'p1' });
+    await queueJob(db, { id: 'f1', status: 'failed', attempts: 5 });
+    await queueJob(db, { id: 'f2', status: 'failed', attempts: 5 });
 
     const health = await worker.getQueueHealth();
 

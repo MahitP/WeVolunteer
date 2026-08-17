@@ -597,26 +597,39 @@ describe('the await group closes after the execution, not before it', () => {
  * promise. Both engines are in use, so the shape is not yet a defect
  * everywhere; it is unported work.
  *
- * There are 267 of them, and that is the honest size of what stands between the
+ * There are 63 of them, and that is the honest size of what stands between the
  * PostgreSQL application suite and green. Asserting zero would break the build
  * for everybody until the whole port lands; asserting a ceiling makes the
  * number visible, stops it growing, and turns each batch of ported files into a
  * smaller number that has to be written down.
  *
- * ── How the 1,084 became 267 ──
+ * ── How 1,084 became 63 ──
  *
- * 824 of them sat inside functions that were *already* `async`, so the fix was
- * one inserted keyword with no cascade: nothing became async that was not, and
- * no caller changed. That made them safe to do as one AST pass — offsets from a
- * real parse, `(await …)` parenthesised whenever the chain was the object of a
- * member access, and every file re-parsed before it was written. The regex
- * passes this document warns about failed because they had to guess where an
- * expression ended; the parser does not guess.
+ * 824 sat inside functions that were *already* `async`, so the fix was one
+ * inserted keyword with no cascade: nothing became async that was not, and no
+ * caller changed.
  *
- * What is left is the part that genuinely cannot be done that way: 137 chains
- * in sync arrows and 55 in sync helper declarations, where making the enclosing
- * function async forces its callers to await it, and 66 in sync hook callbacks.
- * Those are per-file work.
+ * The remaining ~250 were the cascade — a sync helper holding an unawaited
+ * `.run()` is what produced the foreign-key storm, since the INSERT is a
+ * promise nobody waits for and the id it should have returned is `undefined`.
+ * Making the helper async forces its callers to await it, and that makes the
+ * callers async in turn, so the async set was computed as a fixpoint over each
+ * whole file before anything was written.
+ *
+ * Both passes were AST transformations, with offsets from a real parse and a
+ * re-parse before each write. Three things they had to get right, each of which
+ * the migration notes record a regex pass getting wrong:
+ *   · `(await f()).prop` — awaiting the call, not the property read
+ *   · `f().then/.catch/.finally` left alone — the chain handles the promise
+ *     already, and `(await f()).catch` reads the method off the resolved value
+ *   · whole-file atomicity — 14 files were refused outright rather than half
+ *     converted, because a partly-awaited file is the state that produces a
+ *     fail-open
+ *
+ * What is left is those 14 refused files: helpers passed as bare callbacks to
+ * `map`/`filter`, and anonymous non-hook functions whose callers cannot be found
+ * by name. They are hand work, and they are listed by running the porting script
+ * in dry-run mode.
  *
  * ── What it costs when it is missed ──
  *
@@ -635,7 +648,7 @@ describe('the unported fixture surface', () => {
   const PROXY_HANDLES = /(?<!await )\b(?:db|tx|conn|connection|dbHandle|database|handle|seeded|live)\s*\.\s*prepare\s*\(/g;
 
   /** Lowered only by porting files, never raised to accommodate new ones. */
-  const CEILING = 267;
+  const CEILING = 63;
 
   it(`has at most ${CEILING} unawaited prepare() chains in proxy-holding test files`, () => {
     const offenders = new Map();

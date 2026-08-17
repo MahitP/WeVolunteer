@@ -33,13 +33,13 @@ afterAll(async () => {
   delete process.env.ERROR_REPORT_RATE_LIMIT;
 });
 
-beforeEach(() => {
-  db.prepare('DELETE FROM error_events').run();
-  db.prepare('DELETE FROM error_groups').run();
+beforeEach(async () => {
+  await db.prepare('DELETE FROM error_events').run();
+  await db.prepare('DELETE FROM error_groups').run();
 });
 
-const groups = () => db.prepare('SELECT * FROM error_groups').all();
-const events = () => db.prepare('SELECT * FROM error_events').all();
+const groups = async () => await db.prepare('SELECT * FROM error_groups').all();
+const events = async () => await db.prepare('SELECT * FROM error_events').all();
 
 /** Raw POST, so a non-JSON or oversized body can be sent deliberately. */
 const post = (body, headers = {}) =>
@@ -57,14 +57,14 @@ describe('intake: accepts a report without a session', () => {
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ accepted: true });
 
-    expect(groups().length).toBe(1);
-    expect(events().length).toBe(1);
-    expect(groups()[0]).toMatchObject({ source: 'client', kind: 'TypeError', status: 'open', occurrences: 1 });
+    expect((await groups()).length).toBe(1);
+    expect((await events()).length).toBe(1);
+    expect((await groups())[0]).toMatchObject({ source: 'client', kind: 'TypeError', status: 'open', occurrences: 1 });
   });
 
   it('leaves user_hash null when nobody is signed in, and sets it when they are', async () => {
     await report({ message: 'anon report' });
-    expect(events()[0].user_hash).toBeNull();
+    expect((await events())[0].user_hash).toBeNull();
 
     const cookie = await srv.login('leo.chen@example.com');
     const res = await fetch(`${srv.base}/api/errors/report`, {
@@ -74,11 +74,11 @@ describe('intake: accepts a report without a session', () => {
     });
     expect(res.status).toBe(202);
 
-    const signedIn = groups().find(g => g.message.includes('signed-in'));
+    const signedIn = (await groups()).find(g => g.message.includes('signed-in'));
     const ev = await db.prepare('SELECT * FROM error_events WHERE fingerprint = ?').get(signedIn.fingerprint);
     expect(ev.user_hash).toMatch(/^[0-9a-f]{32}$/);
     // A hash, never the id.
-    expect(JSON.stringify(events())).not.toContain('user-student-1');
+    expect(JSON.stringify(await events())).not.toContain('user-student-1');
   });
 
   it('answers 202 for a garbage or expired session rather than 401', async () => {
@@ -89,8 +89,8 @@ describe('intake: accepts a report without a session', () => {
       { Cookie: 'wev_session=not-a-real-token' }
     );
     expect(res.status).toBe(202);
-    expect(groups().length).toBe(1);
-    expect(events()[0].user_hash).toBeNull();
+    expect((await groups()).length).toBe(1);
+    expect((await events())[0].user_hash).toBeNull();
   });
 });
 
@@ -111,7 +111,7 @@ describe('intake: the client cannot assign what the server owns', () => {
     });
     expect(res.status).toBe(202);
 
-    const [g] = groups();
+    const [g] = await groups();
     expect(g.source, 'a client escaped the client ceiling by claiming to be the server').toBe('client');
     expect(g.release).not.toBe('9.9.9-attacker');
     expect(g.status).toBe('open');
@@ -121,7 +121,7 @@ describe('intake: the client cannot assign what the server owns', () => {
     expect(g.fingerprint).toMatch(/^[0-9a-f]{64}$/);
     expect(g.first_seen_at.startsWith('1999'), 'a client backdated its own report').toBe(false);
 
-    const ev = events()[0];
+    const ev = (await events())[0];
     expect(ev.user_hash).not.toBe('attacker-chosen-hash');
     expect(ev.occurred_at.startsWith('1999')).toBe(false);
   });
@@ -131,7 +131,7 @@ describe('intake: the client cannot assign what the server owns', () => {
       context: { component: 'Login', password: 'hunter2', newEmail: 'a@b.com', challengeId: 'reauth-xyz' },
       message: 'context probe',
     });
-    const ctx = events()[0].context ?? '';
+    const ctx = (await events())[0].context ?? '';
     expect(ctx).toContain('Login');
     for (const leak of ['hunter2', 'a@b.com', 'reauth-xyz', 'password', 'newEmail', 'challengeId']) {
       expect(ctx, `${leak} reached the context column`).not.toContain(leak);
@@ -142,49 +142,49 @@ describe('intake: the client cannot assign what the server owns', () => {
 describe('intake: fingerprints', () => {
   it('collapses identical reports into one group', async () => {
     for (let i = 0; i < 4; i++) await report({ message: 'the same failure' });
-    expect(groups().length).toBe(1);
-    expect(groups()[0].occurrences).toBe(4);
+    expect((await groups()).length).toBe(1);
+    expect((await groups())[0].occurrences).toBe(4);
   });
 
   it('separates genuinely different reports', async () => {
     await report({ message: 'alpha failure' });
     await report({ message: 'beta failure' });
     await report({ message: 'alpha failure', kind: 'RangeError' });
-    expect(groups().length).toBe(3);
+    expect((await groups()).length).toBe(3);
   });
 });
 
 describe('intake: route privacy, asserted on stored values', () => {
-  const storedRoute = () => groups()[0].route;
+  const storedRoute = async () => (await groups())[0].route;
 
   it('never persists a query string', async () => {
     await report({ route: '/events?q=12%20Maple%20Ave&city=Princeton' });
-    expect(storedRoute()).toBe('/events');
-    expect(JSON.stringify([...groups(), ...events()])).not.toContain('Maple');
+    expect(await storedRoute()).toBe('/events');
+    expect(JSON.stringify([...await groups(), ...await events()])).not.toContain('Maple');
   });
 
   it('never persists a fragment', async () => {
     await report({ route: '/calendar#section-private' });
-    expect(storedRoute()).toBe('/calendar');
-    expect(JSON.stringify(groups())).not.toContain('section-private');
+    expect(await storedRoute()).toBe('/calendar');
+    expect(JSON.stringify(await groups())).not.toContain('section-private');
   });
 
   it('never persists an email carried in a route', async () => {
     await report({ route: '/login?email=leo.chen@example.com' });
-    expect(storedRoute()).toBe('/login');
-    expect(JSON.stringify([...groups(), ...events()])).not.toContain('leo.chen@example.com');
+    expect(await storedRoute()).toBe('/login');
+    expect(JSON.stringify([...await groups(), ...await events()])).not.toContain('leo.chen@example.com');
   });
 
   it('never persists a token carried in a route', async () => {
     await report({ route: '/reset-password?token=eyJhbGciOiJIUzI1NiJ9.eyJhIjoxfQ.sig' });
-    expect(storedRoute()).toBe('/reset-password');
-    expect(JSON.stringify([...groups(), ...events()])).not.toContain('eyJhbGci');
+    expect(await storedRoute()).toBe('/reset-password');
+    expect(JSON.stringify([...await groups(), ...await events()])).not.toContain('eyJhbGci');
   });
 
   it('never persists a real id sitting in a path parameter', async () => {
     await report({ route: '/checkin/event-softball-2026' });
-    expect(storedRoute()).toBe('/checkin/:eventId');
-    expect(JSON.stringify(groups())).not.toContain('softball');
+    expect(await storedRoute()).toBe('/checkin/:eventId');
+    expect(JSON.stringify(await groups())).not.toContain('softball');
   });
 
   /**
@@ -195,8 +195,8 @@ describe('intake: route privacy, asserted on stored values', () => {
    */
   it('stores unknown for /users/user-student-2/profile, and keeps the id out', async () => {
     await report({ route: '/users/user-student-2/profile' });
-    expect(storedRoute()).toBe('unknown');
-    expect(JSON.stringify([...groups(), ...events()])).not.toContain('user-student-2');
+    expect(await storedRoute()).toBe('unknown');
+    expect(JSON.stringify([...await groups(), ...await events()])).not.toContain('user-student-2');
   });
 
   it('stores unknown for arbitrary and hostile paths, never the raw path', async () => {
@@ -207,7 +207,7 @@ describe('intake: route privacy, asserted on stored values', () => {
       await db.prepare('DELETE FROM error_groups').run();
       const res = await report({ route: hostile, message: `hostile ${hostile.slice(0, 12)}` });
       expect(res.status).toBe(202);
-      expect(storedRoute(), `${hostile} was stored raw`).toBe('unknown');
+      expect(await storedRoute(), `${hostile} was stored raw`).toBe('unknown');
     }
   });
 
@@ -216,7 +216,7 @@ describe('intake: route privacy, asserted on stored values', () => {
       await db.prepare('DELETE FROM error_groups').run();
       const res = await report({ route: bad, message: 'non-string route' });
       expect(res.status, 'intake failed on hostile input instead of neutralising it').toBe(202);
-      expect(storedRoute()).toBe('unknown');
+      expect(await storedRoute()).toBe('unknown');
     }
   });
 
@@ -231,7 +231,7 @@ describe('intake: route privacy, asserted on stored values', () => {
       await report({ route, message: `sweep ${String(route).slice(0, 10)}` });
     }
 
-    const stored = new Set(groups().map(g => g.route).filter(Boolean));
+    const stored = new Set((await groups()).map(g => g.route).filter(Boolean));
     for (const r of stored) {
       expect(allowed.has(r), `stored route "${r}" is outside the approved set`).toBe(true);
     }
@@ -279,7 +279,7 @@ describe('intake: failures never reach the client', () => {
     expect(called, 'the spy never intercepted — this test proves nothing').toBeGreaterThan(0);
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ accepted: true });
-    expect(groups().length).toBe(0);
+    expect((await groups()).length).toBe(0);
   });
 
   it('answers 202 for an empty object and an array body', async () => {
@@ -301,7 +301,7 @@ describe('intake: failures never reach the client', () => {
       const res = await post(body);
       expect(res.status, `body ${body} was accepted`).toBe(400);
     }
-    expect(groups().length).toBe(0);
+    expect((await groups()).length).toBe(0);
   });
 
   it('answers 400 for malformed JSON without leaking internals', async () => {
@@ -319,7 +319,7 @@ describe('intake: the 8 kB body cap actually engages', () => {
       res.status,
       'the 8 kB cap is not active — a route-level parser after the global one is a no-op'
     ).toBe(413);
-    expect(groups().length).toBe(0);
+    expect((await groups()).length).toBe(0);
   });
 
   it('accepts a body comfortably under the cap', async () => {

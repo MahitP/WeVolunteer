@@ -338,8 +338,8 @@ describe('friend messaging', () => {
       expect((await openPeer(gus, fay)).status).toBe(403);
     });
 
-    it('withdrew the friendship, so the two rules cannot disagree', () => {
-      const row = db.prepare(`
+    it('withdrew the friendship, so the two rules cannot disagree', async () => {
+      const row = await db.prepare(`
         SELECT 1 FROM user_relationships WHERE kind = 'friend'
           AND ((actor_id = ? AND subject_id = ?) OR (actor_id = ? AND subject_id = ?))
       `).get(fay.id, gus.id, gus.id, fay.id);

@@ -75,14 +75,14 @@ describe('privileged profile fields are gated on every route that can reach them
    */
   describe('GET /api/events/:id/attendees', () => {
     /** Two accepted volunteers on one event, so the caller is a genuine peer. */
-    const seedRoster = () => {
-      const ev = db.prepare("SELECT id FROM events WHERE status != 'cancelled' LIMIT 1").get().id;
-      const slot = db.prepare('SELECT id FROM slots WHERE event_id = ? LIMIT 1').get(ev);
+    const seedRoster = async () => {
+      const ev = (await db.prepare("SELECT id FROM events WHERE status != 'cancelled' LIMIT 1").get()).id;
+      const slot = await db.prepare('SELECT id FROM slots WHERE event_id = ? LIMIT 1').get(ev);
       if (!slot) return null;
-      db.prepare("UPDATE events SET attendee_visibility = 'accepted' WHERE id = ?").run(ev);
-      db.prepare("UPDATE users SET profile_visibility = 'private', school = 'PRIVATE-SCHOOL', grade = '11' WHERE id = 'user-student-2'").run();
+      await db.prepare("UPDATE events SET attendee_visibility = 'accepted' WHERE id = ?").run(ev);
+      await db.prepare("UPDATE users SET profile_visibility = 'private', school = 'PRIVATE-SCHOOL', grade = '11' WHERE id = 'user-student-2'").run();
       for (const uid of ['user-student-1', 'user-student-2']) {
-        db.prepare(`INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
+        await db.prepare(`INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
           VALUES (?, ?, ?, ?, 'accepted', ?)
       ON CONFLICT (id) DO UPDATE SET user_id = excluded.user_id, event_id = excluded.event_id, slot_id = excluded.slot_id, status = excluded.status, applied_at = excluded.applied_at`).run(`app-roster-${uid}`, uid, ev, slot.id, new Date().toISOString());
       }
@@ -90,7 +90,7 @@ describe('privileged profile fields are gated on every route that can reach them
     };
 
     it('withholds a private peer\'s school and grade from a co-attendee', async () => {
-      const ev = seedRoster();
+      const ev = await seedRoster();
       if (!ev) return;
       const peer = await srv.login('leo.chen@example.com');
       const res = await srv.call('GET', `/api/events/${ev}/attendees`, undefined, peer);
@@ -105,7 +105,7 @@ describe('privileged profile fields are gated on every route that can reach them
     });
 
     it('still gives the hosting organizer school and grade', async () => {
-      const ev = seedRoster();
+      const ev = await seedRoster();
       if (!ev) return;
       const organizerId = (await db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(ev)).organizer_id;
       const email = (await db.prepare('SELECT email FROM users WHERE id = ?').get(organizerId)).email;

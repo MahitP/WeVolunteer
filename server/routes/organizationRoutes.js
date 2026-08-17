@@ -44,8 +44,8 @@ const router = express.Router();
 /** Member and event counts, computed in the same statement as the row. */
 const ORG_SELECT = `
   SELECT o.*,
-         (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS memberCount,
-         (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS eventCount
+         (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
+         (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
   FROM organizations o
 `;
 
@@ -129,7 +129,7 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
 
   const members = await db.prepare(`
     SELECT u.id, u.username, u.name, u.avatar, u.profile_picture_url, u.role, u.location,
-           m.member_role AS memberRole, m.joined_at AS joinedAt
+           m.member_role AS "memberRole", m.joined_at AS "joinedAt"
     FROM organization_members m
     JOIN users u ON u.id = m.user_id
     WHERE m.organization_id = ? AND u.account_status = 'active'
@@ -143,9 +143,9 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
    * not something to advertise.
    */
   const events = await db.prepare(`
-    SELECT e.id, e.title, e.category, e.location, e.status, e.credits_hours AS creditsHours,
-           e.application_deadline AS applicationDeadline,
-           (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) AS startsAt
+    SELECT e.id, e.title, e.category, e.location, e.status, e.credits_hours AS "creditsHours",
+           e.application_deadline AS "applicationDeadline",
+           (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) AS "startsAt"
     FROM events e
     WHERE e.organization_id = ? AND e.status <> 'cancelled'
     ORDER BY startsAt DESC

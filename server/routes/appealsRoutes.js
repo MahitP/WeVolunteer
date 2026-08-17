@@ -484,7 +484,7 @@ router.get('/api/appeals/mine', authenticateToken, async (req, res) => {
   // token route above: a reopened appeal is usually decided by somebody else.
   const appeals = await db.prepare(`
     SELECT a.id, a.subject, a.subject_ref, a.statement, a.status, a.decision, a.reasoning,
-           COALESCE(u.name, a.reviewer_name_snapshot) AS reviewerName,
+           COALESCE(u.name, a.reviewer_name_snapshot) AS "reviewerName",
            a.created_at, a.decided_at
       FROM appeals a
       LEFT JOIN users u ON u.id = a.reviewer_id

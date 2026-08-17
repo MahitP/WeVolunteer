@@ -242,7 +242,7 @@ export async function resolveInvitation(db, { token, user, now = new Date() }) {
 export async function listPendingInvitations(db, { now = new Date() } = {}) {
   const rows = await db.prepare(`
     SELECT i.id, i.email, i.role, i.reason, i.created_at, i.expires_at,
-           COALESCE(u.name, 'Account since deleted') AS invitedByName
+           COALESCE(u.name, 'Account since deleted') AS "invitedByName"
       FROM admin_invitations i
       LEFT JOIN users u ON u.id = i.invited_by
      WHERE i.status = 'pending'

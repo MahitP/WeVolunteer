@@ -20,16 +20,16 @@ import { SUSPENDED_ALLOWED, suspendedMayReach } from './suspendedAccess.js';
 describe('a suspended session', () => {
   let srv, db, suspended, active, admin;
 
-  const suspend = (id, { until = null, reason = 'Messaging a student after being asked to stop' } = {}) => {
-    db.prepare(`
+  const suspend = async (id, { until = null, reason = 'Messaging a student after being asked to stop' } = {}) => {
+    await db.prepare(`
       UPDATE users SET account_status = 'suspended', suspended_at = ?, suspended_until = ?,
                        suspension_reason = ?, suspension_lifted_at = NULL
        WHERE id = ?
     `).run('2026-08-01T09:00:00.000Z', until, reason, id);
   };
 
-  const unsuspend = (id) => {
-    db.prepare(`
+  const unsuspend = async (id) => {
+    await db.prepare(`
       UPDATE users SET account_status = 'active', suspended_at = NULL, suspended_until = NULL,
                        suspension_reason = NULL WHERE id = ?
     `).run(id);
@@ -45,9 +45,9 @@ describe('a suspended session', () => {
   afterAll(async () => { await srv?.close(); });
 
   beforeEach(async () => {
-    unsuspend('user-student-2');
+    await unsuspend('user-student-2');
     suspended = await srv.login('priya.patel@example.com');
-    suspend('user-student-2');
+    await suspend('user-student-2');
   });
 
   /* ── The disclosure ───────────────────────────────────────────────────── */
@@ -70,7 +70,7 @@ describe('a suspended session', () => {
    * is this account is not that, which is what makes it sayable here.
    */
   it('names the end date of a timed suspension', async () => {
-    suspend('user-student-2', { until: '2099-01-01T00:00:00.000Z' });
+    await suspend('user-student-2', { until: '2099-01-01T00:00:00.000Z' });
     const res = await srv.call('GET', '/api/auth/me', undefined, suspended);
     expect(res.body.suspension.until).toBe('2099-01-01T00:00:00.000Z');
     expect(res.body.suspension.indefinite).toBe(false);
@@ -112,13 +112,13 @@ describe('a suspended session', () => {
    * capability check, where an admin route would answer before it.
    */
   it('does not let a suspended administrator use administrative routes', async () => {
-    suspend('user-admin');
+    await suspend('user-admin');
     try {
       const res = await srv.call('GET', '/api/admin/reports', undefined, admin);
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('account_suspended');
     } finally {
-      unsuspend('user-admin');
+      await unsuspend('user-admin');
     }
   });
 
@@ -195,7 +195,7 @@ describe('a suspended session', () => {
     /* Reset explicitly. An earlier case in this file may have left this account
        suspended, in which case the suspend below answers 409, changes nothing,
        and the assertions pass without exercising anything. */
-    unsuspend('user-student-3');
+    await unsuspend('user-student-3');
     const live = await srv.login('ethan.miller@example.com');
     expect((await srv.call('GET', '/api/auth/me', undefined, live)).status).toBe(200);
 
@@ -223,7 +223,7 @@ describe('a suspended session', () => {
    * saw the suspension happen is refused on its very next request.
    */
   it('applies to every open session at once, not just the active one', async () => {
-    unsuspend('user-student-3');
+    await unsuspend('user-student-3');
     const phone = await srv.login('ethan.miller@example.com');
     const laptop = await srv.login('ethan.miller@example.com');
 
@@ -239,7 +239,7 @@ describe('a suspended session', () => {
 
   /** And access returns on the same session when the suspension is lifted. */
   it('restores the same session on unsuspension, with no new sign-in', async () => {
-    unsuspend('user-student-3');
+    await unsuspend('user-student-3');
     const live = await srv.login('ethan.miller@example.com');
     await srv.call('POST', '/api/admin/users/user-student-3/suspend',
       { reason: 'Messaging a student after being asked to stop' }, admin);
@@ -262,7 +262,7 @@ describe('a suspended session', () => {
    * job involved. That has to remain true through the new gate.
    */
   it('stops applying the moment a timed suspension has passed', async () => {
-    suspend('user-student-2', { until: '2000-01-01T00:00:00.000Z' });
+    await suspend('user-student-2', { until: '2000-01-01T00:00:00.000Z' });
     const res = await srv.call('GET', '/api/notifications', undefined, suspended);
     expect(res.status).not.toBe(403);
     const me = await srv.call('GET', '/api/auth/me', undefined, suspended);

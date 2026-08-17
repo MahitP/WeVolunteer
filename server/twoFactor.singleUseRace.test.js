@@ -78,9 +78,9 @@ describe('a second-factor code cannot be spent twice, even concurrently', () => 
     return `wev_preauth=${cookie}`;
   };
 
-  const codeCount = userId => db.prepare(
+  const codeCount = async userId => (await db.prepare(
     'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
-  ).get(userId).n;
+  ).get(userId)).n;
 
   beforeAll(async () => {
     srv = await startTestServer();
@@ -128,7 +128,7 @@ describe('a second-factor code cannot be spent twice, even concurrently', () => 
      */
     expect(attempts.filter(a => a.status === 200).length).toBe(1);
     expect(attempts.every(a => a.status === 200 || (a.status >= 400 && a.status < 500))).toBe(true);
-    expect(codeCount(user.id)).toBe(0);
+    expect(await codeCount(user.id)).toBe(0);
 
     /* The one that won reports the spend truthfully. */
     expect(accepted[0].body.recoveryCodesRemaining).toBe(0);
@@ -150,7 +150,7 @@ describe('a second-factor code cannot be spent twice, even concurrently', () => 
       `statuses: ${attempts.map(a => a.status).join(',')}`
     ).toBe(1);
     /* Two untouched codes: the burst spent the one it was given, and no more. */
-    expect(codeCount(user.id)).toBe(2);
+    expect(await codeCount(user.id)).toBe(2);
   }, 30_000);
 
   /**
@@ -204,6 +204,6 @@ describe('a second-factor code cannot be spent twice, even concurrently', () => 
       srv.call('POST', '/api/auth/login-2fa', { method: 'recovery', code: CODES[0] }, undefined, { Cookie: cookie })
     ));
 
-    expect(codeCount(user.id)).toBe(3);
+    expect(await codeCount(user.id)).toBe(3);
   }, 30_000);
 });

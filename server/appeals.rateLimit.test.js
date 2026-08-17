@@ -43,10 +43,10 @@ beforeAll(async () => {
 afterAll(async () => { await srv.close(); });
 
 /** Closes every live appeal for a user, as a reviewer deciding them would. */
-function decideAllFor(userId) {
+async function decideAllFor(userId) {
   /* `resolved`, not `rejected` — the status CHECK is
      ('open','reviewing','resolved') and the DECISION lives in its own column. */
-  db.prepare(
+  await db.prepare(
     "UPDATE appeals SET status = 'resolved' WHERE user_id = ? AND status IN ('open', 'reviewing')"
   ).run(userId);
 }
@@ -82,7 +82,7 @@ describe('a person cannot open unlimited appeals', () => {
       expect(res.body.duplicate, `appeal ${n} collapsed into the previous one`).toBeFalsy();
       /* Decided, so the next one is a genuinely new case rather than a duplicate
          — which is precisely how the loop this guards against works. */
-      decideAllFor(userId);
+      await decideAllFor(userId);
     }
 
     const over = await fileAppeal(cookie);
@@ -95,7 +95,7 @@ describe('a person cannot open unlimited appeals', () => {
     const { cookie, userId } = await freshUser();
     for (let n = 0; n < APPEAL_WINDOW_MAX; n++) {
       await fileAppeal(cookie);
-      decideAllFor(userId);
+      await decideAllFor(userId);
     }
 
     const over = await fileAppeal(cookie);
@@ -156,7 +156,7 @@ describe('a person cannot open unlimited appeals', () => {
     const a = await freshUser();
     for (let n = 0; n < APPEAL_WINDOW_MAX; n++) {
       await fileAppeal(a.cookie);
-      decideAllFor(a.userId);
+      await decideAllFor(a.userId);
     }
     expect((await fileAppeal(a.cookie)).status).toBe(429);
 

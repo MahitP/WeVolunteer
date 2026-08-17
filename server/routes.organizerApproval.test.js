@@ -39,12 +39,12 @@ describe('POST /api/admin/organizers/:id/approve', () => {
 
   afterAll(async () => { await srv?.close(); });
 
-  const verifiedOf = (id) =>
-    db.prepare('SELECT verified FROM users WHERE id = ?').get(id)?.verified;
+  const verifiedOf = async (id) =>
+    (await db.prepare('SELECT verified FROM users WHERE id = ?').get(id))?.verified;
 
-  const auditCount = (id) => db.prepare(
+  const auditCount = async (id) => (await db.prepare(
     "SELECT COUNT(*) AS n FROM admin_audit_logs WHERE action = 'APPROVE_ORGANIZER' AND target_user_id = ?"
-  ).get(id).n;
+  ).get(id)).n;
 
   /* ── What it must not reach ────────────────────────────────────────────── */
 
@@ -53,13 +53,13 @@ describe('POST /api/admin/organizers/:id/approve', () => {
    * flag that lets them post events and wear the school's badge.
    */
   it('refuses to verify a student, and writes nothing', async () => {
-    const before = verifiedOf(STUDENT);
+    const before = await verifiedOf(STUDENT);
 
     const res = await srv.call('POST', `/api/admin/organizers/${STUDENT}/approve`, {}, admin);
 
     expect(res.status).toBe(404);
-    expect(verifiedOf(STUDENT), 'a student was marked verified').toBe(before);
-    expect(auditCount(STUDENT), 'an approval was recorded for a student').toBe(0);
+    expect(await verifiedOf(STUDENT), 'a student was marked verified').toBe(before);
+    expect(await auditCount(STUDENT), 'an approval was recorded for a student').toBe(0);
   });
 
   /**
@@ -70,7 +70,7 @@ describe('POST /api/admin/organizers/:id/approve', () => {
     const res = await srv.call('POST', '/api/admin/organizers/user-does-not-exist/approve', {}, admin);
 
     expect(res.status).toBe(404);
-    expect(auditCount('user-does-not-exist')).toBe(0);
+    expect(await auditCount('user-does-not-exist')).toBe(0);
   });
 
   /**
@@ -84,12 +84,12 @@ describe('POST /api/admin/organizers/:id/approve', () => {
   it('refuses to approve an organizer twice', async () => {
     const first = await srv.call('POST', `/api/admin/organizers/${PENDING}/approve`, {}, admin);
     expect(first.status, JSON.stringify(first.body)).toBe(200);
-    expect(verifiedOf(PENDING)).toBe(1);
-    expect(auditCount(PENDING)).toBe(1);
+    expect(await verifiedOf(PENDING)).toBe(1);
+    expect(await auditCount(PENDING)).toBe(1);
 
     const second = await srv.call('POST', `/api/admin/organizers/${PENDING}/approve`, {}, admin);
     expect(second.status).toBe(404);
-    expect(auditCount(PENDING), 'a second approval was recorded').toBe(1);
+    expect(await auditCount(PENDING), 'a second approval was recorded').toBe(1);
   });
 
   /* ── What it must still do ─────────────────────────────────────────────── */
@@ -113,7 +113,7 @@ describe('POST /api/admin/organizers/:id/approve', () => {
     const res = await srv.call('POST', `/api/admin/organizers/${id}/approve`, {}, admin);
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(verifiedOf(id)).toBe(1);
-    expect(auditCount(id)).toBe(1);
+    expect(await verifiedOf(id)).toBe(1);
+    expect(await auditCount(id)).toBe(1);
   });
 });

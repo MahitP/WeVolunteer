@@ -56,12 +56,12 @@ const submitCode = (code, preauth) =>
   srv.call('POST', '/api/auth/login-2fa', { method: 'email', code }, undefined,
     preauth ? { Cookie: `wev_preauth=${preauth}` } : {});
 
-const userId = (email = EMAIL) =>
-  db.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+const userId = async (email = EMAIL) =>
+  (await db.prepare('SELECT id FROM users WHERE email = ?').get(email)).id;
 
-const liveCodes = (email = EMAIL) =>
-  db.prepare('SELECT * FROM tfa_email_codes WHERE user_id = ? ORDER BY created_at DESC')
-    .all(userId(email));
+const liveCodes = async (email = EMAIL) =>
+  await db.prepare('SELECT * FROM tfa_email_codes WHERE user_id = ? ORDER BY created_at DESC')
+    .all(await userId(email));
 
 /**
  * Enrols an account in email 2FA and nothing else.
@@ -71,8 +71,8 @@ const liveCodes = (email = EMAIL) =>
  * about what happens once an account IS enrolled, and routing every case through
  * a re-authentication would test that instead.
  */
-function enrolEmailOnly(email = EMAIL) {
-  db.prepare(`
+async function enrolEmailOnly(email = EMAIL) {
+  await db.prepare(`
     UPDATE users
        SET tfa_email_enabled = 1, email_verified = 1,
            tfa_enabled = 0, tfa_secret = NULL
@@ -81,23 +81,23 @@ function enrolEmailOnly(email = EMAIL) {
 }
 
 /** Clears the cooldown and every stored code, so a case starts from nothing. */
-function clearCodes(email = EMAIL) {
-  db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(userId(email));
-  db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId(email));
+async function clearCodes(email = EMAIL) {
+  await db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(await userId(email));
+  await db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(await userId(email));
 }
 
 beforeAll(async () => {
   const { startTestServer } = await import('./testServer.js');
   srv = await startTestServer();
   ({ db } = await import('./db.js'));
-  enrolEmailOnly();
+  await enrolEmailOnly();
 }, 60000);
 
 afterAll(async () => { await srv?.close?.(); });
 
-beforeEach(() => {
-  enrolEmailOnly();
-  clearCodes();
+beforeEach(async () => {
+  await enrolEmailOnly();
+  await clearCodes();
 });
 
 /* ── Requesting a code ───────────────────────────────────────────────────── */
@@ -106,7 +106,7 @@ describe('POST /api/auth/login-2fa/email/send', () => {
   it('refuses a request carrying no pre-auth grant', async () => {
     const res = await sendCode(null);
     expect(res.status).toBe(401);
-    expect(liveCodes()).toHaveLength(0);
+    expect(await liveCodes()).toHaveLength(0);
   });
 
   /**
@@ -119,7 +119,7 @@ describe('POST /api/auth/login-2fa/email/send', () => {
   it('refuses a token that is not a pre-auth grant', async () => {
     const res = await sendCode('not-a-real-token');
     expect(res.status).toBe(401);
-    expect(liveCodes()).toHaveLength(0);
+    expect(await liveCodes()).toHaveLength(0);
   });
 
   it('sends a code and reports the address masked', async () => {
@@ -131,13 +131,13 @@ describe('POST /api/auth/login-2fa/email/send', () => {
        and the full address is a fact about the account. */
     expect(res.body.maskedEmail).toMatch(/^\w{2}\*\*\*@/);
     expect(res.body.maskedEmail).not.toBe(EMAIL);
-    expect(liveCodes()).toHaveLength(1);
+    expect(await liveCodes()).toHaveLength(1);
   });
 
   /** The code is stored hashed. A readable column is a readable second factor. */
   it('stores the code as a hash, never in the clear', async () => {
     await sendCode(await beginLogin());
-    const [row] = liveCodes();
+    const [row] = await liveCodes();
 
     expect(row.code_hash).toMatch(/^\$2[aby]\$/);
     expect(row.code_hash).not.toMatch(/^\d{6}$/);
@@ -164,7 +164,7 @@ describe('POST /api/auth/login-2fa/email/send', () => {
 
     const res = await sendCode(preauth);
     expect(res.status).toBe(200);
-    expect(liveCodes()).toHaveLength(1);
+    expect(await liveCodes()).toHaveLength(1);
   });
 
   it('refuses an account with no second factor at all', async () => {
@@ -174,7 +174,7 @@ describe('POST /api/auth/login-2fa/email/send', () => {
     const res = await sendCode(preauth);
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('method_unavailable');
-    expect(liveCodes()).toHaveLength(0);
+    expect(await liveCodes()).toHaveLength(0);
   });
 
   /**
@@ -189,7 +189,7 @@ describe('POST /api/auth/login-2fa/email/send', () => {
 
     const res = await sendCode(preauth);
     expect(res.status).toBe(400);
-    expect(liveCodes()).toHaveLength(0);
+    expect(await liveCodes()).toHaveLength(0);
   });
 
   /**
@@ -201,7 +201,7 @@ describe('POST /api/auth/login-2fa/email/send', () => {
   it('retires the previous code when a new one is requested', async () => {
     const preauth = await beginLogin();
     await sendCode(preauth);
-    const [first] = liveCodes();
+    const [first] = await liveCodes();
 
     /* Past the 60-second cooldown, which is a separate control tested below. */
     await db.prepare("UPDATE tfa_email_codes SET created_at = datetime('now', '-2 minutes') WHERE id = ?")
@@ -212,7 +212,7 @@ describe('POST /api/auth/login-2fa/email/send', () => {
 
     const after = await db.prepare('SELECT used_at FROM tfa_email_codes WHERE id = ?').get(first.id);
     expect(after.used_at, 'the superseded code was left live').not.toBeNull();
-    expect(liveCodes().filter(c => c.used_at === null)).toHaveLength(1);
+    expect((await liveCodes()).filter(c => c.used_at === null)).toHaveLength(1);
   });
 
   it('refuses a second request inside the cooldown', async () => {
@@ -285,11 +285,11 @@ describe('POST /api/auth/login-2fa/email/send', () => {
  */
 async function issueKnownCode(digits, { email = EMAIL, expiresInMs = 10 * 60 * 1000 } = {}) {
   const bcrypt = (await import('bcryptjs')).default;
-  const id = `tfa-email-test-${digits}-${userId(email)}`;
-  await db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(userId(email));
+  const id = `tfa-email-test-${digits}-${await userId(email)}`;
+  await db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(await userId(email));
   await db.prepare(
     'INSERT INTO tfa_email_codes (id, user_id, code_hash, expires_at) VALUES (?, ?, ?, ?)'
-  ).run(id, userId(email), await bcrypt.hash(digits, 10),
+  ).run(id, await userId(email), await bcrypt.hash(digits, 10),
     new Date(Date.now() + expiresInMs).toISOString());
   return id;
 }
@@ -336,11 +336,11 @@ describe('POST /api/auth/login-2fa with an emailed code', () => {
   it('charges one attempt per submission, not one per stored code', async () => {
     const preauth = await beginLogin();
     const bcrypt = (await import('bcryptjs')).default;
-    await db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(userId());
+    await db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(await userId());
 
     for (const digits of ['411111', '422222', '433333']) {
       await db.prepare('INSERT INTO tfa_email_codes (id, user_id, code_hash, expires_at) VALUES (?, ?, ?, ?)')
-        .run(`multi-${digits}`, userId(), await bcrypt.hash(digits, 10),
+        .run(`multi-${digits}`, await userId(), await bcrypt.hash(digits, 10),
           new Date(Date.now() + 600000).toISOString());
     }
 
@@ -405,7 +405,7 @@ describe('POST /api/auth/login-2fa with an emailed code', () => {
   it('refuses a code that a resend retired', async () => {
     const preauth = await beginLogin();
     await issueKnownCode('823456');
-    await db.prepare("UPDATE tfa_email_codes SET used_at = datetime('now') WHERE user_id = ?").run(userId());
+    await db.prepare("UPDATE tfa_email_codes SET used_at = datetime('now') WHERE user_id = ?").run(await userId());
 
     expect((await submitCode('823456', preauth)).status).toBe(401);
   });
@@ -446,7 +446,7 @@ describe('POST /api/auth/login-2fa with an emailed code', () => {
    */
   it("refuses another account's code", async () => {
     const other = 'ethan.miller@example.com';
-    enrolEmailOnly(other);
+    await enrolEmailOnly(other);
     await issueKnownCode('111213', { email: other });
 
     const res = await submitCode('111213', await beginLogin(EMAIL));

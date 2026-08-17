@@ -39,10 +39,10 @@ beforeAll(async () => {
 
 afterAll(async () => { await srv.close(); });
 
-beforeEach(() => {
+beforeEach(async () => {
   /* Undo any tombstoning a previous case did. The seed's own values, restored
      by id so the roster is exercised rather than sidestepped. */
-  db.prepare(`
+  await db.prepare(`
     UPDATE users SET account_status = 'active', email = 'admin@example.gov'
      WHERE id = 'user-admin'
   `).run();

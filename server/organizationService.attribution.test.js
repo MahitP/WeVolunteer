@@ -30,37 +30,37 @@ let outsider;
 let orgA, orgB;
 
 /** Creates an organization directly, returning its id. */
-function makeOrg(name, slug, status = 'active') {
+async function makeOrg(name, slug, status = 'active') {
   const id = `org-test-${slug}`;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO organizations (id, name, slug, description, created_by, status, created_at, updated_at)
     VALUES (?, ?, ?, '', ?, ?, ?, ?)
   `).run(id, name, slug, managerId, status, new Date().toISOString(), new Date().toISOString());
   return id;
 }
 
-const join = (orgId, userId, role = 'member') =>
-  db.prepare(`
+const join = async (orgId, userId, role = 'member') =>
+  await db.prepare(`
     INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
     VALUES (?, ?, ?, ?)
       ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
   `).run(orgId, userId, role, new Date().toISOString());
 
 /** An event owned by `orgId` (or by nobody), with one shift somebody attended. */
-function attendedEvent({ orgId, title, hours, userId, creditsHours = 1, status = 'completed' }) {
+async function attendedEvent({ orgId, title, hours, userId, creditsHours = 1, status = 'completed' }) {
   const eventId = `ev-${title.replace(/\W/g, '')}-${Math.abs(hours * 100)}`;
   const slotId = `slot-${eventId}`;
   const past = '2026-01-01T10:00:00.000Z';
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO events (id, title, description, category, location, application_deadline,
                         organizer_id, status, created_at, organization_id, credits_hours)
     VALUES (?, ?, '', 'Other', 'Somewhere', ?, ?, ?, ?, ?, ?)
   `).run(eventId, title, past, managerId, status, past, orgId, creditsHours);
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
     VALUES (?, ?, 'Shift', '', ?, ?, 5)
   `).run(slotId, eventId, past, past);
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
     VALUES (?, ?, ?, 1, ?)
   `).run(eventId, slotId, userId, hours);
@@ -90,23 +90,23 @@ beforeAll(async () => {
   const s = await mk('stu'); student = s.cookie; studentId = s.id;
   const o = await mk('out'); outsider = o.cookie;
 
-  orgA = makeOrg('Alpha Club', 'alpha-club');
-  orgB = makeOrg('Beta Club', 'beta-club');
-  join(orgA, managerId, 'manager');
-  join(orgA, studentId);
-  join(orgB, studentId);
+  orgA = await makeOrg('Alpha Club', 'alpha-club');
+  orgB = await makeOrg('Beta Club', 'beta-club');
+  await join(orgA, managerId, 'manager');
+  await join(orgA, studentId);
+  await join(orgB, studentId);
 
   /* 3 + 2 = 5 hours for A, 7 for B. */
-  attendedEvent({ orgId: orgA, title: 'A One', hours: 3, userId: studentId });
-  attendedEvent({ orgId: orgA, title: 'A Two', hours: 2, userId: studentId });
-  attendedEvent({ orgId: orgB, title: 'B One', hours: 7, userId: studentId });
+  await attendedEvent({ orgId: orgA, title: 'A One', hours: 3, userId: studentId });
+  await attendedEvent({ orgId: orgA, title: 'A Two', hours: 2, userId: studentId });
+  await attendedEvent({ orgId: orgB, title: 'B One', hours: 7, userId: studentId });
 
   /* Owned by nobody: counts platform-wide, toward no organization. */
-  attendedEvent({ orgId: null, title: 'Independent', hours: 11, userId: studentId });
+  await attendedEvent({ orgId: null, title: 'Independent', hours: 11, userId: studentId });
 
   /* Cancelled after attendance was confirmed — see the note in
      organizationHours.js on why the hours survive and the COUNT does not. */
-  attendedEvent({ orgId: orgA, title: 'A Cancelled', hours: 4, userId: studentId, status: 'cancelled' });
+  await attendedEvent({ orgId: orgA, title: 'A Cancelled', hours: 4, userId: studentId, status: 'cancelled' });
 
   /* Self-logged, and therefore never anybody's organization hours. */
   await db.prepare(`

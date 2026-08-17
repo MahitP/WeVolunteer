@@ -291,13 +291,13 @@ describe('POST /api/2fa/disable — removing one factor is not removing them all
     return { cookie, user, secret };
   }
 
-  const codeCount = (userId) => db.prepare(
+  const codeCount = async (userId) => (await db.prepare(
     'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
-  ).get(userId).n;
+  ).get(userId)).n;
 
   it('keeps email 2FA and the recovery codes when the authenticator is removed', async () => {
     const { cookie, user, secret } = await enrolBoth();
-    expect(codeCount(user.id)).toBe(10);
+    expect(await codeCount(user.id)).toBe(10);
 
     const grant = await srv.stepUp(cookie, '2fa.disable', { password: PW });
     const res = await srv.call('POST', '/api/2fa/disable',
@@ -316,7 +316,7 @@ describe('POST /api/2fa/disable — removing one factor is not removing them all
        code as a replay on the first sign-in after re-enrolling. */
     expect(row.tfa_last_counter).toBeNull();
     expect(row.tfa_email_enabled, 'email 2FA must survive').toBe(1);
-    expect(codeCount(user.id), 'the codes the user wrote down must survive').toBe(10);
+    expect(await codeCount(user.id), 'the codes the user wrote down must survive').toBe(10);
   }, 40000);
 
   it('clears the codes only when the LAST factor goes', async () => {
@@ -325,7 +325,7 @@ describe('POST /api/2fa/disable — removing one factor is not removing them all
     const enableGrant = await srv.stepUp(cookie, '2fa.enable', { password: PW });
     await srv.call('POST', '/api/2fa/enable', { token: generateSync({ secret }) }, cookie,
       { [REAUTH_CHALLENGE_HEADER]: enableGrant });
-    expect(codeCount(user.id)).toBe(10);
+    expect(await codeCount(user.id)).toBe(10);
 
     const grant = await srv.stepUp(cookie, '2fa.disable', { password: PW });
     const res = await srv.call('POST', '/api/2fa/disable',
@@ -342,6 +342,6 @@ describe('POST /api/2fa/disable — removing one factor is not removing them all
     expect(row.tfa_email_enabled).toBe(0);
     /* Ten live credentials on an account with no second factor would be a
        standing bypass of the protection the user just removed. */
-    expect(codeCount(user.id), 'nothing left to recover past').toBe(0);
+    expect(await codeCount(user.id), 'nothing left to recover past').toBe(0);
   }, 40000);
 });

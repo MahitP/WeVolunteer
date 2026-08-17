@@ -253,8 +253,8 @@ describe('signup enforces the class year server-side', () => {
     };
   };
 
-  const row = (email) =>
-    db.prepare('SELECT grade, graduation_year FROM users WHERE email = ?').get(email);
+  const row = async (email) =>
+    await db.prepare('SELECT grade, graduation_year FROM users WHERE email = ?').get(email);
 
   it('stores the class year and the grade derived from it', async () => {
     const { min } = graduationYearRange();
@@ -263,7 +263,7 @@ describe('signup enforces the class year server-side', () => {
     const res = await srv.call('POST', '/api/auth/signup', payload);
     expect(res.status).toBe(201);
 
-    expect(row(payload.email)).toEqual({ grade: '12', graduation_year: min });
+    expect(await row(payload.email)).toEqual({ grade: '12', graduation_year: min });
   });
 
   it('accepts the numeric string a form submits, and stores a number', async () => {
@@ -271,7 +271,7 @@ describe('signup enforces the class year server-side', () => {
     const payload = account({ grade: '10', graduationYear: String(year) });
 
     expect((await srv.call('POST', '/api/auth/signup', payload)).status).toBe(201);
-    expect(row(payload.email)).toEqual({ grade: '10', graduation_year: year });
+    expect(await row(payload.email)).toEqual({ grade: '10', graduation_year: year });
   });
 
   /**
@@ -286,7 +286,7 @@ describe('signup enforces the class year server-side', () => {
 
     expect((await srv.call('POST', '/api/auth/signup', payload)).status).toBe(201);
     expect(
-      row(payload.email),
+      await row(payload.email),
       'the client claimed 12th grade with a freshman class year and the server believed it'
     ).toEqual({ grade: '9', graduation_year: max });
   });
@@ -299,7 +299,7 @@ describe('signup enforces the class year server-side', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.field).toBe('graduationYear');
-    expect(row(payload.email), 'a refused applicant must leave no account behind').toBeFalsy();
+    expect(await row(payload.email), 'a refused applicant must leave no account behind').toBeFalsy();
   });
 
   it('REFUSES a class year too far ahead to be in high school', async () => {
@@ -309,7 +309,7 @@ describe('signup enforces the class year server-side', () => {
     const res = await srv.call('POST', '/api/auth/signup', payload);
     expect(res.status).toBe(400);
     expect(res.body.field).toBe('graduationYear');
-    expect(row(payload.email)).toBeFalsy();
+    expect(await row(payload.email)).toBeFalsy();
   });
 
   /**
@@ -325,7 +325,7 @@ describe('signup enforces the class year server-side', () => {
       const res = await srv.call('POST', '/api/auth/signup', payload);
       expect(res.status, `${JSON.stringify(bad)} must be refused`).toBe(400);
       expect(res.body.field).toBe('graduationYear');
-      expect(row(payload.email)).toBeFalsy();
+      expect(await row(payload.email)).toBeFalsy();
     }
   });
 
@@ -335,14 +335,14 @@ describe('signup enforces the class year server-side', () => {
     const res = await srv.call('POST', '/api/auth/signup', payload);
     expect(res.status).toBe(400);
     expect(res.body.field).toBe('graduationYear');
-    expect(row(payload.email)).toBeFalsy();
+    expect(await row(payload.email)).toBeFalsy();
   });
 
   it('stores no class year for an organizer, rather than a placeholder', async () => {
     const payload = account({ role: 'organizer', grade: 'Adult' });
 
     expect((await srv.call('POST', '/api/auth/signup', payload)).status).toBe(201);
-    expect(row(payload.email)).toEqual({ grade: 'Adult', graduation_year: null });
+    expect(await row(payload.email)).toEqual({ grade: 'Adult', graduation_year: null });
   });
 
   /**
@@ -355,7 +355,7 @@ describe('signup enforces the class year server-side', () => {
     const payload = account({ grade: '10', graduationYear: undefined });
 
     expect((await srv.call('POST', '/api/auth/signup', payload)).status).toBe(201);
-    expect(row(payload.email)).toEqual({ grade: '10', graduation_year: graduationYearForGrade('10') });
+    expect(await row(payload.email)).toEqual({ grade: '10', graduation_year: graduationYearForGrade('10') });
   });
 
   it('applies to the OAuth signup path too — a provider vouches for an address, not a grade', async () => {
@@ -382,6 +382,6 @@ describe('signup enforces the class year server-side', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.field).toBe('graduationYear');
-    expect(row(email)).toBeFalsy();
+    expect(await row(email)).toBeFalsy();
   });
 });

@@ -247,7 +247,7 @@ const parseList = (raw) => {
  */
 async function organizationsFor(db, userId, { withHours = false } = {}) {
   const rows = await db.prepare(`
-    SELECT o.id, o.slug, o.name, o.status, m.member_role AS memberRole
+    SELECT o.id, o.slug, o.name, o.status, m.member_role AS "memberRole"
     FROM organization_members m
     JOIN organizations o ON o.id = m.organization_id
     WHERE m.user_id = ?
@@ -268,7 +268,7 @@ async function organizationsFor(db, userId, { withHours = false } = {}) {
 
   const totals = new Map();
   for (const t of await db.prepare(`
-    SELECT e.organization_id                 AS organizationId,
+    SELECT e.organization_id                 AS "organizationId",
            COALESCE(SUM(a.hours_awarded), 0) AS hours,
            COUNT(DISTINCT a.event_id)        AS events
     FROM attendance a

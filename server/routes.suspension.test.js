@@ -42,8 +42,8 @@ afterAll(async () => { await srv.close(); });
  * end on a date that test never chose, which is a cross-test dependency that
  * presents as a flake rather than a failure.
  */
-function resetAccounts() {
-  db.prepare(`
+async function resetAccounts() {
+  await db.prepare(`
     UPDATE users
     SET account_status = 'active', suspended_at = NULL, suspension_reason = NULL,
         suspended_by = NULL, suspended_until = NULL, suspension_lifted_at = NULL
@@ -62,7 +62,7 @@ describe('POST /api/admin/users/:id/suspend', () => {
     organizerToken = await srv.login('jordan.whitfield@example.org');
   });
 
-  beforeEach(() => resetAccounts());
+  beforeEach(async () => await resetAccounts());
 
   it('suspends an account and records who did it and why', async () => {
     const res = await srv.call('POST', '/api/admin/users/user-student-2/suspend',
@@ -346,7 +346,7 @@ describe('POST /api/admin/users/:id/unsuspend', () => {
   let adminToken;
 
   beforeAll(async () => { adminToken = await srv.login('admin@example.gov'); });
-  beforeEach(() => resetAccounts());
+  beforeEach(async () => await resetAccounts());
 
   it('restores the account and clears the suspension detail', async () => {
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
@@ -426,12 +426,12 @@ describe('timed suspension', () => {
   let adminToken;
 
   beforeAll(async () => { adminToken = await srv.login('admin@example.gov'); });
-  beforeEach(() => resetAccounts());
+  beforeEach(async () => await resetAccounts());
 
   const inDays = (n) => new Date(Date.now() + n * 86400_000).toISOString();
 
   /** Backdates a live suspension's deadline, i.e. simulates the clock passing it. */
-  const expireNow = (userId) => db.prepare(
+  const expireNow = async (userId) => await db.prepare(
     'UPDATE users SET suspended_until = ? WHERE id = ?'
   ).run(new Date(Date.now() - 1000).toISOString(), userId);
 
@@ -466,7 +466,7 @@ describe('timed suspension', () => {
   it('lets the account sign in again once the deadline passes', async () => {
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
       { reason: GOOD_REASON, until: inDays(7) }, adminToken);
-    expireNow('user-student-2');
+    await expireNow('user-student-2');
 
     const res = await srv.call('POST', '/api/auth/login',
       { email: 'priya.patel@example.com', password: 'password123' });
@@ -476,7 +476,7 @@ describe('timed suspension', () => {
   it('normalises the row when the deadline has passed, keeping why it happened', async () => {
     await srv.call('POST', '/api/admin/users/user-student-2/suspend',
       { reason: GOOD_REASON, until: inDays(7) }, adminToken);
-    expireNow('user-student-2');
+    await expireNow('user-student-2');
 
     await srv.call('POST', '/api/auth/login',
       { email: 'priya.patel@example.com', password: 'password123' });
@@ -504,7 +504,7 @@ describe('timed suspension', () => {
     expect(during.status).toBe(403);
     expect(during.body.code).toBe('account_suspended');
 
-    expireNow('user-student-3');
+    await expireNow('user-student-3');
     const after = await srv.call('POST', '/api/auth/login',
       { email: 'ethan.miller@example.com', password: 'password123' });
     expect(after.status).toBe(200);

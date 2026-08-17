@@ -74,8 +74,8 @@ beforeAll(async () => {
 afterAll(async () => { await srv?.close(); });
 
 describe('deleted accounts are not readable as profiles', () => {
-  it('keeps its role, which is what makes the rest of this file necessary', () => {
-    const row = db.prepare('SELECT role, account_status FROM users WHERE id = ?').get(DEAD_ORGANIZER);
+  it('keeps its role, which is what makes the rest of this file necessary', async () => {
+    const row = await db.prepare('SELECT role, account_status FROM users WHERE id = ?').get(DEAD_ORGANIZER);
     // If a future change starts clearing `role` on deletion, these endpoints
     // stop being reachable by role and this fixture stops testing anything.
     // Asserting it here means that change fails loudly instead of silently

@@ -261,9 +261,9 @@ export async function commitmentsFor(db, userIds, { now = new Date().toISOString
      DUE_COMMITMENTS definition `volunteerStats` uses, so the two cannot
      disagree about what a commitment is. */
   const rows = await db.prepare(`
-    SELECT a.user_id                AS userId,
-           a.event_id               AS eventId,
-           MAX(s.end_datetime)      AS occurredAt,
+    SELECT a.user_id                AS "userId",
+           a.event_id               AS "eventId",
+           MAX(s.end_datetime)      AS "occurredAt",
            MAX(at.present)          AS present
     FROM applications a
     JOIN slots  s ON s.id = a.slot_id

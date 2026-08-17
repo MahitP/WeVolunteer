@@ -72,8 +72,8 @@ describe('organization moderation', () => {
 
   afterAll(async () => { await srv?.close(); });
 
-  const join = (userId, role = 'member') =>
-    db.prepare(`INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
+  const join = async (userId, role = 'member') =>
+    await db.prepare(`INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
                 VALUES (?, ?, ?, ?)
       ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at`).run(orgId, userId, role, new Date().toISOString());
 
@@ -84,12 +84,12 @@ describe('organization moderation', () => {
   const lift = (key, userId, session) =>
     srv.call('POST', `/api/organizations/${key}/bans/${userId}/lift`, {}, session);
 
-  beforeEach(() => {
-    db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
-    db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ? AND status IN ('open','reviewing')")
+  beforeEach(async () => {
+    await db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
+    await db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ? AND status IN ('open','reviewing')")
       .run(studentId);
-    join(managerId, 'manager');
-    join(studentId);
+    await join(managerId, 'manager');
+    await join(studentId);
   });
 
   describe('the list of who is banned', () => {

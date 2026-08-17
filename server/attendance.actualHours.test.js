@@ -48,11 +48,11 @@ describe('actual hours, and events that credit none', () => {
     return { eventId, slotId, appId };
   }
 
-  const credited = (slotId) => db.prepare(
+  const credited = async (slotId) => await db.prepare(
     'SELECT present, hours_awarded FROM attendance WHERE slot_id = ? AND user_id = ?'
   ).get(slotId, studentId);
 
-  const ledger = (slotId) => db.prepare(
+  const ledger = async (slotId) => await db.prepare(
     'SELECT * FROM hours_ledger WHERE slot_id = ? ORDER BY rowid'
   ).all(slotId);
 
@@ -75,7 +75,7 @@ describe('actual hours, and events that credit none', () => {
         attendanceMap: { [appId]: true },
       }, organizer);
       expect(res.status).toBe(200);
-      expect(credited(slotId).hours_awarded).toBe(4);
+      expect((await credited(slotId)).hours_awarded).toBe(4);
     });
   });
 
@@ -87,7 +87,7 @@ describe('actual hours, and events that credit none', () => {
         hoursMap: { [appId]: 2.5 },
       }, organizer);
       expect(res.status).toBe(200);
-      expect(credited(slotId)).toMatchObject({ present: 1, hours_awarded: 2.5 });
+      expect(await credited(slotId)).toMatchObject({ present: 1, hours_awarded: 2.5 });
     });
 
     it('credits more hours when a volunteer stayed on', async () => {
@@ -95,7 +95,7 @@ describe('actual hours, and events that credit none', () => {
       await srv.call('POST', `/api/events/${eventId}/attendance`, {
         attendanceMap: { [appId]: true }, hoursMap: { [appId]: 4 },
       }, organizer);
-      expect(credited(slotId).hours_awarded).toBe(4);
+      expect((await credited(slotId)).hours_awarded).toBe(4);
     });
 
     /**
@@ -108,14 +108,14 @@ describe('actual hours, and events that credit none', () => {
       await srv.call('POST', `/api/events/${eventId}/attendance`, {
         attendanceMap: { [appId]: true },
       }, organizer);
-      expect(credited(slotId).hours_awarded).toBe(4);
+      expect((await credited(slotId)).hours_awarded).toBe(4);
 
       const res = await srv.call('POST', `/api/events/${eventId}/attendance`, {
         attendanceMap: { [appId]: true }, hoursMap: { [appId]: 1.5 },
         reason: 'Left after the first hour and a half.',
       }, organizer);
       expect(res.status).toBe(200);
-      expect(credited(slotId).hours_awarded).toBe(1.5);
+      expect((await credited(slotId)).hours_awarded).toBe(1.5);
     });
   });
 
@@ -139,7 +139,7 @@ describe('actual hours, and events that credit none', () => {
       await srv.call('POST', `/api/events/${eventId}/attendance`, {
         attendanceMap: { [appId]: true }, hoursMap: { [appId]: 2 },
       }, organizer);
-      expect(credited(slotId).hours_awarded).toBe(4);
+      expect((await credited(slotId)).hours_awarded).toBe(4);
     });
 
     it('refuses an out-of-range or unparseable number', async () => {
@@ -166,7 +166,7 @@ describe('actual hours, and events that credit none', () => {
         reason: 'Left early — family pickup.',
       }, organizer);
 
-      const rows = ledger(slotId);
+      const rows = await ledger(slotId);
       expect(rows).toHaveLength(2);
       expect(rows[0].action).toBe('credited');
       expect(rows[1]).toMatchObject({
@@ -204,7 +204,7 @@ describe('actual hours, and events that credit none', () => {
         attendanceMap: { [appId]: true },
       }, organizer);
       expect(res.status).toBe(200);
-      expect(credited(slotId)).toMatchObject({ present: 1, hours_awarded: 0 });
+      expect(await credited(slotId)).toMatchObject({ present: 1, hours_awarded: 0 });
     });
 
     /* The flag carries the meaning, so an hours override on such an event has
@@ -214,7 +214,7 @@ describe('actual hours, and events that credit none', () => {
       await srv.call('POST', `/api/events/${eventId}/attendance`, {
         attendanceMap: { [appId]: true }, hoursMap: { [appId]: 6 },
       }, organizer);
-      expect(credited(slotId).hours_awarded).toBe(0);
+      expect((await credited(slotId)).hours_awarded).toBe(0);
     });
 
     it('is created through the API with creditsHours: false, and reports it back', async () => {

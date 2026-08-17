@@ -38,11 +38,11 @@ const adminToken = () => srv.login('admin@example.gov');
  * it, so filtering on the event name silently matches nothing and this whole file
  * would pass while asserting the absence of rows it never looked for.
  */
-const notices = (userId) => db.prepare(
+const notices = async (userId) => await db.prepare(
   "SELECT * FROM notifications WHERE user_id = ? AND title LIKE '%note about your%' ORDER BY rowid DESC"
 ).all(userId);
 
-const audits = (userId) => db.prepare(
+const audits = async (userId) => await db.prepare(
   "SELECT * FROM admin_audit_logs WHERE action = 'ACCOUNT_WARNED' AND target_user_id = ?"
 ).all(userId);
 
@@ -54,7 +54,7 @@ describe('POST /api/admin/users/:id/warn', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.warned).toBe(true);
 
-    const [notice] = notices('user-student-2');
+    const [notice] = await notices('user-student-2');
     expect(notice, 'a warning nobody receives is not a warning').toBeTruthy();
     expect(notice.body).toContain('Kept messaging a student');
   });
@@ -63,7 +63,7 @@ describe('POST /api/admin/users/:id/warn', () => {
     await srv.call('POST', '/api/admin/users/user-student-3/warn',
       { reason: REASON }, await adminToken());
 
-    const rows = audits('user-student-3');
+    const rows = await audits('user-student-3');
     expect(rows.length).toBeGreaterThan(0);
     expect(rows[rows.length - 1].admin_id).toBe('user-admin');
     expect(rows[rows.length - 1].details).toContain('Kept messaging');
@@ -106,7 +106,7 @@ describe('POST /api/admin/users/:id/warn', () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
-    expect(notices(target).length).toBeGreaterThanOrEqual(2);
+    expect((await notices(target)).length).toBeGreaterThanOrEqual(2);
   });
 
   /**
@@ -122,7 +122,7 @@ describe('POST /api/admin/users/:id/warn', () => {
 
   describe('refusals', () => {
     it('requires a reason of real length, and writes nothing when refused', async () => {
-      const before = audits('user-student-2').length;
+      const before = (await audits('user-student-2')).length;
 
       for (const body of [{}, { reason: 'stop' }, { reason: 1 }]) {
         const res = await srv.call('POST', '/api/admin/users/user-student-2/warn',
@@ -131,7 +131,7 @@ describe('POST /api/admin/users/:id/warn', () => {
         expect(res.body.code).toBe('reason_required');
       }
 
-      expect(audits('user-student-2').length, 'a refused warning must not partially apply')
+      expect((await audits('user-student-2')).length, 'a refused warning must not partially apply')
         .toBe(before);
     });
 

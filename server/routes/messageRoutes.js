@@ -577,7 +577,7 @@ router.get('/api/messages/users/search', authenticateToken, async (req, res) => 
     if (can(req.principal, 'applicant.review') || can(req.principal, 'event.moderate')) {
       rows = await db.prepare(`
         SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role,
-               'applicant' AS kind, e.id AS eventId, e.title AS eventTitle
+               'applicant' AS kind, e.id AS "eventId", e.title AS "eventTitle"
         FROM users u
         JOIN applications a ON a.user_id = u.id
         JOIN events e ON a.event_id = e.id
@@ -588,7 +588,7 @@ router.get('/api/messages/users/search', authenticateToken, async (req, res) => 
     } else if (can(req.principal, 'application.withdraw')) {
       rows = await db.prepare(`
         SELECT DISTINCT u.id, u.name, u.username, u.avatar, u.role,
-               'organizer' AS kind, e.id AS eventId, e.title AS eventTitle
+               'organizer' AS kind, e.id AS "eventId", e.title AS "eventTitle"
         FROM users u
         JOIN events e ON e.organizer_id = u.id
         JOIN applications a ON a.event_id = e.id

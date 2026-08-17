@@ -35,15 +35,15 @@ afterAll(async () => {
   delete process.env.ALERT_EMAIL;
 });
 
-beforeEach(() => {
-  db.prepare('DELETE FROM error_events').run();
-  db.prepare('DELETE FROM error_groups').run();
+beforeEach(async () => {
+  await db.prepare('DELETE FROM error_events').run();
+  await db.prepare('DELETE FROM error_groups').run();
 });
 
 /** A brand-new, never-alerted problem of the given source. */
-function newProblem(fingerprint, source = 'server') {
+async function newProblem(fingerprint, source = 'server') {
   const now = new Date().toISOString();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO error_groups
       (fingerprint, source, kind, message, route, status, occurrences, users_seen,
        first_seen_at, last_seen_at, alerted_at)
@@ -52,8 +52,8 @@ function newProblem(fingerprint, source = 'server') {
   `).run(fingerprint, source, now, now);
 }
 
-const alertedAt = (fp) =>
-  db.prepare('SELECT alerted_at FROM error_groups WHERE fingerprint = ?').get(fp)?.alerted_at;
+const alertedAt = async (fp) =>
+  (await db.prepare('SELECT alerted_at FROM error_groups WHERE fingerprint = ?').get(fp))?.alerted_at;
 
 /** Waits for the sweep's un-awaited alert promise to settle. */
 const settle = () => new Promise(r => setImmediate(r));
@@ -61,14 +61,14 @@ const settle = () => new Promise(r => setImmediate(r));
 describe('the maintenance sweep actually sends alerts', () => {
   it('mails a new server problem when runNotificationSweep runs', async () => {
     const sendMail = vi.spyOn(email, 'sendMail').mockResolvedValue({ ok: true });
-    newProblem('fp-alert-wiring');
+    await newProblem('fp-alert-wiring');
 
     // The real entry point the 15-minute interval calls — not sendErrorAlerts.
     await utils.runNotificationSweep();
     await settle();
 
     expect(sendMail, 'runNotificationSweep never reached sendErrorAlerts').toHaveBeenCalled();
-    expect(alertedAt('fp-alert-wiring')).not.toBeNull();
+    expect(await alertedAt('fp-alert-wiring')).not.toBeNull();
     sendMail.mockRestore();
   });
 
@@ -79,7 +79,7 @@ describe('the maintenance sweep actually sends alerts', () => {
    */
   it('mails nothing personal, going through the real sweep', async () => {
     const sendMail = vi.spyOn(email, 'sendMail').mockResolvedValue({ ok: true });
-    newProblem('fp-alert-privacy');
+    await newProblem('fp-alert-privacy');
 
     await utils.runNotificationSweep();
     await settle();
@@ -93,13 +93,13 @@ describe('the maintenance sweep actually sends alerts', () => {
 
   it('does not mail a client problem', async () => {
     const sendMail = vi.spyOn(email, 'sendMail').mockResolvedValue({ ok: true });
-    newProblem('fp-alert-client', 'client');
+    await newProblem('fp-alert-client', 'client');
 
     await utils.runNotificationSweep();
     await settle();
 
     expect(sendMail).not.toHaveBeenCalled();
-    expect(alertedAt('fp-alert-client')).toBeNull();
+    expect(await alertedAt('fp-alert-client')).toBeNull();
     sendMail.mockRestore();
   });
 
@@ -113,7 +113,7 @@ describe('the maintenance sweep actually sends alerts', () => {
   it('a failing mail layer does not abort the rest of the maintenance sweep', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const sendMail = vi.spyOn(email, 'sendMail').mockRejectedValue(new Error('SMTP is down'));
-    newProblem('fp-alert-smtp-down');
+    await newProblem('fp-alert-smtp-down');
 
     await expect(utils.runNotificationSweep()).resolves.toBeTypeOf('number');
     expect(typeof await utils.runNotificationSweep()).toBe('number');

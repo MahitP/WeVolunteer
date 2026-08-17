@@ -51,11 +51,11 @@ describe('GET /api/platform/owner', () => {
 
   afterAll(async () => { await srv?.close(); });
 
-  it('has an owner to talk about — the fixture the rest of this file needs', () => {
+  it('has an owner to talk about — the fixture the rest of this file needs', async () => {
     /* Guards the vacuity directly: if this account stops existing, the tests
        below stop testing and stay green, which is how they shipped the first
        time. */
-    expect(db.prepare("SELECT COUNT(*) n FROM users WHERE role = 'super_admin' AND account_status = 'active'").get().n)
+    expect((await db.prepare("SELECT COUNT(*) n FROM users WHERE role = 'super_admin' AND account_status = 'active'").get()).n)
       .toBeGreaterThan(0);
   });
 

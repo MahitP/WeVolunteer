@@ -38,13 +38,13 @@ describe('the recovery set over an account lifetime', () => {
     };
   };
 
-  const codeCount = userId => db.prepare(
+  const codeCount = async userId => (await db.prepare(
     'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
-  ).get(userId).n;
+  ).get(userId)).n;
 
-  const hashes = userId => db.prepare(
+  const hashes = async userId => (await db.prepare(
     'SELECT code_hash FROM recovery_codes WHERE user_id = ? ORDER BY code_hash'
-  ).all(userId).map(r => r.code_hash);
+  ).all(userId)).map(r => r.code_hash);
 
   /* See routes.2faEnrolment.test.js: enrolment hashes ten codes with bcrypt
      before verifying, so a token minted in the last second of a step is stale by
@@ -157,15 +157,15 @@ describe('the recovery set over an account lifetime', () => {
      */
     it('spends no recovery code, and reports no count, on a TOTP sign-in', async () => {
       const { user, secret } = await enrolTotp();
-      expect(codeCount(user.id)).toBe(10);
-      const before = hashes(user.id);
+      expect(await codeCount(user.id)).toBe(10);
+      const before = await hashes(user.id);
 
       const done = await signIn(user.email, { token: await freshTotp(secret), method: 'totp' }, secret);
       expect(done.status, JSON.stringify(done.body)).toBe(200);
 
       expect(done.body.recoveryCodesRemaining).toBeUndefined();
-      expect(codeCount(user.id)).toBe(10);
-      expect(hashes(user.id)).toEqual(before);
+      expect(await codeCount(user.id)).toBe(10);
+      expect(await hashes(user.id)).toEqual(before);
     }, 30_000);
 
     /**
@@ -182,7 +182,7 @@ describe('the recovery set over an account lifetime', () => {
         expect(done.body.recoveryCodesRemaining, `sign-in ${i + 1}`).toBeUndefined();
       }
 
-      expect(codeCount(user.id)).toBe(10);
+      expect(await codeCount(user.id)).toBe(10);
     }, 90_000);
 
     /**
@@ -196,7 +196,7 @@ describe('the recovery set over an account lifetime', () => {
       const done = await signIn(user.email, { code: codes[0], method: 'recovery' });
       expect(done.status, JSON.stringify(done.body)).toBe(200);
       expect(done.body.recoveryCodesRemaining).toBe(9);
-      expect(codeCount(user.id)).toBe(9);
+      expect(await codeCount(user.id)).toBe(9);
     }, 30_000);
 
     /** And the SAME code cannot be spent twice — it is deleted, not marked. */
@@ -206,7 +206,7 @@ describe('the recovery set over an account lifetime', () => {
       expect((await signIn(user.email, { code: codes[0], method: 'recovery' })).status).toBe(200);
       const replay = await signIn(user.email, { code: codes[0], method: 'recovery' });
       expect(replay.status).not.toBe(200);
-      expect(codeCount(user.id)).toBe(9);
+      expect(await codeCount(user.id)).toBe(9);
     }, 30_000);
 
     /**
@@ -224,7 +224,7 @@ describe('the recovery set over an account lifetime', () => {
       const next = await signIn(user.email, { token: await freshTotp(secret), method: 'totp' }, secret);
       expect(next.status, JSON.stringify(next.body)).toBe(200);
       expect(next.body.recoveryCodesRemaining).toBeUndefined();
-      expect(codeCount(user.id)).toBe(9);
+      expect(await codeCount(user.id)).toBe(9);
     }, 30_000);
 
     /**
@@ -238,7 +238,7 @@ describe('the recovery set over an account lifetime', () => {
 
       const status = await srv.call('GET', '/api/2fa/status', undefined, cookie);
       expect(status.status).toBe(200);
-      expect(status.body.recoveryCodesRemaining).toBe(codeCount(user.id));
+      expect(status.body.recoveryCodesRemaining).toBe(await codeCount(user.id));
       expect(status.body.recoveryCodesRemaining).toBe(9);
     }, 30_000);
   });
@@ -255,12 +255,12 @@ describe('the recovery set over an account lifetime', () => {
      */
     it('keeps the same codes when email is added to an authenticator', async () => {
       const { cookie, user } = await enrolTotp();
-      const before = hashes(user.id);
+      const before = await hashes(user.id);
 
       await enableEmail(cookie, user);
 
-      expect(codeCount(user.id)).toBe(10);
-      expect(hashes(user.id)).toEqual(before);
+      expect(await codeCount(user.id)).toBe(10);
+      expect(await hashes(user.id)).toEqual(before);
     }, 30_000);
 
     /**
@@ -271,15 +271,15 @@ describe('the recovery set over an account lifetime', () => {
     it('keeps the codes when email is removed and the authenticator remains', async () => {
       const { cookie, user, secret } = await enrolTotp();
       await enableEmail(cookie, user);
-      const before = hashes(user.id);
+      const before = await hashes(user.id);
 
       const grant = await srv.stepUp(cookie, '2fa.disable', { password: PW });
       const off = await srv.call('POST', '/api/2fa/email/disable',
         { token: await freshTotp(secret) }, cookie, { [REAUTH_CHALLENGE_HEADER]: grant });
       expect(off.status, JSON.stringify(off.body)).toBe(200);
 
-      expect(codeCount(user.id)).toBe(10);
-      expect(hashes(user.id)).toEqual(before);
+      expect(await codeCount(user.id)).toBe(10);
+      expect(await hashes(user.id)).toEqual(before);
 
       const status = await srv.call('GET', '/api/2fa/status', undefined, cookie);
       expect(status.body.methods.totp).toBe(true);

@@ -30,8 +30,8 @@ const NOW = new Date('2026-06-01T12:00:00.000Z');
 const OWNER = 'inv-owner';
 const INVITED = 'invited@example.invalid';
 
-const addUser = (id, email, role, emailVerified = 1) => {
-  db.prepare(`
+const addUser = async (id, email, role, emailVerified = 1) => {
+  await db.prepare(`
     INSERT INTO users (id, name, email, username, password_hash, grade, role,
                        verified, email_verified, account_status, created_at, token_version)
     VALUES (?, ?, ?, ?, 'x', '11', ?, 1, ?, 'active', ?, 0)
@@ -39,15 +39,15 @@ const addUser = (id, email, role, emailVerified = 1) => {
   `).run(id, `P ${id}`, email, id, role, emailVerified, NOW.toISOString());
 };
 
-const userRow = (id) => db.prepare(
+const userRow = async (id) => await db.prepare(
   'SELECT id, email, email_verified FROM users WHERE id = ?'
 ).get(id);
 
 beforeEach(async () => {
   await db.prepare('DELETE FROM admin_invitations').run();
   await db.prepare("DELETE FROM users WHERE id LIKE 'inv-%'").run();
-  addUser(OWNER, 'inv-owner@example.invalid', 'super_admin');
-  addUser('inv-target', INVITED, 'student');
+  await addUser(OWNER, 'inv-owner@example.invalid', 'super_admin');
+  await addUser('inv-target', INVITED, 'student');
 });
 
 const makeInvite = async (over = {}) => mod.createInvitation(db, {
@@ -58,7 +58,7 @@ const makeInvite = async (over = {}) => mod.createInvitation(db, {
 describe('resolveInvitation', () => {
   it('accepts a live token from the verified invited address', async () => {
     const { token } = await makeInvite();
-    const res = await mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: NOW });
+    const res = await mod.resolveInvitation(db, { token, user: await userRow('inv-target'), now: NOW });
     expect(res.ok).toBe(true);
     expect(res.invitation.email).toBe(INVITED);
   });
@@ -70,9 +70,9 @@ describe('resolveInvitation', () => {
    */
   it('refuses a different signed-in address holding the same token', async () => {
     const { token } = await makeInvite();
-    addUser('inv-other', 'somebody-else@example.invalid', 'student');
+    await addUser('inv-other', 'somebody-else@example.invalid', 'student');
 
-    const res = await mod.resolveInvitation(db, { token, user: userRow('inv-other'), now: NOW });
+    const res = await mod.resolveInvitation(db, { token, user: await userRow('inv-other'), now: NOW });
     expect(res.ok).toBe(false);
     expect(res.logReason).toMatch(/does not match/);
   });
@@ -86,7 +86,7 @@ describe('resolveInvitation', () => {
     const { token } = await makeInvite();
     await db.prepare("UPDATE users SET email_verified = 0 WHERE id = 'inv-target'").run();
 
-    const res = await mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: NOW });
+    const res = await mod.resolveInvitation(db, { token, user: await userRow('inv-target'), now: NOW });
     expect(res.ok).toBe(false);
     expect(res.logReason).toMatch(/not verified/);
   });
@@ -96,7 +96,7 @@ describe('resolveInvitation', () => {
     const { token } = await makeInvite();
     const later = new Date(NOW.getTime() + mod.INVITE_TTL_MS + 1000);
 
-    const res = await mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: later });
+    const res = await mod.resolveInvitation(db, { token, user: await userRow('inv-target'), now: later });
     expect(res.ok).toBe(false);
     expect(res.logReason).toBe('expired');
   });
@@ -105,7 +105,7 @@ describe('resolveInvitation', () => {
     const { token, id } = await makeInvite();
     await mod.revokeInvitation(db, { id, now: NOW });
 
-    const res = await mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: NOW });
+    const res = await mod.resolveInvitation(db, { token, user: await userRow('inv-target'), now: NOW });
     expect(res.ok).toBe(false);
     expect(res.logReason).toMatch(/status is revoked/);
   });
@@ -114,7 +114,7 @@ describe('resolveInvitation', () => {
     const first = await makeInvite();
     await makeInvite({ reason: 'Re-sent because the first bounced' });
 
-    const res = await mod.resolveInvitation(db, { token: first.token, user: userRow('inv-target'), now: NOW });
+    const res = await mod.resolveInvitation(db, { token: first.token, user: await userRow('inv-target'), now: NOW });
     expect(res.ok).toBe(false);
     expect(res.logReason).toMatch(/status is replaced/);
   });
@@ -128,7 +128,7 @@ describe('resolveInvitation', () => {
     const { token } = await makeInvite();
     await db.prepare("UPDATE users SET role = 'student' WHERE id = ?").run(OWNER);
 
-    const res = await mod.resolveInvitation(db, { token, user: userRow('inv-target'), now: NOW });
+    const res = await mod.resolveInvitation(db, { token, user: await userRow('inv-target'), now: NOW });
     expect(res.ok).toBe(false);
     expect(res.logReason).toMatch(/no longer holds ownership/);
   });
@@ -141,8 +141,8 @@ describe('resolveInvitation', () => {
    */
   it('gives every refusal an identical caller-facing shape', async () => {
     const { token } = await makeInvite();
-    const target = userRow('inv-target');
-    addUser('inv-other', 'somebody-else@example.invalid', 'student');
+    const target = await userRow('inv-target');
+    await addUser('inv-other', 'somebody-else@example.invalid', 'student');
 
     /**
      * Four causes that are genuinely distinct at this layer.
@@ -156,7 +156,7 @@ describe('resolveInvitation', () => {
     const refusals = [
       await mod.resolveInvitation(db, { token: 'nope', user: target, now: NOW }),
       await mod.resolveInvitation(db, { token: null, user: target, now: NOW }),
-      await mod.resolveInvitation(db, { token, user: userRow('inv-other'), now: NOW }),
+      await mod.resolveInvitation(db, { token, user: await userRow('inv-other'), now: NOW }),
       await mod.resolveInvitation(db, { token, user: null, now: NOW }),
     ];
 

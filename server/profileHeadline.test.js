@@ -94,8 +94,8 @@ describe('the profile headline', () => {
    * serializer gating the read is the one that holds if the first is bypassed.
    */
   describe('a value in the column is still gated on an ordinary account', () => {
-    beforeAll(() => {
-      db.prepare(`
+    beforeAll(async () => {
+      await db.prepare(`
         UPDATE users SET profile_headline = ?, profile_highlights = ?, profile_visibility = 'private'
         WHERE id = ?
       `).run('Walks home down Elm after 4pm', JSON.stringify(['Sophomore']), studentId);

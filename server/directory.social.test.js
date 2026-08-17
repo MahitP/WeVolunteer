@@ -17,7 +17,7 @@ describe('the social and organization features', () => {
   let aliceId, bobId, carolId, organizerId;
 
   /** Rows in `notifications` of a given kind for a given recipient. */
-  const notificationsFor = (userId, titleLike) => db.prepare(
+  const notificationsFor = async (userId, titleLike) => await db.prepare(
     `SELECT * FROM notifications WHERE user_id = ? AND title LIKE ?`
   ).all(userId, titleLike);
 
@@ -113,11 +113,11 @@ describe('the social and organization features', () => {
     it('notifies an accepted friend', async () => {
       const res = await apply(alice);
       expect(res.status).toBe(201);
-      expect(notificationsFor(bobId, 'A friend signed up')).toHaveLength(1);
+      expect(await notificationsFor(bobId, 'A friend signed up')).toHaveLength(1);
     });
 
     it('does not notify somebody who is not a friend', async () => {
-      expect(notificationsFor(carolId, 'A friend signed up')).toHaveLength(0);
+      expect(await notificationsFor(carolId, 'A friend signed up')).toHaveLength(0);
     });
 
     /**
@@ -130,10 +130,10 @@ describe('the social and organization features', () => {
       await srv.call('POST', `/api/users/${carolId}/friend`, undefined, bob);
       await srv.call('POST', `/api/users/${bobId}/friend/accept`, undefined, carol);
 
-      const before = notificationsFor(carolId, 'A friend signed up').length;
+      const before = (await notificationsFor(carolId, 'A friend signed up')).length;
       const res = await apply(bob);
       expect(res.status).toBe(201);
-      expect(notificationsFor(carolId, 'A friend signed up')).toHaveLength(before);
+      expect(await notificationsFor(carolId, 'A friend signed up')).toHaveLength(before);
     });
 
     it('turns back on when the volunteer re-enables it', async () => {
@@ -142,16 +142,16 @@ describe('the social and organization features', () => {
       await srv.call('PATCH', '/api/auth/profile', { friendActivityVisible: true }, bob);
       const res = await apply(bob);
       expect(res.status).toBe(201);
-      expect(notificationsFor(carolId, 'A friend signed up').length).toBeGreaterThan(0);
+      expect((await notificationsFor(carolId, 'A friend signed up')).length).toBeGreaterThan(0);
     });
 
     /* One piece of news per event, however many shifts were taken. */
     it('does not send a second notification for the same event', async () => {
-      const before = notificationsFor(bobId, 'A friend signed up').length;
+      const before = (await notificationsFor(bobId, 'A friend signed up')).length;
       await srv.call('PATCH', '/api/applications/bulk', {}, alice).catch(() => {});
       await db.prepare('DELETE FROM applications WHERE user_id = ? AND slot_id = ?').run(aliceId, slotId);
       await apply(alice);
-      expect(notificationsFor(bobId, 'A friend signed up')).toHaveLength(before);
+      expect(await notificationsFor(bobId, 'A friend signed up')).toHaveLength(before);
     });
   });
 
@@ -166,7 +166,7 @@ describe('the social and organization features', () => {
     });
 
     it('stops the muter being notified about the muted account', async () => {
-      const before = notificationsFor(bobId, 'A friend signed up').length;
+      const before = (await notificationsFor(bobId, 'A friend signed up')).length;
       const start = new Date(Date.now() + 21 * 86400000);
       const created = await srv.call('POST', '/api/events', {
         title: 'Second cleanup', description: 'Also gloves.', category: 'Other',
@@ -178,7 +178,7 @@ describe('the social and organization features', () => {
       }, organizer);
       const slot = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(created.body.id)).id;
       await srv.call('POST', `/api/events/${created.body.id}/apply`, { slotId: slot }, alice);
-      expect(notificationsFor(bobId, 'A friend signed up')).toHaveLength(before);
+      expect(await notificationsFor(bobId, 'A friend signed up')).toHaveLength(before);
     });
 
     it('lifts a mute', async () => {

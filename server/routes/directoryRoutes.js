@@ -201,9 +201,9 @@ router.get('/api/users/:id/service-record', authenticateToken, requireCap('direc
   if (!row) return res.status(404).json({ error: 'No such account.', code: 'not_found' });
 
   const completed = await db.prepare(`
-    SELECT e.id AS eventId, e.title, e.location, e.category, e.credits_hours AS creditsHours,
-           s.start_datetime AS startDatetime, s.end_datetime AS endDatetime,
-           at.present, at.hours_awarded AS hoursAwarded
+    SELECT e.id AS "eventId", e.title, e.location, e.category, e.credits_hours AS "creditsHours",
+           s.start_datetime AS "startDatetime", s.end_datetime AS "endDatetime",
+           at.present, at.hours_awarded AS "hoursAwarded"
     FROM attendance at
     JOIN slots s ON s.id = at.slot_id
     JOIN events e ON e.id = at.event_id
@@ -226,8 +226,8 @@ router.get('/api/users/:id/service-record', authenticateToken, requireCap('direc
    * it is the service this platform can actually vouch for.
    */
   const external = isSelf ? (await db.prepare(`
-    SELECT id, organization_name AS organizationName, activity_name AS activityName,
-           description, occurred_on AS occurredOn, hours
+    SELECT id, organization_name AS "organizationName", activity_name AS "activityName",
+           description, occurred_on AS "occurredOn", hours
     FROM external_hours WHERE user_id = ? ORDER BY occurred_on DESC LIMIT 200
   `).all(targetId)).map(r => ({ ...r, selfReported: true })) : [];
 
@@ -351,8 +351,8 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
     const rows = sigil === 'tag'
       ? await db.prepare(`
         SELECT o.*,
-               (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS memberCount,
-               (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS eventCount
+               (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
+               (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
         FROM organizations o
         WHERE o.status = 'active'
           AND o.tags IS NOT NULL
@@ -362,8 +362,8 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
       `).all(tagKey, limit + 1, offset)
       : await db.prepare(`
         SELECT o.*,
-               (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS memberCount,
-               (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS eventCount
+               (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
+               (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
         FROM organizations o
         WHERE o.status = 'active' AND (o.name LIKE ? ESCAPE '\\' OR o.slug LIKE ? ESCAPE '\\')
         ORDER BY o.name COLLATE nocase

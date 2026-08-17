@@ -94,8 +94,8 @@ describe('reopening a report keeps the withdrawn reasoning', () => {
    * The column exists to carry a withdrawn decision, not to become a general
    * free-text field that later readers have to guess the meaning of.
    */
-  it('writes no note on actions that withdraw nothing', () => {
-    const others = db.prepare(
+  it('writes no note on actions that withdraw nothing', async () => {
+    const others = await db.prepare(
       "SELECT action, note FROM moderation_actions WHERE report_id = ? AND action != 'reopened'"
     ).all(reportId);
 

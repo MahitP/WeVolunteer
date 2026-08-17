@@ -30,7 +30,7 @@ describe('the Student Organizer Agreement', () => {
 
   const idOf = async (s) => (await srv.call('GET', '/api/auth/me', undefined, s)).body.id;
 
-  const seat = (userId, role) => db.prepare(`
+  const seat = async (userId, role) => await db.prepare(`
     INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
     VALUES (?, ?, ?, ?)
       ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
@@ -48,7 +48,7 @@ describe('the Student Organizer Agreement', () => {
   const post = (session) => srv.call('POST', `/api/organizations/${orgKey}/announcements`,
     { body: 'A notice from the club.' }, session);
 
-  const acceptanceRows = (userId) => db.prepare(
+  const acceptanceRows = async (userId) => await db.prepare(
     `SELECT document_slug, version FROM legal_acceptances
       WHERE user_id = ? AND document_slug = 'student-organizer-agreement'`
   ).all(userId);
@@ -80,9 +80,9 @@ describe('the Student Organizer Agreement', () => {
       `DELETE FROM legal_acceptances
         WHERE user_id IN (?, ?) AND document_slug = 'student-organizer-agreement'`
     ).run(helperId, bystanderId);
-    seat(ownerId, 'manager');
-    seat(bystanderId, 'member');
-    seat(helperId, 'member');
+    await seat(ownerId, 'manager');
+    await seat(bystanderId, 'member');
+    await seat(helperId, 'member');
     await setRole(helperId, 'student_organizer');
   });
 
@@ -217,7 +217,7 @@ describe('the Student Organizer Agreement', () => {
       const res = await accept(bystander);
       expect(res.status).toBe(400);
       expect(res.body.code).toBe('not_a_student_organizer');
-      expect(acceptanceRows(bystanderId)).toEqual([]);
+      expect(await acceptanceRows(bystanderId)).toEqual([]);
     });
 
     it('also binds a STUDENT who manages a club', async () => {
@@ -265,7 +265,7 @@ describe('the Student Organizer Agreement', () => {
            elevated fixtures — identity is re-derived from the row per request,
            so no re-sign-in is needed. */
         await db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, signed.user.id);
-        seat(signed.user.id, 'manager');
+        await seat(signed.user.id, 'manager');
 
         const me = await srv.call('GET', '/api/auth/me', undefined, signed.cookie);
         expect(me.body.withheld, `${role} was withheld the helper capabilities`)
@@ -293,7 +293,7 @@ describe('the Student Organizer Agreement', () => {
   describe('the record', () => {
     it('writes one acceptance row, at the current version', async () => {
       await accept(helper);
-      expect(acceptanceRows(helperId)).toEqual([
+      expect(await acceptanceRows(helperId)).toEqual([
         { document_slug: 'student-organizer-agreement', version: '1.0' },
       ]);
     });
@@ -303,7 +303,7 @@ describe('the Student Organizer Agreement', () => {
       const again = await accept(helper);
       expect(again.status).toBe(200);
       expect(again.body.alreadyAccepted).toBe(true);
-      expect(acceptanceRows(helperId)).toHaveLength(1);
+      expect(await acceptanceRows(helperId)).toHaveLength(1);
     });
 
     it('refuses a submission that acknowledges nothing', async () => {
@@ -313,7 +313,7 @@ describe('the Student Organizer Agreement', () => {
         expect(res.status, JSON.stringify(body)).toBe(400);
         expect(res.body.code).toBe('acknowledgement_required');
       }
-      expect(acceptanceRows(helperId)).toEqual([]);
+      expect(await acceptanceRows(helperId)).toEqual([]);
     });
 
     it('survives demotion, so re-promotion does not ask again at the same version', async () => {
@@ -325,7 +325,7 @@ describe('the Student Organizer Agreement', () => {
        */
       await accept(helper);
       await setRole(helperId, 'member');
-      expect(acceptanceRows(helperId)).toHaveLength(1);
+      expect(await acceptanceRows(helperId)).toHaveLength(1);
 
       await setRole(helperId, 'student_organizer');
       expect((await status(helper)).body.accepted).toBe(true);

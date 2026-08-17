@@ -55,16 +55,16 @@ async function freshExportWorker({ exportDir } = {}) {
  * omitted — the resulting "NOT NULL constraint failed: users.grade" surfaced as
  * seven unrelated-looking failures.
  */
-function makeUser(db, id = 'u-export') {
-  db.prepare(`
+async function makeUser(db, id = 'u-export') {
+  await db.prepare(`
     INSERT INTO users (id, username, email, password_hash, name, grade, role, created_at)
     VALUES (?, ?, ?, 'x', 'Export Tester', '11', 'student', ?)
   `).run(id, id, `${id}@example.org`, new Date().toISOString());
   return id;
 }
 
-function queueExport(db, { id, userId, status = 'pending', createdAt = null }) {
-  db.prepare(`
+async function queueExport(db, { id, userId, status = 'pending', createdAt = null }) {
+  await db.prepare(`
     INSERT INTO data_export_jobs (id, user_id, status, created_at)
     VALUES (?, ?, ?, ?)
   `).run(id, userId, status, createdAt ?? new Date().toISOString());
@@ -117,8 +117,8 @@ describe('exports are written to durable storage, not tmpdir', () => {
 
   it('writes a completed export into that directory and records the path', async () => {
     const { db, worker, root } = await freshExportWorker();
-    const userId = makeUser(db);
-    queueExport(db, { id: 'exp-1', userId });
+    const userId = await makeUser(db);
+    await queueExport(db, { id: 'exp-1', userId });
 
     await worker.processPendingExports();
 
@@ -130,8 +130,8 @@ describe('exports are written to durable storage, not tmpdir', () => {
 
   it('a completed export survives a simulated restart', async () => {
     const { db, worker, root } = await freshExportWorker();
-    const userId = makeUser(db);
-    queueExport(db, { id: 'exp-restart', userId });
+    const userId = await makeUser(db);
+    await queueExport(db, { id: 'exp-restart', userId });
 
     await worker.processPendingExports();
     const before = await db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-restart');
@@ -157,9 +157,9 @@ describe('exports are written to durable storage, not tmpdir', () => {
 describe('stranded export jobs are reclaimed', () => {
   it('reclaims a job left in processing by a restart', async () => {
     const { db, worker } = await freshExportWorker();
-    const userId = makeUser(db);
+    const userId = await makeUser(db);
     const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    queueExport(db, { id: 'exp-stuck', userId, status: 'processing', createdAt: longAgo });
+    await queueExport(db, { id: 'exp-stuck', userId, status: 'processing', createdAt: longAgo });
 
     const reclaimed = await worker.reclaimStaleExports();
 
@@ -171,8 +171,8 @@ describe('stranded export jobs are reclaimed', () => {
 
   it('leaves a genuinely running export alone', async () => {
     const { db, worker } = await freshExportWorker();
-    const userId = makeUser(db);
-    queueExport(db, { id: 'exp-now', userId, status: 'processing' });
+    const userId = await makeUser(db);
+    await queueExport(db, { id: 'exp-now', userId, status: 'processing' });
 
     expect(await worker.reclaimStaleExports()).toBe(0);
     const row = await db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-now');
@@ -181,9 +181,9 @@ describe('stranded export jobs are reclaimed', () => {
 
   it('unblocks a user who was permanently 409-ed', async () => {
     const { db, worker } = await freshExportWorker();
-    const userId = makeUser(db);
+    const userId = await makeUser(db);
     const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    queueExport(db, { id: 'exp-block', userId, status: 'processing', createdAt: longAgo });
+    await queueExport(db, { id: 'exp-block', userId, status: 'processing', createdAt: longAgo });
 
     // This is the query POST /api/privacy/export uses to refuse a new request.
     const blockedBefore = await db.prepare(
@@ -205,8 +205,8 @@ describe('stranded export jobs are reclaimed', () => {
 describe('cleanup still happens', () => {
   it('deletes the file and clears the path when an export expires', async () => {
     const { db, worker, root } = await freshExportWorker();
-    const userId = makeUser(db);
-    queueExport(db, { id: 'exp-expire', userId });
+    const userId = await makeUser(db);
+    await queueExport(db, { id: 'exp-expire', userId });
 
     await worker.processPendingExports();
     const row = await db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-expire');
