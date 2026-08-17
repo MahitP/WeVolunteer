@@ -73,7 +73,7 @@ describe('booting a second time against the same database', () => {
   it('publishes each registered document exactly once across two boots', async () => {
     await boot();
     const db = await boot();
-    const rows = db.prepare('SELECT slug, version, COUNT(*) AS c FROM legal_documents GROUP BY slug, version').all();
+    const rows = await db.prepare('SELECT slug, version, COUNT(*) AS c FROM legal_documents GROUP BY slug, version').all();
     expect(rows.every(r => r.c === 1), 'a boot duplicated a publication row').toBe(true);
   });
 
@@ -94,20 +94,20 @@ describe('booting a second time against the same database', () => {
   it('reconciles stale unaccepted publications on the boot that first applies 016', async () => {
     let db = await boot();
 
-    const target = db.prepare('SELECT slug, version FROM legal_documents LIMIT 1').get();
-    db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
+    const target = await db.prepare('SELECT slug, version FROM legal_documents LIMIT 1').get();
+    await db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
       .run('0'.repeat(64), target.slug, target.version);
-    db.prepare('DELETE FROM schema_migrations WHERE version = 16').run();
+    await db.prepare('DELETE FROM schema_migrations WHERE version = 16').run();
     expect(
-      db.prepare('SELECT COUNT(*) AS c FROM legal_acceptances WHERE document_slug = ?')
-        .get(target.slug).c,
+      (await db.prepare('SELECT COUNT(*) AS c FROM legal_acceptances WHERE document_slug = ?')
+        .get(target.slug)).c,
       'fixture assumption: nobody has accepted this document'
     ).toBe(0);
 
     // Before 016 existed this threw here and the process died at startup.
     db = await boot();
 
-    const row = db.prepare('SELECT content_hash FROM legal_documents WHERE slug = ? AND version = ?')
+    const row = await db.prepare('SELECT content_hash FROM legal_documents WHERE slug = ? AND version = ?')
       .get(target.slug, target.version);
     expect(row, 'the document was not republished').toBeTruthy();
     expect(row.content_hash, 'the stale hash survived the reconciliation').not.toBe('0'.repeat(64));
@@ -123,34 +123,33 @@ describe('booting a second time against the same database', () => {
    */
   it('REFUSES to reconcile a row that a recorded acceptance points at', async () => {
     let db = await boot();
-    const target = db.prepare('SELECT slug, version, content_hash FROM legal_documents LIMIT 1').get();
+    const target = await db.prepare('SELECT slug, version, content_hash FROM legal_documents LIMIT 1').get();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, email, password_hash, name, role, grade, username,
                          email_verified, account_status, created_at)
       VALUES ('republish-user', 'republish@example.com', 'h', 'Republish Tester', 'student',
               '11', 'republish_user', 1, 'active', '${new Date().toISOString()}')
     `).run();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO legal_acceptances
         (id, user_id, document_slug, version, content_hash, accepted_at, method)
       VALUES ('acc-republish', 'republish-user', ?, ?, ?, '${new Date().toISOString()}', 'signup')
     `).run(target.slug, target.version, target.content_hash);
 
-    db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
+    await db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
       .run('f'.repeat(64), target.slug, target.version);
-    db.prepare('DELETE FROM schema_migrations WHERE version = 16').run();
+    await db.prepare('DELETE FROM schema_migrations WHERE version = 16').run();
 
     await expect(boot()).rejects.toThrow(/referenced by recorded acceptances|never delete these rows/i);
 
     // A refusal must not have destroyed anything.
     const { DatabaseSync } = await import('node:sqlite');
-    const raw = new DatabaseSync(process.env.WEV_DB_PATH);
-    expect(raw.prepare('SELECT COUNT(*) AS c FROM legal_acceptances WHERE id = ?')
-      .get('acc-republish').c).toBe(1);
-    expect(raw.prepare('SELECT COUNT(*) AS c FROM legal_documents WHERE slug = ? AND version = ?')
-      .get(target.slug, target.version).c).toBe(1);
-    raw.close();
+    const { db: raw } = await import('./db.js');
+    expect((await raw.prepare('SELECT COUNT(*) AS c FROM legal_acceptances WHERE id = ?')
+      .get('acc-republish')).c).toBe(1);
+    expect((await raw.prepare('SELECT COUNT(*) AS c FROM legal_documents WHERE slug = ? AND version = ?')
+      .get(target.slug, target.version)).c).toBe(1);
   });
 
   /**
@@ -178,17 +177,17 @@ describe('booting a second time against the same database', () => {
   it.runIf(!LEGAL_HASHES_ENFORCED)('absorbs an edited published version before launch, moving the recorded hash', async () => {
     let db = await boot();
     expect(
-      db.prepare('SELECT COUNT(*) AS c FROM schema_migrations WHERE version = 16').get().c,
+      (await db.prepare('SELECT COUNT(*) AS c FROM schema_migrations WHERE version = 16').get()).c,
       'fixture assumption: 016 has been applied'
     ).toBe(1);
 
-    const target = db.prepare('SELECT slug, version FROM legal_documents LIMIT 1').get();
-    db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
+    const target = await db.prepare('SELECT slug, version FROM legal_documents LIMIT 1').get();
+    await db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
       .run('a'.repeat(64), target.slug, target.version);
 
     db = await boot();
 
-    const after = db.prepare('SELECT content_hash FROM legal_documents WHERE slug = ? AND version = ?')
+    const after = await db.prepare('SELECT content_hash FROM legal_documents WHERE slug = ? AND version = ?')
       .get(target.slug, target.version);
     expect(after.content_hash).not.toBe('a'.repeat(64));
     expect(after.content_hash).toMatch(/^[0-9a-f]{64}$/);
@@ -208,8 +207,8 @@ describe('booting a second time against the same database', () => {
    */
   it('still refuses an edited published version when enforcement is on', async () => {
     let db = await boot();
-    const target = db.prepare('SELECT slug, version FROM legal_documents LIMIT 1').get();
-    db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
+    const target = await db.prepare('SELECT slug, version FROM legal_documents LIMIT 1').get();
+    await db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')
       .run('a'.repeat(64), target.slug, target.version);
 
     vi.resetModules();

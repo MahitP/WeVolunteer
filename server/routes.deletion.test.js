@@ -16,7 +16,6 @@
  * action, and that it is spent exactly once.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
 import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 
 let srv;
@@ -40,13 +39,19 @@ const signup = (over = {}) => srv.call('POST', '/api/auth/signup', { ...TEST_SIG
   ...over
 });
 
-const openDb = () => new DatabaseSync(process.env.WEV_DB_PATH);
+const openDb = async () => {
+  /* The application's own connection, not a second handle on the SQLite file.
+     Opening the file directly bypasses the engine abstraction, so under the
+     PostgreSQL harness these assertions read an empty database and fail with
+     `no such table` — while the behaviour they check is engine-independent. */
+  const { db } = await import('./db.js');
+  return db;
+};
 
 /** The stored challenge row, to assert on what spending it actually did. */
-function challengeRow(id) {
-  const db = openDb();
-  const row = db.prepare('SELECT * FROM reauth_challenges WHERE id = ?').get(id);
-  db.close();
+async function challengeRow(id) {
+  const db = await openDb();
+  const row = await db.prepare('SELECT * FROM reauth_challenges WHERE id = ?').get(id);
   return row;
 }
 
@@ -69,9 +74,8 @@ describe('Account Deletion System', () => {
   it('refuses to delete a super_admin account', async () => {
     const { cookie, body } = await signup();
     
-    const db = openDb();
-    db.prepare("UPDATE users SET role = 'super_admin' WHERE id = ?").run(body.user.id);
-    db.close();
+    const db = await openDb();
+    await db.prepare("UPDATE users SET role = 'super_admin' WHERE id = ?").run(body.user.id);
 
     const granted = await srv.stepUp(cookie, 'account.delete', { password: 'Password123' });
     const res = await deleteAccount(cookie, granted);
@@ -100,9 +104,8 @@ describe('Account Deletion System', () => {
     expect(res.body.action).toBe('account.delete');
 
     // And the account is untouched — the refusal is before any work.
-    const db = openDb();
-    const user = db.prepare('SELECT account_status FROM users WHERE id = ?').get(body.user.id);
-    db.close();
+    const db = await openDb();
+    const user = await db.prepare('SELECT account_status FROM users WHERE id = ?').get(body.user.id);
     expect(user.account_status).toBe('active');
   });
 
@@ -128,9 +131,8 @@ describe('Account Deletion System', () => {
     const res = await deleteAccount(cookie, challengeId);
     expect(res.status).toBe(200);
 
-    const db = openDb();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-    db.close();
+    const db = await openDb();
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
 
     expect(user.account_status).toBe('deleted');
     expect(user.deleted_at).not.toBeNull();
@@ -160,11 +162,11 @@ describe('Account Deletion System', () => {
     const { cookie } = await signup({ password: 'CorrectPassword123' });
 
     const challengeId = await srv.stepUp(cookie, 'account.delete', { password: 'CorrectPassword123' });
-    expect(challengeRow(challengeId).consumed_at).toBeNull();
+    expect((await challengeRow(challengeId)).consumed_at).toBeNull();
 
     expect((await deleteAccount(cookie, challengeId)).status).toBe(200);
 
-    const after = challengeRow(challengeId);
+    const after = await challengeRow(challengeId);
     expect(after.consumed_at, 'the grant is still spendable after the action it authorised').not.toBeNull();
 
     expect((await deleteAccount(cookie, challengeId)).status).not.toBe(200);
@@ -186,9 +188,9 @@ describe('Account Deletion System', () => {
     }).then(r => ({ cookie: r.cookie, body: { user: r.user } }));
 
     // Organizers need approval before posting, so create the event directly.
-    const db = openDb();
+    const db = await openDb();
     const eventId = `event-del-${rnd()}`;
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, organizer_id,
                           status, application_deadline, created_at)
       VALUES (?, 'Blocking Event', 'Still open', 'Other', 'Somewhere', ?, 'open', ?, ?)
@@ -197,7 +199,6 @@ describe('Account Deletion System', () => {
       new Date(Date.now() + 7 * 24 * 3600_000).toISOString(),
       new Date().toISOString()
     );
-    db.close();
 
     const challengeId = await srv.stepUp(cookie, 'account.delete', { password: 'Password123' });
     const blocked = await deleteAccount(cookie, challengeId);
@@ -205,11 +206,10 @@ describe('Account Deletion System', () => {
     expect(blocked.body.code).toBe('has_active_events');
 
     // Unspent, so the same verification still works for the retry.
-    expect(challengeRow(challengeId).consumed_at).toBeNull();
+    expect((await challengeRow(challengeId)).consumed_at).toBeNull();
 
-    const db2 = openDb();
-    db2.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(eventId);
-    db2.close();
+    const db2 = await openDb();
+    await db2.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(eventId);
 
     expect((await deleteAccount(cookie, challengeId)).status).toBe(200);
   });
@@ -256,9 +256,8 @@ describe('Account Deletion System', () => {
     const res = await deleteAccount(cookie, challengeId);
     expect(res.status).toBe(200);
 
-    const db = openDb();
-    const user = db.prepare('SELECT account_status FROM users WHERE id = ?').get(userId);
-    db.close();
+    const db = await openDb();
+    const user = await db.prepare('SELECT account_status FROM users WHERE id = ?').get(userId);
     expect(user.account_status).toBe('deleted');
   });
 
@@ -293,9 +292,8 @@ describe('Account Deletion System', () => {
       srv.stepUpOAuth(cookie, 'account.delete', { sub: 'sub-somebody-else-entirely' })
     ).rejects.toThrow(/grant failed/);
 
-    const db = openDb();
-    const user = db.prepare('SELECT account_status FROM users WHERE id = ?').get(userId);
-    db.close();
+    const db = await openDb();
+    const user = await db.prepare('SELECT account_status FROM users WHERE id = ?').get(userId);
     expect(user.account_status).toBe('active');
   });
 
@@ -322,21 +320,20 @@ describe('Account Deletion System', () => {
    */
   describe('releases upcoming commitments (S4)', () => {
     /** An open event with one future slot, hosted by the seeded organizer. */
-    const findOpenFutureSlot = () => {
-      const db = openDb();
-      const row = db.prepare(`
+    const findOpenFutureSlot = async () => {
+      const db = await openDb();
+      const row = await db.prepare(`
         SELECT s.id AS slot_id, e.id AS event_id, e.organizer_id
         FROM slots s JOIN events e ON s.event_id = e.id
         WHERE s.start_datetime > '${new Date().toISOString()}'
           AND e.status = 'open'
         ORDER BY s.start_datetime ASC LIMIT 1
       `).get();
-      db.close();
       return row;
     };
 
     it('withdraws the deleted account from a future shift', async () => {
-      const slot = findOpenFutureSlot();
+      const slot = await findOpenFutureSlot();
       expect(slot).toBeTruthy(); // guards the fixture, not the code
 
       const { cookie, user } = await srv.signupConfirmed({
@@ -352,13 +349,12 @@ describe('Account Deletion System', () => {
       const del = await deleteAccount(cookie, challengeId);
       expect(del.status).toBe(200);
 
-      const db = openDb();
-      const apps = db.prepare('SELECT status, waitlist_order FROM applications WHERE user_id = ?').all(user.id);
-      const organizerNotice = db.prepare(`
+      const db = await openDb();
+      const apps = await db.prepare('SELECT status, waitlist_order FROM applications WHERE user_id = ?').all(user.id);
+      const organizerNotice = (await db.prepare(`
         SELECT COUNT(*) AS c FROM notifications
         WHERE user_id = ? AND title LIKE '%volunteer left%'
-      `).get(slot.organizer_id).c;
-      db.close();
+      `).get(slot.organizer_id)).c;
 
       expect(apps.length).toBeGreaterThan(0);
       // Nothing is left holding a spot.

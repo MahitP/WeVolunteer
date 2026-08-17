@@ -647,6 +647,58 @@ describe('the await group closes after the execution, not before it', () => {
 describe('the unported fixture surface', () => {
   const PROXY_HANDLES = /(?<!await )\b(?:db|tx|conn|connection|dbHandle|database|handle|seeded|live)\s*\.\s*prepare\s*\(/g;
 
+  /**
+   * Detected on the STRIPPED source, not the raw file.
+   *
+   * The exclusion used to read the original text, on the reasoning that `strip()`
+   * blanks things the check needs. It is the other way round: `strip()` blanks
+   * comments and string BODIES, and a real handle is neither — it is code, so it
+   * survives. Reading the raw file only adds the ability for PROSE to trip it.
+   *
+   * That is not hypothetical. Porting a file off its raw handle means writing a
+   * comment saying so, and the moment that comment named the constructor the file
+   * dropped out of this count entirely — silently, while its chains were still
+   * unported. A measurement that a comment can switch off is worse than no
+   * measurement, because the number keeps looking right.
+   */
+  const holdsRawHandle = (stripped) => /\bnew\s+DatabaseSync\s*\(/.test(stripped);
+
+  /**
+   * No test may open a raw handle on the APPLICATION's database file.
+   *
+   * `new DatabaseSync(process.env.WEV_DB_PATH)` is a second, private connection
+   * to the file the application is using — but only when the application is on
+   * SQLite. Under the PostgreSQL harness the application is on PostgreSQL and
+   * that file is empty, so the test writes through the API and then reads an
+   * empty database, reporting `no such table: users`.
+   *
+   * Eleven files did this, and the shape hid a whole class of work: because
+   * files holding a raw handle are excluded from the ratchet above, none of
+   * their unawaited chains were ever counted. The measurement tracking the port
+   * had a blind spot exactly where the least-ported files were.
+   *
+   * 182 tests came back when they were moved onto the application's own handle —
+   * covering evidence preservation, account deletion, identity change, OAuth,
+   * organizer agreements, sessions and 2FA. None of that is engine-specific.
+   *
+   * A raw handle on a THROWAWAY database is still fine and is not matched here:
+   * `:memory:` and per-test temp files are how the migration, schema and backup
+   * tests legitimately drive SQLite directly.
+   */
+  it('never opens a raw SQLite handle on the application database', () => {
+    const offenders = [];
+    for (const { rel, src } of FILES) {
+      if (!rel.includes('.test.')) continue;
+      if (/new\s+DatabaseSync\s*\(\s*process\.env\.WEV_DB_PATH/.test(src)) offenders.push(rel);
+    }
+    expect(
+      offenders,
+      'this opens a second connection to the SQLite file the application may not be using. '
+      + "Take the application's handle instead: `const { db } = await import('./db.js')`, and do "
+      + 'not close it — it is shared. A throwaway `:memory:` or temp-file handle is fine.',
+    ).toEqual([]);
+  });
+
   /** Lowered only by porting files, never raised to accommodate new ones. */
   const CEILING = 63;
 
@@ -654,10 +706,7 @@ describe('the unported fixture surface', () => {
     const offenders = new Map();
     for (const { rel, src } of FILES) {
       if (!rel.includes('.test.')) continue;
-      /* `strip()` has already blanked comments and string bodies, so a raw
-         handle is detected from the original file instead. */
-      const raw = readFileSync(path.join(SERVER, rel), 'utf8');
-      if (raw.includes('new DatabaseSync(')) continue;
+      if (holdsRawHandle(src)) continue;
       const hits = src.match(PROXY_HANDLES)?.length ?? 0;
       if (hits) offenders.set(rel, hits);
     }
@@ -686,7 +735,7 @@ describe('the unported fixture surface', () => {
   it('pins the ceiling to the real count exactly', () => {
     const total = FILES
       .filter(f => f.rel.includes('.test.'))
-      .filter(f => !readFileSync(path.join(SERVER, f.rel), 'utf8').includes('new DatabaseSync('))
+      .filter(f => !holdsRawHandle(f.src))
       .reduce((n, f) => n + (f.src.match(PROXY_HANDLES)?.length ?? 0), 0);
 
     expect(

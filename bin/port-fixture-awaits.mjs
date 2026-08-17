@@ -106,7 +106,9 @@ const refusedFiles = [], report = [];
 for (const f of files) {
   const abs = path.join(SERVER, f);
   const src = readFileSync(abs, 'utf8');
-  if (src.includes('new DatabaseSync(')) continue;
+  /* Matched on the parsed source, not the raw text: a comment that merely
+     NAMES the constructor must not exclude a file from the port. */
+  if (/\bnew\s+DatabaseSync\s*\(/.test(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, ''))) continue;
 
   let ast; try { ast = parseAst(src); } catch { continue; }
 

@@ -51,9 +51,8 @@ describe('the Organizer Agreement', () => {
    */
   async function approvedButNotAccepted() {
     const { DatabaseSync } = await import('node:sqlite');
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    db.prepare("DELETE FROM legal_acceptances WHERE user_id = 'user-org-pending'").run();
-    db.close();
+    const { db } = await import('./db.js');
+    await db.prepare("DELETE FROM legal_acceptances WHERE user_id = 'user-org-pending'").run();
 
     const admin = await srv.login('admin@example.gov');
     await srv.call('POST', '/api/admin/organizers/user-org-pending/approve', undefined, admin);
@@ -193,11 +192,10 @@ describe('the Organizer Agreement', () => {
 
       const { DatabaseSync } = await import('node:sqlite');
       const { ORGANIZER_DOCUMENTS } = await import('./legalDocuments.js');
-      const db = new DatabaseSync(process.env.WEV_DB_PATH);
-      const rows = db.prepare(
+      const { db } = await import('./db.js');
+      const rows = await db.prepare(
         "SELECT * FROM legal_acceptances WHERE user_id = 'user-org-pending' AND method = 'organizer_agreement'"
       ).all();
-      db.close();
 
       expect(rows.length).toBe(ORGANIZER_DOCUMENTS.length);
       for (const doc of ORGANIZER_DOCUMENTS) {
@@ -365,10 +363,9 @@ describe('the Organizer Agreement', () => {
        * `verified = 0`, and earlier tests in this file approve them.
        */
       const { DatabaseSync } = await import('node:sqlite');
-      const raw = new DatabaseSync(process.env.WEV_DB_PATH);
-      raw.prepare("DELETE FROM legal_acceptances WHERE user_id = 'user-org-pending'").run();
-      raw.prepare("UPDATE users SET verified = 0 WHERE id = 'user-org-pending'").run();
-      raw.close();
+      const { db: raw } = await import('./db.js');
+      await raw.prepare("DELETE FROM legal_acceptances WHERE user_id = 'user-org-pending'").run();
+      await raw.prepare("UPDATE users SET verified = 0 WHERE id = 'user-org-pending'").run();
 
       const admin = await srv.login('admin@example.gov');
       const queue = await srv.call('GET', '/api/admin/organizers/pending', undefined, admin);

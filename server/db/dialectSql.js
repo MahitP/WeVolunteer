@@ -226,6 +226,25 @@ export function nullSafeEquals(db, column, param) {
 }
 
 /**
+ * The negation: "different from this value, and NULL counts as different".
+ *
+ * The call sites are the two leaderboard predicates, which ask that a student's
+ * `hours_visibility` is not `'private'`. The column is nullable on older rows,
+ * and the intent — recorded at the call site — is that a NULL reads as public
+ * and therefore stays on the board.
+ *
+ * `<> 'private'` would NOT do that: NULL compared with `<>` is NULL, which is
+ * not true, so every older row would silently drop off the leaderboard. SQLite's
+ * `IS NOT 'private'` gets it right and PostgreSQL rejects the form outright, so
+ * this answered 500 there rather than answering wrongly.
+ */
+export function nullSafeNotEquals(db, column, param) {
+  return isPostgres(db)
+    ? `${column} IS DISTINCT FROM ${param}`
+    : `${column} IS NOT ${param}`;
+}
+
+/**
  * A deterministic tie-break for rows sharing a timestamp.
  *
  * `moderation_actions` and `hours_ledger` both order a history by `created_at`

@@ -16,7 +16,6 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
  * re-run. The global default stays 5000ms.
  */
 vi.setConfig({ testTimeout: 30000 });
-import { DatabaseSync } from 'node:sqlite';
 import { TEST_SIGNUP_DEFAULTS } from './testConsent.js';
 import { installMailbox } from './testMailbox.js';
 
@@ -64,7 +63,14 @@ afterAll(async () => {
 
 const rnd = () => Math.random().toString(36).slice(2, 9);
 
-const openDb = () => new DatabaseSync(process.env.WEV_DB_PATH);
+const openDb = async () => {
+  /* The application's own connection, not a second handle on the SQLite file.
+     Opening the file directly bypasses the engine abstraction, so under the
+     PostgreSQL harness these assertions read an empty database and fail with
+     `no such table` — while the behaviour they check is engine-independent. */
+  const { db } = await import('./db.js');
+  return db;
+};
 
 /**
  * Changes the email address, presenting a grant bound to that same address.
@@ -123,10 +129,9 @@ const changeTokenFor = (newEmail) => mailbox.waitForToken(newEmail, 'emailchange
  * The pending row itself, for the cases that assert on its ABSENCE or on which
  * address is pending. `new_email` is not a credential and is still stored plainly.
  */
-function pendingChangeFor(userId) {
-  const db = openDb();
-  const row = db.prepare('SELECT new_email FROM email_change_tokens WHERE user_id = ?').get(userId);
-  db.close();
+async function pendingChangeFor(userId) {
+  const db = await openDb();
+  const row = await db.prepare('SELECT new_email FROM email_change_tokens WHERE user_id = ?').get(userId);
   return row;
 }
 
@@ -152,9 +157,8 @@ describe('U2 — changing the email address', () => {
     expect(res.body.pending).toBe(target);
 
     // The critical assertion: the account still answers at its old address.
-    const db = openDb();
-    const row = db.prepare('SELECT email FROM users WHERE id = ?').get(user.id);
-    db.close();
+    const db = await openDb();
+    const row = await db.prepare('SELECT email FROM users WHERE id = ?').get(user.id);
     expect(row.email).toBe(user.email);
   });
 
@@ -247,7 +251,7 @@ describe('U2 — changing the email address', () => {
     expect(res.body.code).toBe('params_mismatch');
 
     // Nothing pending: the substituted address was never written anywhere.
-    expect(pendingChangeFor(user.id)).toBeUndefined();
+    expect(await pendingChangeFor(user.id)).toBeUndefined();
   });
 
   it('spends the grant exactly once', async () => {
@@ -314,9 +318,8 @@ describe('U2 — changing the email address', () => {
 
     // Refused before the grant was spent, so the user can try a different
     // address without verifying again.
-    const db = openDb();
-    const row = db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(res.challengeId);
-    db.close();
+    const db = await openDb();
+    const row = await db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(res.challengeId);
     expect(row.consumed_at).toBeNull();
   });
 
@@ -493,9 +496,8 @@ describe('changing the password', () => {
       { newPassword: 'AnotherPass2' }, cookie, srv.reauthHeader(challengeId));
     expect(replay.status).not.toBe(200);
 
-    const db = openDb();
-    const row = db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
-    db.close();
+    const db = await openDb();
+    const row = await db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
     expect(row.consumed_at).not.toBeNull();
   });
 

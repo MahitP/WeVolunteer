@@ -16,6 +16,7 @@ import { normaliseTag, tagsForEvents } from '../eventTags.js';
 import { SERVICE_HOUR_GOAL } from '../milestones.js';
 import { volunteerInsights } from '../volunteerInsights.js';
 import { commentHasLiveReport, COMMENT_HELD_MESSAGE } from '../evidenceHolds.js';
+import { nullSafeNotEquals } from '../db/dialectSql.js';
 
 const router = express.Router();
 
@@ -574,7 +575,7 @@ router.get('/api/leaderboard', authenticateToken, async (req, res) => {
          * this comment: it lives inside a template literal, and one would end
          * the string mid-SQL — the same trap migration 046 records.)
          */
-        AND u.hours_visibility IS NOT 'private'
+        AND ${nullSafeNotEquals(db, 'u.hours_visibility', "'private'")}
       GROUP BY u.id
       ORDER BY hours DESC, shifts DESC
       LIMIT 25

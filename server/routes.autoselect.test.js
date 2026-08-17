@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
 
 // Lowered so the draw-cap test doesn't need to make five real runs. Must be
 // set before testServer.js dynamically imports config.js/eventRoutes.js.
@@ -22,18 +21,23 @@ describe('auto-select: deadline guard, re-draw reasons, and draw cap', () => {
   // validation on POST /api/events is bypassed here (an Auto Select event
   // must be created with a future deadline to pass creation, then the
   // deadline is pushed into the past directly so the draw can be tested).
-  const withDb = (fn) => {
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    try { return fn(db); } finally { db.close(); }
+  /* The application's own connection, not a second handle on the SQLite file.
+     A raw handle bypasses the engine abstraction, so under the PostgreSQL
+     harness it reads an empty database. It is shared, so it is never closed
+     here — that would close the application's own connection for the rest of
+     the run. */
+  const withDb = async (fn) => {
+    const { db } = await import('./db.js');
+    return await fn(db);
   };
 
-  const pushDeadlineToPast = (eventId) => withDb((db) => {
+  const pushDeadlineToPast = async (eventId) => await withDb(async (db) => {
     const past = new Date(Date.now() - 864e5).toISOString();
-    db.prepare('UPDATE events SET application_deadline = ? WHERE id = ?').run(past, eventId);
+    await db.prepare('UPDATE events SET application_deadline = ? WHERE id = ?').run(past, eventId);
   });
 
-  const runReason = (eventId, runNumber) => withDb((db) => {
-    const row = db.prepare('SELECT reason FROM auto_select_runs WHERE event_id = ? AND run_number = ?')
+  const runReason = async (eventId, runNumber) => await withDb(async (db) => {
+    const row = await db.prepare('SELECT reason FROM auto_select_runs WHERE event_id = ? AND run_number = ?')
       .get(eventId, runNumber);
     return row ? row.reason : undefined;
   });
@@ -79,7 +83,7 @@ describe('auto-select: deadline guard, re-draw reasons, and draw cap', () => {
   });
 
   it('runs the first draw after the deadline with no reason required, and stores no reason', async () => {
-    pushDeadlineToPast(evId);
+    await pushDeadlineToPast(evId);
 
     const res = await srv.call('POST', `/api/events/${evId}/auto-select/run`, {}, orgToken);
     expect(res.status).toBe(200);
@@ -90,7 +94,7 @@ describe('auto-select: deadline guard, re-draw reasons, and draw cap', () => {
     expect(runs.body.length).toBe(1);
     expect(runs.body[0].runNumber).toBe(1);
 
-    expect(runReason(evId, 1)).toBeNull();
+    expect(await runReason(evId, 1)).toBeNull();
   });
 
   it('rejects a re-draw with no reason', async () => {
@@ -108,7 +112,7 @@ describe('auto-select: deadline guard, re-draw reasons, and draw cap', () => {
     const runs = await srv.call('GET', `/api/events/${evId}/auto-select/runs`, undefined, orgToken);
     expect(runs.body.length).toBe(2);
 
-    expect(runReason(evId, 2)).toBe(secondReason);
+    expect(await runReason(evId, 2)).toBe(secondReason);
   });
 
   it('refuses a draw once the cap is reached, even with a reason supplied', async () => {
@@ -133,7 +137,7 @@ describe('auto-select: deadline guard, re-draw reasons, and draw cap', () => {
     const seeded = await seedDrawEvent(1, applicants);
     const evId2 = seeded.evId;
     const orgToken2 = seeded.orgToken;
-    pushDeadlineToPast(evId2);
+    await pushDeadlineToPast(evId2);
 
     const first = await srv.call('POST', `/api/events/${evId2}/auto-select/run`, {}, orgToken2);
     expect(first.status).toBe(200);

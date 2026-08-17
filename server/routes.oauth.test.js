@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
 import jwt from 'jsonwebtoken';
 import { TEST_SIGNUP_DEFAULTS } from './testConsent.js';
 
@@ -101,16 +100,16 @@ describe('oauth', () => {
      * token) and none of it is what these two cases are about. The row this writes
      * is byte-identical to the one the callback writes.
      */
-    const linkProvider = (db, userId, sub, email) => {
+    const linkProvider = async (db, userId, sub, email) => {
       const now = new Date().toISOString();
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO oauth_accounts
           (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at)
         VALUES (?, ?, 'google', ?, ?, ?, ?)
       `).run(`oa-${sub}`, userId, sub, email, now, now);
     };
 
-    const suspend = (db, userId, until) => db.prepare(`
+    const suspend = async (db, userId, until) => await db.prepare(`
       UPDATE users SET account_status = 'suspended', suspended_at = ?,
              suspended_until = ?, suspension_reason = 'testing the provider door'
        WHERE id = ?
@@ -121,8 +120,8 @@ describe('oauth', () => {
       const sub = 'sub-suspended-live';
       const id = 'user-student-2';
       const email = 'priya.patel@example.com';
-      linkProvider(db, id, sub, email);
-      suspend(db, id, new Date(Date.now() + 7 * 86400_000).toISOString());
+      await linkProvider(db, id, sub, email);
+      await suspend(db, id, new Date(Date.now() + 7 * 86400_000).toISOString());
 
       const { state, nonceCookie } = await begin('google');
       const res = await callback('google', { code: identity({ sub, email }), state, nonceCookie });
@@ -136,8 +135,8 @@ describe('oauth', () => {
       const sub = 'sub-suspended-expired';
       const id = 'user-student-3';
       const email = 'ethan.miller@example.com';
-      linkProvider(db, id, sub, email);
-      suspend(db, id, new Date(Date.now() - 1000).toISOString());
+      await linkProvider(db, id, sub, email);
+      await suspend(db, id, new Date(Date.now() - 1000).toISOString());
 
       const { state, nonceCookie } = await begin('google');
       const res = await callback('google', { code: identity({ sub, email }), state, nonceCookie });
@@ -145,7 +144,7 @@ describe('oauth', () => {
       expect(res.status, JSON.stringify(res.body)).toBe(200);
       expect(res.cookie).toBeTruthy();
 
-      const row = db.prepare(
+      const row = await db.prepare(
         'SELECT account_status, suspension_lifted_at, suspension_reason FROM users WHERE id = ?'
       ).get(id);
       expect(row.account_status).toBe('active');
@@ -213,13 +212,12 @@ describe('oauth', () => {
       Buffer.from(state.split('.')[1], 'base64url').toString()
     ).nonce;
 
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const before = db.prepare('SELECT COUNT(*) AS c FROM oauth_states WHERE nonce = ?').get(nonce).c;
+    const { db } = await import('./db.js');
+    const before = (await db.prepare('SELECT COUNT(*) AS c FROM oauth_states WHERE nonce = ?').get(nonce)).c;
 
     await callback('google', { code: identity(), state, nonceCookie });
 
-    const after = db.prepare('SELECT COUNT(*) AS c FROM oauth_states WHERE nonce = ?').get(nonce).c;
-    db.close();
+    const after = (await db.prepare('SELECT COUNT(*) AS c FROM oauth_states WHERE nonce = ?').get(nonce)).c;
 
     expect(before).toBe(1);
     expect(after).toBe(0);
@@ -229,9 +227,8 @@ describe('oauth', () => {
     // A structurally valid, correctly signed state for a nonce with no row —
     // which is what a forged or long-expired state looks like.
     const { state, nonceCookie } = await begin('google');
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    db.prepare('DELETE FROM oauth_states').run();
-    db.close();
+    const { db } = await import('./db.js');
+    await db.prepare('DELETE FROM oauth_states').run();
 
     const res = await callback('google', { code: identity(), state, nonceCookie });
     expect(res.status).toBe(400);
@@ -254,9 +251,8 @@ describe('oauth', () => {
     expect(res.status).toBe(400);
     expect(res.body.field).toBe('role');
 
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const row = db.prepare('SELECT 1 FROM users WHERE username = ?').get('sneaky_admin');
-    db.close();
+    const { db } = await import('./db.js');
+    const row = await db.prepare('SELECT 1 FROM users WHERE username = ?').get('sneaky_admin');
     expect(row).toBeUndefined();
   });
 
@@ -287,9 +283,8 @@ describe('oauth', () => {
       }
     });
 
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const rows = db.prepare('SELECT signup_data FROM oauth_signup_sessions').all();
-    db.close();
+    const { db } = await import('./db.js');
+    const rows = await db.prepare('SELECT signup_data FROM oauth_signup_sessions').all();
     expect(rows.length).toBeGreaterThan(0);
     for (const r of rows) {
       expect(r.signup_data).not.toContain('SuperSecret123');
@@ -355,10 +350,9 @@ describe('oauth', () => {
     expect(res.status).toBe(200);
     expect(res.body.emailVerified).toBe(false);
 
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const row = db.prepare('SELECT email_verified FROM users WHERE username = ?').get(username);
-    const pending = db.prepare('SELECT 1 FROM email_verification_tokens WHERE user_id = (SELECT id FROM users WHERE username = ?)').get(username);
-    db.close();
+    const { db } = await import('./db.js');
+    const row = await db.prepare('SELECT email_verified FROM users WHERE username = ?').get(username);
+    const pending = await db.prepare('SELECT 1 FROM email_verification_tokens WHERE user_id = (SELECT id FROM users WHERE username = ?)').get(username);
     expect(row.email_verified).toBe(0);
     expect(pending).toBeTruthy();
   });
@@ -453,9 +447,8 @@ describe('oauth', () => {
     expect(body).not.toContain('Mock User');
     expect(body).not.toContain('mock@example.com');
 
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const fake = db.prepare("SELECT 1 FROM users WHERE email LIKE '%mock%'").get();
-    db.close();
+    const { db } = await import('./db.js');
+    const fake = await db.prepare("SELECT 1 FROM users WHERE email LIKE '%mock%'").get();
     expect(fake, 'a fabricated account was created').toBeFalsy();
   });
 
@@ -590,9 +583,8 @@ describe('oauth', () => {
     expect(res.body.code).toBe('link_token_other_account');
 
     // Nothing was written against either account.
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const row = db.prepare('SELECT 1 FROM oauth_accounts WHERE provider_user_id = ?').get('sub-attacker-google');
-    db.close();
+    const { db } = await import('./db.js');
+    const row = await db.prepare('SELECT 1 FROM oauth_accounts WHERE provider_user_id = ?').get('sub-attacker-google');
     expect(row).toBeUndefined();
   });
 

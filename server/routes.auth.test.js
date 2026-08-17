@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
 import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 import { installMailbox } from './testMailbox.js';
 import { hashToken } from './tokenDigest.js';
@@ -165,10 +164,9 @@ describe('auth: password reset', () => {
 
     // The row is addressed by the digest of the token, because that is all the
     // table holds now — the same lookup the route itself performs.
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    db.prepare('UPDATE password_reset_tokens SET expires_at = ? WHERE token_hash = ?')
+    const { db } = await import('./db.js');
+    await db.prepare('UPDATE password_reset_tokens SET expires_at = ? WHERE token_hash = ?')
       .run('2020-01-01T00:00:00.000Z', hashToken(token));
-    db.close();
 
     const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'TooLatePass1' });
     expect(res.status).toBe(400);

@@ -58,9 +58,26 @@ let srv;
 beforeAll(async () => { srv = await startTestServer(); });
 afterAll(async () => { await srv.close(); });
 
+/**
+ * The application's own connection, not a second handle on the file.
+ *
+ * This used to construct a raw SQLite handle on `process.env.WEV_DB_PATH`, which
+ * reaches around the engine abstraction and opens the file directly. Under the
+ * PostgreSQL harness the application is on PostgreSQL and that file is empty, so
+ * every assertion in this file failed with `no such table: users` — not because
+ * evidence preservation is broken there, but because the test was looking at a
+ * different database from the one it had just written to through the API.
+ *
+ * Nothing this file checks is SQLite-specific: it is about a safety report
+ * surviving the deletion of the people named in it, which has to hold on
+ * whichever engine is underneath.
+ *
+ * The handle is SHARED, so it is never closed here — closing it would close the
+ * application's own connection (its pool, on PostgreSQL) for the rest of the run.
+ */
 async function openDb() {
-  const { DatabaseSync } = await import('node:sqlite');
-  return new DatabaseSync(process.env.WEV_DB_PATH);
+  const { db } = await import('./db.js');
+  return db;
 }
 
 /**
@@ -147,14 +164,13 @@ describe('evidence under a live report cannot be destroyed by the reported party
   /** Counts the rows that constitute the evidence for a conversation. */
   async function evidenceCounts(conversationId) {
     const db = await openDb();
-    const reports = db.prepare(
+    const reports = (await db.prepare(
       "SELECT COUNT(*) c FROM reports WHERE target_type = 'conversation' AND target_id = ?"
-    ).get(conversationId).c;
-    const snapshots = db.prepare(`
+    ).get(conversationId)).c;
+    const snapshots = (await db.prepare(`
       SELECT COUNT(*) c FROM report_evidence
       WHERE report_id IN (SELECT id FROM reports WHERE target_type = 'conversation' AND target_id = ?)
-    `).get(conversationId).c;
-    db.close();
+    `).get(conversationId)).c;
     return { reports, snapshots };
   }
 
@@ -277,10 +293,9 @@ describe('evidence under a live report cannot be destroyed by the reported party
 
     const db = await openDb();
     expect(
-      db.prepare('SELECT COUNT(*) c FROM conversations WHERE id = ?').get(conversationId).c,
+      (await db.prepare('SELECT COUNT(*) c FROM conversations WHERE id = ?').get(conversationId)).c,
       'fixture: the conversation should genuinely be gone, or this proves nothing'
     ).toBe(0);
-    db.close();
 
     expect(
       await evidenceCounts(conversationId),
@@ -302,8 +317,7 @@ describe('evidence under a live report cannot be destroyed by the reported party
     await srv.call('DELETE', `/api/events/${eventId}`, undefined, organizer);
 
     const db = await openDb();
-    const row = db.prepare('SELECT * FROM reports WHERE id = ?').get(reportId);
-    db.close();
+    const row = await db.prepare('SELECT * FROM reports WHERE id = ?').get(reportId);
 
     expect(row.reporter_name_snapshot, 'who filed it').toBeTruthy();
     expect(row.target_author_name_snapshot, 'who it was about').toBeTruthy();
@@ -325,11 +339,11 @@ describe('a safety record survives the deletion of the people in it', () => {
     const db = await openDb();
     const now = new Date().toISOString();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, name, email, password_hash, grade, role, verified, created_at, account_status)
       VALUES ('u-purge-reporter', 'Purge Reporter', 'purge-reporter@test.local', 'x', 'N/A', 'student', 1, ?, 'deleted')
     `).run(now);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO reports (id, reporter_id, reporter_name_snapshot, target_type, target_id,
                            target_body_snapshot, category, description, status, priority,
                            created_at, updated_at)
@@ -339,10 +353,9 @@ describe('a safety record survives the deletion of the people in it', () => {
     `).run(now, now);
 
     // The cascade under test. Before migration 011 this deleted the report.
-    db.prepare("DELETE FROM users WHERE id = 'u-purge-reporter'").run();
+    await db.prepare("DELETE FROM users WHERE id = 'u-purge-reporter'").run();
 
-    const row = db.prepare("SELECT * FROM reports WHERE id = 'rep-purge-1'").get();
-    db.close();
+    const row = await db.prepare("SELECT * FROM reports WHERE id = 'rep-purge-1'").get();
 
     expect(row, 'purging the reporter destroyed their own safety report').toBeTruthy();
     expect(row.reporter_id, 'the live link is severed, as it should be').toBeNull();
@@ -356,12 +369,12 @@ describe('a safety record survives the deletion of the people in it', () => {
     const db = await openDb();
     const longAgo = new Date(Date.now() - 4 * 365 * 864e5).toISOString();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, name, email, password_hash, grade, role, verified, created_at,
                          account_status, deleted_at)
       VALUES ('u-held', 'Held Shell', 'held@test.local', 'x', 'N/A', 'student', 1, ?, 'deleted', ?)
     `).run(longAgo, longAgo);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO reports (id, reporter_id, reporter_name_snapshot, target_type, target_id,
                            category, description, status, priority, created_at, updated_at)
       VALUES ('rep-held-1', 'u-held', 'Held Shell', 'comment', 'cmt-x', 'bullying_or_harassment',
@@ -371,25 +384,24 @@ describe('a safety record survives the deletion of the people in it', () => {
     const result = await sweep(db, { now: new Date() });
 
     expect(
-      db.prepare("SELECT 1 FROM users WHERE id = 'u-held'").get(),
+      await db.prepare("SELECT 1 FROM users WHERE id = 'u-held'").get(),
       'the shell of a party to an OPEN report was purged, taking the surrounding context'
     ).toBeTruthy();
     expect(result.heldByReport).toBeGreaterThan(0);
 
     // ...and the hold lifts when the report is dealt with, or it is not a hold,
     // it is a permanent exemption nobody chose.
-    db.prepare("UPDATE reports SET status = 'resolved' WHERE id = 'rep-held-1'").run();
+    await db.prepare("UPDATE reports SET status = 'resolved' WHERE id = 'rep-held-1'").run();
     await sweep(db, { now: new Date() });
     expect(
-      db.prepare("SELECT 1 FROM users WHERE id = 'u-held'").get(),
+      await db.prepare("SELECT 1 FROM users WHERE id = 'u-held'").get(),
       'resolving the report must release the shell to the published 3-year schedule'
     ).toBeFalsy();
     expect(
-      db.prepare("SELECT 1 FROM reports WHERE id = 'rep-held-1'").get(),
+      await db.prepare("SELECT 1 FROM reports WHERE id = 'rep-held-1'").get(),
       'and the report itself still survives the purge'
     ).toBeTruthy();
 
-    db.close();
   });
 
   it('does not let an organizer purge take volunteers\' credited hours with it', async () => {
@@ -409,19 +421,19 @@ describe('a safety record survives the deletion of the people in it', () => {
     const db = await openDb();
     const longAgo = new Date(Date.now() - 4 * 365 * 864e5).toISOString();
 
-    const attendanceBefore = db.prepare('SELECT COUNT(*) c FROM attendance').get().c;
-    const organizerId = db.prepare(
+    const attendanceBefore = (await db.prepare('SELECT COUNT(*) c FROM attendance').get()).c;
+    const organizerId = (await db.prepare(
       'SELECT organizer_id FROM events WHERE id IN (SELECT DISTINCT event_id FROM attendance) LIMIT 1'
-    ).get()?.organizer_id;
+    ).get())?.organizer_id;
     expect(organizerId, 'fixture: the seed has no organizer with attendance against their events').toBeTruthy();
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE users SET account_status = 'deleted', deleted_at = ? WHERE id = ?
     `).run(longAgo, organizerId);
 
     await sweep(db, { now: new Date() });
 
-    const attendanceAfter = db.prepare('SELECT COUNT(*) c FROM attendance').get().c;
+    const attendanceAfter = (await db.prepare('SELECT COUNT(*) c FROM attendance').get()).c;
 
     /**
      * Put the seeded organizer back before asserting.
@@ -432,10 +444,9 @@ describe('a safety record survives the deletion of the people in it', () => {
      * Restoring before the assertion means a failure here still leaves the file
      * usable.
      */
-    db.prepare(`
+    await db.prepare(`
       UPDATE users SET account_status = 'active', deleted_at = NULL WHERE id = ?
     `).run(organizerId);
-    db.close();
 
     expect(
       attendanceAfter,
@@ -501,12 +512,10 @@ describe('a moderator can still read what was preserved', () => {
     expect(evidence.status).toBe(200);
     expect(evidence.body.messages.map(m => m.body).join(' ')).toContain('tell your parents');
 
-    const { DatabaseSync } = await import('node:sqlite');
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const logged = db.prepare(
+    const db = await openDb();
+    const logged = (await db.prepare(
       "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED' AND details LIKE ?"
-    ).get(`%${reportId}%`).c;
-    db.close();
+    ).get(`%${reportId}%`)).c;
     expect(logged, 'reading a student\'s private messages must leave a record').toBeGreaterThan(0);
   });
 
