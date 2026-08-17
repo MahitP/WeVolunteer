@@ -24,6 +24,7 @@
  */
 
 import crypto from 'crypto';
+import { isUniqueViolation } from './db/dialectSql.js';
 import { runInTransaction } from './db/connectionContext.js';
 
 import { db } from './db.js';
@@ -218,7 +219,7 @@ export async function createReport({ reporter, targetType, targetId, category, d
      * student an error after they worked up to pressing the button teaches them
      * the button is broken.
      */
-    if (String(err.message || '').includes('UNIQUE constraint failed')) {
+    if (isUniqueViolation(err)) {
       const existing = await db.prepare(`
         SELECT id FROM reports
         WHERE reporter_id = ? AND target_type = ? AND target_id = ?

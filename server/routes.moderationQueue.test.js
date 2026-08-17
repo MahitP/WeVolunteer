@@ -49,7 +49,7 @@ async function freshReporter() {
 const adminToken = () => srv.login('admin@example.gov');
 const rowFor = async (id) => await db.prepare('SELECT * FROM reports WHERE id = ?').get(id);
 const historyFor = async (id) => await db.prepare(
-  'SELECT * FROM moderation_actions WHERE report_id = ? ORDER BY created_at, rowid'
+  'SELECT * FROM moderation_actions WHERE report_id = ? ORDER BY created_at, id'
 ).all(id);
 
 /** Files a report from somebody with no other involvement, and returns its id. */

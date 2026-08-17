@@ -238,6 +238,33 @@ export function nullSafeEquals(db, column, param) {
  * `IS NOT 'private'` gets it right and PostgreSQL rejects the form outright, so
  * this answered 500 there rather than answering wrongly.
  */
+/**
+ * Did this error come from a UNIQUE constraint?
+ *
+ * The engines report it completely differently, and the difference is not
+ * cosmetic — this is how "insert, and if it collides read the existing row"
+ * gets written, so a failed match turns a handled duplicate into a 500.
+ *
+ *   SQLite      Error: UNIQUE constraint failed: reports.reporter_id, …
+ *   PostgreSQL  error: duplicate key value violates unique constraint "…"
+ *               with err.code === '23505'
+ *
+ * PostgreSQL's SQLSTATE is checked first because it is a stable code rather
+ * than prose; SQLite has no equivalent on the error object, so its message is
+ * the only signal available there.
+ *
+ * The one call site is the report-duplicate path, where matching only SQLite's
+ * wording meant a second report of the same thing answered 500 on PostgreSQL
+ * instead of returning the original id — and the comment at that site is
+ * explicit that showing a distressed student an error after they worked up to
+ * pressing the button is the outcome it exists to prevent.
+ */
+export function isUniqueViolation(err) {
+  if (!err) return false;
+  if (err.code === '23505') return true;                       // PostgreSQL
+  return /UNIQUE constraint failed/i.test(String(err.message ?? ''));  // SQLite
+}
+
 export function nullSafeNotEquals(db, column, param) {
   return isPostgres(db)
     ? `${column} IS DISTINCT FROM ${param}`
