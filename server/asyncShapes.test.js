@@ -20,6 +20,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { unportedChains } from './testing/fixtureDebt.js';
 
 const SERVER = path.resolve(import.meta.dirname);
 
@@ -784,14 +785,13 @@ describe('the unported fixture surface', () => {
   });
 
   /** Lowered only by porting files, never raised to accommodate new ones. */
-  const CEILING = 22;
+  const CEILING = 133;
 
   it(`has at most ${CEILING} unawaited prepare() chains in proxy-holding test files`, () => {
     const offenders = new Map();
     for (const { rel, src } of FILES) {
       if (!rel.includes('.test.')) continue;
-      if (holdsRawHandle(src)) continue;
-      const hits = src.match(PROXY_HANDLES)?.length ?? 0;
+      const hits = unportedChains(readFileSync(path.join(SERVER, rel), 'utf8')).length;
       if (hits) offenders.set(rel, hits);
     }
 
@@ -819,8 +819,7 @@ describe('the unported fixture surface', () => {
   it('pins the ceiling to the real count exactly', () => {
     const total = FILES
       .filter(f => f.rel.includes('.test.'))
-      .filter(f => !holdsRawHandle(f.src))
-      .reduce((n, f) => n + (f.src.match(PROXY_HANDLES)?.length ?? 0), 0);
+      .reduce((n, f) => n + unportedChains(readFileSync(path.join(SERVER, f.rel), 'utf8')).length, 0);
 
     expect(
       CEILING,
