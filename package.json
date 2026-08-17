@@ -14,13 +14,17 @@
     "dev:client": "vite --host",
     "dev:server": "npm run dev --workspace=server",
     "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "dev:ai": "VITE_LOCAL_AI=true npm run dev",
+    "dev:no-ai": "VITE_LOCAL_AI=false npm run dev",
     "build": "vite build",
+    "build:no-ai": "VITE_LOCAL_AI=false vite build",
     "start": "npm start --workspace=server",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:reset:dev": "node --env-file-if-exists=.env bin/reset-dev-db.mjs",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:postgres": "WEV_POSTGRES_APP_TEST=1 vitest run --project server"
   },
   "dependencies": {
     "@amplitude/unified": "^1.1.29",
@@ -29,6 +33,7 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^1.24.0",
     "pdfjs-dist": "^6.2.108",
+    "pg": "^8.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-leaflet": "^5.0.0",

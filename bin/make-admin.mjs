@@ -61,7 +61,7 @@ const invokedDirectly = process.argv[1]
 
 if (invokedDirectly) main();
 
-function main() {
+async function main() {
 const email = process.argv[2];
 
 if (!email) {
@@ -158,7 +158,7 @@ try {
       "UPDATE users SET role = 'admin', token_version = token_version + 1 WHERE email = ?"
     ).run(email);
 
-    recordCliAudit(db, {
+    await recordCliAudit(db, {
       action: CLI_EVENTS.ADMIN_PROMOTED_CLI,
       targetUserId: user.id,
       command: 'bin/make-admin.mjs',

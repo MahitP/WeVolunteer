@@ -29,6 +29,7 @@
 
 import { normaliseTag, MAX_TAGS_PER_EVENT } from '../eventTags.js';
 import { AIStatus } from './runtime/types.js';
+import { TAGS_PROMPT, asDataBlock } from './prompts/tasks.js';
 
 /**
  * The shape the model is held to.
@@ -50,11 +51,6 @@ export const TAG_SCHEMA = Object.freeze({
   additionalProperties: false,
 });
 
-const PROMPT = [
-  'Suggest short topic tags for this volunteering opportunity.',
-  'One or two words each, describing what the work is about.',
-  'Do not include the words "volunteer", "volunteering" or "event".',
-].join(' ');
 
 /**
  * Tags that say nothing.
@@ -154,7 +150,7 @@ export async function suggestTags({ title, description, runtime, vocabulary = []
 
   try {
     const reply = await runtime.generate(
-      [{ role: 'user', content: `${PROMPT}\n\nOPPORTUNITY:\n---\n${source}\n---` }],
+      [{ role: 'user', content: `${TAGS_PROMPT}\n\n${asDataBlock('OPPORTUNITY', source)}` }],
       { schema: TAG_SCHEMA, signal, maxTokens: 120 },
     );
 

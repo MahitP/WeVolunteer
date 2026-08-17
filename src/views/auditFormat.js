@@ -114,6 +114,44 @@ const ACTIONS = {
      to see classmates' details and write on their service records. */
   ORGANIZATION_RANK_CHANGED: ['Organization rank changed', TONES.NOTABLE],
   ORGANIZATION_ROSTER_EXPORTED: ['Organization roster exported', TONES.NOTABLE],
+
+  /* Club moderation. All five are NOTABLE and none is GRAVE, deliberately.
+     GRAVE is reserved for what a person cannot undo and cannot escape — a
+     platform-wide lockout, or somebody reading their messages. A ban from one
+     organization is exclusion from one community: the account still works,
+     every other club is still open, and there is an appeal route with a
+     decision at the end of it. That is the weight COMMENT_DELETED and
+     EVENT_DELETED carry — power exercised over somebody else — and it is the
+     right rung for these.
+
+     Removal is NOTABLE rather than routine for the reason the route that
+     writes it gives: a plain removal used to leave no trace at all, and it is
+     the same act as a ban minus the bar on returning. Somebody deciding another
+     student is no longer in the club is not clerical work.
+
+     The two reversals are NOTABLE for the same reason ACCOUNT_UNSUSPENDED is.
+     They only ever restore access, which is why they are not grave — but a
+     standing decision being undone is exactly what somebody auditing a year of
+     club moderation is looking for. */
+  ORGANIZATION_BANNED:      ['Banned from an organization', TONES.NOTABLE],
+  ORGANIZATION_MEMBERSHIP_REMOVED: ['Removed from an organization', TONES.NOTABLE],
+  ORGANIZATION_BAN_LIFTED:  ['Organization ban lifted', TONES.NOTABLE],
+  ORGANIZATION_BAN_APPEAL_REVERSED: ['Organization ban appeal upheld; ban lifted', TONES.NOTABLE],
+  ORGANIZATION_BAN_APPEAL_STANDS: ['Organization ban appeal denied; ban stands', TONES.NOTABLE],
+
+  /* Creating or editing a badge DEFINITION, which is not the same act as
+     awarding one and is why it has its own pair of names. It changes what the
+     platform recognises rather than who it recognises, touches nobody's profile
+     on its own, and is ordinary administrative work — so ROUTINE, matching
+     BADGE_AWARDED above.
+
+     These two are older than the rest of this block and were unlabelled the
+     whole time. They rendered as raw SCREAMING_SNAKE in the Audit Explorer and
+     the coverage guard could not see them, because `badgeRoutes.js` picks
+     between them with a ternary and the guard's scan only matched a quote
+     sitting directly after `action:`. The scan reads conditional forms now. */
+  BADGE_DEFINED:            ['Badge definition created', TONES.ROUTINE],
+  BADGE_DEFINITION_UPDATED: ['Badge definition updated', TONES.ROUTINE],
   ERROR_GROUP_STATUS_CHANGED: ['Error group triaged', TONES.ROUTINE],
   USERNAME_DEDUPED:         ['Duplicate username resolved', TONES.ROUTINE],
 

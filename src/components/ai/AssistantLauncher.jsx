@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import WellyMark from './WellyMark';
 import { isLocalAIEnabled, detectCapability } from '../../ai';
 import { readPreferences } from '../../ai/preferences';
 import { useLocationContext } from '../../contexts/LocationContext';
@@ -7,14 +7,44 @@ import { useLocationContext } from '../../contexts/LocationContext';
 /**
  * The way in.
  *
- * ── Shown only to somebody who already opted in ──
+ * ── Shown to anybody whose device can run it ──
  *
- * Three conditions, all required: the build has the feature, the device can run
- * it, and this person has set it up in Settings. A launcher that appeared for
- * everyone would be an advertisement for a download, on a screen where students
- * are trying to do something else — and the repository has an explicit position
- * on nudging people into consent decisions, recorded beside the analytics
- * switch.
+ * Two conditions: the build has the feature, and the device can run it. Whether
+ * this person has set a model up decides what OPENS, not whether the button is
+ * there.
+ *
+ * It used to require setup as a third condition, on the argument that a launcher
+ * everybody can see is an advertisement for a download — the repository's
+ * position on not nudging people into consent decisions, recorded beside the
+ * analytics switch. That argument was overtaken by what it produced: a feature
+ * whose only entry point was a card most students would never scroll to, in a
+ * Settings section about something else. "Welly is finished and I still cannot
+ * find it" is the report this shape generates.
+ *
+ * The anti-nudge position is kept where it does the work. This button opens an
+ * EXPLANATION, never a transfer: the same disclosure screen as before — what it
+ * can do, that the weights come from Hugging Face, how large they are — and the
+ * download still starts only when somebody chooses a model and presses the
+ * button that names the size. Nothing is fetched by looking, and nothing is
+ * fetched by opening. What changed is that the offer is findable; what it costs
+ * to accept is stated exactly where it always was.
+ *
+ * ── Why it lives in the topbar ──
+ *
+ * It was a circle fixed to the bottom-right corner, which is the shape every
+ * sales and support widget on the web has taught people to recognise. It also
+ * floated over content, needed a z-index, and had a media query to stop it
+ * colliding with the mobile bottom navigation.
+ *
+ * The topbar already holds the application's global actions — the theme toggle
+ * and the notifications bell. Welly is exactly that kind of thing: available
+ * everywhere, owned by no single page, and not a destination. Sitting there it
+ * inherits the existing button treatment, falls into natural keyboard order,
+ * covers nothing, and needs no stacking rules at all.
+ *
+ * A navigation entry was considered and rejected: navigation is for places, and
+ * a permanent entry for an off-by-default feature is a dead item for most
+ * students.
  *
  * ── Lazily imported ──
  *
@@ -49,28 +79,36 @@ export default function AssistantLauncher() {
     ? { lat: location.latitude, lng: location.longitude }
     : null;
 
-  /* Read at render, not held in state: Settings can turn this off in another
-     tab, and a launcher that outlived the preference would open a panel with
-     no model to load. */
   if (!isLocalAIEnabled()) return null;
-  const prefs = readPreferences();
-  if (!prefs.enabled || !prefs.modelId) return null;
   if (!detectCapability().supported) return null;
+
+  /* Read at render, not held in state: Settings can change this in another tab,
+     and a launcher holding a stale answer would open the wrong panel. */
+  const prefs = readPreferences();
+  const configured = Boolean(prefs.enabled && prefs.modelId);
 
   return (
     <>
+      {/* Same treatment as ThemeToggle and NotificationsBell beside it. The
+          accessible name is the assistant's name, not a description of a
+          shape — "Welly" is what a student is looking for. */}
       <button
-        className="btn btn-primary ai-launcher"
+        className="btn btn-ghost btn-icon welly-launcher"
         onClick={() => setOpen(true)}
-        aria-label="Open the assistant"
+        aria-label="Ask Welly"
         aria-haspopup="dialog"
+        title="Ask Welly"
       >
-        <Sparkles size={18} aria-hidden="true" />
+        <WellyMark />
       </button>
 
       {open && (
         <Suspense fallback={null}>
-          <AssistantPanel onClose={() => setOpen(false)} position={position} />
+          <AssistantPanel
+            onClose={() => setOpen(false)}
+            position={position}
+            needsSetup={!configured}
+          />
         </Suspense>
       )}
     </>

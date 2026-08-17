@@ -80,7 +80,7 @@ async function main() {
         WHERE id = ?
       `).run(user.id);
 
-      recordCliAudit(db, {
+      await recordCliAudit(db, {
         action: CLI_EVENTS.OWNER_REVOKED,
         targetUserId: user.id,
         command: 'bin/revoke-ownership.mjs',

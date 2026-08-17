@@ -9366,6 +9366,64 @@ input:disabled + .premium-slider {
   font-size: 0.875rem;
 }
 
+/**
+ * The banned state, on the organization page and in the moderation list.
+ *
+ * Tinted with the existing `--danger` aliases rather than a new colour, so it
+ * reads as the same "this is an enforcement state" the rest of the app uses and
+ * moves with the theme. Deliberately NOT an `.alert`: nothing has just gone
+ * wrong, this is a standing fact about the page.
+ */
+.org-ban-notice {
+  margin: var(--s4) 0 0;
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--danger-border, var(--danger));
+  border-radius: var(--r-md);
+  background: var(--danger-tint, transparent);
+}
+
+.org-ban-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0 0 var(--s2);
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.org-ban-notice p + p { margin: var(--s1) 0 0; }
+
+.org-ban-row {
+  gap: var(--s3);
+  align-items: flex-start;
+  padding: var(--s3) 0;
+}
+
+.org-ban-row + .org-ban-row { border-top: 1px solid var(--border); }
+
+.org-ban-name { margin: 0; font-weight: 600; }
+
+.org-ban-appeal {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: var(--s1) 0 0;
+  color: var(--warn);
+}
+
+/* A list that carries rows rather than bullets. */
+.list-plain { list-style: none; margin: 0; padding: 0; }
+
+@media (max-width: 560px) {
+  /* The Unban control drops under the person it applies to rather than
+     squeezing the reason into a column two words wide. */
+  .org-ban-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .org-ban-row .btn { align-self: flex-start; }
+}
+
 .org-eventgroup + .org-eventgroup { margin-top: var(--s4); }
 
 .org-event {
@@ -10975,24 +11033,18 @@ input:disabled + .premium-slider {
    is also what keeps this readable in dark mode without a second palette.
    ───────────────────────────────────────────────────────────────────────── */
 
-/* The launcher sits above content but below dialogs, and clears the mobile
-   bottom navigation rather than sitting on top of it. */
-.ai-launcher {
-  position: fixed;
-  right: var(--s4);
-  bottom: var(--s4);
-  z-index: 40;
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  border-radius: var(--r-full);
-  box-shadow: var(--sh-2);
+/* Welly's mark wears the WeVolunteer badge tile, so it is correct in both
+   themes without a second palette. The glyph inherits --brand-mark-ink. */
+.welly-mark svg {
+  display: block;
 }
 
-@media (max-width: 768px) {
-  .ai-launcher {
-    bottom: calc(var(--s16) + var(--s4));
-  }
+/* The launcher is an ordinary topbar icon button. It was a fixed-position
+   circle in the corner — the shape every support widget on the web uses — and
+   needed a z-index and a media query to avoid the mobile bottom navigation.
+   Sitting in the action row it needs neither. */
+.welly-launcher {
+  flex: none;
 }
 
 .ai-transcript {

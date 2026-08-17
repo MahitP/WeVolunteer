@@ -40,8 +40,8 @@ here untrue, the change is a policy change first.
 
 # AI and on-device processing
 
-WeVolunteer has an optional assistant that runs on your own device. This page explains what
-that means in practice: what is downloaded, what is stored, what travels over the network, and
+WeVolunteer has an optional assistant called **Welly** that runs on your own device. This
+page explains what that means in practice: what is downloaded, what is stored, what travels over the network, and
 what the assistant is not allowed to do.
 
 It is **off unless you turn it on**. If you have never opened Settings and set it up, nothing
@@ -49,9 +49,7 @@ described here has happened on your device.
 
 ## Where the assistant runs
 
-The language model runs inside your browser, on your device. The one exception
-is speaking your question instead of typing it, which is off by default and
-described in its own section below.
+The language model runs inside your browser, on your device.
 
 When you type something to the assistant, that text is processed on your device. It is not
 sent to OpenAI, Anthropic, Google, or any other AI company. There is no account, no API key
@@ -152,29 +150,18 @@ the relevant WeVolunteer page, not the one in a conversation.
 
 ## Which devices can use it
 
-Not every device can run a model, and WeVolunteer will not offer one that is likely to fail.
-Where a device is not capable, or is only capable of the smallest model, Settings says so and
-says why rather than presenting a choice that will not work.
+Not every device can run a model, and WeVolunteer will not offer one that is likely to fail or
+to answer badly. Where a device cannot, Settings says so and says why rather than presenting a
+choice that will not work.
 
-On iPhone and iPad, Safari limits how much memory a page may use and ends the page if it is
-exceeded, so only the smallest model is offered there.
+**Welly is not currently available on iPhone or iPad.** Safari limits how much memory a web
+page may use and ends the page if it is exceeded, and the only model small enough to stay
+inside that limit did not answer reliably enough to put in front of a student. Rather than
+offer one that sometimes reports a correct answer as a failure, it is not offered at all. This
+will change if a small enough model becomes good enough.
 
-## Speaking instead of typing
-
-There is an optional setting that lets you ask a question out loud instead of
-typing it. **This is the one part of the assistant that does not stay on your
-device**, and it is a separate setting for that reason.
-
-When you use it, your browser records what you say and sends it to a speech
-service run by the company that makes your browser — Google for Chrome,
-Microsoft for Edge, Apple for Safari — which turns it into text and sends the
-text back. WeVolunteer never receives the audio, and has no way to see what that
-company does with it or how long it is kept. That is between you and your
-browser, and their privacy policy is the one that governs it.
-
-It is **off unless you turn it on**, it is not switched on by the main assistant
-setting, and typing always works instead. If your browser has no speech
-recognition, the option does not appear.
+The same applies to computers with little memory available. Everything else in WeVolunteer
+works normally on every device either way.
 
 ## Analytics
 

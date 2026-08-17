@@ -67,9 +67,9 @@ describe('when a document has changed', () => {
   });
 
   it('goes away once dismissed', async () => {
-    const { container } = draw();
+    const { baseElement } = draw();
     fireEvent.click(await screen.findByRole('button', { name: /Got it/i }));
-    await waitFor(() => expect(container.querySelector('[role="dialog"]')).toBeNull());
+    await waitFor(() => expect(baseElement.querySelector('[role="dialog"]')).toBeNull());
   });
 });
 
@@ -88,10 +88,10 @@ describe('honesty about the excerpt', () => {
     /* A deletion-only change is real and must still notify — but inventing a
        sentence would put words in the document's mouth. */
     api.fetchLegalUpdates.mockResolvedValue({ updates: [{ ...UPDATE, excerpt: null, changeCount: 0 }] });
-    const { container } = draw();
+    const { baseElement } = draw();
 
     await screen.findByText(/wording has been revised/i);
-    expect(container.querySelector('.legal-excerpt')).toBeNull();
+    expect(baseElement.querySelector('.legal-excerpt')).toBeNull();
   });
 });
 
@@ -102,10 +102,10 @@ describe('several at once', () => {
     api.fetchLegalUpdates.mockResolvedValue({
       updates: [UPDATE, { ...UPDATE, slug: 'terms-of-service', title: 'Terms of Service' }],
     });
-    const { container } = draw();
+    const { baseElement } = draw();
 
     await screen.findByText('Privacy Policy has been updated');
-    expect(container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(baseElement.querySelectorAll('[role="dialog"]')).toHaveLength(1);
     expect(await screen.findByText(/1 more update/)).toBeInTheDocument();
   });
 
@@ -123,18 +123,18 @@ describe('several at once', () => {
 describe('renders nothing when', () => {
   it('there is nothing to say', async () => {
     api.fetchLegalUpdates.mockResolvedValue({ updates: [] });
-    const { container } = draw();
+    const { baseElement } = draw();
     await waitFor(() => expect(api.fetchLegalUpdates).toHaveBeenCalled());
-    expect(container.textContent).toBe('');
+    expect(baseElement.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it('the request fails', async () => {
     /* A student who opened the app to find a shift must not be shown an error
        about a notice system they never asked about. */
     api.fetchLegalUpdates.mockRejectedValue(new Error('offline'));
-    const { container } = draw();
+    const { baseElement } = draw();
     await waitFor(() => expect(api.fetchLegalUpdates).toHaveBeenCalled());
-    expect(container.textContent).toBe('');
+    expect(baseElement.querySelector('[role="dialog"]')).toBeNull();
   });
 });
 
@@ -148,9 +148,9 @@ describe('it cannot trap somebody', () => {
     api.fetchLegalUpdates.mockResolvedValue({ updates: [UPDATE] });
     api.acknowledgeLegalUpdate.mockRejectedValue(new Error('500'));
 
-    const { container } = draw();
+    const { baseElement } = draw();
     fireEvent.click(await screen.findByRole('button', { name: /Got it/i }));
 
-    await waitFor(() => expect(container.querySelector('[role="dialog"]')).toBeNull());
+    await waitFor(() => expect(baseElement.querySelector('[role="dialog"]')).toBeNull());
   });
 });

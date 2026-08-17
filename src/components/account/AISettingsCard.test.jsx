@@ -6,6 +6,11 @@ import { MemoryRouter } from 'react-router-dom';
 /**
  * The settings surface, driven entirely against mocked storage.
  *
+ * The capability fixture says `advanced`, which is what a real 8 GB device
+ * now gets. It said `fast` until the smallest model was withdrawn from
+ * conversation — a tier real detection can no longer return, so a fixture
+ * claiming it was testing a state that cannot occur.
+ *
  * Nothing here downloads a model or touches WebAssembly — `aiStorage()` is
  * replaced wholesale. That is the point of the abstraction: the states a
  * student actually sees (unsupported, off, downloading, ready, failed) are
@@ -21,7 +26,7 @@ const storage = {
 let capability = {
   supported: true,
   reason: null,
-  recommendedTier: 'fast',
+  recommendedTier: 'advanced',
   maxBytes: Number.POSITIVE_INFINITY,
   webgpu: true,
   isIOS: false,
@@ -54,7 +59,7 @@ beforeEach(() => {
   capability = {
     supported: true,
     reason: null,
-    recommendedTier: 'fast',
+    recommendedTier: 'advanced',
     maxBytes: Number.POSITIVE_INFINITY,
     webgpu: true,
     isIOS: false,
@@ -66,7 +71,7 @@ describe('before anything is set up', () => {
   it('offers setup and downloads nothing on its own', () => {
     renderCard();
 
-    expect(screen.getByRole('button', { name: /set up the assistant/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /set up welly/i })).toBeInTheDocument();
     /* Rendering the panel must not fetch anything. The download begins only
        when somebody chooses a model and confirms. */
     expect(storage.downloadModel).not.toHaveBeenCalled();
@@ -96,7 +101,7 @@ describe('on a device that cannot run a model', () => {
 
     expect(screen.getByText(/cannot run on this device/i)).toBeInTheDocument();
     expect(screen.getByText(/cannot run WebAssembly/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /set up the assistant/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /set up welly/i })).toBeNull();
   });
 });
 
@@ -108,7 +113,7 @@ describe('choosing a model', () => {
      */
     renderCard();
 
-    fireEvent.click(screen.getByRole('button', { name: /set up the assistant/i }));
+    fireEvent.click(screen.getByRole('button', { name: /set up welly/i }));
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText('Recommended')).toBeInTheDocument();
@@ -116,7 +121,7 @@ describe('choosing a model', () => {
 
   it('shows a real size and licence for each option', async () => {
     renderCard();
-    fireEvent.click(screen.getByRole('button', { name: /set up the assistant/i }));
+    fireEvent.click(screen.getByRole('button', { name: /set up welly/i }));
 
     const radios = await screen.findAllByRole('radio');
     expect(radios.length).toBeGreaterThan(0);
@@ -130,7 +135,7 @@ describe('choosing a model', () => {
   it('downloads the chosen model and remembers it', async () => {
     renderCard();
 
-    fireEvent.click(screen.getByRole('button', { name: /set up the assistant/i }));
+    fireEvent.click(screen.getByRole('button', { name: /set up welly/i }));
     await screen.findByRole('dialog');
     fireEvent.click(screen.getByRole('button', { name: /download .* and turn on/i }));
 
@@ -153,7 +158,7 @@ describe('when the download fails', () => {
 
     renderCard();
 
-    fireEvent.click(screen.getByRole('button', { name: /set up the assistant/i }));
+    fireEvent.click(screen.getByRole('button', { name: /set up welly/i }));
     await screen.findByRole('dialog');
     fireEvent.click(screen.getByRole('button', { name: /download .* and turn on/i }));
 
@@ -173,7 +178,7 @@ describe('when the download fails', () => {
 
     renderCard();
 
-    fireEvent.click(screen.getByRole('button', { name: /set up the assistant/i }));
+    fireEvent.click(screen.getByRole('button', { name: /set up welly/i }));
     await screen.findByRole('dialog');
     fireEvent.click(screen.getByRole('button', { name: /download .* and turn on/i }));
 

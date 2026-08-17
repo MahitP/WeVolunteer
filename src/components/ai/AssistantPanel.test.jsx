@@ -30,7 +30,7 @@ const renderPanel = () => render(
 );
 
 const askQuestion = text => {
-  fireEvent.change(screen.getByLabelText(/ask the assistant/i), { target: { value: text } });
+  fireEvent.change(screen.getByLabelText(/ask welly/i), { target: { value: text } });
   fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
 };
 
@@ -113,8 +113,8 @@ describe('privacy of the transcript', () => {
      * levels do not cover everything inside a subtree, and a transcript records
      * what somebody asked about their own volunteering.
      */
-    const { container } = renderPanel();
-    expect(container.querySelector('[data-replay-block]')).toBeTruthy();
+    const { baseElement } = renderPanel();
+    expect(baseElement.querySelector('[data-replay-block]')).toBeTruthy();
   });
 
   it('keeps nothing on the device unless the preference is on', async () => {

@@ -1890,10 +1890,23 @@ when they are done, not when they become uncomfortable to look at.
   change to a security control.
 - **Effort:** small. **Opened and resolved:** 2026-08-08.
 
-#### TD-21 — foreign-key enforcement rests on a library default, not a pragma
+#### TD-21 — foreign-key enforcement rested on a library default, not a pragma — **resolved**
+
+- **Resolution (2026-08-15).** Both halves are done and this entry was simply not
+  updated when they landed. `server/db.js` constructs
+  `new DatabaseSync(dbPath, { enableForeignKeyConstraints: true })` — stated
+  rather than inherited, with the paragraph the two neighbouring pragmas already
+  had — and `server/db.foreignKeys.test.js` asserts it on the application's own
+  connection. Commit `a7517b4`. The "written up rather than done here" sentence
+  below describes the state before that commit and is kept for its reasoning.
+- **Why it is recorded rather than deleted.** The register asked to be verified
+  against the repository rather than trusted, and this is the case that makes the
+  point in the opposite direction from the usual one: an item can be stale by
+  being *closed*, not only by being reopened. A reader triaging launch work would
+  have spent time on a one-line change that was already made.
 
 - **Detail:** `node:sqlite` sets `enableForeignKeyConstraints: true` by default,
-  and `server/db.js:109` constructs `new DatabaseSync(dbPath)` with no options.
+  and `server/db.js:109` constructed `new DatabaseSync(dbPath)` with no options.
   So every declared foreign key in this schema **is** enforced — all forty-four
   tables, including `attendance`'s three `ON DELETE CASCADE` clauses and
   `user_badges`' two. Verified against the production database:
@@ -1967,6 +1980,36 @@ when they are done, not when they become uncomfortable to look at.
 ### Resolved
 
 Kept rather than deleted, because the reasoning is the part worth having.
+
+#### TD-23 — the audit-label guard could not see a conditional action — **resolved**
+
+- **Was.** `src/auditLabelCoverage.test.js` scans the server for every audit
+  action that can be written and fails the build on any that reaches the Audit
+  Explorer without a hand-written label. Its scan required a quote sitting
+  *directly* after `action:`, so a call site that picks between two names was
+  invisible to it:
+
+      action: mode === 'ban' ? 'ORGANIZATION_BANNED' : 'ORGANIZATION_MEMBERSHIP_REMOVED',
+
+- **What it hid.** Seven actions were shipping unlabelled and rendering as raw
+  SCREAMING_SNAKE, six of them invisible to the guard. Four of the six were new
+  organization-moderation actions; the other two were `BADGE_DEFINED` and
+  `BADGE_DEFINITION_UPDATED`, unseen since `badgeRoutes.js` was written. The
+  seventh, `ORGANIZATION_BAN_LIFTED`, is a plain literal and was the only one
+  that ever failed the build — pulling on it is what surfaced the other six.
+- **Why it mattered more than six labels.** This is the TD-12 pattern in a second
+  place: a guard whose *scan* is narrower than the code it polices does not
+  degrade to partial coverage, it asserts something false. The header of that
+  very file says it exists because three actions had already drifted — and while
+  it said so, six more were drifting past it.
+- **Fix.** The scan takes everything to the end of the `action:` line and pulls
+  every SCREAMING_SNAKE literal out of it, so both branches of a conditional are
+  seen. Deliberately over-inclusive: a false positive costs one unnecessary
+  label, a false negative costs the bug above, silently. Verified by deleting
+  each of the seven labels in turn and confirming the guard fails on it — seven
+  runs, seven failures, which is the part that distinguishes a guard that works
+  from a guard that passes.
+- **Opened and closed:** 2026-08-15.
 
 #### TD-16 — Guard 5 could not see the `auto_linked` grant spend — **resolved**
 

@@ -48,7 +48,7 @@ WEV_DB_PATH=/tmp/wevolunteer-demo.db npm run dev
 ### What the seed creates
 
 - **Accounts:** 26 — 1 administrator, 5 organizers, 20 students. All share the
-  password `pilotpassword2026`; the administrator is `admin@sbvolunteers.org`.
+  password `pilotpassword2026`; the administrator is `pilot-admin@example.org`.
   Credentials are listed in `docs/operations/pilot-credentials.md`.
 - **Events:** 6 realistic test events, some open, some past.
 - **Applications:** the simulated applications, waitlists, and withdrawals.

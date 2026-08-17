@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Send, Square, Trash2, Mic, MicOff } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Send, Square, Trash2 } from 'lucide-react';
 import Modal, { ModalHead } from '../Modal';
+import WellyMark from './WellyMark';
 import AssistantCard, { AssistantSource } from './AssistantCard';
 import { ask } from '../../ai/assistant';
 import { AIStatus, createRuntime, modelById, isAbort } from '../../ai';
 import { readPreferences } from '../../ai/preferences';
 import { loadConversation, saveConversation, clearConversation } from '../../ai/conversation';
-import { isVoiceSupported, startDictation } from '../../ai/voice';
 
 /**
  * The conversation.
@@ -25,14 +26,13 @@ import { isVoiceSupported, startDictation } from '../../ai/voice';
  * facts without the sentence polished. Blocking the input behind a loading
  * spinner would make the assistant feel slower than the app it lives in.
  */
-export default function AssistantPanel({ onClose, position }) {
+export default function AssistantPanel({ onClose, position, needsSetup = false }) {
+  /* Before every early return, per `hookOrder.test.jsx`. */
+  const navigate = useNavigate();
   const [messages, setMessages] = useState(() => loadConversation());
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(AIStatus.IDLE);
-  const [listening, setListening] = useState(false);
-  const [voiceError, setVoiceError] = useState(null);
-  const dictationRef = useRef(null);
 
   const runtimeRef = useRef(null);
   const abortRef = useRef(null);
@@ -67,7 +67,6 @@ export default function AssistantPanel({ onClose, position }) {
       cancelled = true;
       aliveRef.current = false;
       abortRef.current?.abort();
-      dictationRef.current?.stop();
       /* Release the model with the panel. Holding several hundred megabytes
          open for a closed dialog is the difference between a usable phone and
          a reloaded tab. */
@@ -139,54 +138,84 @@ export default function AssistantPanel({ onClose, position }) {
     }
   }, [busy, position]);
 
-  /**
-   * Dictate a question.
-   *
-   * Offered only when the browser has a recogniser AND the person switched it
-   * on — it is the one capability here that sends audio away, so it is opt-in
-   * separately from the assistant itself.
-   */
-  const toggleDictation = useCallback(() => {
-    if (dictationRef.current) {
-      dictationRef.current.stop();
-      return;
-    }
-    setVoiceError(null);
-    setListening(true);
-
-    const session = startDictation({ onInterim: text => setInput(text) });
-    dictationRef.current = session;
-
-    session.result
-      .then(text => { if (aliveRef.current && text) setInput(text); })
-      .catch(err => { if (aliveRef.current) setVoiceError(err.message); })
-      .finally(() => {
-        dictationRef.current = null;
-        if (aliveRef.current) setListening(false);
-      });
-  }, []);
-
   const clearAll = useCallback(() => {
     clearConversation();
     setMessages([]);
   }, []);
 
-  /* Both halves required: a browser that can, and a person who asked. */
-  const voiceEnabled = readPreferences().voiceInput && isVoiceSupported();
-
   const statusLine = status === AIStatus.LOADING
-    ? 'Getting the model ready. You can ask now — answers will be plainer until it is.'
+    ? 'Getting Welly ready on this device. You can ask now — answers will be plainer until then.'
     : status === AIStatus.ERROR
-      ? 'The model could not start, so answers will be plainer. Everything still works.'
+      ? 'Welly could not start on this device, so answers will be plainer. Everything still works.'
       : null;
 
+  /**
+   * Opened before a model exists.
+   *
+   * The launcher is visible to anybody whose device can run Welly, so this is
+   * the first thing most students see — and it must be an explanation, not a
+   * conversation with a broken input. It deliberately does NOT offer to start a
+   * download: the choice of model, its size and where the weights come from
+   * belong on the disclosure screen in Settings, which already states all three
+   * and is the one place that consent is recorded from.
+   *
+   * Sending somebody there rather than reproducing it here is not politeness
+   * about scope. The setup screen owns integrity verification, the size check
+   * and the OPFS write; a second entry point into that would be a second path to
+   * keep correct.
+   */
+  if (needsSetup) {
+    return (
+      <Modal onClose={onClose} label="Welly, the WeVolunteer assistant" size="lg">
+        <ModalHead onClose={onClose}>
+          <div className="row" style={{ gap: 'var(--s3)', alignItems: 'center' }}>
+            <WellyMark />
+            <div>
+              <h2>Welly</h2>
+              <p className="lead">WeVolunteer&rsquo;s assistant. Not set up on this device yet.</p>
+            </div>
+          </div>
+        </ModalHead>
+
+        <div className="modal-body stack-sm">
+          <p>
+            Welly can look up opportunities, your hours, your certificates and the
+            organizations you are part of. It runs inside this browser, so what you
+            type to it is not sent to an AI company.
+          </p>
+          <p className="dim small">
+            Setting it up downloads a model once — from Hugging Face, so that company
+            receives a request from this device. After that it works without one. You
+            choose which model, and you can remove it again at any time.
+          </p>
+        </div>
+
+        <div className="modal-foot">
+          <button className="btn btn-secondary" onClick={onClose}>Not now</button>
+          <button
+            className="btn btn-primary"
+            onClick={() => { onClose(); navigate('/settings?section=privacy'); }}
+          >
+            Set up Welly
+          </button>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
-    <Modal onClose={onClose} label="WeVolunteer assistant" size="lg">
-      <ModalHead
-        title="Assistant"
-        description="Runs on this device. It can suggest, but never decides."
-        onClose={onClose}
-      />
+    <Modal onClose={onClose} label="Welly, the WeVolunteer assistant" size="lg">
+      {/* The mark and the name together, so Welly reads as part of
+          WeVolunteer rather than as a separate product. */}
+      <ModalHead onClose={onClose}>
+        <div className="row" style={{ gap: 'var(--s3)', alignItems: 'center' }}>
+          <WellyMark />
+          <div>
+            <h2>Welly</h2>
+            <p className="lead">Runs on this device. Welly can suggest, but never decides.</p>
+          </div>
+        </div>
+      </ModalHead>
 
       {/*
         Blocked from session replay, not merely masked. A transcript is a record
@@ -196,15 +225,13 @@ export default function AssistantPanel({ onClose, position }) {
       */}
       <div className="modal-body stack-sm" data-replay-block>
         {statusLine && <p className="dim small" role="status">{statusLine}</p>}
-        {listening && <p className="dim small" role="status">Listening. Your browser is turning this into text.</p>}
-        {voiceError && <p className="alert alert-danger" role="alert">{voiceError}</p>}
 
         <div className="ai-transcript stack-sm" ref={transcriptRef} aria-live="polite">
           {messages.length === 0 && (
             <div className="stack-xs">
               <p className="dim small">
-                Ask about opportunities, your hours, your certificates, or the organizations
-                you are part of.
+                Welly can look up opportunities, your hours, your certificates, and the
+                organizations you are part of.
               </p>
               <ul className="ai-suggestions stack-xs">
                 {[
@@ -224,7 +251,7 @@ export default function AssistantPanel({ onClose, position }) {
 
           {messages.map((m, i) => (
             <div key={i} className={`ai-turn ai-turn-${m.role}`}>
-              <span className="sr-only">{m.role === 'user' ? 'You said' : 'Assistant replied'}</span>
+              <span className="sr-only">{m.role === 'user' ? 'You said' : 'Welly replied'}</span>
               <p>{m.text}{m.streaming && !m.text ? 'Thinking...' : ''}</p>
               {m.card && <AssistantCard card={m.card} />}
               {m.kind && <AssistantSource kind={m.kind} />}
@@ -234,27 +261,16 @@ export default function AssistantPanel({ onClose, position }) {
       </div>
 
       <div className="modal-foot ai-composer">
-        <label className="sr-only" htmlFor="ai-input">Ask the assistant</label>
+        <label className="sr-only" htmlFor="ai-input">Ask Welly</label>
         <input
           id="ai-input"
           className="input"
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }}
-          placeholder="Ask about volunteering..."
+          placeholder="Ask Welly about volunteering..."
           autoComplete="off"
         />
-        {voiceEnabled && (
-          <button
-            className={`btn btn-icon ${listening ? 'btn-danger' : 'btn-ghost'}`}
-            onClick={toggleDictation}
-            disabled={busy}
-            aria-label={listening ? 'Stop listening' : 'Ask by voice'}
-            aria-pressed={listening}
-          >
-            {listening ? <MicOff size={16} /> : <Mic size={16} />}
-          </button>
-        )}
         {busy ? (
           <button
             className="btn btn-secondary btn-icon"

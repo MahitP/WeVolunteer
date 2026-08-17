@@ -41,26 +41,12 @@ import { routeIntent } from './router.js';
 import { runTool } from './tools.js';
 import { AIStatus } from './runtime/types.js';
 import { isAbort } from './runtime/types.js';
+import { SYSTEM_PROMPT, isUsableReply, WELLY_NAME } from './prompts/welly.js';
+import { asDataBlock } from './prompts/tasks.js';
 
 /** Replies are short. This is a helper, not an essay generator. */
 const MAX_REPLY_TOKENS = 160;
 
-/**
- * Kept deliberately small.
- *
- * Every rule that matters is enforced in code — which tool runs, what it may
- * return, what is rendered. A long prompt asking the model to behave would add
- * latency at a model size where latency is already the main complaint, in
- * exchange for a guarantee it cannot give. This one establishes voice and the
- * single instruction that actually improves output: use the data, do not invent.
- */
-const SYSTEM_PROMPT = [
-  'You are the WeVolunteer assistant, helping a student with volunteering.',
-  'Answer in one or two short sentences, plainly and warmly.',
-  'Use ONLY the facts in the DATA block. Never invent names, numbers or dates.',
-  'If the DATA block is empty, say you could not find anything.',
-  'Do not mention the DATA block, tools, or how you got the information.',
-].join(' ');
 
 /** Answers that need no lookup. */
 const FIXED = {
@@ -152,20 +138,34 @@ function failureMessage(reason) {
 
 /** The untrusted payload, fenced and labelled. */
 function dataBlock(kind, data) {
-  return `DATA (${kind}):\n---\n${JSON.stringify(data)}\n---`;
+  return asDataBlock(`DATA (${kind})`, JSON.stringify(data));
 }
 
 /**
- * Whether the model's attempt is usable.
+ * Results where the deterministic sentence is already the best answer.
  *
- * Small models occasionally emit nothing, a fragment, or run on. Rather than
- * showing that, the deterministic sentence is used. This is a display choice,
- * not a safety control — the card is correct either way.
+ * A zero is short, unambiguous and complete — "You do not have any verified
+ * hours yet." cannot be improved by rephrasing, and asking a small model to
+ * try is where the whole risk sits. Measured: given zero hours, the 135M model
+ * replied "You could not find anything.", turning a correct answer into one
+ * that reads like a failure.
+ *
+ * So the model is not consulted at all for empty results. This removes the
+ * failure rather than detecting it, which is the stronger of the two fixes;
+ * `isUsableReply` is the second line for everything else.
  */
-function usable(text) {
-  const t = String(text || '').trim();
-  return t.length >= 2 && t.length <= 600;
+function isEmptyResult(kind, data) {
+  switch (kind) {
+    case 'hours': return !data.hours;
+    case 'certificate': return data.valid !== true;
+    case 'certificates':
+    case 'organizations':
+    case 'applications':
+    case 'opportunities': return !data.total;
+    default: return false;
+  }
 }
+
 
 /**
  * Answer one message.
@@ -215,8 +215,9 @@ export async function ask(message, { runtime = null, position = null, onToken, s
   const fallback = summarise(result.kind, result.data);
   const card = { kind: result.kind, data: result.data };
 
-  /* No model, or one that is not ready: the deterministic answer is the answer. */
-  if (!runtime || runtime.status !== AIStatus.READY) {
+  /* No model, one that is not ready, or a result that needs no rephrasing:
+     the deterministic answer is the answer. */
+  if (!runtime || runtime.status !== AIStatus.READY || isEmptyResult(result.kind, result.data)) {
     return { intent, answer: fallback, card, phrasedByModel: false };
   }
 
@@ -232,7 +233,7 @@ export async function ask(message, { runtime = null, position = null, onToken, s
       { onToken, signal, maxTokens: MAX_REPLY_TOKENS },
     );
 
-    if (!usable(text)) return { intent, answer: fallback, card, phrasedByModel: false };
+    if (!isUsableReply(text)) return { intent, answer: fallback, card, phrasedByModel: false };
     return { intent, answer: text.trim(), card, phrasedByModel: true };
   } catch (err) {
     /* Cancelling mid-sentence still leaves a correct answer on screen. */
@@ -241,4 +242,4 @@ export async function ask(message, { runtime = null, position = null, onToken, s
   }
 }
 
-export const __testing = { summarise, failureMessage, FIXED, SYSTEM_PROMPT };
+export const __testing = { summarise, failureMessage, FIXED, SYSTEM_PROMPT, isEmptyResult, WELLY_NAME };

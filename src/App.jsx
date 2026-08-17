@@ -1623,6 +1623,12 @@ function AppShell({ toasts, addToast, removeToast }) {
             {meta.sub && <div className="topbar-sub truncate">{meta.sub}</div>}
           </div>
           <div className="topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)' }}>
+            {/**
+              * Welly sits with the other global actions rather than floating
+              * over the page. It renders nothing unless the build has the
+              * feature, the device can run it, and this person set it up.
+              */}
+            <AssistantLauncher />
             <ThemeToggle />
             <NotificationsBell
               key={currentUser.id}
@@ -1963,13 +1969,6 @@ function AppShell({ toasts, addToast, removeToast }) {
           />
         </React.Suspense>
       )}
-
-      {/**
-        * Inside the signed-in shell, because every tool the assistant can reach
-        * requires an authenticated session. It renders nothing unless the build
-        * has the feature, the device can run it, and this person set it up.
-        */}
-      <AssistantLauncher />
 
       <Toasts toasts={toasts} onRemove={removeToast} />
     </div>

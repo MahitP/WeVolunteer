@@ -1,11 +1,20 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "oxc"],
+  "plugins": [
+    "react",
+    "oxc"
+  ],
   "rules": {
     "react/rules-of-hooks": "error",
     "react/only-export-components": "off",
     "no-unused-vars": "off",
     "react-hooks/exhaustive-deps": "off",
-    "react/no-did-update-set-state": "off"
+    "react/no-did-update-set-state": "off",
+    "no-undef": "error"
+  },
+  "env": {
+    "node": true,
+    "browser": true,
+    "es2024": true
   }
 }

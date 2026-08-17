@@ -33,6 +33,7 @@ import {
 } from './extract.js';
 import { AIStatus } from '../runtime/types.js';
 import { isAbort } from '../runtime/types.js';
+import { CERTIFICATE_PROMPT, asDataBlock } from '../prompts/tasks.js';
 
 /**
  * The shape the model is constrained to.
@@ -57,11 +58,6 @@ export const EXTRACTION_SCHEMA = Object.freeze({
   additionalProperties: false,
 });
 
-const PROMPT = [
-  'Extract volunteering details from the certificate text below.',
-  'Use only what the text says. If something is not stated, use an empty string for text or 0 for hours.',
-  'Format the date as YYYY-MM-DD.',
-].join(' ');
 
 /**
  * Read a certificate.
@@ -124,7 +120,7 @@ export async function readCertificate(file, { runtime = null, signal, today = ne
   if (missing.length > 0 && runtime && runtime.status === AIStatus.READY) {
     try {
       const reply = await runtime.generate(
-        [{ role: 'user', content: `${PROMPT}\n\nCERTIFICATE TEXT:\n---\n${text}\n---` }],
+        [{ role: 'user', content: `${CERTIFICATE_PROMPT}\n\n${asDataBlock('CERTIFICATE TEXT', text)}` }],
         { schema: EXTRACTION_SCHEMA, signal, maxTokens: 200 },
       );
 

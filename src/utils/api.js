@@ -844,6 +844,23 @@ export const api = {
       body: JSON.stringify({ decision, reasoning }),
     }),
 
+  /* Who is currently banned. Scoped server-side the same way the appeal inbox
+     is — the key in the path names the club, `canManage` decides whether this
+     caller manages THAT one. */
+  fetchOrganizationBans: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/bans`),
+
+  /**
+   * Lift a ban with no appeal involved.
+   *
+   * A separate call from `decideOrganizationAppeal` because it is a separate
+   * act: nothing was contested, so there is no reasoning to record against an
+   * appellant's statement, and an appeal left open stays open.
+   */
+  liftOrganizationBan: async (key, userId) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/bans/${encodeURIComponent(userId)}/lift`,
+      { method: 'POST' }),
+
   removeOrganizationMember: async (key, userId, { mode = 'kick', reason = '' } = {}) =>
     apiFetch(`/api/organizations/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`,
       { method: 'DELETE', body: JSON.stringify({ mode, reason }) }),

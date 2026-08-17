@@ -37,10 +37,10 @@ export default function AIEnableModal({ capability, models, initialModelId, onCo
   const selected = models.find(m => m.id === selectedId) || null;
 
   return (
-    <Modal onClose={onClose} label="Set up the on-device assistant" size="lg">
+    <Modal onClose={onClose} label="Set up Welly" size="lg">
       <ModalHead
-        title="Set up the assistant"
-        description="It runs on this device, so there is nothing to subscribe to and no usage limit."
+        title="Set up Welly"
+        description="Welly is WeVolunteer’s assistant. It runs on this device, so there is nothing to subscribe to and no usage limit."
         onClose={onClose}
       />
 
@@ -58,7 +58,7 @@ export default function AIEnableModal({ capability, models, initialModelId, onCo
         <section className="stack-xs">
           <h3>Where your information goes</h3>
           <p className="dim small">
-            The assistant itself runs inside this browser. What you type to it is not sent
+            Welly runs inside this browser. What you type to it is not sent
             to an AI company, and there is no account or key behind it.
           </p>
           <p className="dim small">
@@ -166,7 +166,7 @@ export function AIUnsupportedNotice({ reason }) {
     <div className="row" style={{ alignItems: 'flex-start', gap: 'var(--s3)' }}>
       <Cpu size={18} aria-hidden="true" />
       <div className="stack-xs" style={{ flex: 1 }}>
-        <span className="strong">The assistant cannot run on this device</span>
+        <span className="strong">Welly cannot run on this device</span>
         <span className="dim small">{reason}</span>
         <span className="dim small">
           Everything else in WeVolunteer works exactly as it does elsewhere.

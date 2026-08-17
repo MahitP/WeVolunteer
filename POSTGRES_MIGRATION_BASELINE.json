@@ -1,0 +1,3228 @@
+{
+  "generated_at": "2026-08-15T21:46:24.716Z",
+  "source": {
+    "path": "/Users/mahit/Documents/Important Coding Files/New Projects/SBVolunteers App/pilot.db",
+    "bytes": 1171456,
+    "sha256": "01862f75c37bc1252e329faa3f59562cd1c6752e175fd1da9ab9efbb09686074"
+  },
+  "artifacts": {
+    "binary": {
+      "path": "migration/backups/sqlite/original/pilot-2026-08-15T21-46-24.db",
+      "bytes": 1150976,
+      "sha256": "960863e1c6ddea9a1d5b60f630722208f5b18a6d415d7deed212d10a17036306",
+      "verified": true
+    },
+    "logical": {
+      "path": "migration/backups/sqlite/logical/pilot-2026-08-15T21-46-24.sql",
+      "bytes": 202904,
+      "sha256": "cf047edbb44db4ecabf470efdfbb5f117bc93fcc482ecd66bda5a61057392af7",
+      "verified": true
+    },
+    "schema": {
+      "path": "migration/backups/sqlite/checksums/schema-2026-08-15T21-46-24.json",
+      "sha256": "bce6c3b41a01e6f45b836dd2b2da78526c0217225f3be751a8df25eaa16afff1"
+    }
+  },
+  "totals": {
+    "tables": 65,
+    "rows": 548,
+    "indexes": 95,
+    "triggers": 20,
+    "views": 0,
+    "foreign_key_violations": 0
+  },
+  "tables": {
+    "admin_audit_logs": {
+      "row_count": 18,
+      "id_column": "id",
+      "min_id": "audit-01dafa80-5181-4a81-9526-15721b6f292d",
+      "max_id": "audit-dc8b9a6d-8827-4f96-bd5e-681382fa6349",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T15:22:46.781Z",
+      "max_created_at": "2026-08-14T20:31:30.265Z",
+      "columns": 6
+    },
+    "admin_invitations": {
+      "row_count": 0,
+      "columns": 11
+    },
+    "appeal_events": {
+      "row_count": 3,
+      "id_column": "id",
+      "min_id": "apev_1a98525e5b1573f8",
+      "max_id": "apev_f01299881e02b13f",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-08T03:21:21.813Z",
+      "max_created_at": "2026-08-14T15:53:55.095Z",
+      "columns": 9
+    },
+    "appeal_tokens": {
+      "row_count": 1,
+      "id_column": "token",
+      "id_redacted": true,
+      "id_bounds_sha256": "ac600f4787a46f01aa79bf4bb16e47f408887fac7623be8870be3fe869301f3f",
+      "columns": 4
+    },
+    "appeals": {
+      "row_count": 2,
+      "id_column": "id",
+      "min_id": "appeal-20c40852-1092-46fd-a57c-2fc9159170b3",
+      "max_id": "appeal-a17838de-e50a-46e5-94af-56c87a0226fa",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-08T03:21:21.812Z",
+      "max_created_at": "2026-08-13T14:54:38.401Z",
+      "columns": 18
+    },
+    "application_conflicts": {
+      "row_count": 13,
+      "id_column": "id",
+      "min_id": "conf-1786324745106-cfpyby",
+      "max_id": "conf-1786324805523-exenft",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-10T01:19:05.105Z",
+      "max_created_at": "2026-08-10T01:20:05.522Z",
+      "columns": 6
+    },
+    "applications": {
+      "row_count": 29,
+      "id_column": "id",
+      "min_id": "app-1786076238053-47y7p5",
+      "max_id": "app-sb-9",
+      "columns": 7
+    },
+    "attendance": {
+      "row_count": 16,
+      "id_column": "slot_id",
+      "min_id": "slot-1786324707720-0k7q3pcwy",
+      "max_id": "slot-pantry-1",
+      "columns": 5
+    },
+    "attendance_checkin": {
+      "row_count": 13,
+      "id_column": "slot_id",
+      "min_id": "slot-1786324707720-0k7q3pcwy",
+      "max_id": "slot-1786324707720-yntw7ysqf",
+      "columns": 7
+    },
+    "auto_select_runs": {
+      "row_count": 0,
+      "columns": 8
+    },
+    "badges": {
+      "row_count": 27,
+      "id_column": "id",
+      "min_id": "badge-0a6d37e0-8005-4ff9-8452-fe1b0204bf83",
+      "max_id": "badge-fa722e2d-c922-43b2-a020-ec700208cda0",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-07T20:35:26.764Z",
+      "max_created_at": "2026-08-12T16:30:29.076Z",
+      "columns": 9
+    },
+    "certificates": {
+      "row_count": 2,
+      "id_column": "user_id",
+      "min_id": "user-student-1",
+      "max_id": "user-student-2",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T06:57:00.812Z",
+      "max_created_at": "2026-08-12T00:25:11.050Z",
+      "columns": 9
+    },
+    "checkin_tokens": {
+      "row_count": 0,
+      "columns": 11
+    },
+    "conversation_participants": {
+      "row_count": 10,
+      "id_column": "conversation_id",
+      "min_id": "conv-1786029621834-75e37c2b",
+      "max_id": "conv-1786576835942-28217514",
+      "columns": 8
+    },
+    "conversation_report_messages": {
+      "row_count": 0,
+      "columns": 5
+    },
+    "conversation_reports": {
+      "row_count": 0,
+      "columns": 14
+    },
+    "conversations": {
+      "row_count": 5,
+      "id_column": "id",
+      "min_id": "conv-1786029621834-75e37c2b",
+      "max_id": "conv-1786576835942-28217514",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T15:20:21.834Z",
+      "max_created_at": "2026-08-12T23:20:35.942Z",
+      "columns": 14
+    },
+    "data_export_jobs": {
+      "row_count": 0,
+      "columns": 7
+    },
+    "email_change_tokens": {
+      "row_count": 0,
+      "columns": 4
+    },
+    "email_verification_tokens": {
+      "row_count": 0,
+      "columns": 3
+    },
+    "error_events": {
+      "row_count": 48,
+      "id_column": "id",
+      "min_id": "err-0021d8b2-c1af-40ca-8ee7-67c19b44b7ce",
+      "max_id": "err-ffd5b293-7caa-4d4d-bcdd-9dbd8f65045c",
+      "time_column": "occurred_at",
+      "min_created_at": "2026-08-06T18:37:36.838Z",
+      "max_created_at": "2026-08-15T19:04:26.728Z",
+      "columns": 11
+    },
+    "error_groups": {
+      "row_count": 15,
+      "id_column": "fingerprint",
+      "min_id": "226b89bc8ed5846126cb11cfc6432b76d2584feab67abd3f1d439edff737db37",
+      "max_id": "fbbe735697a4f1960ca080802f6ad9db2c82113cbd7e193639bd1de2d5ef4223",
+      "columns": 14
+    },
+    "event_announcements": {
+      "row_count": 3,
+      "id_column": "id",
+      "min_id": "ann-1",
+      "max_id": "ann-1786565031560-ing0r4",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T06:57:00.801Z",
+      "max_created_at": "2026-08-12T20:03:51.560Z",
+      "columns": 6
+    },
+    "event_comments": {
+      "row_count": 4,
+      "id_column": "id",
+      "min_id": "cmt-1",
+      "max_id": "cmt-2",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T06:57:00.801Z",
+      "max_created_at": "2026-08-12T20:03:00.392Z",
+      "columns": 5
+    },
+    "event_tags": {
+      "row_count": 2,
+      "id_column": "event_id",
+      "min_id": "event-293d061b-99cc-4455-8590-6853357c1d90",
+      "max_id": "event-e5b42ccf-4582-493b-9737-79ba2a928fe6",
+      "columns": 3
+    },
+    "events": {
+      "row_count": 4,
+      "id_column": "id",
+      "min_id": "event-293d061b-99cc-4455-8590-6853357c1d90",
+      "max_id": "event-softball",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T06:57:00.801Z",
+      "max_created_at": "2026-08-12T20:00:00.226Z",
+      "columns": 19
+    },
+    "external_hours": {
+      "row_count": 0,
+      "columns": 9
+    },
+    "hours_ledger": {
+      "row_count": 16,
+      "id_column": "id",
+      "min_id": "ledger-1786494091279-95cbt00l",
+      "max_id": "migrate:slot-pantry-1:user-student-3",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T06:57:00.810Z",
+      "max_created_at": "2026-08-12T00:21:31.278Z",
+      "columns": 18
+    },
+    "instance_lock": {
+      "row_count": 0,
+      "columns": 5
+    },
+    "issue_reports": {
+      "row_count": 0,
+      "columns": 9
+    },
+    "legal_acceptances": {
+      "row_count": 1,
+      "id_column": "id",
+      "min_id": "acc-1786041010764-a308181223",
+      "max_id": "acc-1786041010764-a308181223",
+      "columns": 10
+    },
+    "legal_change_notices": {
+      "row_count": 0,
+      "columns": 5
+    },
+    "legal_document_revisions": {
+      "row_count": 0,
+      "columns": 8
+    },
+    "legal_documents": {
+      "row_count": 12,
+      "id_column": "slug",
+      "min_id": "admin-responsibilities-policy",
+      "max_id": "youth-safety-guidelines",
+      "columns": 7
+    },
+    "messages": {
+      "row_count": 12,
+      "id_column": "id",
+      "min_id": "msg-1786029625901-cbb5b205",
+      "max_id": "msg-1786581683045-5a4e35b2",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T15:20:25.902Z",
+      "max_created_at": "2026-08-13T00:41:23.045Z",
+      "columns": 7
+    },
+    "moderation_actions": {
+      "row_count": 4,
+      "id_column": "id",
+      "min_id": "act_081f12be-b14e-4422-ab5b-6a020f14f3e9",
+      "max_id": "act_d518f82e-0aa8-4101-9172-3e5c011f6d87",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T15:20:50.146Z",
+      "max_created_at": "2026-08-07T03:55:18.045Z",
+      "columns": 12
+    },
+    "notification_jobs": {
+      "row_count": 0,
+      "columns": 20
+    },
+    "notification_preferences": {
+      "row_count": 0,
+      "columns": 4
+    },
+    "notifications": {
+      "row_count": 122,
+      "id_column": "id",
+      "min_id": "notif-1",
+      "max_id": "notif-3",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T06:57:00.801Z",
+      "max_created_at": "2026-08-15T16:53:18.069Z",
+      "columns": 10
+    },
+    "oauth_accounts": {
+      "row_count": 0,
+      "columns": 8
+    },
+    "oauth_signup_sessions": {
+      "row_count": 0,
+      "columns": 4
+    },
+    "oauth_states": {
+      "row_count": 0,
+      "columns": 4
+    },
+    "organization_announcement_replies": {
+      "row_count": 0,
+      "columns": 5
+    },
+    "organization_announcements": {
+      "row_count": 0,
+      "columns": 7
+    },
+    "organization_bans": {
+      "row_count": 3,
+      "id_column": "id",
+      "min_id": "orgban-1786632757579-48euoh",
+      "max_id": "orgban-1786812798068-45v5o2",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-13T14:52:37.579Z",
+      "max_created_at": "2026-08-15T16:53:18.066Z",
+      "columns": 8
+    },
+    "organization_members": {
+      "row_count": 7,
+      "id_column": "organization_id",
+      "min_id": "org-4239887d-791c-4c58-b774-fec14fc1abc0",
+      "max_id": "org-aea7b689-d1b6-4554-8276-43c574c8d28e",
+      "columns": 4
+    },
+    "organizations": {
+      "row_count": 5,
+      "id_column": "id",
+      "min_id": "org-4239887d-791c-4c58-b774-fec14fc1abc0",
+      "max_id": "org-aea7b689-d1b6-4554-8276-43c574c8d28e",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-09T22:43:30.635Z",
+      "max_created_at": "2026-08-13T00:44:48.421Z",
+      "columns": 15
+    },
+    "password_reset_tokens": {
+      "row_count": 0,
+      "columns": 3
+    },
+    "reauth_challenges": {
+      "row_count": 0,
+      "columns": 12
+    },
+    "recovery_codes": {
+      "row_count": 20,
+      "id_column": "id",
+      "min_id": "rc-16501a7b-bc11-4ef6-bf03-2df94fedac80",
+      "max_id": "rc-eb11c1eb-cbee-4de3-8a77-a644efd53196",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-08 16:47:06",
+      "max_created_at": "2026-08-08 17:02:20",
+      "columns": 5
+    },
+    "report_evidence": {
+      "row_count": 1,
+      "id_column": "report_id",
+      "min_id": "rep_9566fad359194262",
+      "max_id": "rep_9566fad359194262",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T15:20:25.902Z",
+      "max_created_at": "2026-08-06T15:20:25.902Z",
+      "columns": 7
+    },
+    "reports": {
+      "row_count": 1,
+      "id_column": "id",
+      "min_id": "rep_9566fad359194262",
+      "max_id": "rep_9566fad359194262",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T15:20:50.146Z",
+      "max_created_at": "2026-08-06T15:20:50.146Z",
+      "columns": 24
+    },
+    "resend_webhook_events": {
+      "row_count": 0,
+      "columns": 7
+    },
+    "revoked_sessions": {
+      "row_count": 19,
+      "id_column": "jti",
+      "id_redacted": true,
+      "id_bounds_sha256": "49eea1338a9eaf98063279ec352d623d1a9a008aac8dbd56aa116c64004d3f00",
+      "columns": 4
+    },
+    "schema_migrations": {
+      "row_count": 55,
+      "id_column": "version",
+      "min_id": 1,
+      "max_id": 55,
+      "columns": 4
+    },
+    "security_audit_logs": {
+      "row_count": 9,
+      "id_column": "id",
+      "min_id": "sec-0c02cf71-7c21-4e94-9937-d1fc18bff86b",
+      "max_id": "sec-e8b460b1-651b-4b1d-958b-677040cf3744",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-08T03:20:13.082Z",
+      "max_created_at": "2026-08-09T23:17:48.088Z",
+      "columns": 7
+    },
+    "slots": {
+      "row_count": 24,
+      "id_column": "id",
+      "min_id": "slot-1786324707720-0k7q3pcwy",
+      "max_id": "slot-softball-7",
+      "columns": 7
+    },
+    "tfa_email_codes": {
+      "row_count": 0,
+      "columns": 7
+    },
+    "tfa_login_attempts": {
+      "row_count": 0,
+      "columns": 4
+    },
+    "user_badges": {
+      "row_count": 2,
+      "id_column": "id",
+      "min_id": "ub-40e0d463-6b7d-4550-8947-ce9cba91fbb6",
+      "max_id": "ub-4bc0becd-9ed0-4165-8ecf-c9854e236b60",
+      "columns": 5
+    },
+    "user_blocks": {
+      "row_count": 0,
+      "columns": 4
+    },
+    "user_capabilities": {
+      "row_count": 0,
+      "columns": 6
+    },
+    "user_favorites": {
+      "row_count": 0,
+      "columns": 3
+    },
+    "user_relationships": {
+      "row_count": 2,
+      "id_column": "id",
+      "min_id": "rel-1786576759496-69497abc",
+      "max_id": "rel-1786576814039-13a1a146",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-12T23:19:19.495Z",
+      "max_created_at": "2026-08-12T23:20:14.039Z",
+      "columns": 7
+    },
+    "users": {
+      "row_count": 18,
+      "id_column": "id",
+      "min_id": "system-cli",
+      "max_id": "user-student-3",
+      "time_column": "created_at",
+      "min_created_at": "2026-08-06T06:57:00.801Z",
+      "max_created_at": "2026-08-07T14:02:18.869Z",
+      "columns": 50
+    }
+  },
+  "foreign_keys": {
+    "admin_audit_logs": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "admin_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "admin_invitations": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "invited_by",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "NO ACTION",
+        "match": "NONE"
+      }
+    ],
+    "appeal_events": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "actor_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "appeals",
+        "from": "appeal_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "RESTRICT",
+        "match": "NONE"
+      }
+    ],
+    "appeal_tokens": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "appeals": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "reviewer_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "reports",
+        "from": "report_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "RESTRICT",
+        "match": "NONE"
+      },
+      {
+        "id": 2,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "RESTRICT",
+        "match": "NONE"
+      }
+    ],
+    "application_conflicts": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "applications",
+        "from": "conflicting_application_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "applications",
+        "from": "application_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "applications": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "slots",
+        "from": "slot_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "events",
+        "from": "event_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 2,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "attendance": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "slots",
+        "from": "slot_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 2,
+        "seq": 0,
+        "table": "events",
+        "from": "event_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "attendance_checkin": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "slots",
+        "from": "slot_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 2,
+        "seq": 0,
+        "table": "events",
+        "from": "event_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "auto_select_runs": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "events",
+        "from": "event_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "checkin_tokens": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "slots",
+        "from": "slot_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 2,
+        "seq": 0,
+        "table": "events",
+        "from": "event_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "conversation_participants": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "conversations",
+        "from": "conversation_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "conversation_report_messages": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "conversation_reports",
+        "from": "report_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "RESTRICT",
+        "match": "NONE"
+      }
+    ],
+    "conversation_reports": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "reported_user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "users",
+        "from": "reporter_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      }
+    ],
+    "conversations": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "created_by",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "users",
+        "from": "organizer_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 2,
+        "seq": 0,
+        "table": "users",
+        "from": "student_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 3,
+        "seq": 0,
+        "table": "events",
+        "from": "event_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "data_export_jobs": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "email_change_tokens": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "email_verification_tokens": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "error_events": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "error_groups",
+        "from": "fingerprint",
+        "to": "fingerprint",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "event_announcements": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "author_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "events",
+        "from": "event_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "event_comments": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "events",
+        "from": "event_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "event_tags": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "events",
+        "from": "event_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "events": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "organizer_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "organizations",
+        "from": "organization_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      }
+    ],
+    "external_hours": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "issue_reports": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "reporter_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      }
+    ],
+    "legal_acceptances": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "RESTRICT",
+        "match": "NONE"
+      }
+    ],
+    "legal_change_notices": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "legal_document_revisions": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "created_by",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      }
+    ],
+    "messages": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "sender_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "conversations",
+        "from": "conversation_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "moderation_actions": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "actor_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "reports",
+        "from": "report_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "RESTRICT",
+        "match": "NONE"
+      }
+    ],
+    "notification_preferences": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "notifications": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "oauth_accounts": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "organization_announcement_replies": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "author_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "organization_announcements",
+        "from": "announcement_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "organization_announcements": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "author_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "organizations",
+        "from": "organization_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "organization_bans": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "lifted_by",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "users",
+        "from": "banned_by",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      },
+      {
+        "id": 2,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 3,
+        "seq": 0,
+        "table": "organizations",
+        "from": "organization_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "organization_members": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "organizations",
+        "from": "organization_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "organizations": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "created_by",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      }
+    ],
+    "password_reset_tokens": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "reauth_challenges": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "recovery_codes": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "report_evidence": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "reports",
+        "from": "report_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "RESTRICT",
+        "match": "NONE"
+      }
+    ],
+    "reports": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "resolved_by",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "users",
+        "from": "assigned_to",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      },
+      {
+        "id": 2,
+        "seq": 0,
+        "table": "users",
+        "from": "target_author_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      },
+      {
+        "id": 3,
+        "seq": 0,
+        "table": "users",
+        "from": "reporter_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL",
+        "match": "NONE"
+      }
+    ],
+    "security_audit_logs": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "slots": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "events",
+        "from": "event_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "tfa_email_codes": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "tfa_login_attempts": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "user_badges": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "badges",
+        "from": "badge_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "user_blocks": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "blocked_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "users",
+        "from": "blocker_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "user_capabilities": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "user_favorites": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "events",
+        "from": "event_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "users",
+        "from": "user_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ],
+    "user_relationships": [
+      {
+        "id": 0,
+        "seq": 0,
+        "table": "users",
+        "from": "subject_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      },
+      {
+        "id": 1,
+        "seq": 0,
+        "table": "users",
+        "from": "actor_id",
+        "to": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "CASCADE",
+        "match": "NONE"
+      }
+    ]
+  },
+  "indexes": {
+    "admin_audit_logs": [
+      {
+        "name": "idx_admin_audit_logs_actor_aggregation",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "admin_id",
+          "action",
+          "created_at"
+        ]
+      },
+      {
+        "name": "idx_admin_audit_logs_created",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "created_at"
+        ]
+      },
+      {
+        "name": "idx_admin_audit_logs_action",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "action"
+        ]
+      },
+      {
+        "name": "idx_admin_audit_logs_target",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "target_user_id"
+        ]
+      },
+      {
+        "name": "idx_admin_audit_logs_admin",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "admin_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_admin_audit_logs_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "admin_invitations": [
+      {
+        "name": "idx_admin_invitations_status_created",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "status",
+          "created_at"
+        ]
+      },
+      {
+        "name": "idx_admin_invitations_token",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "token_hash"
+        ]
+      },
+      {
+        "name": "idx_admin_invitations_one_pending",
+        "unique": true,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "email"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_admin_invitations_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "appeal_events": [
+      {
+        "name": "idx_appeal_events_actor",
+        "unique": false,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "actor_id"
+        ]
+      },
+      {
+        "name": "idx_appeal_events_appeal",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "appeal_id",
+          "created_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_appeal_events_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "appeal_tokens": [
+      {
+        "name": "idx_appeal_tokens_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_appeal_tokens_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "token"
+        ]
+      }
+    ],
+    "appeals": [
+      {
+        "name": "idx_appeals_reviewer",
+        "unique": false,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "reviewer_id"
+        ]
+      },
+      {
+        "name": "idx_appeals_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "created_at"
+        ]
+      },
+      {
+        "name": "idx_appeals_queue",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "status",
+          "created_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_appeals_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "application_conflicts": [
+      {
+        "name": "sqlite_autoindex_application_conflicts_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "applications": [
+      {
+        "name": "idx_applications_user_status",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "status"
+        ]
+      },
+      {
+        "name": "idx_applications_slot",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "slot_id",
+          "status"
+        ]
+      },
+      {
+        "name": "idx_applications_event",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "event_id",
+          "status"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_applications_2",
+        "unique": true,
+        "origin": "u",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "slot_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_applications_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "attendance": [
+      {
+        "name": "idx_attendance_event",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "event_id"
+        ]
+      },
+      {
+        "name": "idx_attendance_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "present"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_attendance_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "slot_id",
+          "user_id"
+        ]
+      }
+    ],
+    "attendance_checkin": [
+      {
+        "name": "idx_checkin_event",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "event_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_attendance_checkin_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "slot_id",
+          "user_id"
+        ]
+      }
+    ],
+    "auto_select_runs": [
+      {
+        "name": "sqlite_autoindex_auto_select_runs_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "badges": [
+      {
+        "name": "sqlite_autoindex_badges_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "certificates": [
+      {
+        "name": "sqlite_autoindex_certificates_2",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "event_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_certificates_1",
+        "unique": true,
+        "origin": "u",
+        "partial": false,
+        "columns": [
+          "code"
+        ]
+      }
+    ],
+    "checkin_tokens": [
+      {
+        "name": "idx_checkin_tokens_expiry",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "expires_at"
+        ]
+      },
+      {
+        "name": "idx_checkin_tokens_live",
+        "unique": true,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "application_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_checkin_tokens_2",
+        "unique": true,
+        "origin": "u",
+        "partial": false,
+        "columns": [
+          "token_hash"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_checkin_tokens_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "conversation_participants": [
+      {
+        "name": "idx_conversation_participants_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_conversation_participants_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "conversation_id",
+          "user_id"
+        ]
+      }
+    ],
+    "conversation_report_messages": [
+      {
+        "name": "idx_conversation_report_messages_message",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "message_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_conversation_report_messages_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "report_id",
+          "message_id"
+        ]
+      }
+    ],
+    "conversation_reports": [
+      {
+        "name": "idx_conversation_reports_event",
+        "unique": false,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "event_id_snapshot"
+        ]
+      },
+      {
+        "name": "idx_conversation_reports_status",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "status",
+          "created_at"
+        ]
+      },
+      {
+        "name": "idx_conversation_reports_conversation",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "conversation_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_conversation_reports_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "conversations": [
+      {
+        "name": "idx_conversations_peer_pair",
+        "unique": true,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "pair_key"
+        ]
+      },
+      {
+        "name": "idx_conversations_admin_thread",
+        "unique": true,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "kind",
+          "created_by",
+          null
+        ]
+      },
+      {
+        "name": "idx_conversations_event",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "event_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_conversations_2",
+        "unique": true,
+        "origin": "u",
+        "partial": false,
+        "columns": [
+          "student_id",
+          "organizer_id",
+          "event_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_conversations_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "data_export_jobs": [
+      {
+        "name": "idx_export_jobs_status",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "status"
+        ]
+      },
+      {
+        "name": "idx_export_jobs_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_data_export_jobs_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "email_change_tokens": [
+      {
+        "name": "sqlite_autoindex_email_change_tokens_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "token_hash"
+        ]
+      }
+    ],
+    "email_verification_tokens": [
+      {
+        "name": "sqlite_autoindex_email_verification_tokens_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "token_hash"
+        ]
+      }
+    ],
+    "error_events": [
+      {
+        "name": "idx_error_events_occurred",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "occurred_at"
+        ]
+      },
+      {
+        "name": "idx_error_events_group",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "fingerprint",
+          "occurred_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_error_events_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "error_groups": [
+      {
+        "name": "idx_error_groups_source",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "source",
+          "status"
+        ]
+      },
+      {
+        "name": "idx_error_groups_triage",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "status",
+          "last_seen_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_error_groups_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "fingerprint"
+        ]
+      }
+    ],
+    "event_announcements": [
+      {
+        "name": "idx_announcements_event",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "event_id",
+          "created_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_event_announcements_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "event_comments": [
+      {
+        "name": "idx_comments_event",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "event_id",
+          "created_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_event_comments_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "event_tags": [
+      {
+        "name": "idx_event_tags_tag",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "tag"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_event_tags_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "event_id",
+          "tag"
+        ]
+      }
+    ],
+    "events": [
+      {
+        "name": "idx_events_audience",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "audience",
+          "organization_id"
+        ]
+      },
+      {
+        "name": "idx_events_organization",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "organization_id"
+        ]
+      },
+      {
+        "name": "idx_events_organizer",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "organizer_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_events_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "external_hours": [
+      {
+        "name": "idx_external_hours_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "occurred_on"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_external_hours_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "hours_ledger": [
+      {
+        "name": "idx_ledger_slot",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "slot_id",
+          "user_id"
+        ]
+      },
+      {
+        "name": "idx_ledger_event",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "event_id",
+          "created_at"
+        ]
+      },
+      {
+        "name": "idx_ledger_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "created_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_hours_ledger_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "issue_reports": [
+      {
+        "name": "idx_issue_reports_reporter",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "reporter_id",
+          "created_at"
+        ]
+      },
+      {
+        "name": "idx_issue_reports_status",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "status",
+          "created_at"
+        ]
+      },
+      {
+        "name": "idx_issue_reports_recent",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "created_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_issue_reports_2",
+        "unique": true,
+        "origin": "u",
+        "partial": false,
+        "columns": [
+          "reference"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_issue_reports_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "legal_acceptances": [
+      {
+        "name": "idx_acceptances_doc",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "document_slug",
+          "version"
+        ]
+      },
+      {
+        "name": "idx_acceptances_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "document_slug",
+          "accepted_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_legal_acceptances_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "legal_change_notices": [
+      {
+        "name": "sqlite_autoindex_legal_change_notices_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "slug",
+          "version"
+        ]
+      }
+    ],
+    "legal_document_revisions": [
+      {
+        "name": "idx_legal_revisions_current",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "slug",
+          "id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_legal_document_revisions_1",
+        "unique": true,
+        "origin": "u",
+        "partial": false,
+        "columns": [
+          "slug",
+          "version"
+        ]
+      }
+    ],
+    "legal_documents": [
+      {
+        "name": "idx_legal_documents_effective",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "slug",
+          "effective_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_legal_documents_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "slug",
+          "version"
+        ]
+      }
+    ],
+    "messages": [
+      {
+        "name": "idx_messages_sender",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "sender_id"
+        ]
+      },
+      {
+        "name": "idx_messages_conversation_created",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "conversation_id",
+          "created_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_messages_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "moderation_actions": [
+      {
+        "name": "idx_moderation_actions_report",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "report_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_moderation_actions_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "notification_jobs": [
+      {
+        "name": "idx_notification_jobs_provider_message",
+        "unique": false,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "provider_message_id"
+        ]
+      },
+      {
+        "name": "idx_notification_jobs_claim",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "status",
+          "next_attempt_at"
+        ]
+      },
+      {
+        "name": "idx_notification_jobs_idempotency",
+        "unique": true,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "idempotency_key"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_notification_jobs_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "notification_preferences": [
+      {
+        "name": "sqlite_autoindex_notification_preferences_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "category",
+          "channel"
+        ]
+      }
+    ],
+    "notifications": [
+      {
+        "name": "idx_notifications_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "read"
+        ]
+      },
+      {
+        "name": "idx_notifications_dedupe",
+        "unique": true,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "user_id",
+          "dedupe_key"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_notifications_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "oauth_accounts": [
+      {
+        "name": "idx_oauth_accounts_user_provider",
+        "unique": true,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "provider"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_oauth_accounts_2",
+        "unique": true,
+        "origin": "u",
+        "partial": false,
+        "columns": [
+          "provider",
+          "provider_user_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_oauth_accounts_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "oauth_signup_sessions": [
+      {
+        "name": "sqlite_autoindex_oauth_signup_sessions_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "oauth_states": [
+      {
+        "name": "sqlite_autoindex_oauth_states_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "nonce"
+        ]
+      }
+    ],
+    "organization_announcement_replies": [
+      {
+        "name": "idx_org_announcement_replies",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "announcement_id",
+          "created_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_organization_announcement_replies_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "organization_announcements": [
+      {
+        "name": "idx_org_announcements_org",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "organization_id",
+          "created_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_organization_announcements_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "organization_bans": [
+      {
+        "name": "idx_org_bans_lookup",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "organization_id"
+        ]
+      },
+      {
+        "name": "idx_org_bans_active",
+        "unique": true,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "organization_id",
+          "user_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_organization_bans_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "organization_members": [
+      {
+        "name": "idx_org_members_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_organization_members_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "organization_id",
+          "user_id"
+        ]
+      }
+    ],
+    "organizations": [
+      {
+        "name": "idx_organizations_creator",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "created_by"
+        ]
+      },
+      {
+        "name": "idx_organizations_slug",
+        "unique": true,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "slug"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_organizations_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "password_reset_tokens": [
+      {
+        "name": "sqlite_autoindex_password_reset_tokens_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "token_hash"
+        ]
+      }
+    ],
+    "reauth_challenges": [
+      {
+        "name": "idx_reauth_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "expires_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_reauth_challenges_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "recovery_codes": [
+      {
+        "name": "sqlite_autoindex_recovery_codes_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "report_evidence": [
+      {
+        "name": "idx_report_evidence_message",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "message_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_report_evidence_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "report_id",
+          "message_id"
+        ]
+      }
+    ],
+    "reports": [
+      {
+        "name": "idx_reports_no_dup",
+        "unique": true,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "reporter_id",
+          "target_type",
+          "target_id"
+        ]
+      },
+      {
+        "name": "idx_reports_event",
+        "unique": false,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "event_id_snapshot"
+        ]
+      },
+      {
+        "name": "idx_reports_conversation",
+        "unique": false,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "conversation_id_snapshot"
+        ]
+      },
+      {
+        "name": "idx_reports_reporter",
+        "unique": false,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "reporter_id"
+        ]
+      },
+      {
+        "name": "idx_reports_author",
+        "unique": false,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "target_author_id"
+        ]
+      },
+      {
+        "name": "idx_reports_assignee",
+        "unique": false,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "assigned_to"
+        ]
+      },
+      {
+        "name": "idx_reports_queue",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "status",
+          "priority",
+          "created_at"
+        ]
+      },
+      {
+        "name": "idx_reports_status",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "status",
+          "created_at"
+        ]
+      },
+      {
+        "name": "idx_reports_target",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "target_type",
+          "target_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_reports_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "resend_webhook_events": [
+      {
+        "name": "idx_resend_events_recent",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "received_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_resend_webhook_events_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "event_id"
+        ]
+      }
+    ],
+    "revoked_sessions": [
+      {
+        "name": "idx_revoked_sessions_expiry",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "expires_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_revoked_sessions_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "jti"
+        ]
+      }
+    ],
+    "security_audit_logs": [
+      {
+        "name": "idx_security_audit_logs_type",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "event_type",
+          "created_at"
+        ]
+      },
+      {
+        "name": "idx_security_audit_logs_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "created_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_security_audit_logs_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "slots": [
+      {
+        "name": "idx_slots_event_window",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "event_id",
+          "start_datetime",
+          "end_datetime",
+          "max_spots"
+        ]
+      },
+      {
+        "name": "idx_slots_event",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "event_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_slots_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "tfa_email_codes": [
+      {
+        "name": "idx_tfa_email_codes_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "expires_at"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_tfa_email_codes_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "tfa_login_attempts": [
+      {
+        "name": "sqlite_autoindex_tfa_login_attempts_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "token_hash"
+        ]
+      }
+    ],
+    "user_badges": [
+      {
+        "name": "sqlite_autoindex_user_badges_2",
+        "unique": true,
+        "origin": "u",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "badge_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_user_badges_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "user_blocks": [
+      {
+        "name": "idx_user_blocks_blocked",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "blocked_id",
+          "blocker_id"
+        ]
+      },
+      {
+        "name": "idx_user_blocks_pair",
+        "unique": true,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "blocker_id",
+          "blocked_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_user_blocks_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "user_capabilities": [
+      {
+        "name": "idx_usercaps_user",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "user_id"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_user_capabilities_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "capability",
+          "scope"
+        ]
+      }
+    ],
+    "user_favorites": [
+      {
+        "name": "sqlite_autoindex_user_favorites_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "user_id",
+          "event_id"
+        ]
+      }
+    ],
+    "user_relationships": [
+      {
+        "name": "idx_relationships_actor",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "actor_id",
+          "kind",
+          "status"
+        ]
+      },
+      {
+        "name": "idx_relationships_subject",
+        "unique": false,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "subject_id",
+          "kind",
+          "status"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_user_relationships_2",
+        "unique": true,
+        "origin": "u",
+        "partial": false,
+        "columns": [
+          "actor_id",
+          "subject_id",
+          "kind"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_user_relationships_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ],
+    "users": [
+      {
+        "name": "idx_users_email_nocase",
+        "unique": true,
+        "origin": "c",
+        "partial": false,
+        "columns": [
+          "email"
+        ]
+      },
+      {
+        "name": "idx_users_username_nocase",
+        "unique": true,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "username"
+        ]
+      },
+      {
+        "name": "idx_users_username",
+        "unique": true,
+        "origin": "c",
+        "partial": true,
+        "columns": [
+          "username"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_users_3",
+        "unique": true,
+        "origin": "u",
+        "partial": false,
+        "columns": [
+          "username"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_users_2",
+        "unique": true,
+        "origin": "u",
+        "partial": false,
+        "columns": [
+          "email"
+        ]
+      },
+      {
+        "name": "sqlite_autoindex_users_1",
+        "unique": true,
+        "origin": "pk",
+        "partial": false,
+        "columns": [
+          "id"
+        ]
+      }
+    ]
+  },
+  "invariants": {
+    "users_total": 18,
+    "users_active": 16,
+    "users_deleted_tombstones": 2,
+    "users_by_role": {
+      "admin": 1,
+      "organizer": 2,
+      "student": 13,
+      "super_admin": 2
+    },
+    "users_tfa_enabled": 0,
+    "users_with_tfa_secret": 0,
+    "recovery_codes_total": 20,
+    "recovery_codes_unused": 20,
+    "organizations_total": 5,
+    "organization_members_total": 7,
+    "organization_bans_active": 2,
+    "events_total": 4,
+    "events_cancelled": 0,
+    "slots_total": 24,
+    "applications_total": 29,
+    "applications_accepted": 28,
+    "applications_waitlisted": 0,
+    "applications_withdrawn": 1,
+    "attendance_total": 16,
+    "attendance_present": 15,
+    "hours_ledger_total": 16,
+    "hours_ledger_delta_sum": 212.72,
+    "hours_ledger_final_sum": 215.72,
+    "external_hours_total": 0,
+    "external_hours_sum": 0,
+    "certificates_total": 2,
+    "notifications_total": 122,
+    "notifications_unread": 15,
+    "admin_audit_logs_total": 18,
+    "security_audit_logs_total": 9,
+    "moderation_actions_total": 4,
+    "appeals_total": 2,
+    "reports_total": 1,
+    "report_evidence_total": 1,
+    "legal_documents_total": 12,
+    "legal_acceptances_total": 1,
+    "legal_revisions_total": 0,
+    "schema_migrations_head": 55,
+    "schema_migrations_count": 55,
+    "orphan_applications_user": 0,
+    "orphan_applications_event": 0,
+    "orphan_attendance_user": 0,
+    "orphan_hours_user": 0,
+    "orphan_notifications_user": 0,
+    "orphan_org_members_user": 0,
+    "orphan_org_members_org": 0,
+    "orphan_audit_actor": 0
+  }
+}

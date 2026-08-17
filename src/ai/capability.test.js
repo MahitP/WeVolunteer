@@ -40,24 +40,33 @@ describe('iOS detection', () => {
 });
 
 describe('what iOS is offered', () => {
-  it('caps at the iOS ceiling and recommends the smallest model', () => {
+  it('offers no assistant at all, and says why', () => {
+    /**
+     * A deliberate consequence, not an oversight.
+     *
+     * The only model under the iOS memory ceiling is SmolLM2-135M, and that
+     * model was withdrawn from conversation after it answered a student who had
+     * zero hours by repeating its own instructions back — turning a correct
+     * result into an apparent failure.
+     *
+     * So iPhone and iPad currently get nothing. That is the honest position: no
+     * assistant is better than one that misreports a correct answer. It
+     * reverses the moment a small model converses acceptably, which is a
+     * measurement rather than a decision.
+     */
     const cap = detectCapability(nav({ ua: IPHONE, touch: 5, memory: 8, cores: 8, gpu: true }));
 
-    /* Reported memory and a working GPU would otherwise earn the largest tier.
-       On iOS the ceiling overrides both, because the constraint is Safari's
-       per-tab allowance rather than the hardware. */
-    expect(cap.maxBytes).toBe(IOS_MAX_MODEL_BYTES);
-    expect(cap.recommendedTier).toBe('fast');
-    expect(cap.reason).toMatch(/iPhone and iPad/);
+    expect(cap.supported).toBe(false);
+    expect(cap.recommendedTier).toBeNull();
+    expect(cap.reason).toMatch(/memory/i);
+    expect(offerableModels(cap)).toEqual([]);
   });
 
-  it('offers only models that fit under the ceiling', () => {
+  it('still recognises the device and applies the ceiling', () => {
+    /* Detection and the ceiling are unchanged; only the outcome moved. */
     const cap = detectCapability(nav({ ua: IPHONE, touch: 5 }));
-    const offered = offerableModels(cap);
-
-    expect(offered.length).toBeGreaterThan(0);
-    for (const m of offered) expect(m.bytes).toBeLessThanOrEqual(IOS_MAX_MODEL_BYTES);
-    expect(offered.length).toBeLessThan(MODELS.length);
+    expect(cap.isIOS).toBe(true);
+    expect(cap.maxBytes).toBe(IOS_MAX_MODEL_BYTES);
   });
 });
 
@@ -66,7 +75,18 @@ describe('tier recommendation on desktop', () => {
     expect(detectCapability(nav({ memory: 16, gpu: true })).recommendedTier).toBe('advanced');
     expect(detectCapability(nav({ memory: 8, gpu: true })).recommendedTier).toBe('advanced');
     expect(detectCapability(nav({ memory: 4, gpu: true })).recommendedTier).toBe('balanced');
-    expect(detectCapability(nav({ memory: 2, gpu: true })).recommendedTier).toBe('fast');
+  });
+
+  it('offers nothing to a device under the smallest conversational floor', () => {
+    /**
+     * The second cost of withdrawing the 135M model. The smallest remaining
+     * conversational model needs 4 GB, so a 2 GB machine — a low-end Chromebook,
+     * say — is now told the assistant is unavailable rather than being given
+     * one that will thrash or speak badly.
+     */
+    const cap = detectCapability(nav({ memory: 2, gpu: true }));
+    expect(cap.supported).toBe(false);
+    expect(offerableModels(cap)).toEqual([]);
   });
 
   it('stops at the middle tier when memory is unreported', () => {
@@ -80,9 +100,11 @@ describe('tier recommendation on desktop', () => {
     expect(cap.recommendedTier).toBe('balanced');
   });
 
-  it('falls to the smallest tier when there is neither memory nor a GPU', () => {
-    expect(detectCapability(nav({ gpu: false, cores: 16 })).recommendedTier).toBe('fast');
-    expect(detectCapability(nav({ gpu: true, cores: 2 })).recommendedTier).toBe('fast');
+  it('falls to the smallest OFFERABLE tier when there is neither memory nor a GPU', () => {
+    /* The heuristic still says "fast"; the picker no longer has one, so the
+       recommendation lands on the smallest model that may actually be shown. */
+    expect(detectCapability(nav({ gpu: false, cores: 16 })).recommendedTier).toBe('balanced');
+    expect(detectCapability(nav({ gpu: true, cores: 2 })).recommendedTier).toBe('balanced');
   });
 
   it('warns when there is no graphics acceleration, without refusing', () => {
@@ -111,7 +133,8 @@ describe('offerableModels', () => {
        tier recommendation already covers this case; excluding models outright
        would hide the largest option from every Safari and Firefox user. */
     const offered = offerableModels(detectCapability(nav({ ua: MAC, gpu: true, cores: 16 })));
-    expect(offered).toHaveLength(MODELS.length);
+    expect(offered).toHaveLength(MODELS.filter(m => m.conversational).length);
+    expect(offered.every(m => m.conversational)).toBe(true);
   });
 
   it('returns nothing when the device is unsupported', () => {

@@ -74,7 +74,7 @@ function operator() {
  * the rest, because `details` is one TEXT column and the value of a consistent
  * shape in it is being greppable.
  */
-export function recordCliAudit(db, { action, targetUserId, command, reason, metadata = {} }) {
+export async function recordCliAudit(db, { action, targetUserId, command, reason, metadata = {} }) {
   if (!action) throw new Error('recordCliAudit: action is required');
   if (!targetUserId) throw new Error('recordCliAudit: targetUserId is required');
   if (!command) throw new Error('recordCliAudit: command is required');
@@ -87,7 +87,7 @@ export function recordCliAudit(db, { action, targetUserId, command, reason, meta
   ];
   if (reason) parts.push(`reason=${reason}`);
 
-  return recordAudit(db, {
+  return await recordAudit(db, {
     adminId: SYSTEM_CLI_ID,
     action,
     targetUserId,

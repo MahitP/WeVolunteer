@@ -11,7 +11,6 @@ import {
   isAbort,
 } from '../../ai';
 import { readPreferences, writePreferences, clearPreferences } from '../../ai/preferences';
-import { isVoiceSupported } from '../../ai/voice';
 import AIEnableModal, { AIUnsupportedNotice } from './AIEnableModal';
 import ConfirmDialog from '../common/ConfirmDialog';
 
@@ -41,10 +40,6 @@ import ConfirmDialog from '../common/ConfirmDialog';
 export default function AISettingsCard({ addToast }) {
   const [prefs, setPrefs] = useState(() => readPreferences());
   const [capability] = useState(() => detectCapability());
-  /* Read once: whether the browser has a recogniser at all does not change
-     while the page is open, and a control that cannot work should not be
-     offered. */
-  const [voiceSupported] = useState(() => isVoiceSupported());
   const [picking, setPicking] = useState(false);
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState(null);
@@ -120,7 +115,7 @@ export default function AISettingsCard({ addToast }) {
     clearPreferences();
     setPrefs(readPreferences());
     setUsedBytes(0);
-    addToast?.('The assistant is off and its downloaded data has been removed.', 'success');
+    addToast?.('Welly is off and the downloaded model has been removed.', 'success');
   }, [addToast]);
 
   /* A build without the feature renders nothing — not a disabled control, which
@@ -129,7 +124,7 @@ export default function AISettingsCard({ addToast }) {
 
   return (
     <div className="card card-pad" style={{ marginTop: 'var(--s4)' }}>
-      <h3 style={{ marginBottom: 'var(--s4)' }}>On-device assistant</h3>
+      <h3 style={{ marginBottom: 'var(--s4)' }}>Welly</h3>
 
       {!capability.supported && <AIUnsupportedNotice reason={capability.reason} />}
 
@@ -138,7 +133,7 @@ export default function AISettingsCard({ addToast }) {
           {!prefs.enabled && !progress && (
             <>
               <p className="dim small">
-                An assistant that runs inside this browser and can help you find
+                WeVolunteer’s assistant. Welly runs inside this browser and can help you find
                 opportunities and understand your volunteer record. What you type to it is
                 not sent to an AI company. Setting it up downloads a model from Hugging
                 Face, and it can be removed again at any time.{' '}
@@ -146,7 +141,7 @@ export default function AISettingsCard({ addToast }) {
               </p>
               <div>
                 <button className="btn btn-primary" onClick={() => setPicking(true)}>
-                  Set up the assistant
+                  Set up Welly
                 </button>
               </div>
             </>
@@ -211,34 +206,6 @@ export default function AISettingsCard({ addToast }) {
                 </div>
               </label>
 
-              {/**
-                * Voice is a separate switch on purpose, and its copy is the
-                * bluntest on this screen.
-                *
-                * Everything else here runs in the browser. This does not:
-                * browsers stream the audio to a speech service run by the
-                * vendor, and the page cannot observe or prevent it. Folding it
-                * into the main switch would make the on-device claim false for
-                * anybody who turned that switch on.
-                */}
-              {voiceSupported && (
-                <label className="row" style={{ alignItems: 'flex-start' }}>
-                  <input
-                    type="checkbox"
-                    checked={prefs.voiceInput}
-                    onChange={e => setPrefs(writePreferences({ voiceInput: e.target.checked }))}
-                  />
-                  <div className="stack-xs" style={{ flex: 1 }}>
-                    <span className="strong">Let me speak my questions</span>
-                    <span className="dim small">
-                      Off by default, and the one part of this that does not stay on your
-                      device: your browser sends the recording to its own speech service to
-                      turn it into text. WeVolunteer never receives the audio, and typing
-                      always works instead.
-                    </span>
-                  </div>
-                </label>
-              )}
 
               <div className="row" style={{ gap: 'var(--s2)', flexWrap: 'wrap' }}>
                 <button className="btn btn-secondary btn-sm" onClick={() => setPicking(true)}>
@@ -265,7 +232,7 @@ export default function AISettingsCard({ addToast }) {
 
       {confirmRemove && (
         <ConfirmDialog
-          title="Turn off the assistant?"
+          title="Turn off Welly?"
           destructive
           confirmLabel="Turn off and remove"
           onConfirm={removeEverything}

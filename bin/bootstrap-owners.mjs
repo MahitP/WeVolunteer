@@ -163,7 +163,7 @@ async function main() {
         );
       }
 
-      recordCliAudit(db, {
+      await recordCliAudit(db, {
         action: CLI_EVENTS.OWNER_GRANTED,
         targetUserId: userId,
         command: 'bin/bootstrap-owners.mjs',

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
 /**
@@ -17,9 +17,64 @@ import react from '@vitejs/plugin-react'
 const API_TARGET = process.env.VITE_API_TARGET
   || `http://localhost:${process.env.API_PORT || 5050}`
 
+/**
+ * Whether this build carries the on-device assistant. Defaults to ON.
+ *
+ * ── Why the default lives here rather than in an environment file ──
+ *
+ * It used to be opt-in: `VITE_LOCAL_AI` unset meant no Welly, and the only way
+ * to see the feature was `npm run dev:ai`. That was right while the assistant
+ * was being built and wrong the moment it was finished — a feature nobody can
+ * reach without knowing the name of an undocumented variable is a feature that
+ * is off in every deployment where somebody forgot, including production. The
+ * failure mode is silence: nothing errors, the launcher simply is not there.
+ *
+ * An environment file cannot fix that, because the problem IS the environment
+ * file — `.env` is not committed, so "remember to set this" is exactly the step
+ * that gets missed. A default in the config travels with the repository.
+ *
+ * ── Why `define` rather than reading it in `config.js` ──
+ *
+ * The value must survive as a LITERAL in the transformed source. `src/ai/index.js`
+ * guards its dynamic imports with `import.meta.env.VITE_LOCAL_AI === 'true'`, and
+ * that comparison folding to a constant is the only thing that keeps the 7.66 MB
+ * `wllama.wasm` out of a build with the feature off — an imported constant does
+ * not fold across the module boundary and ships the runtime anyway (measured:
+ * 10,144 KB vs 2,652 KB; see src/ai/bundleCost.test.js).
+ *
+ * `define` performs exactly that textual substitution, so the guard keeps working
+ * character-for-character, and turning the feature OFF still removes the runtime
+ * from the output. What changes is only which way the default points.
+ *
+ * ── What it does NOT do ──
+ *
+ * This switches on the OFFER, never a download. No model is fetched until
+ * somebody opens Welly and chooses one; a device that cannot run one is never
+ * offered one. See `src/ai/capability.js` and the note in `src/config.js`.
+ *
+ * `VITE_LOCAL_AI=false` (or an empty string, which is what
+ * `bin/verify-ai-bundle.mjs` builds with) opts out and drops the assets.
+ *
+ * ── Precedence ──
+ *
+ * Shell environment, then `.env` files for the mode, then this default. The
+ * `.env` layer is read explicitly with `loadEnv` because `define` bypasses
+ * Vite's own env handling entirely: without it, a deployment that had written
+ * `VITE_LOCAL_AI=false` into its `.env` would be silently overridden by the
+ * default here — the config would be ignoring the one file an operator would
+ * expect to be authoritative.
+ */
+function localAiFlag(mode) {
+  const fromFiles = loadEnv(mode, process.cwd(), 'VITE_')
+  return process.env.VITE_LOCAL_AI ?? fromFiles.VITE_LOCAL_AI ?? 'true'
+}
+
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
+  define: {
+    'import.meta.env.VITE_LOCAL_AI': JSON.stringify(localAiFlag(mode)),
+  },
   server: {
     // Vite does not read PORT on its own — without this it always tries 5173
     // and collides with anything already there. Honouring PORT lets the dev
@@ -75,4 +130,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))

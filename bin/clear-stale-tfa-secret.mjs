@@ -116,7 +116,7 @@ export function assessAccount(db, email) {
 }
 
 /** The write. One column, one row, inside a transaction with its audit entry. */
-export function clearStaleSecret(db, { user, reason, command = 'bin/clear-stale-tfa-secret.mjs' }) {
+export async function clearStaleSecret(db, { user, reason, command = 'bin/clear-stale-tfa-secret.mjs' }) {
   db.exec('BEGIN');
   try {
     /**
@@ -145,7 +145,7 @@ export function clearStaleSecret(db, { user, reason, command = 'bin/clear-stale-
       );
     }
 
-    recordCliAudit(db, {
+    await recordCliAudit(db, {
       action: CLI_EVENTS.TFA_STALE_SECRET_CLEARED,
       targetUserId: user.id,
       command,
@@ -215,7 +215,7 @@ async function main() {
       }
     }
 
-    clearStaleSecret(db, { user, reason });
+    await clearStaleSecret(db, { user, reason });
 
     const after = db.prepare(
       'SELECT tfa_enabled, tfa_email_enabled, tfa_secret FROM users WHERE id = ?'

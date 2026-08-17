@@ -249,3 +249,69 @@ describe('one tool per turn', () => {
     expect(apiMock.fetchEventsFiltered).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('the instruction-echo failure that was measured', () => {
+  /**
+   * On 2026-08-15, a student with no hours asked "how many hours do I have".
+   * The tool succeeded and returned {hours: 0}. SmolLM2-135M replied with the
+   * prompt's own wording — "You could not find anything." — turning a correct
+   * zero into something that reads like a lookup failure.
+   *
+   * Fixed at two layers, and both are pinned here: the model is not consulted
+   * at all for an empty result, and an echoed reply is rejected if it ever
+   * reaches the check by another route.
+   */
+  it('does not consult the model when the answer is zero', async () => {
+    apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 0, events: 0 });
+    const rt = await readyRuntime('You could not find anything.');
+
+    const res = await ask('how many hours do I have', { runtime: rt });
+
+    expect(rt.calls).toHaveLength(0);
+    expect(res.answer).toBe('You do not have any verified hours yet.');
+    expect(res.phrasedByModel).toBe(false);
+  });
+
+  it('never lets a zero be described as a failed lookup', async () => {
+    apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 0, events: 0 });
+    const res = await ask('how many hours do I have', { runtime: null });
+
+    expect(res.toolFailed).toBeUndefined();
+    expect(res.answer).not.toMatch(/could not find|couldn't find|failed|error/i);
+    expect(res.card.data.hours).toBe(0);
+  });
+
+  it('skips the model for every other empty result too', async () => {
+    apiMock.fetchEventsFiltered.mockResolvedValue({ events: [], pagination: { total: 0 } });
+    const rt = await readyRuntime('something the model would have said');
+
+    const res = await ask('find volunteering opportunities', { runtime: rt });
+
+    expect(rt.calls).toHaveLength(0);
+    expect(res.answer).toBe("I couldn't find any opportunities matching that.");
+  });
+
+  it('falls back when a non-empty answer comes back as an echo', async () => {
+    /* The second layer. A real result still goes to the model, so the echo
+       check has to hold there. */
+    apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 35.5, events: 7 });
+    const rt = await readyRuntime('Use only the facts in the DATA block.');
+
+    const res = await ask('how many hours do I have', { runtime: rt });
+
+    expect(rt.calls).toHaveLength(1);
+    expect(res.answer).toBe('You have 35.5 verified hours.');
+    expect(res.phrasedByModel).toBe(false);
+  });
+
+  it('still uses the model for a real, non-empty answer', async () => {
+    /* The fix must not amount to switching the model off. */
+    apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 35.5, events: 7 });
+    const rt = await readyRuntime('You have 35.5 hours so far — nice work.');
+
+    const res = await ask('how many hours do I have', { runtime: rt });
+
+    expect(res.phrasedByModel).toBe(true);
+    expect(res.answer).toBe('You have 35.5 hours so far — nice work.');
+  });
+});

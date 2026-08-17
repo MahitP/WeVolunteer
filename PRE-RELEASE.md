@@ -36,8 +36,37 @@ your SPF and DKIM.
 that commit is still in history, `JWT_SECRET`, `TFA_ENCRYPTION_KEY`, the SMTP
 app password and the Google OAuth client secret should all be rotated too.
 
-- [ ] Check whether the commit is reachable
-- [ ] Rotate all five if it is
+- [x] **Checked 2026-08-15: the commit is NOT reachable.**
+      `git log --all -- .env` returns nothing, so no reachable ref carries the
+      file. Rotation is not required *on these grounds* — but read the next item
+      before concluding those four secrets were never exposed.
+
+### The pre-remediation backup still holds the live secrets, world-readable
+
+`.env.backup-20260809-preremediation` sits beside `.env` in the repository root.
+It is gitignored, so it is not in history and not the finding above. The problem
+is on disk:
+
+- It is mode **644**. `.env` is deliberately **600**.
+- Its values are not stale. `JWT_SECRET`, `TFA_ENCRYPTION_KEY`,
+  `GOOGLE_CLIENT_SECRET` and `SMTP_PASS` are **byte-identical to the current
+  `.env`** — verified by comparison, not assumed from the filename. "Pre
+  remediation" describes when the copy was taken, not what it contains.
+
+So the care taken over `.env`'s permissions is undone by a world-readable copy of
+the same four secrets one directory listing away. Any other account or process on
+that machine can read the token-signing key and the key that decrypts stored 2FA
+secrets.
+
+- [ ] Tighten it now, before deciding anything else:
+      ```bash
+      chmod 600 .env.backup-20260809-preremediation
+      ```
+- [ ] Then delete it, or move it to the password manager. A backup of secrets
+      that is not encrypted and not needed is only a second place to lose them
+      from. Use `trash`, not `rm`.
+- [ ] If that machine is shared, or has been, treat all four as disclosed and
+      rotate them along with the Resend key above.
 
 ---
 
@@ -155,17 +184,18 @@ one, and no way to action a safety report.
 
 ## 6. Legal
 
-**Enforcement is now ON.** `LEGAL_HASHES_ENFORCED = true`, all 11 documents match
+**Enforcement is now ON.** `LEGAL_HASHES_ENFORCED = true`, all 12 documents match
 their pinned hashes, and a production server refuses to boot if one drifts.
 
 Editing a published policy is therefore no longer an edit: change the file, run
 `node bin/legal-hashes.mjs`, paste the printed constant into `LEGAL_DOCUMENTS`,
 and decide whether the change is MAJOR (re-acceptance) or MINOR (notice only).
 
-- [x] Run `node bin/legal-hashes.mjs` — all 11 documents report matching
+- [x] Run `node bin/legal-hashes.mjs` — all 12 documents report matching
 - [x] Set `LEGAL_HASHES_ENFORCED = true` in `server/legalDocuments.js`
 - [ ] Boot once and confirm
-      `[legal] 11 published documents verified against their pinned hashes`
+      `[legal] 12 published documents verified against their pinned hashes` — this
+      line now prints in production too; it previously did not
 - [ ] Open each policy in the Legal Center and confirm it still renders
 - [ ] Re-run the suite: `server/consent.test.js` has a case that is skipped
       while the flag is false and starts running when it is true
@@ -257,7 +287,16 @@ observed once, not as current behaviour.
 - [ ] Password reset end to end
 - [ ] Email 2FA end to end
 - [ ] An enforcement notice — confirm it comes from `admin@`, not `noreply@`
-- [ ] A legal-update notice — confirm it comes from `legal@`
+- [ ] ~~A legal-update notice — confirm it comes from `legal@`~~ **Not testable;
+      nothing sends one.** `LEGAL_DOCUMENT_UPDATED` has notification copy, a
+      mandatory-notice exemption and a `legal@` identity mapping, and no code
+      path anywhere dispatches it. The promise the Terms make — "we will tell you
+      in the app" — is kept by `LegalUpdateModal`, which pulls
+      `pendingNoticesFor()` on load; the push half was built and never wired.
+      Deliberately left unwired rather than switched on during a launch pass:
+      turning it on emails every account on the platform the next time a policy
+      is published, and that is a decision about volume and tone, not a defect
+      to quietly repair. See the Final Launch Readiness Report, P1.
 - [ ] Confirm no email carries a `Reply-To` on an authentication message
 - [ ] Confirm the same message looks identical whether Resend or SMTP sent it
 
@@ -266,7 +305,7 @@ observed once, not as current behaviour.
 ## 9. Database and migrations
 
 - [ ] Back up the production database before the first deploy
-- [ ] Deploy and confirm migrations reach head **52**
+- [ ] Deploy and confirm migrations reach head **55**
 - [ ] `PRAGMA integrity_check` → `ok`
 - [ ] `PRAGMA foreign_key_check` → empty
 - [ ] Restart once and confirm 0 migrations apply the second time
@@ -346,6 +385,15 @@ Live concerns that are now closed. Listed so nobody reopens them.
 
 - **`wevolunteers.org` is verified in Resend.** Sending enabled; DKIM, SPF MX
   and SPF TXT all `verified`. Open and click tracking off.
+- **Two-factor sign-in works on the pilot database again** (migration 055).
+  Every second-factor submission there answered `HTTP 500` — correct code and
+  wrong one alike, email and recovery both — because `tfa_login_attempts` had
+  been created outside the migration system with `preauth_jti` as its key where
+  the sign-in path writes `token_hash`. Migration 025 uses
+  `CREATE TABLE IF NOT EXISTS`, which does not compare shapes, so it saw the name
+  and recorded itself as applied. Every test builds the table from scratch and
+  passed; the only database anyone signs in to could not complete a sign-in.
+  Verified closed against `pilot.db`: head is 55 and the column is `token_hash`.
 - **Auth tokens are hashed at rest** (migration 048). They were stored plaintext,
   which made any readable copy of the database a set of keys to every account
   with an outstanding reset.
@@ -356,7 +404,7 @@ Live concerns that are now closed. Listed so nobody reopens them.
 - **Every authentication message sends from `noreply@wevolunteers.org`**,
   enforced in `server/emailIdentity.js` rather than by convention.
 - **The retired domains** (`wevolunteer.org` singular, `wevolunteer.app`) and the
-  personal Gmail address are gone from shipped code and all eleven policies.
+  personal Gmail address are gone from shipped code and all twelve policies.
 - **Appeals are rate limited** to 5 per person per subject per rolling 30 days.
 - **Service history and certificates are privacy-gated** (migration 049),
   defaulting to public and enforced server-side.

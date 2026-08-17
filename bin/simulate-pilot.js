@@ -54,7 +54,7 @@ try {
   if (!pendingOrg) bugs.push('No pending organizer found to approve.');
   else {
     db.prepare('UPDATE users SET verified = 1 WHERE id = ?').run(pendingOrg.id);
-    recordAudit(db, {
+    await recordAudit(db, {
       adminId: 'admin-1',
       action: 'APPROVE_ORGANIZER',
       targetUserId: pendingOrg.id,
@@ -104,8 +104,9 @@ try {
   console.log('  ✓ Organizer completed event and credited hours.');
 
   // Check hours ledger
-  const { initDatabase } = await import('../server/db.js');
-  initDatabase(); // runs backfill
+  const { initDatabase, completeDatabaseInit } = await import('../server/db.js');
+  initDatabase();
+  await completeDatabaseInit(); // the backfill this script depends on
   
   const ledger = db.prepare('SELECT hours_awarded FROM attendance WHERE user_id = ? AND event_id = ?').get(student, newEventId);
   if (!ledger || ledger.hours_awarded !== 1) {

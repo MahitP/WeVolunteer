@@ -64,6 +64,28 @@ function recommendTier({ deviceMemoryGB, webgpu, cores }) {
   return 'fast';
 }
 
+
+/**
+ * Whether one model can be offered to this device, for conversation.
+ *
+ * The single predicate, used by both the capability check and the picker.
+ * They used to apply different rules, and the gap had a real consequence: a
+ * 2 GB machine passed `supported` on the byte ceiling and then got an empty
+ * picker, because the memory floor was only applied in the second place. One
+ * function means "supported" and "here are your options" cannot disagree.
+ */
+function fitsDevice(model, { maxBytes, deviceMemoryGB }) {
+  /* Only models fit to speak to a student. The smallest is a capable
+     extraction engine and a poor conversationalist, and is withheld here
+     rather than deleted — see the note on its registry entry. */
+  if (!model.conversational) return false;
+  if (model.bytes > maxBytes) return false;
+  /* Absence of evidence is not evidence of a small machine; the tier
+     recommendation is already conservative when memory is unknown. */
+  if (deviceMemoryGB == null) return true;
+  return deviceMemoryGB >= model.minDeviceMemoryGB;
+}
+
 /**
  * Inspect the device.
  *
@@ -97,12 +119,15 @@ export function detectCapability(nav = typeof navigator !== 'undefined' ? naviga
   const deviceMemoryGB = typeof nav.deviceMemory === 'number' ? nav.deviceMemory : null;
 
   const maxBytes = isIOS ? IOS_MAX_MODEL_BYTES : Number.POSITIVE_INFINITY;
-  const fits = MODELS.filter(m => m.bytes <= maxBytes);
+  const fits = MODELS.filter(m => fitsDevice(m, { maxBytes, deviceMemoryGB }));
 
   if (fits.length === 0) {
     return {
       supported: false,
-      reason: 'No available model is small enough to run safely on this device.',
+      /* Currently the iPhone and iPad answer: the only model under the iOS
+         memory ceiling is the one withheld from conversation. Stated as a
+         device limit because that is what it is from here. */
+      reason: 'The assistant needs more memory than this device can give a web page, so it is not available here.',
       recommendedTier: null,
       maxBytes,
       webgpu,
@@ -142,9 +167,8 @@ export function detectCapability(nav = typeof navigator !== 'undefined' ? naviga
  */
 export function offerableModels(capability) {
   if (!capability.supported) return [];
-  return MODELS.filter(m => {
-    if (m.bytes > capability.maxBytes) return false;
-    if (capability.deviceMemoryGB == null) return true;
-    return capability.deviceMemoryGB >= m.minDeviceMemoryGB;
-  });
+  return MODELS.filter(m => fitsDevice(m, {
+    maxBytes: capability.maxBytes,
+    deviceMemoryGB: capability.deviceMemoryGB,
+  }));
 }

@@ -89,6 +89,9 @@ export const IOS_MAX_MODEL_BYTES = 200 * 1024 * 1024;
  */
 export const SHA256_MAX_BYTES = 256 * 1024 * 1024;
 
+/** Models that may be offered as the assistant's voice. See `conversational`. */
+export const conversationalModels = () => MODELS.filter(m => m.conversational);
+
 /** Tier identifiers, ordered smallest to largest. */
 export const TIERS = ['fast', 'balanced', 'advanced'];
 
@@ -110,10 +113,34 @@ export const MODELS = [
     quantisation: 'Q4_K_M',
     license: 'Apache-2.0',
     licenseUrl: 'https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct',
-
-    /* The only entry under IOS_MAX_MODEL_BYTES, and therefore the only one an
-       iPhone or iPad is ever offered. */
     minDeviceMemoryGB: 2,
+
+    /**
+     * Not offered for conversation. Three measurements, all on 2026-08-15:
+     *
+     *   asked for hours   "inYou have 0 hours of work."
+     *   asked with zero   "You could not find anything."  ← its own instructions,
+     *                     turning a correct result into an apparent failure
+     *   asked for tags    5 of 8 were the two words it was told to avoid
+     *
+     * The same model is reliable under a grammar: certificate extraction
+     * returned correct, schema-valid JSON on every attempt. So it is kept in the
+     * registry rather than deleted — it is a good extraction engine and a bad
+     * conversationalist, and the honest thing is to stop offering it for the
+     * second while keeping the entry for the first.
+     *
+     * ── What this costs ──
+     *
+     * This is the only model under `IOS_MAX_MODEL_BYTES`, so withdrawing it from
+     * conversation means iPhone and iPad currently get no assistant at all.
+     * That is worse than it sounds and better than the alternative: a student on
+     * an iPad reading "You could not find anything." when they have hours is a
+     * failure of the product, not a limitation of it.
+     *
+     * Reversing this needs a small model that converses acceptably, not a
+     * change of mind.
+     */
+    conversational: false,
   },
   {
     id: 'qwen2.5-0.5b-instruct-q4km',
@@ -127,6 +154,7 @@ export const MODELS = [
     bytes: 491400032,
     sha256: '74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db',
 
+    conversational: true,
     parameters: '0.5B',
     contextWindow: 32768,
     quantisation: 'Q4_K_M',
@@ -147,6 +175,7 @@ export const MODELS = [
     bytes: 986048768,
     sha256: '1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370',
 
+    conversational: true,
     parameters: '1.5B',
     contextWindow: 32768,
     quantisation: 'Q4_K_M',

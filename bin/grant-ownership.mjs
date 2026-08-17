@@ -94,7 +94,7 @@ async function main() {
         WHERE id = ?
       `).run(user.id);
 
-      recordCliAudit(db, {
+      await recordCliAudit(db, {
         action: CLI_EVENTS.OWNER_GRANTED,
         targetUserId: user.id,
         command: 'bin/grant-ownership.mjs',

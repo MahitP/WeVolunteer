@@ -149,8 +149,10 @@ for (const suffix of ['', '-wal', '-shm']) {
 if (process.env.DEMO_MODE === undefined) process.env.DEMO_MODE = 'true';
 process.env.WEV_DB_PATH = dbPath;
 
-const { initDatabase, db } = await import('../server/db.js');
+const { initDatabase, completeDatabaseInit, db } = await import('../server/db.js');
 initDatabase();
+/* The async half of boot — ledger backfill and parity. See db.js. */
+await completeDatabaseInit();
 
 const counts = ['users', 'events', 'slots', 'applications']
   .map(t => `${t}=${db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get().c}`)

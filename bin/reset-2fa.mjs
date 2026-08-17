@@ -112,7 +112,7 @@ async function main() {
 
       db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(user.id);
 
-      recordCliAudit(db, {
+      await recordCliAudit(db, {
         action: CLI_EVENTS.TFA_RESET_CLI,
         targetUserId: user.id,
         command: 'bin/reset-2fa.mjs',
