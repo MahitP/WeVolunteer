@@ -297,8 +297,17 @@ describe.skipIf(!live)('SQLite and PostgreSQL describe the same database', () =>
              ON ccu.constraint_name = tc.constraint_name AND ccu.constraint_schema = tc.constraint_schema
            JOIN information_schema.referential_constraints rc
              ON rc.constraint_name = tc.constraint_name AND rc.constraint_schema = tc.constraint_schema
-          WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = ? AND tc.table_name = ?`
-      ).all(NAMESPACE, table)).map(f => `${f.from_col}→${f.to_table}.${f.to_col} ${f.delete_rule}`).sort();
+          WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = ? AND tc.table_name = ?
+            /* The schema is pinned on EVERY view, not only on tc. The join
+               conditions match on constraint_schema but carry no filter, so the
+               planner builds each side across every schema in the database
+               before narrowing, and the harness gives each of ~283 test files
+               its own namespace, all live at once during a run. That turned
+               this query from instant into a fifteen-second timeout, reported
+               as SQLite and PostgreSQL disagreeing about foreign keys.
+               (No backticks here: this sits inside a template literal.) */
+            AND kcu.constraint_schema = ? AND ccu.constraint_schema = ? AND rc.constraint_schema = ?`
+      ).all(NAMESPACE, table, NAMESPACE, NAMESPACE, NAMESPACE)).map(f => `${f.from_col}→${f.to_table}.${f.to_col} ${f.delete_rule}`).sort();
 
       if (here.join(' | ') !== there.join(' | ')) {
         drift.push(`${table}:\n    sqlite   ${here.join(' | ')}\n    postgres ${there.join(' | ')}`);
