@@ -15,6 +15,7 @@
  *     bounds anything. `EXPLAIN QUERY PLAN` is the only honest way to check.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 
 let srv;
 beforeAll(async () => {
@@ -29,14 +30,14 @@ const plan = async (db, sql, ...params) =>
   (await db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params)).map(r => r.detail).join(' | ');
 
 describe('004_error_events — applies and registers', () => {
-  it('records itself in schema_migrations as version 4 with a non-null checksum', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('records itself in schema_migrations as version 4 with a non-null checksum', async () => {
     const db = await getDb();
     const row = await db.prepare('SELECT name, checksum FROM schema_migrations WHERE version = 4').get();
     expect(row?.name).toBe('error_events');
     expect(row?.checksum).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it('creates both tables with the expected primary keys', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('creates both tables with the expected primary keys', async () => {
     const db = await getDb();
     for (const t of ['error_groups', 'error_events']) {
       expect(
@@ -55,7 +56,7 @@ describe('004_error_events — applies and registers', () => {
    * be filled by whoever added it, so their absence is asserted rather than left
    * to the reviewer of a future diff.
    */
-  it('stores a hash and not an id, and offers nowhere to put a body, an IP or a URL', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('stores a hash and not an id, and offers nowhere to put a body, an IP or a URL', async () => {
     const db = await getDb();
     const cols = (await db.prepare('PRAGMA table_info(error_events)').all()).map(c => c.name);
 
@@ -70,7 +71,7 @@ describe('004_error_events — applies and registers', () => {
     }
   });
 
-  it('is idempotent — a second runMigrations applies nothing and throws nothing', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('is idempotent — a second runMigrations applies nothing and throws nothing', async () => {
     const db = await getDb();
     const { runMigrations } = await import('./migrations/index.js');
     const before = (await db.prepare('SELECT COUNT(*) c FROM error_groups').get()).c;
@@ -183,7 +184,7 @@ describe('004_error_events — retention can actually delete', () => {
 });
 
 describe('004_error_events — the sweep and ceiling queries use their indexes', () => {
-  it('creates all four indexes', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('creates all four indexes', async () => {
     const db = await getDb();
     const names = (await db.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('error_groups','error_events')"
@@ -204,7 +205,7 @@ describe('004_error_events — the sweep and ceiling queries use their indexes',
    * to a scan, the retention pass walks the largest table in the schema on every
    * run — the failure this table exists to avoid.
    */
-  it('plans the 30-day event sweep against idx_error_events_occurred, not a scan', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('plans the 30-day event sweep against idx_error_events_occurred, not a scan', async () => {
     const db = await getDb();
     const detail = await plan(db, 'DELETE FROM error_events WHERE occurred_at < ?', '2026-01-01T00:00:00.000Z');
     expect(detail).toContain('idx_error_events_occurred');
@@ -216,7 +217,7 @@ describe('004_error_events — the sweep and ceiling queries use their indexes',
    * open a new group. Unindexed, the defence scans the table it is bounding,
    * once per attack request.
    */
-  it('plans the client-group ceiling against idx_error_groups_source, not a scan', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('plans the client-group ceiling against idx_error_groups_source, not a scan', async () => {
     const db = await getDb();
     const detail = await plan(db,
       'SELECT COUNT(*) FROM error_groups WHERE source = ? AND status = ?', 'client', 'open');
@@ -224,7 +225,7 @@ describe('004_error_events — the sweep and ceiling queries use their indexes',
     expect(detail).not.toMatch(/SCAN error_groups(?! USING)/);
   });
 
-  it('plans the triage read and the per-group event read against their indexes', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('plans the triage read and the per-group event read against their indexes', async () => {
     const db = await getDb();
     expect(await plan(db,
       "SELECT * FROM error_groups WHERE status = 'open' ORDER BY last_seen_at DESC"

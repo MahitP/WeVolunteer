@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 
 let srv;
 beforeAll(async () => { srv = await startTestServerLazy(); }, 60000);
@@ -14,14 +15,14 @@ async function startTestServerLazy() {
 const getDb = async () => (await import('./db.js')).db;
 
 describe('003_reauth_challenges', () => {
-  it('records itself in schema_migrations as version 3 with a non-null checksum', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('records itself in schema_migrations as version 3 with a non-null checksum', async () => {
     const db = await getDb();
     const row = await db.prepare('SELECT name, checksum FROM schema_migrations WHERE version = 3').get();
     expect(row?.name).toBe('reauth_challenges');
     expect(row?.checksum).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it('creates the reauth_challenges table with id as PRIMARY KEY', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('creates the reauth_challenges table with id as PRIMARY KEY', async () => {
     const db = await getDb();
     expect(await db.prepare("SELECT name FROM sqlite_master WHERE name = 'reauth_challenges'").get()).toBeTruthy();
     const columns = await db.prepare('PRAGMA table_info(reauth_challenges)').all();
@@ -29,7 +30,7 @@ describe('003_reauth_challenges', () => {
     expect(idCol?.pk).toBe(1);
   });
 
-  it('creates the idx_reauth_user index on (user_id, expires_at)', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('creates the idx_reauth_user index on (user_id, expires_at)', async () => {
     const db = await getDb();
     const idx = await db.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'reauth_challenges' AND name = 'idx_reauth_user'"
@@ -101,7 +102,7 @@ describe('003_reauth_challenges', () => {
     expect((await db.prepare('SELECT COUNT(*) c FROM reauth_challenges WHERE user_id = ?').get(userId)).c).toBe(0);
   });
 
-  it('is idempotent — a second runMigrations applies nothing and throws nothing', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('is idempotent — a second runMigrations applies nothing and throws nothing', async () => {
     const db = await getDb();
     const { runMigrations } = await import('./migrations/index.js');
     const before = (await db.prepare('SELECT COUNT(*) c FROM reauth_challenges').get()).c;

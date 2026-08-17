@@ -366,6 +366,45 @@ describe('SQLite-only SQL still in the codebase', () => {
     ).toEqual([]);
   });
 
+  /**
+   * `RUNNING_ON_POSTGRES` may only silence the SQLite migration mechanism.
+   *
+   * It is the one switch in the suite that makes a test not run on PostgreSQL,
+   * which makes it the obvious place to put a failure somebody does not want to
+   * fix. The bar is written in `testEngine.js`: the test's SUBJECT must not
+   * exist on PostgreSQL, and today the only such subject is the migration
+   * machinery — `initDatabase()` returns before running a single migration
+   * there, applying the generated schema whole instead.
+   *
+   * So the files allowed to use it are the migration files, and this pins the
+   * list. Fifteen of the nineteen migration suites need no exemption at all and
+   * pass on PostgreSQL unchanged, which is the evidence that the exemption is
+   * narrow rather than a blanket.
+   *
+   * Adding a file here is a claim that its subject does not exist on
+   * PostgreSQL. If the honest reason is "it fails and I do not know why", that
+   * is a failure, not an exemption.
+   */
+  it('confines the engine skip to the SQLite migration mechanism', () => {
+    /* `FILES` deliberately excludes test files — it measures shipped SQL — so
+       the test tree is read directly here. This file names the flag in order to
+       police it and would otherwise appear in its own list. */
+    const users = readdirSync(SERVER)
+      .filter(n => n.includes('.test.') && n !== 'sqliteDialect.test.js')
+      .filter(n => readFileSync(path.join(SERVER, n), 'utf8').includes('RUNNING_ON_POSTGRES'))
+      .sort();
+    expect(
+      users,
+      'RUNNING_ON_POSTGRES is for tests whose subject does not exist on PostgreSQL — '
+      + 'today only the SQLite migration machinery. See server/testEngine.js.',
+    ).toEqual([
+      'migrations.authzRoles.test.js',
+      'migrations.errorEvents.test.js',
+      'migrations.graduationYear.test.js',
+      'migrations.reauth.test.js',
+    ]);
+  });
+
   it('holds the total at 119 — 6 runtime, 113 boot', () => {
     const runtime = CONSTRUCTS.reduce((n, c) => n + tallyOf(rel => !isBoot(rel), c), 0);
     const boot = CONSTRUCTS.reduce((n, c) => n + tallyOf(isBoot, c), 0);

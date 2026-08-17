@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 
 let srv;
 beforeAll(async () => { srv = await startTestServerLazy(); }, 60000);
@@ -14,7 +15,7 @@ async function startTestServerLazy() {
 const getDb = async () => (await import('./db.js')).db;
 
 describe('001_authz_roles', () => {
-  it('records itself in schema_migrations', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('records itself in schema_migrations', async () => {
     const db = await getDb();
     const row = db.prepare('SELECT name FROM schema_migrations WHERE version = 1').get();
     expect(row?.name).toBe('authz_roles');
@@ -24,36 +25,36 @@ describe('001_authz_roles', () => {
     const db = await getDb();
     const now = new Date().toISOString();
     for (const role of ['super_admin', 'partner']) {
-      expect(() => db.prepare(`
+      await db.prepare(`
         INSERT INTO users (id, name, email, password_hash, grade, role, created_at)
         VALUES (?, ?, ?, 'x', 'N/A', ?, ?)
-      `).run(`u-${role}`, role, `${role}@test.local`, role, now)).not.toThrow();
+      `).run(`u-${role}`, role, `${role}@test.local`, role, now);
     }
-    expect(db.prepare("SELECT role FROM users WHERE id = 'u-super_admin'").get().role).toBe('super_admin');
+    expect((await db.prepare("SELECT role FROM users WHERE id = 'u-super_admin'").get()).role).toBe('super_admin');
   });
 
   it('still rejects a role outside the enum', async () => {
     const db = await getDb();
-    expect(() => db.prepare(`
+    await expect(async () => db.prepare(`
       INSERT INTO users (id, name, email, password_hash, grade, role, created_at)
       VALUES ('u-bogus','B','bogus@test.local','x','N/A','wizard', ?)
-    `).run(new Date().toISOString())).toThrow();
+    `).run(new Date().toISOString())).rejects.toThrow();
   });
 
   it('preserved every seeded user and their data', async () => {
     const db = await getDb();
     // The demo seed creates users, events and applications; all must survive.
-    expect(db.prepare('SELECT COUNT(*) c FROM users').get().c).toBeGreaterThan(5);
-    expect(db.prepare('SELECT COUNT(*) c FROM events').get().c).toBeGreaterThan(0);
-    expect(db.prepare('SELECT COUNT(*) c FROM applications').get().c).toBeGreaterThan(0);
+    expect((await db.prepare('SELECT COUNT(*) c FROM users').get()).c).toBeGreaterThan(5);
+    expect((await db.prepare('SELECT COUNT(*) c FROM events').get()).c).toBeGreaterThan(0);
+    expect((await db.prepare('SELECT COUNT(*) c FROM applications').get()).c).toBeGreaterThan(0);
     // The classic cascade-delete symptom: users survive but children vanish.
-    const orphanApps = db.prepare(
+    const orphanApps = (await db.prepare(
       'SELECT COUNT(*) c FROM applications a LEFT JOIN users u ON u.id = a.user_id WHERE u.id IS NULL'
-    ).get().c;
+    ).get()).c;
     expect(orphanApps).toBe(0);
   });
 
-  it('recreated all three users indexes', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('recreated all three users indexes', async () => {
     const db = await getDb();
     const names = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='users'")
       .all().map(r => r.name);
@@ -65,18 +66,18 @@ describe('001_authz_roles', () => {
   it('kept the case-insensitive email index enforcing', async () => {
     const db = await getDb();
     const now = new Date().toISOString();
-    db.prepare(`INSERT INTO users (id,name,email,password_hash,grade,role,created_at)
+    await db.prepare(`INSERT INTO users (id,name,email,password_hash,grade,role,created_at)
                 VALUES ('u-case','C','Case@test.local','x','N/A','student',?)`).run(now);
-    expect(() => db.prepare(`INSERT INTO users (id,name,email,password_hash,grade,role,created_at)
-                VALUES ('u-case2','C2','case@test.local','x','N/A','student',?)`).run(now)).toThrow();
+    await expect(async () => db.prepare(`INSERT INTO users (id,name,email,password_hash,grade,role,created_at)
+                VALUES ('u-case2','C2','case@test.local','x','N/A','student',?)`).run(now)).rejects.toThrow();
   });
 
-  it('left foreign key enforcement ON afterwards', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('left foreign key enforcement ON afterwards', async () => {
     const db = await getDb();
     expect(db.prepare('PRAGMA foreign_keys').get().foreign_keys).toBe(1);
   });
 
-  it('is idempotent — a second runMigrations applies nothing', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('is idempotent — a second runMigrations applies nothing', async () => {
     const db = await getDb();
     const { runMigrations } = await import('./migrations/index.js');
     const before = db.prepare('SELECT COUNT(*) c FROM users').get().c;

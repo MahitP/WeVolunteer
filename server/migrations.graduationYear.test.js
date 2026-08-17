@@ -20,6 +20,7 @@
  *     which can read a clock.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 
 let srv;
 beforeAll(async () => {
@@ -31,14 +32,14 @@ afterAll(async () => { await srv?.close(); });
 const getDb = async () => (await import('./db.js')).db;
 
 describe('010_graduation_year — applies and registers', () => {
-  it('records itself in schema_migrations as version 10 with a non-null checksum', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('records itself in schema_migrations as version 10 with a non-null checksum', async () => {
     const db = await getDb();
     const row = await db.prepare('SELECT name, checksum FROM schema_migrations WHERE version = 10').get();
     expect(row?.name).toBe('graduation_year');
     expect(row?.checksum).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it('adds graduation_year to users as a nullable INTEGER with no default', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('adds graduation_year to users as a nullable INTEGER with no default', async () => {
     const db = await getDb();
     const col = (await db.prepare('PRAGMA table_info(users)').all()).find(c => c.name === 'graduation_year');
 
@@ -48,7 +49,7 @@ describe('010_graduation_year — applies and registers', () => {
     expect(col.dflt_value, 'a default would invent a class year for grandfathered rows').toBeNull();
   });
 
-  it('carries no CHECK constraint, because the eligible range moves every year', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('carries no CHECK constraint, because the eligible range moves every year', async () => {
     const db = await getDb();
     const sql = (await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get()).sql;
     expect(sql).toContain('graduation_year');
@@ -83,7 +84,7 @@ describe('010_graduation_year — applies and registers', () => {
     expect(typeof value).toBe('number');
   });
 
-  it('is idempotent — a second runMigrations applies nothing, throws nothing, and loses no data', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('is idempotent — a second runMigrations applies nothing, throws nothing, and loses no data', async () => {
     const db = await getDb();
     const { runMigrations } = await import('./migrations/index.js');
     const before = (await db.prepare('SELECT COUNT(*) c FROM users WHERE graduation_year IS NOT NULL').get()).c;
