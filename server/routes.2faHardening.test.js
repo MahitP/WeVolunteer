@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
@@ -77,7 +78,20 @@ describe('2FA Security Hardening Regressions', () => {
      * sign in as an administrator at all — a test that damages a shared fixture
      * fails its neighbours rather than itself, which is the hardest kind to read.
      */
-    it('migrates legacy plaintext secrets cleanly without corruption', async () => {
+    /**
+     * SQLite-only: it drives migration 027 directly.
+     *
+     * PostgreSQL never replays the migrations — `initDatabase()` returns before
+     * running one and the generated schema is applied whole — so `027`'s
+     * synchronous SQLite code is handed the async handle and its `.all()`
+     * returns a promise, giving "usersWithPlaintextSecrets is not iterable".
+     * The subject here is the migration pass itself, not the encryption.
+     *
+     * What it protects IS covered on PostgreSQL: the encryption round-trip is
+     * asserted by the neighbouring cases in this file, and the resulting column
+     * shape by db.postgresSchema.test.js.
+     */
+    it.skipIf(RUNNING_ON_POSTGRES)('migrates legacy plaintext secrets cleanly without corruption', async () => {
       const MIGRATION_SUBJECT = 'priya.patel@example.com';
       const plaintextSecret = 'JBSWY3DPEHPK3PXP';
       await db.prepare('UPDATE users SET tfa_secret = ? WHERE email = ?').run(plaintextSecret, MIGRATION_SUBJECT);

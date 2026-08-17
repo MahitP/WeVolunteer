@@ -62,7 +62,58 @@ const PREFIXES = [
 /** Old enough that no live run could own it. */
 const MIN_AGE_MS = 30 * 60 * 1000;
 
-export default function reclaimStaleTempDirs() {
+/**
+ * Drops PostgreSQL schema namespaces left behind by earlier runs.
+ *
+ * The harness gives each test FILE its own `wev_t_…` schema and drops it in
+ * `srv.close()`. A file that dies in `beforeAll` never reaches that, so the
+ * namespace survives — and they accumulate: 89 of them had built up in
+ * `wv_app_test`.
+ *
+ * That is not merely untidy. `db.postgresSchema.test.js` compares foreign keys
+ * across the catalogue, and with 89 stale namespaces to walk it went from
+ * passing to timing out at fifteen seconds — a failure that looked like a
+ * schema disagreement and was actually accumulated litter. The same run passed
+ * against `wv_adapter`, which had none.
+ *
+ * Safe to run here and nowhere else: `globalSetup` executes once, before any
+ * worker starts, so nothing can be holding a namespace when this runs. Doing it
+ * per-file would let one worker drop a schema another is using.
+ *
+ * Opportunistic throughout — a cleanup that fails a test run is worse than
+ * litter.
+ */
+async function dropStaleSchemas() {
+  const url = process.env.TEST_POSTGRES_URL;
+  if (!url) return;
+
+  let pg;
+  try { pg = (await import('pg')).default; } catch { return; }
+
+  const client = new pg.Client({ connectionString: url });
+  try {
+    await client.connect();
+    const { rows } = await client.query(
+      "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'wev\\_t\\_%'"
+    );
+    for (const { nspname } of rows) {
+      /* Identifier interpolated, not bound: PostgreSQL takes no parameter in
+         DDL. The value comes from its own catalogue and matched the prefix
+         pattern above, so it cannot carry anything else. */
+      await client.query(`DROP SCHEMA IF EXISTS "${nspname}" CASCADE`);
+    }
+    if (rows.length) {
+      console.log(`[test cleanup] dropped ${rows.length} stale PostgreSQL schema namespace(s)`);
+    }
+  } catch {
+    /* No server, no permission, or a race with another run. Opportunistic. */
+  } finally {
+    try { await client.end(); } catch { /* already gone */ }
+  }
+}
+
+export default async function reclaimStaleTempDirs() {
+  await dropStaleSchemas();
   const dir = tmpdir();
   let removed = 0;
   let reclaimed = 0;

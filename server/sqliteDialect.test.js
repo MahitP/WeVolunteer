@@ -459,6 +459,10 @@ describe('SQLite-only SQL still in the codebase', () => {
       'migrations.errorEvents.test.js',
       'migrations.graduationYear.test.js',
       'migrations.reauth.test.js',
+      /* Drives migration 027 directly: its synchronous SQLite code cannot run
+         against the async handle, and PostgreSQL never replays migrations. The
+         encryption it protects is covered by the cases beside it. */
+      'routes.2faHardening.test.js',
       /* The email-dedupe pass is the same thing wearing a different name: it
          runs inside `initDatabase()`, after the PostgreSQL early return. Only
          its migration describe is exempt; the API describe beside it runs on
