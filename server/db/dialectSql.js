@@ -259,6 +259,31 @@ export function nullSafeEquals(db, column, param) {
  * explicit that showing a distressed student an error after they worked up to
  * pressing the button is the outcome it exists to prevent.
  */
+/**
+ * A row lock, so a read-then-write on that row cannot interleave.
+ *
+ * The shape this exists for is capacity: read `COUNT(*) … WHERE status =
+ * 'accepted'`, compare it to `max_spots`, then write. Two requests that read
+ * before either writes both believe there is room, and the slot ends up
+ * oversubscribed. Measured, not theorised — before this existed, five
+ * simultaneous accepts put five volunteers into a two-spot shift.
+ *
+ * On PostgreSQL, `SELECT … FOR UPDATE` on the SLOT row serialises every accept
+ * for that slot: the second transaction blocks until the first commits and then
+ * re-reads the count it actually has to respect. The lock is taken on the slot
+ * rather than on the applications, because the rows being counted are not the
+ * rows being locked — a new application can be inserted between the two, and a
+ * lock on "the rows I read" would not cover it.
+ *
+ * On SQLite this is an empty string, deliberately. Its writes are serialised
+ * process-wide by the write queue, so the interleaving cannot occur; and
+ * `FOR UPDATE` is not syntax it accepts. That asymmetry is the whole reason
+ * this bug was invisible until the application ran on a connection pool.
+ */
+export function forUpdate(db) {
+  return isPostgres(db) ? ' FOR UPDATE' : '';
+}
+
 export function isUniqueViolation(err) {
   if (!err) return false;
   if (err.code === '23505') return true;                       // PostgreSQL

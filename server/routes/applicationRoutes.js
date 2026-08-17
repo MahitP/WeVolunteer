@@ -5,6 +5,7 @@ import {
   assignWaitlistOrder, promoteFromWaitlist, notifyPromotions
 } from '../utils.js';
 import { runInTransaction } from '../db/connectionContext.js';
+import { forUpdate } from '../db/dialectSql.js';
 import { can, requireCap, requireCapAny } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
 import { friendsToNotify } from '../relationships.js';
@@ -730,19 +731,11 @@ router.patch('/api/applications/:id', authenticateToken,
         });
       }
 
-      // Check spots capacity at the slot level if accepting
-      if (status === 'accepted') {
-        const slot = await db.prepare('SELECT max_spots FROM slots WHERE id = ?').get(app.slot_id);
-        const slotMaxSpots = slot ? slot.max_spots : 0;
-        const slotAccepted = (await db.prepare(`
-          SELECT COUNT(*) as count FROM applications
-          WHERE slot_id = ? AND status = 'accepted'
-        `).get(app.slot_id)).count;
-
-        if (slotAccepted >= slotMaxSpots) {
-          return res.status(400).json({ error: `Cannot accept: This slot is full (${slotMaxSpots} spots).` });
-        }
-      }
+      /* The capacity check moved INSIDE the transaction below, behind a row
+         lock on the slot. Checking here read the count on the ambient handle
+         and wrote several statements later, so two organizers pressing Accept
+         together both saw room: five simultaneous accepts put five volunteers
+         into a two-spot shift. SQLite's process-wide write queue hid it. */
 
       const wasAccepted = app.status === 'accepted';
 
@@ -794,7 +787,27 @@ router.patch('/api/applications/:id', authenticateToken,
       // The status change and any resulting promotion must land together: a spot
       // freed but not refilled, or refilled twice, are both worse than neither.
       let promotions = [];
+      let slotFull = null;
       await runInTransaction(db, async (tx) => {
+        if (status === 'accepted') {
+          /* Lock the SLOT, then count. The lock is on the slot rather than the
+             applications because the rows counted are not the rows locked — an
+             application can be inserted between the two. */
+          const slot = await tx.prepare(
+            `SELECT max_spots FROM slots WHERE id = ?${forUpdate(db)}`
+          ).get(app.slot_id);
+          const slotMaxSpots = slot ? slot.max_spots : 0;
+          const slotAccepted = (await tx.prepare(`
+            SELECT COUNT(*) as count FROM applications
+            WHERE slot_id = ? AND status = 'accepted'
+          `).get(app.slot_id)).count;
+
+          if (Number(slotAccepted) >= Number(slotMaxSpots)) {
+            slotFull = slotMaxSpots;
+            return;
+          }
+        }
+
         await tx.prepare('UPDATE applications SET status = ? WHERE id = ?').run(status, appId);
 
         // Joining the waitlist means joining the back of the queue.
@@ -811,6 +824,13 @@ router.patch('/api/applications/:id', authenticateToken,
           promotions = await promoteFromWaitlist(app.slot_id);
         }
       });
+
+      /* Refused inside the transaction, answered outside it: returning from the
+         callback would have committed a no-op rather than sending a response. */
+      if (slotFull !== null) {
+        return res.status(400).json({ error: `Cannot accept: This slot is full (${slotFull} spots).` });
+      }
+
       await notifyPromotions(promotions);
 
       // Notify the volunteer

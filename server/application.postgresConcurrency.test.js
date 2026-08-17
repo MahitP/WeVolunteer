@@ -193,6 +193,94 @@ describe.skipIf(!RUNNING_ON_POSTGRES)('the application under real PostgreSQL con
     }, 60_000);
   });
 
+
+  /**
+   * Event capacity is the highest-stakes read-then-write in the product.
+   *
+   * `PATCH /api/applications/:id` accepts by reading
+   * `SELECT COUNT(*) … WHERE status = 'accepted'`, comparing it to the slot's
+   * `max_spots`, and only then writing — and that read happens on the ambient
+   * handle, outside the transaction that performs the write. Two organizers
+   * clicking Accept at the same moment can therefore both read the same count.
+   *
+   * On SQLite the process-wide write queue serialised this so completely that
+   * the window never opened. A connection pool opens it.
+   *
+   * Oversubscription is not a cosmetic bug: it puts more volunteers on a shift
+   * than the host asked for, and the person who arrives to be turned away is a
+   * student who arranged a ride.
+   */
+  describe('event capacity', () => {
+    const ORGANIZER = 'jordan.whitfield@example.org';
+
+    /** An event with one slot of `spots`, and `n` pending applications on it. */
+    async function raceFixture(spots, n, tag) {
+      const organizer = await srv.login(ORGANIZER);
+      const start = new Date(Date.now() + 40 * 864e5).toISOString();
+      const made = await srv.call('POST', '/api/events', {
+        title: `Capacity race ${tag}`, description: 'd', category: 'Other', location: 'Somewhere',
+        applicationDeadline: new Date(Date.now() + 30 * 864e5).toISOString(),
+        slots: [{
+          name: 'S', description: 'd', startDatetime: start,
+          endDatetime: new Date(Date.now() + 40 * 864e5 + 108e5).toISOString(), maxSpots: spots,
+        }],
+      }, organizer);
+      expect(made.status, `fixture: event not created (${JSON.stringify(made.body)})`).toBe(201);
+
+      const slot = await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(made.body.id);
+
+      /* Applications are written directly: the goal is to race the ACCEPT path,
+         and going through the apply endpoint n times only adds fixture that can
+         fail for unrelated eligibility reasons. */
+      const students = await db.prepare(
+        "SELECT id FROM users WHERE role = 'student' AND account_status = 'active' ORDER BY id LIMIT ?"
+      ).all(n);
+      expect(students.length, `fixture: needs ${n} students, seed has ${students.length}`).toBe(n);
+
+      const ids = [];
+      for (const [i, u] of students.entries()) {
+        const id = `app-race-${tag}-${i}`;
+        await db.prepare(`
+          INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
+          VALUES (?, ?, ?, ?, 'pending', ?)
+        `).run(id, u.id, made.body.id, slot.id, new Date().toISOString());
+        ids.push(id);
+      }
+      return { organizer, slotId: slot.id, applicationIds: ids };
+    }
+
+    const acceptedIn = async (slotId) => Number((await db.prepare(
+      "SELECT COUNT(*) AS c FROM applications WHERE slot_id = ? AND status = 'accepted'"
+    ).get(slotId)).c);
+
+    for (const [spots, attempts] of [[1, 2], [1, 5], [2, 5]]) {
+      it(`never puts more than ${spots} into a ${spots}-spot slot when ${attempts} accepts race`, async () => {
+        for (let round = 0; round < 3; round += 1) {
+          const tag = `${spots}x${attempts}r${round}-${Math.random().toString(36).slice(2, 7)}`;
+          const { organizer, slotId, applicationIds } = await raceFixture(spots, attempts, tag);
+
+          const results = await Promise.all(applicationIds.map(id =>
+            srv.call('PATCH', `/api/applications/${id}`, { status: 'accepted' }, organizer)
+              .catch(err => ({ status: 0, body: { error: String(err?.message ?? err) } }))));
+
+          const accepted = await acceptedIn(slotId);
+          expect(
+            accepted,
+            `oversubscribed: ${accepted} accepted into ${spots} spot(s). `
+            + `statuses: ${results.map(r => r.status).join(',')}`,
+          ).toBeLessThanOrEqual(spots);
+
+          /* And it must not UNDER-fill either: refusing everybody would satisfy
+             the bound above while breaking the product. */
+          expect(accepted, 'the slot was left emptier than it should be').toBe(Math.min(spots, attempts));
+
+          const okays = results.filter(r => r.status === 200).length;
+          expect(okays, 'more requests reported success than there were spots').toBe(accepted);
+        }
+      }, 120_000);
+    }
+  });
+
   /**
    * A check-in token is single-use by contract: it is how attendance is claimed,
    * and a token that can be redeemed twice is a double attendance record.
