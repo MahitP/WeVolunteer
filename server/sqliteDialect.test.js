@@ -213,7 +213,11 @@ function scalarMinMax(lit) {
  * introspection with direct PostgreSQL equivalents, not queries to rewrite.
  */
 const CONSTRUCTS = [
-  { name: 'PRAGMA',          pattern: /\bPRAGMA\s+\w/gi,                    runtime: 4, boot: 82,
+  /* 6 rather than 4: `withForeignKeysOff()` in the dialect layer holds the
+     SQLite half of suspending FK enforcement (`PRAGMA foreign_keys = OFF/ON`)
+     beside its PostgreSQL equivalent. Both branches live together on purpose —
+     that is what the dialect module is for. */
+  { name: 'PRAGMA',          pattern: /\bPRAGMA\s+\w/gi,                    runtime: 6, boot: 82,
     postgres: 'session settings and information_schema; PRAGMA does not exist' },
   /**
    * Case-sensitive, and the case carries the meaning.
@@ -446,6 +450,11 @@ describe('SQLite-only SQL still in the codebase', () => {
       'RUNNING_ON_POSTGRES is for tests whose subject does not exist on PostgreSQL — '
       + 'today only the SQLite migration machinery. See server/testEngine.js.',
     ).toEqual([
+      /* SQLite FILE tooling, not migration machinery: `bin/backup.sh` drives
+         SQLite's online backup API and `bin/reset-dev-db.mjs` deletes `.db`
+         and `-wal` files. Backing up PostgreSQL is `pg_dump` against a server —
+         a different program, covered by the cutover document rather than here. */
+      'backup.test.js',
       'migrations.authzRoles.test.js',
       'migrations.errorEvents.test.js',
       'migrations.graduationYear.test.js',
@@ -455,6 +464,7 @@ describe('SQLite-only SQL still in the codebase', () => {
          its migration describe is exempt; the API describe beside it runs on
          both engines. */
       'routes.emailUniqueness.test.js',
+      'routes.resetRemoved.test.js',
     ]);
   });
 
@@ -491,11 +501,11 @@ describe('SQLite-only SQL still in the codebase', () => {
     ).toEqual([]);
   });
 
-  it('holds the total at 119 — 6 runtime, 113 boot', () => {
+  it('holds the total at 121 — 8 runtime, 113 boot', () => {
     const runtime = CONSTRUCTS.reduce((n, c) => n + tallyOf(rel => !isBoot(rel), c), 0);
     const boot = CONSTRUCTS.reduce((n, c) => n + tallyOf(isBoot, c), 0);
 
-    expect(runtime, 'runtime SQLite-only SQL grew').toBeLessThanOrEqual(6);
+    expect(runtime, 'runtime SQLite-only SQL grew').toBeLessThanOrEqual(8);
     expect(boot, 'boot-path SQLite-only SQL grew').toBeLessThanOrEqual(113);
   });
 });

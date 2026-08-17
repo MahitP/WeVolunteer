@@ -215,18 +215,23 @@ describe('an export that expired earlier today is cleaned up', () => {
     const worker = await import('./workers/exportWorker.js');
 
     const now = new Date().toISOString();
+    /* `DO NOTHING` on both: these ids are fixed, and the file's schema namespace
+       outlives a single test, so a re-run would otherwise collide on the
+       primary key rather than on anything this test is about. */
     await db.prepare(`
       INSERT INTO users (id, username, email, password_hash, name, grade, role, created_at)
       VALUES ('u-dt','u-dt','u-dt@example.org','x','DT','11','student',?)
+      ON CONFLICT (id) DO NOTHING
     `).run(now);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO data_export_jobs (id, user_id, status, file_location, created_at, completed_at, expires_at)
       VALUES ('exp-dt','u-dt','completed', NULL, ?, ?, ?)
+      ON CONFLICT (id) DO UPDATE SET status = 'completed', expires_at = excluded.expires_at
     `).run(isoFromNow(-8 * HOUR), isoFromNow(-8 * HOUR), isoFromNow(-3 * HOUR));
 
     await worker.cleanupExpiredExports();
 
-    const row = db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-dt');
+    const row = await db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-dt');
     expect(
       row.status,
       'an export that expired three hours ago is still marked completed, so a '

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 import { execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -18,7 +19,20 @@ afterAll(async () => {
   fs.rmSync(backupDir, { recursive: true, force: true });
 });
 
-describe('Backup script verification', () => {
+/**
+ * SQLite file-level tooling — its subject does not exist on PostgreSQL.
+ *
+ * `bin/backup.sh` drives SQLite's ONLINE BACKUP API (`.backup`) against a `.db`
+ * file and its `-wal`; `bin/reset-dev-db.mjs` deletes those files. Neither
+ * operation has a PostgreSQL meaning: backing up a PostgreSQL deployment is
+ * `pg_dump` against a server, which is a different program with a different
+ * failure model.
+ *
+ * Recorded as a genuine gap rather than hidden: the PostgreSQL backup path has
+ * NO equivalent coverage here, and `docs/operations/postgres-cutover-and-rollback.md`
+ * is where that procedure lives.
+ */
+describe.skipIf(RUNNING_ON_POSTGRES)('Backup script verification', () => {
   it('successfully creates a verified backup archive', () => {
     // 1. Run the backup script
     const scriptPath = path.resolve(__dirname, '../bin/backup.sh');

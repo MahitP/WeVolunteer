@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -35,7 +36,20 @@ import { startTestServer } from './testServer.js';
 const ROOT = process.cwd().replace(/\\/g, '/');
 const SCRIPT = path.join(process.cwd(), 'bin', 'reset-dev-db.mjs');
 
-describe('the database-reset HTTP endpoint is gone', () => {
+/**
+ * SQLite file-level tooling — its subject does not exist on PostgreSQL.
+ *
+ * `bin/backup.sh` drives SQLite's ONLINE BACKUP API (`.backup`) against a `.db`
+ * file and its `-wal`; `bin/reset-dev-db.mjs` deletes those files. Neither
+ * operation has a PostgreSQL meaning: backing up a PostgreSQL deployment is
+ * `pg_dump` against a server, which is a different program with a different
+ * failure model.
+ *
+ * Recorded as a genuine gap rather than hidden: the PostgreSQL backup path has
+ * NO equivalent coverage here, and `docs/operations/postgres-cutover-and-rollback.md`
+ * is where that procedure lives.
+ */
+describe.skipIf(RUNNING_ON_POSTGRES)('the database-reset HTTP endpoint is gone', () => {
   let srv;
   beforeAll(async () => { srv = await startTestServer(); });
   afterAll(async () => { await srv?.close(); });
