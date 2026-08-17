@@ -136,13 +136,16 @@ describe('revocations do not grow without bound', () => {
     const { db } = await import('./db.js');
     const { purgeExpiredRevocations } = await import('./utils.js');
 
+    /* `revoked_at` is bound rather than `datetime('now')`: PostgreSQL has no
+       such function, and the column holds ISO-8601 like every other timestamp
+       in this schema. */
     const past = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
     const future = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
     const user = (await db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get()).id;
-    await db.prepare('INSERT INTO revoked_sessions (jti, user_id, revoked_at, expires_at) VALUES (?,?,datetime(\'now\'),?)')
-      .run('expired-jti', user, past);
-    await db.prepare('INSERT INTO revoked_sessions (jti, user_id, revoked_at, expires_at) VALUES (?,?,datetime(\'now\'),?)')
-      .run('live-jti', user, future);
+    await db.prepare('INSERT INTO revoked_sessions (jti, user_id, revoked_at, expires_at) VALUES (?,?,?,?)')
+      .run('expired-jti', user, new Date().toISOString(), past);
+    await db.prepare('INSERT INTO revoked_sessions (jti, user_id, revoked_at, expires_at) VALUES (?,?,?,?)')
+      .run('live-jti', user, new Date().toISOString(), future);
 
     await purgeExpiredRevocations();
 

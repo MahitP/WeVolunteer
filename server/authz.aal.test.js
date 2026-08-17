@@ -128,7 +128,12 @@ async function grantedChallenge({ session, action = 'account.delete', params = {
   return id;
 }
 
-const challengeRow = (id) => db.prepare('SELECT * FROM reauth_challenges WHERE id = ?').get(id);
+/* Async because the handle is: on PostgreSQL `.get()` returns a promise, and
+   reading `.consumed_at` off it yields `undefined`. `toBeNull()` then failed —
+   but `toBeUndefined()` or a truthiness check would have PASSED while proving
+   nothing about whether the middleware spent the grant. */
+const challengeRow = async (id) =>
+  await db.prepare('SELECT * FROM reauth_challenges WHERE id = ?').get(id);
 
 /* ── requireAAL2: the gate itself, with no server and no database ──────────── */
 
@@ -264,7 +269,7 @@ describe('resolveAssurance — cost', () => {
 describe('peekChallenge', () => {
   it('reports a granted, unexpired, unconsumed challenge and leaves it untouched', async () => {
     const id = await grantedChallenge({ session: alice });
-    const before = challengeRow(id);
+    const before = await challengeRow(id);
 
     const res = await reauth.peekChallenge({ db, challengeId: id, userId: alice.userId });
 
@@ -273,7 +278,7 @@ describe('peekChallenge', () => {
       id, userId: alice.userId, action: 'account.delete', sessionJti: alice.jti
     });
     // The whole reason this function exists instead of consumeChallenge.
-    expect(challengeRow(id)).toEqual(before);
+    expect(await challengeRow(id)).toEqual(before);
   });
 
   it('never reveals another user\'s challenge', async () => {
@@ -330,7 +335,7 @@ describe('assurance over HTTP', () => {
     const id = await grantedChallenge({ session: alice });
 
     await hit('/probe/delete', { session: alice, challengeId: id });
-    expect(challengeRow(id).consumed_at, 'the middleware must not spend the grant').toBeNull();
+    expect((await challengeRow(id)).consumed_at, 'the middleware must not spend the grant').toBeNull();
 
     // Still spendable afterwards, which is the property that matters: the
     // handler, not the middleware, decides when the grant is used up.
@@ -388,7 +393,7 @@ describe('assurance over HTTP', () => {
     expect(res.body).toEqual({ aal: 1, aalAction: null });
 
     // And Bob's own grant is untouched by Alice having waved it around.
-    expect(challengeRow(id).consumed_at).toBeNull();
+    expect((await challengeRow(id)).consumed_at).toBeNull();
   });
 
   it('a grant from a different session of the SAME user confers nothing', async () => {
