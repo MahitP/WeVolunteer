@@ -29,11 +29,11 @@ beforeAll(async () => {
 });
 
 describe('Migration 019: Audit Log Hardening', () => {
-  it('creates performance indexes on admin_audit_logs', () => {
-    const indexes = db.prepare(`
+  it('creates performance indexes on admin_audit_logs', async () => {
+    const indexes = (await db.prepare(`
       SELECT name FROM sqlite_master 
       WHERE type = 'index' AND tbl_name = 'admin_audit_logs'
-    `).all().map(i => i.name);
+    `).all()).map(i => i.name);
     
     expect(indexes).toContain('idx_admin_audit_logs_admin');
     expect(indexes).toContain('idx_admin_audit_logs_target');
@@ -49,11 +49,11 @@ describe('Migration 019: Audit Log Hardening', () => {
     });
 
     await expect(async () => {
-      db.prepare('UPDATE admin_audit_logs SET details = ? WHERE id = ?').run('changed', id);
+      await db.prepare('UPDATE admin_audit_logs SET details = ? WHERE id = ?').run('changed', id);
     }).rejects.toThrow(/admin_audit_logs is append-only: records cannot be altered/);
 
     await expect(async () => {
-      db.prepare('UPDATE admin_audit_logs SET created_at = ? WHERE id = ?').run('2000-01-01T00:00:00.000Z', id);
+      await db.prepare('UPDATE admin_audit_logs SET created_at = ? WHERE id = ?').run('2000-01-01T00:00:00.000Z', id);
     }).rejects.toThrow(/admin_audit_logs is append-only: records cannot be altered/);
   });
 
@@ -65,7 +65,7 @@ describe('Migration 019: Audit Log Hardening', () => {
     });
 
     await expect(async () => {
-      db.prepare('DELETE FROM admin_audit_logs WHERE id = ?').run(id);
+      await db.prepare('DELETE FROM admin_audit_logs WHERE id = ?').run(id);
     }).rejects.toThrow(/admin_audit_logs is append-only: only the retention worker may delete aged logs/);
   });
 
@@ -104,7 +104,7 @@ describe('Migration 019: Audit Log Hardening', () => {
 
     // Deleting the user should be blocked by users_no_delete_with_audit_logs
     await expect(async () => {
-      db.prepare('DELETE FROM users WHERE id = ?').run('user-cascade-tester');
+      await db.prepare('DELETE FROM users WHERE id = ?').run('user-cascade-tester');
     }).rejects.toThrow(/cannot delete user: they have created audit logs which must be retained/);
   });
 });

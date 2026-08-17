@@ -53,7 +53,7 @@ const daysAgo = (n) => new Date(Date.now() - n * DAY).toISOString();
 let seq = 0;
 
 /** A resolved report with one frozen evidence row, aged well past every window. */
-function seedResolvedReport({ ageDays }) {
+async function seedResolvedReport({ ageDays }) {
   const n = ++seq;
   const reporter = `sr-reporter-${n}`;
   const subject = `sr-subject-${n}`;
@@ -61,14 +61,14 @@ function seedResolvedReport({ ageDays }) {
   const at = daysAgo(ageDays);
 
   for (const [id, role, grade] of [[reporter, 'student', '10'], [subject, 'organizer', 'Adult']]) {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, email, password_hash, name, role, grade, username,
                          email_verified, account_status, created_at)
       VALUES (?, ?, 'h', 'Safety Fixture', ?, ?, ?, 1, 'active', '${new Date().toISOString()}')
     `).run(id, `${id}@example.com`, role, grade, id.replace(/-/g, '_'));
   }
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO reports (id, reporter_id, reporter_name_snapshot, target_type, target_id,
                          target_author_id, category, priority, status, resolution,
                          description, created_at, updated_at, resolved_at)
@@ -76,7 +76,7 @@ function seedResolvedReport({ ageDays }) {
             'resolved', 'account_suspended', 'd', ?, ?, ?)
   `).run(reportId, reporter, subject, subject, at, at, at);
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO report_evidence (report_id, message_id, sender_id, sender_name_snapshot,
                                  body, created_at, captured_at)
     VALUES (?, ?, ?, 'Safety Fixture', 'the message that was reported', ?, ?)
@@ -105,22 +105,22 @@ describe('the decision is enforced by the database, not by convention', () => {
   });
 
   it('refuses to delete a resolved report, at the database', async () => {
-    const { reportId } = seedResolvedReport({ ageDays: 8 * 365 });
-    await expect(async () => db.prepare('DELETE FROM reports WHERE id = ?').run(reportId)).rejects
+    const { reportId } = await seedResolvedReport({ ageDays: 8 * 365 });
+    await expect(async () => await db.prepare('DELETE FROM reports WHERE id = ?').run(reportId)).rejects
       .toThrow(/never deleted|no_delete|ABORT/i);
   });
 
   it('refuses to edit or blank a frozen evidence body, however old', async () => {
-    const { reportId } = seedResolvedReport({ ageDays: 12 * 365 });
-    await expect(async () => db.prepare(
+    const { reportId } = await seedResolvedReport({ ageDays: 12 * 365 });
+    await expect(async () => await db.prepare(
       "UPDATE report_evidence SET body = '[redacted]' WHERE report_id = ?"
     ).run(reportId)).rejects.toThrow(/frozen|never edited|ABORT/i);
-    await expect(async () => db.prepare('DELETE FROM report_evidence WHERE report_id = ?').run(reportId)).rejects
+    await expect(async () => await db.prepare('DELETE FROM report_evidence WHERE report_id = ?').run(reportId)).rejects
       .toThrow(/ABORT|never/i);
   });
 
   it('leaves a decade-old resolved report and its evidence in place after a sweep', async () => {
-    const { reportId } = seedResolvedReport({ ageDays: 10 * 365 });
+    const { reportId } = await seedResolvedReport({ ageDays: 10 * 365 });
     await sweep(db);
     expect((await db.prepare('SELECT COUNT(*) AS c FROM reports WHERE id = ?').get(reportId)).c).toBe(1);
     expect(
@@ -138,24 +138,24 @@ describe('what the decision does NOT extend to', () => {
    * took at the time — which is what lets the report survive without the profile
    * surviving with it.
    */
-  it('keeps the name snapshot rather than the live account', () => {
-    const { reportId, reporter } = seedResolvedReport({ ageDays: 5 * 365 });
+  it('keeps the name snapshot rather than the live account', async () => {
+    const { reportId, reporter } = await seedResolvedReport({ ageDays: 5 * 365 });
 
     // The account is anonymised the way DELETE /api/auth/account anonymises it.
-    db.prepare(`
+    await db.prepare(`
       UPDATE users SET name = 'Safety F.', email = ?, username = ?,
                        account_status = 'deleted', deleted_at = ?
        WHERE id = ?
     `).run(`deleted_${reporter}@system.local`, `deleted_${reporter}`, daysAgo(1), reporter);
 
-    const row = db.prepare(
+    const row = await db.prepare(
       'SELECT reporter_id, reporter_name_snapshot FROM reports WHERE id = ?'
     ).get(reportId);
 
     // The report still says who filed it, from the snapshot — not from the account,
     // which no longer carries the name.
     expect(row.reporter_name_snapshot).toBe('Safety Fixture');
-    expect(db.prepare('SELECT name FROM users WHERE id = ?').get(reporter).name).toBe('Safety F.');
+    expect((await db.prepare('SELECT name FROM users WHERE id = ?').get(reporter)).name).toBe('Safety F.');
   });
 
   it('still applies the ordinary message sweep to a CLOSED report\'s conversation', () => {

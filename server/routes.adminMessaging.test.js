@@ -203,14 +203,14 @@ describe('refusals', () => {
  * handlers, and the second admin-messaging feature somebody writes in a year.
  */
 describe('the shape is enforced by the schema', () => {
-  const insert = (over) => {
+  const insert = async (over) => {
     const row = {
       id: `conv_test_${Math.random().toString(36).slice(2)}`,
       kind: 'admin_student', event_id: null,
       student_id: STUDENT, organizer_id: null,
       created_by: 'user-admin', created_at: new Date().toISOString(), ...over,
     };
-    return db.prepare(`
+    return await db.prepare(`
       INSERT INTO conversations (id, kind, event_id, student_id, organizer_id, created_by, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(row.id, row.kind, row.event_id, row.student_id, row.organizer_id,
@@ -218,7 +218,7 @@ describe('the shape is enforced by the schema', () => {
   };
 
   it('refuses an unknown kind', async () => {
-    await expect(async () => insert({ kind: 'admin_everybody' })).rejects.toThrow();
+    await expect(async () => await insert({ kind: 'admin_everybody' })).rejects.toThrow();
   });
 
   /**
@@ -227,15 +227,15 @@ describe('the shape is enforced by the schema', () => {
    * read as a thread about nothing.
    */
   it('still requires an event, a student and an organizer for an event thread', async () => {
-    await expect(async () => insert({ kind: 'student_organizer', event_id: null })).rejects.toThrow();
+    await expect(async () => await insert({ kind: 'student_organizer', event_id: null })).rejects.toThrow();
   });
 
   it('refuses an admin_student row that also names an organizer', async () => {
-    await expect(async () => insert({ kind: 'admin_student', organizer_id: ORGANIZER })).rejects.toThrow();
+    await expect(async () => await insert({ kind: 'admin_student', organizer_id: ORGANIZER })).rejects.toThrow();
   });
 
   it('refuses an admin_organizer row with no organizer', async () => {
-    await expect(async () => insert({ kind: 'admin_organizer', student_id: STUDENT, organizer_id: null })).rejects
+    await expect(async () => await insert({ kind: 'admin_organizer', student_id: STUDENT, organizer_id: null })).rejects
       .toThrow();
   });
 
@@ -246,7 +246,7 @@ describe('the shape is enforced by the schema', () => {
    */
   it('refuses a duplicate thread between the same admin and person', async () => {
     await openThread(ORGANIZER);
-    await expect(async () => insert({
+    await expect(async () => await insert({
       kind: 'admin_organizer', student_id: null, organizer_id: ORGANIZER,
     })).rejects.toThrow(/UNIQUE|constraint/i);
   });

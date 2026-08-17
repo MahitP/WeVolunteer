@@ -25,8 +25,8 @@ afterAll(async () => { await srv?.close(); });
 
 const getDb = async () => (await import('./db.js')).db;
 
-const plan = (db, sql, ...params) =>
-  db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params).map(r => r.detail).join(' | ');
+const plan = async (db, sql, ...params) =>
+  (await db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params)).map(r => r.detail).join(' | ');
 
 describe('004_error_events — applies and registers', () => {
   it('records itself in schema_migrations as version 4 with a non-null checksum', async () => {
@@ -93,20 +93,20 @@ describe('004_error_events — constraints behave', () => {
     fingerprint: fp, source: 'server', kind: 'TypeError', message: 'x',
     status: 'open', first: '2026-08-03T00:00:00.000Z', last: '2026-08-03T00:00:00.000Z', ...over
   });
-  const insertGroup = (db, g) => db.prepare(`
+  const insertGroup = async (db, g) => await db.prepare(`
     INSERT INTO error_groups (fingerprint, source, kind, message, status, first_seen_at, last_seen_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(g.fingerprint, g.source, g.kind, g.message, g.status, g.first, g.last);
 
   it('refuses a source outside the closed set', async () => {
     const db = await getDb();
-    await expect(async () => insertGroup(db, group('fp-bad-source', { source: 'browser' }))).rejects.toThrow();
+    await expect(async () => await insertGroup(db, group('fp-bad-source', { source: 'browser' }))).rejects.toThrow();
     await insertGroup(db, group('fp-ok-source', { source: 'worker' }));
   });
 
   it('refuses a status outside the closed set, and defaults to open', async () => {
     const db = await getDb();
-    await expect(async () => insertGroup(db, group('fp-bad-status', { status: 'wontfix' }))).rejects.toThrow();
+    await expect(async () => await insertGroup(db, group('fp-bad-status', { status: 'wontfix' }))).rejects.toThrow();
 
     await db.prepare(`
       INSERT INTO error_groups (fingerprint, source, kind, message, first_seen_at, last_seen_at)
@@ -119,14 +119,14 @@ describe('004_error_events — constraints behave', () => {
 
   it('refuses an event whose group does not exist', async () => {
     const db = await getDb();
-    await expect(async () => db.prepare(`
+    await expect(async () => await db.prepare(`
       INSERT INTO error_events (id, fingerprint, occurred_at) VALUES ('ev-orphan', 'fp-never-existed', ?)
     `).run('2026-08-03T00:00:00.000Z')).rejects.toThrow();
   });
 
   it('round-trips an event through every column', async () => {
     const db = await getDb();
-    insertGroup(db, group('fp-roundtrip'));
+    await insertGroup(db, group('fp-roundtrip'));
     const at = '2026-08-03T01:02:03.000Z';
     await db.prepare(`
       INSERT INTO error_events
@@ -206,7 +206,7 @@ describe('004_error_events — the sweep and ceiling queries use their indexes',
    */
   it('plans the 30-day event sweep against idx_error_events_occurred, not a scan', async () => {
     const db = await getDb();
-    const detail = plan(db, 'DELETE FROM error_events WHERE occurred_at < ?', '2026-01-01T00:00:00.000Z');
+    const detail = await plan(db, 'DELETE FROM error_events WHERE occurred_at < ?', '2026-01-01T00:00:00.000Z');
     expect(detail).toContain('idx_error_events_occurred');
     expect(detail).not.toMatch(/SCAN error_events(?! USING)/);
   });
@@ -218,7 +218,7 @@ describe('004_error_events — the sweep and ceiling queries use their indexes',
    */
   it('plans the client-group ceiling against idx_error_groups_source, not a scan', async () => {
     const db = await getDb();
-    const detail = plan(db,
+    const detail = await plan(db,
       'SELECT COUNT(*) FROM error_groups WHERE source = ? AND status = ?', 'client', 'open');
     expect(detail).toContain('idx_error_groups_source');
     expect(detail).not.toMatch(/SCAN error_groups(?! USING)/);
@@ -226,11 +226,11 @@ describe('004_error_events — the sweep and ceiling queries use their indexes',
 
   it('plans the triage read and the per-group event read against their indexes', async () => {
     const db = await getDb();
-    expect(plan(db,
+    expect(await plan(db,
       "SELECT * FROM error_groups WHERE status = 'open' ORDER BY last_seen_at DESC"
     )).toContain('idx_error_groups_triage');
 
-    expect(plan(db,
+    expect(await plan(db,
       'SELECT * FROM error_events WHERE fingerprint = ? ORDER BY occurred_at DESC', 'fp-x'
     )).toContain('idx_error_events_group');
   });

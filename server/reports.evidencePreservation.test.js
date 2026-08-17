@@ -70,8 +70,8 @@ async function seedReportableThread(key, { ageDays = 4 * 365 } = {}) {
   return { cookie, user, eventId, convId, messageIds };
 }
 
-const messagesLeft = (convId) =>
-  db.prepare('SELECT COUNT(*) c FROM messages WHERE conversation_id = ?').get(convId).c;
+const messagesLeft = async (convId) =>
+  (await db.prepare('SELECT COUNT(*) c FROM messages WHERE conversation_id = ?').get(convId)).c;
 
 beforeAll(async () => {
   srv = await startTestServer();
@@ -100,7 +100,7 @@ describe('the retention sweep does not delete under a live investigation', () =>
     const { sweep } = await import('./workers/retentionWorker.js');
     await sweep(db, { now: new Date() });
 
-    expect(messagesLeft(convId), 'four-year-old messages under a live report were swept').toBe(30);
+    expect(await messagesLeft(convId), 'four-year-old messages under a live report were swept').toBe(30);
     expect(
       (await db.prepare('SELECT COUNT(*) c FROM report_evidence WHERE report_id = ?').get(filed.body.reportId)).c,
       'the frozen snapshot did not survive its own sweep',
@@ -119,7 +119,7 @@ describe('the retention sweep does not delete under a live investigation', () =>
 
     // The whole thread is held while the report is live: the snapshot is bounded
     // and message 30 is still evidence while somebody is reading message 10.
-    expect(messagesLeft(convId)).toBe(30);
+    expect(await messagesLeft(convId)).toBe(30);
   });
 
   /**
@@ -137,14 +137,14 @@ describe('the retention sweep does not delete under a live investigation', () =>
 
     const { sweep } = await import('./workers/retentionWorker.js');
     await sweep(db, { now: new Date() });
-    expect(messagesLeft(convId)).toBe(30);
+    expect(await messagesLeft(convId)).toBe(30);
 
     await srv.call('PATCH', `/api/admin/reports/${filed.body.reportId}`, {
       status: 'resolved', resolution: 'no_action', resolutionNote: 'Reviewed and closed out.',
     }, await adminToken());
 
     await sweep(db, { now: new Date() });
-    expect(messagesLeft(convId), 'the hold never released').toBe(0);
+    expect(await messagesLeft(convId), 'the hold never released').toBe(0);
     expect(
       (await db.prepare('SELECT COUNT(*) c FROM report_evidence WHERE report_id = ?').get(filed.body.reportId)).c,
       'the evidence went with the messages — the snapshot IS the record',
@@ -166,7 +166,7 @@ describe('the retention sweep does not delete under a live investigation', () =>
 
     const { sweep } = await import('./workers/retentionWorker.js');
     await sweep(db, { now: new Date() });
-    expect(messagesLeft(convId)).toBe(30);
+    expect(await messagesLeft(convId)).toBe(30);
   });
 
   it('leaves the preserved tables untouched on every pass', async () => {
@@ -257,9 +257,9 @@ describe('a report outlives what it is about', () => {
       targetType: 'user', targetId: 'frozen_subject', reason: 'other', details: 'the original words',
     }, cookie);
 
-    await expect(async () => db.prepare('DELETE FROM reports WHERE id = ?').run(filed.body.reportId)).rejects
+    await expect(async () => await db.prepare('DELETE FROM reports WHERE id = ?').run(filed.body.reportId)).rejects
       .toThrow(/never deleted/);
-    await expect(async () => db.prepare("UPDATE reports SET description = 'rewritten' WHERE id = ?")
+    await expect(async () => await db.prepare("UPDATE reports SET description = 'rewritten' WHERE id = ?")
       .run(filed.body.reportId)).rejects.toThrow(/record of what was said/);
     expect((await db.prepare('SELECT description FROM reports WHERE id = ?').get(filed.body.reportId)).description)
       .toBe('the original words');
@@ -271,9 +271,9 @@ describe('a report outlives what it is about', () => {
       targetType: 'conversation', targetId: convId, reason: 'sexual_content',
     }, cookie);
 
-    await expect(async () => db.prepare('DELETE FROM report_evidence WHERE report_id = ?').run(filed.body.reportId)).rejects
+    await expect(async () => await db.prepare('DELETE FROM report_evidence WHERE report_id = ?').run(filed.body.reportId)).rejects
       .toThrow(/never deleted/);
-    await expect(async () => db.prepare("UPDATE report_evidence SET body = 'rewritten' WHERE report_id = ?")
+    await expect(async () => await db.prepare("UPDATE report_evidence SET body = 'rewritten' WHERE report_id = ?")
       .run(filed.body.reportId)).rejects.toThrow(/never edited/);
   });
 
