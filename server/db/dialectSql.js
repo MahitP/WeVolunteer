@@ -72,6 +72,22 @@ export function greatest(db, ...values) {
 }
 
 /**
+ * `LEAST`, which SQLite spells `min` — the same overload hazard as `greatest`.
+ *
+ * The call sites are both halves of the browse haversine, which clamps the
+ * cosine with `min(1.0, …)` before `acos`: floating-point error can push it a
+ * hair above 1 for two nearly identical points, and `acos` of that is NaN.
+ *
+ * PostgreSQL reads the two-argument form as its *aggregate* `min` and refuses
+ * with "function min(numeric, double precision) does not exist", so the
+ * distance filter and the nearest-first sort both answered 500 there while
+ * every other browse filter worked.
+ */
+export function least(db, ...values) {
+  return `${isPostgres(db) ? 'LEAST' : 'min'}(${values.join(', ')})`;
+}
+
+/**
  * The `YYYY-MM` month of an ISO-8601 timestamp column.
  *
  * Both engines take `substr`, so this needs no branch — it exists so that call
@@ -243,4 +259,32 @@ export function nullSafeEquals(db, column, param) {
 export function insertionTiebreak(db, alias) {
   const prefix = alias ? `${alias}.` : '';
   return isPostgres(db) ? `${prefix}id` : `${prefix}rowid`;
+}
+
+/**
+ * "Does this text contain that text", as a position test.
+ *
+ * The one call site is the browse search box (`eventQuery.buildEventWhere`),
+ * which matches the typed string against an event's title, description and
+ * location and against the organizer's name.
+ *
+ * ── Why a position test and not LIKE ──
+ *
+ * `LIKE` gives `%` and `_` meaning, so a user typing `100%` or `a_b` would be
+ * running a pattern rather than searching for their own characters. Escaping
+ * that correctly on both engines is more moving parts than asking for a
+ * position, and the position form has no metacharacters at all.
+ *
+ * ── The translation ──
+ *
+ * SQLite spells it `instr(haystack, needle)` and PostgreSQL spells it
+ * `strpos(haystack, needle)`. The argument order and the result agree exactly:
+ * a 1-based index, or 0 when the needle is absent, so `> 0` means "contains" on
+ * both. PostgreSQL has no `instr` at all, which is not a silent difference —
+ * the browse endpoint answered 500 on every search until this branch existed,
+ * and answered correctly the moment a filter other than `q` was used, so it
+ * only showed up when someone actually typed in the box.
+ */
+export function substringPosition(db, haystack, needle) {
+  return `${isPostgres(db) ? 'strpos' : 'instr'}(${haystack}, ${needle}) > 0`;
 }

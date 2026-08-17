@@ -18,7 +18,7 @@
  *     LAST by distance, matching `distance != null` and `?? Infinity`
  *   • per-slot hours carry a 0.1 floor, as formatSlot does
  */
-import { hoursBetween, greatest } from './db/dialectSql.js';
+import { hoursBetween, greatest, least, substringPosition } from './db/dialectSql.js';
 
 import { normaliseTag, MAX_TAGS_PER_EVENT } from './eventTags.js';
 
@@ -33,7 +33,20 @@ const SORTS = {
   // COLLATE NOCASE approximates localeCompare well enough for titles and, unlike
   // it, can use an index.
   alpha: 'e.title COLLATE NOCASE ASC',
-  distance: 'distance_miles IS NULL, distance_miles ASC'
+  /**
+   * `NULLS LAST` rather than a leading `distance_miles IS NULL`.
+   *
+   * Both spellings mean "events with no coordinates go to the bottom", and the
+   * `IS NULL` form is the one SQLite needs if you cannot assume `NULLS LAST` —
+   * its ASC default is NULLS FIRST. But `distance_miles` is a SELECT alias, and
+   * PostgreSQL resolves an output alias in ORDER BY only as a bare reference,
+   * never inside an expression, so `distance_miles IS NULL` failed there with
+   * "column distance_miles does not exist" and the nearest-first sort 500'd.
+   *
+   * `NULLS LAST` is understood by SQLite 3.30+ (this runs 3.51) and states the
+   * intent directly instead of encoding it as a boolean sort key.
+   */
+  distance: 'distance_miles ASC NULLS LAST'
 };
 
 export const EVENT_SORTS = Object.keys(SORTS);
@@ -211,10 +224,10 @@ export function eventQueryFragments({ lat, lng, db = null }) {
   const EARTH_RADIUS_MILES = 3958.8;
 
   const distanceExpr = lat != null
-    ? `(${EARTH_RADIUS_MILES} * acos(min(1.0,
+    ? `(${EARTH_RADIUS_MILES} * acos(${least(db, '1.0', `
          cos(radians(@lat)) * cos(radians(e.latitude)) * cos(radians(e.longitude) - radians(@lng))
          + sin(radians(@lat)) * sin(radians(e.latitude))
-       )))`
+       `)}))`
     : 'NULL';
 
   return {
@@ -278,13 +291,14 @@ export function buildEventWhere(filters, userId, db = null) {
   else if (filters.scope === 'open') clauses.push(`e.status = 'open'`);
 
   if (filters.q) {
-    // instr on lowered text rather than LIKE: no wildcard characters in user
-    // input can change the shape of the match.
+    // A position test on lowered text rather than LIKE: no wildcard characters
+    // in user input can change the shape of the match. The engines spell the
+    // function differently, so it comes from the dialect layer.
     clauses.push(`(
-      instr(lower(e.title), lower(@q)) > 0
-      OR instr(lower(e.description), lower(@q)) > 0
-      OR instr(lower(e.location), lower(@q)) > 0
-      OR instr(lower(u.name), lower(@q)) > 0
+      ${substringPosition(db, 'lower(e.title)', 'lower(@q)')}
+      OR ${substringPosition(db, 'lower(e.description)', 'lower(@q)')}
+      OR ${substringPosition(db, 'lower(e.location)', 'lower(@q)')}
+      OR ${substringPosition(db, 'lower(u.name)', 'lower(@q)')}
     )`);
     params.q = filters.q;
   }
@@ -395,10 +409,10 @@ export function buildEventWhere(filters, userId, db = null) {
     // An event with no coordinates has no distance, so it cannot satisfy a
     // distance filter — the same as the client's `distance != null` test.
     clauses.push('e.latitude IS NOT NULL AND e.longitude IS NOT NULL');
-    clauses.push(`(3958.8 * acos(min(1.0,
+    clauses.push(`(3958.8 * acos(${least(db, '1.0', `
       cos(radians(@lat)) * cos(radians(e.latitude)) * cos(radians(e.longitude) - radians(@lng))
       + sin(radians(@lat)) * sin(radians(e.latitude))
-    ))) <= @maxDistance`);
+    `)})) <= @maxDistance`);
     params.maxDistance = filters.maxDistance;
     // Used by the clause immediately above, so they belong in these params.
     params.lat = filters.lat;
