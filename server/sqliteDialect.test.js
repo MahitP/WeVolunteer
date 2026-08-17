@@ -168,6 +168,27 @@ const isBoot = rel => rel === 'db.js' || rel.startsWith('migrations/') || rel.en
  * parentheses is the only way to tell the two overloads apart, so the depth is
  * counted rather than guessed.
  */
+/**
+ * Counts `date(x, y)` / `time(x, y)` — the modifier form SQLite alone has.
+ *
+ * Shares `scalarMinMax`'s reason for balancing parentheses rather than matching:
+ * the one-argument `date(col)` is portable and must not be counted, so the top
+ * level comma is the whole signal, and arguments nest.
+ */
+function dateWithModifier(lit) {
+  let found = 0;
+  for (const m of lit.matchAll(/\b(?:date|time)\s*\(/gi)) {
+    let depth = 1;
+    for (let i = m.index + m[0].length; i < lit.length && depth > 0; i += 1) {
+      const ch = lit[i];
+      if (ch === '(') depth += 1;
+      else if (ch === ')') depth -= 1;
+      else if (ch === ',' && depth === 1) { found += 1; break; }
+    }
+  }
+  return found;
+}
+
 function scalarMinMax(lit) {
   let found = 0;
   for (const m of lit.matchAll(/\b(?:min|max)\s*\(/gi)) {
@@ -262,6 +283,17 @@ const CONSTRUCTS = [
    * without quotes — so the rule is simply "quote any alias that is not already
    * all-lower-case".
    */
+  /**
+   * Two-argument `date()` / `time()` — SQLite's modifier form.
+   *
+   * `date('now', '-6 months')` has no PostgreSQL equivalent at all; it refuses
+   * with "function date(unknown, unknown) does not exist". Both admin-stats
+   * queries used it, so the whole endpoint answered 500 there while the
+   * one-argument spellings elsewhere were fine — which is why a plain
+   * `/date\(/` search would have been useless and this counts the arity.
+   */
+  { name: 'date()/time() with a modifier', count: dateWithModifier,          runtime: 0, boot: 0,
+    postgres: "a bound ISO-8601 timestamp computed in JS, or now() - interval '6 months'" },
   { name: 'unquoted camelCase alias', pattern: /\bAS\s+[a-z_]\w*[A-Z]\w*/g,  runtime: 0, boot: 0,
     postgres: 'AS "userId" — quote it, or PostgreSQL returns `userid` and the property read yields undefined' },
 ];

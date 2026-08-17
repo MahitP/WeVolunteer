@@ -231,6 +231,18 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
     const participationRate = totals.students > 0
       ? Math.round((activeVolunteers / totals.students) * 100) : null;
 
+    /**
+     * The six-month floor is computed in JS and BOUND, not `date('now', …)`.
+     *
+     * PostgreSQL has no two-argument `date()` and refused both queries outright
+     * — "function date(unknown, unknown) does not exist" — so the whole admin
+     * stats endpoint answered 500 there. It is also the more correct form: the
+     * columns hold ISO-8601 UTC, and a bound ISO string compares against them
+     * exactly, where SQLite's `date()` returns `YYYY-MM-DD` and relies on the
+     * prefix comparing usefully.
+     */
+    const sixMonthsAgo = new Date(Date.now() - 182 * 24 * 3600 * 1000).toISOString();
+
     // Hours per month, last 6 months
     const monthlyHours = await db.prepare(`
       SELECT substr(s.end_datetime, 1, 7) as month,
@@ -238,18 +250,18 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
              COUNT(DISTINCT at.user_id) as volunteers
       FROM attendance at
       JOIN slots s ON at.slot_id = s.id
-      WHERE at.present = 1 AND s.end_datetime >= date('now', '-6 months')
+      WHERE at.present = 1 AND s.end_datetime >= ?
       GROUP BY month ORDER BY month ASC
-    `).all();
+    `).all(sixMonthsAgo);
 
     // Volunteers joining over time
     const signupsByMonth = await db.prepare(`
       SELECT substr(created_at, 1, 7) as month, COUNT(*) as c
       FROM users
       WHERE role = 'student' AND account_status <> 'deleted'
-        AND created_at >= date('now', '-6 months')
+        AND created_at >= ?
       GROUP BY month ORDER BY month ASC
-    `).all();
+    `).all(sixMonthsAgo);
 
     const topOrganizers = await db.prepare(`
       SELECT u.id, u.name, u.avatar, u.verified,
