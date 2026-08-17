@@ -1,4 +1,5 @@
 import express from 'express';
+import { isUniqueViolation } from '../db/dialectSql.js';
 import { runInTransaction } from '../db/connectionContext.js';
 import rateLimit from 'express-rate-limit';
 import { DEMO_MODE } from '../config.js';
@@ -249,6 +250,27 @@ router.post(
       if (err instanceof LegalValidationError) {
         return res.status(400).json({ error: err.message, field: err.field });
       }
+      /**
+       * Two publishes of the same version, racing.
+       *
+       * Validation rejects a version that already exists, but under a
+       * connection pool both requests can pass that check before either has
+       * inserted — so the loser reaches the unique index instead, and answered
+       * 500. SQLite's process-wide write queue serialised them, so the second
+       * one saw the committed row and took the validation path.
+       *
+       * A 500 tells the editor their work may or may not have saved. This is an
+       * ordinary conflict and says so, with the same shape validation would have
+       * produced.
+       */
+      if (isUniqueViolation(err)) {
+        return res.status(409).json({
+          error: 'That version was just published by someone else. '
+            + 'Reload to see it, then publish your changes as a new version.',
+          field: 'version',
+        });
+      }
+
       console.error('Failed to publish legal document revision:', err);
       return res.status(500).json({
         error: 'This could not be saved. Your changes have not been lost — '

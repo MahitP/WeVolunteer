@@ -74,14 +74,18 @@ beforeAll(async () => {
    */
   let n = 0;
   const hash = await bcrypt.hash(PASSWORD, 10);
-  makeSession = () => {
+  /* Async because the handle is. Unawaited, the INSERT had not landed and
+     `sign()` was handed a PROMISE instead of a row — so every request carried a
+     token with undefined claims and came back 401, which reads as the limiter
+     refusing when it is the fixture never creating the account. */
+  makeSession = async () => {
     const uid = `reauth-rl-user-${++n}`;
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, name, email, username, password_hash, grade, role,
                          verified, email_verified, created_at)
       VALUES (?, ?, ?, ?, ?, 'Adult', 'student', 1, 1, ?)
     `).run(uid, 'Limited Person', `${uid}@example.org`, uid, hash, new Date().toISOString());
-    return sign(db.prepare('SELECT id, role, email, name FROM users WHERE id = ?').get(uid));
+    return sign(await db.prepare('SELECT id, role, email, name FROM users WHERE id = ?').get(uid));
   };
 }, 60000);
 
@@ -110,7 +114,7 @@ describe('the step-up password endpoint is rate limited', () => {
       // A new ACCOUNT, and therefore a new challenge, each time — so neither the
       // per-challenge counter nor the per-account ceiling can be what produces
       // the refusal below. Only the limiter spans all six.
-      const who = makeSession();
+      const who = await makeSession();
       const opened = await post('/api/auth/reauth/challenge', { action: 'account.delete' }, who);
       expect(opened.status).toBe(201);
 
