@@ -104,7 +104,7 @@ describe('the methods a sign-in is offered', () => {
   it('offers recovery codes once the account holds some', async () => {
     await db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
     await db.prepare(
-      "INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))"
+      `INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, '${new Date().toISOString()}')`
     ).run('rc-availability-test', await userId(), '$2a$10$notarealhashbutthatisfineher.eeeeeeeeeeeeeeeeeeeeeeeeeee');
 
     const { body } = await beginLogin();

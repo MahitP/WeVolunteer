@@ -60,7 +60,7 @@ describe('a second-factor code cannot be spent twice, even concurrently', () => 
     await db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE id = ?')
       .run(encryptSecret(TOTP_SECRET), userId);
     const ins = db.prepare(
-      "INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))"
+      `INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, '${new Date().toISOString()}')`
     );
     /* Sequential, not `forEach`: an async callback there is neither awaited nor
        collected, so the codes would still be arriving when the race starts. */

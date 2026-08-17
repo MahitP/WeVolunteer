@@ -760,7 +760,7 @@ describe('the social and organization features', () => {
     it('refuses to ACCEPT a request across the boundary', async () => {
       await db.prepare(`
         INSERT INTO user_relationships (id, actor_id, subject_id, kind, status, created_at)
-        VALUES ('rel-legacy-peer', ?, ?, 'friend', 'pending', datetime('now'))
+        VALUES ('rel-legacy-peer', ?, ?, 'friend', 'pending', '${new Date().toISOString()}')
       `).run(organizerId, aliceId);
 
       const res = await srv.call('POST', `/api/users/${organizerId}/friend/accept`, undefined, alice);

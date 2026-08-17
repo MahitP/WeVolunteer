@@ -265,7 +265,7 @@ describe('no query compares an ISO column against SQLite\'s datetime(\'now\')', 
     expect(
       offenders,
       'these compare an ISO-8601 column against SQLite\'s space-separated '
-      + "datetime('now'), which misclassifies every timestamp on today's date. "
+      + `'${new Date().toISOString()}', which misclassifies every timestamp on today's date. `
       + 'Bind new Date().toISOString() instead.'
     ).toEqual([]);
   });

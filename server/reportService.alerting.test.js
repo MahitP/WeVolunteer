@@ -55,7 +55,7 @@ async function makeStudent() {
   await db.prepare(`
     INSERT INTO users (id, email, password_hash, name, role, grade, username,
                        email_verified, account_status, created_at)
-    VALUES (?, ?, 'h', 'Alert Student', 'student', '10', ?, 1, 'active', datetime('now'))
+    VALUES (?, ?, 'h', 'Alert Student', 'student', '10', ?, 1, 'active', '${new Date().toISOString()}')
   `).run(id, `${id}@example.com`, id.replace(/-/g, '_'));
   return id;
 }
@@ -71,7 +71,7 @@ async function makeOrganizer() {
   await db.prepare(`
     INSERT INTO users (id, email, password_hash, name, role, grade, username,
                        email_verified, account_status, created_at)
-    VALUES (?, ?, 'h', 'Alert Organizer', 'organizer', 'Adult', ?, 1, 'active', datetime('now'))
+    VALUES (?, ?, 'h', 'Alert Organizer', 'organizer', 'Adult', ?, 1, 'active', '${new Date().toISOString()}')
   `).run(id, `${id}@example.com`, id.replace(/-/g, '_'));
   return id;
 }

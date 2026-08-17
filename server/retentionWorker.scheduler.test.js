@@ -87,7 +87,7 @@ describe('the retention worker sweeps at startup', () => {
       INSERT INTO users (id, email, password_hash, name, role, grade, username,
                          email_verified, account_status, created_at)
       VALUES ('ret-admin', 'ret-admin@example.gov', 'h', 'Ret Admin', 'admin', 'N/A',
-              'ret_admin', 1, 'active', datetime('now'))
+              'ret_admin', 1, 'active', '${new Date().toISOString()}')
     `).run();
 
     /**

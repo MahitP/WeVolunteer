@@ -64,7 +64,7 @@ function seedResolvedReport({ ageDays }) {
     db.prepare(`
       INSERT INTO users (id, email, password_hash, name, role, grade, username,
                          email_verified, account_status, created_at)
-      VALUES (?, ?, 'h', 'Safety Fixture', ?, ?, ?, 1, 'active', datetime('now'))
+      VALUES (?, ?, 'h', 'Safety Fixture', ?, ?, ?, 1, 'active', '${new Date().toISOString()}')
     `).run(id, `${id}@example.com`, role, grade, id.replace(/-/g, '_'));
   }
 

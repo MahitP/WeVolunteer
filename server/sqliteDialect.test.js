@@ -333,6 +333,39 @@ describe('SQLite-only SQL still in the codebase', () => {
       + 'names case-insensitively, PostgreSQL does not').toEqual([]);
   });
 
+  /**
+   * An alias that is quoted where it is defined must be quoted where it is used.
+   *
+   * Quoting only the definition is worse than quoting neither. `AS "startsAt"`
+   * creates a column whose name really is mixed-case, and the `ORDER BY
+   * startsAt` two lines below then folds to `startsat`, matches nothing, and
+   * PostgreSQL answers `column "startsat" does not exist` — a 500 where before
+   * there was merely a wrong value. Three of these were introduced by the commit
+   * that quoted the definitions, and they are exactly what this catches.
+   *
+   * Scoped to one literal at a time: an alias is only in scope within its own
+   * statement, and matching across a file would flag the JS property of the same
+   * name that legitimately reads the result.
+   */
+  it('quotes an alias everywhere it is used, not only where it is defined', () => {
+    const wrong = [];
+    for (const { rel, sql } of FILES) {
+      for (const lit of sql) {
+        for (const m of lit.matchAll(/\bAS\s+"([a-z_]\w*[A-Z]\w*)"/g)) {
+          const bare = new RegExp(`(?<!")\\b${m[1]}\\b(?!")`, 'g');
+          /* The definition itself is `AS "name"`, already excluded by the
+             look-arounds, so anything left is an unquoted use. */
+          if (bare.test(lit)) wrong.push(`${rel} — ${m[1]}`);
+        }
+      }
+    }
+    expect(
+      [...new Set(wrong)],
+      'PostgreSQL folds the unquoted use to lower case and it stops matching the '
+      + 'quoted alias, which is a 500 rather than a wrong value.',
+    ).toEqual([]);
+  });
+
   it('holds the total at 119 — 6 runtime, 113 boot', () => {
     const runtime = CONSTRUCTS.reduce((n, c) => n + tallyOf(rel => !isBoot(rel), c), 0);
     const boot = CONSTRUCTS.reduce((n, c) => n + tallyOf(isBoot, c), 0);

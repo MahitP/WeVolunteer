@@ -93,10 +93,10 @@ describe('055 repairs a drifted tfa_login_attempts', () => {
     const { db, cleanup } = scratchDb(DRIFTED);
     const claim = (database) => database.prepare(`
       INSERT INTO tfa_login_attempts (token_hash, user_id, attempts, last_attempt_at)
-      VALUES (?, ?, 1, datetime('now'))
+      VALUES (?, ?, 1, '${new Date().toISOString()}')
       ON CONFLICT(token_hash) DO UPDATE SET
         attempts = attempts + 1,
-        last_attempt_at = datetime('now')
+        last_attempt_at = '${new Date().toISOString()}'
     `).run('hash-abc', 'u-1');
 
     try {
@@ -118,7 +118,7 @@ describe('055 repairs a drifted tfa_login_attempts', () => {
     try {
       db.prepare(
         "INSERT INTO tfa_login_attempts (token_hash, user_id, attempts, last_attempt_at) "
-        + "VALUES ('keep-me', 'u-1', 3, datetime('now'))"
+        + `VALUES ('keep-me', 'u-1', 3, '${new Date().toISOString()}')`
       ).run();
       migration.up(db);
       /* Untouched, not rebuilt: rebuilding a correct table would discard live
@@ -135,7 +135,7 @@ describe('055 repairs a drifted tfa_login_attempts', () => {
       migration.up(db);
       db.prepare(
         "INSERT INTO tfa_login_attempts (token_hash, user_id, attempts, last_attempt_at) "
-        + "VALUES ('survivor', 'u-1', 1, datetime('now'))"
+        + `VALUES ('survivor', 'u-1', 1, '${new Date().toISOString()}')`
       ).run();
       migration.up(db);
       expect(

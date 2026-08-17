@@ -76,7 +76,7 @@ async function makeUser(db, { id, status = 'active', email = null }) {
   await db.prepare(`
     INSERT INTO users (id, email, password_hash, name, role, grade, username,
                        email_verified, account_status, created_at)
-    VALUES (?, ?, 'h', 'Test Person', 'student', '9', ?, 1, ?, datetime('now'))
+    VALUES (?, ?, 'h', 'Test Person', 'student', '9', ?, 1, ?, '${new Date().toISOString()}')
   `).run(id, email ?? `${id}@example.com`, id.replace(/-/g, '_'), status);
   return id;
 }

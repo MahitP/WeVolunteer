@@ -148,7 +148,7 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
            (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) AS "startsAt"
     FROM events e
     WHERE e.organization_id = ? AND e.status <> 'cancelled'
-    ORDER BY startsAt DESC
+    ORDER BY "startsAt" DESC
     LIMIT 50
   `).all(row.id);
 

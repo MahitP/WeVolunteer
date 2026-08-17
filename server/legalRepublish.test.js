@@ -129,12 +129,12 @@ describe('booting a second time against the same database', () => {
       INSERT INTO users (id, email, password_hash, name, role, grade, username,
                          email_verified, account_status, created_at)
       VALUES ('republish-user', 'republish@example.com', 'h', 'Republish Tester', 'student',
-              '11', 'republish_user', 1, 'active', datetime('now'))
+              '11', 'republish_user', 1, 'active', '${new Date().toISOString()}')
     `).run();
     db.prepare(`
       INSERT INTO legal_acceptances
         (id, user_id, document_slug, version, content_hash, accepted_at, method)
-      VALUES ('acc-republish', 'republish-user', ?, ?, ?, datetime('now'), 'signup')
+      VALUES ('acc-republish', 'republish-user', ?, ?, ?, '${new Date().toISOString()}', 'signup')
     `).run(target.slug, target.version, target.content_hash);
 
     db.prepare('UPDATE legal_documents SET content_hash = ? WHERE slug = ? AND version = ?')

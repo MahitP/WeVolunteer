@@ -327,7 +327,7 @@ describe('Account Deletion System', () => {
       const row = db.prepare(`
         SELECT s.id AS slot_id, e.id AS event_id, e.organizer_id
         FROM slots s JOIN events e ON s.event_id = e.id
-        WHERE s.start_datetime > datetime('now')
+        WHERE s.start_datetime > '${new Date().toISOString()}'
           AND e.status = 'open'
         ORDER BY s.start_datetime ASC LIMIT 1
       `).get();

@@ -102,7 +102,7 @@ describe('2FA Security Hardening Regressions', () => {
 
       const recoveryCode = 'A1B2C3D4E5';
       const hash = bcrypt.hashSync(recoveryCode, 10);
-      await db.prepare("INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))").run('rc-1', 'user-admin', hash);
+      await db.prepare(`INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, '${new Date().toISOString()}')`).run('rc-1', 'user-admin', hash);
 
       const res = await srv.call('POST', '/api/auth/login-2fa', { method: 'recovery', code: recoveryCode }, undefined, { Cookie: `wev_preauth=${preauthToken}` });
       console.log('Recovery response:', res.status, res.body);

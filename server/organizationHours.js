@@ -159,7 +159,7 @@ export async function organizationHistoryForUser(db, organizationId, userId, { l
     WHERE e.organization_id = ? AND a.user_id = ? AND a.present = 1
       AND e.status <> 'cancelled'
     GROUP BY e.id
-    ORDER BY startsAt DESC
+    ORDER BY "startsAt" DESC
     LIMIT ?
   `).all(organizationId, userId, limit))
     .map(r => ({ ...r, hours: Number(r.hours), creditsHours: r.creditsHours !== 0 }));

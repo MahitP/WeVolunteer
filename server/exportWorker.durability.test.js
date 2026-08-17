@@ -213,7 +213,7 @@ describe('cleanup still happens', () => {
     expect(existsSync(row.file_location)).toBe(true);
 
     // Backdate the expiry rather than waiting seven days.
-    await db.prepare("UPDATE data_export_jobs SET expires_at = datetime('now','-1 day') WHERE id = ?")
+    await db.prepare(`UPDATE data_export_jobs SET expires_at = '${new Date(Date.now() - 86400000).toISOString()}' WHERE id = ?`)
       .run('exp-expire');
 
     await worker.cleanupExpiredExports();

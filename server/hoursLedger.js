@@ -27,6 +27,7 @@
  * survivability. The denormalised name columns are what keep an orphaned row
  * readable.
  */
+import { insertionTiebreak } from './db/dialectSql.js';
 
 /** What kind of change a row represents. */
 export const LEDGER_ACTIONS = ['credited', 'revoked', 'adjusted', 'migrated', 'voided'];
@@ -289,13 +290,35 @@ export async function verifyLedgerParity(db) {
 /**
  * Every hours change recorded for one volunteer, newest first.
  *
- * Ties on `created_at` are broken by `rowid`, which SQLite assigns in insertion
- * order. Several rows share a timestamp whenever one save changes more than one
- * record, and the id's random suffix would otherwise order them arbitrarily —
- * an audit log has to read back in the order things actually happened.
+ * Ties on `created_at` are broken by `rowid` on SQLite, which assigns it in
+ * insertion order. Several rows share a timestamp whenever one save changes more
+ * than one record, and the id's random suffix would otherwise order them
+ * arbitrarily — an audit log has to read back in the order things happened.
+ *
+ * ── The difference on PostgreSQL, and why it is acceptable here ──
+ *
+ * PostgreSQL has no `rowid`, and `ctid` is not a substitute: it is a physical
+ * location that moves when a row is updated. `insertionTiebreak()` gives the
+ * primary key there, which is deterministic — the same query returns the same
+ * order every time — but for rows sharing a timestamp it orders
+ * *lexicographically by id*, not by insertion.
+ *
+ * That difference is real and is deliberately not hidden. It is acceptable in
+ * this function today for a reason that was checked rather than assumed: no
+ * route calls `getLedgerForUser`, and nothing reads the `seq` column it selects.
+ * The two tests that cover it use distinct `created_at` values, so the tiebreak
+ * is never exercised. There is currently no behaviour that can observe the
+ * difference.
+ *
+ * If this is ever wired to a screen, that stops being true, and the fix is a
+ * monotonic column on `hours_ledger` plus a backfill for existing rows — a
+ * schema change and a cutover decision, not something to slip into a dialect
+ * helper. `moderation_actions` has the identical construct and the identical
+ * caveat. Both are recorded as open items in POSTGRES_MIGRATION_STATUS.md.
  */
 export async function getLedgerForUser(db, userId) {
+  const seq = insertionTiebreak(db);
   return await db.prepare(
-    'SELECT rowid AS seq, * FROM hours_ledger WHERE user_id = ? ORDER BY created_at DESC, rowid DESC'
+    `SELECT ${seq} AS seq, * FROM hours_ledger WHERE user_id = ? ORDER BY created_at DESC, ${seq} DESC`
   ).all(userId);
 }

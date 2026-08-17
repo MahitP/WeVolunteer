@@ -85,7 +85,7 @@ async function seedApplication({ slotEnd, appliedAt }) {
   await db.prepare(`
     INSERT INTO users (id, email, password_hash, name, role, grade, username,
                        email_verified, account_status, created_at)
-    VALUES (?, ?, 'h', 'Retention Student', 'student', '11', ?, 1, 'active', datetime('now'))
+    VALUES (?, ?, 'h', 'Retention Student', 'student', '11', ?, 1, 'active', '${new Date().toISOString()}')
   `).run(userId, `${userId}@example.com`, userId.replace(/-/g, '_'));
 
   await db.prepare(`
@@ -204,7 +204,7 @@ describe('the event decides the clock, not the application', () => {
     await db.prepare(`
       INSERT INTO users (id, email, password_hash, name, role, grade, username,
                          email_verified, account_status, created_at)
-      VALUES (?, ?, 'h', 'No Slot Student', 'student', '9', ?, 1, 'active', datetime('now'))
+      VALUES (?, ?, 'h', 'No Slot Student', 'student', '9', ?, 1, 'active', '${new Date().toISOString()}')
     `).run(userId, `${userId}@example.com`, userId.replace(/-/g, '_'));
     await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline,

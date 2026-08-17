@@ -204,7 +204,7 @@ describe('POST /api/auth/login-2fa/email/send', () => {
     const [first] = await liveCodes();
 
     /* Past the 60-second cooldown, which is a separate control tested below. */
-    await db.prepare("UPDATE tfa_email_codes SET created_at = datetime('now', '-2 minutes') WHERE id = ?")
+    await db.prepare(`UPDATE tfa_email_codes SET created_at = '${new Date(Date.now() - 120000).toISOString()}' WHERE id = ?`)
       .run(first.id);
 
     const res = await sendCode(preauth);
@@ -213,6 +213,40 @@ describe('POST /api/auth/login-2fa/email/send', () => {
     const after = await db.prepare('SELECT used_at FROM tfa_email_codes WHERE id = ?').get(first.id);
     expect(after.used_at, 'the superseded code was left live').not.toBeNull();
     expect((await liveCodes()).filter(c => c.used_at === null)).toHaveLength(1);
+  });
+
+  /**
+   * The cooldown must read BOTH shapes this column is written in.
+   *
+   * `created_at` is the one column whose default differs by engine: SQLite's
+   * `datetime('now')` writes `2026-08-10 12:00:00`, and the generated PostgreSQL
+   * schema writes ISO-8601. The route used to append `'Z'` unconditionally,
+   * which turned the ISO form into `…123ZZ` and `getTime()` into NaN. The
+   * cooldown fails shut, so the endpoint then answered 429 to every request
+   * forever and nobody using email as their second factor could sign in.
+   *
+   * Both shapes are written here directly, because the bug is invisible on
+   * whichever engine happens to be running the test.
+   */
+  it('honours the cooldown for both the ISO and the SQLite timestamp shape', async () => {
+    const old = new Date(Date.now() - 120000);
+    const shapes = [
+      old.toISOString(),                                       // PostgreSQL default
+      old.toISOString().replace('T', ' ').replace(/\..*$/, ''), // SQLite datetime('now')
+    ];
+
+    for (const shape of shapes) {
+      const preauth = await beginLogin();
+      await sendCode(preauth);
+      /* Every row for this user, not just the newest: the cooldown reads
+         `ORDER BY created_at DESC LIMIT 1`, and by the second shape there are
+         codes left over from the first. */
+      await db.prepare('UPDATE tfa_email_codes SET created_at = ? WHERE user_id = ?')
+        .run(shape, await userId());
+
+      const res = await sendCode(preauth);
+      expect(res.status, `a code stored as "${shape}" must be read as two minutes old, not as unparseable`).toBe(200);
+    }
   });
 
   it('refuses a second request inside the cooldown', async () => {
@@ -405,7 +439,7 @@ describe('POST /api/auth/login-2fa with an emailed code', () => {
   it('refuses a code that a resend retired', async () => {
     const preauth = await beginLogin();
     await issueKnownCode('823456');
-    await db.prepare("UPDATE tfa_email_codes SET used_at = datetime('now') WHERE user_id = ?").run(await userId());
+    await db.prepare(`UPDATE tfa_email_codes SET used_at = '${new Date().toISOString()}' WHERE user_id = ?`).run(await userId());
 
     expect((await submitCode('823456', preauth)).status).toBe(401);
   });

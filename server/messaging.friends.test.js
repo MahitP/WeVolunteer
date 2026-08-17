@@ -375,7 +375,7 @@ describe('friend messaging', () => {
     it('does not let a legacy organizer↔student friendship unlock messaging', async () => {
       await db.prepare(`
         INSERT INTO user_relationships (id, actor_id, subject_id, kind, status, created_at)
-        VALUES ('rel-legacy-msg', ?, ?, 'friend', 'accepted', datetime('now'))
+        VALUES ('rel-legacy-msg', ?, ?, 'friend', 'accepted', '${new Date().toISOString()}')
       `).run(organizerId, ada.id);
 
       try {

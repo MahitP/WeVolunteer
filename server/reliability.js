@@ -274,7 +274,7 @@ export async function commitmentsFor(db, userIds, { now = new Date().toISOString
       AND e.status <> 'cancelled'
       AND s.end_datetime <= ?
     GROUP BY a.user_id, a.event_id
-    ORDER BY occurredAt DESC
+    ORDER BY "occurredAt" DESC
   `).all(...ids, now);
 
   for (const row of rows) {

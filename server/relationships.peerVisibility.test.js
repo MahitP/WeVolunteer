@@ -34,7 +34,7 @@ describe('friend-tier visibility is peer-only', () => {
     await db.prepare('DELETE FROM user_relationships WHERE id = ?').run(id);
     await db.prepare(`
       INSERT INTO user_relationships (id, actor_id, subject_id, kind, status, created_at)
-      VALUES (?, ?, ?, 'friend', 'accepted', datetime('now'))
+      VALUES (?, ?, ?, 'friend', 'accepted', '${new Date().toISOString()}')
     `).run(id, actorId, subjectId);
   };
 
@@ -123,7 +123,7 @@ describe('friend-tier visibility is peer-only', () => {
     await forceAcceptedFriendship('rel-blocked', aliceId, bobId);
     await db.prepare(`
       INSERT INTO user_blocks (id, blocker_id, blocked_id, created_at)
-      VALUES ('blk-peervis', ?, ?, datetime('now'))
+      VALUES ('blk-peervis', ?, ?, '${new Date().toISOString()}')
     `).run(aliceId, bobId);
 
     expect(await areFriends(db, aliceId, bobId)).toBe(false);
@@ -164,7 +164,7 @@ describe('friend-tier visibility is peer-only', () => {
   it('grants nothing for a pending request between peers', async () => {
     await db.prepare(`
       INSERT INTO user_relationships (id, actor_id, subject_id, kind, status, created_at)
-      VALUES ('rel-pending', ?, ?, 'friend', 'pending', datetime('now'))
+      VALUES ('rel-pending', ?, ?, 'friend', 'pending', '${new Date().toISOString()}')
     `).run(bobId, carolId);
     expect(await areFriends(db, bobId, carolId)).toBe(false);
     await drop('rel-pending');

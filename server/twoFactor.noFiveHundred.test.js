@@ -535,7 +535,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
       for (const n of ['111111', '222222', '333333']) {
         await db.prepare(`
           INSERT INTO tfa_email_codes (id, user_id, code_hash, expires_at, created_at)
-          VALUES (?, ?, ?, ?, datetime('now'))
+          VALUES (?, ?, ?, ?, '${new Date().toISOString()}')
         `).run(`multi-${n}`, userId, bcrypt.hashSync(n, 10), expires);
       }
 
@@ -554,7 +554,7 @@ describe('the second-factor step never answers 500 for a user-facing failure', (
       const userId = (await db.prepare('SELECT id FROM users WHERE email = ?').get(EMAIL)).id;
       await db.prepare(`
         INSERT INTO tfa_email_codes (id, user_id, code_hash, expires_at, created_at)
-        VALUES (?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, '${new Date().toISOString()}')
       `).run(`exp-${Math.random().toString(36).slice(2)}`, userId,
         bcrypt.hashSync('654321', 10), new Date(Date.now() - 60000).toISOString());
 

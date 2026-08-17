@@ -222,7 +222,7 @@ describe('POST /api/2fa/enable — the recovery-code set it hands back', () => {
       Array.from({ length: 10 }, (_, i) => bcrypt.hash(`STALE${i}`, 10))
     );
     const insert = db.prepare(
-      "INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))"
+      `INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, '${new Date().toISOString()}')`
     );
     for (const hash of stale) await insert.run(`rc-${crypto.randomUUID()}`, user.id, hash);
 

@@ -1323,18 +1323,34 @@ router.post('/api/auth/login-2fa/email/send', async (req, res) => {
     /**
      * An unreadable timestamp holds the cooldown SHUT, not open.
      *
-     * `created_at` is `DEFAULT (datetime('now'))` and this route does not supply
-     * it, so today the value is `2026-08-10 12:00:00` and appending `Z` parses.
-     * The day any other path writes an ISO string there, the concatenation
-     * becomes `…000ZZ`, `getTime()` returns NaN, and `NaN < 60000` is FALSE —
-     * so the one comparison guarding this endpoint would silently stop guarding
-     * it, leaving the send route bounded only by the per-IP mail ceiling.
-     *
      * A rate limit whose failure mode is "no rate limit" is the wrong way
      * round, and the failure is invisible: nothing errors, codes simply start
      * flowing. `Number.isFinite` is the difference between the two directions.
+     *
+     * ── Why the zone suffix is conditional ──
+     *
+     * This column's default is the ONE place in the schema where the two engines
+     * write different shapes. SQLite's `DEFAULT (datetime('now'))` gives
+     * `2026-08-10 12:00:00`, with no `T` and no zone. The generated PostgreSQL
+     * schema gives `2026-08-10T12:00:00.123Z`, matching the ISO-8601 that every
+     * other timestamp in this application uses.
+     *
+     * The previous version appended `'Z'` unconditionally, which is right for
+     * exactly one of those. On PostgreSQL it produced `…123ZZ`, `getTime()`
+     * returned NaN, and the fail-shut branch above then answered 429 to EVERY
+     * request — permanently. Email codes could never be sent, so anyone whose
+     * second factor is email could not finish signing in at all. Failing shut
+     * saved this from being a security hole and turned it into a total outage
+     * instead, which is why it needs handling rather than tolerating.
+     *
+     * Normalising rather than branching on the dialect: the value either carries
+     * a zone already or it does not, and that is answerable from the string.
      */
-    const elapsed = Date.now() - new Date(recent.created_at + 'Z').getTime();
+    const stored = String(recent.created_at ?? '');
+    const withZone = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(stored)
+      ? stored
+      : `${stored.replace(' ', 'T')}Z`;
+    const elapsed = Date.now() - new Date(withZone).getTime();
     if (!Number.isFinite(elapsed) || elapsed < 60000) {
       const wait = Number.isFinite(elapsed) ? Math.ceil((60000 - elapsed) / 1000) : 60;
       return res.status(429).json({ error: `Please wait ${wait} seconds before requesting another code.`, retryAfter: wait });
