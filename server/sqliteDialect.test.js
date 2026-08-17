@@ -78,7 +78,51 @@ function sourceFiles(dir, out = []) {
  * be of the code.
  */
 const STRING_LITERAL = /`(?:[^`\\]|\\.)*`|'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"/g;
-const LOOKS_LIKE_SQL = /\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|PRAGMA)\b/i;
+
+/**
+ * A literal is SQL if it carries a statement verb — OR if it is a FRAGMENT.
+ *
+ * ── Why the verbs alone were not enough ──
+ *
+ * The verb test was the whole definition, and it is how `instr()` and the
+ * scalar `min(1.0, …)` reached production. This codebase assembles its bigger
+ * queries from pieces: `eventQuery.js` returns WHERE clauses, ORDER BY strings
+ * and select expressions that the route concatenates into a statement. A piece
+ * like
+ *
+ *     instr(lower(e.title), lower(@q)) > 0
+ *
+ * is SQL by any reading, contains no verb, and so was never scanned at all.
+ * The guard reported zero runtime `instr` while the browse search box was
+ * answering 500 on PostgreSQL. A ratchet that cannot see a third of the SQL is
+ * not measuring what its name claims.
+ *
+ * ── What identifies a fragment ──
+ *
+ * Either a named bind parameter (`@q`, `@lat` — this codebase's convention for
+ * assembled SQL, and the reason `sqlPlaceholders.js` exists), or a clause
+ * keyword. Both are things prose and ordinary JS templates do not contain, which
+ * matters because the alternative — scanning every string — counts
+ * `Math.min(total, LIMIT)` inside a log line and `${member.rowid}` inside an
+ * email-dedup template as dialect debt. Those were measured, not imagined: they
+ * are the exact false positives this test produced before the rule was narrowed.
+ *
+ * ── What this still cannot see ──
+ *
+ * A fragment carrying neither a bind parameter nor a clause keyword — say a
+ * bare `'lower(x) > 0'` concatenated in from somewhere — is still invisible.
+ * That is a real remaining hole and not a theoretical one: it is the same shape
+ * as the bug this rule was written for, minus the `@q` that happens to save it.
+ * Closing it properly means recognising SQL structurally rather than by tokens,
+ * which is a parser, not a regex. Until then the backstop is the one that
+ * actually found these two: running the application suite against a real
+ * PostgreSQL, where an untranslated construct raises rather than hides.
+ */
+const LOOKS_LIKE_SQL = new RegExp([
+  /\b(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|PRAGMA)\b/.source,
+  /@[a-z_]\w*/.source,
+  /\b(?:WHERE|ORDER\s+BY|GROUP\s+BY|HAVING|JOIN|ON\s+CONFLICT|COLLATE)\b/.source,
+].join('|'), 'i');
 
 /**
  * Two files talk ABOUT the dialect rather than speaking it, and counting them
@@ -110,6 +154,35 @@ const FILES = sourceFiles(SERVER)
 const isBoot = rel => rel === 'db.js' || rel.startsWith('migrations/') || rel.endsWith('seed_badges.js');
 
 /**
+ * Counts the SCALAR overload of `min`/`max` — the two-argument form.
+ *
+ * The one-argument aggregate is correct on both engines and is everywhere in
+ * this codebase (`MAX(at.present)`, `MIN(s.start_datetime)`, and forty more),
+ * so the thing to find is specifically a comma at the top level of the call's
+ * own parentheses. That cannot be a regex: the arguments nest, and the real
+ * offender was
+ *
+ *     min(1.0, cos(radians(@lat)) * cos(radians(e.latitude)) * cos(…) + sin(…))
+ *
+ * where `[^()]*,` matches nothing and `.*,` matches far too much. Balancing the
+ * parentheses is the only way to tell the two overloads apart, so the depth is
+ * counted rather than guessed.
+ */
+function scalarMinMax(lit) {
+  let found = 0;
+  for (const m of lit.matchAll(/\b(?:min|max)\s*\(/gi)) {
+    let depth = 1;
+    for (let i = m.index + m[0].length; i < lit.length && depth > 0; i += 1) {
+      const ch = lit[i];
+      if (ch === '(') depth += 1;
+      else if (ch === ')') depth -= 1;
+      else if (ch === ',' && depth === 1) { found += 1; break; }
+    }
+  }
+  return found;
+}
+
+/**
  * Every construct, what PostgreSQL wants instead, and how many are left.
  *
  * `runtime` and `boot` are counted apart because they retire differently. The
@@ -134,9 +207,18 @@ const CONSTRUCTS = [
    * Verified on both before adopting it: equality and ORDER BY behave
    * identically. `LIKE` does not — PostgreSQL refuses a nondeterministic
    * collation there — and no site combines the two. `db.dialectSql.test.js`
-   * pins the equality and ordering behaviour; the test below pins that no other
-   * spelling creeps in, since `COLLATE NoCase` would work on SQLite and fail on
-   * PostgreSQL with nothing to catch it.
+   * pins the equality and ordering behaviour.
+   *
+   * The test below pins that no other spelling creeps in. Note what that is and
+   * is not for: an earlier version of this comment claimed `COLLATE NoCase`
+   * would fail on PostgreSQL, and that is simply untrue — PostgreSQL folds an
+   * unquoted identifier to lower case, so every spelling resolves to the same
+   * collation and all of them work. (Checked directly against the ICU collation
+   * rather than reasoned about.) The rule is worth keeping anyway, because the
+   * ratchet above distinguishes `NOCASE` from `nocase` BY CASE and a third
+   * spelling would be counted as neither — but it is a counting rule, not a
+   * correctness one, and stating it as correctness sends the next person
+   * hunting for a bug that is not there.
    */
   { name: 'COLLATE NOCASE',  pattern: /COLLATE\s+NOCASE/g,                  runtime: 0, boot: 5,
     postgres: 'the shared `nocase` ICU collation — write it lower-case' },
@@ -152,6 +234,20 @@ const CONSTRUCTS = [
     postgres: 'timestamp subtraction yielding an interval' },
   { name: 'AUTOINCREMENT',   pattern: /\bAUTOINCREMENT\b/gi,                runtime: 0, boot: 1,
     postgres: 'GENERATED … AS IDENTITY, or bigserial' },
+  /**
+   * Both of the following were added AFTER they had already shipped as bugs,
+   * which is the honest reason they are here.
+   *
+   * This list is a ratchet over constructs somebody thought of, not a way of
+   * discovering new ones — so it reported the runtime column clean while the
+   * browse endpoint answered 500 on PostgreSQL for every text search and every
+   * distance sort. What found them was running the application suite against a
+   * real PostgreSQL; what keeps them from coming back is counting them here.
+   */
+  { name: 'instr()',         pattern: /\binstr\s*\(/gi,                     runtime: 0, boot: 0,
+    postgres: 'strpos(haystack, needle) — same argument order, same 1-based-or-0 result' },
+  { name: 'scalar min/max',  count: scalarMinMax,                           runtime: 0, boot: 0,
+    postgres: 'LEAST(…) / GREATEST(…) — PostgreSQL reads the 2-arg form as its aggregate and refuses' },
 ];
 
 /* Rebuilt per call because `String.match` with a /g/ regex is stateful, and
@@ -163,6 +259,13 @@ const tally = (predicate, pattern) => FILES
   .filter(f => predicate(f.rel))
   .reduce((n, f) => n + f.sql.reduce((m, lit) => m + (lit.match(pattern)?.length ?? 0), 0), 0);
 
+/* A construct is counted either by a pattern or, when the shape needs balanced
+   parentheses to recognise at all, by its own function. */
+const tallyOf = (predicate, c) => (c.count
+  ? FILES.filter(f => predicate(f.rel))
+    .reduce((n, f) => n + f.sql.reduce((m, lit) => m + c.count(lit), 0), 0)
+  : tally(predicate, freshly(c.pattern)));
+
 describe('SQLite-only SQL still in the codebase', () => {
   it('finds SQL to count at all, so the ratchet is not vacuous', () => {
     const literals = FILES.reduce((n, f) => n + f.sql.length, 0);
@@ -172,8 +275,8 @@ describe('SQLite-only SQL still in the codebase', () => {
 
   for (const c of CONSTRUCTS) {
     it(`${c.name} — at most ${c.runtime} runtime, ${c.boot} boot (PostgreSQL: ${c.postgres})`, () => {
-      const runtime = tally(rel => !isBoot(rel), freshly(c.pattern));
-      const boot = tally(isBoot, freshly(c.pattern));
+      const runtime = tallyOf(rel => !isBoot(rel), c);
+      const boot = tallyOf(isBoot, c);
 
       expect(
         runtime,
@@ -215,8 +318,8 @@ describe('SQLite-only SQL still in the codebase', () => {
   });
 
   it('holds the total at 119 — 6 runtime, 113 boot', () => {
-    const runtime = CONSTRUCTS.reduce((n, c) => n + tally(rel => !isBoot(rel), freshly(c.pattern)), 0);
-    const boot = CONSTRUCTS.reduce((n, c) => n + tally(isBoot, freshly(c.pattern)), 0);
+    const runtime = CONSTRUCTS.reduce((n, c) => n + tallyOf(rel => !isBoot(rel), c), 0);
+    const boot = CONSTRUCTS.reduce((n, c) => n + tallyOf(isBoot, c), 0);
 
     expect(runtime, 'runtime SQLite-only SQL grew').toBeLessThanOrEqual(6);
     expect(boot, 'boot-path SQLite-only SQL grew').toBeLessThanOrEqual(113);

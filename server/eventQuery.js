@@ -30,9 +30,11 @@ const SORTS = {
   deadline: 'e.application_deadline ASC',
   spots: 'spots_remaining DESC',
   hours: 'agg.total_hours DESC',
-  // COLLATE NOCASE approximates localeCompare well enough for titles and, unlike
-  // it, can use an index.
-  alpha: 'e.title COLLATE NOCASE ASC',
+  // A case-insensitive collation approximates localeCompare well enough for
+  // titles and, unlike it, can use an index. Spelled lower-case: that is the one
+  // token both engines resolve to their own collation, and the dialect ratchet
+  // counts the two spellings separately.
+  alpha: 'e.title COLLATE nocase ASC',
   /**
    * `NULLS LAST` rather than a leading `distance_miles IS NULL`.
    *
