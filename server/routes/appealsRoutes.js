@@ -21,6 +21,7 @@ import crypto from 'node:crypto';
 import { db } from '../db.js';
 import { authenticateToken } from '../utils.js';
 import { runInTransaction } from '../db/connectionContext.js';
+import { forUpdate } from '../db/dialectSql.js';
 import { can, requireCap } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
@@ -808,8 +809,28 @@ router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.rev
      WHERE user_id = ? AND expires_at > ? ORDER BY expires_at DESC LIMIT 1
   `).get(appeal.user_id, now))?.token ?? null;
 
+  let alreadyDecided = false;
   try {
     await runInTransaction(db, async (tx) => {
+      /**
+       * Re-read the appeal under a row lock before deciding it.
+       *
+       * The `isFinal(appeal.status)` check above runs on the ambient handle,
+       * many statements before this write. Three reviewers deciding at once all
+       * passed it and all wrote: the suite saw [200, 200, 200] where the
+       * contract is one 200 and two 409s, so one appeal carried three decisions
+       * and the last writer silently won.
+       *
+       * SQLite's process-wide write queue closed that window; a connection pool
+       * opens it. Locking the row here makes the second and third transactions
+       * wait, re-read the committed status, and take the refusal the first one
+       * earned.
+       */
+      const current = await tx.prepare(
+        `SELECT status FROM appeals WHERE id = ?${forUpdate(db)}`
+      ).get(req.params.id);
+      if (!current || isFinal(current.status)) { alreadyDecided = true; return; }
+
       await tx.prepare(`
         UPDATE appeals
            SET status = 'resolved', decision = ?, reasoning = ?, reviewer_id = ?,
@@ -869,6 +890,16 @@ router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.rev
   } catch (err) {
     console.error('Failed to decide appeal:', err);
     return res.status(500).json({ error: 'We could not record that decision. Please try again.' });
+  }
+
+  /* Refused inside the transaction, answered outside it — the same shape the
+     accept path uses, because returning from the callback would commit a no-op
+     rather than send a response. */
+  if (alreadyDecided) {
+    return res.status(409).json({
+      error: 'This appeal has already been decided. Reopen it if the decision needs to change.',
+      code: 'already_decided',
+    });
   }
 
   /**
