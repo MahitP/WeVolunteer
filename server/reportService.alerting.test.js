@@ -114,7 +114,11 @@ async function silenceAllPreferences(userId) {
     await db.prepare(`
       INSERT INTO notification_preferences (user_id, channel, category, enabled)
       VALUES (?, ?, 'ACCOUNT', 0)
-      ON CONFLICT DO UPDATE SET enabled = 0
+      /* The conflict target is named. SQLite infers it from any unique index;
+         PostgreSQL refuses a bare DO UPDATE with "requires inference
+         specification or constraint name". The key is (user_id, category,
+         channel). */
+      ON CONFLICT (user_id, category, channel) DO UPDATE SET enabled = 0
     `).run(userId, channel);
   }
 }

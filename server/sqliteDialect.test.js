@@ -426,6 +426,39 @@ describe('SQLite-only SQL still in the codebase', () => {
     ]);
   });
 
+  /**
+   * `ON CONFLICT DO UPDATE` must name what it conflicts on.
+   *
+   * SQLite infers the target from whichever unique index the row violates.
+   * PostgreSQL refuses outright — "ON CONFLICT DO UPDATE requires inference
+   * specification or constraint name" — so the statement does not run at all.
+   *
+   * `DO NOTHING` is exempt: PostgreSQL accepts it bare, and it means "any
+   * conflict" on both engines.
+   *
+   * Scanned across tests as well as shipped code, because the one that got here
+   * was in a fixture — and a fixture that cannot write its own precondition
+   * fails three tests in a way that looks like the feature is broken.
+   */
+  it('names the conflict target on every ON CONFLICT DO UPDATE', () => {
+    const bad = [];
+    for (const name of readdirSync(SERVER, { recursive: true })) {
+      if (typeof name !== 'string' || !name.endsWith('.js')) continue;
+      if (name === 'sqliteDialect.test.js') continue;
+      const raw = readFileSync(path.join(SERVER, name), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+        .replace(/(^|[^:])\/\/.*$/gm, (m, p1) => p1);
+      for (const m of raw.matchAll(/ON\s+CONFLICT\s+DO\s+UPDATE/gi)) {
+        bad.push(`${name}:${raw.slice(0, m.index).split('\n').length}`);
+      }
+    }
+    expect(
+      bad,
+      'PostgreSQL refuses a bare ON CONFLICT DO UPDATE. Name the columns, '
+      + 'e.g. ON CONFLICT (user_id, category, channel) DO UPDATE SET ….',
+    ).toEqual([]);
+  });
+
   it('holds the total at 119 — 6 runtime, 113 boot', () => {
     const runtime = CONSTRUCTS.reduce((n, c) => n + tallyOf(rel => !isBoot(rel), c), 0);
     const boot = CONSTRUCTS.reduce((n, c) => n + tallyOf(isBoot, c), 0);
