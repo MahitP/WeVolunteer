@@ -723,6 +723,52 @@ describe('the unported fixture surface', () => {
    * `:memory:` and per-test temp files are how the migration, schema and backup
    * tests legitimately drive SQLite directly.
    */
+  /**
+   * A camelCase alias must be quoted in TEST SQL too.
+   *
+   * `sqliteDialect.test.js` ratchets this for shipped code, but its scanner
+   * deliberately skips test files — it measures the SQL the product runs. So
+   * `SELECT user_id AS userId` survived in fixtures, and PostgreSQL folded it to
+   * `userid`: `row.userId` was `undefined`, `isMember()` answered false for
+   * everybody, and six authorization tests in `routes.organizationMembers`
+   * failed looking exactly like a broken permission check.
+   *
+   * That is the expensive shape — not a crash, but a fixture quietly reporting
+   * that an authorized member is not a member. Quoting is a no-op on SQLite,
+   * which preserves the case either way.
+   *
+   * Files holding a raw handle are exempt: those really are SQLite, and one of
+   * them pins this very behaviour as executable documentation.
+   */
+  it('quotes camelCase column aliases in test SQL', () => {
+    /**
+     * Read from the RAW file with only comments removed — not from `strip()`.
+     *
+     * `strip()` blanks string literals, and a test's SQL lives inside one, so
+     * scanning the stripped source finds nothing at all. The first version of
+     * this guard did exactly that and passed against a deliberate mutation,
+     * which is the only reason the hole was noticed.
+     */
+    const commentsOnly = (s) => s
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .replace(/(^|[^:])\/\/.*$/gm, (m, p1) => p1 + ' '.repeat(Math.max(0, m.length - p1.length)));
+
+    const bad = [];
+    for (const { rel, src } of FILES) {
+      if (!rel.includes('.test.') || holdsRawHandle(src)) continue;
+      const raw = commentsOnly(readFileSync(path.join(SERVER, rel), 'utf8'));
+      for (const m of raw.matchAll(/\bAS\s+([a-z_]\w*[A-Z]\w*)/g)) {
+        bad.push(`${rel}:${lineOf(raw, m.index)} — AS ${m[1]}`);
+      }
+    }
+    expect(
+      bad,
+      'PostgreSQL folds an unquoted identifier to lower case, so the property read '
+      + 'yields undefined and the assertion fails for a reason that is not the one under test. '
+      + 'Write AS "userId".',
+    ).toEqual([]);
+  });
+
   it('never opens a raw SQLite handle on the application database', () => {
     const offenders = [];
     for (const { rel, src } of FILES) {

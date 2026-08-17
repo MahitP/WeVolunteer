@@ -38,7 +38,7 @@ describe('removing an organization member', () => {
   let orgId;
 
   const membersOf = async () => await db.prepare(
-    'SELECT user_id AS userId, member_role AS role FROM organization_members WHERE organization_id = ?'
+    'SELECT user_id AS "userId", member_role AS role FROM organization_members WHERE organization_id = ?'
   ).all(orgId);
 
   const isMember = async (userId) => (await membersOf()).some(m => m.userId === userId);

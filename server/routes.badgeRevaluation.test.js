@@ -22,7 +22,7 @@ describe('badge re-evaluation through the attendance route', () => {
 
   /** Every accepted application on an event whose shifts have ended. */
   const rosterFor = async (eventId) => await realDb.prepare(`
-    SELECT a.id, a.user_id AS userId FROM applications a
+    SELECT a.id, a.user_id AS "userId" FROM applications a
     WHERE a.event_id = ? AND a.status = 'accepted'
   `).all(eventId);
 

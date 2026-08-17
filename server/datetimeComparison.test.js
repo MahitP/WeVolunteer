@@ -74,7 +74,7 @@ describe('the raw comparison semantics', () => {
     
     const endedEarlierToday = isoFromNow(-4 * HOUR);
     const right = db.prepare("SELECT julianday(?) > julianday('now') AS isFuture").get(endedEarlierToday).isFuture;
-    const bound = db.prepare('SELECT ? > ? AS isFuture').get(endedEarlierToday, new Date().toISOString()).isFuture;
+    const bound = db.prepare('SELECT ? > ? AS "isFuture"').get(endedEarlierToday, new Date().toISOString()).isFuture;
 
     expect(wrong).toBe(1);  // the bug: a finished shift looks like a future one
     expect(right).toBe(0);
