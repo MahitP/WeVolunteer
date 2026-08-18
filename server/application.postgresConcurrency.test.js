@@ -279,6 +279,54 @@ describe.skipIf(!RUNNING_ON_POSTGRES)('the application under real PostgreSQL con
         }
       }, 120_000);
     }
+
+    /**
+     * The BULK route races itself, and for a different reason than the single one.
+     *
+     * `PATCH /api/applications/:id` was fixed by moving the capacity check inside
+     * the transaction behind `SELECT … FOR UPDATE` on the slot. The bulk route
+     * computes its budget — `remainingBySlot` — BEFORE `runInTransaction` opens,
+     * with `await`s in the loop, and then spends that budget inside. Two batches
+     * on one slot can therefore both read "2 remaining" and both accept 2.
+     *
+     * `instanceLock.js` argues that one process is safe because "node:sqlite is
+     * synchronous and the handler never awaits". That premise is exactly what the
+     * PostgreSQL migration removes: every statement is now a promise, so the
+     * interleaving the lock was protecting against happens WITHIN one process.
+     * The lock is still right about multi-instance; it is no longer sufficient.
+     *
+     * Disjoint batches, so nothing is shared but the slot's capacity.
+     */
+    for (const [spots, batches, perBatch] of [[2, 3, 2], [1, 4, 1], [2, 2, 3]]) {
+      it(`never puts more than ${spots} into a ${spots}-spot slot when ${batches} bulk accepts race`, async () => {
+        for (let round = 0; round < 3; round += 1) {
+          const tag = `blk${spots}x${batches}x${perBatch}r${round}-${Math.random().toString(36).slice(2, 7)}`;
+          const { organizer, slotId, applicationIds } =
+            await raceFixture(spots, batches * perBatch, tag);
+
+          const groups = Array.from({ length: batches }, (_, i) =>
+            applicationIds.slice(i * perBatch, (i + 1) * perBatch));
+
+          const results = await Promise.all(groups.map(ids =>
+            srv.call('PATCH', '/api/applications/bulk', { applicationIds: ids, status: 'accepted' }, organizer)
+              .catch(err => ({ status: 0, body: { error: String(err?.message ?? err) } }))));
+
+          const accepted = await acceptedIn(slotId);
+          expect(
+            accepted,
+            `oversubscribed: ${accepted} accepted into ${spots} spot(s) across `
+            + `${batches} concurrent bulk calls. statuses: ${results.map(r => r.status).join(',')}`,
+          ).toBeLessThanOrEqual(spots);
+
+          /* And not under-filled: refusing everything would satisfy the bound
+             above while breaking the route. */
+          expect(
+            accepted,
+            'the slot was left emptier than it should be',
+          ).toBe(Math.min(spots, batches * perBatch));
+        }
+      }, 120_000);
+    }
   });
 
 

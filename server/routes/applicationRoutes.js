@@ -548,19 +548,6 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
     const applied = [];
     const skipped = [];
     const remainingBySlot = {};
-    if (status === 'accepted') {
-      for (const app of apps) {
-        if (remainingBySlot[app.slot_id] === undefined) {
-          const slot = await db.prepare('SELECT max_spots FROM slots WHERE id = ?').get(app.slot_id);
-          const slotMaxSpots = slot ? slot.max_spots : 0;
-          const slotAccepted = (await db.prepare(`
-            SELECT COUNT(*) as count FROM applications
-            WHERE slot_id = ? AND status = 'accepted'
-          `).get(app.slot_id)).count;
-          remainingBySlot[app.slot_id] = Math.max(0, slotMaxSpots - slotAccepted);
-        }
-      }
-    }
 
     const promotions = [];
     const freedSlots = new Set();
@@ -568,6 +555,38 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
        applications on the same slot disagree about whether it had started. */
     const removalClock = new Date();
     await runInTransaction(db, async (tx) => {
+      /**
+       * Capacity is counted INSIDE the transaction, behind a row lock per slot.
+       *
+       * It used to be counted just above, before the transaction opened. That was
+       * safe for exactly as long as `instanceLock.js` says it was: one process,
+       * `node:sqlite` synchronous, and a handler that never awaited between the
+       * read and the write. PostgreSQL removes that premise — every statement is
+       * a promise now — so the interleaving stopped needing a second instance to
+       * happen. Three concurrent bulk calls on a two-spot slot each read
+       * "2 remaining" and each accepted 2: six volunteers into two places, three
+       * 200s, and nothing anywhere said the roster was overfull.
+       *
+       * Slots are locked in a deterministic order — sorted by id — rather than in
+       * whatever order the applications arrived. Two batches spanning the same two
+       * slots in opposite orders would otherwise be able to take the locks
+       * head-on and deadlock; a total order on acquisition removes that outright.
+       */
+      if (status === 'accepted') {
+        const slotIds = [...new Set(apps.map(a => a.slot_id))].sort();
+        for (const slotId of slotIds) {
+          const slot = await tx.prepare(
+            `SELECT max_spots FROM slots WHERE id = ?${forUpdate(db)}`
+          ).get(slotId);
+          const slotMaxSpots = slot ? slot.max_spots : 0;
+          const slotAccepted = Number((await tx.prepare(`
+            SELECT COUNT(*) as count FROM applications
+            WHERE slot_id = ? AND status = 'accepted'
+          `).get(slotId)).count);
+          remainingBySlot[slotId] = Math.max(0, slotMaxSpots - slotAccepted);
+        }
+      }
+
       const update = await tx.prepare('UPDATE applications SET status = ? WHERE id = ?');
       for (const app of apps) {
         if (app.status === 'accepted' && status === 'accepted') {
