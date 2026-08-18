@@ -13,14 +13,30 @@
  * With N instances the login brute-force limit, the mail limit and the
  * certificate-verify limit are all N× looser than configured, and nothing says so.
  *
- * The narrower consequence is an ordering hazard: capacity checks read outside their
- * transaction (`PATCH /api/applications/bulk` counts accepted rows per slot, then
- * opens a transaction to write). One process is safe because `node:sqlite` is
- * synchronous and the handler never awaits, so the read and the write cannot
- * interleave. Two processes can interleave them and accept past a slot's capacity.
- * Stated honestly: 25 concurrent trials across two live instances did not reproduce
- * an oversell, because SQLite's write serialization narrows the window to
- * microseconds. It is a real hazard, not a demonstrated defect.
+ * The narrower consequence WAS an ordering hazard: capacity checks read outside
+ * their transaction (`PATCH /api/applications/bulk` counted accepted rows per slot,
+ * then opened a transaction to write). One process was safe because `node:sqlite`
+ * is synchronous and the handler never awaits, so the read and the write could not
+ * interleave. Two processes could interleave them and accept past a slot's capacity.
+ * Stated honestly at the time: 25 concurrent trials across two live instances did
+ * not reproduce an oversell, because SQLite's write serialization narrows the window
+ * to microseconds. It was a real hazard, not a demonstrated defect.
+ *
+ * ── What the PostgreSQL migration changed about that paragraph ──
+ *
+ * The premise above — "the handler never awaits" — is a property of `node:sqlite`,
+ * not of the handler. On PostgreSQL every statement is a promise, so the read and
+ * the write interleave WITHIN one process and the second instance stops being
+ * necessary. It then stopped being hypothetical: three concurrent bulk accepts put
+ * six volunteers into a two-spot slot and returned 200 to all three
+ * (`application.postgresConcurrency.test.js`).
+ *
+ * Both capacity routes now count inside their transaction behind `SELECT … FOR
+ * UPDATE` on the slot, so the invariant no longer rests on either the engine's
+ * concurrency model or on this lock. The lock remains correct and still worth
+ * holding — the rate limiters below are genuinely per-process — but it is not what
+ * keeps a roster from being oversold, and nothing new should be written as though
+ * it were.
  *
  * ── Why a lock rather than shared state ──
  *

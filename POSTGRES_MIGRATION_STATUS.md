@@ -2751,3 +2751,94 @@ it looks for lives in one. Mutation-proven both ways.
 Security negative-path pass, concurrency beyond the paths already covered,
 health/readiness, observability, semantic parity on migrated data, deployment
 configuration, SQLite retirement classification, cutover and rollback rehearsal.
+
+---
+
+## Phase 17 — security negative-path pass, and two defects it surfaced
+
+### Suite state
+
+| Suite | Result |
+|---|---|
+| PostgreSQL (`npm run test:postgres`) | **4808 passed · 0 failed · 33 skipped**, process exit **0** |
+| SQLite (`--project server`) | **4816 passed · 0 failed · 25 skipped** |
+| Frontend AI bundle guard | 15 passed |
+| lint / build / `npm audit` | clean · ok · **0 vulnerabilities** |
+
+### The suite was exiting non-zero with zero failures
+
+Three unhandled rejections — `syntax error at or near "AUTOINCREMENT"` — which
+vitest counts separately from failures and warns "might cause false positive
+tests".
+
+Two tests ran migration 034's `up()` against the live handle. `up()` calls
+`db.exec()` **without awaiting**: correct against synchronous `node:sqlite`, but
+on PostgreSQL the SQLite DDL was rejected *after* `up()` had already returned.
+Both tests passed having proved nothing — `not.toThrow()` saw a clean return, and
+the row-count assertion was unchanged because the table was never touched.
+
+Migrations build the SQLite schema; PostgreSQL uses the generated
+`db/postgresSchema.js`, where `AUTOINCREMENT` has already become an identity
+column. The two are now confined with `skipIf(RUNNING_ON_POSTGRES)` and the
+confinement guard's allow-list carries the reason. The duplicate-`(slug, version)`
+test beside them is deliberately **not** confined — it exercises the constraint,
+not the migration.
+
+### Bulk accept overfilled slots on PostgreSQL
+
+`PATCH /api/applications/bulk` counted capacity **before** opening its
+transaction and spent that budget inside. Three concurrent calls put **six
+volunteers into a two-spot slot and returned 200 to all three**. Reproduced at
+2/3, 1/4 and 2/2 spots-to-batches, three rounds each.
+
+`instanceLock.js` had argued one process was safe because "`node:sqlite` is
+synchronous and the handler never awaits". That premise is a property of the
+SQLite driver, not of the handler — PostgreSQL makes every statement a promise,
+so the interleaving happens **within one process** and no second instance is
+needed. The count now happens inside the transaction behind `SELECT … FOR UPDATE`,
+matching the single-application route, with slots locked in **sorted id order** so
+two batches spanning the same slots cannot deadlock. `instanceLock.js` has been
+corrected: the lock is still right about multi-instance and the per-process rate
+limiters, but it is not what keeps a roster from being oversold.
+
+### 2FA — the reported Internal Server Error
+
+Root cause was the duplicate `TFA_ENCRYPTION_KEY`, fixed 2026-08-09. Node's
+`--env-file` is last-wins and silent, so only the final key could decrypt stored
+secrets. The rule was protected only by a comment; it is now a boot guard that
+reads the launched env files, refuses to start, names the offending line numbers,
+and prints neither key. It counts assignments rather than mentions — `.env.example`
+names the variable throughout the prose documenting the rule. Mutation-tested in
+both directions.
+
+The live verification path was already sound: `verifyTotpStep` catches decrypt
+failures and returns `{valid:false}` rather than surfacing a 500. Two dead
+`decryptSecret` imports (which oxlint does not flag) were removed.
+
+### Audited and found sound — no change needed
+
+- **Organization moderation.** Ban/unban are org-scoped through
+  `loadManagedOrganization` → `canManage`, which filters on
+  `organization_id AND user_id` and requires `member_role = 'manager'`. Cross-org
+  ban and cross-org unban are both prevented by scoping the write to the loaded
+  org's id. Self-ban, last-manager lockout and missing-reason are all refused.
+  Membership has no status column — revocation is row deletion — so there is no
+  pending/revoked manager to fail open on. The partial unique index backing
+  `ON CONFLICT … WHERE lifted_at IS NULL` exists in both the generated schema and
+  the live database.
+- **Global auth gate.** `authenticateToken` re-reads the user from the database
+  rather than trusting the token payload, and rejects missing, deleted, suspended
+  (bar a four-route allow-list) and stale-`token_version` sessions. Pre-auth 2FA
+  tokens cannot be used as full sessions.
+- **Rate limiting.** Deliberately process-local; `instanceLock.js` enforces the
+  single-instance constraint that makes that correct, and documents why Redis was
+  rejected. **Not** distributed protection — accurate as long as one instance runs.
+- **AI bundle gating.** `VITE_LOCAL_AI=false` build contains **zero** wllama/Welly
+  assets (2.8 MB). The default is ON, set in the committed `vite.config.js`.
+
+### Still not done
+
+Health/readiness audit, observability audit, semantic parity on migrated data,
+deployment-configuration audit, SQLite-retirement classification, cutover
+rehearsal, rollback rehearsal, code-quality pass, browser-compatibility evidence
+beyond Chrome/macOS. `POSTGRES_READY` stays **false**.
