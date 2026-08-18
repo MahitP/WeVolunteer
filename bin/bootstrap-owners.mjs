@@ -78,11 +78,7 @@ async function usernameFor(db, email) {
   const base = `owner_${email.split('@')[0]}`.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24);
   let candidate = base;
   let n = 1;
-  /* `LOWER(x) = LOWER(?)` rather than `COLLATE NOCASE`: the latter is SQLite-only
-     and is a syntax error on PostgreSQL, so this loop would have thrown on the
-     engine this tooling now has to support. `base` is already lowercased above,
-     so the comparison means the same thing on both. */
-  while (await db.prepare('SELECT 1 FROM users WHERE LOWER(username) = LOWER(?)').get(candidate)) {
+  while (await db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE').get(candidate)) {
     candidate = `${base}${n++}`;
   }
   return candidate;
@@ -121,7 +117,7 @@ async function main() {
   const now = new Date().toISOString();
 
   for (const email of emails) {
-    const existing = await db.prepare('SELECT id, role, account_status FROM users WHERE LOWER(email) = LOWER(?)').get(email);
+    const existing = await db.prepare('SELECT id, role, account_status FROM users WHERE email = ? COLLATE NOCASE').get(email);
 
     await db.exec('BEGIN');
     try {
