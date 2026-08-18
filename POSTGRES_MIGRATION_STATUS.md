@@ -3132,3 +3132,80 @@ than during an incident, and written into the runbook. Building a reverse
 migration is assessed and not recommended: a second full migration path, with
 its own dialect translation and failure modes, for a scenario where `pg_restore`
 is already the better answer.
+
+---
+
+## Phase 21 — the production boot, and `POSTGRES_READY = true`
+
+### The experiment
+
+`NODE_ENV=production`, real `server.js`, **no harness override**, against a
+scratch database holding **7,024 migrated rows**.
+
+```
+[db] using postgres localhost:5432/wv_prodboot
+[db] postgres: schema deferred to completeDatabaseInit()
+[db] postgres: schema applied
+[Hours ledger] Backfilled 400 entries from 400 attendance record(s).
+[Hours ledger] Parity verified against attendance for 400 volunteer(s).
+[Certificates] Issued 400 code(s).
+[legal] 12 published documents verified against their pinned hashes.
+[Worker] Notification outbox processor started.
+[AutoSelect] Scheduler started — every 15 min, 24h grace period after the deadline.
+WeVolunteer API Server listening on 127.0.0.1:5199
+```
+
+`/health` → `{"status":"ok","database":"connected","writable":true}`. The
+instance lock refused a second boot, correctly. No SQLite fallback, no worker
+failure, no swallowed initialisation error. Process stable through the whole
+session.
+
+Exercised against the **running server**, not the database: unauthenticated 401,
+wrong password 401, login 200, `/api/auth/me`, events, notifications,
+organizations, certificates, `/api/2fa/status`, directory search in both cases,
+friends, appeals — and hours **write** (201) then read back. Admin endpoints
+refused a student with 403.
+
+### It found two defects the suite could not
+
+**1. A PostgreSQL boot died on a SQLite setting.** `db.js` ran its path checks
+before resolving the engine, so a relative `WEV_DB_PATH` — the pilot's own `.env`
+carries `./pilot.db` — exited with `FATAL: WEV_DB_PATH must be an absolute path
+in production`. **The first cutover attempt would have hard-failed**, citing the
+wrong database. Two smaller lies came with it: "creating an empty one … stop the
+server now" (nothing is created, and it tells the operator to abort a healthy
+cutover) and `[db] using <sqlite path>`, which is indistinguishable from a silent
+fallback. The engine is now resolved first; all three are engine-aware and the
+log names host and database, never the password.
+
+**2. One failing request took the whole server down.** Express 4 does not catch
+rejected async handlers: the rejection reached `unhandledRejection`, and
+`shutdown.js` correctly treats that as fatal and drains. **51 of 206 async
+handlers have no try/catch.** `GET /api/organizations` — one unquoted alias in an
+ORDER BY, wrong only on PostgreSQL — ended the process three requests in.
+
+An async error boundary now walks the router stack once and routes rejections
+into the error middleware that already existed. Verified against a real failure
+rather than a simulated one: with a column renamed out from under the query, the
+route answers **500 and the server keeps serving**.
+
+The alias is fixed (`ORDER BY "memberCount"`) and a ratchet entry catches
+unquoted camelCase in `ORDER BY`, mutation-verified. The existing alias-
+consistency guard could not have seen it: the select list is an interpolated
+constant, so the definition and the use are never in one string literal.
+
+**The first draft of the boundary was itself wrong** — it wrapped mounted
+sub-routers, dropping their `.stack` and blinding `routes.resetRemoved` and
+`authz.completeness`, two authorization-adjacent guards that walk the router
+tree. Both failed and both were right. Sub-routers are now descended into, never
+wrapped.
+
+### The gate
+
+`POSTGRES_READY = true`. Every condition the gate named is met and pinned: an
+engine-selecting `db.js`, a PostgreSQL schema path, the dialect translated, and
+now the production boot. The assertion is kept and inverted, so closing it again
+is also a deliberate act.
+
+This records that the engineering evidence exists. It does not claim the
+deployment has served real traffic.
