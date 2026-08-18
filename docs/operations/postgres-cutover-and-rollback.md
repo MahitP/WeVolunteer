@@ -183,12 +183,53 @@ rollback horizon is longer than a few minutes.
 
 ---
 
+### If PostgreSQL fails AFTER it has served traffic
+
+This is the case the three above do not cover, and the only one where rollback
+is not free.
+
+**The point of no return is the first write on PostgreSQL, not the cutover
+command.** From that moment the SQLite file is a point-in-time snapshot, not a
+live alternative. Measured, not assumed: the migration opens the source
+`readOnly: true`, and the file is **byte-identical afterwards** (SHA-256 taken
+either side of a 760-row load). It is a perfect rollback artefact and a
+perfectly stale one — an account created on PostgreSQL after cutover is present
+there and absent from the snapshot, which is exactly what reverting would
+discard.
+
+So "roll back to SQLite" at this stage is not a rollback. It is a decision to
+accept losing every signup, application, check-in, hours entry and moderation
+action since cutover. That is an owner's call about acceptable data loss, and
+nobody should be making it for the first time during an incident.
+
+**The engineering recovery is PostgreSQL, not SQLite:**
+
+```
+pg_restore --clean --if-exists --dbname="$DATABASE_URL" <the pre-cutover dump>
+```
+
+Rehearsed — see the table above. It returns the rows *and* the 20 immutability
+trigger functions, their triggers, and the `nocase` collation. Reverting the
+engine is the last resort behind it, not the first move.
+
+**Before starting the cutover, decide and write down:** the maximum data loss
+that would be accepted to get back to SQLite, and who is allowed to make that
+call at 3am. If the answer is "none", then SQLite reversion is not a recovery
+option for this deployment and `pg_restore` is the whole plan.
+
 ## Open owner decisions
 
 1. **How writes are held during the window** — maintenance stop (available now)
    versus a read-only mode (would need building).
 2. **Whether a reverse PostgreSQL → SQLite migration is worth building**, to
-   shrink the data loss on a post-cutover rollback.
+   shrink the data loss on a post-cutover rollback. Assessed 2026-08-18 and
+   **not recommended as a launch gate**: it would be a second full migration
+   path — with its own dialect translation, its own verification and its own
+   failure modes — built to serve a scenario in which `pg_restore` is already
+   the better answer. The gap it closes is data loss, and the way to close that
+   is to not need the reversion, which the rehearsed PostgreSQL restore already
+   does. Worth revisiting only if an owner decides SQLite must remain a live
+   fallback indefinitely.
 3. **`hours_ledger` / `moderation_actions` insertion ordering.** PostgreSQL
    tie-breaks equal timestamps lexicographically by id rather than by insertion.
    Currently unobservable — `getLedgerForUser` has no route callers and nothing
