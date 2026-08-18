@@ -2664,3 +2664,90 @@ negative-path pass, worker audit, scale migration beyond 548 rows, query/index
 audit, production-boot audit, health/readiness verification, observability
 review, SQLite-retirement classification, and the cutover rehearsal steps that
 need a real deployment.
+
+---
+
+## Phase 16 — transaction, worker and scale audits
+
+```
+PostgreSQL   4,802 passed | 0 failed | 31 skipped   (2 consecutive runs)
+SQLite       4,751 passed | 0 failed | 82 skipped
+Adapter      7,013 passed | 0 failed | 22 skipped
+lint · build · audit · schema drift · whitespace   all clean
+```
+
+### 16a · A settled transaction still accepted statements
+
+`commit()` and `rollback()` both release the client to the pool. Nothing stopped
+`tx.prepare(…)` afterwards from using that same client — by then very likely
+checked out to another request. A stray write after commit did not merely land
+outside its transaction; it could land inside somebody else's. Measured before
+the fix: `{ changes: 1 }`.
+
+Found by writing the audit rather than reading the code. `runInTransaction`
+reads correctly; the pool is where it went wrong.
+
+The audit executes seven scenarios: commit, rollback on a thrown callback,
+rollback on a failed statement mid-transaction, **twelve consecutive failures
+each followed by a successful query** (a leaked or aborted client fails this
+within a few rounds), concurrent transactions where one fails and two commit,
+refused nesting, and use-after-settle.
+
+### 16b · Workers
+
+Three cases, all against the pool: overlapping retention sweeps with a third
+alone as control; twelve failing sweeps each followed by a successful query;
+three overlapping notification sweeps mailing at most one digest.
+
+One assertion was written as `x <= x`, which cannot fail. It is replaced, and
+the limit is now stated plainly: this proves concurrency leaves the database in
+the state one sweep would have, NOT that reported counts partition cleanly
+between two sweeps.
+
+Retention's interval is 24 hours, so overlap is not a realistic schedule hazard
+and no re-entrancy guard was added for its own sake.
+
+### 16c · Scale
+
+`server/testing/makeScaleDataset.mjs` generates a production-shaped population —
+realistic fan-out rather than an amplified copy of the pilot, because index
+behaviour depends on cardinality and a large narrow dataset measures the wrong
+thing. At 5,000 users / 88,064 rows / 16 MB SQLite:
+
+```
+schema applied            0.13 s
+migration + verification  3.26 s      (~27,000 rows/sec)
+PostgreSQL size           33 MB
+application boot          3.51 s
+row counts, PK sets       all match
+foreign keys              all 87 validate
+second run                refuses, exit 1
+```
+
+Boot verified the hours ledger against attendance for 5,000 volunteers and
+issued 5,000 certificates, so the data is coherent to the application and not
+merely present.
+
+Hot-path query plans at this scale — notifications-by-user, accepted count per
+slot, applications-by-user, attendance-by-user — all use indexes. No sequential
+scans, and **no indexes added**, because there is no evidence for any.
+
+### 16d · Four guards fired at the new tooling, and all four were right
+
+The generator tripped `tooling.scriptSafety`, `auditLog` and
+`db.accessSurface`. None was relaxed: it moved to `server/testing/` because it
+is fixture tooling, dropped its fabricated audit rows rather than have
+`auditLog` grow an allowlist, and adopted `transactionOn` instead of a raw
+BEGIN.
+
+**One guard was genuinely wrong and is fixed.** `auditLog` scanned raw file
+text, so a comment explaining the rule counted as a violation of it. The
+tempting fix is to reword the comment, degrading the explanation to satisfy the
+measurement. It now strips comments; string literals stay, since the statement
+it looks for lives in one. Mutation-proven both ways.
+
+### Still outstanding before POSTGRES_READY
+
+Security negative-path pass, concurrency beyond the paths already covered,
+health/readiness, observability, semantic parity on migrated data, deployment
+configuration, SQLite retirement classification, cutover and rollback rehearsal.
