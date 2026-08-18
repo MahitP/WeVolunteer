@@ -326,8 +326,20 @@ describe.skipIf(!live)('SQLite and PostgreSQL describe the same database', () =>
     const here = sqlite.prepare(
       "SELECT name, tbl_name FROM sqlite_master WHERE type='index' AND sql LIKE '%UNIQUE%' ORDER BY name"
     ).all().map(r => r.name);
+    /* Read from the catalogs rather than the pg_indexes view. That view calls
+       pg_get_indexdef() in its select list, so PostgreSQL renders the
+       definition of EVERY index in the database before the schemaname filter
+       can apply — and the harness has ~283 namespaces live at once, each with
+       ~95 indexes. It timed out at fifteen seconds, reported as an index
+       disagreement. indisunique is also the precise question; matching UNIQUE
+       in rendered DDL text was a proxy for it. */
     const there = (await pg.prepare(
-      `SELECT indexname FROM pg_indexes WHERE schemaname = ? AND indexdef LIKE '%UNIQUE%' ORDER BY indexname`
+      `SELECT c.relname AS indexname
+         FROM pg_index i
+         JOIN pg_class c ON c.oid = i.indexrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = ? AND i.indisunique
+        ORDER BY c.relname`
     ).all(NAMESPACE)).map(r => r.indexname);
 
     expect(here.length, 'no unique indexes found — this comparison would be vacuous').toBeGreaterThan(5);

@@ -73,10 +73,23 @@ describe('migration 056', () => {
    * space at position 10 sorts below the cutoff's `T`.
    */
   it('makes a recent attempt visible to the window again', () => {
-    const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
+    /**
+     * The two timestamps are pinned to one instant, not read from the clock.
+     *
+     * The defect asserted below is about the SEPARATOR at position 10 — a space
+     * sorting under `T` — and that only decides the comparison when both
+     * strings share a date prefix. Derived from `Date.now()`, they do not: run
+     * within fifteen minutes of UTC midnight, "thirty seconds ago" lands on the
+     * next date from "fifteen minutes ago", the date digits differ first, and
+     * the comparison flips. The test then failed for a reason that has nothing
+     * to do with what it is testing — deterministically, but only between
+     * 00:00 and 00:15 UTC, which is exactly when nobody is watching.
+     */
+    const base = new Date('2026-06-15T12:00:00.000Z').getTime();
+    const thirtySecondsAgo = new Date(base - 30 * 1000);
     insert('recent', thirtySecondsAgo.toISOString().replace('T', ' ').slice(0, 19));
 
-    const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const cutoff = new Date(base - 15 * 60 * 1000).toISOString();
     const counted = () => db
       .prepare('SELECT COUNT(*) AS n FROM tfa_login_attempts WHERE last_attempt_at > ?')
       .get(cutoff).n;
