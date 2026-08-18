@@ -42,10 +42,18 @@ export default function AppealInbox({ orgKey, addToast }) {
       .then(res => { if (!cancelled) setAppeals(res?.appeals ?? []); })
       /* An empty inbox and an unreachable one look the same to a reader, so a
          failure renders as "nothing to review" rather than as a broken card in
-         the management page. The toast is where the error is reported. */
-      .catch(() => { if (!cancelled) setAppeals([]); });
+         the management page. The toast is where the error is reported — and it
+         has to actually be raised: this catch used to set the empty state and
+         say nothing, so a manager whose inbox failed to load saw no card, was
+         told nothing, and had every reason to believe there was nothing
+         waiting. Hiding the card is only defensible when something else speaks. */
+      .catch(() => {
+        if (cancelled) return;
+        setAppeals([]);
+        addToast?.('Could not load appeals for this organization. Reload to try again.', 'error');
+      });
     return () => { cancelled = true; };
-  }, [orgKey]);
+  }, [orgKey, addToast]);
 
   const decide = async (appeal, decision) => {
     const why = (reasoning[appeal.id] || '').trim();
