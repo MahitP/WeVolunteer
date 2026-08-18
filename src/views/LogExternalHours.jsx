@@ -121,7 +121,24 @@ export default function LogExternalHours({ addToast }) {
     setLoading(true);
     api.fetchExternalHours()
       .then(res => setEntries(res.entries))
-      .catch(() => setEntries([]))
+      /**
+       * A failed load must not become "Nothing logged yet".
+       *
+       * This used to be `setEntries([])`, and the empty state below renders an
+       * EmptyState titled exactly that. So a student whose request failed was
+       * told their own hours record was empty — about the one screen where the
+       * obvious response is to type everything in again, which is how a network
+       * blip turns into duplicate submissions.
+       *
+       * `entries` stays null, and both branches below are guarded with `?.`, so
+       * neither the list nor the empty state renders. The toast is what says
+       * something went wrong. On a later reload the last good list is kept
+       * rather than blanked.
+       */
+      .catch(() => {
+        setEntries(prev => prev);
+        addToast?.('Could not load your external entries. Reload to try again.', 'error');
+      })
       .finally(() => setLoading(false));
   };
 
