@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
 import crypto from 'node:crypto';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /**
  * The two-factor encryption-key guard.
@@ -121,5 +124,109 @@ describe('TFA_ENCRYPTION_KEY validation in production', () => {
   it('warns loudly in development rather than passing in silence', () => {
     const r = boot({ NODE_ENV: 'development', TFA_ENCRYPTION_KEY: DEV_KEY });
     expect(r.stdout + (r.stderr || '')).toMatch(/WARNING|not usable/);
+  });
+});
+
+
+/**
+ * The duplicate-definition guard.
+ *
+ * ── The incident this reproduces ──
+ *
+ * `node --env-file` is last-wins and says nothing about it. A local .env carried
+ * two different TFA_ENCRYPTION_KEY lines until 2026-08-09; only the last could
+ * decrypt the stored secrets, so every enrolled authenticator failed
+ * verification, and the file gave no indication which key was in force.
+ *
+ * The fix at the time was a comment in .env.example asking for exactly one line.
+ * These tests exist because a comment is not a guard.
+ *
+ * The false-positive direction matters as much as the true-positive one here:
+ * that same .env.example comment names the variable several times in prose, so a
+ * guard that counted occurrences rather than ASSIGNMENTS would refuse to boot on
+ * the very file that documents the rule.
+ */
+function bootWithEnvFile(contents, extraEnv = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'wev-tfa-envfile-'));
+  const file = join(dir, '.env');
+  writeFileSync(file, contents);
+
+  /* The inherited environment carries this repo's own key. Node applies
+     --env-file over the top, but leaving it in would make a test that asserts on
+     the ABSENCE of a definition depend on the developer's machine. */
+  const env = { ...process.env, NODE_ENV: 'production', JWT_SECRET: STRONG_JWT, ...extraEnv };
+  delete env.TFA_ENCRYPTION_KEY;
+
+  const root = process.cwd().replace(/\\/g, '/');
+  const r = spawnSync(process.execPath, [
+    `--env-file-if-exists=${file}`,
+    '--input-type=module',
+    '-e',
+    `
+      const { TFA_ENCRYPTION_KEY } = await import('${root}/server/config.js');
+      console.log('BOOTED:' + Buffer.from(TFA_ENCRYPTION_KEY, 'base64').length);
+    `,
+  ], { env, encoding: 'utf8' });
+
+  rmSync(dir, { recursive: true, force: true });
+  return { booted: r.status === 0, stdout: r.stdout || '', stderr: r.stderr || '', file };
+}
+
+describe('TFA_ENCRYPTION_KEY duplicate definitions in an env file', () => {
+  it('boots when the key is defined exactly once', () => {
+    /* The positive case first — the guard must not stand in the way of a
+       correctly written file. */
+    const r = bootWithEnvFile(`TFA_ENCRYPTION_KEY=${realKey()}\n`);
+    expect(r.booted, r.stderr).toBe(true);
+    expect(r.stdout).toContain('BOOTED:32');
+  });
+
+  it('refuses to boot when the key is defined twice, and names both lines', () => {
+    const first = realKey();
+    const second = realKey();
+    expect(first).not.toBe(second);
+
+    const r = bootWithEnvFile(
+      `# leading comment\nTFA_ENCRYPTION_KEY=${first}\nOTHER=1\nTFA_ENCRYPTION_KEY=${second}\n`
+    );
+
+    expect(r.booted).toBe(false);
+    expect(r.stderr).toMatch(/defines TFA_ENCRYPTION_KEY 2 times/);
+    /* The line numbers are the whole value of the message: the operator has to
+       find them to fix it, and the guard refuses to choose for them. */
+    expect(r.stderr).toMatch(/lines 2, 4/);
+    expect(r.stderr).toMatch(/last-wins/);
+  });
+
+  it('does not expose either key value in the failure message', () => {
+    /* The message is printed to a terminal and pasted into issues. */
+    const first = realKey();
+    const second = realKey();
+    const r = bootWithEnvFile(`TFA_ENCRYPTION_KEY=${first}\nTFA_ENCRYPTION_KEY=${second}\n`);
+
+    expect(r.booted).toBe(false);
+    expect(r.stderr).not.toContain(first);
+    expect(r.stderr).not.toContain(second);
+  });
+
+  it('does not count commented-out lines as definitions', () => {
+    /* This is .env.example's own shape: prose naming the variable, then one
+       real assignment. A guard that tripped here would be unusable. */
+    const r = bootWithEnvFile(
+      '# NOTE: exactly one TFA_ENCRYPTION_KEY line may exist.\n'
+      + '# A second TFA_ENCRYPTION_KEY silently shadows the first.\n'
+      + `#TFA_ENCRYPTION_KEY=${realKey()}\n`
+      + `TFA_ENCRYPTION_KEY=${realKey()}\n`
+    );
+    expect(r.booted, r.stderr).toBe(true);
+    expect(r.stdout).toContain('BOOTED:32');
+  });
+
+  it('counts the `export ` form, which shells and env files both accept', () => {
+    const r = bootWithEnvFile(
+      `TFA_ENCRYPTION_KEY=${realKey()}\nexport TFA_ENCRYPTION_KEY=${realKey()}\n`
+    );
+    expect(r.booted).toBe(false);
+    expect(r.stderr).toMatch(/defines TFA_ENCRYPTION_KEY 2 times/);
   });
 });

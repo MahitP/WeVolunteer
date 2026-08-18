@@ -19,7 +19,6 @@ import { validateAccountFields, validatePassword, validateUsername, validateEmai
 import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
 import { isSuspended, liftIfExpired, suspensionNotice } from '../suspension.js';
 import { ROLE, previewPersonaOf } from '../authz.js';
-import { decryptSecret } from '../cryptoUtils.js';
 import { verifyTotpOnce } from '../totpReplay.js';
 import { runInTransaction } from '../db/connectionContext.js';
 import { recordSecurityEvent } from '../securityAudit.js';

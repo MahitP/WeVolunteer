@@ -8,7 +8,7 @@ import { authenticateToken, secondFactorRequiredFor, enabledSecondFactors } from
 import { runInTransaction } from '../db/connectionContext.js';
 import { requireAAL2 } from '../authz.js';
 import { spendChallenge, ChallengeNotSpent, refuseReauth } from '../reauthResponses.js';
-import { encryptSecret, decryptSecret, verifyTotp } from '../cryptoUtils.js';
+import { encryptSecret, verifyTotp } from '../cryptoUtils.js';
 import { recordSecurityEvent } from '../securityAudit.js';
 
 const router = express.Router();
