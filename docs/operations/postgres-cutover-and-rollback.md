@@ -175,6 +175,9 @@ rollback horizon is longer than a few minutes.
 | Application boots on migrated data | yes | schema applied, hours-ledger parity verified, 18 users / 4 events / 16 attendance / 18 audit logs read back |
 | Tombstoned accounts preserved | yes | 3 `deleted` users both sides, anonymised addresses identical |
 | Engine refuses an unknown value | yes | covered by the engine gate tests |
+| PostgreSQL backup and restore | yes | `pg_dump --format=custom` (184 KB), whole `public` schema dropped, `pg_restore` — 61 users / 15 events / 360 applications / 60 attendance / 480 notifications / 2 audit rows all returned, plus **20 functions, 20 triggers and the `nocase` collation** |
+| Privileged tooling on PostgreSQL | yes | `reset-2fa` cleared the secret, zeroed both flags, bumped `token_version` and wrote the audit row against the right user; `grant-ownership` and `bootstrap-owners` promoted/created owners — each confirmed by querying afterwards, not by the script's own success message |
+| Cutover without `--force` | yes | create → apply schema → load → verify: 1121 rows, 65 tables, PK sets and all 87 FKs match |
 | Rollback to SQLite after cutover | **no** | needs a real deployment; the file being untouched is what makes it safe |
 | Write-hold during the window | **no** | no read-only mode exists; owner decision above |
 
@@ -191,3 +194,72 @@ rollback horizon is longer than a few minutes.
    Currently unobservable — `getLedgerForUser` has no route callers and nothing
    reads the `seq` it selects — so no schema change has been made. If either is
    ever wired to a screen, it needs a monotonic column and a backfill.
+
+
+---
+
+## The rehearsal, as executed (2026-08-18)
+
+Reproducible end to end against scratch infrastructure. Nothing below touches
+production; `--source` is opened read-only throughout.
+
+```bash
+export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"
+SCRATCH=/tmp/wev-rehearsal && mkdir -p "$SCRATCH"
+
+# 1. A production-shaped SQLite dataset (real migrations, real init path)
+node server/testing/makeScaleDataset.mjs --out "$SCRATCH/cli.db" --users 60
+
+# 2. A clean PostgreSQL database with the generated schema
+dropdb --if-exists wv_cli_test && createdb wv_cli_test
+node --input-type=module -e "
+  const { PostgresDatabase } = await import('./server/db/postgresConnection.js');
+  const { translatePlaceholders } = await import('./server/db/sqlPlaceholders.js');
+  const { applyPostgresSchema } = await import('./server/db/postgresSchema.js');
+  const db = new PostgresDatabase({ connectionString: process.env.PG,
+    translate: translatePlaceholders, max: 2 });
+  await applyPostgresSchema(db); await db.close();"
+
+# 3. Load and verify — no --force
+node bin/migrate-sqlite-to-postgres.mjs \
+  --source "$SCRATCH/cli.db" --target "$PG" --apply
+
+# 4. Back up before anything else touches it
+pg_dump --format=custom --file="$SCRATCH/rollback.dump" "$PG"
+
+# 5. Prove the backup restores: destroy, then restore
+psql "$PG" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+pg_restore --dbname="$PG" --no-owner "$SCRATCH/rollback.dump"
+```
+
+### What the rehearsal established
+
+**The documented sequence did not work before it was executed.** Two defects,
+both invisible to reading:
+
+1. `applyPostgresSchema()` stamps one `schema_migrations` row
+   (`56, postgres_baseline`), and the loader's populated-target guard counted it
+   — so step 3 always refused and the operator reached for `--force`, which
+   disables the guard entirely, including the part that stops a second load
+   duplicating a live database.
+2. With the guard passed, the load died **partway through**, foreign keys
+   suspended, on `duplicate key value violates unique constraint
+   "schema_migrations_pkey"` — the source's own history contains version 56 and
+   collided with that same marker.
+
+Both are fixed; step 3 now completes with no `--force`.
+
+**The restore returns more than rows.** The drop cascaded through 86 objects,
+including 20 trigger functions that enforce immutability — `admin_audit_logs`
+no-delete/no-update, `appeals_immutable`, `reports_immutable`,
+`security_audit_logs_no_update` and the rest. All 20 functions, all 20 triggers
+and the `nocase` collation came back with the dump. A restore that returned the
+rows but not those triggers would leave the append-only guarantees silently off,
+which is the failure this step exists to rule out.
+
+### Still not rehearsed
+
+Rollback *from* PostgreSQL *to* SQLite after a real cutover. The SQLite file is
+never written during migration, so the rollback is "point the engine back and
+start" — but that has not been executed against a live deployment, and is listed
+above as not rehearsed rather than assumed.
