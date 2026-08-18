@@ -305,10 +305,29 @@ describe('the helper is the only writer', () => {
     const helper = path.join(root, 'auditLog.js');
     const self = fileURLToPath(import.meta.url);
 
+    /**
+     * Comments are stripped before the scan, so PROSE about this rule cannot
+     * trip it.
+     *
+     * The check was a raw `includes()` over the whole file, which meant a
+     * comment explaining why a module does not write audit rows directly was
+     * counted as a module that does. That is not hypothetical — it fired on a
+     * fixture generator whose comment quoted the rule in order to explain
+     * obeying it, and the tempting "fix" is to reword the comment, which
+     * degrades the explanation to satisfy the measurement.
+     *
+     * Stripping comments creates no hole: a real INSERT is code, and code
+     * survives. String literals are deliberately NOT stripped — the statement
+     * this looks for lives inside one.
+     */
+    const withoutComments = (src) => src
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .replace(/(^|[^:])\/\/.*$/gm, (m, p1) => p1);
+
     const offenders = [];
     for (const file of [...scan(root), ...scan(path.join(repo, 'bin'))]) {
       if (file === helper || file === self) continue;
-      const src = readFileSync(file, 'utf8');
+      const src = withoutComments(readFileSync(file, 'utf8'));
       if (src.includes('INSERT INTO admin_audit_logs')) {
         offenders.push(path.relative(repo, file));
       }

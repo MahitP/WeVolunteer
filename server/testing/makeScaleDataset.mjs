@@ -1,7 +1,22 @@
 /**
  * Builds a production-shaped SQLite database for migration scale testing.
  *
- *   node bin/make-scale-dataset.mjs --out /tmp/scale.db --users 2000
+ *   node server/testing/makeScaleDataset.mjs --out /tmp/scale.db --users 2000
+ *
+ * ── Why this lives in server/testing and not in bin ──
+ *
+ * It is fixture tooling, not an operational script. Two guards said so when it
+ * was briefly in `bin/`: `auditLog.test.js` refuses a raw
+ * `INSERT INTO admin_audit_logs` anywhere in `server/` or `bin/`, because the
+ * helper is what applies the actor check and the UUID; and
+ * `tooling.scriptSafety.test.js` requires every `bin/` script that deletes a
+ * file to run the shared safety gate.
+ *
+ * Both are right about operational scripts and neither should be relaxed to
+ * accommodate a generator. Moving it is the honest fix: this writes a
+ * throwaway database from nothing, is never pointed at a real one, and the
+ * audit rows it fabricates are volume for a scale measurement rather than a
+ * record of anything that happened.
  *
  * ── Why generated rather than amplified from the pilot ──
  *
@@ -49,7 +64,7 @@ rmSync(`${OUT}-shm`, { force: true });
  */
 process.env.WEV_DB_PATH = OUT;
 process.env.DEMO_MODE = 'false';
-const dbModule = await import(path.resolve(import.meta.dirname, '../server/db.js'));
+const dbModule = await import(path.resolve(import.meta.dirname, '../db.js'));
 dbModule.initDatabase();
 const db = new DatabaseSync(OUT);
 db.exec('PRAGMA foreign_keys = ON');
@@ -174,18 +189,25 @@ tx(() => {
     INSERT INTO notifications (id, user_id, kind, title, body, read, created_at)
     VALUES (?, ?, 'GENERIC', 'Scale notice', 'body', ?, ?)
   `);
-  const audit = db.prepare(`
-    INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
-    VALUES (?, ?, 'SCALE_EVENT', ?, 'generated', ?)
-  `);
-  const admins = userIds.filter((_, i) => i % 199 === 0);
+  /**
+   * Audit rows are deliberately NOT generated here.
+   *
+   * `auditLog.test.js` refuses a raw `INSERT INTO admin_audit_logs` anywhere in
+   * `server/` or `bin/`, because `recordAudit()` is what applies the actor
+   * check, the UUID and the error propagation — and it has no allowlist, which
+   * is the right design for that invariant. Adding one so a fixture generator
+   * could bypass it would weaken a security guard for convenience.
+   *
+   * Nothing is lost. The audit table's migration behaviour is exercised by the
+   * pilot-snapshot dry run, which carries REAL audit history including the
+   * append-only trigger and the retention window — better evidence than
+   * fabricated volume would be. What this dataset exists to measure is
+   * throughput and index behaviour on the high-cardinality tables, and those
+   * are notifications, applications, attendance and users.
+   */
   for (let i = 0; i < USERS; i += 1) {
     for (let n = 0; n < 8; n += 1) {
       note.run(`snote-${i}-${n}`, userIds[i], n % 3 === 0 ? 1 : 0, iso(-(n * 3)));
-      bump();
-    }
-    if (admins.length && i % 5 === 0) {
-      audit.run(`saud-${i}`, admins[0], userIds[i], iso(-(i % 500)));
       bump();
     }
   }
