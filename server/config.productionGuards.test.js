@@ -164,3 +164,60 @@ describe('TFA_ENCRYPTION_KEY base64 validation actually runs', () => {
     expect(r.booted).toBe(false);
   });
 });
+
+/**
+ * DEMO_MODE must not survive a production boot.
+ *
+ * The refusal lives in `server.js`, and it was the only one of the four
+ * production refusals with no test behind it — APP_URL, TRUST_PROXY, the
+ * encryption key, the email provider and OAUTH_ALLOW_MOCK all had one.
+ *
+ * What it prevents is not subtle. `completeDatabaseInit()` seeds the demo
+ * accounts, and `db.js` prints a banner about them saying they "share a
+ * PUBLISHED password". A production process that reached that call would stand
+ * up a set of known-credential logins on a platform used by minors.
+ *
+ * ── Ordering, which the test also pins ──
+ *
+ * `import { app } from './app.js'` is hoisted above the check, so the database
+ * handle is already open by the time the guard runs. That is tolerable because
+ * the seeding is not at import time — it happens in `completeDatabaseInit()`,
+ * further down `server.js`, and the process has exited before then. The
+ * assertion on the seeding banner is what holds that ordering in place: if
+ * seeding were ever moved into a module's import, this test fails rather than
+ * the guard quietly becoming decorative.
+ *
+ * Runs `server.js` itself rather than a module, because the guard is there.
+ * WEV_DB_PATH points at a throwaway file — a privileged boot must never be
+ * pointed at a real database by a test.
+ */
+describe('DEMO_MODE cannot be enabled in production', () => {
+  const bootServer = (env) => {
+    const root = process.cwd().replace(/\\/g, '/');
+    const r = spawnSync(process.execPath, [`${root}/server/server.js`], {
+      env: {
+        ...PRODUCTION,
+        WEV_DB_PATH: `/tmp/wev-demo-guard-${process.pid}.db`,
+        ...env,
+      },
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    return { status: r.status, out: `${r.stdout || ''}${r.stderr || ''}` };
+  };
+
+  it('refuses to boot, and exits non-zero', () => {
+    const r = bootServer({ DEMO_MODE: 'true' });
+
+    expect(r.out).toMatch(/FATAL: DEMO_MODE cannot be enabled in production/);
+    expect(r.status, 'a refusal that exits 0 is not a refusal').toBe(1);
+  });
+
+  it('exits before the demo accounts are seeded', () => {
+    /* The banner `db.js` prints when it creates them. Its absence is the
+       evidence that no published-password login was stood up. */
+    const r = bootServer({ DEMO_MODE: 'true' });
+
+    expect(r.out).not.toMatch(/PUBLISHED password/i);
+  });
+});
