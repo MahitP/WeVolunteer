@@ -3,6 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/** Kept as literals rather than imported from server/db/engine.js: that module
+    throws on an unrunnable engine at import time, which is a rule about serving
+    traffic and must not stop an operator repairing a database. */
+const SQLITE_ENGINE = 'sqlite';
+const POSTGRES_ENGINE = 'postgres';
+
 /**
  * Which database a privileged command-line script is about to change.
  *
@@ -125,53 +131,96 @@ function loadDotEnv() {
  * @param {string} command  e.g. `bin/grant-ownership.mjs`, used in the messages.
  * @returns {{ db: DatabaseSync, dbPath: string }}
  */
-export function openPrivilegedDb(command) {
+export async function openPrivilegedDb(command) {
   const dbPath = anchorRelative(loadDotEnv());
+  const engine = (process.env.DATABASE_ENGINE ?? SQLITE_ENGINE).trim().toLowerCase();
 
   /**
-   * A PostgreSQL deployment has no file to open, and every message below this
-   * point would send the operator looking for one.
+   * PostgreSQL, when the deployment is on PostgreSQL.
    *
-   * These scripts speak SQLite only: they use the synchronous `node:sqlite` API
-   * directly. Run against a PostgreSQL deployment, the existence check below
-   * fires and says "no database at …/pilot.db — check WEV_DB_PATH". That is
-   * true and useless: the path is irrelevant because the data is not in a file
-   * at all, and an operator reading it goes looking for a missing SQLite file
-   * instead of learning that the tool cannot do the job.
-   *
-   * The moment this matters is the worst possible one. `bin/reset-2fa.mjs` is
-   * the ONLY way to clear a locked-out account's two-factor enrolment — every
+   * These scripts are the emergency path, not a convenience. `bin/reset-2fa.mjs`
+   * is the ONLY way to clear a locked-out account's two-factor enrolment — every
    * `/api/2fa/*` route is self-service behind `requireAAL2`, so you must already
-   * have passed 2FA to turn it off — and `REQUIRE_ADMIN_2FA` defaults on. So the
-   * operator reading this message is quite likely locked out of their own
-   * platform. They are owed the real reason on the first try.
+   * hold a second factor to remove one — and REQUIRE_ADMIN_2FA defaults on. A
+   * PostgreSQL deployment without working tooling is a deployment where a lost
+   * authenticator is unrecoverable, including for an administrator.
    *
-   * Checked AFTER `loadDotEnv()`, which populates `process.env` from `.env`:
-   * the engine is usually configured there rather than in the shell.
+   * Deliberately NOT gated on `POSTGRES_READY`. That flag governs whether the
+   * server may SERVE TRAFFIC on PostgreSQL; it has nothing to say about whether
+   * an operator may repair a database. Gating here would make the cutover
+   * rehearsal impossible and would keep the tooling broken for exactly as long
+   * as the flag is false, which is the window in which it is most needed.
    *
-   * This is a refusal, not a fix. Porting the six production scripts means
-   * giving this function a PostgreSQL branch and awaiting every statement in
-   * each of them. Until that happens, saying so plainly is the honest behaviour
-   * -- and the reason it refuses rather than guessing is the one already written
-   * below: a privileged command that appears to work and changes nothing is
-   * worse than one that stops.
+   * The application's own connection class and placeholder translator are reused
+   * rather than reimplemented: identical SQL through an identical adapter is the
+   * only way these commands are guaranteed to mean the same thing the server
+   * would mean by them.
    */
-  const engine = (process.env.DATABASE_ENGINE ?? 'sqlite').trim().toLowerCase();
-  if (engine === 'postgres') {
-    console.error('Refused: DATABASE_ENGINE=postgres, and this script speaks SQLite only.');
-    console.error('');
-    console.error(`  ${command} reads and writes through node:sqlite directly. It`);
-    console.error('  cannot reach a PostgreSQL database, and it will not pretend to.');
-    console.error('');
-    console.error('  There is no in-application substitute for these commands: every');
-    console.error('  two-factor route is self-service and requires an existing second');
-    console.error('  factor, so a locked-out account cannot be recovered from the UI.');
-    console.error('');
-    console.error('  Tracked in POSTGRES_MIGRATION_STATUS.md (phase 18) as a cutover');
-    console.error('  blocker. To operate on a SQLite database from this machine anyway,');
-    console.error('  set the engine for this command only:');
-    console.error(`    DATABASE_ENGINE=sqlite WEV_DB_PATH=./pilot.db node ${command} ...`);
-    process.exit(1);
+  if (engine === POSTGRES_ENGINE) {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      console.error('Refused: DATABASE_ENGINE=postgres but DATABASE_URL is not set.');
+      console.error('');
+      console.error('  There is nothing to connect to, and this script will not guess.');
+      process.exit(1);
+    }
+
+    const { PostgresDatabase } = await import('../server/db/postgresConnection.js');
+    const { translatePlaceholders } = await import('../server/db/sqlPlaceholders.js');
+
+    /* Two connections is more than a single-threaded script can use. A CLI that
+       opens the server's ten would sit on a meaningful slice of a small
+       deployment's pool while it waits at a confirmation prompt. */
+    const db = new PostgresDatabase({
+      connectionString,
+      translate: translatePlaceholders,
+      max: 2,
+    });
+    const close = () => db.close();
+
+    /**
+     * Never the whole URL: it carries the password, and these transcripts get
+     * pasted into incident notes. Host and database name are what the operator
+     * needs in order to answer "is that the right server".
+     */
+    let target = 'the configured PostgreSQL server';
+    try {
+      const u = new URL(connectionString);
+      target = `${u.hostname}${u.port ? `:${u.port}` : ''}${u.pathname}`;
+    } catch { /* an unparseable URL still connects or fails loudly below */ }
+
+    let reachable;
+    try {
+      reachable = await db.prepare(
+        "SELECT to_regclass('users') IS NOT NULL AS has_users"
+      ).get();
+    } catch (err) {
+      console.error(`Database: ${target}`);
+      console.error(`Refused: could not query ${target}.`);
+      console.error(`  ${err.message}`);
+      await close();
+      process.exit(1);
+    }
+
+    /* Same check the SQLite path makes, and for the same reason: a database
+       without a `users` table makes every script below report "user not found"
+       for a user who exists, which reads as a data problem rather than a
+       wrong-database problem. */
+    if (!reachable?.has_users) {
+      console.error(`Database: ${target}`);
+      console.error(`Refused: ${target} is not an initialised WeVolunteer database.`);
+      console.error('It has no `users` table. Run the migration or start the server');
+      console.error('against it once, or point DATABASE_URL at the right database.');
+      await close();
+      process.exit(1);
+    }
+
+    const migrations = await db.prepare(
+      "SELECT COUNT(*) AS n FROM schema_migrations WHERE to_regclass('schema_migrations') IS NOT NULL"
+    ).get().catch(() => ({ n: 0 }));
+
+    console.log(`Database: ${target} (postgres, ${Number(migrations?.n ?? 0)} migrations applied)`);
+    return { db, dbPath: target, engine, close };
   }
 
   /**
@@ -229,7 +278,10 @@ export function openPrivilegedDb(command) {
 
   console.log(`Database: ${dbPath} (${migrations} migrations applied)`);
 
-  return { db, dbPath };
+  /* `close` exists on both engines so a caller never has to ask which it got.
+     On SQLite it is nearly a formality; on PostgreSQL an unclosed pool keeps
+     the event loop alive and the script hangs after printing success. */
+  return { db, dbPath, engine, close: () => db.close() };
 }
 
 /** Exported for the test that pins the fallback, so it cannot drift silently. */

@@ -228,22 +228,31 @@ describe('privileged CLI database resolution', () => {
 });
 
 /**
- * The privileged scripts speak SQLite only, and must say so on PostgreSQL.
+ * The privileged scripts on PostgreSQL.
  *
- * Before this guard, running any of them against a PostgreSQL deployment fell
- * through to the file-existence check and reported "no database at …/pilot.db —
- * check WEV_DB_PATH". True, and useless: the path is irrelevant because the data
- * is not in a file, and the operator goes hunting for a missing SQLite file
- * instead of learning the tool cannot reach their database.
+ * ── What changed, and why the old assertion is gone ──
  *
- * The moment this matters is the worst one available. `bin/reset-2fa.mjs` is the
- * only way to clear a locked-out account's two-factor enrolment — every
- * `/api/2fa/*` route is self-service behind `requireAAL2` — and REQUIRE_ADMIN_2FA
- * defaults on, so the person reading the message may well be locked out of their
- * own platform.
+ * These six scripts used to speak SQLite only. `openPrivilegedDb` had no
+ * PostgreSQL branch, so on a PostgreSQL deployment they fell through to the
+ * file-existence check and reported "no database at …/pilot.db". An earlier
+ * revision of this file pinned that refusal, because an accurate refusal beat a
+ * misleading one. They now actually work, so pinning the refusal would pin the
+ * bug.
  *
- * Both directions are pinned. A guard that fired on SQLite too would take the
- * working tooling away from the deployment that still uses it.
+ * ── Why it mattered enough to port rather than document ──
+ *
+ * `bin/reset-2fa.mjs` is the ONLY way to clear a locked-out account's two-factor
+ * enrolment. Every `/api/2fa/*` route is self-service behind `requireAAL2` — you
+ * must already hold a second factor to remove one — and REQUIRE_ADMIN_2FA
+ * defaults on. On PostgreSQL without this tooling, an administrator who loses
+ * their authenticator and recovery codes is locked out permanently.
+ *
+ * These tests cover what can be asserted without a live server: the engine is
+ * honoured, a missing URL fails closed, and SQLite is untouched. Actually
+ * mutating a PostgreSQL database is covered by the cutover rehearsal in
+ * `docs/operations/postgres-cutover-and-rollback.md`, which was executed against
+ * a scratch database on 2026-08-18 — reset-2fa cleared the secret, zeroed both
+ * flags, bumped token_version and wrote the audit row.
  */
 describe('privileged scripts and the PostgreSQL engine', () => {
   const SCRIPTS = [
@@ -256,30 +265,44 @@ describe('privileged scripts and the PostgreSQL engine', () => {
   ];
 
   for (const script of SCRIPTS) {
-    it(`${script} refuses on DATABASE_ENGINE=postgres and names the reason`, () => {
+    it(`${script} fails closed on DATABASE_ENGINE=postgres with no DATABASE_URL`, () => {
       const out = run(script, ['someone@example.org', 'a reason'], {
         DATABASE_ENGINE: 'postgres',
-        DATABASE_URL: 'postgres://user@localhost:5432/whatever',
+        DATABASE_URL: undefined,
       });
 
-      expect(out).toMatch(/speaks SQLite only/);
-      /* The misleading old message must not be what they read. */
-      expect(out).not.toMatch(/Check WEV_DB_PATH in \.env/);
+      expect(out).toMatch(/DATABASE_URL is not set/);
+      /* It must not silently fall back to a SQLite file when the deployment has
+         said it is on PostgreSQL. That fallback is how a privileged command ends
+         up reporting success against a database nobody reads. */
+      expect(out).not.toMatch(/no database at/);
     });
   }
 
-  it('does not fire when the engine is SQLite, explicitly or by default', () => {
-    /* A path that does not exist, so the run stops at the ordinary
-       file-existence refusal — which is proof the PostgreSQL guard let it past. */
+  it('does not reach for PostgreSQL when the engine is SQLite, explicitly or by default', () => {
     const missing = path.join(ROOT, 'definitely-not-a-database.db');
 
     for (const env of [{ DATABASE_ENGINE: 'sqlite' }, { DATABASE_ENGINE: undefined }]) {
       const out = run('bin/reset-2fa.mjs', ['someone@example.org', 'a reason'], {
         ...env,
         WEV_DB_PATH: missing,
+        DATABASE_URL: 'postgres://should-never-be-used@localhost:5432/nope',
       });
-      expect(out).not.toMatch(/speaks SQLite only/);
+      /* DATABASE_URL is set and must be ignored: the engine, not the presence of
+         a connection string, decides. */
       expect(out).toMatch(/no database at/);
+      expect(out).not.toMatch(/should-never-be-used/);
     }
+  });
+
+  it('never prints the connection string, which carries the password', () => {
+    const out = run('bin/reset-2fa.mjs', ['someone@example.org', 'a reason'], {
+      DATABASE_ENGINE: 'postgres',
+      DATABASE_URL: 'postgres://wev:sup3rs3cr3t@db.internal:5432/wevolunteer',
+    });
+    expect(out).not.toMatch(/sup3rs3cr3t/);
+    /* Host and database name are what the operator needs to answer "is that the
+       right server", and are safe to show. */
+    expect(out).toMatch(/db\.internal:5432\/wevolunteer/);
   });
 });

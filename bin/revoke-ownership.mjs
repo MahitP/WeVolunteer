@@ -36,10 +36,10 @@ async function main() {
   }
 
   try {
-    const { db } = openPrivilegedDb('bin/revoke-ownership.mjs');
-    assertSystemActor(db);
+    const { db } = await openPrivilegedDb('bin/revoke-ownership.mjs');
+    await assertSystemActor(db);
 
-    const user = db.prepare('SELECT id, role FROM users WHERE email = ?').get(email);
+    const user = await db.prepare('SELECT id, role FROM users WHERE email = ?').get(email);
 
     if (!user) {
       console.error(`Error: User with email ${email} not found.`);
@@ -51,7 +51,7 @@ async function main() {
       process.exit(0);
     }
 
-    const { count } = db.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'super_admin'`).get();
+    const { count } = await db.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'super_admin'`).get();
     
     if (count <= 1) {
       console.error(`Refused: ${email} is the last remaining super_admin.`);
@@ -71,9 +71,9 @@ async function main() {
     }
 
     // Atomic demotion
-    db.exec('BEGIN');
+    await db.exec('BEGIN');
     try {
-      db.prepare(`
+      await db.prepare(`
         UPDATE users 
         SET role = 'admin', 
             token_version = token_version + 1 
@@ -88,9 +88,9 @@ async function main() {
         metadata: { subject: email },
       });
 
-      db.exec('COMMIT');
+      await db.exec('COMMIT');
     } catch (err) {
-      db.exec('ROLLBACK');
+      await db.exec('ROLLBACK');
       throw err;
     }
 

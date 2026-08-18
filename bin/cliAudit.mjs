@@ -104,8 +104,12 @@ export async function recordCliAudit(db, { action, targetUserId, command, reason
  * is broken" rather than "this database is out of date". Checking first means
  * the message names the actual problem.
  */
-export function assertSystemActor(db) {
-  const row = db.prepare('SELECT id FROM users WHERE id = ?').get(SYSTEM_CLI_ID);
+export async function assertSystemActor(db) {
+  /* `await` on both engines: SQLite's `.get()` returns the row directly and
+     awaiting a non-promise is a no-op, while PostgreSQL returns a promise. One
+     spelling that is correct on both is what keeps these scripts from having an
+     engine branch at every call site. */
+  const row = await db.prepare('SELECT id FROM users WHERE id = ?').get(SYSTEM_CLI_ID);
   if (row) return;
   throw new Error(
     `The reserved '${SYSTEM_CLI_ID}' account is missing from this database.\n\n`

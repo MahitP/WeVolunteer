@@ -70,10 +70,10 @@ if (!email) {
 }
 
 try {
-  const { db } = openPrivilegedDb('bin/make-admin.mjs');
-  assertSystemActor(db);
+  const { db } = await openPrivilegedDb('bin/make-admin.mjs');
+  await assertSystemActor(db);
 
-  const user = db.prepare('SELECT id, role, account_status FROM users WHERE email = ?').get(email);
+  const user = await db.prepare('SELECT id, role, account_status FROM users WHERE email = ?').get(email);
 
   if (!user) {
     console.error(`Error: User with email ${email} not found.`);
@@ -152,9 +152,9 @@ try {
    * the old sessions, and leaving them alive means a freshly promoted
    * administrator holds a cookie minted before they had the capabilities.
    */
-  db.exec('BEGIN');
+  await db.exec('BEGIN');
   try {
-    db.prepare(
+    await db.prepare(
       "UPDATE users SET role = 'admin', token_version = token_version + 1 WHERE email = ?"
     ).run(email);
 
@@ -166,9 +166,9 @@ try {
       metadata: { subject: email, previousRole: user.role },
     });
 
-    db.exec('COMMIT');
+    await db.exec('COMMIT');
   } catch (err) {
-    db.exec('ROLLBACK');
+    await db.exec('ROLLBACK');
     throw err;
   }
 
