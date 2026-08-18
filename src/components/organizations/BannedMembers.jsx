@@ -50,8 +50,20 @@ export default function BannedMembers({ orgKey, organizationName, addToast }) {
       /* An empty list and an unreachable one must not look the same to a
          manager — this card claims "nobody is banned", which is a statement
          about moderation state and would be a lie if the request simply
-         failed. `null` keeps it in its loading shape and says nothing. */
-      if (!signal?.aborted) setBans(prev => prev ?? []);
+         failed.
+         
+         This used to read `setBans(prev => prev ?? [])`, which did the exact
+         thing the paragraph above says not to: on a FAILED FIRST LOAD `prev` is
+         null, so the fallback turned it into `[]` and the card announced
+         "Nobody is banned from …" on the strength of a request that never
+         arrived. A manager checking whether somebody was still excluded got a
+         confident no.
+         
+         Leaving the state alone is what the comment always described. On a
+         first load it stays null and the card does not render, saying nothing.
+         On a later refresh it keeps the last list that actually loaded, which
+         is better than blanking a real one because one poll failed. */
+      if (!signal?.aborted) setBans(prev => prev);
     }
   }, [orgKey]);
 
