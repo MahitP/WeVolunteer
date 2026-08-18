@@ -203,10 +203,101 @@ if (nullIds.length) {
   console.log('NULL primary keys: none');
 }
 
+/* ── Resynchronise identity sequences ─────────────────────────────────────── */
+/**
+ * Every row above was inserted with an EXPLICIT id, which leaves PostgreSQL's
+ * identity sequences untouched — still sitting at 1 while the table holds ids up
+ * to MAX(id). Nothing complains during the load. The failure arrives later, on
+ * the first row somebody inserts normally:
+ *
+ *     duplicate key value violates unique constraint "…_pkey"
+ *     DETAIL:  Key (id)=(2) already exists.
+ *
+ * Reproduced on a scratch database on 2026-08-18: five rows loaded with ids 1-5
+ * left the sequence at 1, and the next default insert failed on id=2.
+ *
+ * It is easy to under-rate this because only ONE column in the schema is
+ * identity-backed today (`legal_document_revisions.id`). That is exactly the
+ * table a deployment writes to when publishing a policy revision — so the first
+ * symptom after a cutover would be "we cannot publish a legal document any more",
+ * which is not where anybody would look for a migration bug.
+ *
+ * The set is discovered from `information_schema` rather than hard-coded, so a
+ * future identity column is covered the day it is added. `setval(..., false)`
+ * with COALESCE(MAX(id), 0) + 1 is correct for an empty table too: it leaves the
+ * sequence poised to hand out 1.
+ */
+if (APPLY) {
+  const { rows: identities } = await q(`
+    SELECT table_name, column_name
+      FROM information_schema.columns
+     WHERE table_schema = current_schema() AND is_identity = 'YES'
+     ORDER BY table_name, column_name
+  `);
+
+  const resynced = [];
+  for (const { table_name: table, column_name: column } of identities) {
+    const { rows } = await q(
+      `SELECT setval(
+                pg_get_serial_sequence($1, $2),
+                COALESCE((SELECT MAX(${ident(column)}) FROM ${ident(table)}), 0) + 1,
+                false
+              ) AS next_value`,
+      [table, column]
+    );
+    resynced.push(`${table}.${column} → ${rows[0].next_value}`);
+  }
+
+  console.log(identities.length
+    ? `\nidentity sequences resynchronised: ${resynced.join(', ')}`
+    : '\nidentity sequences: none in this schema');
+}
+
 /* ── Verify ───────────────────────────────────────────────────────────────── */
 if (APPLY) {
   console.log('\n── verification ──');
   const mismatches = [];
+
+  /**
+   * Every identity sequence must be able to issue an id that does not already
+   * exist. Checked rather than assumed: the resynchronisation above is the fix,
+   * and this is what notices if it ever stops working.
+   *
+   * Compared against MAX(id) instead of calling nextval, because nextval
+   * CONSUMES a value — a verification step that burns an id every run would be
+   * its own small defect.
+   */
+  for (const { table_name: t, column_name: c } of (await q(`
+    SELECT table_name, column_name FROM information_schema.columns
+     WHERE table_schema = current_schema() AND is_identity = 'YES'
+  `)).rows) {
+    /**
+     * Read from the sequence RELATION, not `pg_sequences`.
+     *
+     * `pg_sequences.last_value` is NULL until the sequence has actually been
+     * read, so a freshly `setval`-ed sequence reports NULL there — and the first
+     * draft of this check coalesced that to 0 and reported every correctly
+     * resynchronised sequence as broken. The relation exposes `is_called` too,
+     * which is the half that decides what the next id will be:
+     *
+     *     is_called = false  ->  next id IS last_value
+     *     is_called = true   ->  next id is last_value + 1
+     */
+    const { rows: seqName } = await q('SELECT pg_get_serial_sequence($1, $2) AS s', [t, c]);
+    const { rows: state } = await q(`
+      SELECT COALESCE((SELECT MAX(${ident(c)}) FROM ${ident(t)}), 0) AS max_id,
+             (SELECT last_value FROM ${seqName[0].s}) AS last_value,
+             (SELECT is_called  FROM ${seqName[0].s}) AS is_called
+    `);
+    const maxId = Number(state[0].max_id);
+    const nextId = Number(state[0].last_value) + (state[0].is_called ? 1 : 0);
+    if (nextId <= maxId) {
+      mismatches.push(
+        `${t}.${c}: next id would be ${nextId} but MAX(${c}) is ${maxId} — `
+        + 'the next insert would collide'
+      );
+    }
+  }
 
   for (const { table, rows, pk } of report) {
     const { rows: got } = await q(`SELECT COUNT(*)::int AS c FROM ${ident(table)}`);
