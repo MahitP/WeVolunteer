@@ -307,6 +307,29 @@ const CONSTRUCTS = [
    * cast — `ROUND(AVG(x)::numeric, 2)` — rather than discover it in production.
    * `ROUND(x)` with one argument is fine on both and is not matched.
    */
+  /**
+   * An UNQUOTED camelCase identifier in `ORDER BY`, which is an alias reference.
+   *
+   * Every column in this schema is snake_case, so a camelCase name in ORDER BY
+   * is always referring to a `AS "someAlias"` from the select list — and that
+   * alias is quoted, so it is case-sensitive. PostgreSQL folds the unquoted
+   * reference to lower case, finds no `membercount`, and fails the whole query.
+   * SQLite matches either way.
+   *
+   * This is not the same rule as the `unquoted camelCase alias` entry below,
+   * which polices where an alias is DEFINED. Both sides were correct here — the
+   * definition was properly quoted — and the query still died, because the USE
+   * was not. The existing alias-consistency check could not see it either: the
+   * select list lives in an interpolated `${ORG_SELECT}` constant and the
+   * ORDER BY in the template around it, so the two are never in one string
+   * literal for a scanner to compare.
+   *
+   * Cost of missing it: `GET /api/organizations` returned 500 on PostgreSQL and,
+   * before the async error boundary landed, took the whole server down with it.
+   */
+  { name: 'unquoted camelCase in ORDER BY',
+    pattern: /ORDER\s+BY\s+(?!")[a-z]+[A-Z][A-Za-z]*/g,               runtime: 0, boot: 0,
+    postgres: 'ORDER BY "theAlias" — quote it, or PostgreSQL folds the reference to lower case' },
   { name: 'two-arg ROUND',   pattern: /\bROUND\s*\([^)]*,[^)]*\)/gi,          runtime: 0, boot: 0,
     postgres: 'round(x::numeric, n) — PostgreSQL has no round(double precision, integer)' },
   { name: 'raw LIKE (runtime)', pattern: /(?<!\$\{)\bLIKE\b/g,                runtime: 1, boot: 7,
@@ -605,13 +628,23 @@ describe('the PostgreSQL engine gate', () => {
   const dbSrc = readFileSync(path.join(SERVER, 'db.js'), 'utf8');
   const engineSrc = readFileSync(path.join(SERVER, 'db', 'engine.js'), 'utf8');
 
-  it('is shut', async () => {
+  /**
+   * Open since 2026-08-18. The three conditions this test used to guard are
+   * pinned individually below, and the fourth — a real production boot — was
+   * run against a scratch database with 7,024 migrated rows. See the comment on
+   * POSTGRES_READY for what it exercised and the two defects it found.
+   *
+   * Kept as an assertion rather than deleted: the constant is what decides
+   * whether a deployment may open a PostgreSQL connection, and a change to it
+   * should still have to be deliberate in both directions.
+   */
+  it('is open, and stays a one-line decision', async () => {
     const { POSTGRES_READY } = await import('./db/engine.js');
     expect(
       POSTGRES_READY,
-      'opening this gate requires an engine-selecting db.js, a PostgreSQL schema path, '
-      + 'and the 194 constructs above translated. See POSTGRES_MIGRATION_STATUS.md.',
-    ).toBe(false);
+      'closing this gate again means PostgreSQL deployments stop booting — do it '
+      + 'deliberately, and say why in POSTGRES_MIGRATION_STATUS.md.',
+    ).toBe(true);
   });
 
   /**

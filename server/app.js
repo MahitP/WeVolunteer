@@ -1146,6 +1146,90 @@ if (IS_PRODUCTION) {
   });
 }
 
+/**
+ * Route a rejected async handler into the error middleware below, instead of
+ * letting it kill the process.
+ *
+ * ── The outage this prevents ──
+ *
+ * Express 4 does not understand promises. An `async (req, res)` handler that
+ * throws returns a rejected promise which Express drops on the floor; Node
+ * raises `unhandledRejection`; `shutdown.js` treats that as fatal and drains.
+ * So ONE failing request took the entire server down for every user.
+ *
+ * Found by the production boot rehearsal on 2026-08-18, not by the suite. A
+ * single `GET /api/organizations` — one unquoted alias in an ORDER BY, wrong
+ * only on PostgreSQL — logged `column "membercount" does not exist` and the
+ * process exited three requests into the session.
+ *
+ * 51 of the 206 async route handlers have no try/catch of their own, so this was
+ * not one unlucky route. On SQLite most of them never throw, which is why it was
+ * invisible: PostgreSQL turns every dialect difference, constraint violation and
+ * transient pool error into exactly this.
+ *
+ * ── Why here, and not 51 try/catch blocks ──
+ *
+ * A wrapper at each site is 51 chances to forget the 52nd. This walks the router
+ * stack once, after everything is mounted and before the error handler is
+ * registered, and wraps each handler so a rejection becomes `next(err)`. The
+ * error middleware below then answers the request the way it already answers
+ * every other failure.
+ *
+ * Handlers of arity 4 are error middleware and are left alone — wrapping one
+ * would change how Express classifies it. Layers are marked so a second pass
+ * cannot double-wrap. `unhandledRejection` stays fatal in shutdown.js: it is
+ * still the right response to a rejection from somewhere that is NOT a request,
+ * and this narrows what reaches it rather than muting it.
+ */
+export function routeAsyncErrorsToExpress(stack) {
+  for (const layer of stack ?? []) {
+    if (layer.route?.stack) routeAsyncErrorsToExpress(layer.route.stack);
+
+    const fn = layer.handle;
+    if (typeof fn !== 'function' || fn.length >= 4 || fn.__asyncErrorsRouted) continue;
+
+    /**
+     * A mounted sub-router is descended into, never wrapped.
+     *
+     * `app.use(someRouter)` makes a layer whose `handle` IS the router function,
+     * and that function carries the `.stack` of everything inside it. Replacing
+     * it with a wrapper drops the `.stack`, and anything walking the tree stops
+     * dead at the mount point — which is not hypothetical: it broke
+     * `routes.resetRemoved` (which descends via `layer.handle.stack` to prove no
+     * reset route is reachable) and `authz.completeness` (which enumerates every
+     * mounted route to prove each one is gated). Two authorization-adjacent
+     * guards went blind, and both said so.
+     *
+     * There is nothing to gain by wrapping one either: a router does not reject,
+     * the handlers inside it do, and those are reached by the recursion.
+     */
+    if (Array.isArray(fn.stack)) {
+      routeAsyncErrorsToExpress(fn.stack);
+      continue;
+    }
+
+    const wrapped = function asyncErrorBoundary(req, res, next) {
+      let result;
+      try {
+        result = fn.call(this, req, res, next);
+      } catch (err) {
+        next(err);
+        return undefined;
+      }
+      /* Returns the HANDLED chain, not the original promise. Express ignores the
+         return value, but anything that does await it — a test, a future
+         wrapper — would otherwise see the same rejection a second time and
+         resurrect the unhandled rejection this exists to prevent. */
+      if (result && typeof result.then === 'function') return result.then(undefined, next);
+      return result;
+    };
+    wrapped.__asyncErrorsRouted = true;
+    layer.handle = wrapped;
+  }
+}
+
+routeAsyncErrorsToExpress(app._router?.stack);
+
 // Error handler registered LAST, so it catches errors from every layer above,
 // including the static/SPA block.
 app.use(async (err, req, res, _next) => {

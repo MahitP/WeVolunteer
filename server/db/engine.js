@@ -114,14 +114,45 @@ export function resolveEngine(env = process.env) {
 }
 
 /**
- * Flipped to `true` by the change that makes PostgreSQL actually runnable —
- * engine wiring, a schema path, and the dialect translated. Not by the change
- * that finishes the async port: that one has landed, and this is still false.
+ * Opened 2026-08-18, after the production boot rehearsal it was waiting for.
  *
  * A single constant rather than a scattered set of checks, so "is PostgreSQL
  * supported" has exactly one answer and turning it on is one reviewable line.
+ *
+ * ── What was required, and what was done ──
+ *
+ * The three original conditions — an engine-selecting `db.js`, a PostgreSQL
+ * schema path, and the dialect translated — are each pinned by a test below.
+ * The fourth, added when the first three were met, was the one thing the suite
+ * could not provide: an actual production boot. `startTestServer` applies the
+ * schema directly and starts none of `initDatabase()` ->
+ * `completeDatabaseInit()` -> `assertSchemaReady()`, the instance lock, the
+ * notification sweep or the workers.
+ *
+ * That boot was run: `NODE_ENV=production`, no harness override, against a
+ * scratch database holding 7,024 migrated rows. It applied the schema, verified
+ * hours-ledger parity for 400 volunteers, issued 400 certificates, checked 12
+ * legal documents against their pinned hashes, started the worker and the
+ * scheduler, reached listening, and answered `/health` with connected and
+ * writable. Authentication, authorization refusals, hours read AND write,
+ * organizations, moderation, notifications, 2FA status and directory search
+ * were all exercised against the running server.
+ *
+ * ── It was not a formality: it found two defects the suite could not ──
+ *
+ *   1. `db.js` ran its SQLite path checks before resolving the engine, so a
+ *      relative `WEV_DB_PATH` — which the pilot's own .env carries — made a
+ *      PostgreSQL boot exit with `FATAL: WEV_DB_PATH must be an absolute path`.
+ *      The first cutover attempt would have failed on a setting it never reads.
+ *   2. Express 4 does not catch rejected async handlers, so one failing request
+ *      became `unhandledRejection` and drained the whole process. 51 of 206
+ *      async handlers had no try/catch. `GET /api/organizations` ended the
+ *      server three requests into the session.
+ *
+ * Both are fixed and covered. Opening this flag records that the engineering
+ * evidence exists; it does not claim the deployment has served real traffic.
  */
-export const POSTGRES_READY = false;
+export const POSTGRES_READY = true;
 
 /**
  * Connection settings for the PostgreSQL engine.

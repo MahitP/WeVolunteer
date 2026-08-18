@@ -81,8 +81,13 @@ router.get('/api/organizations', authenticateToken, requireCap('directory.read')
         JOIN organization_members mm ON mm.organization_id = o.id AND mm.user_id = ?
         WHERE o.status = 'active' ORDER BY o.name COLLATE nocase LIMIT ? OFFSET ?`)
       .all(req.principal.userId, limit + 1, offset)
+    /* `"memberCount"` is QUOTED here because it is quoted where ORG_SELECT
+       defines it. PostgreSQL folds an unquoted identifier to lower case, so a
+       bare `memberCount` looks for `membercount`, which does not exist — and
+       this is an ORDER BY, so the whole query fails rather than sorting oddly.
+       SQLite matched it either way, which is why it shipped. */
     : await db.prepare(`${ORG_SELECT} WHERE o.status = 'active'
-        ORDER BY memberCount DESC, o.name COLLATE nocase LIMIT ? OFFSET ?`)
+        ORDER BY "memberCount" DESC, o.name COLLATE nocase LIMIT ? OFFSET ?`)
       .all(limit + 1, offset);
 
   res.json({

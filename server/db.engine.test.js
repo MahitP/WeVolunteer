@@ -48,32 +48,39 @@ describe('resolving the database engine', () => {
    * reader deletes. `server/sqliteDialect.test.js` holds the same facts against
    * the codebase, so this cannot drift into being merely a well-worded string.
    */
-  it('refuses postgres, and says what is actually missing', () => {
-    expect(POSTGRES_READY, 'flip this together with the refusal below').toBe(false);
-    expect(() => resolveEngine({ DATABASE_ENGINE: POSTGRES })).toThrow(/not runnable yet/);
-    /* The point of this test is the word ACTUALLY: the refusal has to name the
-       blocker that is real today, not the one that was real when it was written.
-       It used to assert "never served a request against PostgreSQL", and that
-       claim expired -- the full application suite now runs against a real
-       PostgreSQL server through the real Express app. Leaving it would have
-       pinned a false statement and sent the next reader to the wrong place.
+  /**
+   * The gate is open, so `postgres` resolves rather than refusing.
+   *
+   * This test used to assert the refusal and the reason given for it. Both are
+   * gone, and pinning either would pin a lie. What is worth keeping is that the
+   * flag and the behaviour cannot drift apart: whichever way POSTGRES_READY
+   * points, `resolveEngine` must agree with it, or a deployment reads one answer
+   * from the constant and gets the other from the engine.
+   */
+  it('resolves postgres, in step with POSTGRES_READY', () => {
+    expect(POSTGRES_READY, 'flip this together with the behaviour below').toBe(true);
+    expect(resolveEngine({ DATABASE_ENGINE: POSTGRES })).toBe(POSTGRES);
+  });
 
-       The blocker now is the production BOOT: server.js runs
-       initDatabase() -> completeDatabaseInit() -> assertSchemaReady(), the
-       instance lock, the sweep and the workers, none of which the harness
-       exercises. */
-    for (const reason of [/production BOOT/, /assertSchemaReady/, /instance lock/]) {
-      expect(() => resolveEngine({ DATABASE_ENGINE: POSTGRES })).toThrow(reason);
-    }
+  it('still refuses an engine it does not know, rather than falling back', () => {
+    /* The failure mode this protects is a typo: `DATABASE_ENGINE=postgre`
+       quietly opening SQLite would look exactly like a successful migration. */
+    expect(() => resolveEngine({ DATABASE_ENGINE: 'postgre' })).toThrow(/not a known engine/);
   });
 
   /**
    * The harness override, tested condition by condition.
    *
-   * It is the only way past the gate, so "all three are required" is not a
-   * detail — a version that needed only `WEV_POSTGRES_APP_TEST` would be exactly
-   * the environment-variable escape the module's comment refuses to add, and it
-   * would look identical from the outside.
+   * It was the only way past the gate while the gate was shut. Now that
+   * POSTGRES_READY is true, `resolveEngine` returns postgres with or without it,
+   * so the assertions about it THROWING are gone — they would pass only by
+   * accident of a behaviour that no longer exists.
+   *
+   * `harnessOverride()` itself is still pinned condition by condition, because
+   * it is still a deliberate escape hatch and "all three are required" is still
+   * the property that keeps it from becoming an environment-variable bypass. If
+   * the gate is ever closed again it becomes load-bearing immediately, and it
+   * must not have rotted in the meantime.
    */
   describe('the PostgreSQL application-test override', () => {
     const harness = { DATABASE_ENGINE: POSTGRES, VITEST: 'true', WEV_POSTGRES_APP_TEST: '1' };
@@ -84,15 +91,11 @@ describe('resolving the database engine', () => {
     });
 
     it('refuses without VITEST, which nothing outside the runner sets', () => {
-      const env = { ...harness, VITEST: undefined };
-      expect(harnessOverride(env)).toBe(false);
-      expect(() => resolveEngine(env)).toThrow(/not runnable yet/);
+      expect(harnessOverride({ ...harness, VITEST: undefined })).toBe(false);
     });
 
     it('refuses without the explicitly named flag', () => {
-      const env = { ...harness, WEV_POSTGRES_APP_TEST: undefined };
-      expect(harnessOverride(env)).toBe(false);
-      expect(() => resolveEngine(env)).toThrow(/not runnable yet/);
+      expect(harnessOverride({ ...harness, WEV_POSTGRES_APP_TEST: undefined })).toBe(false);
     });
 
     it('refuses a value that merely looks enabled', () => {
@@ -106,9 +109,7 @@ describe('resolving the database engine', () => {
      * production process holding both other variables cannot use it.
      */
     it('refuses in production even with both set', () => {
-      const env = { ...harness, NODE_ENV: 'production' };
-      expect(harnessOverride(env)).toBe(false);
-      expect(() => resolveEngine(env)).toThrow(/not runnable yet/);
+      expect(harnessOverride({ ...harness, NODE_ENV: 'production' })).toBe(false);
     });
 
     it('does not affect the SQLite selection at all', () => {

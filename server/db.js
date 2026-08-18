@@ -59,13 +59,37 @@ const rawDbPath = process.env.WEV_DB_PATH;
  * this guard did exactly that and left `:memory:`, `:memory:-shm` and
  * `:memory:-wal` sitting in the repository root.
  */
+/**
+ * The engine is decided BEFORE any of the SQLite path handling below.
+ *
+ * It used to be resolved ~80 lines further down, after three pieces of logic
+ * that only make sense for a file-backed database had already run against
+ * `WEV_DB_PATH`. On a PostgreSQL deployment all three were wrong, and the boot
+ * experiment on 2026-08-18 hit every one:
+ *
+ *   1. A relative `WEV_DB_PATH` threw `FATAL: WEV_DB_PATH must be an absolute
+ *      path in production` — refusing to start a PostgreSQL server over a
+ *      SQLite setting it never reads. The pilot's own .env carries
+ *      `WEV_DB_PATH=./pilot.db`, so the FIRST cutover attempt would have hit
+ *      this and reported the wrong database in the error.
+ *   2. A missing file warned "creating an empty one … stop the server now",
+ *      which is false (nothing is created) and tells the operator to abort a
+ *      healthy cutover.
+ *   3. `[db] using <sqlite path>` named a database the process was not going to
+ *      open, which is indistinguishable from a silent fallback to SQLite.
+ *
+ * None of these could be caught by the suite, because the harness never runs the
+ * production boot. They were found by running it.
+ */
+export const ENGINE = resolveEngine();
+
 const isSqliteLocator = p => p === ':memory:' || p.startsWith('file:');
 
 const dbPath = rawDbPath
   ? (isSqliteLocator(rawDbPath) ? rawDbPath : path.resolve(rawDbPath))
   : path.join(__dirname, 'wevolunteer.db');
 
-if (rawDbPath && !isSqliteLocator(rawDbPath) && !path.isAbsolute(rawDbPath)) {
+if (ENGINE === SQLITE && rawDbPath && !isSqliteLocator(rawDbPath) && !path.isAbsolute(rawDbPath)) {
   const detail = `WEV_DB_PATH="${rawDbPath}" is relative, so it resolves against the current\n`
     + `  working directory (${process.cwd()})\n`
     + `  and currently means: ${dbPath}`;
@@ -99,7 +123,8 @@ if (rawDbPath && !isSqliteLocator(rawDbPath) && !path.isAbsolute(rawDbPath)) {
  * of a legitimate first run, and the relative-path refusal above still covers
  * the ambiguity that has no correct production use.
  */
-if (process.env.NODE_ENV === 'production' && !isSqliteLocator(dbPath) && !fs.existsSync(dbPath)) {
+if (ENGINE === SQLITE && process.env.NODE_ENV === 'production'
+    && !isSqliteLocator(dbPath) && !fs.existsSync(dbPath)) {
   console.warn(
     `[db] WARNING: no database at ${dbPath} — creating an empty one.\n`
     + '     If this is not a first-time install, stop the server now: the path is\n'
@@ -109,7 +134,19 @@ if (process.env.NODE_ENV === 'production' && !isSqliteLocator(dbPath) && !fs.exi
   );
 }
 
-console.log(`[db] using ${dbPath}`);
+/* Names the database this process will actually open. On PostgreSQL that is
+   host and database only — the connection string carries the password, and this
+   line ends up in logs and incident notes. */
+if (ENGINE === SQLITE) {
+  console.log(`[db] using ${dbPath}`);
+} else {
+  let target = 'the configured PostgreSQL server';
+  try {
+    const u = new URL(process.env.DATABASE_URL ?? '');
+    target = `${u.hostname}${u.port ? `:${u.port}` : ''}${u.pathname}`;
+  } catch { /* an unparseable URL fails loudly when the pool connects */ }
+  console.log(`[db] using postgres ${target}`);
+}
 
 /**
  * `enableForeignKeyConstraints` is stated rather than inherited.
@@ -141,7 +178,8 @@ console.log(`[db] using ${dbPath}`);
  * its tests without that gate having to be opened first — a test may build the
  * connection it wants; a deployment may not.
  */
-export const ENGINE = resolveEngine();
+/* Declared above, before the SQLite path checks that must not run on
+   PostgreSQL. Kept as an export here in the original position's stead. */
 
 /**
  * Builds a connection for one engine.
