@@ -99,9 +99,28 @@ if (onlySource.length) console.log(`  only in SQLite    : ${onlySource.join(', '
 if (onlyTarget.length) console.log(`  only in PostgreSQL: ${onlyTarget.join(', ')}`);
 
 /* ── Refuse to load into a populated target ───────────────────────────────── */
+/**
+ * The schema baseline row is not data, and counting it made this guard useless.
+ *
+ * `applyPostgresSchema()` writes exactly one row —
+ * `(56, 'postgres_baseline', …, 'baseline')` — so that a freshly built schema
+ * does not look like an un-migrated database. The documented cutover is: create
+ * the database, apply the schema, then load. That sequence therefore always
+ * arrived here with `schema_migrations(1)` and always refused.
+ *
+ * The damage was not the refusal, it was the remedy: the operator adds `--force`,
+ * which turns the guard off completely — including the part that stops a second
+ * load duplicating every row of a live database. A runbook that ends in "always
+ * pass --force" has no guard at all. Ignoring the one row it put there itself
+ * keeps the check meaningful, because a target that has been loaded once holds
+ * the SOURCE's schema_migrations rows too, and those are not named
+ * 'postgres_baseline'.
+ */
 let populated = [];
 for (const t of shared) {
-  const { rows } = await q(`SELECT COUNT(*)::int AS c FROM ${ident(t)}`);
+  const { rows } = t === 'schema_migrations'
+    ? await q("SELECT COUNT(*)::int AS c FROM schema_migrations WHERE name <> 'postgres_baseline'")
+    : await q(`SELECT COUNT(*)::int AS c FROM ${ident(t)}`);
   if (rows[0].c > 0) populated.push(`${t}(${rows[0].c})`);
 }
 if (populated.length && !FORCE) {
@@ -111,6 +130,30 @@ if (populated.length && !FORCE) {
 }
 
 /* ── Copy ─────────────────────────────────────────────────────────────────── */
+/**
+ * The baseline marker goes before the real migration history arrives.
+ *
+ * `applyPostgresSchema()` stamps `(56, 'postgres_baseline')` to record that the
+ * schema was built whole rather than replayed. The source's own
+ * `schema_migrations` lists all 56 individually — including version 56 — so
+ * copying it in collides with the marker on the primary key and the load dies
+ * partway through with `duplicate key value violates unique constraint
+ * "schema_migrations_pkey"`, after other tables have already been written.
+ *
+ * Dropping the placeholder is the honest resolution: it exists only to say "the
+ * schema is at 56" in the absence of a real history, and a real history is
+ * exactly what is about to be loaded. Deleted only when the source actually has
+ * rows to replace it with, so a source without migration history still leaves
+ * the target able to state its version.
+ */
+if (APPLY && shared.includes('schema_migrations')) {
+  const sourceHistory = sqlite
+    .prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n;
+  if (sourceHistory > 0) {
+    await q("DELETE FROM schema_migrations WHERE name = 'postgres_baseline'");
+  }
+}
+
 const report = [];
 let copied = 0, nullIds = [];
 
