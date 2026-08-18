@@ -143,12 +143,20 @@ class PostgresExecutorBase {
    */
   get dialect() { return 'postgres'; }
 
+  /**
+   * Asked before every statement. The pool-backed handle is always usable, so
+   * the default does nothing; a transaction overrides it once it has settled.
+   */
+  _assertUsable() { /* the pool handle is always usable */ }
+
   prepare(sql) {
+    this._assertUsable();
     return new PostgresStatement(this._executor, sql, this._translate);
   }
 
   /** Multi-statement DDL and the like. No parameters, matching `DatabaseSync.exec`. */
   async exec(sql) {
+    this._assertUsable();
     await this._executor.query(sql);
   }
 }
@@ -191,6 +199,32 @@ export class PostgresTransaction extends PostgresExecutorBase {
          return the client, not to mask the original error with this one. */
     } finally {
       this.#client.release();
+    }
+  }
+
+  /**
+   * A settled transaction is not a database handle any more.
+   *
+   * `commit()` and `rollback()` both RELEASE the client back to the pool. Until
+   * this existed, `tx.prepare(…)` afterwards still held that client and happily
+   * ran the statement on it — by then very likely checked out to a different
+   * request. So a stray write after commit did not merely land outside its
+   * transaction (bad enough, and the silent shape this whole phase exists to
+   * prevent); it could land in the middle of somebody else's.
+   *
+   * Measured before the fix: a statement issued on a committed handle returned
+   * `{ changes: 1 }`.
+   *
+   * Refusing is safe for correct callers, because a correct caller has no reason
+   * to touch the handle after the block it was given for has ended.
+   */
+  _assertUsable() {
+    if (this.#settled) {
+      throw new Error(
+        'This transaction has already been committed or rolled back, so its client '
+        + 'has been returned to the pool. Running a statement on it now would execute '
+        + 'on a connection another request may hold. Use the pool handle instead.'
+      );
     }
   }
 
