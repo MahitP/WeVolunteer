@@ -1,10 +1,15 @@
 # PostgreSQL cutover and rollback
 
-Status: **procedure written, partly rehearsed.** The rehearsable parts have been
-run against scratch databases; the parts that need a real deployment window are
-marked as such and are owner decisions, not something this document invents.
+Status: **rehearsed end to end against scratch infrastructure.** Everything that
+can be exercised without a real deployment window has been run — including a
+production-mode boot, a `pg_dump`/`pg_restore` round trip, and the privileged
+recovery tooling. What genuinely needs a live deployment is marked as such and is
+an owner decision, not something this document invents.
 
-SQLite is still the authoritative engine. `POSTGRES_READY` is `false`.
+`POSTGRES_READY` is **`true`** as of 2026-08-18. That means the engine is
+supported and boot-tested, **not** that this deployment has cut over: the default
+engine is still SQLite, and nothing changes until `DATABASE_ENGINE=postgres` is
+set deliberately.
 
 ---
 

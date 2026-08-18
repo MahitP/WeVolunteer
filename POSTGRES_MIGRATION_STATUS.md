@@ -3,10 +3,12 @@
 Kept current so this project can be picked up without reading a chat log.
 
 ```
-Current phase:              1, 4, 5, 6 complete. Phase 7 groups 1-3, waves 4-7
-                            complete. Wave 8 scoped; conversion not landed.
+Current phase:              21. Migration complete; POSTGRES_READY is TRUE.
 Architecture:               option D, PostgreSQL-native async.
-Current database:           SQLite - authoritative.
+Current database:           SQLite by default. PostgreSQL supported and
+                            boot-tested — set DATABASE_ENGINE=postgres to use it.
+                            Cutting over is an owner decision; see
+                            docs/operations/postgres-cutover-and-rollback.md.
 Tests:                      434 files / 6885 passed / 0 failed (with PostgreSQL)
                             434 files / 6853 passed / 34 skipped (without)
 Remaining call sites:       653 across 42 files
