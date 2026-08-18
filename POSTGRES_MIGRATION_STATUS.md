@@ -2946,3 +2946,99 @@ marker assets either before or after.
 The remaining ~70 violations are unused local variables and parameters, not
 imports. Enabling the rule outright still fails on those, so it stays off with the
 count recorded here rather than being flipped to green by exemption.
+
+---
+
+## Phase 19 — the CLI blocker cleared, and four cards that lied on failure
+
+### The Phase 18 blocker is fixed
+
+`openPrivilegedDb` now branches on `DATABASE_ENGINE` and builds the
+application's own `PostgresDatabase` with the application's own placeholder
+translator. All six privileged scripts await every statement — correct on both
+engines, because awaiting `node:sqlite`'s synchronous return is a no-op, so no
+call site needs an engine branch.
+
+Deliberately **not** gated on `POSTGRES_READY`: that flag governs whether the
+server may serve traffic, not whether an operator may repair a database. Gating
+it would keep the tooling broken for exactly as long as the flag is false.
+
+Verified against a real PostgreSQL database, confirmed by querying afterwards
+rather than trusting the scripts' own success messages:
+
+| Command | Result |
+|---|---|
+| `reset-2fa` | secret cleared, both flags zeroed, `token_version` bumped, audit row written against the right user |
+| `grant-ownership` | account promoted to `super_admin` |
+| `bootstrap-owners` | owner created, username generated |
+| missing account / unreachable database / missing `DATABASE_URL` | all fail closed with the real reason; the connection string is never printed |
+| SQLite, unchanged | still works |
+
+### Two cutover defects, found by executing the runbook
+
+1. The populated-target guard counted the `postgres_baseline` row that
+   `applyPostgresSchema()` writes, so the documented sequence always refused —
+   and the remedy, `--force`, switches the guard off completely, including the
+   part that stops a second load duplicating a live database.
+2. Past that, the load died **partway through with foreign keys suspended** on
+   `schema_migrations_pkey`: the source's own history contains version 56 and
+   collided with the same marker.
+
+Both fixed. The sequence now completes with no `--force`: 1121 rows, 65 tables,
+PK sets and all 87 foreign keys match.
+
+### Rollback rehearsed for the first time
+
+`pg_dump --format=custom` (184 KB) → whole `public` schema dropped →
+`pg_restore`. All rows returned, and so did **20 functions, 20 triggers and the
+`nocase` collation**. The drop cascaded through 86 objects including every
+immutability trigger (`admin_audit_logs` no-delete/no-update,
+`appeals_immutable`, `reports_immutable`, `security_audit_logs_no_update`). A
+restore that brought back rows but not those triggers would leave the
+append-only guarantees silently off.
+
+Rollback *from* PostgreSQL *to* SQLite after a real cutover remains **not
+rehearsed** — it needs a live deployment.
+
+### Four cards that made false claims when their load failed
+
+A sweep for catch handlers that fabricate an empty-success state found eight
+candidates. Four were real:
+
+| Component | What a failed load said |
+|---|---|
+| `BannedMembers` | "Nobody is banned from …" |
+| `LogExternalHours` | "Nothing logged yet" — about the student's own hours |
+| `OrganizationAnnouncements` | "Nothing announced yet" |
+| `AppealInbox` | hid itself with no error, so "nobody is waiting on you" |
+
+`LogExternalHours` is the worst: it is the one screen where the obvious response
+to "nothing is here" is to type it all in again, so a network blip becomes
+duplicate entries against a total that decides whether a student meets a service
+requirement.
+
+In two of them a comment directly above the catch already described the correct
+behaviour the code did not implement — `BannedMembers` said "`null` keeps it in
+its loading shape and says nothing" above `setBans(prev => prev ?? [])`, and
+`AppealInbox` said "the toast is where the error is reported" above a catch that
+raised no toast. **All four were in components with no tests at all**, which is
+how a comment and its code drift apart unnoticed. Each fix now has tests for the
+claim and its counterpart, and each is mutation-verified.
+
+The other four are correct as written and were left alone: `ProviderButtons`
+simply hides (asserting nothing), `TagSuggestions` documents itself as a
+convenience on a form that works without it, and `SuspendedWall` deliberately
+keeps the suspension reason on screen when the appeal list will not load — the
+right trade on the only page a suspended person can reach, backed by the
+server's duplicate-appeal guard.
+
+### Already complete, verified rather than rebuilt
+
+The moderation experience the brief describes was already implemented: the
+banned-user notice carries a red `Appeal` button (`Scale` icon), a disabled
+`Appeal Sent` with a `Clock` icon and `aria-disabled` while one is pending, and
+the outcome plus a fresh appeal once decided — with the shift list suppressed
+entirely rather than shown greyed out, because a disabled Join still reads as
+"you could join". Organizer-side, `BannedMembers` shows who, why, when and by
+whom, warns when an appeal is already waiting, and offers Unban behind a
+confirmation. 12 tests already covered the member-facing half.
