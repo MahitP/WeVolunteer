@@ -2581,3 +2581,86 @@ where prose is not.
 3. **Scale untested.** The dry run is 548 rows.
 4. **Rollback after cutover is documented but not rehearsed** — it needs a real
    deployment.
+
+---
+
+## Phase 15 — the PostgreSQL application suite reaches zero, and stays there
+
+```
+PostgreSQL   4,787 passed | 0 failed | 31 skipped     (three consecutive runs)
+SQLite       4,751 passed | 0 failed | 67 skipped
+Adapter      7,008 passed | 0 failed | 12 skipped
+lint clean · build clean · audit clean · schema drift clean · whitespace clean
+```
+
+### 15a · The ratchet was measuring less than it claimed
+
+The fixture ratchet exempted any file containing `new DatabaseSync(`. One
+legitimate `:memory:` handle in `datetimeComparison.test.js` therefore excused
+seven unawaited writes elsewhere in the same file that went through the
+APPLICATION's handle.
+
+`server/testing/fixtureDebt.js` now parses each file and resolves every chain
+through the scope chain enclosing it — necessary because that file binds `db`
+twice, once raw and once to the app proxy, with opposite correct behaviour. Four
+shapes had to be handled, each found by scanning and checking rather than
+assuming: declarations, assignments to an outer `let` (which bind at the
+DECLARATION, not the assignment), factory functions returning a handle, and
+factories returning `{ db }` destructured by the caller.
+
+**Honest number: 130 chains across 28 files, not the 22 the old scan reported.**
+
+Both mutation directions proven — and the false-positive direction failed first,
+on `const { DatabaseSync: _DS }`, so alias resolution was added and re-proven.
+
+### 15b · Two measurement hazards that made the suite look better than it was
+
+**A file that does not parse is reported as SKIPPED, not failed.** A stray
+backtick inside a SQL template literal closes the string; vitest cannot load the
+file and quietly drops every test in it. This happened three times during this
+phase and the failure count improved each time. A guard now parses every source
+file and fails with a filename.
+
+**89 leaked schema namespaces.** The harness drops its namespace in
+`srv.close()`, which a file dying in `beforeAll` never reaches. They accumulate,
+and `db.postgresSchema.test.js` walks the catalogue: with 89 stale namespaces it
+timed out at fifteen seconds, reported as SQLite and PostgreSQL disagreeing
+about foreign keys. Cleanup now runs in `globalSetup`, before any worker starts.
+
+That was only half of it. Two parity queries were also unscoped in a way the
+namespace count amplified — the FK comparison filtered `tc.table_schema` but not
+the three joins, and the unique-index check used `pg_indexes`, which renders
+every index definition in the database before filtering. Both now scope
+properly, so they hold regardless of how many namespaces are live.
+
+### 15c · Application bugs found
+
+- **admin stats answered 500** — `date('now', '-6 months')` has no PostgreSQL
+  equivalent. Guarded by arity, since one-argument `date()` is portable.
+- **certificate verification answered 500** — `GROUP BY` missing the joined
+  tables' keys.
+- **a racing legal publish answered 500** — two publishes of one version pass
+  validation before either inserts; the loser now gets a 409, which is what the
+  test demands (it asserts explicitly that no 500 occurs).
+- **two security assertions were reading fields off a promise.** `authz.aal`
+  proves the step-up middleware does not spend a grant. `toBeNull()` failed,
+  which is how it was found — but `toBeFalsy()` or `toBeUndefined()` would have
+  PASSED while proving nothing.
+
+### 15d · A test that only failed between 00:00 and 00:15 UTC
+
+`migrations.isoLoginAttempts` asserts a lexicographic defect: a space at
+position 10 sorts under `T`. That only decides the comparison when both strings
+share a date prefix, and derived from `Date.now()` they do not — run just after
+UTC midnight, "thirty seconds ago" and "fifteen minutes ago" land on different
+dates and the comparison flips. It failed on SQLite and the adapter while
+PostgreSQL was green, which read as a regression. It was 00:07. Both timestamps
+now come from one pinned instant.
+
+### Remaining before POSTGRES_READY
+
+The test gates are met and stable. Not yet done: transaction audit, security
+negative-path pass, worker audit, scale migration beyond 548 rows, query/index
+audit, production-boot audit, health/readiness verification, observability
+review, SQLite-retirement classification, and the cutover rehearsal steps that
+need a real deployment.
