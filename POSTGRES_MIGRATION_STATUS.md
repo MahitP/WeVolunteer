@@ -3042,3 +3042,93 @@ entirely rather than shown greyed out, because a disabled Join still reads as
 "you could join". Organizer-side, `BannedMembers` shows who, why, when and by
 whom, warns when an appeal is already waiting, and offers Unban behind a
 confirmation. 12 tests already covered the member-facing half.
+
+---
+
+## Phase 20 — the four remaining audits
+
+### Semantic parity on migrated data — DONE, and it found a shipped bug
+
+A 300-user dataset (5,297 rows) migrated into a scratch database, then 18
+representative queries run against **both** engines and diffed: ordering and
+collation, NULLs in sort keys, `NOT IN` over a nullable column, aggregates,
+`GROUP BY … HAVING`, inner and left joins, boolean-as-integer grouping, case
+sensitivity, ISO timestamp comparison, integer division, `LIMIT/OFFSET`
+pagination, `DISTINCT`, and an authorization-shaped membership query.
+
+**16 identical. Two divergences, both real:**
+
+1. **`LIKE` case folding** — 300 rows on SQLite, 0 on PostgreSQL. Traced to seven
+   raw `LIKE`s in runtime SQL: organization search, a people-search ranking tier,
+   message-body search, three people-searches in messaging, and admin audit-log
+   search. Every one is a *search* feature, so on PostgreSQL each silently
+   returns nothing for a differently-cased query — no error, on the features
+   whose entire purpose is finding something. All now use
+   `caseInsensitiveLike(db)`. Mutation-verified across engines: with the raw
+   operator restored, SQLite passes all 72 tests in the file and PostgreSQL fails
+   exactly the new one.
+2. **`ROUND(double precision, integer)` does not exist on PostgreSQL** — a 500,
+   not a wrong number. The application uses no two-argument `ROUND` today; the
+   audit's own query hit it. Added to the ratchet at zero, because the natural
+   place to reach for it is an average of volunteer hours.
+
+A `raw LIKE (runtime)` construct is now in the dialect ratchet. Adding it moved
+the total 121 → 129 (9 runtime, 120 boot): **the code did not get worse, the list
+got longer.** One runtime site remains and is counted, not exempted —
+`testTempCleanup` matching `pg_namespace.nspname`, PostgreSQL-only harness code
+over schema names it creates itself.
+
+### Observability — DONE
+
+Pool exhaustion had no coverage. Three cases now run against a real
+two-connection pool: a query with every connection held **fails near the
+configured timeout** rather than hanging; the pool **serves traffic again
+immediately** afterwards, on both connections concurrently; and ten consecutive
+rolled-back transactions do not wedge it. Mutation-verified — removing the
+`release()` on the rollback path fails the leak case and only it.
+
+Log-secret review found nothing leaking: the only candidate,
+`microsoft.js` logging a token-exchange body, logs it **only on a failed
+exchange**, where the response carries `error_description` and no token.
+
+Health is `/health` alone, returning 503 with no detail on an unreadable or
+read-only database — deliberately no error text, since it is unauthenticated.
+Boot is fail-closed: everything is awaited before `listen()`, and
+`assertSchemaReady()` is called.
+
+### Deployment configuration — DONE
+
+Every production-sensitive variable either fails closed or has a safe default.
+`TRUST_PROXY` is FATAL when unset in production (without it Express trusts a
+spoofable `X-Forwarded-For`, which is a rate-limit bypass). No email provider is
+FATAL. `APP_URL` must be present, absolute and https. `OAUTH_ALLOW_MOCK` refuses
+production. `DATABASE_URL` is required when the engine is postgres. CORS defaults
+to non-matching localhost origins, so an unset `CORS_ORIGINS` denies rather than
+allows. The Resend webhook returns `not_configured` and rejects when its secret
+is absent.
+
+`DEMO_MODE`'s production refusal was the only one with **no test behind it**, and
+demo accounts share a published password. Now pinned, with a second assertion on
+the seeding banner that holds the *ordering*: `import { app }` is hoisted above
+the guard, so the guard is only sufficient because seeding happens later.
+
+### PostgreSQL → SQLite rollback — NOT a required launch gate
+
+Determined rather than assumed.
+
+- **Before traffic** (boot, schema or migration failure) the SQLite file is
+  untouched — verified byte-identical by SHA-256 either side of a 760-row load —
+  and the engine refuses to fall back silently. Rollback is a flag flip. Covered.
+- **After traffic**, reverting discards every write since cutover. Demonstrated:
+  an account created on PostgreSQL is present there and absent from the
+  snapshot. That is not a rollback, it is accepted data loss.
+- The engineering recovery for "PostgreSQL broke after cutover" is `pg_restore`,
+  which **is** rehearsed and returns the immutability triggers as well as the
+  rows.
+
+So the gate is superseded. What remains is an owner decision — the maximum
+acceptable data loss, and who may call it — now required *before* cutover rather
+than during an incident, and written into the runbook. Building a reverse
+migration is assessed and not recommended: a second full migration path, with
+its own dialect translation and failure modes, for a scenario where `pg_restore`
+is already the better answer.

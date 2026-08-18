@@ -287,6 +287,28 @@ const CONSTRUCTS = [
    * only, and several use `NOT LIKE` to match exact stored strings where case
    * folding would be wrong anyway.
    */
+  /**
+   * Two-argument `ROUND` on a floating-point value.
+   *
+   * SQLite has one numeric type family and `ROUND(x, 2)` always works.
+   * PostgreSQL only defines `round(numeric, integer)` — there is no
+   * `round(double precision, integer)` — so rounding an `AVG()` or any REAL
+   * column to N places raises
+   *
+   *     function round(double precision, integer) does not exist
+   *
+   * which is a 500, not a wrong number. Found while writing the cross-engine
+   * parity audit: the audit's own query hit it. The application uses none today,
+   * which is why this sits at zero.
+   *
+   * Zero rather than absent because the natural place to reach for it is an
+   * average of volunteer hours, and hours are the number this product exists to
+   * report. A future `ROUND(AVG(hours_awarded), 2)` should have to stop here and
+   * cast — `ROUND(AVG(x)::numeric, 2)` — rather than discover it in production.
+   * `ROUND(x)` with one argument is fine on both and is not matched.
+   */
+  { name: 'two-arg ROUND',   pattern: /\bROUND\s*\([^)]*,[^)]*\)/gi,          runtime: 0, boot: 0,
+    postgres: 'round(x::numeric, n) — PostgreSQL has no round(double precision, integer)' },
   { name: 'raw LIKE (runtime)', pattern: /(?<!\$\{)\bLIKE\b/g,                runtime: 1, boot: 7,
     postgres: 'caseInsensitiveLike(db) — LIKE on SQLite, ILIKE on PostgreSQL' },
   /**
