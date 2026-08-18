@@ -260,6 +260,36 @@ const CONSTRUCTS = [
   { name: 'AUTOINCREMENT',   pattern: /\bAUTOINCREMENT\b/gi,                runtime: 0, boot: 1,
     postgres: 'GENERATED … AS IDENTITY, or bigserial' },
   /**
+   * Raw `LIKE` in RUNTIME SQL, which is a case-sensitivity bug on PostgreSQL.
+   *
+   * SQLite's LIKE ignores ASCII case; PostgreSQL's does not. So a raw `LIKE`
+   * behaves differently on the two engines while looking correct on the one the
+   * suite was written against. Organization search shipped this way and was
+   * found by a cross-engine parity diff, not by this list — the entry exists so
+   * the next one is found here instead.
+   *
+   * The sanctioned form is `caseInsensitiveLike(db)`, which is LIKE on SQLite
+   * and ILIKE on PostgreSQL. `ILIKE` itself does not match this pattern (the
+   * `\b` will not fire mid-word), and neither does the helper's name, which is
+   * not upper case.
+   *
+   * The one remaining RUNTIME site is `testTempCleanup.js`, matching
+   * `pg_namespace.nspname LIKE 'wev\_t\_%'`. That is PostgreSQL-only harness
+   * code against schema names this harness creates itself, always lower case —
+   * there is no user input and no other engine. Counted rather than exempted so
+   * a second one has to be argued for.
+   *
+   * The lookbehind excludes `${LIKE}` — the interpolation of the helper's
+   * result, which is the form this entry is asking for. Counting it would make
+   * the fix look like the violation.
+   *
+   * The boot count is not zero and should not be: migrations run against SQLite
+   * only, and several use `NOT LIKE` to match exact stored strings where case
+   * folding would be wrong anyway.
+   */
+  { name: 'raw LIKE (runtime)', pattern: /(?<!\$\{)\bLIKE\b/g,                runtime: 1, boot: 7,
+    postgres: 'caseInsensitiveLike(db) — LIKE on SQLite, ILIKE on PostgreSQL' },
+  /**
    * Both of the following were added AFTER they had already shipped as bugs,
    * which is the honest reason they are here.
    *
@@ -513,12 +543,28 @@ describe('SQLite-only SQL still in the codebase', () => {
     ).toEqual([]);
   });
 
-  it('holds the total at 121 — 8 runtime, 113 boot', () => {
+  /**
+   * Raised from 121 (8 runtime, 113 boot) to 129 (9 runtime, 120 boot) on
+   * 2026-08-18, and the reason matters: **the code did not get worse, the list
+   * got longer.**
+   *
+   * `raw LIKE (runtime)` was added as a construct after organization search
+   * shipped case-sensitive on PostgreSQL. Adding it surfaced 8 sites that were
+   * always there and had never been counted — 1 runtime, 7 boot. The runtime
+   * sites that were actual bugs (message-body search, three people-searches in
+   * messaging, admin audit-log search, and the two in the directory) were fixed
+   * in the same change and are not in these numbers.
+   *
+   * This is the ratchet working as intended. It is a record of constructs
+   * somebody thought to look for, so every addition to the list is expected to
+   * raise the total once, and never again.
+   */
+  it('holds the total at 129 — 9 runtime, 120 boot', () => {
     const runtime = CONSTRUCTS.reduce((n, c) => n + tallyOf(rel => !isBoot(rel), c), 0);
     const boot = CONSTRUCTS.reduce((n, c) => n + tallyOf(isBoot, c), 0);
 
-    expect(runtime, 'runtime SQLite-only SQL grew').toBeLessThanOrEqual(8);
-    expect(boot, 'boot-path SQLite-only SQL grew').toBeLessThanOrEqual(113);
+    expect(runtime, 'runtime SQLite-only SQL grew').toBeLessThanOrEqual(9);
+    expect(boot, 'boot-path SQLite-only SQL grew').toBeLessThanOrEqual(120);
   });
 });
 

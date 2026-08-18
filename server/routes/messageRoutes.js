@@ -1,4 +1,5 @@
 import express from 'express';
+import { caseInsensitiveLike } from '../db/dialectSql.js';
 import { authenticateToken } from '../utils.js';
 import { runInTransaction } from '../db/connectionContext.js';
 import { reportLimiter } from '../reportLimiter.js';
@@ -437,6 +438,10 @@ router.patch('/api/messages/conversations/:id/preferences', authenticateToken, a
 });
 
 router.get('/api/messages/search', authenticateToken, async (req, res) => {
+    /* SQLite's LIKE ignores case, PostgreSQL's does not. Bound per handler
+       rather than at module scope: `db` is a proxy whose engine is not
+       resolved when this module is imported. */
+    const LIKE = caseInsensitiveLike(db);
   try {
     const q = String(req.query.q || '').trim();
     if (q.length < 2) return res.json({ results: [] });
@@ -461,7 +466,7 @@ router.get('/api/messages/search', authenticateToken, async (req, res) => {
       JOIN conversation_participants cp ON cp.conversation_id = c.id AND cp.user_id = ?
       LEFT JOIN events e ON e.id = c.event_id
       JOIN users u ON u.id = m.sender_id
-      WHERE m.body LIKE ?
+      WHERE m.body ${LIKE} ?
       ORDER BY m.created_at DESC
       LIMIT 50
     `).all(req.user.id, like);
@@ -534,6 +539,10 @@ router.post('/api/messages/:id/report', authenticateToken, reportLimiter, async 
 });
 
 router.get('/api/messages/users/search', authenticateToken, async (req, res) => {
+    /* SQLite's LIKE ignores case, PostgreSQL's does not. Bound per handler
+       rather than at module scope: `db` is a proxy whose engine is not
+       resolved when this module is imported. */
+    const LIKE = caseInsensitiveLike(db);
   try {
     const q = String(req.query.q || '').trim();
     if (q.length < 2) return res.json({ users: [] });
@@ -566,7 +575,7 @@ router.get('/api/messages/users/search', authenticateToken, async (req, res) => 
         JOIN applications a ON a.user_id = u.id
         JOIN events e ON a.event_id = e.id
         WHERE e.organizer_id = ?
-          AND (u.name LIKE ? OR u.username LIKE ?)
+          AND (u.name ${LIKE} ? OR u.username ${LIKE} ?)
         LIMIT 20
       `).all(req.principal.userId, like, like);
     } else if (can(req.principal, 'application.withdraw')) {
@@ -577,7 +586,7 @@ router.get('/api/messages/users/search', authenticateToken, async (req, res) => 
         JOIN events e ON e.organizer_id = u.id
         JOIN applications a ON a.event_id = e.id
         WHERE a.user_id = ?
-          AND (u.name LIKE ? OR u.username LIKE ?)
+          AND (u.name ${LIKE} ? OR u.username ${LIKE} ?)
         LIMIT 20
       `).all(req.principal.userId, like, like);
 
@@ -615,7 +624,7 @@ router.get('/api/messages/users/search', authenticateToken, async (req, res) => 
          AND ((r.actor_id = ? AND r.subject_id = u.id)
            OR (r.subject_id = ? AND r.actor_id = u.id))
         WHERE u.account_status = 'active'
-          AND (u.name LIKE ? OR u.username LIKE ?)
+          AND (u.name ${LIKE} ? OR u.username ${LIKE} ?)
         LIMIT 20
       `).all(req.principal.userId, req.principal.userId, like, like);
 

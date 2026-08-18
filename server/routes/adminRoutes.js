@@ -17,7 +17,7 @@ import { syncOrganizerCapabilities } from '../organizationRoles.js';
 import { recordAudit } from '../auditLog.js';
 import { deleteUploadedFile } from './profilePictureRoutes.js';
 import { deliveryHealth } from '../resendWebhook.js';
-import { insertionTiebreak } from '../db/dialectSql.js';
+import { insertionTiebreak, caseInsensitiveLike } from '../db/dialectSql.js';
 import {
   REPORT_PRIORITIES, REPORT_RESOLUTIONS, REPORT_STATUSES, REPORT_TARGET_TYPES,
   LIVE_REPORT_STATUSES, CATEGORY_VALUES, isValidCategory, normalizeTargetType,
@@ -2022,7 +2022,10 @@ router.get('/api/admin/audit-logs', authenticateToken, requireCap('audit.read'),
     params.push(req.query.endDate);
   }
   if (req.query.search) {
-    conditions.push('a.details LIKE ?');
+    /* Audit-log search. SQLite's LIKE ignores case, PostgreSQL's does not —
+       an administrator searching for a name would miss differently-cased
+       records on PostgreSQL and have no way to tell. */
+    conditions.push(`a.details ${caseInsensitiveLike(db)} ?`);
     params.push(`%${req.query.search}%`);
   }
 
