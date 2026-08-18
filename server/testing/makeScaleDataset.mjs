@@ -38,6 +38,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { transactionOn } from '../db/connectionContext.js';
 
 const arg = (n, d) => {
   const i = process.argv.indexOf(`--${n}`);
@@ -73,7 +74,17 @@ const iso = (offsetDays = 0) =>
   new Date(Date.now() + offsetDays * 86400000).toISOString();
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-const tx = (fn) => { db.exec('BEGIN'); try { fn(); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; } };
+/**
+ * The shared helper, not a hand-rolled BEGIN.
+ *
+ * `db.accessSurface.test.js` refuses a raw BEGIN in application modules,
+ * because against a pool it lands on one borrowed client while the writes go to
+ * others. This generator holds its own `DatabaseSync`, so a raw BEGIN would in
+ * fact be correct here — but `transactionOn` does the same thing on that handle
+ * and keeps the rule with no exceptions to remember, which is worth more than
+ * the three lines it replaces.
+ */
+const tx = (fn) => transactionOn(db, fn);
 
 const started = Date.now();
 let inserted = 0;
