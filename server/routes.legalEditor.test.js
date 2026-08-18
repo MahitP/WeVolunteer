@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer, enrolTwoFactor } from './testServer.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 
 /**
  * The owner-only Legal Center editor.
@@ -427,12 +428,44 @@ describe('the Legal Center editor', () => {
   /* ── The migration ─────────────────────────────────────────────────────── */
 
   describe('migration 034', () => {
-    it('is idempotent', async () => {
+    /**
+     * The two tests that RUN the migration are SQLite-only, and were silently
+     * vacuous on PostgreSQL until 2026-08-18.
+     *
+     * Migrations build the SQLite schema. PostgreSQL gets `db/postgresSchema.js`,
+     * which is GENERATED from these same migrations with the dialect rewritten
+     * (`bin/generate-postgres-schema.mjs` turns `INTEGER PRIMARY KEY AUTOINCREMENT`
+     * into an identity column). So migration 034's raw DDL is not something
+     * PostgreSQL is ever asked to execute in production.
+     *
+     * Running it here anyway did not fail the way a wrong test should. `up()` calls
+     * `db.exec(...)` WITHOUT awaiting — correct against `node:sqlite`, which is
+     * synchronous, but on PostgreSQL `exec` returns a promise. The SQLite DDL was
+     * rejected by the server with `syntax error at or near "AUTOINCREMENT"` AFTER
+     * `up()` had already returned, so:
+     *
+     *   - `expect(() => …).not.toThrow()` saw a clean return and passed while the
+     *     migration had done nothing at all, proving no idempotency;
+     *   - the row-count test passed for the same reason — the count was unchanged
+     *     because the table was never touched;
+     *   - and the rejection surfaced as one of three "Unhandled Errors" that
+     *     vitest reports separately, which is why the suite could show 0 failures
+     *     and still exit non-zero.
+     *
+     * Confining them is not weakening them: on SQLite they assert exactly what
+     * they did before. This is the same treatment the email-dedupe migration tests
+     * in `routes.emailUniqueness.test.js` already get, for the same reason.
+     *
+     * The duplicate-(slug, version) test below is NOT skipped — it exercises the
+     * live constraint rather than the migration mechanism, and it is already
+     * written in the portable refusal form.
+     */
+    it.skipIf(RUNNING_ON_POSTGRES)('is idempotent', async () => {
       const migration = (await import('./migrations/034_legal_document_revisions.js')).default;
       expect(() => { migration.up(db); migration.up(db); }).not.toThrow();
     });
 
-    it('does not disturb the revisions already stored', async () => {
+    it.skipIf(RUNNING_ON_POSTGRES)('does not disturb the revisions already stored', async () => {
       const before = (await db.prepare('SELECT COUNT(*) AS n FROM legal_document_revisions').get()).n;
       const migration = (await import('./migrations/034_legal_document_revisions.js')).default;
       migration.up(db);

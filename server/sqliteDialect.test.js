@@ -468,6 +468,14 @@ describe('SQLite-only SQL still in the codebase', () => {
          its migration describe is exempt; the API describe beside it runs on
          both engines. */
       'routes.emailUniqueness.test.js',
+      /* Two tests call migration 034's `up()` against the live handle. It runs
+         `db.exec` un-awaited — right for synchronous `node:sqlite`, but on
+         PostgreSQL the SQLite DDL was rejected AFTER `up()` returned, so
+         `not.toThrow()` and the row-count assertion both passed having proved
+         nothing, and the rejection surfaced only as an unhandled error. The
+         duplicate-(slug, version) test in the same describe is NOT exempt: it
+         tests the constraint, not the migration, and runs on both engines. */
+      'routes.legalEditor.test.js',
       'routes.resetRemoved.test.js',
     ]);
   });
