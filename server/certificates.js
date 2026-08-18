@@ -24,6 +24,7 @@
  */
 
 import crypto from 'crypto';
+import { isUniqueViolation } from './db/dialectSql.js';
 
 // Crockford base32, minus 0/O/1/I to avoid visual ambiguity on a printout.
 const ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -134,7 +135,13 @@ export async function getOrCreateCertificateCode(db, userId, eventId) {
       // exists now is authoritative, so stop trying to insert our own.
       // A UNIQUE(code) collision means our random code happens to already
       // belong to a different certificate — regenerate and retry.
-      if (!String(err.message).includes('UNIQUE')) throw err;
+      /* `isUniqueViolation` rather than a message match: the string this tested
+         for ("UNIQUE constraint failed") is SQLite's. PostgreSQL says "duplicate
+         key value violates unique constraint" in lower case, so on PostgreSQL
+         NEITHER collision was recognised and both re-threw — turning a retryable
+         code clash, and a concurrent duplicate that the re-select below already
+         handles, into a failed certificate issuance. */
+      if (!isUniqueViolation(err)) throw err;
     }
   }
 
