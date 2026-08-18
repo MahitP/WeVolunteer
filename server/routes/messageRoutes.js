@@ -15,23 +15,7 @@ import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
 import { recordAudit } from '../auditLog.js';
-import {
-  MESSAGE_MAX_LENGTH,
-  MESSAGE_PAGE_LIMIT,
-  computeConversationLifecycle,
-  decorateConversation,
-  eligibleRelationship,
-  formatMessage,
-  getConversation,
-  getParticipant,
-  isConversationParticipant,
-  listConversationsForUser,
-  newId,
-  otherParticipant,
-  resolveAdminConversation,
-  resolveConversation,
-  resolvePeerConversation
-} from '../messaging.js';
+import { MESSAGE_MAX_LENGTH, MESSAGE_PAGE_LIMIT, computeConversationLifecycle, decorateConversation, formatMessage, getConversation, getParticipant, isConversationParticipant, listConversationsForUser, newId, otherParticipant, resolveAdminConversation, resolveConversation, resolvePeerConversation } from '../messaging.js';
 
 const router = express.Router();
 

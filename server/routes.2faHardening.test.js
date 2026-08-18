@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { RUNNING_ON_POSTGRES } from './testEngine.js';
 import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { startTestServer } from './testServer.js';
 

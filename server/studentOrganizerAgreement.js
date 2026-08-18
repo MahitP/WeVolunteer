@@ -1,6 +1,6 @@
 import { CAPABILITIES, ROLE } from './authz.js';
 import { runInTransaction } from './db/connectionContext.js';
-import { transactionOn } from './db/connectionContext.js';
+import './db/connectionContext.js';
 import { STUDENT_ORGANIZER_DOCUMENTS } from './legalDocuments.js';
 import { recordAcceptances } from './consent.js';
 import { resolveDocument } from './legalStore.js';

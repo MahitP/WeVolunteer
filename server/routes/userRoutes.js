@@ -1,27 +1,19 @@
 import express from 'express';
-import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import {
-  sendVerificationEmail,
-  sendPasswordResetEmail,
-  sendEmailChangeConfirmation,
-  sendEmailChangeNotice
-} from '../email.js';
-import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
+import '../email.js';
+import { VALID_GRADES } from '../config.js';
 
-import { authenticateToken, formatUserResponse, selfUserResponse, inTransaction } from '../utils.js';
+import { authenticateToken, selfUserResponse } from '../utils.js';
 import { can } from '../authz.js';
 /* The milestone ladder. One definition, in a module — it was inline here, and
    duplicated byte-for-byte in utils.js where nothing imported it. See
    server/milestones.js for the badge/milestone boundary this sits on. */
 import { buildMilestones } from '../milestones.js';
 import { milestoneInputs } from '../volunteerInsights.js';
-import { db, initDatabase } from '../db.js';
+import { db } from '../db.js';
 import { distinctionFor } from '../profileSerializer.js';
-import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
-import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
-import { canSeeHours, isValidVisibility, normaliseVisibility } from '../serviceVisibility.js';
+import { validateProfilePatch } from '../accountValidation.js';
+import '../services/verification.js';
+import { canSeeHours, isValidVisibility } from '../serviceVisibility.js';
 
 const router = express.Router();
 

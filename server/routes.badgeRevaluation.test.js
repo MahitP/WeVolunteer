@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { startTestServer } from './testServer.js';
+import './testServer.js';
 
 /**
  * Badge re-evaluation through the REAL finalisation route.

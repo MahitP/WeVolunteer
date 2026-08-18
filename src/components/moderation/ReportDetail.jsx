@@ -5,7 +5,7 @@ import SubjectActions from './SubjectActions';
 import { api } from '../../utils/api';
 import { can } from '../../authz';
 import { categoryLabel } from '../../moderation';
-import { formatDay } from '../../utils/helpers';
+import '../../utils/helpers';
 import { useStepUp } from '../auth/useStepUp';
 import { STEP_UP } from '../../utils/stepUp';
 

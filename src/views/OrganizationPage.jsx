@@ -13,21 +13,16 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import {
-  Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock, UserMinus,
-  FileText, Award,
-  UserPlus2, UserMinus2, Ban,
-  /* `Scale` for an appeal — the same glyph the platform-wide appeal surfaces
+import { Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock, UserMinus, FileText, Award, UserPlus2, UserMinus2, Ban, /* `Scale` for an appeal — the same glyph the platform-wide appeal surfaces
      use — and `ShieldCheck` for lifting a ban, which is a protective act rather
      than a destructive one. Both from lucide, which is the app's only icon set. */
-  Scale, ShieldCheck,
-} from 'lucide-react';
+  Scale } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import OrganizationAnnouncements from '../components/OrganizationAnnouncements';
 import ConfirmDialog from '../components/common/ConfirmDialog';
-import { avatarColorValue } from '../utils/avatarColors';
+import '../utils/avatarColors';
 import OrgAvatar from '../components/common/OrgAvatar';
 import RemoveMemberDialog from '../components/organizations/RemoveMemberDialog';
 import AppealInbox from '../components/organizations/AppealInbox';

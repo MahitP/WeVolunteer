@@ -25,10 +25,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import {
-  MoreHorizontal, UserPlus, UserCheck, UserX, BellOff, Bell, ShieldMinus,
-  Flag, Link2, MapPin, CalendarDays, Clock, Users, Sparkles, Lock, Check, Ban, Pencil,
-} from 'lucide-react';
+import { UserPlus, UserCheck, UserX, BellOff, Bell, ShieldMinus, Flag, Link2, MapPin, CalendarDays, Clock, Sparkles, Lock, Check, Ban, Pencil } from 'lucide-react';
 import { api } from '../utils/api';
 import { formatHours } from '../utils/helpers';
 import { can } from '../authz';

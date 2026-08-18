@@ -30,7 +30,7 @@
  * The last of those is the defect this file was written to catch. See the block
  * comment on that test.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 
 // db.js opens its connection at module scope, so nothing that reaches it may be
 // imported statically here — see the long explanation in testServer.js.

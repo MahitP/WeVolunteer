@@ -21,7 +21,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { navItemsFor, navSectionsFor, tabForPath, RAIL_TAB, PAGE_META } from './App';
 import { APP_ROUTES } from './routes';

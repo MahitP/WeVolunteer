@@ -29,7 +29,7 @@ import { createRandom, performWeightedSelection } from '../weighting.js';
 import { attendanceRecordsFor } from '../volunteerStats.js';
 import { eventApplicationEligibility } from '../eventEligibility.js';
 import { notificationService } from './notificationService.js';
-import { inTransaction } from '../utils.js';
+import '../utils.js';
 import { runInTransaction } from '../db/connectionContext.js';
 import { verifyRunStillApplies, staleRunMessage } from './autoSelectStaleness.js';
 

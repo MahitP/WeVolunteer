@@ -24,7 +24,7 @@
  * genuine server fault is still logged, but no normal path produces one.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { startTestServer, TEST_TOTP_SECRET, freshTotp, enrolTwoFactor } from './testServer.js';
+import { startTestServer, freshTotp, enrolTwoFactor } from './testServer.js';
 
 const EMAIL = 'admin@example.gov';
 

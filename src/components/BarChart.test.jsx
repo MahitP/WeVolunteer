@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { BarChart, Sparkline } from './BarChart';
+import { BarChart } from './BarChart';
 
 /**
  * The three charts three dashboards share, which had no test at all.

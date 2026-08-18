@@ -1,5 +1,4 @@
 import express from 'express';
-import crypto from 'crypto';
 
 import { authenticateToken } from '../utils.js';
 import { runInTransaction } from '../db/connectionContext.js';
@@ -13,7 +12,7 @@ import { eventQueryFragments } from '../eventQuery.js';
 import { normaliseTag, tagsForEvents } from '../eventTags.js';
 /* Derived from the Silver tier, so the meter and the milestone cannot disagree
    about what Silver means. See server/milestones.js. */
-import { SERVICE_HOUR_GOAL } from '../milestones.js';
+import '../milestones.js';
 import { volunteerInsights } from '../volunteerInsights.js';
 import { commentHasLiveReport, COMMENT_HELD_MESSAGE } from '../evidenceHolds.js';
 import { nullSafeNotEquals } from '../db/dialectSql.js';

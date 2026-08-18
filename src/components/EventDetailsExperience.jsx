@@ -1,20 +1,5 @@
 import React from 'react';
-import {
-  ArrowRight,
-  Calendar,
-  CheckCircle,
-  Clock,
-  CloudSun,
-  Flag,
-  Heart,
-  Info,
-  ListChecks,
-  MapPin,
-  Share2,
-  ShieldCheck,
-  Sparkles,
-  Users
-} from 'lucide-react';
+import { ArrowRight, Calendar, CheckCircle, Clock, CloudSun, Flag, Heart, Info, MapPin, Share2, ShieldCheck, Sparkles, Users } from 'lucide-react';
 import {
   countdown,
   formatDay,

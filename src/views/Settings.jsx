@@ -14,9 +14,9 @@ import UsernameCard from '../components/account/UsernameCard';
 import AISettingsCard from '../components/account/AISettingsCard';
 import { api } from '../utils/api';
 import { useTheme } from '../hooks/useTheme';
-import { APP_NAME, SCHOOL_NAME, SUPPORT_EMAIL, STUDENT_GUIDE_URL, ORGANIZER_GUIDE_URL } from '../config';
+import { APP_NAME, SCHOOL_NAME, STUDENT_GUIDE_URL, ORGANIZER_GUIDE_URL } from '../config';
 import { can } from '../authz';
-import { Sun, Moon, SunMoon, ExternalLink, Mail, Scale, Info, FileSignature, LifeBuoy } from 'lucide-react';
+import { Sun, Moon, SunMoon, ExternalLink, Scale, Info, FileSignature, LifeBuoy } from 'lucide-react';
 
 export default function Settings({ currentUser, addToast, onProfileChange }) {
   const [searchParams, setSearchParams] = useSearchParams();

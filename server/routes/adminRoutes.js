@@ -1,7 +1,5 @@
 import express from 'express';
 import { runInTransaction } from '../db/connectionContext.js';
-import fs from 'fs';
-import path from 'path';
 import crypto from 'node:crypto';
 
 import { authenticateToken, formatUserResponse } from '../utils.js';

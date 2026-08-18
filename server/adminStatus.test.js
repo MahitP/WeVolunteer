@@ -20,7 +20,7 @@
  * than it was before.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { rmSync, writeFileSync, mkdirSync, utimesSync, mkdtempSync } from 'fs';
+import { rmSync, writeFileSync, utimesSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { startTestServer } from './testServer.js';

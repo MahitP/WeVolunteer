@@ -2842,3 +2842,107 @@ Health/readiness audit, observability audit, semantic parity on migrated data,
 deployment-configuration audit, SQLite-retirement classification, cutover
 rehearsal, rollback rehearsal, code-quality pass, browser-compatibility evidence
 beyond Chrome/macOS. `POSTGRES_READY` stays **false**.
+
+---
+
+## Phase 18 — SQLite retirement classification, and the blocker it found
+
+### BLOCKER — the privileged operator toolchain does not know PostgreSQL exists
+
+Seven scripts open the database through `openPrivilegedDb` in `bin/resolveDb.mjs`,
+which has **no PostgreSQL branch at all**:
+
+| Script | What is lost after cutover |
+|---|---|
+| `bin/reset-2fa.mjs` | clearing a locked-out account's two-factor enrolment |
+| `bin/clear-stale-tfa-secret.mjs` | clearing an undecryptable TOTP secret |
+| `bin/grant-ownership.mjs` | granting platform ownership |
+| `bin/revoke-ownership.mjs` | revoking platform ownership |
+| `bin/bootstrap-owners.mjs` | recovering from zero owners |
+| `bin/make-admin.mjs` | provisioning an administrator |
+| `bin/reset-dev-db.mjs` | development only — no production impact |
+
+Verified by running it, not by reading it. With `DATABASE_URL` pointing at a live
+PostgreSQL server, `bin/reset-2fa.mjs` ignores it entirely, looks for a SQLite
+file, and refuses:
+
+```
+Database: …/nonexistent.db
+Refused: no database at …/nonexistent.db
+This script will not create one.
+```
+
+It fails **closed**, which is the right behaviour and is why this is a blocker
+rather than an incident waiting to happen. But the capability is simply absent.
+
+**Why this is severe rather than inconvenient.** There is no in-app substitute.
+Every two-factor route (`/api/2fa/disable`, `/api/2fa/email/disable`,
+`/api/2fa/recovery-codes/regenerate`) is self-service and sits behind
+`requireAAL2` — you must already have passed 2FA to turn 2FA off. That is correct
+security design: it stops a stolen password from disabling the second factor. Its
+consequence is that administrative recovery exists **only** in `bin/reset-2fa.mjs`.
+
+So on PostgreSQL, a user who loses their authenticator and their recovery codes is
+permanently locked out, with no path back. `REQUIRE_ADMIN_2FA` defaults ON, so
+this includes administrators. And `server.js` prints, on every boot with no
+owners:
+
+```
+[ownership] Use `node bin/grant-ownership.mjs` to bootstrap an owner.
+```
+
+That instruction would not work. The platform can therefore reach a state where
+super-admin access is lost and the recovery the server itself recommends is
+inoperable.
+
+**Remediation** (deliberately not attempted here — see below). Give
+`openPrivilegedDb` a PostgreSQL branch, then port the six production scripts to
+`await` their statements: they currently use the synchronous `node:sqlite` API
+(`db.prepare(…).get(…)` with no await) inside functions that are already `async`,
+so the change is mechanical but touches every call site. It was left undone rather
+than half-done on purpose — these are privileged scripts, and `resolveDb.mjs`'s own
+comment states the hazard exactly: *"A privileged command that invents an empty
+database looks like it worked and changes nothing that matters."* A partially
+ported one fails the same way.
+
+### Classification of every remaining SQLite dependency
+
+Nine modules import `node:sqlite` outside tests. Everything else the grep finds is
+prose in comments.
+
+1. **Required for production** — `server/db.js`, `server/db/sqliteTransaction.js`.
+   SQLite remains a supported engine; these are not retirement candidates.
+2. **Migration-only** — `bin/migrate-sqlite-to-postgres.mjs` (opens the source
+   read-only), `bin/generate-postgres-schema.mjs` (generates
+   `db/postgresSchema.js` from the migrations).
+3. **Testing-only** — `server/testing/makeScaleDataset.mjs`.
+4. **Operator tooling, SQLite-only** — `bin/resolveDb.mjs`, `bin/lib/db-safety.mjs`
+   (read-only open), `server/verifyHours.js`, `server/migrate_usernames.js`. This
+   is the blocker above.
+5. **Dead code** — none. `verifyHours.js` and `migrate_usernames.js` are standalone
+   scripts rather than imported modules, but both are pinned by
+   `tooling.dbPath.test.js`; neither is dead.
+
+Nothing was removed: there was no dead production dependency to remove.
+
+### Dead code actually removed
+
+`no-unused-vars` is switched **off** in `.oxlintrc.json`, so `npm run lint` passed
+over 164 violations. 94 of those were imports that no longer resolved to anything.
+All 94 are now gone and `npx oxlint --deny no-unused-vars` reports **0** unused
+imports.
+
+Where every named specifier of a statement was dead, the statement was reduced to
+a side-effect import rather than deleted — several of these modules run code when
+loaded (`config.js` throws on bad configuration), and dropping the import outright
+would have changed boot behaviour silently.
+
+Three of them were `leaflet/dist/images/*.png` in `LeafletMap.jsx`, left behind
+when the default-marker fix was replaced by a CSS `divIcon`. The comment above them
+still described the removed fix and went with them. They were **not** costing
+bundle size — Vite had already tree-shaken them; the build output contains no
+marker assets either before or after.
+
+The remaining ~70 violations are unused local variables and parameters, not
+imports. Enabling the rule outright still fails on those, so it stays off with the
+count recorded here rather than being flipped to green by exemption.

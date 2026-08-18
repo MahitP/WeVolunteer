@@ -2,21 +2,16 @@ import express from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import {
-  sendVerificationEmail,
-  sendPasswordResetEmail,
-  sendEmailChangeConfirmation,
-  sendEmailChangeNotice
-} from '../email.js';
-import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
+import '../email.js';
+import { JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
 import { authenticateToken, selfUserResponse, revokeSession, isSessionRevoked, enabledSecondFactors } from '../utils.js';
 import { assertConsent, recordAcceptances, ConsentMissing } from '../consent.js';
-import { withheldCapabilitiesFor } from '../organizerAgreement.js';
-import { grantsFor } from '../userCapabilities.js';
-import { db, initDatabase } from '../db.js';
-import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
-import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
+import '../organizerAgreement.js';
+import '../userCapabilities.js';
+import { db } from '../db.js';
+import { validateAccountFields, validatePassword, validateUsername } from '../accountValidation.js';
+import { issueVerificationToken, sendVerificationMail } from '../services/verification.js';
 import { isSuspended, liftIfExpired, suspensionNotice } from '../suspension.js';
 import { ROLE, previewPersonaOf } from '../authz.js';
 import { verifyTotpOnce } from '../totpReplay.js';

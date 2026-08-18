@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, MoreVertical, Send, Flag, BellOff, Archive, Check, CheckCheck, MapPin, CalendarCheck, MessageSquare } from 'lucide-react';
+import { ArrowLeft, MoreVertical, Send, Flag, BellOff, Archive, Check, CheckCheck, MapPin, CalendarCheck } from 'lucide-react';
 import { api } from '../../utils/api';
 import { subscribeSocket, unsubscribeSocket, emitTypingStart, emitTypingStop } from '../../services/socket';
 import ReportModal from './ReportModal';

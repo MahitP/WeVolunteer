@@ -1,5 +1,5 @@
 import React from 'react';
-import { MapPin, Layers, CalendarClock, ShieldCheck, Star } from 'lucide-react';
+import { Layers, CalendarClock, ShieldCheck, Star } from 'lucide-react';
 import { formatHours, formatDay, formatTimeRange, countdown } from '../utils/helpers';
 import { Seats, DateChip } from './Seats';
 import { LocationThumbnail } from './location';

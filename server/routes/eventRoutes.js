@@ -9,7 +9,7 @@ import { computeDraw, recordRun, applyRun } from '../services/autoSelect.js';
 import { attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
 import { authenticateToken, notifyConfirmedVolunteers } from '../utils.js';
 import { runInTransaction } from '../db/connectionContext.js';
-import { can, requireCap, requireCapAny } from '../authz.js';
+import { can, requireCapAny } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
@@ -19,9 +19,7 @@ import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
 import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
 import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
-import {
-  canManage, canHelpRun, canRunEvent, EVENT_STAFF_CAPABILITIES, memberIds,
-} from '../organizations.js';
+import { canHelpRun, canRunEvent, EVENT_STAFF_CAPABILITIES, memberIds } from '../organizations.js';
 import { MAIL_DOMAIN } from '../emailIdentity.js';
 
 const router = express.Router();

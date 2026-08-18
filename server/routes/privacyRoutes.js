@@ -1,7 +1,7 @@
 import express from 'express';
 import { runInTransaction } from '../db/connectionContext.js';
 import { db } from '../db.js';
-import { authenticateToken, inTransaction } from '../utils.js';
+import { authenticateToken } from '../utils.js';
 import { DEMO_MODE } from '../config.js';
 import { requireAAL2 } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';

@@ -4,7 +4,7 @@ import { db } from '../db.js';
 import { authenticateToken } from '../utils.js';
 import { requireCap } from '../authz.js';
 import { sendMail } from '../email.js';
-import { APP_NAME } from '../config.js';
+import '../config.js';
 /* The address book stays on this side of the boundary — `issueReports.js` is
    bundled into the browser and `emailIdentity.js` reads `process.env` at module
    scope. See the header on `../issueReports.js`. */

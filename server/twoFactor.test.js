@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
+import { startTestServer } from './testServer.js';
 
 let srv;
 beforeAll(async () => {

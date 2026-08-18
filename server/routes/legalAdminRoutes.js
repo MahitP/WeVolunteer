@@ -4,7 +4,7 @@ import { runInTransaction } from '../db/connectionContext.js';
 import rateLimit from 'express-rate-limit';
 import { DEMO_MODE } from '../config.js';
 import { db } from '../db.js';
-import { authenticateToken, inTransaction } from '../utils.js';
+import { authenticateToken } from '../utils.js';
 import { requireCap, requireAAL2 } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import { recordAudit } from '../auditLog.js';

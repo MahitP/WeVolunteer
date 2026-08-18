@@ -2,14 +2,13 @@ import express from 'express';
 import { runInTransaction } from '../db/connectionContext.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import {
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendEmailChangeConfirmation,
   sendEmailChangeNotice
 } from '../email.js';
-import { VALID_GRADES, JWT_SECRET, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
+import { COOKIE_NAME, clearCookieOptions } from '../config.js';
 
 import { authenticateToken, selfUserResponse } from '../utils.js';
 import { requireAAL2, ROLE, can } from '../authz.js';
@@ -24,11 +23,8 @@ import {
   acceptStudentOrganizerAgreement, studentOrganizerAgreementStatus,
 } from '../studentOrganizerAgreement.js';
 import { helpsRunAnywhere } from '../organizationRoles.js';
-import {
-  validateAccountFields, validatePassword, validateUsername, validateEmail,
-  validateProfilePatch, isCurrentPassword
-} from '../accountValidation.js';
-import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
+import { validatePassword, validateUsername, validateEmail, isCurrentPassword } from '../accountValidation.js';
+import { issueVerificationToken, purgeExpiredVerificationTokens } from '../services/verification.js';
 import { OAUTH_ONLY, issueSession, clearLoginFailuresForUser } from './authRoutes.js';
 // The one safe way anything in this application deletes an uploaded file. It
 // lives with the module that owns public/uploads/ and writes into it — read its
