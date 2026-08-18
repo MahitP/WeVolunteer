@@ -51,7 +51,18 @@ describe('resolving the database engine', () => {
   it('refuses postgres, and says what is actually missing', () => {
     expect(POSTGRES_READY, 'flip this together with the refusal below').toBe(false);
     expect(() => resolveEngine({ DATABASE_ENGINE: POSTGRES })).toThrow(/not runnable yet/);
-    for (const reason of [/never served a request against PostgreSQL/, /test:postgres/]) {
+    /* The point of this test is the word ACTUALLY: the refusal has to name the
+       blocker that is real today, not the one that was real when it was written.
+       It used to assert "never served a request against PostgreSQL", and that
+       claim expired -- the full application suite now runs against a real
+       PostgreSQL server through the real Express app. Leaving it would have
+       pinned a false statement and sent the next reader to the wrong place.
+
+       The blocker now is the production BOOT: server.js runs
+       initDatabase() -> completeDatabaseInit() -> assertSchemaReady(), the
+       instance lock, the sweep and the workers, none of which the harness
+       exercises. */
+    for (const reason of [/production BOOT/, /assertSchemaReady/, /instance lock/]) {
       expect(() => resolveEngine({ DATABASE_ENGINE: POSTGRES })).toThrow(reason);
     }
   });
