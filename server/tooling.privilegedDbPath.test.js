@@ -226,3 +226,60 @@ describe('privileged CLI database resolution', () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * The privileged scripts speak SQLite only, and must say so on PostgreSQL.
+ *
+ * Before this guard, running any of them against a PostgreSQL deployment fell
+ * through to the file-existence check and reported "no database at …/pilot.db —
+ * check WEV_DB_PATH". True, and useless: the path is irrelevant because the data
+ * is not in a file, and the operator goes hunting for a missing SQLite file
+ * instead of learning the tool cannot reach their database.
+ *
+ * The moment this matters is the worst one available. `bin/reset-2fa.mjs` is the
+ * only way to clear a locked-out account's two-factor enrolment — every
+ * `/api/2fa/*` route is self-service behind `requireAAL2` — and REQUIRE_ADMIN_2FA
+ * defaults on, so the person reading the message may well be locked out of their
+ * own platform.
+ *
+ * Both directions are pinned. A guard that fired on SQLite too would take the
+ * working tooling away from the deployment that still uses it.
+ */
+describe('privileged scripts and the PostgreSQL engine', () => {
+  const SCRIPTS = [
+    'bin/reset-2fa.mjs',
+    'bin/grant-ownership.mjs',
+    'bin/revoke-ownership.mjs',
+    'bin/make-admin.mjs',
+    'bin/bootstrap-owners.mjs',
+    'bin/clear-stale-tfa-secret.mjs',
+  ];
+
+  for (const script of SCRIPTS) {
+    it(`${script} refuses on DATABASE_ENGINE=postgres and names the reason`, () => {
+      const out = run(script, ['someone@example.org', 'a reason'], {
+        DATABASE_ENGINE: 'postgres',
+        DATABASE_URL: 'postgres://user@localhost:5432/whatever',
+      });
+
+      expect(out).toMatch(/speaks SQLite only/);
+      /* The misleading old message must not be what they read. */
+      expect(out).not.toMatch(/Check WEV_DB_PATH in \.env/);
+    });
+  }
+
+  it('does not fire when the engine is SQLite, explicitly or by default', () => {
+    /* A path that does not exist, so the run stops at the ordinary
+       file-existence refusal — which is proof the PostgreSQL guard let it past. */
+    const missing = path.join(ROOT, 'definitely-not-a-database.db');
+
+    for (const env of [{ DATABASE_ENGINE: 'sqlite' }, { DATABASE_ENGINE: undefined }]) {
+      const out = run('bin/reset-2fa.mjs', ['someone@example.org', 'a reason'], {
+        ...env,
+        WEV_DB_PATH: missing,
+      });
+      expect(out).not.toMatch(/speaks SQLite only/);
+      expect(out).toMatch(/no database at/);
+    }
+  });
+});

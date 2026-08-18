@@ -129,6 +129,52 @@ export function openPrivilegedDb(command) {
   const dbPath = anchorRelative(loadDotEnv());
 
   /**
+   * A PostgreSQL deployment has no file to open, and every message below this
+   * point would send the operator looking for one.
+   *
+   * These scripts speak SQLite only: they use the synchronous `node:sqlite` API
+   * directly. Run against a PostgreSQL deployment, the existence check below
+   * fires and says "no database at …/pilot.db — check WEV_DB_PATH". That is
+   * true and useless: the path is irrelevant because the data is not in a file
+   * at all, and an operator reading it goes looking for a missing SQLite file
+   * instead of learning that the tool cannot do the job.
+   *
+   * The moment this matters is the worst possible one. `bin/reset-2fa.mjs` is
+   * the ONLY way to clear a locked-out account's two-factor enrolment — every
+   * `/api/2fa/*` route is self-service behind `requireAAL2`, so you must already
+   * have passed 2FA to turn it off — and `REQUIRE_ADMIN_2FA` defaults on. So the
+   * operator reading this message is quite likely locked out of their own
+   * platform. They are owed the real reason on the first try.
+   *
+   * Checked AFTER `loadDotEnv()`, which populates `process.env` from `.env`:
+   * the engine is usually configured there rather than in the shell.
+   *
+   * This is a refusal, not a fix. Porting the six production scripts means
+   * giving this function a PostgreSQL branch and awaiting every statement in
+   * each of them. Until that happens, saying so plainly is the honest behaviour
+   * -- and the reason it refuses rather than guessing is the one already written
+   * below: a privileged command that appears to work and changes nothing is
+   * worse than one that stops.
+   */
+  const engine = (process.env.DATABASE_ENGINE ?? 'sqlite').trim().toLowerCase();
+  if (engine === 'postgres') {
+    console.error('Refused: DATABASE_ENGINE=postgres, and this script speaks SQLite only.');
+    console.error('');
+    console.error(`  ${command} reads and writes through node:sqlite directly. It`);
+    console.error('  cannot reach a PostgreSQL database, and it will not pretend to.');
+    console.error('');
+    console.error('  There is no in-application substitute for these commands: every');
+    console.error('  two-factor route is self-service and requires an existing second');
+    console.error('  factor, so a locked-out account cannot be recovered from the UI.');
+    console.error('');
+    console.error('  Tracked in POSTGRES_MIGRATION_STATUS.md (phase 18) as a cutover');
+    console.error('  blocker. To operate on a SQLite database from this machine anyway,');
+    console.error('  set the engine for this command only:');
+    console.error(`    DATABASE_ENGINE=sqlite WEV_DB_PATH=./pilot.db node ${command} ...`);
+    process.exit(1);
+  }
+
+  /**
    * Which file the configuration resolved to, said the same way on every exit
    * path rather than only the successful one.
    *
