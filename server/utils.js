@@ -13,7 +13,7 @@ import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
 import { sweepCheckinTokens } from './checkinTokens.js';
 import { sweepErrors } from './errorReporter.js';
 import { sendErrorAlerts, sendBackupAlert } from './alerting.js';
-import { forUpdate } from './db/dialectSql.js';
+import { forUpdate, isUniqueViolation } from './db/dialectSql.js';
 /* Read here rather than inside alerting.js — that module imports nothing on
    purpose, so everything it needs arrives as an argument. */
 import { backupStatus } from './backupStatus.js';
@@ -913,8 +913,22 @@ export async function createNotification({ userId, kind, title, body, link = nul
     
     return id;
   } catch (e) {
-    // A UNIQUE violation means we already sent this one — that's success.
-    if (String(e.message).includes('UNIQUE')) return null;
+    /**
+     * A unique violation means we already sent this one — that's success.
+     *
+     * This matched on `String(e.message).includes('UNIQUE')`, which is SQLite's
+     * wording ("UNIQUE constraint failed: …"). PostgreSQL says "duplicate key
+     * value violates unique constraint" — lower case, and the match is
+     * case-sensitive — so on PostgreSQL every DEDUPLICATED notification took the
+     * error branch and logged "Failed to create notification". The return value
+     * was the same either way, so nothing broke; what it produced was a steady
+     * stream of logged errors for the one case that is explicitly not an error,
+     * which is how a real failure gets lost.
+     *
+     * `isUniqueViolation` knows both engines: SQLSTATE 23505 on PostgreSQL, the
+     * message on SQLite.
+     */
+    if (isUniqueViolation(e)) return null;
     console.error('Failed to create notification:', e);
     return null;
   }
