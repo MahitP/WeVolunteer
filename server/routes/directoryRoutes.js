@@ -322,15 +322,21 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
      which the empty-result branch below treats as "no matches". */
   const tagKey = sigil === 'tag' ? (normaliseTag(q)?.tag ?? null) : null;
 
+  /* SQLite's LIKE ignores case; PostgreSQL's does not, so `@Ana` silently
+     stopped matching the handle `ana` — an empty result, not an error.
+
+     Hoisted out of the people branch because the ORGANIZATION branch below had
+     the same bug and no access to this: searching "Beach" would not have found
+     "beach cleanup" once the deployment moved to PostgreSQL. One definition, so
+     the next query added here cannot quietly get the raw operator. */
+  const LIKE = caseInsensitiveLike(db);
+
   let users = [];
   if (type !== 'organizations') {
     /**
      * `LIMIT n + 1` is how `hasMore` is answered without a second COUNT over
      * the whole table. The extra row is dropped before it reaches the client.
      */
-    /* SQLite's LIKE ignores case; PostgreSQL's does not, so `@Ana` silently
-       stopped matching the handle `ana` — an empty result, not an error. */
-    const LIKE = caseInsensitiveLike(db);
     const rows = await db.prepare(`
       SELECT id, username, name, avatar, profile_picture_url, role, location
       FROM users
@@ -341,7 +347,7 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
            searching for a friend's exact handle should not have to scroll. */
         CASE WHEN username = ? COLLATE nocase THEN 0
              WHEN username ${LIKE} ? ESCAPE '\\' THEN 1
-             WHEN name LIKE ? ESCAPE '\\' THEN 2
+             WHEN name ${LIKE} ? ESCAPE '\\' THEN 2
              ELSE 3 END,
         name COLLATE nocase
       LIMIT ? OFFSET ?
@@ -385,7 +391,7 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
                (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
                (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
         FROM organizations o
-        WHERE o.status = 'active' AND (o.name LIKE ? ESCAPE '\\' OR o.slug LIKE ? ESCAPE '\\')
+        WHERE o.status = 'active' AND (o.name ${LIKE} ? ESCAPE '\\' OR o.slug ${LIKE} ? ESCAPE '\\')
         ORDER BY o.name COLLATE nocase
         LIMIT ? OFFSET ?
       `).all(term, term, limit + 1, offset);

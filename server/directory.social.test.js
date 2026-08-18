@@ -631,6 +631,34 @@ describe('the social and organization features', () => {
       orgSlug = created.body.organization.slug;
     });
 
+    /**
+     * Organization search was case-SENSITIVE on PostgreSQL until 2026-08-18.
+     *
+     * The people query routed its comparisons through `caseInsensitiveLike(db)` —
+     * LIKE on SQLite, ILIKE on PostgreSQL. The organization query a few lines
+     * below used a raw `LIKE`, and could not have done otherwise: the helper's
+     * result was declared inside the people branch and was not in scope there.
+     *
+     * On SQLite this is invisible, because its LIKE ignores case already. Every
+     * test passed and every search worked. On PostgreSQL, searching "SYNTAX"
+     * stopped finding "Search Syntax Club" — no error, an empty result on the
+     * feature students use to find a club.
+     *
+     * Upper-cased rather than lower-cased on purpose: the fixture name is mixed
+     * case, so lower-casing could pass against a case-sensitive operator by
+     * accident.
+     */
+    it('finds an organization whose name is typed in the wrong case', async () => {
+      const res = await srv.call(
+        'GET', '/api/directory/search?q=SYNTAX&type=organizations', undefined, alice
+      );
+      expect(res.status).toBe(200);
+      expect(
+        res.body.organizations.map(o => o.slug),
+        'searching "SYNTAX" did not find "Search Syntax Club"',
+      ).toContain(orgSlug);
+    });
+
     /* `@handle` is a question about PEOPLE. An organization in the results would
        be the mixed list the sigil exists to escape. */
     it('@ searches people only', async () => {
