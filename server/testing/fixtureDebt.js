@@ -244,7 +244,23 @@ export function unportedChains(src) {
   walk(ast, (n, stack) => {
     const name = prepareChainObject(n);
     if (!name) return;
-    if (stack[stack.length - 1]?.type === 'AwaitExpression') return;
+    const parent = stack[stack.length - 1];
+    if (parent?.type === 'AwaitExpression') return;
+
+    /**
+     * A RETURNED chain is the caller's promise, not abandoned work.
+     *
+     * `expect(async () => db.prepare(sql).run(x)).rejects.toThrow(…)` is the
+     * portable refusal form this migration settled on: the statement is the
+     * arrow's returned expression, so the assertion awaits it. Counting those
+     * as unported debt is a false positive, and it is a common shape — five
+     * appeared in one new file.
+     *
+     * Both spellings count as returned: the concise arrow body, and an explicit
+     * `return` inside a block.
+     */
+    if (parent?.type === 'ArrowFunctionExpression' && parent.body === n) return;
+    if (parent?.type === 'ReturnStatement') return;
 
     /* Resolve the identifier: walk outward and take the innermost scope that
        binds it to a raw handle. If none does, it is the application handle. */

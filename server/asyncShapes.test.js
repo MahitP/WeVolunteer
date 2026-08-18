@@ -815,7 +815,7 @@ describe('the unported fixture surface', () => {
   });
 
   /** Lowered only by porting files, never raised to accommodate new ones. */
-  const CEILING = 128;
+  const CEILING = 113;
 
   it(`has at most ${CEILING} unawaited prepare() chains in proxy-holding test files`, () => {
     const offenders = new Map();
