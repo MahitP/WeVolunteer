@@ -233,7 +233,7 @@ describe('a failing retention sweep reaches the error dashboard', () => {
       let startup;
       expect(() => { startup = worker.startRetentionWorker(dbFailingOnMessageCount(db)); })
         .not.toThrow();
-      (await expect(startup, 'the startup sweep rejected instead of catching internally')).resolves.toBeUndefined();
+      await expect(startup, 'the startup sweep rejected instead of catching internally').resolves.toBeUndefined();
     } finally {
       worker.stopRetentionWorker();
       consoleErr.mockRestore();

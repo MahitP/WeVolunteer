@@ -260,3 +260,63 @@ describe('messages/conversations/resolve capability walkthrough (v1.2a messaging
     expect(res.body.error).toMatch(/Access denied/);
   });
 });
+
+describe('banned student messaging prevention', () => {
+  let orgToken, studentToken;
+  let eventId, orgId, bannedStudentId, convId;
+
+  beforeAll(async () => {
+    orgToken = await srv.login('jordan.whitfield@example.org');
+    const student = await srv.signupConfirmed({
+      name: 'Banned Msg Student', username: 'banned_msg_student', email: 'banned-msg@test.local',
+      password: 'Password123', grade: '10', role: 'student'
+    });
+    studentToken = student.cookie;
+    const { db } = await import('./db.js');
+    bannedStudentId = (await db.prepare("SELECT id FROM users WHERE email = 'banned-msg@test.local'").get()).id;
+
+    // Create an organization and an event under it
+    orgId = 'org-msg-ban-test';
+    await db.prepare(`
+      INSERT INTO organizations (id, name, slug, created_at, updated_at)
+      VALUES (?, 'Ban Test Org', 'ban-test-org', ?, ?)
+      ON CONFLICT (id) DO NOTHING
+    `).run(orgId, new Date().toISOString(), new Date().toISOString());
+
+    const future = new Date(Date.now() + 30 * 864e5).toISOString();
+    const mk = await srv.call('POST', '/api/events', {
+      title: 'Banned Msg Event', description: 'd', category: 'Other', location: 'Hall',
+      applicationDeadline: new Date(Date.now() + 20 * 864e5).toISOString(),
+      slots: [{ name: 'Shift', description: 'd', startDatetime: future, endDatetime: new Date(Date.now() + 30 * 864e5 + 108e5).toISOString(), maxSpots: 5 }]
+    }, orgToken);
+    expect(mk.status).toBe(201);
+    eventId = mk.body.id;
+    await db.prepare('UPDATE events SET organization_id = ? WHERE id = ?').run(orgId, eventId);
+
+    const slot = (await srv.call('GET', '/api/events', undefined, orgToken)).body.find(e => e.id === eventId).slots[0];
+    await srv.call('POST', `/api/events/${eventId}/apply`, { slotId: slot.id }, studentToken);
+
+    // Resolve conversation prior to ban
+    const convRes = await srv.call('POST', '/api/messages/conversations/resolve', { eventId, studentId: bannedStudentId }, studentToken);
+    expect(convRes.status).toBe(200);
+    convId = convRes.body.conversation.id;
+
+    // Now ban the student from this organization
+    await db.prepare(`
+      INSERT INTO organization_bans (id, organization_id, user_id, reason, created_at)
+      VALUES ('ban-msg-1', ?, ?, 'Violation of rules', ?)
+    `).run(orgId, bannedStudentId, new Date().toISOString());
+  });
+
+  it('refuses to resolve conversation for a banned student', async () => {
+    const res = await srv.call('POST', '/api/messages/conversations/resolve', { eventId, studentId: bannedStudentId }, studentToken);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/banned/i);
+  });
+
+  it('refuses to send messages from a banned student in an existing conversation', async () => {
+    const res = await srv.call('POST', `/api/messages/conversations/${convId}/messages`, { body: 'Should fail' }, studentToken);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('banned');
+  });
+});

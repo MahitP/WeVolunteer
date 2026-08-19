@@ -170,6 +170,13 @@ export async function eligibleRelationship({ eventId, actor, studentId = null, p
     return { ok: false, status: 403, error: 'Messaging unlocks after an application exists for this event' };
   }
 
+  if (!isStaff && event.organization_id && actor.id === resolvedStudentId) {
+    const ban = await db.prepare('SELECT 1 FROM organization_bans WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL').get(event.organization_id, actor.id);
+    if (ban) {
+      return { ok: false, status: 403, error: 'You cannot message this organization while banned.' };
+    }
+  }
+
   return {
     ok: true,
     event,

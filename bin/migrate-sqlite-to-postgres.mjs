@@ -71,14 +71,15 @@ const req = createRequire(path.join(REPO, 'noop.js'));
 const { default: pg } = await import(pathToFileURL(req.resolve('pg')).href);
 
 const sqlite = new DatabaseSync(SOURCE, { readOnly: true });
-const pool = new pg.Pool({ connectionString: TARGET, max: 4 });
+const pool = new pg.Pool({ connectionString: TARGET, max: 1 });
+const client = await pool.connect();
 
 /* `bigint`/`numeric` as JavaScript numbers, matching the application adapter,
    so counts compare as numbers rather than strings on one side only. */
 pg.types.setTypeParser(20, (v) => (v === null ? null : Number(v)));
 pg.types.setTypeParser(1700, (v) => (v === null ? null : Number(v)));
 
-const q = (sql, params = []) => pool.query(sql, params);
+const q = (sql, params = []) => client.query(sql, params);
 const ident = (n) => `"${n.replace(/"/g, '""')}"`;
 
 const sourceTables = sqlite
@@ -90,7 +91,31 @@ const targetTables = (await q(
     WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' ORDER BY table_name`
 )).rows.map(r => r.table_name);
 
-const shared = sourceTables.filter(t => targetTables.includes(t));
+function sortTablesByDependency(db, tableNames) {
+  const set = new Set(tableNames);
+  const deps = new Map();
+  for (const t of tableNames) {
+    const fks = db.prepare(`PRAGMA foreign_key_list(${ident(t)})`).all();
+    deps.set(t, new Set(fks.map(f => f.table).filter(target => set.has(target) && target !== t)));
+  }
+  const ordered = [];
+  const placed = new Set();
+  while (ordered.length < tableNames.length) {
+    const ready = tableNames.filter(t => !placed.has(t) && [...deps.get(t)].every(d => placed.has(d)));
+    if (ready.length === 0) {
+      const remaining = tableNames.filter(t => !placed.has(t));
+      ordered.push(...remaining);
+      break;
+    }
+    for (const r of ready) {
+      ordered.push(r);
+      placed.add(r);
+    }
+  }
+  return ordered;
+}
+
+const shared = sortTablesByDependency(sqlite, sourceTables.filter(t => targetTables.includes(t)));
 const onlySource = sourceTables.filter(t => !targetTables.includes(t));
 const onlyTarget = targetTables.filter(t => !sourceTables.includes(t));
 
@@ -99,23 +124,6 @@ if (onlySource.length) console.log(`  only in SQLite    : ${onlySource.join(', '
 if (onlyTarget.length) console.log(`  only in PostgreSQL: ${onlyTarget.join(', ')}`);
 
 /* ── Refuse to load into a populated target ───────────────────────────────── */
-/**
- * The schema baseline row is not data, and counting it made this guard useless.
- *
- * `applyPostgresSchema()` writes exactly one row —
- * `(56, 'postgres_baseline', …, 'baseline')` — so that a freshly built schema
- * does not look like an un-migrated database. The documented cutover is: create
- * the database, apply the schema, then load. That sequence therefore always
- * arrived here with `schema_migrations(1)` and always refused.
- *
- * The damage was not the refusal, it was the remedy: the operator adds `--force`,
- * which turns the guard off completely — including the part that stops a second
- * load duplicating every row of a live database. A runbook that ends in "always
- * pass --force" has no guard at all. Ignoring the one row it put there itself
- * keeps the check meaningful, because a target that has been loaded once holds
- * the SOURCE's schema_migrations rows too, and those are not named
- * 'postgres_baseline'.
- */
 let populated = [];
 for (const t of shared) {
   const { rows } = t === 'schema_migrations'
@@ -126,213 +134,202 @@ for (const t of shared) {
 if (populated.length && !FORCE) {
   console.error(`\nREFUSING: the target already holds rows in ${populated.length} table(s): ${populated.slice(0, 6).join(', ')}`);
   console.error('Re-running into a populated database duplicates it. Drop and recreate, or pass --force.');
-  await pool.end(); process.exit(1);
+  client.release(); await pool.end(); process.exit(1);
 }
 
 /* ── Copy ─────────────────────────────────────────────────────────────────── */
-/**
- * The baseline marker goes before the real migration history arrives.
- *
- * `applyPostgresSchema()` stamps `(56, 'postgres_baseline')` to record that the
- * schema was built whole rather than replayed. The source's own
- * `schema_migrations` lists all 56 individually — including version 56 — so
- * copying it in collides with the marker on the primary key and the load dies
- * partway through with `duplicate key value violates unique constraint
- * "schema_migrations_pkey"`, after other tables have already been written.
- *
- * Dropping the placeholder is the honest resolution: it exists only to say "the
- * schema is at 56" in the absence of a real history, and a real history is
- * exactly what is about to be loaded. Deleted only when the source actually has
- * rows to replace it with, so a source without migration history still leaves
- * the target able to state its version.
- */
-if (APPLY && shared.includes('schema_migrations')) {
-  const sourceHistory = sqlite
-    .prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n;
-  if (sourceHistory > 0) {
-    await q("DELETE FROM schema_migrations WHERE name = 'postgres_baseline'");
-  }
-}
-
-const report = [];
-let copied = 0, nullIds = [];
-
-if (APPLY) await q("SET session_replication_role = 'replica'");
-
-for (const table of shared) {
-  const cols = sqlite.prepare(`PRAGMA table_info(${ident(table)})`).all();
-  const names = cols.map(c => c.name);
-  const pk = cols.filter(c => c.pk > 0).map(c => c.name);
-
-  const rows = sqlite.prepare(`SELECT ${names.map(ident).join(', ')} FROM ${ident(table)}`).all();
-
-  /* SQLite lets a TEXT PRIMARY KEY hold NULL; PostgreSQL will not. Detected and
-     reported per row rather than invented, because a missing identity is a data
-     question for the owner, not something a migration should paper over. */
-  for (const r of rows) {
-    for (const c of pk) if (r[c] === null || r[c] === undefined) nullIds.push(`${table}.${c}`);
-  }
-
-  if (APPLY && rows.length) {
-    const CHUNK = 200;
-    for (let i = 0; i < rows.length; i += CHUNK) {
-      const slice = rows.slice(i, i + CHUNK);
-      const params = [];
-      const tuples = slice.map((r) => {
-        const ph = names.map((n) => { params.push(r[n] ?? null); return `$${params.length}`; });
-        return `(${ph.join(', ')})`;
-      });
-      await q(
-        `INSERT INTO ${ident(table)} (${names.map(ident).join(', ')}) VALUES ${tuples.join(', ')}`,
-        params,
-      );
-    }
-  }
-  copied += rows.length;
-  report.push({ table, rows: rows.length, pk });
-}
-
-if (APPLY) await q("SET session_replication_role = 'origin'");
-
-console.log(`\n${APPLY ? 'COPIED' : 'WOULD COPY'} ${copied} rows across ${shared.length} tables`);
-if (nullIds.length) {
-  const counts = nullIds.reduce((m, k) => m.set(k, (m.get(k) ?? 0) + 1), new Map());
-  console.log(`\nNULL PRIMARY KEYS (PostgreSQL rejects these):`);
-  for (const [k, n] of counts) console.log(`  ${k}: ${n}`);
-} else {
-  console.log('NULL primary keys: none');
-}
-
-/* ── Resynchronise identity sequences ─────────────────────────────────────── */
-/**
- * Every row above was inserted with an EXPLICIT id, which leaves PostgreSQL's
- * identity sequences untouched — still sitting at 1 while the table holds ids up
- * to MAX(id). Nothing complains during the load. The failure arrives later, on
- * the first row somebody inserts normally:
- *
- *     duplicate key value violates unique constraint "…_pkey"
- *     DETAIL:  Key (id)=(2) already exists.
- *
- * Reproduced on a scratch database on 2026-08-18: five rows loaded with ids 1-5
- * left the sequence at 1, and the next default insert failed on id=2.
- *
- * It is easy to under-rate this because only ONE column in the schema is
- * identity-backed today (`legal_document_revisions.id`). That is exactly the
- * table a deployment writes to when publishing a policy revision — so the first
- * symptom after a cutover would be "we cannot publish a legal document any more",
- * which is not where anybody would look for a migration bug.
- *
- * The set is discovered from `information_schema` rather than hard-coded, so a
- * future identity column is covered the day it is added. `setval(..., false)`
- * with COALESCE(MAX(id), 0) + 1 is correct for an empty table too: it leaves the
- * sequence poised to hand out 1.
- */
+let replicaRoleSet = false;
 if (APPLY) {
-  const { rows: identities } = await q(`
-    SELECT table_name, column_name
-      FROM information_schema.columns
-     WHERE table_schema = current_schema() AND is_identity = 'YES'
-     ORDER BY table_name, column_name
-  `);
-
-  const resynced = [];
-  for (const { table_name: table, column_name: column } of identities) {
-    const { rows } = await q(
-      `SELECT setval(
-                pg_get_serial_sequence($1, $2),
-                COALESCE((SELECT MAX(${ident(column)}) FROM ${ident(table)}), 0) + 1,
-                false
-              ) AS next_value`,
-      [table, column]
-    );
-    resynced.push(`${table}.${column} → ${rows[0].next_value}`);
+  try {
+    await q("SET session_replication_role = 'replica'");
+    replicaRoleSet = true;
+  } catch {
+    /* Non-superuser connection (e.g. Supabase, Neon, AWS RDS, Render, etc.).
+       Tables are sorted in dependency order so foreign keys are naturally satisfied. */
+    console.log('Note: session_replication_role could not be set (non-superuser); relying on dependency-ordered load.');
   }
-
-  console.log(identities.length
-    ? `\nidentity sequences resynchronised: ${resynced.join(', ')}`
-    : '\nidentity sequences: none in this schema');
+  await q('BEGIN');
 }
 
-/* ── Verify ───────────────────────────────────────────────────────────────── */
-if (APPLY) {
-  console.log('\n── verification ──');
-  const mismatches = [];
-
-  /**
-   * Every identity sequence must be able to issue an id that does not already
-   * exist. Checked rather than assumed: the resynchronisation above is the fix,
-   * and this is what notices if it ever stops working.
-   *
-   * Compared against MAX(id) instead of calling nextval, because nextval
-   * CONSUMES a value — a verification step that burns an id every run would be
-   * its own small defect.
-   */
-  for (const { table_name: t, column_name: c } of (await q(`
-    SELECT table_name, column_name FROM information_schema.columns
-     WHERE table_schema = current_schema() AND is_identity = 'YES'
-  `)).rows) {
-    /**
-     * Read from the sequence RELATION, not `pg_sequences`.
-     *
-     * `pg_sequences.last_value` is NULL until the sequence has actually been
-     * read, so a freshly `setval`-ed sequence reports NULL there — and the first
-     * draft of this check coalesced that to 0 and reported every correctly
-     * resynchronised sequence as broken. The relation exposes `is_called` too,
-     * which is the half that decides what the next id will be:
-     *
-     *     is_called = false  ->  next id IS last_value
-     *     is_called = true   ->  next id is last_value + 1
-     */
-    const { rows: seqName } = await q('SELECT pg_get_serial_sequence($1, $2) AS s', [t, c]);
-    const { rows: state } = await q(`
-      SELECT COALESCE((SELECT MAX(${ident(c)}) FROM ${ident(t)}), 0) AS max_id,
-             (SELECT last_value FROM ${seqName[0].s}) AS last_value,
-             (SELECT is_called  FROM ${seqName[0].s}) AS is_called
-    `);
-    const maxId = Number(state[0].max_id);
-    const nextId = Number(state[0].last_value) + (state[0].is_called ? 1 : 0);
-    if (nextId <= maxId) {
-      mismatches.push(
-        `${t}.${c}: next id would be ${nextId} but MAX(${c}) is ${maxId} — `
-        + 'the next insert would collide'
-      );
+try {
+  if (APPLY && shared.includes('schema_migrations')) {
+    const sourceHistory = sqlite
+      .prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n;
+    if (sourceHistory > 0) {
+      await q("DELETE FROM schema_migrations WHERE name = 'postgres_baseline'");
     }
   }
 
-  for (const { table, rows, pk } of report) {
-    const { rows: got } = await q(`SELECT COUNT(*)::int AS c FROM ${ident(table)}`);
-    if (got[0].c !== rows) mismatches.push(`${table}: source ${rows} -> target ${got[0].c}`);
+  const report = [];
+  let copied = 0, nullIds = [];
 
-    /* Primary keys compared as SETS, not counts: equal counts with different
-       ids is the failure a count check cannot see. */
-    if (pk.length === 1 && rows > 0) {
-      const src = new Set(sqlite.prepare(`SELECT ${ident(pk[0])} AS k FROM ${ident(table)}`).all().map(r => String(r.k)));
-      const dst = new Set((await q(`SELECT ${ident(pk[0])} AS k FROM ${ident(table)}`)).rows.map(r => String(r.k)));
-      const missing = [...src].filter(k => !dst.has(k));
-      const extra = [...dst].filter(k => !src.has(k));
-      if (missing.length || extra.length) {
-        mismatches.push(`${table}: ${missing.length} ids missing, ${extra.length} unexpected`);
+  for (const table of shared) {
+    const cols = sqlite.prepare(`PRAGMA table_info(${ident(table)})`).all();
+    const names = cols.map(c => c.name);
+    const pk = cols.filter(c => c.pk > 0).map(c => c.name);
+
+    const rows = sqlite.prepare(`SELECT ${names.map(ident).join(', ')} FROM ${ident(table)}`).all();
+
+    for (const r of rows) {
+      for (const c of pk) if (r[c] === null || r[c] === undefined) nullIds.push(`${table}.${c}`);
+    }
+
+    if (APPLY && rows.length) {
+      const CHUNK = 200;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const slice = rows.slice(i, i + CHUNK);
+        const params = [];
+        const tuples = slice.map((r) => {
+          const ph = names.map((n) => { params.push(r[n] ?? null); return `$${params.length}`; });
+          return `(${ph.join(', ')})`;
+        });
+        await q(
+          `INSERT INTO ${ident(table)} (${names.map(ident).join(', ')}) VALUES ${tuples.join(', ')}`,
+          params,
+        );
       }
     }
+    copied += rows.length;
+    report.push({ table, rows: rows.length, pk });
   }
 
-  console.log(mismatches.length ? `ROW/ID MISMATCHES:\n  ${mismatches.join('\n  ')}` : 'row counts and primary keys: all match');
-
-  /* Re-check every foreign key against all the loaded data. */
-  const { rows: fks } = await q(`
-    SELECT conname, conrelid::regclass::text AS tbl
-      FROM pg_constraint
-     WHERE contype = 'f' AND connamespace = current_schema()::regnamespace
-     ORDER BY conname`);
-  const broken = [];
-  for (const fk of fks) {
-    try { await q(`ALTER TABLE ${fk.tbl} VALIDATE CONSTRAINT ${ident(fk.conname)}`); }
-    catch (e) { broken.push(`${fk.tbl}.${fk.conname}: ${e.message}`); }
+  console.log(`\n${APPLY ? 'COPIED' : 'WOULD COPY'} ${copied} rows across ${shared.length} tables`);
+  if (nullIds.length) {
+    const counts = nullIds.reduce((m, k) => m.set(k, (m.get(k) ?? 0) + 1), new Map());
+    console.log(`\nNULL PRIMARY KEYS (PostgreSQL rejects these):`);
+    for (const [k, n] of counts) console.log(`  ${k}: ${n}`);
+  } else {
+    console.log('NULL primary keys: none');
   }
-  console.log(broken.length ? `FOREIGN KEYS FAILING:\n  ${broken.join('\n  ')}` : `foreign keys: all ${fks.length} validate`);
 
-  process.exitCode = (mismatches.length || broken.length || nullIds.length) ? 1 : 0;
+  /* ── Resynchronise identity sequences ─────────────────────────────────────── */
+  if (APPLY) {
+    const { rows: identities } = await q(`
+      SELECT table_name, column_name
+        FROM information_schema.columns
+       WHERE table_schema = current_schema() AND is_identity = 'YES'
+       ORDER BY table_name, column_name
+    `);
+
+    const resynced = [];
+    for (const { table_name: table, column_name: column } of identities) {
+      const { rows } = await q(
+        `SELECT setval(
+                  pg_get_serial_sequence($1, $2),
+                  COALESCE((SELECT MAX(${ident(column)}) FROM ${ident(table)}), 0) + 1,
+                  false
+                ) AS next_value`,
+        [table, column]
+      );
+      resynced.push(`${table}.${column} → ${rows[0].next_value}`);
+    }
+
+    console.log(identities.length
+      ? `\nidentity sequences resynchronised: ${resynced.join(', ')}`
+      : '\nidentity sequences: none in this schema');
+  }
+
+  /* ── Verify ───────────────────────────────────────────────────────────────── */
+  if (APPLY) {
+    console.log('\n── verification ──');
+    const mismatches = [];
+
+    for (const { table_name: t, column_name: c } of (await q(`
+      SELECT table_name, column_name FROM information_schema.columns
+       WHERE table_schema = current_schema() AND is_identity = 'YES'
+    `)).rows) {
+      const { rows: seqName } = await q('SELECT pg_get_serial_sequence($1, $2) AS s', [t, c]);
+      const { rows: state } = await q(`
+        SELECT COALESCE((SELECT MAX(${ident(c)}) FROM ${ident(t)}), 0) AS max_id,
+               (SELECT last_value FROM ${seqName[0].s}) AS last_value,
+               (SELECT is_called  FROM ${seqName[0].s}) AS is_called
+      `);
+      const maxId = Number(state[0].max_id);
+      const nextId = Number(state[0].last_value) + (state[0].is_called ? 1 : 0);
+      if (nextId <= maxId) {
+        mismatches.push(
+          `${t}.${c}: next id would be ${nextId} but MAX(${c}) is ${maxId} — `
+          + 'the next insert would collide'
+        );
+      }
+    }
+
+    for (const { table, rows, pk } of report) {
+      const { rows: got } = await q(`SELECT COUNT(*)::int AS c FROM ${ident(table)}`);
+      if (got[0].c !== rows) mismatches.push(`${table}: source ${rows} -> target ${got[0].c}`);
+
+      if (pk.length === 1 && rows > 0) {
+        const src = new Set(sqlite.prepare(`SELECT ${ident(pk[0])} AS k FROM ${ident(table)}`).all().map(r => String(r.k)));
+        const dst = new Set((await q(`SELECT ${ident(pk[0])} AS k FROM ${ident(table)}`)).rows.map(r => String(r.k)));
+        const missing = [...src].filter(k => !dst.has(k));
+        const extra = [...dst].filter(k => !src.has(k));
+        if (missing.length || extra.length) {
+          mismatches.push(`${table}: ${missing.length} ids missing, ${extra.length} unexpected`);
+        }
+      }
+    }
+
+    console.log(mismatches.length ? `ROW/ID MISMATCHES:\n  ${mismatches.join('\n  ')}` : 'row counts and primary keys: all match');
+
+    const { rows: fks } = await q(`
+      SELECT
+        c.conname AS constraint_name,
+        c.conrelid::regclass::text AS child_table,
+        c.confrelid::regclass::text AS parent_table,
+        (SELECT json_agg(attname ORDER BY array_position(c.conkey, attnum))
+           FROM pg_attribute WHERE attrelid = c.conrelid AND attnum = ANY(c.conkey)) AS child_columns,
+        (SELECT json_agg(attname ORDER BY array_position(c.confkey, attnum))
+           FROM pg_attribute WHERE attrelid = c.confrelid AND attnum = ANY(c.confkey)) AS parent_columns
+      FROM pg_constraint c
+      WHERE c.contype = 'f' AND c.connamespace = current_schema()::regnamespace
+      ORDER BY c.conname
+    `);
+    const broken = [];
+    for (const fk of fks) {
+      const joinConds = fk.child_columns.map((cc, idx) => `c.${ident(cc)} = p.${ident(fk.parent_columns[idx])}`).join(' AND ');
+      const notNullConds = fk.child_columns.map(cc => `c.${ident(cc)} IS NOT NULL`).join(' AND ');
+      const nullParentConds = fk.parent_columns.map(pc => `p.${ident(pc)} IS NULL`).join(' AND ');
+      const checkSql = `
+        SELECT COUNT(*)::int AS count
+        FROM ${fk.child_table} c
+        LEFT JOIN ${fk.parent_table} p ON ${joinConds}
+        WHERE ${notNullConds} AND ${nullParentConds}
+      `;
+      try {
+        const { rows } = await q(checkSql);
+        if (rows[0].count > 0) {
+          broken.push(`${fk.child_table}.${fk.constraint_name}: ${rows[0].count} orphaned rows referencing missing ${fk.parent_table}`);
+        }
+      } catch (e) {
+        broken.push(`${fk.child_table}.${fk.constraint_name}: verification failed: ${e.message}`);
+      }
+    }
+    console.log(broken.length ? `FOREIGN KEYS FAILING:\n  ${broken.join('\n  ')}` : `foreign keys: all ${fks.length} validate`);
+
+    process.exitCode = (mismatches.length || broken.length || nullIds.length) ? 1 : 0;
+  }
+
+  if (APPLY) {
+    if (process.exitCode === 1) {
+      await q('ROLLBACK');
+      console.error('\nROLLBACK: migration failed verification');
+    } else {
+      await q('COMMIT');
+    }
+    if (replicaRoleSet) {
+      try { await q("SET session_replication_role = 'origin'"); } catch {}
+    }
+  }
+} catch (err) {
+  if (APPLY) {
+    try { await q('ROLLBACK'); } catch {}
+    if (replicaRoleSet) {
+      try { await q("SET session_replication_role = 'origin'"); } catch {}
+    }
+  }
+  throw err;
+} finally {
+  client.release();
+  await pool.end();
+  sqlite.close();
 }
-
-await pool.end();
-sqlite.close();

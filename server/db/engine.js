@@ -189,7 +189,14 @@ export function postgresConfig(env = process.env) {
      PostgreSQL reached over the internet without TLS sends the password and
      every student record in clear text, and defaulting to off would make that
      the accidental configuration rather than a chosen one. */
-  const isLocal = /@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(connectionString);
+  let isLocal = false;
+  try {
+    const u = new URL(connectionString);
+    isLocal = u.hostname === 'localhost' || u.hostname === '127.0.0.1'
+      || u.hostname === '::1' || u.hostname === '[::1]';
+  } catch {
+    isLocal = /(?:@|:\/\/)(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(connectionString);
+  }
   const sslDisabled = env.DATABASE_SSL === 'false' || (isLocal && env.DATABASE_SSL !== 'true');
 
   return {

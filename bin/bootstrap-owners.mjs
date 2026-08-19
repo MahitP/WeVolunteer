@@ -193,4 +193,8 @@ async function main() {
   console.log('');
   console.log('Rotate owner passwords on a schedule. An owner account is the only');
   console.log('one on this platform that cannot be locked out by anybody else.');
+  /* Awaited: on PostgreSQL `close()` returns a promise, and exiting before it
+     settles abandons the pool mid-shutdown. The process ends on its own once
+     the pool is closed and no handles remain. */
+  await db.close?.();
 }

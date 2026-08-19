@@ -32,8 +32,8 @@
  * changes something the component never reads.
  */
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const config = vi.hoisted(() => ({ PRIVACY_URL: '/privacy', DEMO_MODE: false }));
@@ -81,6 +81,7 @@ async function fillIdentity() {
 }
 
 beforeEach(() => { vi.clearAllMocks(); });
+afterEach(() => { cleanup(); });
 
 describe('the consent controls', () => {
   it('renders both controls — a contract and a disclosure are different acts', async () => {

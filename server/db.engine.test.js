@@ -158,6 +158,9 @@ describe('the PostgreSQL connection settings', () => {
   it('disables TLS for localhost by default', () => {
     expect(postgresConfig({ DATABASE_URL: 'postgres://u:p@localhost:5432/wv' }).ssl).toBeUndefined();
     expect(postgresConfig({ DATABASE_URL: 'postgres://u:p@127.0.0.1:5432/wv' }).ssl).toBeUndefined();
+    expect(postgresConfig({ DATABASE_URL: 'postgres://localhost:5432/wv' }).ssl).toBeUndefined();
+    expect(postgresConfig({ DATABASE_URL: 'postgres://127.0.0.1:5432/wv' }).ssl).toBeUndefined();
+    expect(postgresConfig({ DATABASE_URL: 'postgres://[::1]:5432/wv' }).ssl).toBeUndefined();
   });
 
   it('lets a local connection opt INTO TLS', () => {

@@ -390,7 +390,7 @@ describe('recordError — never throws', () => {
 
   it('survives a db whose run throws mid-write', async () => {
     const hostile = { prepare: () => ({ get: () => undefined, run: () => { throw new Error('disk I/O'); } }) };
-    expect(async () => recordError(hostile, base())).not.toThrow();
+    await expect(recordError(hostile, base())).resolves.not.toThrow();
   });
 
   it('survives no db, no event, and hostile payloads', async () => {

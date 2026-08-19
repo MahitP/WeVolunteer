@@ -279,6 +279,22 @@ router.post('/api/messages/conversations/:id/messages', authenticateToken, async
       });
     }
 
+    if (conversation.event_id && !can(req.principal, 'event.moderate')) {
+      const isStudent = await db.prepare('SELECT 1 FROM conversation_participants WHERE conversation_id = ? AND user_id = ? AND role_at_creation = ?').get(conversation.id, req.user.id, 'student');
+      if (isStudent) {
+        const event = await db.prepare('SELECT organization_id FROM events WHERE id = ?').get(conversation.event_id);
+        if (event && event.organization_id) {
+          const ban = await db.prepare('SELECT 1 FROM organization_bans WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL').get(event.organization_id, req.user.id);
+          if (ban) {
+            return res.status(403).json({
+              error: 'You cannot send messages to this organization while banned.',
+              code: 'banned'
+            });
+          }
+        }
+      }
+    }
+
     const lifecycle = await computeConversationLifecycle(conversation, new Date());
     if (!lifecycle.writable) {
       return res.status(409).json({

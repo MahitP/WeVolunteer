@@ -326,7 +326,9 @@ export async function runTransaction(database, fn) {
     await tx.commit();
     return result;
   } catch (err) {
-    await tx.rollback();
+    if (!tx.settled) {
+      try { await tx.rollback(); } catch {}
+    }
     throw err;
   }
 }

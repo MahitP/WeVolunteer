@@ -174,6 +174,9 @@ try {
 
   console.log(`Successfully promoted ${email} to admin (was ${user.role}).`);
   console.log('Recorded in the audit trail. Their existing sessions have been invalidated.');
+  /* Awaited: on PostgreSQL `close()` returns a promise, and exiting before it
+     settles abandons the pool mid-shutdown. */
+  await db.close?.();
 } catch (error) {
   console.error('Database error:', error.message);
   process.exit(1);
