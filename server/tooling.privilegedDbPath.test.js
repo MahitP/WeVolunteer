@@ -204,6 +204,43 @@ describe('privileged CLI database resolution', () => {
   });
 
   /**
+   * The engine and the URL get the same precedence as the path.
+   *
+   * `WEV_DB_PATH` was preserved across `process.loadEnvFile`; `DATABASE_ENGINE`
+   * and `DATABASE_URL` were not. Once a deployment put a real `DATABASE_URL`
+   * into `.env`, that file silently outranked the operator:
+   *
+   *     DATABASE_ENGINE=sqlite node bin/reset-2fa.mjs someone@example.org
+   *
+   * ran against PRODUCTION. Same defect this whole file exists for — a
+   * privileged command acting on a database nobody named.
+   *
+   * Asserted against the source rather than by running a script, because the
+   * behavioural version has to write `DATABASE_ENGINE` into the repository's
+   * own `.env` while other suites are reading it in parallel. That trade is
+   * worth naming: this catches the preservation being narrowed or dropped, and
+   * does NOT prove the resolved precedence end-to-end. The end-to-end proof is
+   * the six privileged-CLI suites, which fail outright whenever `.env` carries
+   * a production engine and URL — that is how the bug was found.
+   */
+  it('preserves an explicit engine and URL across .env, not just the path', async () => {
+    const { readFileSync } = await import('fs');
+    const src = readFileSync(path.join(ROOT, 'bin', 'resolveDb.mjs'), 'utf8');
+
+    const block = src.match(/const explicit = \{([\s\S]*?)\};/);
+    expect(block, 'resolveDb.mjs no longer snapshots caller-supplied variables').toBeTruthy();
+    for (const key of ['WEV_DB_PATH', 'DATABASE_ENGINE', 'DATABASE_URL']) {
+      expect(block[1], `${key} must outrank .env`).toContain(key);
+    }
+
+    /* An explicitly EMPTY value means "unset this" and must survive as empty.
+       A truthiness check here would let `.env` hand a URL back to a caller that
+       deliberately cleared it — which is exactly what the failing suites did. */
+    expect(src, 'explicit empty values must be preserved, not treated as absent')
+      .toMatch(/value !== undefined/);
+  });
+
+  /**
    * Nothing may reintroduce a private path resolution.
    *
    * The four scripts each had their own copy of the same expression, which is why

@@ -177,3 +177,71 @@ describe('the PostgreSQL connection settings', () => {
       .toEqual({ rejectUnauthorized: false });
   });
 });
+
+/**
+ * TLS verification against a provider that uses its own CA.
+ *
+ * Supabase does not use a public CA. It presents
+ * `db.<ref>.supabase.co -> Supabase Intermediate 2021 CA -> Supabase Root 2021 CA`,
+ * and that root is self-signed and absent from Node's trust store — so the first
+ * production connection failed with SELF_SIGNED_CERT_IN_CHAIN, and the only way
+ * to get through was to stop verifying.
+ *
+ * That is not an acceptable resting state for a database holding minors'
+ * records: an unverified connection is encrypted to *somebody*, and cannot tell
+ * Supabase from anyone holding the wire. The root is a public certificate, so it
+ * is committed and supplied through DATABASE_SSL_CA, and verification stays on.
+ *
+ * These tests pin the two halves that matter: the CA reaches the driver, and the
+ * escape hatch cannot survive into production.
+ */
+describe('TLS certificate verification', () => {
+  const REMOTE = 'postgres://u:p@db.example.supabase.co:5432/postgres';
+
+  it('keeps verification ON for a remote host', () => {
+    const { ssl } = postgresConfig({ DATABASE_URL: REMOTE });
+    expect(ssl.rejectUnauthorized).toBe(true);
+  });
+
+  it('loads a CA from a file path and hands it to the driver', () => {
+    const { ssl } = postgresConfig({
+      DATABASE_URL: REMOTE,
+      DATABASE_SSL_CA: 'deploy/certs/supabase-root-2021.crt',
+    });
+    expect(ssl.rejectUnauthorized).toBe(true);
+    expect(String(ssl.ca), 'the CA file was not read').toContain('BEGIN CERTIFICATE');
+  });
+
+  it('accepts a CA inline, for platforms that only offer env vars', () => {
+    /* Fly, Render and friends have no filesystem to mount a cert into, so the
+       PEM itself has to be able to travel in the variable. */
+    const inline = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----';
+    const { ssl } = postgresConfig({ DATABASE_URL: REMOTE, DATABASE_SSL_CA: inline });
+    expect(ssl.ca).toBe(inline);
+  });
+
+  it('refuses to boot production with verification disabled', () => {
+    /* The hatch was used once, deliberately, to reach Supabase before the CA was
+       in place. This is what stops that from quietly becoming the deployment. */
+    expect(() => postgresConfig({
+      DATABASE_URL: REMOTE,
+      DATABASE_SSL_INSECURE: 'true',
+      NODE_ENV: 'production',
+    })).toThrow(/DATABASE_SSL_INSECURE=true in production/);
+  });
+
+  it('still allows the hatch outside production', () => {
+    /* A developer pointing at a local server with a throwaway certificate is the
+       case it exists for, and that case is not a security problem. */
+    const { ssl } = postgresConfig({ DATABASE_URL: REMOTE, DATABASE_SSL_INSECURE: 'true' });
+    expect(ssl.rejectUnauthorized).toBe(false);
+  });
+
+  it('does not attach a CA when TLS is off for a local host', () => {
+    const { ssl } = postgresConfig({
+      DATABASE_URL: 'postgres://localhost:5432/wv',
+      DATABASE_SSL_CA: 'deploy/certs/supabase-root-2021.crt',
+    });
+    expect(ssl).toBeUndefined();
+  });
+});

@@ -103,7 +103,28 @@ function anchorRelative(value) {
  * not have a stray `.env` override them.
  */
 function loadDotEnv() {
-  const explicit = process.env.WEV_DB_PATH;
+  /**
+   * A value the CALLER set wins over `.env`, for the engine and the URL as well
+   * as the path.
+   *
+   * Only `WEV_DB_PATH` used to be preserved. Once a deployment put
+   * `DATABASE_ENGINE=postgres` and a production `DATABASE_URL` into `.env`,
+   * `process.loadEnvFile` overwrote whatever the caller had set — so
+   *
+   *     DATABASE_ENGINE=sqlite node bin/reset-2fa.mjs someone@example.org
+   *
+   * silently operated on PRODUCTION instead of the local database the operator
+   * named. That is the same defect this module was written for: a privileged
+   * command quietly acting on a database nobody meant.
+   *
+   * Caught by six privileged-CLI suites the moment a real `DATABASE_URL`
+   * appeared in `.env`, which is exactly when it would have started to matter.
+   */
+  const explicit = {
+    WEV_DB_PATH: process.env.WEV_DB_PATH,
+    DATABASE_ENGINE: process.env.DATABASE_ENGINE,
+    DATABASE_URL: process.env.DATABASE_URL,
+  };
   const envFile = path.join(REPO_ROOT, '.env');
 
   if (fs.existsSync(envFile)) {
@@ -116,7 +137,12 @@ function loadDotEnv() {
     }
   }
 
-  if (explicit) process.env.WEV_DB_PATH = explicit;
+  for (const [key, value] of Object.entries(explicit)) {
+    /* An explicitly EMPTY value is a deliberate "unset this" and is honoured as
+       such — a test proving a command fails closed without a URL cannot have
+       `.env` hand one back. */
+    if (value !== undefined) process.env[key] = value;
+  }
   return process.env.WEV_DB_PATH || DEFAULT_DB;
 }
 

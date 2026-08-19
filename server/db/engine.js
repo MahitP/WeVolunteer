@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 /**
  * Which database engine this process uses.
  *
@@ -199,9 +201,55 @@ export function postgresConfig(env = process.env) {
   }
   const sslDisabled = env.DATABASE_SSL === 'false' || (isLocal && env.DATABASE_SSL !== 'true');
 
+  /**
+   * Certificate verification, and why a CA has to be supplied for Supabase.
+   *
+   * Supabase does not use a public CA. It presents
+   *
+   *     db.<ref>.supabase.co  ->  Supabase Intermediate 2021 CA  ->  Supabase Root 2021 CA
+   *
+   * and that root is self-signed and absent from Node's trust store, so a
+   * verifying connection fails with SELF_SIGNED_CERT_IN_CHAIN. The root is a
+   * public certificate, not a secret; `deploy/certs/supabase-root-2021.crt`
+   * carries it, and `DATABASE_SSL_CA` points at it (a path, or the PEM inline
+   * for platforms that only offer environment variables).
+   *
+   * With it supplied, `rejectUnauthorized` stays TRUE and the server's identity
+   * is actually checked — which is the whole point. Without it the only way to
+   * connect is to stop verifying, and a database holding minors' records must
+   * not be reachable over a connection that cannot tell Supabase from anyone
+   * holding the wire.
+   */
+  let ca;
+  const caSource = env.DATABASE_SSL_CA;
+  if (!sslDisabled && caSource) {
+    ca = caSource.includes('BEGIN CERTIFICATE') ? caSource : readFileSync(caSource, 'utf8');
+  }
+
+  /**
+   * The insecure hatch is refused in production rather than merely discouraged.
+   *
+   * It exists for a developer pointing at a local server with a throwaway
+   * certificate. Reaching production with it set means every connection is
+   * encrypted to an unverified peer, which reads as secure in a log and is not.
+   * It was used once, deliberately, to establish the first Supabase connection
+   * before the CA was in place; failing closed here is what stops that
+   * temporary measure from quietly becoming the deployed configuration.
+   */
+  if (!sslDisabled && env.DATABASE_SSL_INSECURE === 'true' && env.NODE_ENV === 'production') {
+    throw new Error(
+      'FATAL: DATABASE_SSL_INSECURE=true in production disables TLS certificate\n'
+      + '  verification, so the connection cannot tell the real database from an\n'
+      + '  attacker holding the wire.\n'
+      + '  Supply the provider CA instead:\n'
+      + '    DATABASE_SSL_CA=deploy/certs/supabase-root-2021.crt\n'
+      + '  and unset DATABASE_SSL_INSECURE.'
+    );
+  }
+
   return {
     connectionString,
     max,
-    ssl: sslDisabled ? undefined : { rejectUnauthorized: env.DATABASE_SSL_INSECURE !== 'true' },
+    ssl: sslDisabled ? undefined : { rejectUnauthorized: env.DATABASE_SSL_INSECURE !== 'true', ...(ca ? { ca } : {}) },
   };
 }
