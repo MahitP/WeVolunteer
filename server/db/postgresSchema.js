@@ -1390,4 +1390,53 @@ export async function applyPostgresSchema(db) {
     LATEST_MIGRATION_VERSION, 'postgres_baseline', new Date().toISOString(), 'baseline',
     LATEST_MIGRATION_VERSION,
   );
+
+  /**
+   * The reserved `system-cli` actor, which the DDL above cannot carry.
+   *
+   * This file is generated from the migrations' DDL. Migration 022 creates the
+   * actor with an INSERT — DML — so the generator drops it, and a clean-slate
+   * PostgreSQL database came up structurally complete and semantically
+   * incomplete: all 65 tables and 87 foreign keys, and not the one row
+   * `assertSystemActor()` requires.
+   *
+   * Every privileged command depends on it — bootstrap-owners, grant-ownership,
+   * revoke-ownership, make-admin, reset-2fa, clear-stale-tfa-secret — so a fresh
+   * PostgreSQL deployment had no sanctioned way to create its FIRST OWNER.
+   * Found on the real production Supabase database, after the schema applied
+   * cleanly and bootstrap-owners then refused.
+   *
+   * Seeded here rather than by replaying migration DML generally: that would
+   * mean deciding which DML is schema-level and which is data-level, and
+   * getting that wrong on a data migration is worse than the bug it fixes.
+   *
+   * NOTE the companion change in db.js: the "is this database empty" gates count
+   * users, and this row is a user. They now exclude it, or a demo database
+   * seeds nothing because it looks already-initialised.
+   *
+   * Values mirror migration 022 exactly, including `account_status` 'deleted'
+   * and role 'student' — what keeps the actor unable to sign in and off every
+   * roster. `WHERE NOT EXISTS` matches the baseline row above: idempotent, and
+   * it will not overwrite the row if a later migration gives it new columns.
+   */
+  await db.prepare(
+    `INSERT INTO users (
+        id, name, email, username, password_hash, grade, role, verified,
+        avatar, bio, school, skills, email_verified, account_status,
+        leaderboard_opt_in, email_opt_out, profile_visibility, created_at, token_version
+      ) SELECT ?, ?, ?, ?, ?, 'N/A', 'student', 0, ?, ?, ?, ?, 0, 'deleted', 0, 1, 'private', ?, 0
+         WHERE NOT EXISTS (SELECT 1 FROM users WHERE id = ?)`
+  ).run(
+    'system-cli',
+    'System (command line)',
+    'system-cli@wevolunteer.invalid',
+    'system_cli',
+    '!SYSTEM_ACCOUNT_NO_LOGIN!',
+    '⚙️',
+    'Reserved. Records privileged actions performed from the command line, which have no signed-in user to attribute them to.',
+    'WeVolunteer',
+    JSON.stringify([]),
+    new Date().toISOString(),
+    'system-cli',
+  );
 }

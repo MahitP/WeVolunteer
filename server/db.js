@@ -1172,7 +1172,23 @@ export function initDatabase() {
   // share a password that is printed in the README. A real deployment comes up
   // empty, and its first admin is made with `node bin/make-admin.mjs <email>`
   // after that person has signed up normally.
-  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get();
+  /**
+   * "Empty" means no PERSON has registered, not "zero rows".
+   *
+   * The reserved `system-cli` actor is a row in `users` and is not a person: it
+   * is tombstoned (`account_status = 'deleted'`) and holds a password that
+   * cannot be presented. Counting it makes a brand-new database look
+   * initialised.
+   *
+   * On SQLite this never surfaced, purely by ordering: `runMigrations` runs LAST
+   * in `initDatabase()`, so migration 022 creates the actor AFTER this check has
+   * already run. On PostgreSQL the whole schema is applied up front, so the
+   * actor exists before the check — and a demo database then seeded nothing,
+   * leaving every test without users. That is a difference in when the row
+   * appears, not in what the question means, so the question is now asked
+   * precisely on both engines.
+   */
+  const userCount = db.prepare("SELECT COUNT(*) as count FROM users WHERE id <> 'system-cli'").get();
   if (userCount.count > 0) {
     console.log('Database already initialized.');
 
@@ -1493,7 +1509,8 @@ export async function completeDatabaseInit() {
      * the same `demoSeedPending`, so the seeding itself stays in one place.
      */
     if (DEMO_MODE) {
-      const { count } = await db.prepare('SELECT COUNT(*) AS count FROM users').get();
+      /* Excludes the reserved actor for the reason given on the SQLite gate above. */
+      const { count } = await db.prepare("SELECT COUNT(*) AS count FROM users WHERE id <> 'system-cli'").get();
       if (Number(count) === 0) demoSeedPending = true;
     }
   }
