@@ -99,6 +99,30 @@ const CONTEXT_KEYS = Object.freeze([
  * segments are eaten by the generic long-token rule.
  */
 const REDACTIONS = [
+  /* A URL carrying credentials in its authority — `postgres://user:pass@host`.
+     Ordered above the generic token rules so the whole credential goes at once
+     rather than the password being partly eaten by the long-token rule and the
+     username surviving next to it.
+
+     Nothing is known to log a connection string today: `resolveDb.mjs` prints
+     host and database only, and `pg` does not put the DSN in its error
+     messages. This is defence in depth, and cheap. The path that would matter
+     is the one that already caught a partial email leak — a driver error
+     recorded verbatim, stored in `error_reports`, and read later by an
+     administrator through the admin UI. A single such message would put the
+     production database password on an application screen.
+
+     Deliberately requires BOTH a userinfo part and a password, so ordinary URLs
+     — every link in every stack trace — are untouched.
+
+     FIRST, ahead of the email rule, and that ordering is the whole point.
+     `user:password@host` is shaped exactly like an address, so the email rule
+     matched `hunter2-s3cret@db.abcdefgh.supabase.co` and left
+     `postgres://postgres:` standing next to it. The password did disappear,
+     which is why this looked fine, but by accident and only partly: the role
+     name survived, and a rule that happens to cover a case is one refactor
+     away from not covering it. Most-specific-first, as the note above says. */
+  [/\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@/gi, 'URL credentials'],
   /* The local part and the domain are matched with UNICODE letter classes, not
      `A-Za-z`. With the ASCII-only version the rule did not fail cleanly on
      `josé.garcía@lincolnhigh.k12.il.us` — it matched from the first ASCII run

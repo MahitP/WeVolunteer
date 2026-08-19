@@ -108,6 +108,29 @@ describe('redactMessage — one rule, one realistic positive', () => {
     expect(redactMessage('Authorization: Bearer sk_live_abcdef123456')).not.toContain('sk_live_abcdef123456');
   });
 
+  it('removes the credentials from a connection string', () => {
+    /* The path that would matter is the one that already produced a partial
+       email leak: a driver error recorded verbatim, stored in `error_reports`,
+       and read later by an administrator through the admin UI. One such message
+       would put the production database password on an application screen. */
+    const dsn = 'postgres://postgres:hunter2-s3cret@db.abcdefgh.supabase.co:5432/postgres';
+    const out = redactMessage(`connection failed: ${dsn}`);
+    expect(out).not.toContain('hunter2-s3cret');
+    /* The username is a credential too — it is half of what the authority
+       carries, and leaving it makes the redaction look done while naming the
+       role to attack. */
+    expect(out).not.toMatch(/postgres:[^/]/);
+  });
+
+  it('leaves an ordinary URL alone', () => {
+    /* Over-redaction is its own failure: stack traces are full of URLs, and a
+       report whose every frame is [redacted] cannot be acted on. The rule
+       requires a password in the authority for exactly this reason. */
+    const out = redactMessage('failed to fetch https://wevolunteer.org/api/events?page=2');
+    expect(out).toContain('wevolunteer.org');
+    expect(out).toContain('https://');
+  });
+
   it('removes a step-up challenge id', () => {
     expect(redactMessage('reauth-1f0c9a2b-77de-4a11-8f3c-0d9e2b6a4c55 expired'))
       .not.toContain('1f0c9a2b-77de');
