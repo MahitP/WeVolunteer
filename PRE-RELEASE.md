@@ -153,14 +153,40 @@ variable turns into a leaked authorization code. The runbook calls this out at
 
 ## 5. Production environment
 
-- [ ] `APP_URL=https://wevolunteers.org` — boot refuses without it, and refuses
-      plain http
+- [ ] `APP_URL=https://wevolunteers.org` — boot refuses without it, refuses
+      plain http, and refuses a loopback host even over https (every
+      verification and reset link is built from it)
 - [ ] `MAIL_DOMAIN=wevolunteers.org`
 - [ ] `TRUST_PROXY=1` behind nginx — boot refuses without it in production
 - [ ] `JWT_SECRET` and `TFA_ENCRYPTION_KEY` are real generated values, not the
       published development ones
-- [ ] `WEV_DB_PATH` points outside the deploy directory
 - [ ] `BIND_ADDRESS=127.0.0.1`, port firewalled
+
+**The database. Added 2026-08-19 — this section did not name it.** The engine
+defaults to SQLite, so a deployment configured from the list above alone comes
+up on a local file and Supabase is never contacted. `WEV_DB_PATH` was the only
+database line here and it applies to SQLite only.
+
+- [ ] `DATABASE_ENGINE=postgres` — without it the deployment silently runs on
+      SQLite
+- [ ] `DATABASE_URL` — the Supabase connection string, set in
+      `/etc/wevolunteer/wevolunteer.env` and **not** in the repository's `.env`,
+      which is development-only and is read by every privileged CLI tool and by
+      the test suites
+- [ ] `DATABASE_SSL_CA=deploy/certs/supabase-root-2021.crt` — Supabase issues
+      from a private chain, so without this a verifying connection fails and the
+      only way to connect is to stop verifying
+- [ ] `DATABASE_SSL_INSECURE` **unset** — production refuses to boot with it set,
+      by design
+- [ ] Do **not** set `WEV_DB_PATH` on a PostgreSQL deployment. The server itself
+      would still use PostgreSQL — it resolves the engine in
+      `server/db/engine.js`, which reads `DATABASE_ENGINE` and nothing else — but
+      the privileged CLI tools take the opposite view on purpose: in
+      `bin/resolveDb.mjs` an explicit `WEV_DB_PATH` with no explicit
+      `DATABASE_ENGINE` pins them to SQLite, because naming a file is how a
+      caller says which database it means. Setting both on a production host
+      therefore gives you a server on Supabase and `bin/reset-2fa.mjs` on a
+      SQLite file, which is the confusion this list exists to prevent.
 - [ ] `ALERT_EMAIL` set, or operator alerting is silently off
 - [ ] `RESEND_API_KEY` set; SMTP set as fallback, or accept the "no fallback"
       warning at boot as a decision
