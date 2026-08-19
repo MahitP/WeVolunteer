@@ -50,9 +50,29 @@ export default function AISettingsCard({ addToast }) {
   /* Downloads outlive a fast navigation away from Settings; without this the
      completion handler would set state on an unmounted component. */
   const aliveRef = useRef(true);
-  useEffect(() => () => {
-    aliveRef.current = false;
-    abortRef.current?.abort();
+  useEffect(() => {
+    /**
+     * Set on the way IN as well as cleared on the way out.
+     *
+     * A cleanup-only effect leaves this stuck at `false` under StrictMode, which
+     * double-invokes effects in development: mount, cleanup, mount again. The
+     * ref survives that simulated remount because React keeps the same
+     * component instance, so `useRef(true)` does not run a second time and
+     * nothing ever sets it back.
+     *
+     * Every guard in this component then fails closed for the rest of the
+     * session, and the symptom is a feature that looks broken rather than one
+     * that errors: the model downloads correctly, `onProgress` is dropped so the
+     * bar sits at "0 MB of 940 MB", the completion handler returns before
+     * writing preferences so the 940 MB that just landed is never recognised,
+     * and `finally` never clears the progress state so it says "Downloading"
+     * forever. AssistantPanel.jsx already does this correctly.
+     */
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      abortRef.current?.abort();
+    };
   }, []);
 
   const installed = prefs.modelId ? modelById(prefs.modelId) : null;

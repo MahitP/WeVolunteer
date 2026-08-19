@@ -30,11 +30,18 @@ export default function TagSuggestions({ title, description, value = [], onAdd, 
   const runtimeRef = useRef(null);
   const aliveRef = useRef(true);
 
-  useEffect(() => () => {
-    aliveRef.current = false;
-    /* The model is released with the form. An organizer writing one event
-       should not leave several hundred megabytes resident for the session. */
-    runtimeRef.current?.unload();
+  useEffect(() => {
+    /* Set on the way in too. A cleanup-only effect leaves this stuck at `false`
+       under StrictMode's development double-invoke — the ref survives the
+       simulated remount, so nothing restores it — and every guard below then
+       fails closed for the rest of the session. Same fix as AISettingsCard. */
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      /* The model is released with the form. An organizer writing one event
+         should not leave several hundred megabytes resident for the session. */
+      runtimeRef.current?.unload();
+    };
   }, []);
 
   const run = useCallback(async () => {
