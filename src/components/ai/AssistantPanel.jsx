@@ -26,7 +26,7 @@ import { loadConversation, saveConversation, clearConversation } from '../../ai/
  * facts without the sentence polished. Blocking the input behind a loading
  * spinner would make the assistant feel slower than the app it lives in.
  */
-export default function AssistantPanel({ onClose, position, needsSetup = false }) {
+export default function AssistantPanel({ onClose, position, needsSetup = false, currentUser = null }) {
   /* Before every early return, per `hookOrder.test.jsx`. */
   const navigate = useNavigate();
   const [messages, setMessages] = useState(() => loadConversation());
@@ -123,6 +123,11 @@ export default function AssistantPanel({ onClose, position, needsSetup = false }
         runtime: runtimeRef.current,
         position,
         history: priorTurns,
+        /* The signed-in person, so the role gate can answer as themselves. Without
+           it every capability-gated tool refuses, because `can(null, …)` is false
+           for everything — which is exactly what happened when the gate was added
+           and nothing passed a user through. */
+        user: currentUser,
         signal: controller.signal,
         onToken: token => {
           if (!aliveRef.current) return;
@@ -159,7 +164,7 @@ export default function AssistantPanel({ onClose, position, needsSetup = false }
        callback closes over the transcript as it was when `send` was last
        rebuilt, and the model would be handed a conversation that stopped
        several turns ago — which reads as Welly forgetting what was just said. */
-  }, [busy, position, messages]);
+  }, [busy, position, messages, currentUser]);
 
   const clearAll = useCallback(() => {
     clearConversation();

@@ -43,6 +43,7 @@ import { AIStatus } from './runtime/types.js';
 import { isAbort } from './runtime/types.js';
 import { SYSTEM_PROMPT, CHAT_PROMPT, isUsableReply, WELLY_NAME } from './prompts/welly.js';
 import { asDataBlock } from './prompts/tasks.js';
+import { checkRole, actionReplyFor, abilitiesFor } from './roles.js';
 
 /** Replies are short. This is a helper, not an essay generator. */
 const MAX_REPLY_TOKENS = 160;
@@ -198,6 +199,19 @@ function isEmptyResult(kind, data) {
  * complete answer. The assistant works without a model; the model makes it read
  * better.
  */
+/**
+ * What to say when the role gate refuses.
+ *
+ * Names something they CAN do rather than stopping at "no". A refusal that
+ * offers nothing reads as a broken assistant, and the person has no way to tell
+ * whether they asked wrongly or asked for something not theirs.
+ */
+function refusedForRole(user, intent) {
+  const list = abilitiesFor(user);
+  const alternatives = `I can ${list.slice(0, -1).join(', ')} and ${list.at(-1)}.`;
+  return `That is not something your account can ask me for. ${alternatives}`;
+}
+
 /** Recent turns given back to the model. Enough to follow a thread, not a diary. */
 const CHAT_HISTORY_TURNS = 6;
 
@@ -235,9 +249,52 @@ async function chat(message, { runtime, onToken, signal, history = [] }) {
 
 export async function ask(
   message,
-  { runtime = null, position = null, onToken, signal, history = [] } = {},
+  { runtime = null, position = null, onToken, signal, history = [], user = null } = {},
 ) {
   const { intent, tool, slots } = routeIntent(message);
+
+  /**
+   * The role gate, before anything runs.
+   *
+   * Deliberately ahead of both the tool call and the conversation, so there is
+   * one place that decides what this person may ask for rather than a check
+   * inside each tool and a different answer for intents that call none. See
+   * roles.js — that asymmetry is why a student asking to create an event was
+   * told which page to do it on.
+   */
+  const permission = checkRole(user, intent);
+  if (!permission.allowed) {
+    return {
+      intent: 'not_permitted',
+      answer: refusedForRole(user, intent),
+      card: null,
+      phrasedByModel: false,
+    };
+  }
+
+  /* Role-aware, so an organizer is pointed at the page and a student is told
+     plainly that this is not something their account does. */
+  if (intent === 'action_request') {
+    return {
+      intent,
+      answer: actionReplyFor(user, { kind: slots.kind || 'event' }),
+      card: null,
+      phrasedByModel: false,
+    };
+  }
+
+  if (intent === 'capabilities') {
+    /* Listed from what this person can actually reach, rather than a fixed
+       sentence that promises an organizer's abilities to a student. */
+    const list = abilitiesFor(user);
+    return {
+      intent,
+      answer: `I can ${list.slice(0, -1).join(', ')} and ${list.at(-1)}. `
+        + 'I can suggest things, but I never decide them.',
+      card: null,
+      phrasedByModel: false,
+    };
+  }
 
   if (!tool) {
     /**
@@ -286,7 +343,10 @@ export async function ask(
   }
   delete args.wantsNearby;
 
-  const result = await runTool(tool, args);
+  /* The user reaches the tool as well as the gate. Both checks are cheap and
+     they fail for different reasons — the gate answers "not yours to ask", the
+     tool's own check is the last line before a request goes out. */
+  const result = await runTool(tool, args, { user });
 
   if (!result.ok) {
     return {

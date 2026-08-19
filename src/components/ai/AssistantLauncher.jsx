@@ -54,7 +54,7 @@ import { useLocationContext } from '../../contexts/LocationContext';
  */
 const AssistantPanel = lazy(() => import('./AssistantPanel'));
 
-export default function AssistantLauncher() {
+export default function AssistantLauncher({ currentUser = null }) {
   /**
    * Every hook runs before any early return. `hookOrder.test.jsx` enforces
    * this repository-wide, and it is why the conditions below are evaluated
@@ -108,6 +108,7 @@ export default function AssistantLauncher() {
             onClose={() => setOpen(false)}
             position={position}
             needsSetup={!configured}
+            currentUser={currentUser}
           />
         </Suspense>
       )}

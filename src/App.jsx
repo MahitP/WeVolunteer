@@ -1628,7 +1628,7 @@ function AppShell({ toasts, addToast, removeToast }) {
               * over the page. It renders nothing unless the build has the
               * feature, the device can run it, and this person set it up.
               */}
-            <AssistantLauncher />
+            <AssistantLauncher currentUser={currentUser} />
             <ThemeToggle />
             <NotificationsBell
               key={currentUser.id}

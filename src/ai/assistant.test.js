@@ -7,6 +7,13 @@ const apiMock = {
   fetchApplications: vi.fn(),
   fetchEventsFiltered: vi.fn(),
   verifyCertificate: vi.fn(),
+  /* The role-aware tools added alongside the gate. */
+  fetchEvents: vi.fn(),
+  fetchOrganizerStats: vi.fn(),
+  fetchAdminStats: vi.fn(),
+  fetchErrorSummary: vi.fn(),
+  fetchAuditLogs: vi.fn(),
+  fetchVolunteerStats: vi.fn(),
 };
 
 vi.mock('../utils/api', () => ({ api: apiMock }));
@@ -187,6 +194,62 @@ describe('certificate verification', () => {
     const res = await ask('can you verify a certificate', { runtime: null });
     expect(apiMock.verifyCertificate).not.toHaveBeenCalled();
     expect(res.answer).toMatch(/send me the code/i);
+  });
+});
+
+describe('the role gate', () => {
+  const student = { id: 'u1', role: 'student' };
+  const organizer = { id: 'u2', role: 'organizer' };
+
+  it('lets an organizer reach an organizer tool', async () => {
+    /**
+     * The test that was missing. The capability check was added to `runTool` as
+     * `runTool(name, args, { user })`, and the only caller invoked
+     * `runTool(tool, args)` — so `user` was undefined, `can(null, …)` was false
+     * for everything, and EVERY capability-gated tool refused for everyone,
+     * organizers included. Nothing caught it because no test ran a gated tool
+     * through `ask`.
+     */
+    apiMock.fetchEvents.mockResolvedValue({ events: [{ title: 'Park clean-up', status: 'open' }] });
+    const res = await ask('what events do I run', { user: organizer });
+
+    expect(res.intent).toBe('my_events');
+    expect(res.card.data.total).toBe(1);
+  });
+
+  it('refuses the same question from a student, and offers what they can have', async () => {
+    const res = await ask('what events do I run', { user: student });
+
+    expect(res.intent).toBe('not_permitted');
+    expect(res.card).toBeNull();
+    /* A refusal that names nothing else reads as a broken assistant. */
+    expect(res.answer).toMatch(/verified hours/i);
+  });
+
+  it('answers a student asking to create an event without pointing at a door they cannot open', async () => {
+    /**
+     * The original complaint. The fixed answer said "Events are set up from the
+     * Create event page" to everybody — true for an organizer, and for a
+     * student a description of something their account cannot do.
+     */
+    const res = await ask("I'd like you to create an event", { user: student });
+
+    expect(res.intent).toBe('action_request');
+    expect(res.answer).toMatch(/organizers do/i);
+    expect(res.answer).not.toMatch(/Create event page/i);
+  });
+
+  it('points an organizer at the page', async () => {
+    const res = await ask("I'd like you to create an event", { user: organizer });
+    expect(res.answer).toMatch(/Create event page/i);
+  });
+
+  it('lists only the abilities the person actually has', async () => {
+    const asStudent = await ask('what can you do?', { user: student });
+    const asOrganizer = await ask('what can you do?', { user: organizer });
+
+    expect(asStudent.answer).not.toMatch(/events you run/i);
+    expect(asOrganizer.answer).toMatch(/events you run/i);
   });
 });
 
