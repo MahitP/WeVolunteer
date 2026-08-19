@@ -73,38 +73,42 @@ function run(args, input = 'y\n') {
   });
 }
 
-const row = (id) => db.prepare(
+/* Awaited even though the handle is a synchronous `DatabaseSync`. Awaiting a
+   non-promise is a no-op, so one spelling is right on both engines — and the
+   fixture-debt ratchet in asyncShapes.test.js counts every unawaited
+   `prepare()` chain precisely so new files do not add to the port. */
+const row = async (id) => await db.prepare(
   'SELECT role, account_status, token_version, suspension_reason, suspended_by, suspended_at FROM users WHERE id = ?'
 ).get(id);
 
-const audits = () => db.prepare(
+const audits = async () => await db.prepare(
   "SELECT action, target_user_id, details FROM admin_audit_logs WHERE action = 'ACCOUNT_SUSPENDED_CLI'"
 ).all();
 
 describe('bin/suspend-account.mjs', () => {
-  it('requires both an email and a reason', () => {
+  it('requires both an email and a reason', async () => {
     const res = run(['someone@test.local']);
     expect(res.status).toBe(1);
     expect(res.stderr).toMatch(/Usage: node bin\/suspend-account\.mjs/);
   });
 
-  it('refuses an account that does not exist', () => {
+  it('refuses an account that does not exist', async () => {
     const res = run(['nobody@test.local', 'a reason']);
     expect(res.status).toBe(1);
     expect(res.stderr).toMatch(/not found/);
   });
 
-  it('suspends an ordinary account and records why', () => {
+  it('suspends an ordinary account and records why', async () => {
     const res = run(['student@test.local', 'left the programme']);
     expect(res.status, res.stderr).toBe(0);
 
-    const after = row('s1');
+    const after = (await row('s1'));
     expect(after.account_status).toBe('suspended');
     expect(after.suspension_reason).toBe('left the programme');
     expect(after.suspended_by).toBe('system-cli');
     expect(after.suspended_at).toBeTruthy();
 
-    const trail = audits();
+    const trail = (await audits());
     expect(trail).toHaveLength(1);
     expect(trail[0].target_user_id).toBe('s1');
     /* The subject and the role it held are in the trail, because "who was this"
@@ -114,55 +118,55 @@ describe('bin/suspend-account.mjs', () => {
     expect(trail[0].details).toMatch(/left the programme/);
   });
 
-  it('ends existing sessions rather than only blocking the next sign-in', () => {
+  it('ends existing sessions rather than only blocking the next sign-in', async () => {
     /* The load-bearing half. `account_status` alone stops the next sign-in and
        leaves every issued cookie working until it expires — up to seven days of
        a suspended account continuing to act. */
-    const before = row('s1').token_version;
+    const before = (await row('s1')).token_version;
     const res = run(['student@test.local', 'a reason']);
     expect(res.status, res.stderr).toBe(0);
-    expect(row('s1').token_version).toBe(before + 1);
+    expect((await row('s1')).token_version).toBe(before + 1);
   });
 
-  it('refuses a super administrator and names the way round it', () => {
+  it('refuses a super administrator and names the way round it', async () => {
     const res = run(['super@test.local', 'a reason']);
     expect(res.status).toBe(1);
     expect(res.stderr).toMatch(/super administrator/i);
     /* An error that says only "refused" leaves the operator stuck. */
     expect(res.stderr).toMatch(/revoke-ownership\.mjs/);
 
-    const after = row('p1');
+    const after = (await row('p1'));
     expect(after.account_status).toBe('active');
     expect(after.role).toBe('super_admin');
   });
 
-  it('leaves an already-suspended account alone, reason included', () => {
+  it('leaves an already-suspended account alone, reason included', async () => {
     const res = run(['already@test.local', 'a different reason']);
     expect(res.status).toBe(0);
     expect(res.stdout).toMatch(/already suspended/);
     /* Re-stamping would overwrite when and why the original suspension
        happened, which is the part of the record that matters. */
-    expect(row('z1').suspension_reason).toBe('the original reason');
-    expect(audits()).toHaveLength(0);
+    expect((await row('z1')).suspension_reason).toBe('the original reason');
+    expect((await audits())).toHaveLength(0);
   });
 
-  it('treats a deleted account as already handled', () => {
+  it('treats a deleted account as already handled', async () => {
     const res = run(['deleted@test.local', 'a reason']);
     expect(res.status).toBe(0);
     expect(res.stdout).toMatch(/already deleted/);
-    expect(row('x1').account_status).toBe('deleted');
-    expect(audits()).toHaveLength(0);
+    expect((await row('x1')).account_status).toBe('deleted');
+    expect((await audits())).toHaveLength(0);
   });
 
-  it('changes nothing when the confirmation is declined', () => {
-    const before = row('a1');
+  it('changes nothing when the confirmation is declined', async () => {
+    const before = (await row('a1'));
     const res = run(['admin@test.local', 'a reason'], 'N\n');
     expect(res.status).toBe(0);
     expect(res.stdout).toMatch(/Cancelled/);
 
-    const after = row('a1');
+    const after = (await row('a1'));
     expect(after.account_status).toBe('active');
     expect(after.token_version).toBe(before.token_version);
-    expect(audits()).toHaveLength(0);
+    expect((await audits())).toHaveLength(0);
   });
 });

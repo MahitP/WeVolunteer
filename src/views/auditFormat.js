@@ -81,6 +81,13 @@ const ACTIONS = {
      make a year of rows harder to read by crying wolf. */
   TFA_STALE_SECRET_CLEARED: ['Unconfirmed authenticator secret cleared (command line)', TONES.NOTABLE],
   OWNER_REVOKED:            ['Ownership revoked', TONES.GRAVE],
+  /* Grave, and deliberately worded so it cannot be mistaken for the moderation
+     suspension an administrator issues from the Admin area. That one is a
+     decision about a person's conduct and leaves their session alone so they
+     can appeal; this one is an operational lockout from a shell that ends every
+     session immediately, and the two want to read differently at a glance a
+     year later. See bin/suspend-account.mjs. */
+  ACCOUNT_SUSPENDED_CLI:    ['Account suspended (command line)', TONES.GRAVE],
   /* The names these two carried before the CLI scripts were standardised.
      Kept because the trail is append-only and immutable: rows written under the
      old names still exist and still have to read as something. */
