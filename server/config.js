@@ -566,10 +566,60 @@ export const OAUTH_PROVIDERS_CONFIGURED = {
 // SCHOOL_NAME in src/config.js, which IS used; email.js keeps its own
 // EMAIL_FROM. Nothing here changes behaviour.
 
-export const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:4173')
+/**
+ * Cross-origin callers permitted to reach /api with credentials.
+ *
+ * The development default is NOT applied in production.
+ *
+ * It used to be unconditional, so a production process started without
+ * CORS_ORIGINS granted `http://localhost:5173` and `http://localhost:4173`
+ * standing permission to make credentialed cross-origin calls and read the
+ * replies. Anything the user happened to be running on those ports — any dev
+ * server, any local tool — could therefore act as them against the live API,
+ * on a deployment whose operator never configured CORS at all.
+ *
+ * Empty in production is the safe default rather than a broken one: app.js
+ * admits same-origin requests by comparing Origin to the request's own Host,
+ * and the single-origin topology (this process serving both the SPA and the
+ * API) is the documented one. So a deployment that needs no cross-origin
+ * caller needs no CORS_ORIGINS, and one that does states it explicitly.
+ */
+const CORS_ORIGINS_RAW = process.env.CORS_ORIGINS
+  ?? (IS_PRODUCTION ? '' : 'http://localhost:5173,http://localhost:4173');
+
+export const ALLOWED_ORIGINS = CORS_ORIGINS_RAW
   .split(',')
   .map(o => o.trim())
   .filter(Boolean);
+
+/**
+ * A loopback origin in a production allowlist is refused, not ignored.
+ *
+ * Silently dropping it would leave the operator believing a configured origin
+ * is in force. This is the same judgement as OAUTH_REDIRECT_URI above: the
+ * development value surviving into production is a misconfiguration worth
+ * stopping for, and the message names the fix.
+ */
+if (IS_PRODUCTION) {
+  const loopback = ALLOWED_ORIGINS.filter((origin) => {
+    let host;
+    try { ({ hostname: host } = new URL(origin)); } catch { return false; }
+    return host === 'localhost' || host === '127.0.0.1'
+      || host === '::1' || host === '[::1]';
+  });
+
+  if (loopback.length > 0) {
+    throw new Error(
+      `FATAL: CORS_ORIGINS allows a loopback origin in production (${loopback.join(', ')}).\n`
+      + 'That grants anything running on the operator\'s or a user\'s own machine\n'
+      + 'credentialed cross-origin access to the live API. Set it to this\n'
+      + 'deployment\'s public origin, e.g.\n'
+      + '  CORS_ORIGINS=https://volunteers.example.org\n'
+      + 'or leave it unset entirely if the SPA and the API share one origin —\n'
+      + 'same-origin requests are admitted without it.'
+    );
+  }
+}
 
 /**
  * Whether a new account must confirm its email address before using the app.

@@ -35,7 +35,7 @@ function bootProdAndProbe() {
       const api404 = await fetch(base + '/api/does-not-exist-xyz');
       const spa = await fetch(base + '/some/spa/route');
       // A browser sends Origin when fetching <script type="module">, even
-      // same-origin. CORS_ORIGINS is left at its localhost default here, so
+      // same-origin. CORS_ORIGINS names one origin that is not the probe base, so
       // this origin is deliberately NOT on the allowlist.
       const spaWithOrigin = await fetch(base + '/some/spa/route', {
         headers: { Origin: base }
@@ -44,6 +44,10 @@ function bootProdAndProbe() {
         headers: { Origin: 'https://evil.example' }
       });
       const apiAllowedOrigin = await fetch(base + '/api/events', {
+        headers: { Origin: 'https://allowed.example.org' }
+      });
+      // The development default must not be in force in production.
+      const apiDevDefaultOrigin = await fetch(base + '/api/events', {
         headers: { Origin: 'http://localhost:5173' }
       });
       // Browsers attach Origin to same-origin POSTs. 'base' is not on the
@@ -70,6 +74,7 @@ function bootProdAndProbe() {
         spaBody: await spa.text(),
         apiForeignOriginStatus: apiForeignOrigin.status,
         apiAllowedOriginStatus: apiAllowedOrigin.status,
+        apiDevDefaultOriginStatus: apiDevDefaultOrigin.status,
         apiSameOriginPostStatus: apiSameOriginPost.status,
         apiForeignPostStatus: apiForeignPost.status,
         spaWithOriginBody: await spaWithOrigin.text(),
@@ -94,6 +99,10 @@ function bootProdAndProbe() {
            otherwise share one bucket behind a proxy. Set here so this case
            fails for its own reason rather than on an unrelated guard. */
         TRUST_PROXY: '1',
+        /* An explicit public origin. Production no longer falls back to the
+           localhost development origins, so an allowlist case has to state
+           one — which is also the realistic split-origin deployment. */
+        CORS_ORIGINS: 'https://allowed.example.org',
       },
       stdio: 'pipe',
       encoding: 'utf8'
@@ -138,8 +147,8 @@ describe('production middleware ordering (Task 11)', () => {
  * blank white page. Observed directly: assets 403, `#root` empty, no console
  * error a user could act on.
  *
- * These probes use an origin that is NOT on the allowlist (the default is the
- * two localhost dev ports), which is exactly the misconfigured-production case.
+ * These probes use an origin that is NOT on the allowlist, which is exactly the
+ * misconfigured-production case.
  */
 describe('CORS scope', () => {
   const probe = bootProdAndProbe();
@@ -157,6 +166,20 @@ describe('CORS scope', () => {
     // 401 (needs a token), not 403 (origin refused) — proves the allowlist is
     // doing its job rather than being bypassed by the scoping change.
     expect(probe.apiAllowedOriginStatus).toBe(401);
+  });
+
+  it('refuses a localhost origin that the allowlist does not name', () => {
+    /* Scope, stated because the obvious reading is wrong: CORS_ORIGINS is set
+       explicitly on this probe, so the production fallback never runs and this
+       does NOT prove the localhost development default is gone. Verified by
+       mutation — restoring the old unconditional default leaves this green.
+       What it does prove is that the allowlist is exact: a loopback origin gets
+       no implicit pass at the middleware just for being loopback, which the
+       development branch in app.js would otherwise be a short step from.
+
+       The default itself is guarded in config.productionGuards.test.js, where
+       removing the production branch fails five cases. */
+    expect(probe.apiDevDefaultOriginStatus).toBe(403);
   });
 
   it('accepts a same-origin POST even when that origin is not on the allowlist', () => {

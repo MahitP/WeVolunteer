@@ -163,9 +163,21 @@ export async function shutdown({ signal, httpServer, io, intervals = [] }) {
    * graceful shutdown into a burst of "database is not open" errors on the
    * requests being finished. `node:sqlite` checkpoints the WAL on close, which is
    * what keeps the `-wal` sidecar from growing across restarts.
+   *
+   * Awaited, because on PostgreSQL `close()` is `pool.end()` and returns a
+   * promise. Unawaited it did three wrong things at once: the pool was still
+   * draining when the process exited, the line below claimed the database was
+   * closed before it was, and — the one that matters — a rejection escaped the
+   * synchronous `catch` and surfaced as `unhandledRejection`, which this
+   * process treats as fatal, so a failed close during shutdown re-entered
+   * shutdown.
+   *
+   * `node:sqlite` closes synchronously and returns undefined; awaiting that is
+   * a no-op, so one spelling is right on both engines and no call site needs to
+   * know which one it is talking to.
    */
   try {
-    db.close();
+    await db.close();
     console.log('[Shutdown] Database closed.');
   } catch (err) {
     // Already closed, or mid-statement. Worth reporting, not worth failing over:

@@ -96,6 +96,64 @@ describe('APP_URL is validated, not merely present', () => {
     const r = bootEmail({ NODE_ENV: 'development', APP_URL: 'http://localhost:5173' });
     expect(r.booted, r.out.slice(0, 300)).toBe(true);
   });
+
+  it('refuses a loopback host even over https', () => {
+    /* `https://localhost:5173` passes every other check — absolute, parseable,
+       https — and is exactly what a development value looks like after someone
+       adds a certificate to it. Every verification, reset, invitation and
+       email-change link would then point at the recipient's own machine, and
+       the mail would still send successfully, so nothing would report a fault. */
+    for (const value of ['https://localhost:5173', 'https://127.0.0.1', 'https://[::1]:5173']) {
+      const r = bootEmail({ APP_URL: value });
+      expect(r.booted, `${value} was accepted`).toBe(false);
+      expect(r.out).toMatch(/points at localhost in production/);
+    }
+  });
+});
+
+/**
+ * The CORS development default must not survive into production.
+ *
+ * `CORS_ORIGINS` fell back to `http://localhost:5173,http://localhost:4173`
+ * unconditionally, so a production process started without it granted those
+ * origins credentialed cross-origin access to the live API — anything the
+ * user happened to be running on those ports could act as them and read the
+ * replies, on a deployment whose operator never configured CORS at all.
+ */
+describe('CORS_ORIGINS in production', () => {
+  const origins = async (env) => {
+    const root = process.cwd().replace(/\\/g, '/');
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
+        const m = await import('${root}/server/config.js');
+        console.log('ORIGINS:' + JSON.stringify(m.ALLOWED_ORIGINS));
+      `], { env: { ...PRODUCTION, ...env }, encoding: 'utf8' });
+    const line = ((r.stdout || '') + (r.stderr || '')).split('\n').find((l) => l.startsWith('ORIGINS:'));
+    return { list: line ? JSON.parse(line.slice('ORIGINS:'.length)) : null, out: (r.stdout || '') + (r.stderr || '') };
+  };
+
+  it('does not grant localhost when CORS_ORIGINS is unset', async () => {
+    const { list, out } = await origins({ CORS_ORIGINS: undefined });
+    expect(list, out.slice(0, 400)).toEqual([]);
+  });
+
+  it('still applies the development default outside production', async () => {
+    /* Removing the default in dev would break every Vite session. */
+    const { list, out } = await origins({ NODE_ENV: 'development', CORS_ORIGINS: undefined });
+    expect(list, out.slice(0, 400)).toContain('http://localhost:5173');
+  });
+
+  it('honours an explicit public origin', async () => {
+    const { list } = await origins({ CORS_ORIGINS: 'https://volunteers.example.org' });
+    expect(list).toEqual(['https://volunteers.example.org']);
+  });
+
+  it('refuses a loopback origin rather than ignoring it', async () => {
+    /* Dropping it silently would leave the operator believing a configured
+       origin is in force. */
+    const r = bootConfig({ CORS_ORIGINS: 'https://volunteers.example.org,http://localhost:5173' });
+    expect(r.booted).toBe(false);
+    expect(r.out).toMatch(/loopback origin in production/);
+  });
 });
 
 describe('TRUST_PROXY is required in production', () => {

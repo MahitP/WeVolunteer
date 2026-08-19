@@ -157,6 +157,31 @@ if (IS_PRODUCTION && APP_URL) {
     );
     process.exit(1);
   }
+  /**
+   * https is necessary but not sufficient — the host has to be reachable by the
+   * person reading the mail.
+   *
+   * `https://localhost:5173` satisfies every check above and is the shape a
+   * development value takes when it follows a deployment into production. The
+   * result is that every verification, reset, invitation and email-change link
+   * points at the recipient's own machine: the account is unrecoverable, and
+   * nothing in the app reports a fault because the mail sends successfully.
+   *
+   * OAUTH_REDIRECT_URI in config.js already refuses loopback for the same
+   * reason; this is the other half of the same mistake.
+   */
+  const host = parsed.hostname;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') {
+    console.error(
+      `FATAL: APP_URL points at localhost in production (${APP_URL}). It is the base of\n`
+      + 'every verification, password-reset, invitation and email-change link, so each\n'
+      + 'one would send the recipient to their own machine and no account could be\n'
+      + 'confirmed or recovered.\n'
+      + 'Set it to this deployment\'s public URL, e.g.\n'
+      + '  APP_URL=https://volunteers.example.org'
+    );
+    process.exit(1);
+  }
 }
 
 /**
