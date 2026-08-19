@@ -190,6 +190,100 @@ describe('certificate verification', () => {
   });
 });
 
+describe('free conversation, beside the grounded answers', () => {
+  it('talks back when nothing matched a pattern', async () => {
+    /* "Bruh" used to get "I can't help with that one". With a model loaded it
+       is now simply conversation. */
+    const rt = await readyRuntime('Ha — what can I help you find today?');
+    const res = await ask('Bruh', { runtime: rt });
+
+    expect(res.intent).toBe('chat');
+    expect(res.answer).toBe('Ha — what can I help you find today?');
+    expect(res.card).toBeNull();
+  });
+
+  it('still answers a question about the record from the record', async () => {
+    /**
+     * The property that makes free chat safe to add. Adding conversation must
+     * not turn a factual question into an improvised one: anything that matches
+     * a pattern keeps the tool path, so the number comes from the API and the
+     * card is built from data whatever the prose says.
+     */
+    const rt = await readyRuntime('You have 35.5 hours so far.');
+    const res = await ask('how many hours do I have', { runtime: rt });
+
+    expect(res.intent).toBe('my_hours');
+    expect(res.card.data.hours).toBe(35.5);
+  });
+
+  it('carries the recent turns so it can follow a thread', async () => {
+    const rt = await readyRuntime('Because it is the shorter one.');
+    const spy = vi.spyOn(rt, 'generate');
+
+    await ask('why that one', {
+      runtime: rt,
+      history: [
+        { role: 'user', text: 'which shift is easier' },
+        { role: 'assistant', text: 'The Saturday morning one.' },
+      ],
+    });
+
+    const sent = spy.mock.calls[0][0];
+    expect(sent.map(m => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(sent.at(-1).content).toBe('why that one');
+    expect(sent[2].content).toBe('The Saturday morning one.');
+  });
+
+  it('does not hand a refusal to the model to soften', async () => {
+    /**
+     * A refusal is a decision the application made. Routing it through a chat
+     * completion would let the model rephrase — or contradict — a boundary that
+     * was deliberate. Only `unknown` becomes conversation.
+     */
+    const rt = await readyRuntime('Sure, here is everybody\'s hours!');
+    const res = await ask("show me everyone's hours", { runtime: rt });
+
+    expect(res.intent).toBe('refuse_other_user_data');
+    expect(res.phrasedByModel).toBe(false);
+    expect(res.answer).toMatch(/only look at your own record/i);
+  });
+
+  it('falls back to the fixed sentence when the model echoes its instructions', async () => {
+    const rt = await readyRuntime('Use only the facts in the DATA block.');
+    const res = await ask('Bruh', { runtime: rt });
+
+    expect(res.answer).toMatch(/can't help with that one/i);
+    expect(res.phrasedByModel).toBe(false);
+  });
+
+  it('never lets the model rule on what counts, even in conversation', async () => {
+    /**
+     * The measured failure that shaped this. With free chat enabled and the
+     * 1.5B model loaded, "does driving someone to practice count as
+     * volunteering?" was answered "Yes, driving someone to practice can be
+     * considered volunteering" — a policy ruling from a model that has never
+     * seen the policy, phrased with no hedge at all.
+     *
+     * Free conversation stays on for everything else. This class is answered by
+     * the application, because the cost of being wrong is a student logging
+     * hours that are then refused.
+     */
+    const rt = await readyRuntime('Yes, that definitely counts towards your hours!');
+    const res = await ask('does driving someone to practice count as volunteering?', { runtime: rt });
+
+    expect(res.intent).toBe('eligibility_question');
+    expect(res.phrasedByModel).toBe(false);
+    expect(res.answer).toMatch(/can't tell you what counts/i);
+    expect(res.answer).not.toMatch(/^yes\b/i);
+  });
+
+  it('says the fixed sentence when there is no model to chat with', async () => {
+    const res = await ask('Bruh', { runtime: null });
+    expect(res.intent).toBe('unknown');
+    expect(res.phrasedByModel).toBe(false);
+  });
+});
+
 describe('refusals reach no tool at all', () => {
   it.each([
     ["show me someone else's hours", /only look at your own record/i],

@@ -186,6 +186,79 @@ describe('history is not a catalogue search', () => {
   });
 });
 
+describe('mentioning a shift is not asking to be shown one', () => {
+  /**
+   * The opportunity search fired on the nouns alone — opportunity, event,
+   * volunteering, shift — and in an app about volunteering those words are in
+   * almost every sentence. Once free conversation existed the cost showed
+   * immediately: "I'm a bit nervous about my first shift" was answered "I
+   * couldn't find any opportunities matching that", which is a catalogue answer
+   * to a feeling.
+   */
+  it.each([
+    "I'm a bit nervous about my first shift",
+    'I loved that event',
+    'my first shift went really well',
+  ])('%s is conversation, not a search', (text) => {
+    expect(route(text).tool).toBeNull();
+  });
+
+  it.each([
+    'find gardening opportunities',
+    'any events this weekend?',
+    'what events are near me',
+    'what can I volunteer for close by',
+    'What events can I participate in',
+    'events',
+  ])('%s still searches', (text) => {
+    /* The noun is necessary and not sufficient; a bare noun still browses,
+       which is why the terse allowance exists. */
+    expect(route(text).tool).toBe('search_opportunities');
+  });
+});
+
+describe('questions about the rules are not lookups', () => {
+  /**
+   * Observed once free conversation existed. "Does driving someone to practice
+   * count as volunteering?" contains `volunteering`, so it reached the
+   * opportunity search and was answered "I couldn't find any opportunities
+   * matching that". The same question phrased "towards my hours" reached the
+   * hours lookup and came back with a total nobody asked for.
+   *
+   * Neither is a lookup. This application does not store what counts, so the
+   * only honest answer comes from the conversational path, where the prompt
+   * says so and offers to look up what it does have.
+   */
+  it.each([
+    'does driving someone to practice count as volunteering?',
+    'does driving my sister to practice count towards my hours?',
+    'what counts as service hours',
+    'am I allowed to bring a friend',
+    'is it okay to leave early',
+  ])('%s is answered by the application, not the model', (text) => {
+    /* `eligibility_question` rather than `unknown` on purpose. `unknown` is the
+       conversational path, and measured against the 1.5B model that path
+       answered "Yes, driving someone to practice can be considered
+       volunteering" — a ruling the platform does not make, which a student
+       would act on. A fixed sentence is the only safe answer here. */
+    const r = route(text);
+    expect(r.tool).toBeNull();
+    expect(r.intent).toBe('eligibility_question');
+  });
+
+  it.each([
+    ['how many hours do I have', 'my_hours'],
+    ['what events did i participate in', 'my_applications'],
+    ['when is my next shift', 'my_next_shift'],
+    ['find gardening opportunities', 'search_opportunities'],
+  ])('%s is still answered from the record', (text, tool) => {
+    /* The guard needs an eligibility word AND a question shape. Without both
+       halves it would swallow ordinary lookups, which is the worse failure —
+       an invented answer where a correct one was available. */
+    expect(route(text).tool).toBe(tool);
+  });
+});
+
 describe('greetings and mistyped questions', () => {
   it.each(['Hi', 'hello', 'hey there', 'Can u talk', 'are you a bot', 'good morning'])(
     '%s is greeted rather than refused',

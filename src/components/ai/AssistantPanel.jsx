@@ -88,6 +88,11 @@ export default function AssistantPanel({ onClose, position, needsSetup = false }
 
     setInput('');
     setBusy(true);
+    /* Captured BEFORE the new turn is appended, so what goes to the model is the
+       conversation so far — the question itself is added separately by `ask`.
+       Reading `messages` here rather than inside the updater keeps this the
+       history the person can actually see on screen. */
+    const priorTurns = messages;
     setMessages(prev => [...prev, { role: 'user', text: question }]);
 
     const controller = new AbortController();
@@ -105,6 +110,7 @@ export default function AssistantPanel({ onClose, position, needsSetup = false }
       const res = await ask(question, {
         runtime: runtimeRef.current,
         position,
+        history: priorTurns,
         signal: controller.signal,
         onToken: token => {
           if (!aliveRef.current) return;
@@ -136,7 +142,11 @@ export default function AssistantPanel({ onClose, position, needsSetup = false }
       if (aliveRef.current) setBusy(false);
       abortRef.current = null;
     }
-  }, [busy, position]);
+    /* `messages` is a dependency because `priorTurns` reads it. Without it the
+       callback closes over the transcript as it was when `send` was last
+       rebuilt, and the model would be handed a conversation that stopped
+       several turns ago — which reads as Welly forgetting what was just said. */
+  }, [busy, position, messages]);
 
   const clearAll = useCallback(() => {
     clearConversation();

@@ -73,6 +73,40 @@ export const SYSTEM_PROMPT = [
 ].join(' ');
 
 /**
+ * Welly in conversation, when nothing was looked up.
+ *
+ * ── Why this is a second prompt and not a longer first one ──
+ *
+ * `SYSTEM_PROMPT` phrases a result that is already correct: a tool ran, the
+ * facts are in the message, and the model's only job is to put them in a
+ * sentence. Its rules exist to stop it adding anything.
+ *
+ * This one runs when no tool ran at all — there is no DATA block, and nothing
+ * the model says is checked against anything. That is a different job with a
+ * different danger, so it gets its own instructions rather than a conditional
+ * bolted onto the other, which is how one prompt ends up doing neither job well.
+ *
+ * ── The one rule that matters ──
+ *
+ * Free conversation is fine. Inventing this platform's facts is not, and at
+ * this model size it is the likely failure: asked "does driving my sister to
+ * practice count towards my hours", a 1.5B model will produce a confident,
+ * fluent, entirely invented policy, and a student has no way to tell.
+ *
+ * So the boundary is not "do not chat" — it is "you do not know this person's
+ * record or this school's rules". Questions of that shape are pushed back to a
+ * lookup, which is deterministic and correct. Everything else it may simply
+ * talk about.
+ */
+export const CHAT_PROMPT = [
+  `You are ${WELLY_NAME}, the assistant inside WeVolunteer, where students volunteer and organizers run events.`,
+  'Chat warmly and briefly, two or three sentences at most.',
+  'You cannot see anyone\'s hours, shifts, applications or certificates, and you do not know this school\'s rules.',
+  'If they ask about their own record or what counts, say you can look it up and invite them to ask for it directly.',
+  'Never state a WeVolunteer rule, number or date as fact.',
+].join(' ');
+
+/**
  * Fragments of the instructions that must never appear in a reply.
  *
  * Matched against the model's output, lower-cased and stripped of punctuation.

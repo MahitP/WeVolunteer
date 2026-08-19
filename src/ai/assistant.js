@@ -41,7 +41,7 @@ import { routeIntent } from './router.js';
 import { runTool } from './tools.js';
 import { AIStatus } from './runtime/types.js';
 import { isAbort } from './runtime/types.js';
-import { SYSTEM_PROMPT, isUsableReply, WELLY_NAME } from './prompts/welly.js';
+import { SYSTEM_PROMPT, CHAT_PROMPT, isUsableReply, WELLY_NAME } from './prompts/welly.js';
 import { asDataBlock } from './prompts/tasks.js';
 
 /** Replies are short. This is a helper, not an essay generator. */
@@ -63,6 +63,14 @@ const FIXED = {
     'Hi. I can find opportunities, tell you your verified hours, list your certificates '
     + 'and organizations, show what you have applied to, and check a certificate code. '
     + 'What would you like to look at?',
+
+  /* Deliberately not phrased by the model. See routeIntent — asked whether
+     driving someone to practice counts, the 1.5B model answered "Yes", which is
+     a ruling it is in no position to make and a student would act on. */
+  eligibility_question:
+    'I can\'t tell you what counts — that is set by your school or the organizer running '
+    + 'the event, and it is worth asking them directly. What I can do is show you the '
+    + 'hours already credited to you, or what you have applied to.',
 
   capabilities:
     'I can find opportunities, tell you your verified hours, list your certificates and '
@@ -182,10 +190,72 @@ function isEmptyResult(kind, data) {
  * complete answer. The assistant works without a model; the model makes it read
  * better.
  */
-export async function ask(message, { runtime = null, position = null, onToken, signal } = {}) {
+/** Recent turns given back to the model. Enough to follow a thread, not a diary. */
+const CHAT_HISTORY_TURNS = 6;
+
+/**
+ * Answer conversationally, with no lookup behind it.
+ *
+ * Returns null rather than a reply when the model produces nothing usable, so
+ * the caller falls back to the fixed sentence. A conversation that occasionally
+ * says "I can't help with that one" is better than one that occasionally emits
+ * its own instructions.
+ */
+async function chat(message, { runtime, onToken, signal, history = [] }) {
+  try {
+    const recent = history
+      .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string')
+      .slice(-CHAT_HISTORY_TURNS)
+      .map(m => ({ role: m.role, content: m.text }));
+
+    const text = await runtime.generate(
+      [
+        { role: 'system', content: CHAT_PROMPT },
+        ...recent,
+        { role: 'user', content: String(message).trim() },
+      ],
+      { onToken, signal, maxTokens: MAX_REPLY_TOKENS },
+    );
+
+    if (!isUsableReply(text)) return null;
+    return { intent: 'chat', answer: text.trim(), card: null, phrasedByModel: true };
+  } catch (err) {
+    if (isAbort(err)) return { intent: 'chat', answer: '', card: null, cancelled: true, phrasedByModel: false };
+    return null;
+  }
+}
+
+export async function ask(
+  message,
+  { runtime = null, position = null, onToken, signal, history = [] } = {},
+) {
   const { intent, tool, slots } = routeIntent(message);
 
   if (!tool) {
+    /**
+     * Nothing was looked up. Two quite different reasons for that.
+     *
+     * A refusal or a fixed answer is a DECISION — "I only look at your own
+     * record", "send me the code" — and stays exactly as written. Handing those
+     * to a model would let it soften or contradict a boundary the application
+     * made deliberately.
+     *
+     * `unknown` is not a decision. It means the wording matched no pattern, and
+     * until now it produced "I can't help with that one" for anything from
+     * "Bruh" to a genuine question phrased unusually. That is where the
+     * conversation goes: the model answers freely, under CHAT_PROMPT, with the
+     * recent turns for context.
+     *
+     * Only `unknown`, and only with a ready model. Everything with a tool
+     * behind it keeps the grounded path — a question about hours is answered
+     * from the record, never from the model's imagination, and that property is
+     * exactly what makes free chat safe to add beside it.
+     */
+    if (intent === 'unknown' && runtime && runtime.status === AIStatus.READY) {
+      const chatted = await chat(message, { runtime, onToken, signal, history });
+      if (chatted) return chatted;
+    }
+
     return {
       intent,
       answer: FIXED[intent] || FIXED.unknown,

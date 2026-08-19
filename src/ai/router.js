@@ -38,6 +38,61 @@ const CERTIFICATE_CODE = /\bWEV-[0-9A-HJ-NP-Z]{4}-[0-9A-HJ-NP-Z]{4}\b/i;
  */
 const NEARBY = /\b(near(by| me| here)?|close(st| by| to me)?|around here|walking distance)\b/i;
 
+/**
+ * Questions about the RULES rather than about a record.
+ *
+ * "Does driving someone to practice count as volunteering?" contains the word
+ * `volunteering`, so it reached the opportunity search and came back "I
+ * couldn't find any opportunities matching that" — a catalogue answer to a
+ * question about eligibility. "Does this count towards my hours" contains
+ * `hours` and `my`, so it reached the hours lookup and was answered with a
+ * total the student did not ask for.
+ *
+ * Both are the same shape: a question about what is allowed, which this
+ * application does not store and no tool can answer. Left to the matchers they
+ * are captured by a keyword and answered as something else — the exact failure
+ * the header warns about, arriving from the conversational side.
+ *
+ * So they are pulled out ahead of the matchers and left to `unknown`, which is
+ * the conversational path. That is where they belong: CHAT_PROMPT tells the
+ * model it does not know this school's rules and to offer a lookup instead, so
+ * the honest answer is available. Answering "you have 0 hours" is not.
+ *
+ * Narrow on purpose. It needs an eligibility word AND a question shape, so
+ * "how many hours do I have" and "what counts" are not confused with each
+ * other.
+ */
+const ELIGIBILITY = /\b(counts?|allowed|eligible|qualif(y|ies)|permitted|supposed to|rules?|policy|okay to|ok to|fine to)\b/i;
+const QUESTION_SHAPE = /^\s*(does|do|is|are|am|can|could|may|should|would|will|what|why|if)\b/i;
+
+/**
+ * Wanting to be SHOWN something, as opposed to merely mentioning it.
+ *
+ * The opportunity search used to fire on the nouns alone — opportunity, event,
+ * volunteering, shift. In an app about volunteering those words appear in
+ * almost every sentence somebody types, so "I'm a bit nervous about my first
+ * shift" was answered "I couldn't find any opportunities matching that". A
+ * catalogue answer to a feeling.
+ *
+ * A search needs the noun AND a reason to think a search was wanted. Bare nouns
+ * still work — somebody typing "events" means browse — which is what the short
+ * message allowance below is for.
+ */
+const SEARCH_INTENT = new RegExp([
+  /* Asking to be shown. */
+  /\b(find|show|search|browse|list|any|available|open|upcoming|recommend|suggest)\b/,
+  /\b(looking for|sign ?up for|what'?s on)\b/,
+  /* Asking about place or time, which only a search can answer. */
+  /\b(near|nearby|around|close (by|to)|this (week|weekend|month))\b/,
+  /* "What events can I participate in" — wanting to take part is wanting to be
+     shown what there is. Present tense only: the past tense of the same verbs
+     is a question about their own record and is matched well before here. */
+  /\bcan i\b.{0,15}\b(do|join|participate|attend|help|sign ?up|volunteer)\b/,
+].map(r => r.source).join('|'), 'i');
+
+/** Three words or fewer: "events", "any shifts", "volunteering near me". */
+const isTerse = text => String(text).trim().split(/\s+/).length <= 3;
+
 /** A message that is nothing but hello. Anchored at both ends deliberately. */
 const GREETING = /^(hi+|hey+|hello+|hullo|yo|hiya|howdy|sup|greetings|good (morning|afternoon|evening))([\s,]+(there|welly))?[\s!.,?]*$/i;
 
@@ -182,8 +237,10 @@ const MATCHERS = [
   {
     intent: 'search_opportunities',
     tool: 'search_opportunities',
+    /* The noun is necessary and no longer sufficient — see SEARCH_INTENT. */
     test: text =>
-      /\b(opportunit(y|ies)|events?|volunteer(ing)?|shifts?|help out|somewhere to)\b/i.test(text),
+      /\b(opportunit(y|ies)|events?|volunteer(ing)?|shifts?|help out|somewhere to)\b/i.test(text)
+      && (SEARCH_INTENT.test(text) || isTerse(text)),
     slots: text => {
       const slots = {};
       if (NEARBY.test(text)) slots.wantsNearby = true;
@@ -308,6 +365,32 @@ export function routeIntent(message) {
 
   for (const refusal of REFUSALS) {
     if (refusal.test(text)) return { intent: refusal.intent, tool: null, slots: {} };
+  }
+
+  /**
+   * Before the matchers, and NOT handed to the model.
+   *
+   * The first version of this returned `unknown`, which is the conversational
+   * path, on the reasoning that CHAT_PROMPT tells the model it does not know
+   * this school's rules. Measured against the 1.5B model, asked "does driving
+   * someone to practice count as volunteering?", it answered:
+   *
+   *     "Yes, driving someone to practice can be considered volunteering, as it
+   *      involves providing assistance and support to help them improve their
+   *      skills."
+   *
+   * A ruling, with no hedge, on a question the platform does not decide. A
+   * student would log those hours and have them refused by the person who does.
+   *
+   * This is the rule `prompts/tasks.js` already states from its own
+   * measurements: negative instructions do not hold at this size, and anything
+   * enforceable after the fact is enforced after the fact. So eligibility gets
+   * a fixed answer — free conversation continues everywhere else, and the one
+   * class of question where a confident wrong answer costs a student real hours
+   * is answered by the application instead.
+   */
+  if (ELIGIBILITY.test(text) && QUESTION_SHAPE.test(text)) {
+    return { intent: 'eligibility_question', tool: null, slots: {} };
   }
 
   for (const matcher of MATCHERS) {
