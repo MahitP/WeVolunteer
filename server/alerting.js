@@ -92,6 +92,31 @@ export const BACKUP_ALERT_INTERVAL_MS = 12 * 60 * 60 * 1000;
  */
 export const BACKUP_ALERT_STATES = Object.freeze(['stale', 'none', 'unknown']);
 
+/**
+ * Whether a status is worth waking somebody for.
+ *
+ * `unconfigured` means the backup directory does not exist. On a laptop that is
+ * ordinary and alerting on it would train people to ignore the alert. On a
+ * production host it means the platform has no backups at all, which is the
+ * single worst thing this check could stay quiet about.
+ *
+ * That distinction did not matter while SQLite was production: the backup timer
+ * shipped with the deployment, so the directory existed on every real host and
+ * `unconfigured` really did only occur in development. On Supabase nothing
+ * creates it — `bin/backup.sh` is a `sqlite3 .backup` and does not run against a
+ * PostgreSQL deployment — so the state a production host now lands in by
+ * default is exactly the one that was silent.
+ *
+ * Read from `process.env` rather than importing IS_PRODUCTION because this
+ * module deliberately has no imports: its sender is injected, which is what lets
+ * the alerting tests run without booting config.js and its boot-time throws.
+ */
+export function isBackupAlertable(status, env = process.env) {
+  if (!status) return false;
+  if (BACKUP_ALERT_STATES.includes(status.status)) return true;
+  return status.status === 'unconfigured' && env.NODE_ENV === 'production';
+}
+
 /** Named in one place so the query, the email and the tests cannot disagree. */
 export const ALERTED_SOURCES = Object.freeze(['server', 'worker']);
 
@@ -210,8 +235,10 @@ export function __resetBackupAlertThrottle() { lastBackupAlertAt = 0; }
  *
  * It does not distinguish "the timer is disabled" from "the timer ran and
  * failed" — `backupStatus` cannot, and the message says so rather than guessing.
- * It also stays quiet on `unconfigured`, which is a development machine with no
- * backup directory, not an incident.
+ * It stays quiet on `unconfigured` OUTSIDE production, where it is a
+ * development machine with no backup directory rather than an incident. In
+ * production the same state means the host has no backups at all — see
+ * `isBackupAlertable`.
  *
  * @param {{send: Function, now?: Date, appUrl?: string}} opts
  */
@@ -220,7 +247,7 @@ export async function sendBackupAlert({ send, now = new Date(), appUrl, status }
     const to = recipients();
     if (to.length === 0) return { sent: 0, reason: 'not_configured' };
     if (typeof send !== 'function') return { sent: 0, reason: 'no_sender' };
-    if (!status || !BACKUP_ALERT_STATES.includes(status.status)) return { sent: 0, reason: 'healthy' };
+    if (!isBackupAlertable(status)) return { sent: 0, reason: 'healthy' };
 
     /* Throttled AFTER establishing there is something to say, matching
        sendErrorAlerts: a quiet week must never start the clock. */
@@ -234,7 +261,12 @@ export async function sendBackupAlert({ send, now = new Date(), appUrl, status }
         + `${status.staleAfterHours} hours means at least one nightly run did not produce a file.`
       : status.status === 'none'
         ? 'The backup directory exists but contains no archives at all.'
-        : 'The backup directory could not be read.';
+        : status.status === 'unconfigured'
+          ? 'There is no backup directory on this host, so nothing is being backed '
+            + 'up at all. On Supabase, bin/backup.sh does not apply — it is a '
+            + 'sqlite3 .backup — so this is the expected state until either the '
+            + 'provider\'s managed backups are confirmed or a pg_dump schedule exists.'
+          : 'The backup directory could not be read.';
 
     await send({
       to: to.join(', '),
