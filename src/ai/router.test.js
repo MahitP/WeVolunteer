@@ -155,6 +155,67 @@ describe('when nothing matches', () => {
   });
 });
 
+describe('history is not a catalogue search', () => {
+  /**
+   * Observed in use, 2026-08-19. "What events did i participate in" contains
+   * the word `events`, so it reached `search_opportunities`, which stripped the
+   * routing words and searched the catalogue for what was left — "did
+   * participate in" — and answered "I couldn't find any opportunities matching
+   * that". The student asked what they had done and was told, with total
+   * confidence, that nothing was available. That is the failure this module's
+   * header says patterns exist to prevent.
+   */
+  it.each([
+    'What events did i participate in',
+    'what did I attend',
+    'what have I participated in',
+    'which events did I go to',
+    'events I attended last term',
+  ])('%s is a question about their own record', (text) => {
+    expect(route(text).tool).toBe('my_applications');
+  });
+
+  it.each([
+    'What events can I participate in',
+    'what events can I attend this weekend',
+  ])('%s is still a search', (text) => {
+    /* The tense is the only thing separating these from the cases above, so it
+       is the thing worth pinning: widening the history matcher until it eats
+       the future tense would trade one wrong answer for another. */
+    expect(route(text).tool).toBe('search_opportunities');
+  });
+});
+
+describe('greetings and mistyped questions', () => {
+  it.each(['Hi', 'hello', 'hey there', 'Can u talk', 'are you a bot', 'good morning'])(
+    '%s is greeted rather than refused',
+    (text) => {
+      const r = route(text);
+      expect(r.intent).toBe('greeting');
+      expect(r.tool).toBeNull();
+    },
+  );
+
+  it('does not swallow a real question that opens with a greeting', () => {
+    /* The greeting matcher is last and matches the whole message, so anything
+       carrying an actual question is routed by that question instead. */
+    expect(route('Hi, how many hours do I have?').tool).toBe('my_hours');
+  });
+
+  it('survives a typo in the qualifier word', () => {
+    /* "how mnay hours?" returned "I can't help with that one" while "how many
+       volunteer hours do I have?" worked. One mistyped word should not be the
+       difference between an answer and a refusal. */
+    expect(route('how mnay hours?').tool).toBe('my_hours');
+  });
+
+  it('still refuses genuine noise', () => {
+    /* The point is not to answer everything. "Bruh" has no intent to find, and
+       inventing one would be the guessing this router exists to avoid. */
+    expect(route('Bruh').intent).toBe('unknown');
+  });
+});
+
 describe('prompt injection through the message', () => {
   it('does not gain a capability from being told it has one', () => {
     /**

@@ -110,9 +110,17 @@ export const TOOLS = {
           total: list.length,
           items: list.slice(0, MAX_ROWS).map(c => ({
             code: c.code,
-            eventTitle: c.eventTitle || c.event_title,
+            /* `/api/certificates` returns the event name as a flat `title` —
+               see the mapping in attendanceRoutes.js. Reading `eventTitle` or
+               `event_title` found neither, so every row reached the card with
+               an undefined name and the model with a nameless row. The two
+               camelCase spellings are kept as fallbacks; `title` is the one
+               that actually arrives. */
+            eventTitle: c.title || c.eventTitle || c.event_title,
             hours: c.hours,
-            issuedAt: c.createdAt || c.created_at,
+            /* That response carries no created/issued timestamp. The end of the
+               service is the date the certificate is actually about. */
+            issuedAt: c.endDatetime || c.createdAt || c.created_at,
           })),
         });
       } catch (err) {
@@ -153,10 +161,21 @@ export const TOOLS = {
         const list = Array.isArray(rows) ? rows : [];
         return ok('applications', {
           total: list.length,
+          /**
+           * The event name and shift are NESTED on this response.
+           *
+           * `/api/applications` returns `event: { title, … }` and
+           * `slot: { name, … }` — applicationRoutes.js builds them that way.
+           * Reading a flat `eventTitle` found nothing, so every application
+           * arrived with an undefined name: the card listed bare statuses with
+           * no events beside them, and the model, handed rows with nothing in
+           * them, answered "You have not participated in any events yet" to
+           * somebody who had two applications. Observed 2026-08-19.
+           */
           items: list.slice(0, MAX_ROWS).map(a => ({
-            eventTitle: a.eventTitle || a.event_title,
+            eventTitle: a.event?.title || a.eventTitle || a.event_title,
             status: a.status,
-            slotName: a.slotName || a.slot_name || null,
+            slotName: a.slot?.name || a.slotName || a.slot_name || null,
           })),
         });
       } catch (err) {

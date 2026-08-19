@@ -56,6 +56,14 @@ const FIXED = {
     "I can't help with that one. I can look up opportunities, your volunteer hours, your "
     + 'certificates, the organizations you are part of, and what you have applied to.',
 
+  /* Greets back, then orients. The capability list is the same one `capabilities`
+     gives, because "hi" and "what can you do" want the same answer — the
+     difference is only that one of them said hello first. */
+  greeting:
+    'Hi. I can find opportunities, tell you your verified hours, list your certificates '
+    + 'and organizations, show what you have applied to, and check a certificate code. '
+    + 'What would you like to look at?',
+
   capabilities:
     'I can find opportunities, tell you your verified hours, list your certificates and '
     + 'organizations, show what you have applied to, and check a certificate code. '

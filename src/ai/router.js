@@ -38,6 +38,12 @@ const CERTIFICATE_CODE = /\bWEV-[0-9A-HJ-NP-Z]{4}-[0-9A-HJ-NP-Z]{4}\b/i;
  */
 const NEARBY = /\b(near(by| me| here)?|close(st| by| to me)?|around here|walking distance)\b/i;
 
+/** A message that is nothing but hello. Anchored at both ends deliberately. */
+const GREETING = /^(hi+|hey+|hello+|hullo|yo|hiya|howdy|sup|greetings|good (morning|afternoon|evening))([\s,]+(there|welly))?[\s!.,?]*$/i;
+
+/** Asking whether it converses at all — answered with what it can actually do. */
+const SMALLTALK = /^(can (you|u) (talk|chat|speak)|(are|r) (you|u) (there|real|a bot|human)|how are (you|u)|what'?s up)[\s!.,?]*$/i;
+
 const MATCHERS = [
   {
     intent: 'verify_certificate',
@@ -58,9 +64,14 @@ const MATCHERS = [
   {
     intent: 'my_hours',
     tool: 'my_hours',
+    /* `how` is in the qualifier set because "how mnay hours?" — a typo away from
+       a phrasing that already worked — fell through to `unknown`, and a student
+       who mistypes one word should not get "I can't help with that one". It
+       widens nothing that was not already reachable: "how many hours is this
+       shift" matched on `many` before this and matches on `how` now. */
     test: text =>
       /\bhours?\b/i.test(text)
-      && /\b(my|i|me|have|got|many|much|total)\b/i.test(text)
+      && /\b(my|i|me|have|got|how|many|much|total)\b/i.test(text)
       && !/\bexternal\b/i.test(text),
     slots: () => ({}),
   },
@@ -81,8 +92,27 @@ const MATCHERS = [
   {
     intent: 'my_applications',
     tool: 'my_applications',
+    /**
+     * Past-tense participation belongs here, not in the opportunity search.
+     *
+     * "What events did i participate in" contains the word `events`, so it fell
+     * through to `search_opportunities`, which stripped the routing words and
+     * searched the catalogue for the leftovers — "did participate in" — then
+     * reported "I couldn't find any opportunities matching that". That is
+     * exactly the failure this module's header says patterns exist to prevent:
+     * a different question answered confidently, with nothing to tell the
+     * student their question was changed.
+     *
+     * Gated on the PAST tense on purpose. "What events did I participate in" is
+     * a history question; "What events can I participate in" is a search, and
+     * both contain `participate`. The auxiliary is what separates them, so the
+     * bare present tense is deliberately left to the search below.
+     */
     test: text =>
-      /\b(applied|applications?|signed up|sign-?ups?|volunteering for)\b/i.test(text),
+      /\b(applied|applications?|signed up|sign-?ups?|volunteering for)\b/i.test(text)
+      || /\b(participated|attended|took part|been to|went to)\b/i.test(text)
+      || /\bdid i\b.{0,20}\b(participate|attend|go|volunteer|do)\b/i.test(text)
+      || /\bhave i\b.{0,20}\b(participated|attended|been|volunteered)\b/i.test(text),
     slots: () => ({}),
   },
   {
@@ -131,6 +161,24 @@ const MATCHERS = [
     tool: null,
     test: text =>
       /\b(what can you|what do you|help me with|who are you|what are you)\b/i.test(text),
+    slots: () => ({}),
+  },
+  {
+    /**
+     * A greeting is not an unanswerable question.
+     *
+     * "Hi" returned "I can't help with that one", which reads as a rebuff to
+     * somebody who has not asked for anything yet. It is also the first thing
+     * most people type. Answering it with the capability list turns the opening
+     * move into an orientation instead of a refusal.
+     *
+     * LAST in the list, and matched against the WHOLE message, so it only fires
+     * when a greeting is all there is. "Hi, how many hours do I have?" is
+     * matched by `my_hours` above and never reaches this.
+     */
+    intent: 'greeting',
+    tool: null,
+    test: text => GREETING.test(text) || SMALLTALK.test(text),
     slots: () => ({}),
   },
 ];
