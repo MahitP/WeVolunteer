@@ -38,6 +38,13 @@ export const CLI_EVENTS = Object.freeze({
   OWNER_GRANTED: 'OWNER_GRANTED',
   OWNER_REVOKED: 'OWNER_REVOKED',
   ADMIN_PROMOTED_CLI: 'ADMIN_PROMOTED_CLI',
+  /* Disabling an account from a shell. Distinct from the administrative
+     suspension written by `POST /api/admin/users/:id/suspend`, and the trail
+     has to say which one happened: the route leaves `token_version` alone so
+     the person can still reach the appeal flow, while this one bumps it and
+     ends every session immediately. That is the difference between moderating
+     somebody and locking out an account nobody should be holding. */
+  ACCOUNT_SUSPENDED_CLI: 'ACCOUNT_SUSPENDED_CLI',
   /* Clearing a locked-out account's second factor from a shell. Grave: it is the
      one operation that removes an authentication factor without proving
      possession of it. */

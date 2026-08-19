@@ -46,6 +46,7 @@ const SCRIPTS = [
   'bin/revoke-ownership.mjs',
   'bin/make-admin.mjs',
   'bin/bootstrap-owners.mjs',
+  'bin/suspend-account.mjs',
 ];
 
 /**
@@ -299,6 +300,7 @@ describe('privileged scripts and the PostgreSQL engine', () => {
     'bin/make-admin.mjs',
     'bin/bootstrap-owners.mjs',
     'bin/clear-stale-tfa-secret.mjs',
+    'bin/suspend-account.mjs',
   ];
 
   for (const script of SCRIPTS) {
