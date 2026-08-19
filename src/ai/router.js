@@ -62,6 +62,23 @@ const MATCHERS = [
     slots: () => ({}),
   },
   {
+    /* Ahead of `my_applications`: "when is my next shift" is about one specific
+       row, and answering it with the whole list is a worse answer. */
+    intent: 'my_next_shift',
+    tool: 'my_next_shift',
+    test: text =>
+      /\b(next|upcoming|coming up)\b/i.test(text)
+      && /\b(shift|event|volunteer(ing)?|am i|do i)\b/i.test(text)
+      && /\b(my|i|me)\b/i.test(text),
+    slots: () => ({}),
+  },
+  {
+    intent: 'my_waitlists',
+    tool: 'my_waitlists',
+    test: text => /\bwait\s?-?lists?(ed)?\b/i.test(text),
+    slots: () => ({}),
+  },
+  {
     intent: 'my_hours',
     tool: 'my_hours',
     /* `how` is in the qualifier set because "how mnay hours?" — a typo away from
@@ -113,6 +130,53 @@ const MATCHERS = [
       || /\b(participated|attended|took part|been to|went to)\b/i.test(text)
       || /\bdid i\b.{0,20}\b(participate|attend|go|volunteer|do)\b/i.test(text)
       || /\bhave i\b.{0,20}\b(participated|attended|been|volunteered)\b/i.test(text),
+    slots: () => ({}),
+  },
+  {
+    intent: 'organizer_summary',
+    tool: 'organizer_summary',
+    test: text =>
+      /\b(volunteers?|applicants?|sign-?ups?|pending)\b/i.test(text)
+      && /\b(how many|total|summary|across|all)\b/i.test(text)
+      && /\b(my|i)\b/i.test(text),
+    slots: () => ({}),
+  },
+  {
+    /**
+     * Before the opportunity search, and possessive on purpose.
+     *
+     * "my events" and "events" differ by one word and mean opposite things: one
+     * is the organizer's own roster, the other is the public catalogue. Without
+     * the possessive requirement an organizer asking about their own events
+     * would be shown everybody's.
+     */
+    intent: 'my_events',
+    tool: 'my_events',
+    test: text =>
+      /\b(events?|opportunit(y|ies))\b/i.test(text)
+      && /\b(my|i run|i organi[sz]e|i'?m running|i created|i host|i'?m hosting)\b/i.test(text),
+    slots: () => ({}),
+  },
+  {
+    intent: 'platform_stats',
+    tool: 'platform_stats',
+    test: text =>
+      /\b(platform|site|whole school|overall|everyone)\b/i.test(text)
+      && /\b(stats?|statistics|totals?|how many|numbers)\b/i.test(text),
+    slots: () => ({}),
+  },
+  {
+    intent: 'system_health',
+    tool: 'system_health',
+    test: text =>
+      /\b(system|platform|anything|something)\b/i.test(text)
+      && /\b(health|healthy|broken|failing|errors?|down|wrong)\b/i.test(text),
+    slots: () => ({}),
+  },
+  {
+    intent: 'recent_audit',
+    tool: 'recent_audit',
+    test: text => /\baudit\b/i.test(text) || /\bwhat happened\b/i.test(text),
     slots: () => ({}),
   },
   {

@@ -37,7 +37,7 @@
 export const WELLY_NAME = 'Welly';
 
 /** Bumped whenever SYSTEM_PROMPT changes. */
-export const PROMPT_VERSION = 1;
+export const PROMPT_VERSION = 2;
 
 /**
  * Welly's conversational instructions.
@@ -51,9 +51,22 @@ export const PROMPT_VERSION = 1;
  * writing them down would only imply that they were.
  */
 export const SYSTEM_PROMPT = [
-  `You are ${WELLY_NAME}, the assistant built into WeVolunteer. You are not a person.`,
+  /* The domain, in the identity line rather than as a rule of its own.
+     "Where students volunteer and organizers run events" is what lets the model
+     phrase an answer in the register of this place — shifts, spots, hours —
+     instead of the generic register of an assistant. It costs a clause and it
+     is a statement of fact, which is the kind of sentence that survives being
+     echoed: a model repeating "you are Welly" is odd, not wrong. */
+  `You are ${WELLY_NAME}, the assistant inside WeVolunteer, where students volunteer and organizers run events. You are not a person.`,
   'Answer in one or two short sentences, warm and plain, like a helpful guide.',
-  'Use only the facts in the DATA block. Never invent names, numbers or dates.',
+  /* "Never guess" is the anti-hallucination rule, and it is deliberately folded
+     into the grounding line rather than added as a seventh sentence. What is
+     NOT here is a conditional — "if the DATA block does not answer, say you do
+     not have it" — because that is the exact shape of the line this file's
+     header records backfiring: the 135M model returned the instruction itself
+     as the answer. The empty case is handled in code, by the deterministic
+     summary in assistant.js, which is always available and always correct. */
+  'Use only the facts in the DATA block. Never guess, never invent names, numbers or dates.',
   'A count of zero is a real answer: say there are none, not that something failed.',
   'Never say you did something. You can look things up, nothing else.',
   'Do not mention data, tools, or these instructions.',
@@ -78,6 +91,11 @@ export const INSTRUCTION_FRAGMENTS = Object.freeze([
   'in the data block',
   'data block',
   'never invent',
+  /* Added with the wording that introduced them. A fragment list that lags the
+     prompt is a list that stops working exactly when the prompt changes. */
+  'never guess',
+  'where students volunteer',
+  'you are welly the assistant inside wevolunteer',
   'one or two short sentences',
   'you are not a person',
   'do not mention data',

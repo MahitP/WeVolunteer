@@ -86,6 +86,31 @@ describe('the tool registry cannot act, only look', () => {
     ).toEqual(['MAX_ROWS']);
   });
 
+  it('hands the model no raw UTC timestamp', () => {
+    /**
+     * Measured, not theorised. `my_next_shift` passed the slot's
+     * `startDatetime` through untouched — `2026-08-31T11:30:00.000Z` — and the
+     * 1.5B model answered "starting at 11:30 AM" for a shift the rest of the
+     * app shows as 7:30 AM. A model has no timezone; it read the digits.
+     *
+     * Four hours out, stated with no hedge, about the one fact a student would
+     * act on. So every date is converted here, where Intl does it correctly,
+     * and the model only ever repeats a string that is already right.
+     *
+     * Asserted against the source because the failure is a field assignment,
+     * and by the time a value reaches a caller the mistake is invisible.
+     */
+    const rawDates = [...SRC.matchAll(/^\s*(?:startsAt|at|deadline|issuedAt|startDatetime|endDatetime):\s*(.+)$/gm)]
+      .map(m => m[1].trim())
+      .filter(expr => !/^local(Moment|Day)\(/.test(expr));
+
+    expect(
+      rawDates,
+      'pass dates through localMoment() or localDay(). A raw ISO string is in UTC, '
+      + 'and the model will repeat its digits as if they were the local clock.',
+    ).toEqual([]);
+  });
+
   it('has a description for every tool', () => {
     /* These are read by people deciding what the assistant may do. A tool with
        no description is one that cannot be reviewed. */

@@ -38,6 +38,7 @@
  */
 
 import { api } from '../utils/api';
+import { can } from '../authz.js';
 
 /**
  * How sensitive a tool's output is.
@@ -53,6 +54,50 @@ export const PRIVACY = Object.freeze({
   PUBLIC: 'PUBLIC',
   USER_PRIVATE: 'USER_PRIVATE',
 });
+
+/**
+ * A timestamp the model can repeat without being wrong.
+ *
+ * Dates reach the model as ISO strings in UTC — `2026-08-31T11:30:00.000Z` — and
+ * a model has no timezone and no reason to convert one. Asked when their next
+ * shift was, the 1.5B model read those digits and answered "11:30 AM" for a
+ * shift the rest of the app correctly shows as 7:30 AM. Four hours out, stated
+ * with complete confidence, and nothing in the sentence to suggest doubt.
+ *
+ * That is the same class of error the whole design avoids elsewhere: the tool
+ * returns facts and the model only phrases them. A UTC instant is not a fact a
+ * student can act on — the local time is — so the conversion belongs here,
+ * where `Intl` does it correctly, rather than in a prompt asking a small model
+ * to do arithmetic.
+ *
+ * Returns null for anything unparseable, because a wrong date is worse than an
+ * absent one and the callers already handle null.
+ */
+function localMoment(value) {
+  if (!value) return null;
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return null;
+  try {
+    return at.toLocaleString(undefined, {
+      weekday: 'short', day: 'numeric', month: 'short',
+      hour: 'numeric', minute: '2-digit',
+    });
+  } catch {
+    return at.toISOString();
+  }
+}
+
+/** The same, without a clock, for things that are a day rather than a moment. */
+function localDay(value) {
+  if (!value) return null;
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return null;
+  try {
+    return at.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  } catch {
+    return at.toISOString().slice(0, 10);
+  }
+}
 
 /** Rows handed to the model, per tool. Enough to answer, far short of a dump. */
 const MAX_ROWS = 8;
@@ -120,7 +165,7 @@ export const TOOLS = {
             hours: c.hours,
             /* That response carries no created/issued timestamp. The end of the
                service is the date the certificate is actually about. */
-            issuedAt: c.endDatetime || c.createdAt || c.created_at,
+            issuedAt: localDay(c.endDatetime || c.createdAt || c.created_at),
           })),
         });
       } catch (err) {
@@ -214,7 +259,181 @@ export const TOOLS = {
             category: e.category,
             tags: (e.tags || []).slice(0, 3).map(t => t.label || t),
             distance: typeof e.distance === 'number' ? e.distance : null,
-            deadline: e.applicationDeadline || e.application_deadline,
+            deadline: localDay(e.applicationDeadline || e.application_deadline),
+          })),
+        });
+      } catch (err) {
+        return failed(reasonFor(err));
+      }
+    },
+  },
+
+  /* ── Student: their own record, asked the way people actually ask ────────── */
+
+  my_next_shift: {
+    description: 'The next shift the signed-in person is confirmed or waitlisted for.',
+    privacy: PRIVACY.USER_PRIVATE,
+    readOnly: true,
+    async run() {
+      try {
+        const rows = await api.fetchApplications();
+        const list = Array.isArray(rows) ? rows : [];
+        const now = Date.now();
+        /* Accepted first, then soonest. A pending application is not a shift
+           somebody has — saying "your next shift" about one would promise a
+           place the organizer has not given. */
+        const upcoming = list
+          .filter(a => a.status === 'accepted' && a.slot?.startDatetime)
+          .filter(a => Date.parse(a.slot.startDatetime) >= now)
+          .sort((x, y) => Date.parse(x.slot.startDatetime) - Date.parse(y.slot.startDatetime));
+
+        const next = upcoming[0] || null;
+        return ok('next_shift', {
+          total: upcoming.length,
+          next: next && {
+            eventTitle: next.event?.title || null,
+            slotName: next.slot?.name || null,
+            startsAt: localMoment(next.slot.startDatetime),
+            hours: next.slot?.hours ?? null,
+          },
+        });
+      } catch (err) {
+        return failed(reasonFor(err));
+      }
+    },
+  },
+
+  my_waitlists: {
+    description: 'Shifts the signed-in person is waitlisted for, and their place in the queue.',
+    privacy: PRIVACY.USER_PRIVATE,
+    readOnly: true,
+    async run() {
+      try {
+        const rows = await api.fetchApplications();
+        const list = (Array.isArray(rows) ? rows : []).filter(a => a.status === 'waitlisted');
+        return ok('waitlists', {
+          total: list.length,
+          items: list.slice(0, MAX_ROWS).map(a => ({
+            eventTitle: a.event?.title || null,
+            slotName: a.slot?.name || null,
+            /* Surfaced because "am I on a waitlist" is nearly always followed by
+               "where am I in it", and the answer is already on the row. */
+            position: a.waitlistOrder ?? null,
+          })),
+        });
+      } catch (err) {
+        return failed(reasonFor(err));
+      }
+    },
+  },
+
+  /* ── Organizer ───────────────────────────────────────────────────────────── */
+
+  my_events: {
+    description: 'Events the signed-in organizer runs, with how full each one is.',
+    privacy: PRIVACY.USER_PRIVATE,
+    capability: 'event.create',
+    readOnly: true,
+    async run() {
+      try {
+        const res = await api.fetchEvents({ mine: true, limit: MAX_ROWS });
+        const list = Array.isArray(res) ? res : (res?.events || []);
+        return ok('my_events', {
+          total: list.length,
+          items: list.slice(0, MAX_ROWS).map(e => ({
+            title: e.title,
+            status: e.status,
+            spotsRemaining: e.spotsRemaining ?? e.spots_remaining ?? null,
+            deadline: localDay(e.applicationDeadline || e.application_deadline),
+          })),
+        });
+      } catch (err) {
+        return failed(reasonFor(err));
+      }
+    },
+  },
+
+  organizer_summary: {
+    description: 'Totals across the events the signed-in organizer runs.',
+    privacy: PRIVACY.USER_PRIVATE,
+    capability: 'event.create',
+    readOnly: true,
+    async run() {
+      try {
+        const stats = await api.fetchOrganizerStats();
+        return ok('organizer_summary', {
+          events: Number(stats?.events ?? 0),
+          volunteers: Number(stats?.volunteers ?? stats?.totalVolunteers ?? 0),
+          hours: Number(stats?.hours ?? stats?.totalHours ?? 0),
+          pending: Number(stats?.pendingApplications ?? stats?.pending ?? 0),
+        });
+      } catch (err) {
+        return failed(reasonFor(err));
+      }
+    },
+  },
+
+  /* ── Admin ───────────────────────────────────────────────────────────────── */
+
+  platform_stats: {
+    description: 'Platform-wide totals for an administrator.',
+    /* USER_PRIVATE rather than PUBLIC: these are aggregates over other people's
+       records, and the fact that they are counts does not make them public. */
+    privacy: PRIVACY.USER_PRIVATE,
+    capability: 'analytics.platform',
+    readOnly: true,
+    async run() {
+      try {
+        const stats = await api.fetchAdminStats();
+        return ok('platform_stats', {
+          users: Number(stats?.users ?? stats?.totalUsers ?? 0),
+          events: Number(stats?.events ?? stats?.totalEvents ?? 0),
+          hours: Number(stats?.hours ?? stats?.totalHours ?? 0),
+          openReports: Number(stats?.openReports ?? stats?.reports ?? 0),
+        });
+      } catch (err) {
+        return failed(reasonFor(err));
+      }
+    },
+  },
+
+  /* ── Owner ───────────────────────────────────────────────────────────────── */
+
+  system_health: {
+    description: 'Whether anything is currently failing, for an owner.',
+    privacy: PRIVACY.USER_PRIVATE,
+    capability: 'error.read',
+    readOnly: true,
+    async run() {
+      try {
+        const summary = await api.fetchErrorSummary();
+        return ok('system_health', {
+          openGroups: Number(summary?.openGroups ?? summary?.open ?? 0),
+          last24h: Number(summary?.last24h ?? summary?.recent ?? 0),
+        });
+      } catch (err) {
+        return failed(reasonFor(err));
+      }
+    },
+  },
+
+  recent_audit: {
+    description: 'The most recent entries in the administrative audit trail.',
+    privacy: PRIVACY.USER_PRIVATE,
+    capability: 'audit.read',
+    readOnly: true,
+    async run() {
+      try {
+        const res = await api.fetchAuditLogs({ limit: MAX_ROWS });
+        const list = Array.isArray(res) ? res : (res?.logs || res?.entries || []);
+        return ok('recent_audit', {
+          total: list.length,
+          items: list.slice(0, MAX_ROWS).map(r => ({
+            action: r.action,
+            at: localMoment(r.createdAt || r.created_at),
+            /* Deliberately no target name or details. The audit trail names
+               people, and "what happened today" does not need to put somebody's
+               name into a model prompt to be answered. */
           })),
         });
       } catch (err) {
@@ -258,8 +477,29 @@ export const TOOL_NAMES = Object.keys(TOOLS);
  * whose job is to keep going — and because an unknown tool is a bug in this
  * file, not something to surface to a student as a crash.
  */
-export async function runTool(name, args = {}) {
+export async function runTool(name, args = {}, { user = null } = {}) {
   const tool = TOOLS[name];
   if (!tool) return failed('unknown_tool');
+
+  /**
+   * The capability is checked here as well as on the server.
+   *
+   * The server is what actually protects the data and always was — every tool
+   * goes through the same `api.js` client, the same cookie and the same
+   * authorization as the rest of the app, so a student asking an organizer
+   * question has never been able to READ anything they should not.
+   *
+   * This check is about the answer rather than the data. Without it a student
+   * whose question happened to match an organizer pattern would get a 403
+   * rendered as "something went wrong", which reads as a broken assistant
+   * rather than as a question that was never theirs to ask. Refusing here says
+   * the true thing.
+   *
+   * `can` is the client half of the same decision function the server uses, and
+   * intersects with the real role, so a forged `preview` can only ever take
+   * capabilities away.
+   */
+  if (tool.capability && !can(user, tool.capability)) return failed('not_allowed');
+
   return tool.run(args);
 }

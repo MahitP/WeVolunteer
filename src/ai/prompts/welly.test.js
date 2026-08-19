@@ -47,6 +47,39 @@ describe('the prompt stays small on purpose', () => {
     expect(SYSTEM_PROMPT.length).toBeLessThan(500);
   });
 
+  it('says what kind of place this is, not just what it is called', () => {
+    /* Without the domain the model answers in the register of a generic
+       assistant. Naming the place — students volunteering, organizers running
+       events — is what makes it phrase things in shifts, spots and hours. */
+    expect(SYSTEM_PROMPT).toMatch(/students volunteer/i);
+    expect(SYSTEM_PROMPT).toMatch(/organi[sz]ers run events/i);
+  });
+
+  it('forbids guessing as well as inventing', () => {
+    /**
+     * "Never invent names, numbers or dates" covers fabricated specifics. It
+     * does not obviously cover the likelier failure at this size: answering a
+     * question the DATA block does not cover with something plausible. That is
+     * what "never guess" is for, and it is folded into the grounding sentence
+     * rather than added as a new one, because the length bound above is real.
+     */
+    expect(SYSTEM_PROMPT).toMatch(/never guess/i);
+  });
+
+  it('states no conditional rule about empty results', () => {
+    /**
+     * The one instruction shape this file has measured going wrong. "If the
+     * DATA block is empty, say you could not find anything" came back from the
+     * 135M model AS the answer, turning a correct zero into what read like a
+     * failure. The empty case is handled by the deterministic summary in
+     * assistant.js instead — code, not a sentence the model can repeat.
+     *
+     * Pinned so that a future edit adding a well-meaning "if you don't know,
+     * say so" has to read this first.
+     */
+    expect(SYSTEM_PROMPT).not.toMatch(/\bif the data\b|\bif you (do not|don't|cannot|can't)\b|\bif nothing\b/i);
+  });
+
   it('does not try to enforce what code enforces', () => {
     /**
      * Authorization, permissions and tool choice are decided by the router and
