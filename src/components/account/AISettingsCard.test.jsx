@@ -204,8 +204,15 @@ describe('once a model is installed', () => {
   });
 
   it('defaults conversation history to off', async () => {
+    /* Named "Pick up where I left off" since 2026-08-19. The label now says what
+       the setting does rather than what it does not do — the old wording
+       volunteered that conversations are "never sent to WeVolunteer", which is
+       true and is also what made readers wonder whether the other setting sends
+       them somewhere. The default itself is unchanged and is what this asserts:
+       school computers are shared, and a transcript should not greet whoever
+       sits down next. */
     renderCard();
-    const toggle = screen.getByRole('checkbox', { name: /keep my conversations/i });
+    const toggle = screen.getByRole('checkbox', { name: /pick up where i left off/i });
     expect(toggle).not.toBeChecked();
   });
 

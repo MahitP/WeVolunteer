@@ -218,10 +218,27 @@ export default function AISettingsCard({ addToast }) {
                   onChange={e => setPrefs(writePreferences({ saveConversations: e.target.checked }))}
                 />
                 <div className="stack-xs" style={{ flex: 1 }}>
-                  <span className="strong">Keep my conversations on this device</span>
+                  <span className="strong">Pick up where I left off</span>
+                  {/*
+                    Says what the setting DOES, and why the default is what it is.
+
+                    It used to read "Conversations are stored only in this browser
+                    and are never sent to WeVolunteer or anyone else." That answers
+                    a question nobody asked, and raising it is what makes a reader
+                    wonder whether the other setting sends their chat somewhere —
+                    which it does not, and never could: Welly runs on the device and
+                    there is no endpoint that receives what you type.
+
+                    The real reason for the default is the one that was missing.
+                    School computers are shared, and a transcript of what somebody
+                    asked — which is often the thing they did not want to ask a
+                    person — should not still be on screen for whoever sits down
+                    next.
+                  */}
                   <span className="dim small">
-                    Off by default. Conversations are stored only in this browser and are
-                    never sent to WeVolunteer or anyone else.
+                    On, your conversation is still here when you come back. Off, it
+                    clears when you close the tab. Either way it never leaves this
+                    browser. Off by default because school computers are often shared.
                   </span>
                 </div>
               </label>
