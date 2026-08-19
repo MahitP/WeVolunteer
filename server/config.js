@@ -644,6 +644,27 @@ if (IS_PRODUCTION) {
  */
 export const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION !== 'false';
 
+/**
+ * Turning it off in production is legitimate but must not be silent.
+ *
+ * A warning rather than a refusal, because the flag is a documented opt-out and
+ * refusing it would overrule a deployment that meant it — the same line
+ * OAUTH_REDIRECT_URI draws when the provider, not this process, is the
+ * authority. But nothing else reports it: with the gate off, sign-in never
+ * consults `email_verified`, so an account registered against an address its
+ * holder does not own works completely, and the only trace is a line in an env
+ * file nobody re-reads. On a platform holding minors' records that is worth one
+ * line at boot.
+ */
+if (IS_PRODUCTION && !REQUIRE_EMAIL_VERIFICATION) {
+  console.warn(
+    '[config] WARNING: REQUIRE_EMAIL_VERIFICATION=false in production.\n'
+    + '         Accounts can be used without confirming the address, so anyone\n'
+    + '         able to type an address they do not own gets a working account.\n'
+    + '         Unset the variable to restore the default (verification required).'
+  );
+}
+
 // Paths an authenticated-but-unverified user may still reach when
 // REQUIRE_EMAIL_VERIFICATION is on: enough to see their own account and finish
 // verifying. Deliberately minimal — no action routes, no other users' data.

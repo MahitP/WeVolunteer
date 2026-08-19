@@ -50,6 +50,7 @@ import { fileURLToPath } from 'url';
 import {
   resolveDbPath,
   refuseProduction,
+  refuseNonSqliteEngine,
   refuseProductionLikePath,
   refuseNonDisposableDatabase
 } from './lib/db-safety.mjs';
@@ -75,6 +76,15 @@ const assumeYes = args.includes('--yes') || args.includes('-y');
  */
 refuseProduction({
   tool: 'the development database reset',
+  effect: 'delete that database and reseed demo accounts'
+});
+/* Before the path checks below: they all inspect a FILE, and with
+   DATABASE_ENGINE=postgres the file is irrelevant — db.js will open the URL
+   instead, and this script's seed installs a published-password administrator.
+   Measured, not theorised: without this the script created 65 tables and 15
+   demo accounts in a PostgreSQL database with every other gate satisfied. */
+refuseNonSqliteEngine({
+  tool: 'The development database reset',
   effect: 'delete that database and reseed demo accounts'
 });
 refuseProductionLikePath({ tool: 'The development database reset', dbPath });

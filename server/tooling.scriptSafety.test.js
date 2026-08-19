@@ -89,6 +89,80 @@ describe('destructive CLIs refuse a production environment', () => {
   }
 });
 
+/**
+ * The PostgreSQL case, which every other gate in this file is blind to.
+ *
+ * The three existing gates all reason about a FILE — a path is resolved, the
+ * path is inspected, the path is opened as SQLite and its rows counted. On
+ * PostgreSQL the target is a URL and the path names a file that does not exist,
+ * and a missing file reads as "nothing to protect". So all three passed.
+ *
+ * Measured on 2026-08-19, not reasoned about: with DATABASE_ENGINE=postgres and
+ * a DATABASE_URL exported — the shell state the PostgreSQL runbook tells an
+ * operator to create — `reset-dev-db.mjs --yes` created 65 tables and seeded 15
+ * demo accounts, including an administrator, all sharing the password published
+ * in docs/operations/pilot-credentials.md. NODE_ENV was unset, which is the
+ * ordinary state of an operator's shell, so the production gate never fired.
+ *
+ * Asserted per tool rather than once, because reset-dev-db.mjs composes the gate
+ * out of individual calls instead of using guardDestructive — which is exactly
+ * how the previous content check came to miss it.
+ */
+describe('destructive CLIs refuse a PostgreSQL target', () => {
+  for (const tool of DESTRUCTIVE_TOOLS) {
+    it(`${tool} refuses DATABASE_ENGINE=postgres`, () => {
+      const dir = scratchDir('pgengine');
+      const dbFile = path.join(dir, 'scratch.db');
+      writeFileSync(dbFile, 'sentinel');
+
+      const res = run(tool, {
+        env: {
+          DATABASE_ENGINE: 'postgres',
+          /* Unreachable on purpose. The refusal must happen before anything
+             tries to connect, so a wrong URL must not be what stops it. */
+          DATABASE_URL: 'postgres://nobody@127.0.0.1:1/nonexistent',
+          WEV_DB_PATH: dbFile,
+          JWT_SECRET: 'x'.repeat(48),
+        },
+        args: ['--yes'],
+      });
+
+      const untouched = existsSync(dbFile) && readFileSync(dbFile, 'utf8') === 'sentinel';
+      rmSync(dir, { recursive: true, force: true });
+
+      expect(res.code, `expected a non-zero exit\n${res.combined}`).not.toBe(0);
+      expect(res.combined).toMatch(/REFUS/i);
+      expect(untouched, 'the database was modified despite the refusal').toBe(true);
+      /* The URL carries the password; a refusal must not print it. */
+      expect(res.combined).not.toMatch(/nobody@127\.0\.0\.1/);
+    });
+
+    it(`${tool} refuses a bare DATABASE_URL with no engine set`, () => {
+      /* DATABASE_ENGINE defaults to sqlite, so an operator who exported only the
+         URL still has a shell pointed at a deployment. */
+      const dir = scratchDir('pgurl');
+      const dbFile = path.join(dir, 'scratch.db');
+      writeFileSync(dbFile, 'sentinel');
+
+      const res = run(tool, {
+        env: {
+          DATABASE_URL: 'postgres://nobody@127.0.0.1:1/nonexistent',
+          WEV_DB_PATH: dbFile,
+          JWT_SECRET: 'x'.repeat(48),
+        },
+        args: ['--yes'],
+      });
+
+      const untouched = existsSync(dbFile) && readFileSync(dbFile, 'utf8') === 'sentinel';
+      rmSync(dir, { recursive: true, force: true });
+
+      expect(res.code, `expected a non-zero exit\n${res.combined}`).not.toBe(0);
+      expect(res.combined).toMatch(/REFUS/i);
+      expect(untouched).toBe(true);
+    });
+  }
+});
+
 describe('destructive CLIs refuse a production-looking database path', () => {
   // NODE_ENV is the primary gate, but an operator who exported only WEV_DB_PATH
   // never sets it. This is the second net under that case.

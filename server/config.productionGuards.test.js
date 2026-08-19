@@ -120,6 +120,34 @@ describe('APP_URL is validated, not merely present', () => {
  * user happened to be running on those ports could act as them and read the
  * replies, on a deployment whose operator never configured CORS at all.
  */
+describe('REQUIRE_EMAIL_VERIFICATION in production', () => {
+  /**
+   * A deployment may switch the gate off — it is a documented opt-out — but it
+   * must not do so silently. With the gate off nothing in the sign-in path ever
+   * consults `email_verified`, so an account registered against an address its
+   * holder does not own works completely, and the only record is a line in an
+   * env file. A warning, not a refusal, because refusing would overrule an
+   * operator who meant it.
+   */
+  it('warns, and still boots', () => {
+    const r = bootConfig({ REQUIRE_EMAIL_VERIFICATION: 'false' });
+    expect(r.booted, r.out.slice(0, 300)).toBe(true);
+    expect(r.out).toMatch(/REQUIRE_EMAIL_VERIFICATION=false in production/);
+  });
+
+  it('says nothing when the gate is left on', () => {
+    const r = bootConfig({});
+    expect(r.booted, r.out.slice(0, 300)).toBe(true);
+    expect(r.out).not.toMatch(/REQUIRE_EMAIL_VERIFICATION=false/);
+  });
+
+  it('leaves development alone', () => {
+    const r = bootConfig({ NODE_ENV: 'development', REQUIRE_EMAIL_VERIFICATION: 'false' });
+    expect(r.booted, r.out.slice(0, 300)).toBe(true);
+    expect(r.out).not.toMatch(/WARNING: REQUIRE_EMAIL_VERIFICATION/);
+  });
+});
+
 describe('CORS_ORIGINS in production', () => {
   const origins = async (env) => {
     const root = process.cwd().replace(/\\/g, '/');
