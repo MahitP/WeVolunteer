@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { execFileSync } from 'child_process';
-import { mkdtempSync, rmSync, existsSync } from 'fs';
+import { execFileSync, spawnSync } from 'child_process';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, symlinkSync, cpSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -239,6 +239,109 @@ describe('privileged CLI database resolution', () => {
        deliberately cleared it — which is exactly what the failing suites did. */
     expect(src, 'explicit empty values must be preserved, not treated as absent')
       .toMatch(/value !== undefined/);
+  });
+
+  /**
+   * A caller that names a FILE must not be sent to a SERVER by `.env`.
+   *
+   * This is the production incident of 2026-08-19, reproduced. Two `super_admin`
+   * accounts were written into the live Supabase database because
+   * `ownerBootstrap.test.js` spawns `bin/bootstrap-owners.mjs` with
+   * `WEV_DB_PATH` pointed at a throwaway file while `.env` carried a production
+   * `DATABASE_ENGINE` and `DATABASE_URL`. The tool announced the Supabase host
+   * and created the accounts there.
+   *
+   * The first fix preserved variables the caller had SET, and did not close
+   * this: a caller that names a path has said everything it thinks it needs to
+   * and never mentions `DATABASE_ENGINE`, so `.env` still supplied one. Verified
+   * still broken after that fix before this rule was added.
+   *
+   * Run against a COPY of the repository rather than the real one, because the
+   * behaviour depends on the contents of `.env` at the repository root and other
+   * suites read that file concurrently. The copy is bin/ plus server/ with
+   * node_modules symlinked — about a fifth of a second.
+   */
+  describe('an explicit database path outranks a .env engine', () => {
+    const SENTINEL = 'db.SENTINEL-MUST-NOT-BE-REACHED.supabase.co';
+
+    /** A repository copy whose `.env` points at PostgreSQL. */
+    function repoWithPostgresDotEnv() {
+      /* realpath, because on macOS `mkdtemp` hands back /var/folders/… while
+         Node resolves a module's own `__filename` to /private/var/folders/… for
+         the same file. Every `bin/` script guards its `main()` with
+         `path.resolve(process.argv[1]) === path.resolve(__filename)`, so the two
+         spellings make that comparison false: the script exits 0 having done
+         nothing, and the test reads as "the tool produced no output" rather than
+         as a path problem. The same symlink is why `startTestServer` realpaths
+         both sides before comparing. */
+      const dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'wev-dotenv-')));
+      /* Tests and databases are excluded: they are irrelevant here, and copying
+         a `.db` file into a temp directory is exactly the kind of stray database
+         this whole file exists to prevent. */
+      const skip = (src) => /\.test\.[cm]?js$|\.db(-wal|-shm)?$/.test(src);
+      cpSync(path.join(ROOT, 'bin'), path.join(dir, 'bin'), { recursive: true, filter: (s) => !skip(s) });
+      cpSync(path.join(ROOT, 'server'), path.join(dir, 'server'), { recursive: true, filter: (s) => !skip(s) });
+      symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'));
+      /* Without it every server/*.js is parsed as CommonJS, because "type":
+         "module" lives in package.json — and the copy then fails on its first
+         import rather than on the behaviour under test. */
+      cpSync(path.join(ROOT, 'package.json'), path.join(dir, 'package.json'));
+      writeFileSync(path.join(dir, '.env'),
+        `DATABASE_ENGINE=postgres\nDATABASE_URL=postgres://postgres:x@${SENTINEL}:5432/postgres\n`);
+      return dir;
+    }
+
+    function runIn(dir, env) {
+      const r = spawnSync(process.execPath, [path.join(dir, 'bin', 'grant-ownership.mjs'),
+        'nobody@example.invalid', 'probe'], {
+        cwd: dir,
+        env: { ...process.env, WEV_DB_PATH: undefined, DATABASE_ENGINE: undefined,
+               DATABASE_URL: undefined, ...env },
+        encoding: 'utf8',
+        input: 'y\n',
+      });
+      return (r.stdout || '') + (r.stderr || '');
+    }
+
+    it('stays on the named file when .env says postgres', () => {
+      const dir = repoWithPostgresDotEnv();
+      try {
+        const target = path.join(dir, 'named.db');
+        const out = runIn(dir, { WEV_DB_PATH: target });
+
+        /* The whole finding in one assertion: the tool must never announce, nor
+           reach for, the host `.env` named. */
+        expect(out, 'the .env engine overrode an explicitly named database file')
+          .not.toContain(SENTINEL);
+        expect(out).toContain(target);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('still honours an engine the caller asked for explicitly', () => {
+      /* The rule must not become "WEV_DB_PATH always means SQLite". An operator
+         who sets both has said what they want, and production sets
+         DATABASE_ENGINE in its own environment — that path must keep working. */
+      const dir = repoWithPostgresDotEnv();
+      try {
+        const out = runIn(dir, { WEV_DB_PATH: path.join(dir, 'named.db'), DATABASE_ENGINE: 'postgres' });
+        expect(out).toContain(SENTINEL);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('leaves a deployment that names no path alone', () => {
+      /* With no WEV_DB_PATH there is no contradiction to resolve, and `.env` is
+         how a deployment is configured. */
+      const dir = repoWithPostgresDotEnv();
+      try {
+        expect(runIn(dir, {})).toContain(SENTINEL);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   /**

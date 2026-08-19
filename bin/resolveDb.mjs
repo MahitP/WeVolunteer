@@ -143,6 +143,33 @@ function loadDotEnv() {
        `.env` hand one back. */
     if (value !== undefined) process.env[key] = value;
   }
+
+  /**
+   * Naming a FILE and being sent to a SERVER are contradictory instructions, and
+   * the caller's is the specific one.
+   *
+   * The loop above only protects variables the caller actually set. A caller
+   * that says `WEV_DB_PATH=/tmp/scratch.db` has said everything it thinks it
+   * needs to — it named the database — and never mentions `DATABASE_ENGINE`, so
+   * `.env` still supplied one. That is not a hypothetical: it is exactly how two
+   * `super_admin` accounts were written into the production database on
+   * 2026-08-19. `ownerBootstrap.test.js` spawns `bin/bootstrap-owners.mjs` with
+   * `WEV_DB_PATH` pointed at a throwaway file, `.env` carried a production
+   * `DATABASE_ENGINE`/`DATABASE_URL`, and the tool announced the Supabase host
+   * and created the accounts there.
+   *
+   * Reproduced after the first fix and still broken, which is why this second
+   * rule exists: preserving what the caller SET was not enough, because the
+   * dangerous case is the variable the caller never mentions.
+   *
+   * So an explicit `WEV_DB_PATH` with no explicit `DATABASE_ENGINE` pins the
+   * engine to SQLite. A caller that genuinely wants PostgreSQL says so —
+   * production sets `DATABASE_ENGINE` in its own environment, and that path is
+   * untouched because the value is then caller-explicit.
+   */
+  if (explicit.WEV_DB_PATH !== undefined && explicit.DATABASE_ENGINE === undefined) {
+    process.env.DATABASE_ENGINE = 'sqlite';
+  }
   return process.env.WEV_DB_PATH || DEFAULT_DB;
 }
 
