@@ -39,6 +39,106 @@ const CERTIFICATE_CODE = /\bWEV-[0-9A-HJ-NP-Z]{4}-[0-9A-HJ-NP-Z]{4}\b/i;
 const NEARBY = /\b(near(by| me| here)?|close(st| by| to me)?|around here|walking distance)\b/i;
 
 /**
+ * Repairing a near-miss on the handful of words that decide routing.
+ *
+ * "Can u give me horus?" is a transposition away from "hours". It matched no
+ * pattern, reached the conversational path, and the 1.5B model — having no idea
+ * what Horus is in this context — invented one: "Horus is a fun game that you
+ * can play with friends. It's a classic board game that's been around for a
+ * long time." Confident, detailed, entirely fabricated.
+ *
+ * The lookup was available the whole time and one character away.
+ *
+ * Deliberately NOT general fuzzy matching, which is how a router starts
+ * answering questions nobody asked. It is a fixed list of the words that
+ * actually select a tool, an edit distance of one, and a length floor so short
+ * words are left alone — "hour" and "horn" are not the same word, and neither
+ * is "even" and "event".
+ */
+const REPAIRABLE = ['hours', 'certificates', 'organizations', 'volunteering', 'opportunities', 'applications'];
+
+/**
+ * Words that are already correct and must never be "repaired".
+ *
+ * The first version listed both singular and plural — `certificate` AND
+ * `certificates` — and each is one insertion away from the other, so a
+ * correctly typed `certificate` was rewritten to `certificates`. That broke two
+ * matchers that test the singular with a word boundary: "verify my certificate"
+ * stopped asking for the code, and "delete my application" stopped being
+ * refused. Both were caught by existing tests, which is exactly what they are
+ * for.
+ *
+ * So a word spelled correctly is left alone, whatever it is near.
+ */
+const SPELLED_CORRECTLY = new Set([
+  ...REPAIRABLE,
+  'hour', 'certificate', 'organization', 'organizations', 'application',
+  'opportunity', 'volunteer', 'volunteers', 'event', 'events', 'shift', 'shifts',
+]);
+
+/** Damerau-Levenshtein, capped at 1. Transpositions are the typo people make. */
+function isNearMiss(word, target) {
+  if (Math.abs(word.length - target.length) > 1) return false;
+  if (word === target) return false;
+
+  /* One transposition: "horus" for "hours". */
+  if (word.length === target.length) {
+    const diff = [];
+    for (let i = 0; i < word.length; i += 1) if (word[i] !== target[i]) diff.push(i);
+    if (diff.length === 1) return true;
+    if (diff.length === 2 && diff[1] === diff[0] + 1
+        && word[diff[0]] === target[diff[1]] && word[diff[1]] === target[diff[0]]) return true;
+    return false;
+  }
+
+  /* One insertion or deletion. */
+  const [shorter, longer] = word.length < target.length ? [word, target] : [target, word];
+  let i = 0; let j = 0; let skipped = false;
+  while (i < shorter.length && j < longer.length) {
+    if (shorter[i] === longer[j]) { i += 1; j += 1; continue; }
+    if (skipped) return false;
+    skipped = true;
+    j += 1;
+  }
+  return true;
+}
+
+/** Rewrites near-misses so the matchers below see the word that was meant. */
+function repairTypos(text) {
+  return text.replace(/[a-z]{5,}/gi, (word) => {
+    const lower = word.toLowerCase();
+    if (SPELLED_CORRECTLY.has(lower)) return word;
+    const hit = REPAIRABLE.find(target => isNearMiss(lower, target));
+    return hit || word;
+  });
+}
+
+/**
+ * Asking Welly to DO something.
+ *
+ * "I'd like you to create an event" reached the conversational path and was
+ * answered "Sure, I can help you create an event! What kind of event are you
+ * envisioning?" — from a student account, about a thing Welly cannot do for
+ * anybody. Every tool is read-only; there is no create path at all. The reply
+ * was a promise to a person who would then wait for it to happen.
+ *
+ * Both halves of that are wrong independently. The account could not create an
+ * event, and the assistant could not create one either. Neither is a fact the
+ * model has, and CHAT_PROMPT saying "you can only look things up" is the kind
+ * of negative instruction this codebase has already measured failing.
+ *
+ * So an action request is answered by the application, which knows the truth.
+ * The wording sends them to where the action actually lives rather than simply
+ * refusing, because somebody asking to create an event usually may.
+ */
+const ACTION_REQUEST = new RegExp([
+  /\b(create|make|add|set ?up|schedule|post|publish|start)\b.{0,20}\b(event|opportunit(y|ies)|shift|slot)\b/,
+  /\b(delete|remove|cancel|close|edit|change|update)\b.{0,20}\b(event|opportunit(y|ies)|shift|slot|application)\b/,
+  /\b(approve|reject|accept|decline|waitlist)\b.{0,20}\b(applicant|application|volunteer|student)\b/,
+  /\b(sign me up|apply me|register me|book me)\b/,
+].map(r => r.source).join('|'), 'i');
+
+/**
  * Questions about the RULES rather than about a record.
  *
  * "Does driving someone to practice count as volunteering?" contains the word
@@ -360,8 +460,13 @@ const REFUSALS = [
  * nobody anticipated.
  */
 export function routeIntent(message) {
-  const text = String(message || '').trim();
-  if (!text) return { intent: 'empty', tool: null, slots: {} };
+  const raw = String(message || '').trim();
+  if (!raw) return { intent: 'empty', tool: null, slots: {} };
+
+  /* Routing decisions are made on the repaired text; slots are still filled
+     from it too, since a search query built from a misspelling finds nothing
+     either. See repairTypos. */
+  const text = repairTypos(raw);
 
   for (const refusal of REFUSALS) {
     if (refusal.test(text)) return { intent: refusal.intent, tool: null, slots: {} };
@@ -389,6 +494,12 @@ export function routeIntent(message) {
    * class of question where a confident wrong answer costs a student real hours
    * is answered by the application instead.
    */
+  /* Ahead of everything: an action request mentioning an event would otherwise
+     be read as a search for one. See ACTION_REQUEST. */
+  if (ACTION_REQUEST.test(text)) {
+    return { intent: 'action_request', tool: null, slots: {} };
+  }
+
   if (ELIGIBILITY.test(text) && QUESTION_SHAPE.test(text)) {
     return { intent: 'eligibility_question', tool: null, slots: {} };
   }

@@ -101,6 +101,12 @@ export const SYSTEM_PROMPT = [
 export const CHAT_PROMPT = [
   `You are ${WELLY_NAME}, the assistant inside WeVolunteer, where students volunteer and organizers run events.`,
   'Chat warmly and briefly, two or three sentences at most.',
+  /* SYSTEM_PROMPT has always carried this and CHAT_PROMPT did not, which is how
+     "I'd like you to create an event" got "Sure, I can help you create an
+     event!" — a promise, to a student, about a thing no tool here can do. The
+     pattern in router.js is what actually stops that; this line is for the
+     phrasings a pattern will not catch. */
+  'You can look things up. You cannot create, change, cancel or approve anything.',
   'You cannot see anyone\'s hours, shifts, applications or certificates, and you do not know this school\'s rules.',
   'If they ask about their own record or what counts, say you can look it up and invite them to ask for it directly.',
   'Never state a WeVolunteer rule, number or date as fact.',
@@ -161,10 +167,49 @@ export function looksLikeInstructionEcho(text) {
  * sentence, which is always available and always correct. Rejecting freely is
  * therefore cheap, and the bias is deliberately toward rejecting.
  */
+/**
+ * The model offering to do something it cannot do.
+ *
+ * CHAT_PROMPT says plainly "You can look things up. You cannot create, change,
+ * cancel or approve anything." Measured against the 1.5B model immediately
+ * after adding that line, it still finished a reply with:
+ *
+ *     "...I'd be happy to help with general information or assist with creating
+ *      or running an event."
+ *
+ * — in the same conversation where the application had just said it could not.
+ * This is the rule `prompts/tasks.js` records from its own measurements:
+ * negative instructions do not hold at this size, so anything enforceable after
+ * the fact is enforced after the fact.
+ *
+ * A reply making an offer like this is rejected and the deterministic sentence
+ * is shown instead. Rejecting is cheap — the fallback is always correct — and
+ * the alternative is a student waiting for an event that nobody is creating.
+ *
+ * Deliberately matches OFFERS, not descriptions. "The organizer creates the
+ * event" is a true sentence and stays.
+ */
+const CAPABILITY_CLAIMS = [
+  /* The contraction matters: "I'll approve" has no space where "I will
+     approve" does, and the first spelling is the likelier one. */
+  /\bi(?:'ll|'d| will| can| could| would| shall| am able to)\b[^.]{0,25}?\b(create|make|set ?up|schedule|post|publish|approve|register|sign)\b/i,
+  /\b(happy|glad|able) to (help|assist)\b[^.]{0,40}\b(creat|mak|settin|schedulin|approv|runnin|registerin)/i,
+  /\b(help|assist) (you )?(with )?(creating|making|setting ?up|scheduling|approving|running|registering)\b/i,
+  /\blet me (create|make|set ?up|schedule|approve|sign)\b/i,
+];
+
+/** True when a reply promises an action this assistant cannot perform. */
+export function claimsAnAction(text) {
+  const raw = String(text || '');
+  return CAPABILITY_CLAIMS.some(pattern => pattern.test(raw));
+}
+
 export function isUsableReply(text) {
   const raw = String(text || '').trim();
   if (raw.length < 2 || raw.length > 600) return false;
   if (looksLikeInstructionEcho(raw)) return false;
+  /* An offer to do something no tool here can do. See claimsAnAction. */
+  if (claimsAnAction(raw)) return false;
 
   /* A reply that is mostly punctuation or a stray fragment. The 135M model
      produced "inYou have 0 hours of work." — the leading artefact is the shape

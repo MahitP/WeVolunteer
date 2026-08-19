@@ -98,13 +98,25 @@ export default function AssistantPanel({ onClose, position, needsSetup = false }
     const controller = new AbortController();
     abortRef.current = controller;
 
-    /* A placeholder the streamed tokens land in, so the reply appears as it is
-       written rather than arriving all at once after a silence. */
-    let index = -1;
-    setMessages(prev => {
-      index = prev.length;
-      return [...prev, { role: 'assistant', text: '', streaming: true }];
-    });
+    /**
+     * A placeholder the streamed tokens land in, addressed by ID rather than by
+     * position.
+     *
+     * It used to capture `index = prev.length` from INSIDE the updater. That
+     * makes the updater impure, and React double-invokes updaters under
+     * StrictMode, so the captured index came from an invocation whose result was
+     * discarded. The symptom was tokens arriving in the wrong bubble: one reply
+     * ended mid-sentence and the next began with the missing tail —
+     *
+     *     "?I'm sorry, but I can't assist with"
+     *     "that.I'm sorry, but I can't assist"
+     *
+     * which reads as a model producing broken grammar and is nothing of the
+     * kind. An id is stable whatever else touches the array, and the updater
+     * that creates it no longer has to tell anyone where it landed.
+     */
+    const replyId = `welly-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setMessages(prev => [...prev, { id: replyId, role: 'assistant', text: '', streaming: true }]);
 
     try {
       const res = await ask(question, {
@@ -114,23 +126,24 @@ export default function AssistantPanel({ onClose, position, needsSetup = false }
         signal: controller.signal,
         onToken: token => {
           if (!aliveRef.current) return;
-          setMessages(prev => prev.map((m, i) => (
-            i === index ? { ...m, text: m.text + token } : m
+          setMessages(prev => prev.map(m => (
+            m.id === replyId ? { ...m, text: m.text + token } : m
           )));
         },
       });
 
       if (!aliveRef.current) return;
-      setMessages(prev => prev.map((m, i) => (
-        i === index
-          ? { role: 'assistant', text: res.answer, card: res.card, kind: res.card?.kind }
+      setMessages(prev => prev.map(m => (
+        m.id === replyId
+          ? { id: replyId, role: 'assistant', text: res.answer, card: res.card, kind: res.card?.kind }
           : m
       )));
     } catch (err) {
       if (!aliveRef.current) return;
-      setMessages(prev => prev.map((m, i) => (
-        i === index
+      setMessages(prev => prev.map(m => (
+        m.id === replyId
           ? {
+            id: replyId,
             role: 'assistant',
             text: isAbort(err)
               ? 'Stopped.'

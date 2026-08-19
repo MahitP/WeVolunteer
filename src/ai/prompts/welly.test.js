@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  SYSTEM_PROMPT, PROMPT_VERSION, WELLY_NAME,
-  isUsableReply, looksLikeInstructionEcho, INSTRUCTION_FRAGMENTS,
+  SYSTEM_PROMPT, CHAT_PROMPT, PROMPT_VERSION, WELLY_NAME,
+  isUsableReply, looksLikeInstructionEcho, INSTRUCTION_FRAGMENTS, claimsAnAction,
 } from './welly.js';
 
 /**
@@ -87,6 +87,62 @@ describe('the prompt stays small on purpose', () => {
      * involved in them, and a prompt is not a boundary.
      */
     expect(SYSTEM_PROMPT).not.toMatch(/authoriz|permission|allowed to see|capability|only show data the user/i);
+  });
+});
+
+describe('the conversational prompt', () => {
+  it('is bounded like the other one', () => {
+    /* Same reasoning as SYSTEM_PROMPT: every sentence competes with the
+       conversation for a small context window, and is one more thing a small
+       model can echo. */
+    expect(CHAT_PROMPT.length).toBeLessThan(600);
+  });
+
+  it('says it cannot act', () => {
+    /* Asked to create an event it answered "Sure, I can help you create an
+       event!". Every tool is read-only; there is no create path for anybody.
+       The pattern in router.js is the enforcement — this is the hint. */
+    expect(CHAT_PROMPT).toMatch(/cannot create/i);
+  });
+
+  it('disclaims knowing the record and the rules', () => {
+    expect(CHAT_PROMPT).toMatch(/cannot see/i);
+    expect(CHAT_PROMPT).toMatch(/rules/i);
+  });
+});
+
+describe('offering to do what it cannot do', () => {
+  /**
+   * Measured immediately after CHAT_PROMPT gained "You can look things up. You
+   * cannot create, change, cancel or approve anything." The 1.5B model, in the
+   * same conversation where the application had just said it could not create
+   * an event, ended a reply with "...I'd be happy to help with general
+   * information or assist with creating or running an event."
+   *
+   * The instruction was present and did not hold, which is what this codebase
+   * already records about negative instructions at this size. So the offer is
+   * caught on the way out instead.
+   */
+  it.each([
+    "I'd be happy to help with general information or assist with creating or running an event.",
+    'Sure, I can help you create an event! What kind of event are you envisioning?',
+    'Let me set up that shift for you.',
+    "I'll approve that applicant for you.",
+  ])('rejects: %s', (reply) => {
+    expect(claimsAnAction(reply)).toBe(true);
+    expect(isUsableReply(reply)).toBe(false);
+  });
+
+  it.each([
+    'The organizer creates the event, so it is worth asking them.',
+    'Events are set up from the Create event page.',
+    'You have 4 hours credited so far.',
+    'That shift starts at 7:30 AM on Monday.',
+  ])('leaves a plain description alone: %s', (reply) => {
+    /* Describing who does something is true and useful. Only an OFFER is the
+       problem — the distinction is what keeps this from eating good answers. */
+    expect(claimsAnAction(reply)).toBe(false);
+    expect(isUsableReply(reply)).toBe(true);
   });
 });
 

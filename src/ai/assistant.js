@@ -64,6 +64,14 @@ const FIXED = {
     + 'and organizations, show what you have applied to, and check a certificate code. '
     + 'What would you like to look at?',
 
+  /* Not phrased by the model either. Asked to create an event it answered
+     "Sure, I can help you create an event!" — to a student, about something no
+     tool here can do for anyone. See routeIntent. */
+  action_request:
+    'I can look things up, but I can\'t create or change anything myself. Events are '
+    + 'set up from the Create event page, and applications are decided by the organizer '
+    + 'running the event. I can show you what already exists, though.',
+
   /* Deliberately not phrased by the model. See routeIntent — asked whether
      driving someone to practice counts, the 1.5B model answered "Yes", which is
      a ruling it is in no position to make and a student would act on. */

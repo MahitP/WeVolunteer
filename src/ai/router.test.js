@@ -217,6 +217,75 @@ describe('mentioning a shift is not asking to be shown one', () => {
   });
 });
 
+describe('a typo on a routing word', () => {
+  /**
+   * "Can u give me horus?" is one transposition from "hours". It matched
+   * nothing, reached the conversational path, and the 1.5B model invented a
+   * subject: "Horus is a fun game that you can play with friends. It's a
+   * classic board game that's been around for a long time." The lookup was
+   * available the whole time and one character away.
+   */
+  it.each([
+    ['Can u give me horus?', 'my_hours'],
+    ['how many horus do I have', 'my_hours'],
+    ['my certifcates', 'my_certificates'],
+    ['what organizatons am I in', 'my_organizations'],
+  ])('%s still reaches %s', (text, tool) => {
+    expect(route(text).tool).toBe(tool);
+  });
+
+  it('leaves a correctly spelled word alone', () => {
+    /**
+     * The first version listed `certificate` and `certificates` as separate
+     * repair targets, and each is one insertion from the other — so a correctly
+     * typed "certificate" was rewritten to the plural, and two matchers that
+     * test the singular with a word boundary stopped firing. A word spelled
+     * correctly is never repaired, whatever it sits near.
+     */
+    expect(route('verify my certificate').intent).toBe('verify_certificate_missing_code');
+    expect(route('delete my application').intent).toBe('refuse_account_action');
+  });
+
+  it('does not repair a word that simply is not one of ours', () => {
+    /* Narrow on purpose. General fuzzy matching is how a router starts
+       answering questions nobody asked. */
+    expect(route('Bruh').intent).toBe('unknown');
+    expect(route('I loved that event').tool).toBeNull();
+  });
+});
+
+describe('asking Welly to do something', () => {
+  /**
+   * Observed on a STUDENT account. "I'd like you to create an event" reached
+   * the conversational path and was answered "Sure, I can help you create an
+   * event! What kind of event are you envisioning?" — a promise, from an
+   * assistant with no create path, to somebody whose role could not create one
+   * either. They would then wait for it to happen.
+   */
+  it.each([
+    "I'd like you to create an event",
+    'can you make an event for the food drive',
+    'set up a shift for Saturday',
+    'approve that applicant',
+    'sign me up',
+  ])('%s is answered by the application, not the model', (text) => {
+    const r = route(text);
+    expect(r.tool).toBeNull();
+    expect(r.intent).toBe('action_request');
+  });
+
+  it('leaves the existing account-action refusal in front', () => {
+    /* "delete my application" was already refused, and a refusal is a stronger
+       answer than "I can't do that myself". Order matters here. */
+    expect(route('delete my application').intent).toBe('refuse_account_action');
+  });
+
+  it('does not swallow an ordinary search that mentions an event', () => {
+    expect(route('find gardening opportunities').tool).toBe('search_opportunities');
+    expect(route('what events are near me').tool).toBe('search_opportunities');
+  });
+});
+
 describe('questions about the rules are not lookups', () => {
   /**
    * Observed once free conversation existed. "Does driving someone to practice
