@@ -115,9 +115,14 @@ describe('navSectionsFor', () => {
     expect(labelsOf(secondary), 'Admin is in the overflow again').not.toContain('Admin');
   });
 
-  it('gives the owner the five primary destinations in order', () => {
+  it('gives the owner the primary destinations in order', () => {
     expect(labelsOf(navSectionsFor(USER('super_admin')).primary))
-      .toEqual(['Dashboard', 'Discover', 'Calendar', 'Messages', 'Admin']);
+      .toEqual(['Dashboard', 'Discover', 'Calendar', 'Messages', 'Welly', 'Admin']);
+  });
+
+  it('gives a student the primary destinations in order', () => {
+    expect(labelsOf(navSectionsFor(USER('student')).primary))
+      .toEqual(['Dashboard', 'Discover', 'Calendar', 'Messages', 'Welly']);
   });
 
   /**
@@ -245,7 +250,7 @@ describe('navSectionsFor', () => {
    * stay everyday-plus-Admin rather than acquiring an administrative sub-page
    * that happened to sort early. Pinned for the owner, who has the most entries.
    */
-  it("keeps the owner's primary tier to the five destinations", () => {
-    expect(navSectionsFor(USER('super_admin')).primary).toHaveLength(5);
+  it("keeps the owner's primary tier to the six destinations", () => {
+    expect(navSectionsFor(USER('super_admin')).primary).toHaveLength(6);
   });
 });

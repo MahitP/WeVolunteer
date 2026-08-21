@@ -138,11 +138,11 @@ describe('the rail did not grow', () => {
    * destinations and their profile. It was seven before, and the seventh was a
    * second search.
    */
-  it('gives a student six entries and no more', () => {
+  it('gives a student seven entries and no more', () => {
     const items = navItemsFor(USER('student'));
-    expect(items).toHaveLength(6);
+    expect(items).toHaveLength(7);
     expect(items.map(n => n.label)).toEqual([
-      'Dashboard', 'Discover', 'Calendar', 'Messages', 'Notifications', 'Profile',
+      'Dashboard', 'Discover', 'Calendar', 'Messages', 'Welly', 'Notifications', 'Profile',
     ]);
   });
 

@@ -69,6 +69,7 @@ const AdminAuditExplorer = React.lazy(() => import('../views/AdminAuditExplorer'
 const ImpactDashboard = React.lazy(() => import('../views/ImpactDashboard.jsx'));
 const AdminRoster = React.lazy(() => import('../views/AdminRoster'));
 const ModerationCenter = React.lazy(() => import('../views/ModerationCenter'));
+const WellyView = React.lazy(() => import('../views/WellyView'));
 
 /**
  * Views App.jsx routes itself rather than through a table below.
@@ -293,6 +294,7 @@ export const APP_ROUTES = [
   /* Own certificates only: one carries a full name, an organization, dates and
      a verification code. */
   { path: '/certificates', element: <CertificatesPage />, requiredCap: 'portfolio.write' },
+  { path: '/welly', element: <WellyView />, requiredCap: 'self.read' },
   { path: '/settings', element: <Settings /> },
   /**
    * Reporting a problem with the platform.

@@ -13,7 +13,6 @@ const apiMock = {
   fetchAdminStats: vi.fn(),
   fetchErrorSummary: vi.fn(),
   fetchAuditLogs: vi.fn(),
-  fetchVolunteerStats: vi.fn(),
 };
 
 vi.mock('../utils/api', () => ({ api: apiMock }));
@@ -21,6 +20,7 @@ vi.mock('../utils/api', () => ({ api: apiMock }));
 const { ask } = await import('./assistant.js');
 const { MockRuntime } = await import('./runtime/MockRuntime.js');
 const { AIStatus } = await import('./runtime/types.js');
+const { clearDraft } = await import('./confirm.js');
 
 async function readyRuntime(...responses) {
   const rt = new MockRuntime({ responses });
@@ -29,6 +29,7 @@ async function readyRuntime(...responses) {
 }
 
 beforeEach(() => {
+  clearDraft();
   vi.clearAllMocks();
   apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 35.5, events: 7 });
   apiMock.fetchCertificates.mockResolvedValue([]);
@@ -344,6 +345,44 @@ describe('free conversation, beside the grounded answers', () => {
     const res = await ask('Bruh', { runtime: null });
     expect(res.intent).toBe('unknown');
     expect(res.phrasedByModel).toBe(false);
+  });
+
+  it('answers follow-up reactions empathetically based on recent context', async () => {
+    const res = await ask('dang it', {
+      runtime: null,
+      history: [
+        { role: 'user', text: 'How many volunteer hours do I have?' },
+        { role: 'assistant', text: 'You do not have any verified hours yet.' },
+      ],
+    });
+
+    expect(res.answer).toMatch(/Verified Platform Hours/i);
+    expect(res.card).toBeNull();
+  });
+
+  it('answers follow-up why questions from context', async () => {
+    const res = await ask('why?', {
+      runtime: null,
+      history: [
+        { role: 'user', text: 'How many volunteer hours do I have?' },
+        { role: 'assistant', text: 'You do not have any verified hours yet.' },
+      ],
+    });
+
+    expect(res.answer).toMatch(/Verified Platform Hours/i);
+    expect(res.card).toBeNull();
+  });
+
+  it('greets inquiries about chatting ability warmly', async () => {
+    const res = await ask('u cant talk?', { runtime: null });
+    expect(res.intent).toBe('greeting');
+    expect(res.answer).toMatch(/I can find opportunities/i);
+  });
+
+  it('answers affirmations with a friendly acknowledgement', async () => {
+    const res = await ask('thanks!', { runtime: null });
+    expect(res.intent).toBe('affirmation');
+    expect(res.answer).toMatch(/You're welcome/i);
   });
 });
 

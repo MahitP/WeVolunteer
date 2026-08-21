@@ -50,6 +50,7 @@ vi.mock('./views/Signup', () => stub('signup'));
 vi.mock('./views/CertificateVerification', () => stub('cert'));
 vi.mock('./views/ErrorDashboard', () => stub('error-dash'));
 vi.mock('./views/ImpactDashboard', () => stub('impact'));
+vi.mock('./views/WellyView', () => stub('welly'));
 // Eager shell chrome that talks to the (auto-mocked) api — not what this checks.
 vi.mock('./components/ThemeToggle', () => ({ default: () => <div data-testid="theme" /> }));
 vi.mock('./components/NotificationsBell', () => ({ default: () => <div data-testid="bell" /> }));
@@ -150,6 +151,7 @@ describe('authenticated route table', () => {
       ['/calendar', 'calendar', 'applications,currentUser,events,onViewEvent'],
       ['/messages', 'messages', ''],
       ['/portfolio', 'portfolio', 'currentUser'],
+      ['/welly', 'welly', 'currentUser,location,onViewDetails'],
       ['/settings', 'settings', 'addToast,currentUser,onProfileChange'],
       ['/notifications', 'notifications', 'onCountChange,onViewEvent']
     ]) {

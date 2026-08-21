@@ -37,10 +37,10 @@ export default function AIEnableModal({ capability, models, initialModelId, onCo
   const selected = models.find(m => m.id === selectedId) || null;
 
   return (
-    <Modal onClose={onClose} label="Set up Welly" size="lg">
+    <Modal onClose={onClose} label="Set up Welly AI" size="lg">
       <ModalHead
-        title="Set up Welly"
-        description="Welly is WeVolunteer’s assistant. It runs on this device, so there is nothing to subscribe to and no usage limit."
+        title="Set up Welly AI"
+        description="Welly AI runs private, on-device AI directly on your device. Once downloaded, conversations stay in your browser and can work without an internet connection."
         onClose={onClose}
       />
 
@@ -166,10 +166,10 @@ export function AIUnsupportedNotice({ reason }) {
     <div className="row" style={{ alignItems: 'flex-start', gap: 'var(--s3)' }}>
       <Cpu size={18} aria-hidden="true" />
       <div className="stack-xs" style={{ flex: 1 }}>
-        <span className="strong">Welly cannot run on this device</span>
+        <span className="strong">Welly AI cannot run on this device</span>
         <span className="dim small">{reason}</span>
         <span className="dim small">
-          Everything else in WeVolunteer works exactly as it does elsewhere.
+          Welly Chat is still available, and everything else in WeVolunteer works exactly as it does elsewhere.
         </span>
       </div>
     </div>
@@ -181,7 +181,8 @@ export function AIReadyRow({ label }) {
   return (
     <span className="row" style={{ gap: 'var(--s2)' }}>
       <Check size={16} aria-hidden="true" />
-      <span className="small">{label} is ready to use on this device.</span>
+      <span className="small">{label} is ready. Welly AI is active on this device.</span>
     </span>
   );
 }
+

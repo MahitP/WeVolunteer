@@ -281,7 +281,7 @@ export default function AssistantPanel({ onClose, position, needsSetup = false, 
             <div key={i} className={`ai-turn ai-turn-${m.role}`}>
               <span className="sr-only">{m.role === 'user' ? 'You said' : 'Welly replied'}</span>
               <p>{m.text}{m.streaming && !m.text ? 'Thinking...' : ''}</p>
-              {m.card && <AssistantCard card={m.card} />}
+              {m.card && <AssistantCard card={m.card} onAction={send} />}
               {m.kind && <AssistantSource kind={m.kind} />}
             </div>
           ))}

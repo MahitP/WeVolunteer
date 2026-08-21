@@ -18,7 +18,6 @@ import AccountProfile from './views/AccountProfile';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
 import Toasts from './components/common/Toasts';
-import AssistantLauncher from './components/ai/AssistantLauncher';
 import VerifyEmailWall from './components/account/VerifyEmailWall';
 import SuspendedWall from './components/account/SuspendedWall';
 import TwoFactorRequiredWall from './components/auth/TwoFactorRequiredWall';
@@ -34,7 +33,7 @@ import {
 } from './routes/index.jsx';
 import {
   LayoutDashboard, Compass, ShieldCheck, LogOut, CalendarDays,
-  X, Bell, UserRound, MessageSquare, MoreHorizontal, Settings as SettingsIcon
+  X, Bell, UserRound, MessageSquare, MoreHorizontal, Sparkles, Settings as SettingsIcon
 } from 'lucide-react';
 
 // The two heaviest modals. EventModal pulls in the whole organizer surface —
@@ -326,6 +325,7 @@ const NAV = [
   { id: 'browse', path: '/discover', label: 'Discover', icon: Compass, requiredCap: 'event.view' },
   { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, requiredCapAny: ['event.apply', 'event.create'] },
   { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, requiredCap: 'message.send' },
+  { id: 'welly', path: '/welly', label: 'Welly', icon: Sparkles, requiredCap: 'self.read' },
   /* "New event" is deliberately NOT a nav entry.
 
      It was one, which put the single most common organizer action behind reading
@@ -458,6 +458,7 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/events')) return 'browse';
   if (pathname.startsWith('/errors')) return 'errors';
   if (pathname.startsWith('/calendar')) return 'calendar';
+  if (pathname.startsWith('/welly')) return 'welly';
   if (pathname.startsWith('/notifications')) return 'notifications';
   if (pathname.startsWith('/profile')) return 'profile';
   /* The discovery destinations keep tab ids of their OWN, because this function
@@ -626,6 +627,7 @@ export const PAGE_META = {
        old line was the page-header twin of the recipient picker's sentence, and
        it went stale for the same reason — see recipientCopy.js. */
     messages: { title: 'Messages', sub: 'Talk to your friends and the organizers of shifts you applied for' },
+    welly: { title: 'Welly', sub: 'Your WeVolunteer assistant' },
     notifications: { title: 'Notifications', sub: 'Replies, reminders, and event updates' },
     profile: { title: 'Profile', sub: 'Your service record, milestones, and certificates' },
     loggedHours: { title: 'Logged hours', sub: 'Everything you have volunteered, confirmed and self-reported' },
@@ -648,6 +650,7 @@ export const PAGE_META = {
     browse: { title: 'Recruit', sub: 'Events on the network, and the members and clubs behind them' },
     calendar: { title: 'Calendar', sub: 'Events you host and when applications close' },
     messages: { title: 'Messages', sub: 'Coordinate directly with volunteers regarding your events' },
+    welly: { title: 'Welly', sub: 'Your WeVolunteer assistant' },
     notifications: { title: 'Notifications', sub: 'Application updates and community alerts' },
     profile: { title: 'Profile', sub: 'Your public track record and organizer status' },
     directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
@@ -663,6 +666,7 @@ export const PAGE_META = {
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
     calendar: { title: 'Calendar', sub: 'Events across the district and when they close' },
     messages: { title: 'Messages', sub: 'Conversations with students and organizers' },
+    welly: { title: 'Welly', sub: 'Your WeVolunteer assistant' },
     audit: { title: 'Audit Explorer', sub: 'Every administrative action, and who took it' },
     roster: { title: 'Administrator roster', sub: 'Who holds administrative access' },
     /* `staff` only, like `audit` and `roster` above: `legal.edit` is SUPER_ONLY,
@@ -703,6 +707,7 @@ export const PAGE_META = {
   partner: {
     appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
+    welly: { title: 'Welly', sub: 'Your WeVolunteer assistant' },
     /* `/organizer-agreement` is the one route declared with NO capability, on
        purpose — it is how an organizer accepts the terms that grant the rest —
        so any signed-in role can open it, partner included. */
@@ -1471,6 +1476,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/users/:handle/certificates': { currentUser },
     '/users/:handle/hours': { currentUser },
     '/certificates': { currentUser, addToast },
+    '/welly': { currentUser, location, onViewDetails: openEventById },
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
     '/report-issue': { currentUser, addToast },
     '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
@@ -1623,12 +1629,6 @@ function AppShell({ toasts, addToast, removeToast }) {
             {meta.sub && <div className="topbar-sub truncate">{meta.sub}</div>}
           </div>
           <div className="topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)' }}>
-            {/**
-              * Welly sits with the other global actions rather than floating
-              * over the page. It renders nothing unless the build has the
-              * feature, the device can run it, and this person set it up.
-              */}
-            <AssistantLauncher currentUser={currentUser} />
             <ThemeToggle />
             <NotificationsBell
               key={currentUser.id}

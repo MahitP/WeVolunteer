@@ -176,10 +176,14 @@ export class WllamaRuntime {
       messages,
       abortSignal: signal,
       max_tokens: maxTokens,
-      /* Low but not zero. The assistant's job is to phrase facts it was given,
-         not to be interesting, and a higher temperature at this model size
-         mostly buys invented detail. */
-      temperature: 0.3,
+      temperature: schema ? 0.2 : 0.65,
+      temp: schema ? 0.2 : 0.65,
+      top_p: 0.9,
+      top_k: 40,
+      penalty_repeat: 1.18,
+      penalty_last_n: 64,
+      penalty_freq: 0.1,
+      penalty_present: 0.1,
     };
 
     if (schema) {

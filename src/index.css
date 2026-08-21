@@ -11134,3 +11134,755 @@ input:disabled + .premium-slider {
 .rec-reasons {
   margin-top: var(--s2);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   WELLY — DEDICATED FULL-PAGE WORKSPACE & RESPONSIVE UX
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.welly-workspace {
+  display: flex;
+  height: calc(100dvh - 140px);
+  min-height: 500px;
+  max-height: 920px;
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-1);
+}
+
+@media (max-width: 768px) {
+  .welly-workspace {
+    height: calc(100dvh - 135px);
+    max-height: none;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    margin: calc(-1 * var(--s5)) calc(-1 * var(--s4)) 0;
+    width: auto;
+  }
+}
+
+/* ── Desktop Sidebar ──────────────────────────────────────────────────────── */
+.welly-sidebar {
+  width: 260px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+@media (max-width: 768px) {
+  .welly-sidebar {
+    display: none;
+  }
+}
+
+.welly-sidebar-head {
+  padding: var(--s3);
+  border-bottom: 1px solid var(--border);
+}
+
+.welly-new-chat-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+}
+
+.welly-sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s2);
+}
+
+.welly-history-empty {
+  padding: var(--s4) var(--s2);
+  text-align: center;
+}
+
+.welly-history-group {
+  margin-bottom: var(--s3);
+}
+
+.welly-history-group-title {
+  padding: var(--s1) var(--s2);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
+}
+
+.welly-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.welly-history-row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-md);
+  transition: background 0.15s ease;
+  position: relative;
+}
+
+.welly-history-row:hover {
+  background: var(--surface-2);
+}
+
+.welly-history-row.is-active {
+  background: var(--surface-2);
+  font-weight: 500;
+  color: var(--primary);
+}
+
+.welly-history-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s2);
+  border-radius: var(--r-md);
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.welly-history-icon {
+  flex: none;
+  opacity: 0.6;
+}
+
+.welly-history-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.welly-history-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 4px;
+}
+
+.welly-history-action-btn {
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--r-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+  flex: none;
+}
+
+.welly-history-row:hover .welly-history-action-btn,
+.welly-history-row:focus-within .welly-history-action-btn,
+.welly-history-action-btn:focus {
+  opacity: 0.8;
+}
+
+.welly-history-action-btn:hover {
+  opacity: 1;
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.welly-history-action-btn.welly-history-rename-btn:hover {
+  color: var(--primary);
+}
+
+.welly-history-action-btn.welly-history-delete-btn:hover {
+  color: var(--danger);
+}
+
+.welly-history-rename-box {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: 2px 4px;
+  width: 100%;
+}
+
+.welly-history-rename-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--primary);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.8125rem;
+  padding: 2px 6px;
+  outline: none;
+}
+
+@media (max-width: 768px) {
+  .welly-history-action-btn {
+    opacity: 0.75;
+    padding: 6px;
+  }
+}
+
+.welly-sidebar-foot {
+  padding: var(--s2) var(--s3);
+  border-top: 1px solid var(--border);
+}
+
+.welly-clear-all-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s1);
+}
+
+/* ── Mobile Slide-over Drawer ─────────────────────────────────────────────── */
+.welly-mobile-drawer-root {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+}
+
+.welly-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.welly-drawer-sheet {
+  position: relative;
+  width: 82%;
+  max-width: 320px;
+  height: 100%;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+  z-index: 1;
+}
+
+.welly-drawer-head {
+  padding: var(--s3);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.welly-drawer-action {
+  padding: var(--s3);
+}
+
+.welly-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s2) var(--s3);
+}
+
+.welly-drawer-foot {
+  padding: var(--s3);
+  border-top: 1px solid var(--border);
+}
+
+/* ── Main Chat Area ───────────────────────────────────────────────────────── */
+.welly-chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.welly-desktop-header {
+  padding: var(--s3) var(--s5);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface);
+}
+
+@media (max-width: 768px) {
+  .welly-desktop-header {
+    display: none;
+  }
+}
+
+.welly-header-info {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.welly-header-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.welly-header-subtitle {
+  margin: 0;
+}
+
+.welly-status-badge {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+}
+
+.welly-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.welly-ai-ctrl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  font-weight: 600;
+  font-size: 0.8125rem;
+  padding: 0.3125rem 0.75rem;
+  border-radius: var(--r-full, 9999px);
+  transition: all 0.15s ease;
+}
+
+.welly-ai-ready-btn {
+  color: var(--brand);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+}
+
+.welly-ai-ready-btn:hover {
+  background: var(--surface-3, var(--surface-2));
+}
+
+.welly-spark-active {
+  color: var(--brand);
+}
+
+.welly-mobile-bar {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .welly-mobile-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    min-height: 48px;
+    gap: var(--s2);
+  }
+}
+
+.welly-mobile-history-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.welly-mobile-bar-center {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.welly-mobile-bar-title {
+  font-weight: 700;
+  font-size: 1.0625rem;
+}
+
+.welly-mobile-status-badge {
+  font-size: 0.6875rem;
+  padding: 1px 6px;
+  border-radius: var(--r-full, 9999px);
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+
+.welly-mobile-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+.welly-mobile-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--r-full, 9999px);
+  font-weight: 600;
+}
+
+.welly-mobile-new-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+
+/* ── Conversation Transcript ─────────────────────────────────────────────── */
+.welly-transcript {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s4) var(--s5);
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 768px) {
+  .welly-transcript {
+    padding: var(--s3) var(--s3);
+  }
+}
+
+.welly-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 100%;
+  padding: var(--s4) var(--s3);
+}
+
+.welly-empty-mark-wrap {
+  margin-bottom: var(--s3);
+}
+
+.welly-empty-title {
+  margin: 0 0 var(--s1);
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.welly-empty-subtitle {
+  margin: 0 0 var(--s5);
+  max-width: 480px;
+  font-size: 0.9375rem;
+}
+
+.welly-suggestions-container {
+  width: 100%;
+  max-width: 680px;
+}
+
+.welly-suggestions-label {
+  text-align: left;
+  margin-bottom: var(--s2);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.welly-suggestions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--s3);
+  width: 100%;
+}
+
+.welly-suggestion-card {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  color: var(--ink);
+  font-size: 0.875rem;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.welly-suggestion-card:hover {
+  border-color: var(--primary);
+  background: var(--surface-2);
+  transform: translateY(-1px);
+}
+
+.welly-suggestion-spark {
+  color: var(--primary);
+  flex: none;
+}
+
+.welly-suggestion-card span {
+  flex: 1;
+}
+
+.welly-suggestion-arrow {
+  color: var(--ink-3);
+  flex: none;
+  opacity: 0.5;
+}
+
+@media (max-width: 480px) {
+  .welly-suggestions-grid {
+    grid-template-columns: 1fr;
+    gap: var(--s2);
+  }
+  .welly-suggestion-card {
+    padding: var(--s2) var(--s3);
+  }
+}
+
+.welly-messages-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.welly-turn {
+  display: flex;
+  gap: var(--s3);
+  width: 100%;
+}
+
+.welly-turn-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.welly-user-avatar {
+  font-size: 1.125rem;
+}
+
+.welly-turn-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.welly-turn-user {
+  flex-direction: row-reverse;
+}
+
+.welly-turn-user .welly-turn-content {
+  align-items: flex-end;
+}
+
+.welly-turn-user .welly-bubble {
+  background: var(--primary);
+  color: var(--brand-mark-ink, #ffffff);
+  border-radius: var(--r-lg) var(--r-lg) var(--r-sm) var(--r-lg);
+  padding: var(--s3) var(--s4);
+  max-width: 82%;
+  word-break: break-word;
+}
+
+.welly-turn-user .welly-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.welly-turn-assistant .welly-bubble {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  border-radius: var(--r-sm) var(--r-lg) var(--r-lg) var(--r-lg);
+  padding: var(--s3) var(--s4);
+  max-width: 88%;
+  word-break: break-word;
+}
+
+.welly-turn-assistant .welly-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.welly-card-wrapper {
+  max-width: 88%;
+  margin-top: var(--s2);
+}
+
+.welly-thinking {
+  font-style: italic;
+}
+
+/* ── Composer Area ────────────────────────────────────────────────────────── */
+.welly-composer-container {
+  padding: var(--s2) var(--s5) var(--s4);
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.welly-composer-container {
+  padding: var(--s2) var(--s5) calc(var(--s3) + env(safe-area-inset-bottom, 0px));
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .welly-composer-container {
+    padding: var(--s2) var(--s3) calc(var(--s2) + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.welly-quick-chips {
+  display: flex;
+  gap: var(--s2);
+  overflow-x: auto;
+  padding-bottom: var(--s2);
+  margin-bottom: var(--s2);
+  scrollbar-width: none;
+}
+
+.welly-quick-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.welly-quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: var(--s1) var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex: none;
+}
+
+.welly-quick-chip:hover {
+  background: var(--surface-2);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.welly-composer-box {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.15s ease;
+}
+
+.welly-composer-box:focus-within {
+  border-color: var(--primary);
+}
+
+.welly-textarea {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  resize: none;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  min-height: 24px;
+  max-height: 160px;
+  padding: 4px 0;
+  font-family: inherit;
+}
+
+.welly-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+.welly-send-btn {
+  flex: none;
+}
+
+.welly-stop-btn {
+  flex: none;
+}
+
+.welly-composer-footer {
+  text-align: center;
+  margin-top: var(--s2);
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+@media (max-height: 520px) {
+  .welly-workspace {
+    height: calc(100dvh - 85px);
+    min-height: 0;
+  }
+  .welly-desktop-header {
+    padding: var(--s2) var(--s4);
+  }
+  .welly-empty-state {
+    padding: var(--s2);
+  }
+  .welly-empty-subtitle {
+    margin-bottom: var(--s2);
+  }
+  .welly-suggestions-grid {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--s2);
+  }
+  .welly-suggestion-card {
+    padding: var(--s2) var(--s3);
+  }
+  .welly-composer-container {
+    padding: var(--s1) var(--s3);
+  }
+  .welly-composer-footer {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welly-suggestion-card,
+  .welly-quick-chip,
+  .welly-composer-box,
+  .welly-drawer-sheet,
+  .welly-history-action-btn {
+    transition: none !important;
+    transform: none !important;
+  }
+}
+

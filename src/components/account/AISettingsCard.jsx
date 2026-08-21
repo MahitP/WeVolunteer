@@ -144,118 +144,109 @@ export default function AISettingsCard({ addToast }) {
 
   return (
     <div className="card card-pad" style={{ marginTop: 'var(--s4)' }}>
-      <h3 style={{ marginBottom: 'var(--s4)' }}>Welly</h3>
+      <h3 style={{ marginBottom: 'var(--s4)' }}>Welly Assistant</h3>
 
-      {!capability.supported && <AIUnsupportedNotice reason={capability.reason} />}
+      <div className="stack-md">
+        <div className="stack-xs" style={{ borderBottom: '1px solid var(--rule)', paddingBottom: 'var(--s3)' }}>
+          <span className="strong">Welly Chat</span>
+          <p className="dim small" style={{ margin: 0 }}>
+            Your regular WeVolunteer assistant. Always available to help you navigate, discover events, and answer questions.
+          </p>
+        </div>
 
-      {capability.supported && (
         <div className="stack-sm">
-          {!prefs.enabled && !progress && (
-            <>
-              <p className="dim small">
-                WeVolunteer’s assistant. Welly runs inside this browser and can help you find
-                opportunities and understand your volunteer record. What you type to it is
-                not sent to an AI company. Setting it up downloads a model from Hugging
-                Face, and it can be removed again at any time.{' '}
-                <Link to="/legal/ai-and-on-device-processing">How this works</Link>.
-              </p>
-              <div>
-                <button className="btn btn-primary" onClick={() => setPicking(true)}>
-                  Set up Welly
-                </button>
-              </div>
-            </>
-          )}
+          <div className="stack-xs">
+            <span className="strong">Welly AI</span>
+            <p className="dim small" style={{ margin: 0 }}>
+              Private AI that runs directly on your device. Setting it up downloads a model from Hugging Face, and it can be removed again at any time. Conversations stay on this machine and can work without an internet connection.{' '}
+              <Link to="/legal/ai-and-on-device-processing">How this works</Link>.
+            </p>
+          </div>
 
-          {progress && (
-            <div className="stack-xs">
-              <label className="small strong" htmlFor="ai-download-progress">
-                Downloading
-              </label>
-              {/*
-                A real <progress>, so the value is announced rather than being a
-                coloured bar a screen reader cannot read. The percentage is also
-                written out, because progress elements are styled inconsistently
-                and the number is the part people want.
-              */}
-              <progress
-                id="ai-download-progress"
-                max={progress.total || 1}
-                value={progress.loaded || 0}
-              />
-              <span className="dim small">
-                {formatBytes(progress.loaded || 0)} of {formatBytes(progress.total || 0)}
-              </span>
-              <div>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => abortRef.current?.abort()}
-                >
-                  Cancel download
-                </button>
-              </div>
-            </div>
-          )}
+          {!capability.supported && <AIUnsupportedNotice reason={capability.reason} />}
 
-          {error && (
-            <p className="alert alert-danger" role="alert">{error}</p>
-          )}
-
-          {prefs.enabled && installed && !progress && (
+          {capability.supported && (
             <div className="stack-sm">
-              <div className="stack-xs">
-                <span className="strong">{installed.label}</span>
-                <span className="dim small">
-                  {installed.parameters} parameters &middot; {installed.license}
-                  {usedBytes != null && <> &middot; using {formatBytes(usedBytes)} on this device</>}
-                </span>
-              </div>
-
-              <label className="row" style={{ alignItems: 'flex-start' }}>
-                <input
-                  type="checkbox"
-                  checked={prefs.saveConversations}
-                  onChange={e => setPrefs(writePreferences({ saveConversations: e.target.checked }))}
-                />
-                <div className="stack-xs" style={{ flex: 1 }}>
-                  <span className="strong">Pick up where I left off</span>
-                  {/*
-                    Says what the setting DOES, and why the default is what it is.
-
-                    It used to read "Conversations are stored only in this browser
-                    and are never sent to WeVolunteer or anyone else." That answers
-                    a question nobody asked, and raising it is what makes a reader
-                    wonder whether the other setting sends their chat somewhere —
-                    which it does not, and never could: Welly runs on the device and
-                    there is no endpoint that receives what you type.
-
-                    The real reason for the default is the one that was missing.
-                    School computers are shared, and a transcript of what somebody
-                    asked — which is often the thing they did not want to ask a
-                    person — should not still be on screen for whoever sits down
-                    next.
-                  */}
-                  <span className="dim small">
-                    On, your conversation is still here when you come back. Off, it
-                    clears when you close the tab. Either way it never leaves this
-                    browser. Off by default because school computers are often shared.
-                  </span>
+              {!prefs.enabled && !progress && (
+                <div>
+                  <button className="btn btn-primary" onClick={() => setPicking(true)}>
+                    Set up Welly AI
+                  </button>
                 </div>
-              </label>
+              )}
+
+              {progress && (
+                <div className="stack-xs">
+                  <label className="small strong" htmlFor="ai-download-progress">
+                    Downloading Welly AI Model
+                  </label>
+                  <progress
+                    id="ai-download-progress"
+                    max={progress.total || 1}
+                    value={progress.loaded || 0}
+                  />
+                  <span className="dim small">
+                    {formatBytes(progress.loaded || 0)} of {formatBytes(progress.total || 0)}
+                  </span>
+                  <div>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => abortRef.current?.abort()}
+                    >
+                      Cancel download
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <p className="alert alert-danger" role="alert">{error}</p>
+              )}
+
+              {prefs.enabled && installed && !progress && (
+                <div className="stack-sm">
+                  <div className="stack-xs">
+                    <div className="row" style={{ gap: 'var(--s2)', alignItems: 'center' }}>
+                      <span className="strong">{installed.label}</span>
+                      <span className="badge badge-subtle">Welly AI Active</span>
+                    </div>
+                    <span className="dim small">
+                      {installed.parameters} parameters &middot; {installed.license}
+                      {usedBytes != null && <> &middot; using {formatBytes(usedBytes)} on this device</>}
+                    </span>
+                  </div>
 
 
-              <div className="row" style={{ gap: 'var(--s2)', flexWrap: 'wrap' }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => setPicking(true)}>
-                  Change model
-                </button>
-                <button className="btn btn-danger btn-sm" onClick={() => setConfirmRemove(true)}>
-                  Turn off and remove
-                </button>
-              </div>
+                  <label className="row" style={{ alignItems: 'flex-start' }}>
+                    <input
+                      type="checkbox"
+                      checked={prefs.saveConversations}
+                      onChange={e => setPrefs(writePreferences({ saveConversations: e.target.checked }))}
+                    />
+                    <div className="stack-xs" style={{ flex: 1 }}>
+                      <span className="strong">Pick up where I left off</span>
+                      <span className="dim small">
+                        On, your conversation is still here when you come back. Off, it
+                        clears when you close the tab. Either way it never leaves this
+                        browser. Off by default because school computers are often shared.
+                      </span>
+                    </div>
+                  </label>
+
+                  <div className="row" style={{ gap: 'var(--s2)', flexWrap: 'wrap' }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setPicking(true)}>
+                      Change model
+                    </button>
+                    <button className="btn btn-danger btn-sm" onClick={() => setConfirmRemove(true)}>
+                      Turn off and remove
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
-      )}
+      </div>
 
       {picking && (
         <AIEnableModal
@@ -269,16 +260,15 @@ export default function AISettingsCard({ addToast }) {
 
       {confirmRemove && (
         <ConfirmDialog
-          title="Turn off Welly?"
+          title="Turn off Welly AI?"
           destructive
           confirmLabel="Turn off and remove"
           onConfirm={removeEverything}
           onCancel={() => setConfirmRemove(false)}
         >
           <p>
-            This removes the downloaded model from this device and forgets your assistant
-            settings. Nothing else about your account changes, and you can set it up again
-            later.
+            This removes the downloaded model from this device and forgets your Welly AI
+            settings. Welly Chat will remain available as your regular assistant.
           </p>
         </ConfirmDialog>
       )}

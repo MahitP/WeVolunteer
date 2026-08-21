@@ -1,49 +1,302 @@
 /**
- * Keeping a conversation, only when asked to.
+ * Keeping conversations, scoped to the authenticated user and privacy settings.
  *
- * ── Off by default, and stored nowhere else ──
+ * ── User-scoped and privacy-preserving ──
  *
- * A transcript records what somebody asked about their own volunteering: which
- * causes interest them, what they have not signed up for, what they were
- * worried enough about to check. That is worth more care than a UI convenience
- * usually gets.
- *
- * So it is off unless switched on in Settings, it lives in `localStorage` on
- * this device, and it is never sent anywhere — not to WeVolunteer, not to
- * analytics, not into an error report. When the preference is off, nothing is
- * written at all, rather than being written and hidden.
+ * Transcripts are stored in `localStorage` under a user-scoped key:
+ * `wev-ai-conversations-${user.id}`. If the account changes, User B
+ * cannot see User A's past conversations.
  *
  * ── Bounded ──
  *
- * Kept to a small number of recent turns. A transcript that grows without limit
- * eventually fills the origin's storage quota, and the failure lands on the
- * model download rather than here, where it would be impossible to diagnose.
+ * Kept to a bounded number of conversations (MAX_CONVERSATIONS) and
+ * turns per conversation (MAX_TURNS) to prevent quota exhaustion.
  */
 
 import { readPreferences } from './preferences.js';
 
-const KEY = 'wev-ai-conversation';
+const LEGACY_KEY = 'wev-ai-conversation';
+const CONVERSATIONS_KEY_PREFIX = 'wev-ai-conversations-';
 
-/** Turns retained. Enough to scroll back through, far short of a diary. */
-export const MAX_TURNS = 20;
+export const MAX_CONVERSATIONS = 30;
+export const MAX_TURNS = 30;
 
-/**
- * Cards are dropped before storing.
- *
- * A card holds a snapshot of live data — hours, certificate codes, event
- * details. Persisting it would keep a copy of somebody's record in
- * `localStorage` long after the page that fetched it, and it would go stale:
- * a card restored next week would show last week's figures as though they were
- * current. The text is kept; the data is re-fetched if asked again.
- */
-function forStorage(messages) {
-  return messages.slice(-MAX_TURNS).map(({ role, text }) => ({ role, text }));
+// In-memory fallback for current tab session when saveConversations is disabled
+const memoryStore = new Map();
+
+function storageKeyFor(user) {
+  const uid = user?.id || (typeof user === 'string' ? user : 'anonymous');
+  return `${CONVERSATIONS_KEY_PREFIX}${uid}`;
 }
 
-export function loadConversation() {
-  if (!readPreferences().saveConversations) return [];
+/**
+ * Generate a concise title from conversation messages.
+ */
+export function generateConversationTitle(messages = []) {
+  if (!messages || !messages.length) return 'New conversation';
+  const firstUserMsg = messages.find(m => m.role === 'user' && typeof m.text === 'string' && m.text.trim());
+  if (!firstUserMsg) return 'New conversation';
+
+  const text = firstUserMsg.text.trim();
+  if (text.length <= 36) return text;
+  return `${text.slice(0, 33).trim()}...`;
+}
+
+/**
+ * Strip volatile card data / live tokens before persisting.
+ */
+function forStorage(messages) {
+  return (messages || []).slice(-MAX_TURNS).map(({ role, text, kind }) => ({
+    role,
+    text: typeof text === 'string' ? text : '',
+    ...(kind ? { kind } : {}),
+  }));
+}
+
+/**
+ * Get all conversation summaries for a user.
+ */
+export function getConversations({ user } = {}) {
+  const key = storageKeyFor(user);
+  let list = [];
+
+  if (readPreferences().saveConversations) {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) list = parsed;
+      }
+    } catch {
+      list = [];
+    }
+  } else {
+    list = memoryStore.get(key) || [];
+  }
+
+  return list
+    .filter(c => c && typeof c.id === 'string')
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    .slice(0, MAX_CONVERSATIONS)
+    .map(c => ({
+      id: c.id,
+      title: c.title || generateConversationTitle(c.messages),
+      createdAt: c.createdAt || Date.now(),
+      updatedAt: c.updatedAt || Date.now(),
+      preview: c.messages?.findLast?.(m => m.text)?.text?.slice(0, 60) || '',
+      messageCount: Array.isArray(c.messages) ? c.messages.length : 0,
+    }));
+}
+
+/**
+ * Get a full conversation by ID for a user.
+ */
+export function getConversation(id, { user } = {}) {
+  if (!id) return null;
+  const key = storageKeyFor(user);
+  let list = [];
+
+  if (readPreferences().saveConversations) {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) list = parsed;
+      }
+    } catch {
+      list = [];
+    }
+  } else {
+    list = memoryStore.get(key) || [];
+  }
+
+  const found = list.find(c => c.id === id);
+  if (!found) return null;
+
+  return {
+    id: found.id,
+    title: found.title || generateConversationTitle(found.messages),
+    createdAt: found.createdAt || Date.now(),
+    updatedAt: found.updatedAt || Date.now(),
+    messages: (found.messages || []).map(m => ({
+      role: m.role,
+      text: m.text,
+      ...(m.kind ? { kind: m.kind } : {}),
+    })),
+  };
+}
+
+/**
+ * Save or update a conversation record.
+ */
+export function saveConversationRecord(conversation, { user } = {}) {
+  if (!conversation || !conversation.id) return;
+  const key = storageKeyFor(user);
+  let list = [];
+
+  if (readPreferences().saveConversations) {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) list = parsed;
+      }
+    } catch {
+      list = [];
+    }
+  } else {
+    list = memoryStore.get(key) || [];
+  }
+
+  const existingIdx = list.findIndex(c => c.id === conversation.id);
+  const existing = existingIdx >= 0 ? list[existingIdx] : null;
+  const cleanMessages = forStorage(conversation.messages || []);
+  const title = conversation.title || existing?.title || generateConversationTitle(cleanMessages);
+  const now = Date.now();
+
+  const record = {
+    id: conversation.id,
+    title,
+    createdAt: conversation.createdAt || existing?.createdAt || now,
+    updatedAt: now,
+    messages: cleanMessages,
+  };
+
+  if (existingIdx >= 0) {
+    list[existingIdx] = record;
+  } else {
+    list.unshift(record);
+  }
+
+  list = list.slice(0, MAX_CONVERSATIONS);
+
+  if (readPreferences().saveConversations) {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(list));
+    } catch {
+      // Storage full or unavailable
+    }
+  } else {
+    memoryStore.set(key, list);
+  }
+
+  return record;
+}
+
+/**
+ * Delete a specific conversation.
+ */
+export function deleteConversation(id, { user } = {}) {
+  if (!id) return;
+  const key = storageKeyFor(user);
+  let list = [];
+
+  if (readPreferences().saveConversations) {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) list = parsed;
+      }
+    } catch {
+      list = [];
+    }
+  } else {
+    list = memoryStore.get(key) || [];
+  }
+
+  list = list.filter(c => c.id !== id);
+
+  if (readPreferences().saveConversations) {
+    try {
+      if (!list.length) {
+        window.localStorage.removeItem(key);
+      } else {
+        window.localStorage.setItem(key, JSON.stringify(list));
+      }
+    } catch {
+      // ignore
+    }
+  } else {
+    memoryStore.set(key, list);
+  }
+}
+
+/**
+ * Rename a specific conversation.
+ */
+export function renameConversation(id, newTitle, { user } = {}) {
+  if (!id || typeof newTitle !== 'string' || !newTitle.trim()) return null;
+  const key = storageKeyFor(user);
+  let list = [];
+
+  if (readPreferences().saveConversations) {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) list = parsed;
+      }
+    } catch {
+      list = [];
+    }
+  } else {
+    list = memoryStore.get(key) || [];
+  }
+
+  const target = list.find(c => c.id === id);
+  if (!target) return null;
+
+  target.title = newTitle.trim().slice(0, 60);
+  target.updatedAt = Date.now();
+
+  if (readPreferences().saveConversations) {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(list));
+    } catch {
+      // ignore
+    }
+  } else {
+    memoryStore.set(key, list);
+  }
+
+  return target;
+}
+
+/**
+ * Clear all conversations for a user.
+ */
+export function clearAllConversations({ user } = {}) {
+  const key = storageKeyFor(user);
+  memoryStore.delete(key);
   try {
-    const raw = window.localStorage.getItem(KEY);
+    window.localStorage.removeItem(key);
+    window.localStorage.removeItem(LEGACY_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Backwards-compatible load method for single conversation.
+ */
+export function loadConversation(options = {}) {
+  const user = options?.user;
+  if (!readPreferences().saveConversations) {
+    const list = memoryStore.get(storageKeyFor(user));
+    return list?.[0]?.messages || [];
+  }
+
+  // Check user-scoped list first
+  const conversations = getConversations({ user });
+  if (conversations.length > 0) {
+    const full = getConversation(conversations[0].id, { user });
+    if (full?.messages) return full.messages;
+  }
+
+  // Fallback to legacy single conversation key
+  try {
+    const raw = window.localStorage.getItem(LEGACY_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -55,34 +308,47 @@ export function loadConversation() {
   }
 }
 
-export function saveConversation(messages) {
-  /* Checked on every write, not only at startup, so turning the preference off
-     mid-conversation stops recording immediately. */
+/**
+ * Backwards-compatible save method.
+ */
+export function saveConversation(messages, options = {}) {
   if (!readPreferences().saveConversations) return;
+  const user = options?.user;
 
-  /**
-   * An empty conversation removes the key rather than storing `[]`.
-   *
-   * Clearing writes the emptied list straight back through this function, so
-   * storing an empty array would leave a key behind immediately after somebody
-   * asked for the conversation to be deleted. "Cleared" should mean nothing is
-   * there, not that something empty is.
-   */
-  try {
-    if (!messages.length) {
-      window.localStorage.removeItem(KEY);
-      return;
+  if (!messages || !messages.length) {
+    try {
+      window.localStorage.removeItem(LEGACY_KEY);
+    } catch {
+      // ignore
     }
-    window.localStorage.setItem(KEY, JSON.stringify(forStorage(messages)));
-  } catch {
-    /* A full quota must not break the conversation in progress. */
+    return;
   }
+
+  try {
+    window.localStorage.setItem(LEGACY_KEY, JSON.stringify(forStorage(messages)));
+  } catch {
+    // ignore
+  }
+
+  // Also update latest in multi-conversation store if available
+  const existing = getConversations({ user })[0];
+  const convId = existing?.id || `conv-${Date.now()}`;
+  saveConversationRecord({
+    id: convId,
+    messages,
+  }, { user });
 }
 
-export function clearConversation() {
+/**
+ * Backwards-compatible clear method.
+ */
+export function clearConversation(options = {}) {
+  const user = options?.user;
   try {
-    window.localStorage.removeItem(KEY);
+    window.localStorage.removeItem(LEGACY_KEY);
   } catch {
-    /* Nothing to clear. */
+    // ignore
   }
+  clearAllConversations({ user });
 }
+

@@ -73,6 +73,7 @@ const FEATURE_NAMES = Object.freeze({
      describe the power rather than the page, and somebody who reached here by
      guessing a URL is looking for a page. */
   'legal.edit': 'the Legal Center editor',
+  'self.read': 'the Welly assistant and personal account records',
 });
 
 /**

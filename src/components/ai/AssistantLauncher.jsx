@@ -1,8 +1,7 @@
-import React, { lazy, Suspense, useState } from 'react';
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import WellyMark from './WellyMark';
 import { isLocalAIEnabled, detectCapability } from '../../ai';
-import { readPreferences } from '../../ai/preferences';
-import { useLocationContext } from '../../contexts/LocationContext';
 
 /**
  * The way in.
@@ -52,66 +51,21 @@ import { useLocationContext } from '../../contexts/LocationContext';
  * that when the button is pressed rather than when the shell mounts keeps it
  * off the critical path for every page in the application.
  */
-const AssistantPanel = lazy(() => import('./AssistantPanel'));
-
-export default function AssistantLauncher({ currentUser = null }) {
-  /**
-   * Every hook runs before any early return. `hookOrder.test.jsx` enforces
-   * this repository-wide, and it is why the conditions below are evaluated
-   * after `useState` and `useLocationContext` rather than short-circuiting
-   * above them.
-   */
-  const [open, setOpen] = useState(false);
-
-  /**
-   * Whatever position the app already has. The assistant never asks for
-   * location and never triggers the browser permission prompt — a conversation
-   * is the wrong place to be interrupted by one. If it has been shared
-   * elsewhere, distance works; if not, searches simply run without it.
-   */
-  /* Optional-chained because `useLocationContext` returns null outside a
-     provider rather than throwing, and this component is mounted in the app
-     shell — which several route tests render on its own. Destructuring
-     directly turned an absent provider into a TypeError that took the whole
-     shell down. */
-  const location = useLocationContext()?.location;
-  const position = location
-    ? { lat: location.latitude, lng: location.longitude }
-    : null;
+export default function AssistantLauncher() {
+  const navigate = useNavigate();
 
   if (!isLocalAIEnabled()) return null;
   if (!detectCapability().supported) return null;
 
-  /* Read at render, not held in state: Settings can change this in another tab,
-     and a launcher holding a stale answer would open the wrong panel. */
-  const prefs = readPreferences();
-  const configured = Boolean(prefs.enabled && prefs.modelId);
-
   return (
-    <>
-      {/* Same treatment as ThemeToggle and NotificationsBell beside it. The
-          accessible name is the assistant's name, not a description of a
-          shape — "Welly" is what a student is looking for. */}
-      <button
-        className="btn btn-ghost btn-icon welly-launcher"
-        onClick={() => setOpen(true)}
-        aria-label="Ask Welly"
-        aria-haspopup="dialog"
-        title="Ask Welly"
-      >
-        <WellyMark />
-      </button>
-
-      {open && (
-        <Suspense fallback={null}>
-          <AssistantPanel
-            onClose={() => setOpen(false)}
-            position={position}
-            needsSetup={!configured}
-            currentUser={currentUser}
-          />
-        </Suspense>
-      )}
-    </>
+    <button
+      type="button"
+      className="btn btn-ghost btn-icon welly-launcher"
+      onClick={() => navigate('/welly')}
+      aria-label="Ask Welly"
+      title="Ask Welly"
+    >
+      <WellyMark />
+    </button>
   );
 }

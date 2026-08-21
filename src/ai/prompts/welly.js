@@ -99,17 +99,12 @@ export const SYSTEM_PROMPT = [
  * talk about.
  */
 export const CHAT_PROMPT = [
-  `You are ${WELLY_NAME}, the assistant inside WeVolunteer, where students volunteer and organizers run events.`,
-  'Chat warmly and briefly, two or three sentences at most.',
-  /* SYSTEM_PROMPT has always carried this and CHAT_PROMPT did not, which is how
-     "I'd like you to create an event" got "Sure, I can help you create an
-     event!" — a promise, to a student, about a thing no tool here can do. The
-     pattern in router.js is what actually stops that; this line is for the
-     phrasings a pattern will not catch. */
-  'You can look things up. You cannot create, change, cancel or approve anything.',
-  'You cannot see anyone\'s hours, shifts, applications or certificates, and you do not know this school\'s rules.',
-  'If they ask about their own record or what counts, say you can look it up and invite them to ask for it directly.',
-  'Never state a WeVolunteer rule, number or date as fact.',
+  `You are ${WELLY_NAME}, the friendly assistant in WeVolunteer where students volunteer and organizers run events.`,
+  'Talk naturally, warmly, and casually like a helpful human friend, not a robotic customer service bot.',
+  'Avoid stiff phrases like "How may I assist you today" or "I am sorry to hear that".',
+  'You cannot create, change, cancel or approve anything directly.',
+  'You cannot see someone\'s record without looking it up, and you do not know school rules by heart.',
+  'If asked what you can do, offer specific suggestions like finding shifts, checking hours, or viewing applications.',
 ].join(' ');
 
 /**
@@ -204,12 +199,44 @@ export function claimsAnAction(text) {
   return CAPABILITY_CLAIMS.some(pattern => pattern.test(raw));
 }
 
+/** True when a small model gets stuck in a repetitive loop. */
+export function hasRepetitiveLoop(text) {
+  const norm = normalise(text);
+  if (!norm || norm.length < 20) return false;
+  const words = norm.split(' ').filter(Boolean);
+  if (words.length < 6) return false;
+
+  // 1. Check for immediate consecutive phrase repetition: e.g. "word A B word A B"
+  for (let len = 2; len <= 12; len++) {
+    for (let i = 0; i <= words.length - 2 * len; i++) {
+      const phrase = words.slice(i, i + len).join(' ');
+      const nextPhrase = words.slice(i + len, i + 2 * len).join(' ');
+      if (phrase === nextPhrase) return true;
+    }
+  }
+
+  // 2. Check for 3+ occurrences of a longer phrase (4+ words) anywhere in text
+  for (let len = 4; len <= 8; len++) {
+    for (let i = 0; i <= words.length - 3 * len; i++) {
+      const phrase = words.slice(i, i + len).join(' ');
+      const rest = words.slice(i + len).join(' ');
+      const occurrences = rest.split(phrase).length - 1;
+      if (occurrences >= 2) return true;
+    }
+  }
+
+  return false;
+}
+
+
 export function isUsableReply(text) {
   const raw = String(text || '').trim();
-  if (raw.length < 2 || raw.length > 600) return false;
+  if (raw.length < 2 || raw.length > 2000) return false;
   if (looksLikeInstructionEcho(raw)) return false;
   /* An offer to do something no tool here can do. See claimsAnAction. */
   if (claimsAnAction(raw)) return false;
+  /* Repetitive generation loops from small models. */
+  if (hasRepetitiveLoop(raw)) return false;
 
   /* A reply that is mostly punctuation or a stray fragment. The 135M model
      produced "inYou have 0 hours of work." — the leading artefact is the shape
@@ -218,3 +245,4 @@ export function isUsableReply(text) {
 
   return true;
 }
+

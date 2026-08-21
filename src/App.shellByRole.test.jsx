@@ -172,8 +172,8 @@ describe('navigation, per role', () => {
    * back unnoticed.
    */
   it.each([
-    ['student', ['Dashboard', 'Discover', 'Calendar', 'Messages', 'Notifications', 'Profile']],
-    ['organizer', ['Dashboard', 'Discover', 'Calendar', 'Messages', 'Notifications', 'Profile']],
+    ['student', ['Dashboard', 'Discover', 'Calendar', 'Messages', 'Welly', 'Notifications', 'Profile']],
+    ['organizer', ['Dashboard', 'Discover', 'Calendar', 'Messages', 'Welly', 'Notifications', 'Profile']],
     /**
      * Admin GAINED `Messages`, and this pin was updated deliberately rather than
      * relaxed.
@@ -205,7 +205,7 @@ describe('navigation, per role', () => {
      * This list is exact rather than a `toContain`, so the entry cannot return
      * unnoticed — which is exactly how it got here the first time.
      */
-    ['admin', ['Dashboard', 'Discover', 'Messages', 'Admin', 'Notifications', 'Profile']]
+    ['admin', ['Dashboard', 'Discover', 'Messages', 'Welly', 'Admin', 'Notifications', 'Profile']]
   ])('%s nav is what its capabilities justify', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
   });
@@ -219,7 +219,7 @@ describe('navigation, per role', () => {
   it('super_admin gets a populated rail, not an empty shell', () => {
     const items = navItemsFor(USER('super_admin'));
     expect(items.map(n => n.label)).toEqual([
-      /* primary */ 'Dashboard', 'Discover', 'Calendar', 'Messages', 'Admin',
+      /* primary */ 'Dashboard', 'Discover', 'Calendar', 'Messages', 'Welly', 'Admin',
       /* secondary */ 'Notifications', 'Profile'
     ]);
     // The bug: `roles.includes('super_admin')` was false for every entry.
@@ -245,7 +245,7 @@ describe('navigation, per role', () => {
     const { primary, secondary } = navSectionsFor(USER('super_admin'));
 
     expect(primary.map(n => n.label))
-      .toEqual(['Dashboard', 'Discover', 'Calendar', 'Messages', 'Admin']);
+      .toEqual(['Dashboard', 'Discover', 'Calendar', 'Messages', 'Welly', 'Admin']);
     expect(secondary.map(n => n.label), 'Admin is behind the ⋯ menu again')
       .not.toContain('Admin');
   });
@@ -314,7 +314,7 @@ describe('navigation, per role', () => {
        entry carries `accountOnly` and is filtered out here and only here; it is
        still in the mobile ⋯ sheet, which IS the account control at that width. */
     expect(sidebarLabels()).toEqual([
-      'Dashboard', 'Discover', 'Calendar', 'Messages', 'Admin',
+      'Dashboard', 'Discover', 'Calendar', 'Messages', 'Welly', 'Admin',
       'Notifications'
     ]);
     expect(sidebarLabels(), 'Profile belongs to the account menu').not.toContain('Profile');
@@ -326,7 +326,7 @@ describe('navigation, per role', () => {
     await screen.findByTestId('admin-dash');
     /* Profile absent for the same reason as above — the account menu holds it. */
     expect(sidebarLabels()).toEqual([
-      'Dashboard', 'Discover', 'Messages', 'Admin', 'Notifications',
+      'Dashboard', 'Discover', 'Messages', 'Welly', 'Admin', 'Notifications',
     ]);
   });
 

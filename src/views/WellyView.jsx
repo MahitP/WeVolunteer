@@ -1,0 +1,957 @@
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Send, Square, Trash2, Plus, MessageSquare, Clock, X,
+  Compass, Calendar, ShieldCheck, Sparkles, ChevronRight, AlertCircle, RefreshCw,
+  Pencil, Check
+} from 'lucide-react';
+import WellyMark from '../components/ai/WellyMark';
+import AssistantCard, { AssistantSource } from '../components/ai/AssistantCard';
+import { ask } from '../ai/assistant';
+import {
+  AIStatus,
+  createRuntime,
+  modelById,
+  isAbort,
+  isLocalAIEnabled,
+  detectCapability,
+  offerableModels,
+  aiStorage,
+} from '../ai';
+import { readPreferences, writePreferences } from '../ai/preferences';
+import AIEnableModal from '../components/account/AIEnableModal';
+import {
+  getConversations,
+  getConversation,
+  saveConversationRecord,
+  deleteConversation,
+  clearAllConversations,
+  renameConversation,
+  generateConversationTitle,
+  loadConversation,
+  saveConversation,
+} from '../ai/conversation';
+import { can } from '../authz';
+
+
+/**
+ * Format relative date header for grouping conversation history.
+ */
+function getDateGroup(timestamp) {
+  if (!timestamp) return 'Older';
+  const now = new Date();
+  const date = new Date(timestamp);
+  const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays <= 7) return 'Previous 7 days';
+  return 'Older';
+}
+
+/**
+ * Role-aware prompt suggestions.
+ */
+function getRoleSuggestions(user) {
+  if (can(user, 'admin.create') || can(user, 'report.resolve')) {
+    return [
+      { label: 'Show safety reports summary', prompt: 'Show safety reports summary' },
+      { label: 'Show open appeals', prompt: 'Show open appeals' },
+      { label: 'Check system error health', prompt: 'Check system error health' },
+      { label: 'What can admins do?', prompt: 'What can admins do?' },
+    ];
+  }
+
+  if (can(user, 'event.create')) {
+    return [
+      { label: 'Show my events', prompt: 'Show my events' },
+      { label: 'Which events need volunteers?', prompt: 'Which of my events still need volunteers?' },
+      { label: 'Show organizer statistics', prompt: 'Show my organizer statistics' },
+      { label: 'Create an event', prompt: 'Create an event' },
+      { label: 'How do applications work?', prompt: 'How do applications work?' },
+    ];
+  }
+
+  return [
+    { label: 'How many hours do I have?', prompt: 'How many volunteer hours do I have?' },
+    { label: 'Show my applications', prompt: 'Show my applications' },
+    { label: 'Find opportunities near me', prompt: 'Find volunteering opportunities near me' },
+    { label: 'What is my next shift?', prompt: 'What is my next shift?' },
+    { label: 'How does Auto Select work?', prompt: 'How does Auto Select work?' },
+  ];
+}
+
+/**
+ * Dedicated Welly View.
+ */
+export default function WellyView({ currentUser = null, location = null, onViewDetails = null }) {
+  const navigate = useNavigate();
+
+  // Active conversation state
+  const [activeConvId, setActiveConvId] = useState(() => `conv-${Date.now()}`);
+  const [messages, setMessages] = useState([]);
+  const [conversations, setConversations] = useState([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState(AIStatus.IDLE);
+  const [showMobileHistory, setShowMobileHistory] = useState(false);
+  const [editingConvId, setEditingConvId] = useState(null);
+  const [editingTitle, setEditingTitle] = useState('');
+
+  // Welly AI On-Device configuration & download state
+  const [capability] = useState(() => detectCapability());
+  const [prefs, setPrefs] = useState(() => readPreferences());
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(null);
+  const [downloadError, setDownloadError] = useState(null);
+  const downloadAbortRef = useRef(null);
+
+  const runtimeRef = useRef(null);
+  const abortRef = useRef(null);
+  const aliveRef = useRef(true);
+  const transcriptRef = useRef(null);
+  const textareaRef = useRef(null);
+
+  const position = location
+    ? { lat: location.latitude, lng: location.longitude }
+    : null;
+
+  // Escape key closes mobile history drawer
+  useEffect(() => {
+    if (!showMobileHistory) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setShowMobileHistory(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showMobileHistory]);
+
+  // Refresh conversation list for the active user
+  const refreshConversations = useCallback(() => {
+    const list = getConversations({ user: currentUser });
+    setConversations(list);
+    return list;
+  }, [currentUser]);
+
+  // Load conversation list on user mount / change
+  useEffect(() => {
+    const list = refreshConversations();
+    if (list.length > 0) {
+      const latest = getConversation(list[0].id, { user: currentUser });
+      if (latest && latest.messages?.length) {
+        setActiveConvId(latest.id);
+        setMessages(latest.messages);
+        return;
+      }
+    }
+    // New empty conversation
+    setActiveConvId(`conv-${Date.now()}`);
+    setMessages([]);
+  }, [currentUser?.id, refreshConversations]);
+
+  // Load the on-device AI runtime in the background
+  const loadRuntime = useCallback(async () => {
+    const currentPrefs = readPreferences();
+    setPrefs(currentPrefs);
+    const model = currentPrefs.modelId ? modelById(currentPrefs.modelId) : null;
+    if (!currentPrefs.enabled || !model) {
+      if (runtimeRef.current) {
+        await runtimeRef.current.unload();
+        runtimeRef.current = null;
+      }
+      setStatus(AIStatus.IDLE);
+      return;
+    }
+
+    try {
+      setStatus(AIStatus.LOADING);
+      if (runtimeRef.current) {
+        await runtimeRef.current.unload();
+        runtimeRef.current = null;
+      }
+      const runtime = await createRuntime();
+      await runtime.load(model);
+      if (!aliveRef.current) {
+        await runtime.unload();
+        return;
+      }
+      runtimeRef.current = runtime;
+      setStatus(AIStatus.READY);
+    } catch {
+      if (aliveRef.current) setStatus(AIStatus.ERROR);
+    }
+  }, []);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    loadRuntime();
+
+    return () => {
+      aliveRef.current = false;
+      abortRef.current?.abort();
+      downloadAbortRef.current?.abort();
+      runtimeRef.current?.unload();
+      runtimeRef.current = null;
+    };
+  }, [loadRuntime]);
+
+  const handleDownload = useCallback(async (model) => {
+    setShowSetupModal(false);
+    setDownloadError(null);
+    setDownloadProgress({ loaded: 0, total: model.bytes });
+
+    const controller = new AbortController();
+    downloadAbortRef.current = controller;
+
+    try {
+      const storage = await aiStorage();
+      await storage.downloadModel(model, {
+        signal: controller.signal,
+        onProgress: p => { if (aliveRef.current) setDownloadProgress(p); },
+      });
+
+      if (!aliveRef.current) return;
+      const updated = writePreferences({ enabled: true, modelId: model.id });
+      setPrefs(updated);
+      await loadRuntime();
+    } catch (err) {
+      if (!aliveRef.current) return;
+      if (!isAbort(err)) {
+        setDownloadError(err.userMessage || 'The model could not be downloaded. Please try again.');
+      }
+    } finally {
+      if (aliveRef.current) setDownloadProgress(null);
+      downloadAbortRef.current = null;
+    }
+  }, [loadRuntime]);
+
+
+  // Save current conversation record when messages update
+  useEffect(() => {
+    if (!messages.length) return;
+    saveConversationRecord({
+      id: activeConvId,
+      messages,
+    }, { user: currentUser });
+    refreshConversations();
+  }, [messages, activeConvId, currentUser, refreshConversations]);
+
+  // Scroll transcript to bottom on message append / stream
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages, busy]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = 'auto';
+      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    }
+  }, [input]);
+
+  // Switch to a conversation from history
+  const switchConversation = useCallback((id) => {
+    if (busy) abortRef.current?.abort();
+    const conv = getConversation(id, { user: currentUser });
+    if (conv) {
+      setActiveConvId(conv.id);
+      setMessages(conv.messages || []);
+    }
+    setShowMobileHistory(false);
+  }, [busy, currentUser]);
+
+  // Start a new conversation
+  const startNewConversation = useCallback(() => {
+    if (busy) abortRef.current?.abort();
+    const newId = `conv-${Date.now()}`;
+    setActiveConvId(newId);
+    setMessages([]);
+    setInput('');
+    setShowMobileHistory(false);
+    if (textareaRef.current) textareaRef.current.focus();
+  }, [busy]);
+
+  // Delete a conversation
+  const handleDeleteConversation = useCallback((e, id) => {
+    e.stopPropagation();
+    deleteConversation(id, { user: currentUser });
+    const remaining = refreshConversations();
+    if (activeConvId === id) {
+      if (remaining.length > 0) {
+        const next = getConversation(remaining[0].id, { user: currentUser });
+        setActiveConvId(next.id);
+        setMessages(next.messages || []);
+      } else {
+        startNewConversation();
+      }
+    }
+  }, [currentUser, activeConvId, refreshConversations, startNewConversation]);
+
+  // Rename conversation
+  const startRenaming = useCallback((e, conv) => {
+    e.stopPropagation();
+    setEditingConvId(conv.id);
+    setEditingTitle(conv.title);
+  }, []);
+
+  const saveRename = useCallback((id) => {
+    if (editingTitle.trim()) {
+      renameConversation(id, editingTitle.trim(), { user: currentUser });
+      refreshConversations();
+    }
+    setEditingConvId(null);
+    setEditingTitle('');
+  }, [editingTitle, currentUser, refreshConversations]);
+
+  const cancelRename = useCallback(() => {
+    setEditingConvId(null);
+    setEditingTitle('');
+  }, []);
+
+  // Clear all conversations
+  const handleClearAll = useCallback(() => {
+    if (window.confirm('Clear all conversation history on this device?')) {
+      clearAllConversations({ user: currentUser });
+      refreshConversations();
+      startNewConversation();
+    }
+  }, [currentUser, refreshConversations, startNewConversation]);
+
+  // Send a message turn
+  const send = useCallback(async (text) => {
+    const question = (text || '').trim();
+    if (!question || busy) return;
+
+    setInput('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    setBusy(true);
+
+    const priorTurns = messages;
+    setMessages(prev => [...prev, { role: 'user', text: question }]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const replyId = `welly-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setMessages(prev => [...prev, { id: replyId, role: 'assistant', text: '', streaming: true }]);
+
+    try {
+      const res = await ask(question, {
+        runtime: runtimeRef.current,
+        position,
+        history: priorTurns,
+        user: currentUser,
+        signal: controller.signal,
+        onToken: token => {
+          if (!aliveRef.current) return;
+          setMessages(prev => prev.map(m => (
+            m.id === replyId ? { ...m, text: m.text + token } : m
+          )));
+        },
+      });
+
+      if (!aliveRef.current) return;
+      setMessages(prev => prev.map(m => (
+        m.id === replyId
+          ? {
+              id: replyId,
+              role: 'assistant',
+              text: res?.cancelled ? 'Stopped.' : (res.answer || ''),
+              card: res.card,
+              kind: res.card?.kind,
+              streaming: false,
+            }
+          : m
+      )));
+    } catch (err) {
+      if (!aliveRef.current) return;
+      setMessages(prev => prev.map(m => (
+        m.id === replyId
+          ? {
+              id: replyId,
+              role: 'assistant',
+              text: isAbort(err)
+                ? 'Stopped.'
+                : "Something went wrong answering that. Please try again.",
+              streaming: false,
+            }
+          : m
+      )));
+    } finally {
+      if (aliveRef.current) setBusy(false);
+      abortRef.current = null;
+    }
+  }, [busy, messages, position, currentUser]);
+
+
+  // Group conversations by time category
+  const groupedConversations = useMemo(() => {
+    const groups = {
+      'Today': [],
+      'Yesterday': [],
+      'Previous 7 days': [],
+      'Older': [],
+    };
+    for (const c of conversations) {
+      const group = getDateGroup(c.updatedAt);
+      if (!groups[group]) groups[group] = [];
+      groups[group].push(c);
+    }
+    return Object.entries(groups).filter(([_, items]) => items.length > 0);
+  }, [conversations]);
+
+  const suggestions = useMemo(() => getRoleSuggestions(currentUser), [currentUser]);
+
+  const roleSubtitle = useMemo(() => {
+    if (can(currentUser, 'admin.create')) return 'Platform Owner Assistant • Grounded in WeVolunteer Records';
+    if (can(currentUser, 'report.resolve')) return 'Administrative Assistant • Moderation & Records';
+    if (can(currentUser, 'event.create')) return 'Organizer Assistant • Events & Volunteers';
+    return 'Your WeVolunteer Assistant • Hours, Applications & Discovery';
+  }, [currentUser]);
+
+  return (
+    <div className="welly-workspace" data-replay-block>
+      {/* ── Desktop / Tablet Sidebar ────────────────────────────────────────── */}
+      <aside className="welly-sidebar" aria-label="Conversation history">
+        <div className="welly-sidebar-head">
+          <button
+            type="button"
+            className="btn btn-primary btn-sm welly-new-chat-btn"
+            onClick={startNewConversation}
+          >
+            <Plus size={16} aria-hidden="true" />
+            <span>New conversation</span>
+          </button>
+        </div>
+
+        <div className="welly-sidebar-body">
+          {conversations.length === 0 ? (
+            <div className="welly-history-empty dim small">
+              No previous conversations yet.
+            </div>
+          ) : (
+            groupedConversations.map(([groupName, items]) => (
+              <div key={groupName} className="welly-history-group">
+                <div className="welly-history-group-title dim small">{groupName}</div>
+                <ul className="welly-history-list">
+                  {items.map(c => (
+                    <li key={c.id} className={`welly-history-row ${activeConvId === c.id ? 'is-active' : ''}`}>
+                      {editingConvId === c.id ? (
+                        <div className="welly-history-rename-box">
+                          <input
+                            type="text"
+                            className="welly-history-rename-input"
+                            value={editingTitle}
+                            onChange={e => setEditingTitle(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') saveRename(c.id);
+                              if (e.key === 'Escape') cancelRename();
+                            }}
+                            autoFocus
+                            aria-label="Conversation title"
+                          />
+                          <button
+                            type="button"
+                            className="welly-history-action-btn"
+                            onClick={() => saveRename(c.id)}
+                            aria-label="Save title"
+                            title="Save"
+                          >
+                            <Check size={13} aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            className="welly-history-action-btn"
+                            onClick={cancelRename}
+                            aria-label="Cancel rename"
+                            title="Cancel"
+                          >
+                            <X size={13} aria-hidden="true" />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="welly-history-item"
+                            onClick={() => switchConversation(c.id)}
+                            aria-current={activeConvId === c.id ? 'true' : undefined}
+                          >
+                            <MessageSquare size={14} className="welly-history-icon" aria-hidden="true" />
+                            <span className="welly-history-title truncate">{c.title}</span>
+                          </button>
+                          <div className="welly-history-actions">
+                            <button
+                              type="button"
+                              className="welly-history-action-btn welly-history-rename-btn"
+                              onClick={(e) => startRenaming(e, c)}
+                              aria-label={`Rename "${c.title}"`}
+                              title="Rename"
+                            >
+                              <Pencil size={13} aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              className="welly-history-action-btn welly-history-delete-btn"
+                              onClick={(e) => handleDeleteConversation(e, c.id)}
+                              aria-label={`Delete conversation "${c.title}"`}
+                              title="Delete conversation"
+                            >
+                              <Trash2 size={13} aria-hidden="true" />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))
+          )}
+        </div>
+
+        {conversations.length > 0 && (
+          <div className="welly-sidebar-foot">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm welly-clear-all-btn dim"
+              onClick={handleClearAll}
+            >
+              <Trash2 size={13} aria-hidden="true" />
+              <span>Clear history</span>
+            </button>
+          </div>
+        )}
+      </aside>
+
+      {/* ── Mobile History Slide-over Drawer ────────────────────────────────── */}
+      {showMobileHistory && (
+        <div className="welly-mobile-drawer-root" role="dialog" aria-modal="true" aria-label="Conversation history">
+          <div className="welly-drawer-backdrop" onClick={() => setShowMobileHistory(false)} />
+          <div className="welly-drawer-sheet">
+            <div className="welly-drawer-head">
+              <div className="row" style={{ gap: 'var(--s2)', alignItems: 'center' }}>
+                <Clock size={16} />
+                <span className="strong">History</span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                onClick={() => setShowMobileHistory(false)}
+                aria-label="Close history"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="welly-drawer-action">
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                style={{ width: '100%' }}
+                onClick={startNewConversation}
+              >
+                <Plus size={16} />
+                <span>New conversation</span>
+              </button>
+            </div>
+
+            <div className="welly-drawer-body">
+              {conversations.length === 0 ? (
+                <div className="welly-history-empty dim small">No previous conversations.</div>
+              ) : (
+                groupedConversations.map(([groupName, items]) => (
+                  <div key={groupName} className="welly-history-group">
+                    <div className="welly-history-group-title dim small">{groupName}</div>
+                    <ul className="welly-history-list">
+                      {items.map(c => (
+                        <li key={c.id} className={`welly-history-row ${activeConvId === c.id ? 'is-active' : ''}`}>
+                          {editingConvId === c.id ? (
+                            <div className="welly-history-rename-box">
+                              <input
+                                type="text"
+                                className="welly-history-rename-input"
+                                value={editingTitle}
+                                onChange={e => setEditingTitle(e.target.value)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') saveRename(c.id);
+                                  if (e.key === 'Escape') cancelRename();
+                                }}
+                                autoFocus
+                                aria-label="Conversation title"
+                              />
+                              <button
+                                type="button"
+                                className="welly-history-action-btn"
+                                onClick={() => saveRename(c.id)}
+                                aria-label="Save title"
+                              >
+                                <Check size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                className="welly-history-action-btn"
+                                onClick={cancelRename}
+                                aria-label="Cancel rename"
+                              >
+                                <X size={13} />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className="welly-history-item"
+                                onClick={() => switchConversation(c.id)}
+                              >
+                                <MessageSquare size={14} className="welly-history-icon" />
+                                <span className="welly-history-title truncate">{c.title}</span>
+                              </button>
+                              <div className="welly-history-actions">
+                                <button
+                                  type="button"
+                                  className="welly-history-action-btn welly-history-rename-btn"
+                                  onClick={(e) => startRenaming(e, c)}
+                                  aria-label={`Rename "${c.title}"`}
+                                  title="Rename"
+                                >
+                                  <Pencil size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="welly-history-action-btn welly-history-delete-btn"
+                                  onClick={(e) => handleDeleteConversation(e, c.id)}
+                                  aria-label={`Delete "${c.title}"`}
+                                  title="Delete"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {conversations.length > 0 && (
+              <div className="welly-drawer-foot">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm dim"
+                  style={{ width: '100%' }}
+                  onClick={handleClearAll}
+                >
+                  <Trash2 size={14} />
+                  <span>Clear all history</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Main Chat Workspace ─────────────────────────────────────────────── */}
+      <main className="welly-chat-main" aria-label="Welly conversation">
+        {/* Mobile Top Bar */}
+        <div className="welly-mobile-bar">
+          <button
+            type="button"
+            className="btn btn-ghost btn-icon welly-mobile-history-toggle"
+            onClick={() => setShowMobileHistory(true)}
+            aria-label="Open conversation history"
+          >
+            <Clock size={19} />
+          </button>
+          <div className="welly-mobile-bar-center">
+            <WellyMark size="sm" />
+            <span className="welly-mobile-bar-title">Welly</span>
+            <span className="badge badge-subtle welly-mobile-status-badge">
+              {status === AIStatus.READY ? 'AI' : 'Chat'}
+            </span>
+          </div>
+          <div className="welly-mobile-bar-actions">
+            {capability.supported ? (
+              downloadProgress ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm welly-mobile-ai-btn"
+                  onClick={() => downloadAbortRef.current?.abort()}
+                  title="Cancel download"
+                >
+                  <span>{Math.round((downloadProgress.loaded / (downloadProgress.total || 1)) * 100)}%</span>
+                </button>
+              ) : status === AIStatus.READY ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm welly-mobile-ai-btn welly-ai-ready-btn"
+                  onClick={() => setShowSetupModal(true)}
+                  title="Welly AI is ready on this device"
+                >
+                  <Sparkles size={14} className="welly-spark-active" />
+                  <span>AI Ready</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm welly-mobile-ai-btn"
+                  onClick={() => setShowSetupModal(true)}
+                  title="Get Welly AI"
+                >
+                  <Sparkles size={14} />
+                  <span>Get AI</span>
+                </button>
+              )
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm welly-mobile-new-btn"
+              onClick={startNewConversation}
+              title="Start a new conversation"
+            >
+              <Plus size={16} />
+              <span>New</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Desktop Header */}
+        <header className="welly-desktop-header">
+          <div className="welly-header-info">
+            <WellyMark size="lg" />
+            <div>
+              <div className="row" style={{ gap: 'var(--s2)', alignItems: 'center' }}>
+                <h2 className="welly-header-title page-title">Welly</h2>
+                <span className="badge badge-subtle welly-status-badge">
+                  {status === AIStatus.READY ? 'Welly AI' : 'Welly Chat'}
+                </span>
+              </div>
+              <p className="welly-header-subtitle dim small">
+                {status === AIStatus.READY
+                  ? 'Private AI that runs directly on your device'
+                  : (roleSubtitle || 'Your everyday WeVolunteer assistant')}
+              </p>
+            </div>
+          </div>
+
+          <div className="welly-header-actions">
+            {capability.supported ? (
+              downloadProgress ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm welly-ai-ctrl-btn"
+                  onClick={() => downloadAbortRef.current?.abort()}
+                  title="Click to cancel download"
+                >
+                  <RefreshCw size={14} className="spin" style={{ marginRight: 'var(--s1)' }} />
+                  <span>Welly AI · {Math.round((downloadProgress.loaded / (downloadProgress.total || 1)) * 100)}%</span>
+                </button>
+              ) : status === AIStatus.READY ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm welly-ai-ctrl-btn welly-ai-ready-btn"
+                  onClick={() => setShowSetupModal(true)}
+                  title="Welly AI is running locally on your device. Click to manage model."
+                >
+                  <Sparkles size={14} className="welly-spark-active" />
+                  <span>Welly AI · Ready</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm welly-ai-ctrl-btn"
+                  onClick={() => setShowSetupModal(true)}
+                  title="Set up Welly AI to run private AI directly on your device."
+                >
+                  <Sparkles size={14} />
+                  <span>Get Welly AI</span>
+                </button>
+              )
+            ) : (
+              <span className="badge badge-subtle dim" title={capability.reason}>
+                Welly AI · Unsupported
+              </span>
+            )}
+
+            {messages.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm dim"
+                onClick={startNewConversation}
+                title="Start a new conversation"
+              >
+                <Plus size={15} />
+                <span>New chat</span>
+              </button>
+            )}
+          </div>
+        </header>
+
+
+        {/* Conversation Transcript */}
+        <div className="welly-transcript" ref={transcriptRef} aria-live="polite">
+          {messages.length === 0 ? (
+            <div className="welly-empty-state">
+              <div className="welly-empty-mark-wrap">
+                <WellyMark size="lg" />
+              </div>
+              <h2 className="welly-empty-title">
+                Hi, {currentUser?.name ? currentUser.name.split(' ')[0] : 'there'}!
+              </h2>
+              <p className="welly-empty-subtitle dim">
+                Ask me anything about volunteering, your hours, applications, or WeVolunteer.
+              </p>
+
+              <div className="welly-suggestions-container">
+                <div className="welly-suggestions-label dim small">Suggested inquiries</div>
+                <div className="welly-suggestions-grid">
+                  {suggestions.map(({ label, prompt }) => (
+                    <button
+                      key={label}
+                      type="button"
+                      className="welly-suggestion-card"
+                      onClick={() => send(prompt)}
+                    >
+                      <Sparkles size={14} className="welly-suggestion-spark" aria-hidden="true" />
+                      <span>{label}</span>
+                      <ChevronRight size={14} className="welly-suggestion-arrow" aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="welly-messages-list">
+              {messages.map((m, i) => (
+                <div key={m.id || i} className={`welly-turn welly-turn-${m.role}`}>
+                  <div className="welly-turn-avatar">
+                    {m.role === 'user' ? (
+                      <span className="welly-user-avatar">{currentUser?.avatar || '👤'}</span>
+                    ) : (
+                      <WellyMark size="sm" />
+                    )}
+                  </div>
+
+                  <div className="welly-turn-content">
+                    <span className="sr-only">
+                      {m.role === 'user' ? 'You asked:' : 'Welly replied:'}
+                    </span>
+
+                    {m.text ? (
+                      <div className="welly-bubble">
+                        <p>{m.text}</p>
+                      </div>
+                    ) : m.streaming ? (
+                      <div className="welly-bubble welly-thinking">
+                        <span className="dim">Thinking...</span>
+                      </div>
+                    ) : null}
+
+                    {m.card && (
+                      <div className="welly-card-wrapper">
+                        <AssistantCard card={m.card} onAction={send} />
+                      </div>
+                    )}
+
+                    {m.kind && (
+                      <AssistantSource kind={m.kind} />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Composer Area */}
+        <div className="welly-composer-container">
+          {messages.length > 0 && (
+            <div className="welly-quick-chips">
+              {suggestions.slice(0, 3).map(({ label, prompt }) => (
+                <button
+                  key={label}
+                  type="button"
+                  className="welly-quick-chip"
+                  onClick={() => send(prompt)}
+                  disabled={busy}
+                >
+                  <Sparkles size={11} aria-hidden="true" />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="welly-composer-box">
+            <label className="sr-only" htmlFor="welly-prompt-input">
+              Ask Welly a question
+            </label>
+            <textarea
+              id="welly-prompt-input"
+              ref={textareaRef}
+              className="welly-textarea"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  send(input);
+                }
+              }}
+              placeholder="Ask Welly anything about volunteering, shifts, or WeVolunteer..."
+              rows={1}
+              autoComplete="off"
+            />
+
+            <div className="welly-composer-actions">
+              {busy ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-icon welly-stop-btn"
+                  onClick={() => abortRef.current?.abort()}
+                  aria-label="Stop generating"
+                  title="Stop generating"
+                >
+                  <Square size={15} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-icon welly-send-btn"
+                  onClick={() => send(input)}
+                  disabled={!input.trim()}
+                  aria-label="Send question to Welly"
+                  title="Send"
+                >
+                  <Send size={15} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="welly-composer-footer dim small">
+            Welly provides guidance grounded in your records. Actions require your explicit confirmation.
+          </div>
+        </div>
+      </main>
+
+      {showSetupModal && (
+        <AIEnableModal
+          capability={capability}
+          models={offerableModels(capability)}
+          initialModelId={prefs.modelId}
+          onConfirm={handleDownload}
+          onClose={() => setShowSetupModal(false)}
+        />
+      )}
+    </div>
+  );
+}
+

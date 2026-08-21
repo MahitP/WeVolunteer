@@ -85,6 +85,7 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/admin/impact',
   '/notifications',
   '/messages',
+  '/welly',
   '/portfolio',
   '/settings',
   /* The Organizer Agreement acceptance screen. A literal path carrying no
