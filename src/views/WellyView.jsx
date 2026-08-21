@@ -29,6 +29,7 @@ import {
   saveConversation,
 } from '../ai/conversation';
 import { can } from '../authz';
+import { useModal } from '../utils/useModal';
 
 
 /**
@@ -76,6 +77,34 @@ function getRoleSuggestions(user) {
     { label: 'What is my next shift?', prompt: 'What is my next shift?' },
     { label: 'How does Auto Select work?', prompt: 'How does Auto Select work?' },
   ];
+}
+
+/**
+ * The mobile history sheet.
+ *
+ * A thin shell so `useModal` — Escape, focus containment, focus restore, scroll
+ * lock — is called unconditionally, which the rules of hooks require and which
+ * a `{open && <div role="dialog">}` branch cannot do. The contents are passed
+ * in because they are the same list the desktop sidebar draws, and two copies
+ * of a conversation list is how the two surfaces drift apart.
+ */
+function MobileHistoryDrawer({ onClose, children }) {
+  const sheetRef = useModal(onClose);
+
+  return (
+    <div className="welly-mobile-drawer-root">
+      <div className="welly-drawer-backdrop" onClick={onClose} />
+      <div
+        className="welly-drawer-sheet"
+        ref={sheetRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Conversation history"
+      >
+        {children}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -150,16 +179,6 @@ export default function WellyView({ currentUser = null, location = null, onViewD
   const position = location
     ? { lat: location.latitude, lng: location.longitude }
     : null;
-
-  // Escape key closes mobile history drawer
-  useEffect(() => {
-    if (!showMobileHistory) return;
-    const onKey = (e) => {
-      if (e.key === 'Escape') setShowMobileHistory(false);
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [showMobileHistory]);
 
   /* State and ref together, always. Every place that changes which conversation
      is on screen goes through here, so the guard in `send()` cannot be looking
@@ -669,11 +688,22 @@ export default function WellyView({ currentUser = null, location = null, onViewD
         </div>
       </aside>
 
-      {/* ── Mobile History Slide-over Drawer ────────────────────────────────── */}
+      {/**
+        * ── Mobile history: a slide-over, and a real dialog ──────────────────
+        *
+        * It says `role="dialog" aria-modal="true"`, and until now it had none of
+        * the behaviour that promise implies: no focus containment, no focus
+        * restore, no scroll lock. `aria-modal` tells a screen reader that
+        * everything outside is inert while leaving it perfectly reachable by
+        * Tab, which is worse than saying nothing.
+        *
+        * `useModal` is what every other dialog here uses — see the note in
+        * Modal.jsx — and it needs to be called unconditionally, so the sheet is
+        * its own component mounted only while open rather than a branch inside
+        * this one.
+        */}
       {showMobileHistory && (
-        <div className="welly-mobile-drawer-root" role="dialog" aria-modal="true" aria-label="Conversation history">
-          <div className="welly-drawer-backdrop" onClick={() => setShowMobileHistory(false)} />
-          <div className="welly-drawer-sheet">
+        <MobileHistoryDrawer onClose={() => setShowMobileHistory(false)}>
             <div className="welly-drawer-head">
               <div className="row" style={{ gap: 'var(--s2)', alignItems: 'center' }}>
                 <Clock size={16} />
@@ -796,8 +826,7 @@ export default function WellyView({ currentUser = null, location = null, onViewD
                 </button>
               )}
             </div>
-          </div>
-        </div>
+        </MobileHistoryDrawer>
       )}
 
       {/* ── Main Chat Workspace ─────────────────────────────────────────────── */}

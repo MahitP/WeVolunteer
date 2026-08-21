@@ -363,6 +363,37 @@ describe('WellyView full-page workspace', () => {
     });
   });
 
+  /**
+   * The sheet says `aria-modal="true"`, and a claim of modality is a promise
+   * about the keyboard: everything outside is inert. It had none of that — no
+   * focus containment, no focus restore, no scroll lock — which tells a screen
+   * reader the page behind is unreachable while leaving it perfectly reachable
+   * by Tab. `useModal` is what every other dialog here uses.
+   */
+  it('gives the mobile history sheet real dialog behaviour', async () => {
+    render(
+      <MemoryRouter>
+        <WellyView currentUser={studentUser} />
+      </MemoryRouter>
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /open conversation history/i }));
+    });
+
+    const sheet = screen.getByRole('dialog', { name: /conversation history/i });
+    expect(sheet).toHaveAttribute('aria-modal', 'true');
+
+    /* Scroll lock and focus containment both come from the shared hook, and the
+       lock is the one with an observable side effect outside the dialog. */
+    expect(document.body.style.overflow).toBe('hidden');
+
+    await act(async () => { fireEvent.keyDown(document, { key: 'Escape' }); });
+
+    expect(screen.queryByRole('dialog', { name: /conversation history/i })).toBeNull();
+    expect(document.body.style.overflow).not.toBe('hidden');
+  });
+
   it('dismisses mobile drawer when Escape key is pressed', async () => {
     render(
       <MemoryRouter>
